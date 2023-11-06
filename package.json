@@ -1,0 +1,9 @@
+{
+  "name": "mincho",
+  "type": "module",
+  "private": true,
+  "packageManager": "yarn@3.6.4",
+  "workspaces": [
+    "packages/*"
+  ]
+}
