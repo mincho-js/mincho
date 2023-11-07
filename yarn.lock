@@ -562,6 +562,15 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@mincho-js/core@workspace:packages/core":
+  version: 0.0.0-use.local
+  resolution: "@mincho-js/core@workspace:packages/core"
+  dependencies:
+    tsconfig-custom: "workspace:^"
+    vite-config-custom: "workspace:^"
+  languageName: unknown
+  linkType: soft
+
 "@nodelib/fs.scandir@npm:2.1.5":
   version: 2.1.5
   resolution: "@nodelib/fs.scandir@npm:2.1.5"
@@ -3958,7 +3967,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"tsconfig-custom@workspace:configs/tsconfig-custom":
+"tsconfig-custom@workspace:^, tsconfig-custom@workspace:configs/tsconfig-custom":
   version: 0.0.0-use.local
   resolution: "tsconfig-custom@workspace:configs/tsconfig-custom"
   languageName: unknown
@@ -4120,7 +4129,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"vite-config-custom@workspace:configs/vite-config-custom":
+"vite-config-custom@workspace:^, vite-config-custom@workspace:configs/vite-config-custom":
   version: 0.0.0-use.local
   resolution: "vite-config-custom@workspace:configs/vite-config-custom"
   dependencies:

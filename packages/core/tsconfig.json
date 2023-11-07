@@ -1,0 +1,6 @@
+{
+  "extends": "tsconfig-custom/tsconfig.json",
+  "include": ["./src/**/*.ts",  "__tests__/**.ts"],
+  "exclude": ["dist"],
+  "references": [{ "path": "tsconfig.node.json" }]
+}

@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "@mincho-js/core",
+  "version": "0.0.1",
+  "type": "module",
+  "typings": "dist/index.d.ts",
+  "main": "dist/index.cjs",
+  "module": "dist/index.mjs",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "dist/index.d.ts",
+        "default": "./dist/index.mjs"
+      },
+      "require": {
+        "types": "dist/index.d.ts",
+        "default": "./dist/index.cjs"
+      }
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "prettier": "prettier-config-custom",
+  "devDependencies": {
+    "tsconfig-custom": "workspace:^",
+    "vite-config-custom": "workspace:^"
+  }
+}
