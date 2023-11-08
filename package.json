@@ -7,10 +7,23 @@
     "configs/*",
     "packages/*"
   ],
+  "scripts": {
+    "g:clean": "cd $INIT_CWD && yarn run -T rimraf dist coverage .turbo tsconfig.tsbuildinfo node_modules/.vite",
+    "g:build": "cd $INIT_CWD && yarn run -T vite build",
+    "g:build-watch": "cd $INIT_CWD && yarn run build --watch",
+    "g:test": "cd $INIT_CWD && yarn run -T vitest run",
+    "g:test-watch": "cd $INIT_CWD && yarn run -T vitest",
+    "g:coverage": "yarn g:test --coverage",
+    "g:lint": "cd $INIT_CWD && yarn run -T eslint . --report-unused-disable-directives --max-warnings 0",
+    "g:fix": "cd $INIT_CWD && yarn g:lint --fix",
+    "g:check": "cd $INIT_CWD && yarn run -T tsc --noEmit"
+  },
   "devDependencies": {
     "@types/eslint": "^8.44.7",
     "@types/node": "^20.8.10",
+    "@vitest/coverage-v8": "^0.34.6",
     "c8": "^8.0.1",
+    "rimraf": "^5.0.5",
     "typescript": "^5.2.2",
     "vite": "^4.5.0",
     "vitest": "^0.34.6"
