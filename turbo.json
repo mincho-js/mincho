@@ -1,0 +1,40 @@
+{
+  "$schema": "https://turborepo.org/schema.json",
+  "baseBranch": "origin/main",
+  "pipeline": {
+    "clean": {
+      "cache": false
+    },
+    "build": {
+      "dependsOn": ["^build"],
+      "inputs": ["src/**/*.ts", "vite.config.ts"],
+      "outputs": ["dist/**"]
+    },
+    "lint": {
+    },
+    "fix": {
+    },
+    "check": {
+      "dependsOn": ["^build"],
+      "outputs": ["tsconfig.tsbuildinfo"]
+    },
+    "check:all": {
+      "dependsOn": ["lint", "check"]
+    },
+    "test": {
+      "dependsOn": ["^build"],
+      "inputs": ["src/**/*.ts", "__test__/**/*.ts", "vite.config.ts"]
+    },
+    "test:all": {
+      "dependsOn": ["build", "test", "check:all"]
+    },
+    "coverage": {
+      "dependsOn": ["^build"],
+      "inputs": ["src/**/*.ts", "__test__/**/*.ts", "vite.config.ts"],
+      "outputs": ["coverage/**"]
+    },
+    "coverage:all": {
+      "dependsOn": ["build", "coverage", "check:all"]
+    }
+  }
+}

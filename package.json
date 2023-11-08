@@ -8,6 +8,16 @@
     "packages/*"
   ],
   "scripts": {
+    "clean": "turbo run clean",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "fix": "turbo run fix",
+    "check": "turbo run check",
+    "check:all": "turbo run check:all",
+    "test": "turbo run test",
+    "test:all": "turbo run test:all",
+    "coverage": "turbo run coverage",
+    "coverage:all": "turbo run coverage:all",
     "g:clean": "cd $INIT_CWD && yarn run -T rimraf dist coverage .turbo tsconfig.tsbuildinfo node_modules/.vite",
     "g:build": "cd $INIT_CWD && yarn run -T vite build",
     "g:build-watch": "cd $INIT_CWD && yarn run build --watch",
@@ -24,6 +34,7 @@
     "@vitest/coverage-v8": "^0.34.6",
     "c8": "^8.0.1",
     "rimraf": "^5.0.5",
+    "turbo": "^1.10.16",
     "typescript": "^5.2.2",
     "vite": "^4.5.0",
     "vitest": "^0.34.6"
