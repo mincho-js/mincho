@@ -1,6 +1,6 @@
 {
   "$schema": "https://json.schemastore.org/package.json",
-  "name": "@mincho-js/transform-to-vanilla",
+  "name": "@mincho/transform-to-vanilla",
   "version": "0.0.1",
   "type": "module",
   "typings": "./dist/index.d.ts",

@@ -1,7 +1,4 @@
-import {
-  transform,
-  type ComplexCSSRule
-} from "@mincho-js/transform-to-vanilla";
+import { transform, type ComplexCSSRule } from "@mincho/transform-to-vanilla";
 import { style as vStyle } from "@vanilla-extract/css";
 
 export function css(style: ComplexCSSRule) {

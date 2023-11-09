@@ -588,11 +588,11 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@mincho-js/core@workspace:packages/core":
+"@mincho/css@workspace:packages/css":
   version: 0.0.0-use.local
-  resolution: "@mincho-js/core@workspace:packages/core"
+  resolution: "@mincho/css@workspace:packages/css"
   dependencies:
-    "@mincho-js/transform-to-vanilla": "workspace:^"
+    "@mincho/transform-to-vanilla": "workspace:^"
     "@vanilla-extract/css": ^1.13.0
     eslint-config-custom: "workspace:^"
     prettier-config-custom: "workspace:^"
@@ -603,9 +603,9 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@mincho-js/transform-to-vanilla@workspace:^, @mincho-js/transform-to-vanilla@workspace:packages/transform-to-vanilla":
+"@mincho/transform-to-vanilla@workspace:^, @mincho/transform-to-vanilla@workspace:packages/transform-to-vanilla":
   version: 0.0.0-use.local
-  resolution: "@mincho-js/transform-to-vanilla@workspace:packages/transform-to-vanilla"
+  resolution: "@mincho/transform-to-vanilla@workspace:packages/transform-to-vanilla"
   dependencies:
     "@vanilla-extract/css": ^1.13.0
     eslint-config-custom: "workspace:^"
