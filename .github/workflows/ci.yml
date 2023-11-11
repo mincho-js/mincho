@@ -4,7 +4,25 @@ name: CI
 on: [push, pull_request]
 
 jobs:
+  pre_job:
+    runs-on: ubuntu-latest
+    outputs:
+      should_skip: ${{ steps.skip_check.outputs.should_skip }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Check SkipAction
+        id: skip_check
+        uses: fkirc/skip-duplicate-actions@v5
+        with:
+          concurrent_skipping: same_content_newer
+          skip_after_successful_duplicate: "true"
+          paths_ignore: '["**/README.md"]'
+
   build:
+    needs: pre_job
+    if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
     runs-on: ubuntu-latest
 
     steps:
@@ -13,6 +31,9 @@ jobs:
 
       - name: Setup
         uses: ./.github/actions/node-setup
+
+      - name: Workflow lint
+        run: yarn lint:action
 
       - name: Test
         run: yarn test:all
