@@ -9,5 +9,5 @@ declare function UserConfig(
   extendConfigs?: TInputConfig = {}
 ): TOutputConfig;
 
-export type NodeConfig = typeof UserConfig;
-export type ReactConfig = typeof UserConfig;
+export declare const NodeConfig = UserConfig;
+export declare const ReactConfig = UserConfig;
