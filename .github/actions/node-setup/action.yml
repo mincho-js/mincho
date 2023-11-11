@@ -1,7 +1,7 @@
-name: "Setup"
+name: Setup
 
 runs:
-  using: "composite"
+  using: composite
   steps:
     # https://github.com/actions/cache/blob/main/examples.md#node---yarn
     # https://github.blog/changelog/2022-10-11-github-actions-deprecating-save-state-and-set-output-commands/

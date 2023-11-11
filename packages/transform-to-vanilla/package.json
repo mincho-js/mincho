@@ -33,6 +33,12 @@
     "check": "yarn g:check"
   },
   "prettier": "prettier-config-custom",
+  "eslintConfig": {
+    "extends": ["custom"],
+    "parserOptions": {
+      "project": ["./tsconfig.json", "./tsconfig.node.json"]
+    }
+  },
   "devDependencies": {
     "@vanilla-extract/css": "^1.13.0",
     "eslint-config-custom": "workspace:^",

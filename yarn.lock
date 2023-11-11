@@ -1948,6 +1948,15 @@ __metadata:
   languageName: node
   linkType: hard
 
+"eslint-compat-utils@npm:^0.1.0":
+  version: 0.1.2
+  resolution: "eslint-compat-utils@npm:0.1.2"
+  peerDependencies:
+    eslint: ">=6.0.0"
+  checksum: 2315d9db81efb7f58808053bf32a1d5970b38e01cd8244f4f1b5aa05d883255c5c93fc184e9c29a0e7e2dcf16ff16330977302474d3fa870e41c5bed9c66f76b
+  languageName: node
+  linkType: hard
+
 "eslint-config-custom@workspace:^, eslint-config-custom@workspace:configs/eslint-config-custom":
   version: 0.0.0-use.local
   resolution: "eslint-config-custom@workspace:configs/eslint-config-custom"
@@ -1969,6 +1978,17 @@ __metadata:
   checksum: 362e991b6cb343f79362bada2d97c202e5303e6865888918a7445c555fb75e4c078b01278e90be98aa98ae22f8597d8e93d48314bec6824f540f7efcab3ce451
   languageName: node
   linkType: hard
+
+"eslint-config-yaml@workspace:^, eslint-config-yaml@workspace:configs/eslint-conifg-yaml":
+  version: 0.0.0-use.local
+  resolution: "eslint-config-yaml@workspace:configs/eslint-conifg-yaml"
+  dependencies:
+    eslint-define-config: ^1.24.1
+    yaml-eslint-parser: ^1.2.2
+  peerDependencies:
+    eslint: "*"
+  languageName: unknown
+  linkType: soft
 
 "eslint-define-config@npm:^1.24.1":
   version: 1.24.1
@@ -1996,6 +2016,21 @@ __metadata:
   languageName: node
   linkType: hard
 
+"eslint-plugin-yml@npm:^1.10.0":
+  version: 1.10.0
+  resolution: "eslint-plugin-yml@npm:1.10.0"
+  dependencies:
+    debug: ^4.3.2
+    eslint-compat-utils: ^0.1.0
+    lodash: ^4.17.21
+    natural-compare: ^1.4.0
+    yaml-eslint-parser: ^1.2.1
+  peerDependencies:
+    eslint: ">=6.0.0"
+  checksum: bd913df237a9ee65388389b4ba65c68dbb169d041237d8e8ca1e2f415f0202e0a85aabafdc59d2688bb11ae319d1972df7e292cf0c637b1ebe88ae518497ffff
+  languageName: node
+  linkType: hard
+
 "eslint-scope@npm:^7.2.2":
   version: 7.2.2
   resolution: "eslint-scope@npm:7.2.2"
@@ -2006,7 +2041,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"eslint-visitor-keys@npm:^3.3.0, eslint-visitor-keys@npm:^3.4.1, eslint-visitor-keys@npm:^3.4.3":
+"eslint-visitor-keys@npm:^3.0.0, eslint-visitor-keys@npm:^3.3.0, eslint-visitor-keys@npm:^3.4.1, eslint-visitor-keys@npm:^3.4.3":
   version: 3.4.3
   resolution: "eslint-visitor-keys@npm:3.4.3"
   checksum: 36e9ef87fca698b6fd7ca5ca35d7b2b6eeaaf106572e2f7fd31c12d3bfdaccdb587bba6d3621067e5aece31c8c3a348b93922ab8f7b2cbc6aaab5e1d89040c60
@@ -2929,7 +2964,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"lodash@npm:~4.17.15":
+"lodash@npm:^4.17.21, lodash@npm:~4.17.15":
   version: 4.17.21
   resolution: "lodash@npm:4.17.21"
   checksum: eb835a2e51d381e561e508ce932ea50a8e5a68f4ebdd771ea240d3048244a8d13658acbd502cd4829768c56f2e16bdd4340b9ea141297d472517b83868e677f7
@@ -3056,7 +3091,9 @@ __metadata:
     c8: ^8.0.1
     eslint: ^8.53.0
     eslint-config-prettier: ^9.0.0
+    eslint-config-yaml: "workspace:^"
     eslint-plugin-prettier: ^5.0.1
+    eslint-plugin-yml: ^1.10.0
     prettier: ^3.0.3
     rimraf: ^5.0.5
     terser: ^5.24.0
@@ -4704,6 +4741,24 @@ __metadata:
   version: 4.0.0
   resolution: "yallist@npm:4.0.0"
   checksum: 343617202af32df2a15a3be36a5a8c0c8545208f3d3dfbc6bb7c3e3b7e8c6f8e7485432e4f3b88da3031a6e20afa7c711eded32ddfb122896ac5d914e75848d5
+  languageName: node
+  linkType: hard
+
+"yaml-eslint-parser@npm:^1.2.1, yaml-eslint-parser@npm:^1.2.2":
+  version: 1.2.2
+  resolution: "yaml-eslint-parser@npm:1.2.2"
+  dependencies:
+    eslint-visitor-keys: ^3.0.0
+    lodash: ^4.17.21
+    yaml: ^2.0.0
+  checksum: 06e8b8e4f5624731e05618a11e42e4727f99ae75c7c9b1f9986ba020d194580d11fc660674320720e45c27e75bb0044954d95fa1a6b7d5f6f9250af1e43dbeec
+  languageName: node
+  linkType: hard
+
+"yaml@npm:^2.0.0":
+  version: 2.3.4
+  resolution: "yaml@npm:2.3.4"
+  checksum: e6d1dae1c6383bcc8ba11796eef3b8c02d5082911c6723efeeb5ba50fc8e881df18d645e64de68e421b577296000bea9c75d6d9097c2f6699da3ae0406c030d8
   languageName: node
   linkType: hard
 
