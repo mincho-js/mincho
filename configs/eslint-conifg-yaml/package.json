@@ -1,0 +1,14 @@
+{
+  "name": "eslint-config-yaml",
+  "version": "0.0.0",
+  "private": true,
+  "main": "index.js",
+  "license": "MIT",
+  "devDependencies": {
+    "eslint-define-config": "^1.24.1",
+    "yaml-eslint-parser": "^1.2.2"
+  },
+  "peerDependencies": {
+    "eslint": "*"
+  }
+}
