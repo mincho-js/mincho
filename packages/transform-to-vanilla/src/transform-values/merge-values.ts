@@ -100,7 +100,7 @@ if (import.meta.vitest) {
         "inset 0 0 10px #555, 0 0 20px black",
         "inset 0 0 10px #555, 0 0 20px rgba(0, 255, 0, 0.5)"
       ]);
-      expectTypeOf(result).toEqualTypeOf<string[]>();
+      expectTypeOf(result).toEqualTypeOf<FallbackValues>();
     });
 
     it("Merge with Fallback Groups", () => {
@@ -115,7 +115,7 @@ if (import.meta.vitest) {
         "inset 0 0 10px #555, 0 0 20px black, 0 0 40px rgba(255, 0, 0, 0.7) inset",
         "inset 0 0 10px #555, 0 0 20px rgba(0, 255, 0, 0.5), 0 0 40px rgba(255, 0, 0, 0.7) inset"
       ]);
-      expectTypeOf(result).toEqualTypeOf<string[]>();
+      expectTypeOf(result).toEqualTypeOf<FallbackValues>();
     });
 
     it("Merge with only Fallback Groups", () => {
@@ -131,7 +131,7 @@ if (import.meta.vitest) {
         "0 0 20px black, 0 0 40px rgba(255, 0, 0, 0.7) inset",
         "0 0 20px black, 0 0 20px rgba(0, 255, 0, 0.5)"
       ]);
-      expectTypeOf(result).toEqualTypeOf<string[]>();
+      expectTypeOf(result).toEqualTypeOf<FallbackValues>();
     });
   });
 
@@ -152,7 +152,7 @@ if (import.meta.vitest) {
         "scale(2) rotate(28.64deg)",
         "scale(2) rotate(0.5rad)"
       ]);
-      expectTypeOf(result).toEqualTypeOf<string[]>();
+      expectTypeOf(result).toEqualTypeOf<FallbackValues>();
     });
 
     it("Merge with Fallback Groups", () => {
@@ -167,7 +167,7 @@ if (import.meta.vitest) {
         "scale(2) rotate(28.64deg) translate(120px, 50%)",
         "scale(2) rotate(0.5rad) translate(120px, 50%)"
       ]);
-      expectTypeOf(result).toEqualTypeOf<string[]>();
+      expectTypeOf(result).toEqualTypeOf<FallbackValues>();
     });
 
     it("Merge with only Fallback Groups", () => {
@@ -183,7 +183,7 @@ if (import.meta.vitest) {
         "skew(30deg, 20deg) rotate(28.64deg)",
         "skew(30deg, 20deg) rotate(0.5rad)"
       ]);
-      expectTypeOf(result).toEqualTypeOf<string[]>();
+      expectTypeOf(result).toEqualTypeOf<FallbackValues>();
     });
   });
 }
