@@ -1,13 +1,17 @@
-const RegExp = /[$_]$/;
+type DefaultType = string & NonNullable<unknown>;
+type HasSignInString = `${DefaultType}$` | `${DefaultType}_`;
+type InputKeyValue = DefaultType | HasSignInString;
 
 // == Interface ================================================================
-export function removeSignSimbol(keyStr: string) {
-  return hasSignSimbol(keyStr) ? keyStr.trim().replace(RegExp, "") : keyStr;
+export function removeSignSimbol(keyStr: InputKeyValue) {
+  return hasSignSimbol(keyStr)
+    ? keyStr.substring(0, keyStr.length - 1)
+    : keyStr;
 }
 
 // == Utils ====================================================================
-function hasSignSimbol(keyStr: string) {
-  return RegExp.test(keyStr);
+function hasSignSimbol(value: InputKeyValue): value is HasSignInString {
+  return value.endsWith("$") || value.endsWith("_");
 }
 
 // == Tests ====================================================================
