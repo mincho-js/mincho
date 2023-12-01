@@ -1,7 +1,7 @@
+import { transformStyle } from "./transform-object/index";
 import type { ComplexStyleRule } from "@vanilla-extract/css";
 import type {
   ComplexCSSRule,
-  CSSRule,
   VanillaStyleArray,
   VanillaClassNames
 } from "./types/style-rule";
@@ -21,11 +21,6 @@ function isClassNames(
   style: VanillaStyleArray[number]
 ): style is VanillaClassNames {
   return typeof style === "string" || Array.isArray(style);
-}
-
-// TODO: Need traverse
-function transformStyle(style: CSSRule) {
-  return style;
 }
 
 // == Tests ====================================================================
