@@ -31,7 +31,9 @@
     "g:check": "cd $INIT_CWD && yarn run -T tsc --noEmit"
   },
   "eslintConfig": {
-    "extends": ["yaml"]
+    "extends": [
+      "yaml"
+    ]
   },
   "devDependencies": {
     "@types/eslint": "^8.44.7",
