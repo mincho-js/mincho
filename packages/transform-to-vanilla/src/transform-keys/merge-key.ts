@@ -1,3 +1,4 @@
+// == Type ================================================================
 type DefaultType = string & NonNullable<unknown>;
 type HasSignInString = `${DefaultType}$` | `${DefaultType}_`;
 type InputKeyValue = DefaultType | HasSignInString;
