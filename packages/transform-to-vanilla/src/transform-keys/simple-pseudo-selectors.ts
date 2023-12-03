@@ -1,9 +1,10 @@
+import { NonNullableString } from "../types/string";
+import { SimplePseudos } from "../types/simple-pseudo";
+
 // == Type ================================================================
-type DefaultType = string & NonNullable<unknown>;
 type PseudoSelectorsSign = `_${string}` | `__${string}`;
-type ReplacedPseudoSelectorsSign = `:${string}` | `::${string}`;
-type InputKeyValue = DefaultType | PseudoSelectorsSign;
-type ReturnKeyValue = DefaultType | ReplacedPseudoSelectorsSign;
+type InputKeyValue = NonNullableString | PseudoSelectorsSign;
+type ReturnKeyValue = NonNullableString | SimplePseudos;
 
 // == Interface ================================================================
 export function replacePseudoSelectors(keyStr: InputKeyValue): ReturnKeyValue {
