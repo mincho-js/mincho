@@ -31,9 +31,14 @@
   },
   "prettier": "prettier-config-custom",
   "eslintConfig": {
-    "extends": ["custom"],
+    "extends": [
+      "custom"
+    ],
     "parserOptions": {
-      "project": ["./tsconfig.json", "./tsconfig.node.json"]
+      "project": [
+        "./tsconfig.json",
+        "./tsconfig.node.json"
+      ]
     }
   },
   "dependencies": {
