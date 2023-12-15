@@ -1,6 +1,8 @@
-type DefaultType = string & NonNullable<unknown>;
-type HasSignInString = `${DefaultType}$` | `${DefaultType}_`;
-type InputKeyValue = DefaultType | HasSignInString;
+import { NonNullableString } from "../types/string";
+
+// == Type ================================================================
+type HasSignInString = `${NonNullableString}$` | `${NonNullableString}_`;
+type InputKeyValue = NonNullableString | HasSignInString;
 
 // == Interface ================================================================
 export function removeSignSimbol(keyStr: InputKeyValue) {
