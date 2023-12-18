@@ -50,5 +50,8 @@
     "prettier-config-custom": "workspace:^",
     "tsconfig-custom": "workspace:^",
     "vite-config-custom": "workspace:^"
+  },
+  "dependencies": {
+    "csstype": "^3.1.3"
   }
 }

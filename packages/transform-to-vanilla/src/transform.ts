@@ -2,8 +2,8 @@ import { transformStyle } from "./transform-object/index";
 import type { ComplexStyleRule } from "@vanilla-extract/css";
 import type {
   ComplexCSSRule,
-  VanillaStyleArray,
-  VanillaClassNames
+  VanillaClassNames,
+  ComplexCSSItem
 } from "./types/style-rule";
 
 // == Interface ================================================================
@@ -17,9 +17,7 @@ export function transform(style: ComplexCSSRule): ComplexStyleRule {
 }
 
 // == Utils ====================================================================
-function isClassNames(
-  style: VanillaStyleArray[number]
-): style is VanillaClassNames {
+function isClassNames(style: ComplexCSSItem): style is VanillaClassNames {
   return typeof style === "string" || Array.isArray(style);
 }
 
