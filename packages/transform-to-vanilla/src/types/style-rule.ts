@@ -136,6 +136,89 @@ if (import.meta.vitest) {
   const { describe, it, expectTypeOf } = import.meta.vitest;
 
   describe.concurrent("CSS Rules", () => {
+    it("Unitless", () => {
+      const unitless: CSSRule = {
+        // cast to pixels
+        padding: 10,
+        marginTop: 25,
+
+        // unitless properties
+        flexGrow: 1,
+        opacity: 0.5
+      };
+      expectTypeOf<CSSRule>().toMatchTypeOf(unitless);
+    });
+
+    it("Vendor Prefix", () => {
+      const vender: CSSRule = {
+        WebkitTapHighlightColor: "rgba(0, 0, 0, 0)"
+      };
+      expectTypeOf<CSSRule>().toMatchTypeOf(vender);
+    });
+
+    it("Fallback styles", () => {
+      const fallback: CSSRule = {
+        overflow: ["auto", "overlay"]
+      };
+      expectTypeOf<CSSRule>().toMatchTypeOf(fallback);
+    });
+
+    it("Merge Values", () => {
+      const merged: CSSRule = {
+        boxShadow$: ["inset 0 0 10px #555", "0 0 20px black"],
+        transform_: ["scale(2)", "rotate(15deg)"]
+      };
+      expectTypeOf<CSSRule>().toMatchTypeOf(merged);
+    });
+
+    it("CSS var", () => {
+      // Toplevel Var
+      const cssVar: CSSRule = {
+        $customVar: "none",
+        "--custom-var": "none",
+
+        // Var Properties
+        vars: {
+          $customVar: "none",
+          "--custom-var": "none"
+        },
+
+        // Usage
+        border: "$customVar",
+        background: "$fallbackVar(red)",
+        outline: "var(--custom-var)",
+        display: "var(--fallback-var, flex)"
+      };
+      expectTypeOf<CSSRule>().toMatchTypeOf(cssVar);
+    });
+
+    it("Simple Pseudo selectors", () => {
+      const simplePseudos: CSSRule = {
+        // Literal pseudo
+        _hover: {
+          color: "pink"
+        },
+        _firstOfType: {
+          color: "blue"
+        },
+        __before: {
+          content: ""
+        },
+
+        // Backward compatibility
+        ":hover": {
+          color: "pink"
+        },
+        ":first-of-type": {
+          color: "blue"
+        },
+        "::before": {
+          content: ""
+        }
+      };
+      expectTypeOf<CSSRule>().toMatchTypeOf(simplePseudos);
+    });
+
     it("AtRules", () => {
       const atRules: CSSRule = {
         // Toplevel rules
@@ -171,27 +254,6 @@ if (import.meta.vitest) {
         }
       };
       expectTypeOf<CSSRule>().toMatchTypeOf(atRules);
-    });
-
-    it("CSS var", () => {
-      // Toplevel Var
-      const cssVar: CSSRule = {
-        $customVar: "none",
-        "--custom-var": "none",
-
-        // Var Properties
-        vars: {
-          $customVar: "none",
-          "--custom-var": "none"
-        },
-
-        // Usage
-        border: "$customVar",
-        background: "$fallbackVar(red)",
-        outline: "var(--custom-var)",
-        display: "var(--fallback-var, flex)"
-      };
-      expectTypeOf<CSSRule>().toMatchTypeOf(cssVar);
     });
   });
 }
