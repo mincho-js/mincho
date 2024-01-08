@@ -26,7 +26,7 @@ export type ClassNames = string | Array<ClassNames>;
 
 // == Style with Selectors ====================================================
 // -- Main --------------------------------------------------------------------
-export type StyleWithSelectors = CSSPropertiesAndPseudos & SelectorProperty; // TODO: SelectorProperties
+export type StyleWithSelectors = CSSPropertiesAndPseudos & SelectorProperties;
 
 // -- Psesudo -----------------------------------------------------------------
 type CSSPropertiesAndPseudos = CSSPropertiesWithVars & PseudoProperties;
@@ -41,15 +41,13 @@ export type SelectorProperties = ToplevelSelector & SelectorProperty;
 type SelectorProperty = {
   selectors?: SelectorMap;
 };
-type ToplevelSelector = Partial<{
-  [selector: NonNullableString]: SelectorValues;
-}>;
+type ToplevelSelector = Partial<SelectorMap>;
 
+type SelectorMap = {
+  [selector: `${string}&${string}`]: SelectorValues;
+};
 type SelectorValues = CSSPropertiesWithVars &
   WithQueries<CSSPropertiesWithVars>;
-interface SelectorMap {
-  [selector: NonNullableString]: SelectorValues;
-}
 
 // == CSS Properties ==========================================================
 // -- Main --------------------------------------------------------------------
@@ -217,6 +215,29 @@ if (import.meta.vitest) {
         }
       };
       expectTypeOf<CSSRule>().toMatchTypeOf(simplePseudos);
+    });
+
+    it("Complex selectors", () => {
+      const complexSelectors: CSSRule = {
+        // Toplevel complex selectors
+        "&:hover:not(:active)": {
+          border: "2px solid aquamarine"
+        },
+        "nav li > &": {
+          textDecoration: "underline"
+        },
+
+        // selectors Properties
+        selectors: {
+          "&:hover:not(:active)": {
+            border: "2px solid aquamarine"
+          },
+          "nav li > &": {
+            textDecoration: "underline"
+          }
+        }
+      };
+      expectTypeOf<CSSRule>().toMatchTypeOf(complexSelectors);
     });
 
     it("AtRules", () => {
