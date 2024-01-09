@@ -53,10 +53,15 @@ interface SelectorMap {
 
 // == CSS Properties ==========================================================
 // -- Main --------------------------------------------------------------------
-export type CSSPropertiesWithVars = CSSComplexProperties & {
-  vars?: {
-    [key: string]: string;
-  };
+export type CSSPropertiesWithVars = CSSComplexProperties &
+  VarProperty &
+  TopLevelVar;
+export type VarProperty = {
+  vars?: CSSVarMap;
+};
+export type TopLevelVar = Partial<CSSVarMap>;
+type CSSVarMap = {
+  [key: CSSVarKey]: CSSVarValue;
 };
 
 export type CSSComplexProperties = CSSProperties & CSSMergeProperties;
@@ -68,6 +73,16 @@ export type CSSProperties = {
     | CSSVarFunction
     | Array<CSSVarFunction | CSSTypeProperties[Property]>;
 };
+
+export type CSSVarKey = `--${string}` | `$${string}`;
+export type CSSVarValue = `${string | number}`;
+
+// https://github.com/vanilla-extract-css/vanilla-extract/blob/master/packages/private/src/types.ts
+export type CSSVarFunction =
+  | `var(--${string})`
+  | `var(--${string}, ${CSSVarValue})`
+  | `$${string}`
+  | `$${string}(${CSSVarValue})`;
 
 // TODO: Instead of enabling all properties, we recommend enabling only some properties.
 // https://github.com/mincho-js/working-group/blob/main/text/000-css-literals.md#7-merge-values
@@ -116,11 +131,6 @@ export interface CSSKeyframes {
   [time: string]: CSSComplexProperties;
 }
 
-// https://github.com/vanilla-extract-css/vanilla-extract/blob/master/packages/private/src/types.ts
-export type CSSVarFunction =
-  | `var(--${string})`
-  | `var(--${string}, ${string | number})`;
-
 // == Tests ====================================================================
 if (import.meta.vitest) {
   const { describe, it, expectTypeOf } = import.meta.vitest;
@@ -161,6 +171,27 @@ if (import.meta.vitest) {
         }
       };
       expectTypeOf<CSSRule>().toMatchTypeOf(atRules);
+    });
+
+    it("CSS var", () => {
+      // Toplevel Var
+      const cssVar: CSSRule = {
+        $customVar: "none",
+        "--custom-var": "none",
+
+        // Var Properties
+        vars: {
+          $customVar: "none",
+          "--custom-var": "none"
+        },
+
+        // Usage
+        border: "$customVar",
+        background: "$fallbackVar(red)",
+        outline: "var(--custom-var)",
+        display: "var(--fallback-var, flex)"
+      };
+      expectTypeOf<CSSRule>().toMatchTypeOf(cssVar);
     });
   });
 }
