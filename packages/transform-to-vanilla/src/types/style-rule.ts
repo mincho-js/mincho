@@ -1,7 +1,12 @@
-import type { ComplexStyleRule, StyleRule } from "@vanilla-extract/css";
-import type { Properties } from "csstype";
+import type {
+  ComplexStyleRule,
+  StyleRule,
+  fontFace
+} from "@vanilla-extract/css";
+import type { Properties, Property } from "csstype";
 import type { NonNullableString } from "./string";
 import type { SimplePseudos, CamelPseudos } from "./simple-pseudo";
+import type { IntRange, ExcludeArray } from "./utils";
 
 // == Vanilla Extract Inteface ================================================
 // https://github.com/vanilla-extract-css/vanilla-extract/blob/master/packages/css/src/types.ts
@@ -92,8 +97,7 @@ export type CSSMergeProperties = {
   >;
 };
 
-type CSSTypeProperties = Properties<number | NonNullableString> &
-  ContainerProperties;
+type CSSTypeProperties = WithAnonymousCSSProperty & ContainerProperties;
 
 // csstype is yet to ship container property types as they are not in
 // the output MDN spec files yet. Remove this once that's done.
@@ -124,10 +128,27 @@ type TopLevelAtRules<StyleType> = {
   [key in AtRulesKeywords as `@${key} ${string}`]?: StyleType;
 };
 
-// == Others ==================================================================
-export interface CSSKeyframes {
-  [time: string]: CSSComplexProperties;
-}
+// == Anonymous At-Rules ======================================================
+type WithAnonymousCSSProperty = Omit<ResolvedProperties, AnonymousPropertyKey> &
+  Partial<AnonymousProperty>;
+
+export type AnonymousProperty = {
+  animationName:
+    | Property.AnimationName
+    | { [key in CSSKeyframeFromTo]: CSSComplexProperties };
+  fontFamily:
+    | Property.FontFamily
+    | ExcludeArray<Parameters<typeof fontFace>[0]>;
+};
+export type AnonymousPropertyKey = keyof AnonymousProperty;
+
+type ResolvedProperties = Properties<number | NonNullableString>;
+
+type CSSKeyframeFromTo =
+  | "from"
+  | "to"
+  | `${IntRange<1, 11>}0%`
+  | `${number & NonNullable<unknown>}%`;
 
 // == Tests ====================================================================
 if (import.meta.vitest) {
@@ -276,5 +297,33 @@ if (import.meta.vitest) {
       };
       expectTypeOf<CSSRule>().toMatchTypeOf(atRules);
     });
+  });
+
+  it("Anonymous AtRules", () => {
+    const regularProperties: CSSRule = {
+      animationName: "none",
+      fontFamily: "sans-serif"
+    };
+    expectTypeOf<CSSRule>().toMatchTypeOf(regularProperties);
+
+    const anonymousAtRules: CSSRule = {
+      animationName: {
+        from: {
+          opacity: 0
+        },
+        "50%": {
+          opacity: 0.3
+        },
+        to: {
+          opacity: 1
+        }
+      },
+      fontFamily: {
+        fontWeight: 900,
+        // TODO: Improve merge proerties to src$
+        src: "local('Pretendard Regular'), url(../../../packages/pretendard/dist/web/static/woff2/Pretendard-Regular.woff2) format('woff2'), url(../../../packages/pretendard/dist/web/static/woff/Pretendard-Regular.woff) format('woff');"
+      }
+    };
+    expectTypeOf<CSSRule>().toMatchTypeOf(anonymousAtRules);
   });
 }
