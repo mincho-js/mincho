@@ -147,16 +147,16 @@ type ResolvedProperties = Properties<number | NonNullableString>;
 type CSSKeyframeFromTo =
   | "from"
   | "to"
-  | `${IntRange<1, 11>}0%`
+  | `${IntRange<1, 10>}0%`
   | `${number & NonNullable<unknown>}%`;
 
 // == Tests ====================================================================
 if (import.meta.vitest) {
-  const { describe, it, expectTypeOf } = import.meta.vitest;
+  const { describe, it, assertType } = import.meta.vitest;
 
   describe.concurrent("CSS Rules", () => {
     it("Unitless", () => {
-      const unitless: CSSRule = {
+      assertType<CSSRule>({
         // cast to pixels
         padding: 10,
         marginTop: 25,
@@ -164,35 +164,31 @@ if (import.meta.vitest) {
         // unitless properties
         flexGrow: 1,
         opacity: 0.5
-      };
-      expectTypeOf<CSSRule>().toMatchTypeOf(unitless);
+      });
     });
 
     it("Vendor Prefix", () => {
-      const vender: CSSRule = {
+      assertType<CSSRule>({
         WebkitTapHighlightColor: "rgba(0, 0, 0, 0)"
-      };
-      expectTypeOf<CSSRule>().toMatchTypeOf(vender);
+      });
     });
 
     it("Fallback styles", () => {
-      const fallback: CSSRule = {
+      assertType<CSSRule>({
         overflow: ["auto", "overlay"]
-      };
-      expectTypeOf<CSSRule>().toMatchTypeOf(fallback);
+      });
     });
 
     it("Merge Values", () => {
-      const merged: CSSRule = {
+      assertType<CSSRule>({
         boxShadow$: ["inset 0 0 10px #555", "0 0 20px black"],
         transform_: ["scale(2)", "rotate(15deg)"]
-      };
-      expectTypeOf<CSSRule>().toMatchTypeOf(merged);
+      });
     });
 
     it("CSS var", () => {
-      // Toplevel Var
-      const cssVar: CSSRule = {
+      assertType<CSSRule>({
+        // Toplevel Var
         $customVar: "none",
         "--custom-var": "none",
 
@@ -207,12 +203,11 @@ if (import.meta.vitest) {
         background: "$fallbackVar(red)",
         outline: "var(--custom-var)",
         display: "var(--fallback-var, flex)"
-      };
-      expectTypeOf<CSSRule>().toMatchTypeOf(cssVar);
+      });
     });
 
     it("Simple Pseudo selectors", () => {
-      const simplePseudos: CSSRule = {
+      assertType<CSSRule>({
         // Literal pseudo
         _hover: {
           color: "pink"
@@ -234,12 +229,11 @@ if (import.meta.vitest) {
         "::before": {
           content: ""
         }
-      };
-      expectTypeOf<CSSRule>().toMatchTypeOf(simplePseudos);
+      });
     });
 
     it("Complex selectors", () => {
-      const complexSelectors: CSSRule = {
+      assertType<CSSRule>({
         // Toplevel complex selectors
         "&:hover:not(:active)": {
           border: "2px solid aquamarine"
@@ -257,12 +251,11 @@ if (import.meta.vitest) {
             textDecoration: "underline"
           }
         }
-      };
-      expectTypeOf<CSSRule>().toMatchTypeOf(complexSelectors);
+      });
     });
 
     it("AtRules", () => {
-      const atRules: CSSRule = {
+      assertType<CSSRule>({
         // Toplevel rules
         "@media screen and (min-width: 768px)": {
           color: "red",
@@ -294,36 +287,35 @@ if (import.meta.vitest) {
             }
           }
         }
-      };
-      expectTypeOf<CSSRule>().toMatchTypeOf(atRules);
+      });
     });
-  });
 
-  it("Anonymous AtRules", () => {
-    const regularProperties: CSSRule = {
-      animationName: "none",
-      fontFamily: "sans-serif"
-    };
-    expectTypeOf<CSSRule>().toMatchTypeOf(regularProperties);
+    it("Anonymous AtRules", () => {
+      // Original Properties
+      assertType<CSSRule>({
+        animationName: "none",
+        fontFamily: "sans-serif"
+      });
 
-    const anonymousAtRules: CSSRule = {
-      animationName: {
-        from: {
-          opacity: 0
+      // Anonymouse AtRules
+      assertType<CSSRule>({
+        animationName: {
+          from: {
+            opacity: 0
+          },
+          "50%": {
+            opacity: 0.3
+          },
+          to: {
+            opacity: 1
+          }
         },
-        "50%": {
-          opacity: 0.3
-        },
-        to: {
-          opacity: 1
+        fontFamily: {
+          fontWeight: 900,
+          // TODO: Improve merge proerties to src$
+          src: "local('Pretendard Regular'), url(../../../packages/pretendard/dist/web/static/woff2/Pretendard-Regular.woff2) format('woff2'), url(../../../packages/pretendard/dist/web/static/woff/Pretendard-Regular.woff) format('woff');"
         }
-      },
-      fontFamily: {
-        fontWeight: 900,
-        // TODO: Improve merge proerties to src$
-        src: "local('Pretendard Regular'), url(../../../packages/pretendard/dist/web/static/woff2/Pretendard-Regular.woff2) format('woff2'), url(../../../packages/pretendard/dist/web/static/woff/Pretendard-Regular.woff) format('woff');"
-      }
-    };
-    expectTypeOf<CSSRule>().toMatchTypeOf(anonymousAtRules);
+      });
+    });
   });
 }
