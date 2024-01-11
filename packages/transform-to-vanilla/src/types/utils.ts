@@ -1,3 +1,4 @@
+// == Numbers =================================================================
 // https://stackoverflow.com/questions/39494689/is-it-possible-to-restrict-number-to-a-certain-range
 export type IntRange<F extends number, T extends number> =
   | Exclude<Enumerate<T>, Enumerate<F>>
@@ -10,8 +11,16 @@ export type Enumerate<
   ? Acc[number]
   : Enumerate<N, [...Acc, Acc["length"]]>;
 
+// == Array ===================================================================
 export type ExcludeArray<T> = T extends unknown[] ? never : T;
 
+export type Arr<
+  T,
+  N extends number,
+  Acc extends T[] = []
+> = Acc["length"] extends N ? Acc : Arr<T, N, [...Acc, T]>;
+
+// == Test ====================================================================
 if (import.meta.vitest) {
   const { describe, it, expectTypeOf } = import.meta.vitest;
 
@@ -35,6 +44,17 @@ if (import.meta.vitest) {
       expectTypeOf<ExcludeArray<string | number[]>>().toEqualTypeOf<string>();
       expectTypeOf<ExcludeArray<boolean | number | number[]>>().toEqualTypeOf<
         boolean | number
+      >();
+    });
+
+    it("Arr<T, N, Acc>", () => {
+      expectTypeOf<Arr<number, 1>>().toEqualTypeOf<[number]>();
+      expectTypeOf<Arr<number, 2>>().toEqualTypeOf<[number, number]>();
+      expectTypeOf<Arr<number, 5>>().toEqualTypeOf<
+        [number, number, number, number, number]
+      >();
+      expectTypeOf<Arr<number | string, 2>>().toEqualTypeOf<
+        [number | string, number | string]
       >();
     });
   });

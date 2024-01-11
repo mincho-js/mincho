@@ -6,7 +6,7 @@ import type {
 import type { Properties, Property } from "csstype";
 import type { NonNullableString } from "./string";
 import type { SimplePseudos, CamelPseudos } from "./simple-pseudo";
-import type { IntRange, ExcludeArray } from "./utils";
+import type { IntRange, ExcludeArray, Arr } from "./utils";
 
 // == Vanilla Extract Inteface ================================================
 // https://github.com/vanilla-extract-css/vanilla-extract/blob/master/packages/css/src/types.ts
@@ -138,7 +138,7 @@ export type AnonymousProperty = {
     | { [key in CSSKeyframeFromTo]: CSSComplexProperties };
   fontFamily:
     | Property.FontFamily
-    | ExcludeArray<Parameters<typeof fontFace>[0]>;
+    | ({ fontFamily: string } & FontFaceRule & Partial<FontFaceMergeRule>);
 };
 export type AnonymousPropertyKey = keyof AnonymousProperty;
 
@@ -149,6 +149,29 @@ type CSSKeyframeFromTo =
   | "to"
   | `${IntRange<1, 10>}0%`
   | `${number & NonNullable<unknown>}%`;
+
+type FontFaceRule = ExcludeArray<Parameters<typeof fontFace>[0]>;
+type RequiredFontFaceRule = Required<FontFaceRule>;
+type FontFaceMergeRule = {
+  fontStretch_: Arr<Exclude<RequiredFontFaceRule["fontStretch"], "normal">, 2>;
+  fontStyle_: ["oblique", ...`${number}${Angle}`[]];
+  fontWeight_: RequiredFontFaceRule["fontWeight"][];
+  fontFeatureSettings$: FeatureTagValue;
+  MozFontFeatureSettings$: FeatureTagValue;
+  fontVariationSettings$: `${string} ${number}`[];
+  src$: FontFaceSrc[];
+  unicodeRange$: `U+${string}`[];
+};
+
+type Angle = "deg" | "grad" | "rad" | "turn";
+type FeatureTagValue = (NonNullableString &
+  `${string} ${number | "on" | "off"}`)[];
+type FontFaceSrc =
+  | `local(${string})`
+  | `url(${string})`
+  | `url(${string}) format(${string})`
+  | `url(${string}) tech(${string})`
+  | `url(${string}) format(${string}) tech(${string})`;
 
 // == Tests ====================================================================
 if (import.meta.vitest) {
@@ -311,9 +334,13 @@ if (import.meta.vitest) {
           }
         },
         fontFamily: {
+          fontFamily: "Pretendard",
           fontWeight: 900,
-          // TODO: Improve merge proerties to src$
-          src: "local('Pretendard Regular'), url(../../../packages/pretendard/dist/web/static/woff2/Pretendard-Regular.woff2) format('woff2'), url(../../../packages/pretendard/dist/web/static/woff/Pretendard-Regular.woff) format('woff');"
+          src$: [
+            "local('Pretendard Regular')",
+            "url(../../../packages/pretendard/dist/web/static/woff2/Pretendard-Regular.woff2) format('woff2')",
+            "url(../../../packages/pretendard/dist/web/static/woff/Pretendard-Regular.woff) format('woff')"
+          ]
         }
       });
     });
