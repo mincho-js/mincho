@@ -1,8 +1,4 @@
-import type {
-  ComplexStyleRule,
-  StyleRule,
-  fontFace
-} from "@vanilla-extract/css";
+import type { StyleRule, fontFace } from "@vanilla-extract/css";
 import type { Properties, Property } from "csstype";
 import type { NonNullableString } from "./string";
 import type { SimplePseudos, CamelPseudos } from "./simple-pseudo";
@@ -13,8 +9,8 @@ import type { IntRange, ExcludeArray, Arr } from "./utils";
 export type VanillaStyleRuleKey = keyof StyleRule;
 export type VanillaStyleRuleValue = StyleRule[VanillaStyleRuleKey];
 
-export type VanillaStyleArray = Exclude<ComplexStyleRule, StyleRule>;
-export type VanillaClassNames = Exclude<VanillaStyleArray[number], StyleRule>;
+export type VanillaStyleArray = Array<StyleRule | ClassNames>;
+export type VanillaClassNames = ClassNames;
 
 // == Interface ===============================================================
 export type ComplexCSSRule = CSSRule | Array<ComplexCSSItem>;
