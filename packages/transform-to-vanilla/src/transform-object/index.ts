@@ -4,8 +4,9 @@ import type {
   CSSRule,
   CSSRuleKey,
   CSSRuleValue,
-  StyleRuleValue
+  VanillaStyleRuleValue
 } from "@/types/style-rule";
+import { replacePseudoSelectors } from "@/transform-keys/simple-pseudo-selectors";
 
 // == Interface ================================================================
 export function transformStyle(style: CSSRule) {
@@ -14,18 +15,21 @@ export function transformStyle(style: CSSRule) {
     // Type '{}' is missing the following properties from type
     // '{ accentColor: StyleRuleValue; alignContent: StyleRuleValue; alignItems: StyleRuleValue; alignSelf: StyleRuleValue; ... 904 more ...;
     //  vars: StyleRuleValue; }': accentColor, alignContent, alignItems, alignSelf, and 905 more.ts(2740)
-    [key in string]: StyleRuleValue;
+    [key in string]: VanillaStyleRuleValue;
   } = {};
 
   for (const [key, value] of Object.entries(style) as [
     CSSRuleKey,
     CSSRuleValue
   ][]) {
-    if (typeof value === "string") {
-      result[key] = simplyImportant(value);
-      continue;
-    }
-    result[key] = value;
+    const transformedValue =
+      typeof value === "object"
+        ? transformStyle(value as CSSRule) // TODO: Array
+        : typeof value === "string"
+        ? simplyImportant(value)
+        : value;
+    const transformedKey = replacePseudoSelectors(key);
+    result[transformedKey] = transformedValue as VanillaStyleRuleValue;
   }
   return result as StyleRule;
 }
@@ -42,6 +46,26 @@ if (import.meta.vitest) {
         })
       ).toStrictEqual({
         color: "red !important"
+      } satisfies StyleRule);
+    });
+
+    it("Simple Psudo", () => {
+      expect(
+        transformStyle({
+          _hover: {
+            color: "red!"
+          },
+          __MozSelection: {
+            background: "blue"
+          }
+        })
+      ).toStrictEqual({
+        ":hover": {
+          color: "red !important"
+        },
+        "::-moz-selection": {
+          background: "blue"
+        }
       } satisfies StyleRule);
     });
   });
