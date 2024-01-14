@@ -40,6 +40,11 @@ type PseudoProperties = {
 export type SelectorProperties = ToplevelSelector & SelectorProperty;
 
 type SelectorProperty = {
+  /**
+   * More complex rules can be written using the `selectors` key.
+   *
+   * @see https://vanilla-extract.style/documentation/styling/#complex-selectors
+   */
   selectors?: SelectorMap;
 };
 type ToplevelSelector = Partial<SelectorMap>;
@@ -56,6 +61,11 @@ export type CSSPropertiesWithVars = CSSComplexProperties &
   VarProperty &
   TopLevelVar;
 export type VarProperty = {
+  /**
+   * Custom properties are scoped to the element(s) they are declared on, and participate in the cascade: the value of such a custom property is that from the declaration decided by the cascading algorithm.
+   *
+   * @see https://developer.mozilla.org/en-US/docs/Web/CSS/--*
+   */
   vars?: CSSVarMap;
 };
 export type TopLevelVar = Partial<CSSVarMap>;
@@ -129,12 +139,50 @@ type WithAnonymousCSSProperty = Omit<ResolvedProperties, AnonymousPropertyKey> &
   Partial<AnonymousProperty>;
 
 export type AnonymousProperty = {
+  /**
+   * The **`animation-name`** CSS property specifies the names of one or more `@keyframes` at-rules that describe the animation to apply to an element. Multiple `@keyframe` at-rules are specified as a comma-separated list of names. If the specified name does not match any `@keyframe` at-rule, no properties are animated.
+   *
+   * **Syntax**: `[ none | <keyframes-name> ]#`
+   *
+   * **Initial value**: `none`
+   *
+   * | Chrome  | Firefox | Safari  |  Edge  |   IE   |
+   * | :-----: | :-----: | :-----: | :----: | :----: |
+   * | **43**  | **16**  |  **9**  | **12** | **10** |
+   * | 3 _-x-_ | 5 _-x-_ | 4 _-x-_ |        |        |
+   *
+   * @see https://developer.mozilla.org/docs/Web/CSS/animation-name
+   */
   animationName:
     | Property.AnimationName
     | { [key in CSSKeyframeFromTo]: CSSComplexProperties };
+
+  /**
+   * The **`font-family`** CSS property specifies a prioritized list of one or more font family names and/or generic family names for the selected element.
+   *
+   * **Syntax**: `[ <family-name> | <generic-family> ]#`
+   *
+   * **Initial value**: depends on user agent
+   *
+   * | Chrome | Firefox | Safari |  Edge  |  IE   |
+   * | :----: | :-----: | :----: | :----: | :---: |
+   * | **1**  |  **1**  | **1**  | **12** | **3** |
+   *
+   * @see https://developer.mozilla.org/docs/Web/CSS/font-family
+   */
   fontFamily:
     | Property.FontFamily
-    | ({ fontFamily: string } & FontFaceRule & Partial<FontFaceMergeRule>);
+    | ({
+        /**
+         * The **`font-family`** CSS descriptor sets the font family for a font specified in an [`@font-face`](https://developer.mozilla.org/en-US/docs/Web/CSS/@font-face) at-rule.
+         *
+         * **Syntax**: `<family-name>`
+         *
+         * @see https://developer.mozilla.org/en-US/docs/Web/CSS/@font-face/font-family
+         */
+        fontFamily: string;
+      } & FontFaceRule &
+        Partial<FontFaceMergeRule>);
 };
 export type AnonymousPropertyKey = keyof AnonymousProperty;
 
@@ -149,13 +197,75 @@ type CSSKeyframeFromTo =
 type FontFaceRule = ExcludeArray<Parameters<typeof fontFace>[0]>;
 type RequiredFontFaceRule = Required<FontFaceRule>;
 type FontFaceMergeRule = {
+  /**
+   * The **font-stretch** CSS descriptor allows authors to specify a normal, condensed, or expanded face for the fonts specified in the [`@font-face`](https://developer.mozilla.org/en-US/docs/Web/CSS/@font-face) at-rule.
+   *
+   * **Syntax**: `<'font-stretch'>{1,2} `
+   *
+   * @see https://developer.mozilla.org/en-US/docs/Web/CSS/@font-face/font-stretch
+   */
   fontStretch_: Arr<Exclude<RequiredFontFaceRule["fontStretch"], "normal">, 2>;
+
+  /**
+   * The **`font-style`** CSS descriptor allows authors to specify font styles for the fonts specified in the [`@font-face`](https://developer.mozilla.org/en-US/docs/Web/CSS/@font-face) at-rule.
+   *
+   * **Syntax**: `oblique <angle [-90deg,90deg]>?]`
+   *
+   * @see https://developer.mozilla.org/en-US/docs/Web/CSS/@font-face/font-style
+   */
   fontStyle_: ["oblique", ...`${number}${Angle}`[]];
+
+  /**
+   * The **`font-weight`** CSS descriptor allows authors to specify font weights for the fonts specified in the [`@font-face`](https://developer.mozilla.org/en-US/docs/Web/CSS/@font-face) at-rule. The [`font-weight`](https://developer.mozilla.org/en-US/docs/Web/CSS/font-weight) property can separately be used to set how thick or thin characters in text should be displayed.
+   *
+   * **Syntax**: `<font-weight-absolute>{1,2}`
+   *
+   * @see https://developer.mozilla.org/en-US/docs/Web/CSS/@font-face/font-weight
+   */
   fontWeight_: RequiredFontFaceRule["fontWeight"][];
+
+  /**
+   * The **`font-feature-settings`** CSS descriptor allows you to define the initial settings to use for the font defined by the [`@font-face`](https://developer.mozilla.org/en-US/docs/Web/CSS/@font-face) at-rule. You can further use this descriptor to control typographic font features such as ligatures, small caps, and swashes, for the font defined by `@font-face`.
+   *
+   * **Syntax**: `<feature-tag-value>#`
+   *
+   * @see https://developer.mozilla.org/en-US/docs/Web/CSS/@font-face/font-feature-settings
+   */
   fontFeatureSettings$: FeatureTagValue;
+  /**
+   * The **`font-feature-settings`** CSS descriptor allows you to define the initial settings to use for the font defined by the [`@font-face`](https://developer.mozilla.org/en-US/docs/Web/CSS/@font-face) at-rule. You can further use this descriptor to control typographic font features such as ligatures, small caps, and swashes, for the font defined by `@font-face`.
+   *
+   * **Syntax**: `<feature-tag-value>#`
+   *
+   * @see https://developer.mozilla.org/en-US/docs/Web/CSS/@font-face/font-feature-settings
+   */
   MozFontFeatureSettings$: FeatureTagValue;
+
+  /**
+   * The **`font-variation-settings`** CSS descriptor allows authors to specify low-level OpenType or TrueType font variations in the [`@font-face`](https://developer.mozilla.org/en-US/docs/Web/CSS/@font-face) at-rule.
+   *
+   * **Syntax**: `[ <string> <number> ]#`
+   *
+   * @see https://developer.mozilla.org/en-US/docs/Web/CSS/@font-face/font-variation-settings
+   */
   fontVariationSettings$: `${string} ${number}`[];
+
+  /**
+   * The **`src`** CSS descriptor for the [`@font-face`](https://developer.mozilla.org/en-US/docs/Web/CSS/@font-face) at-rule specifies the resource containing font data.
+   *
+   * **Syntax**: `<font-src-list>`
+   *
+   * @see https://developer.mozilla.org/en-US/docs/Web/CSS/@font-face/src
+   */
   src$: FontFaceSrc[];
+
+  /**
+   * The **`unicode-range`** CSS descriptor sets the specific range of characters to be used from a font defined using the [`@font-face`](https://developer.mozilla.org/en-US/docs/Web/CSS/@font-face) at-rule and made available for use on the current page.
+   *
+   * **Syntax**: `<urange>`
+   *
+   * @see https://developer.mozilla.org/en-US/docs/Web/CSS/@font-face/unicode-range
+   */
   unicodeRange$: `U+${string}`[];
 };
 
