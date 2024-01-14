@@ -1,19 +1,17 @@
-import { NonNullableString } from "../types/string";
-
-// == Type ================================================================
-type HasSignInString = `${NonNullableString}$` | `${NonNullableString}_`;
-type InputKeyValue = NonNullableString | HasSignInString;
-
 // == Interface ================================================================
-export function removeSignSimbol(keyStr: InputKeyValue) {
-  return hasSignSimbol(keyStr)
-    ? keyStr.substring(0, keyStr.length - 1)
-    : keyStr;
+export function removeMergeSymbol(keyStr: string) {
+  return keyStr.substring(0, keyStr.length - 1);
 }
 
-// == Utils ====================================================================
-function hasSignSimbol(value: InputKeyValue): value is HasSignInString {
-  return value.endsWith("$") || value.endsWith("_");
+export function mergeKeyInfo(keyStr: string) {
+  const isMergeToComma = keyStr.endsWith("$");
+  const isMergeToSpace = keyStr.endsWith("_");
+
+  return {
+    isMergeToComma,
+    isMergeToSpace,
+    isMergeSymbol: isMergeToComma || isMergeToSpace
+  };
 }
 
 // == Tests ====================================================================
@@ -21,18 +19,53 @@ if (import.meta.vitest) {
   const { describe, it, expect } = import.meta.vitest;
 
   describe.concurrent("Remove Key Sign Symbol", () => {
+    it("Has Sign Symbol to the end", () => {
+      expect(removeMergeSymbol("boxShadow$")).toBe("boxShadow");
+      expect(removeMergeSymbol("transform_")).toBe("transform");
+    });
+  });
+
+  describe.concurrent("Get key info has merge symbol", () => {
     it("No Sign Symbol", () => {
-      expect(removeSignSimbol("boxShadow")).toBe("boxShadow");
+      expect(mergeKeyInfo("boxShadow")).toStrictEqual({
+        isMergeToComma: false,
+        isMergeToSpace: false,
+        isMergeSymbol: false
+      });
     });
     it("Has Sign Symbol to the end", () => {
-      expect(removeSignSimbol("boxShadow$")).toBe("boxShadow");
-      expect(removeSignSimbol("transform_")).toBe("transform");
+      expect(mergeKeyInfo("boxShadow$")).toStrictEqual({
+        isMergeToComma: true,
+        isMergeToSpace: false,
+        isMergeSymbol: true
+      });
+      expect(mergeKeyInfo("transform_")).toStrictEqual({
+        isMergeToComma: false,
+        isMergeToSpace: true,
+        isMergeSymbol: true
+      });
     });
     it("Has Sign Symbol in the middle or at the first", () => {
-      expect(removeSignSimbol("box$Shadow")).toBe("box$Shadow");
-      expect(removeSignSimbol("trans_form")).toBe("trans_form");
-      expect(removeSignSimbol("$boxShadow")).toBe("$boxShadow");
-      expect(removeSignSimbol("_transform")).toBe("_transform");
+      expect(mergeKeyInfo("box$Shadow")).toStrictEqual({
+        isMergeToComma: false,
+        isMergeToSpace: false,
+        isMergeSymbol: false
+      });
+      expect(mergeKeyInfo("trans_form")).toStrictEqual({
+        isMergeToComma: false,
+        isMergeToSpace: false,
+        isMergeSymbol: false
+      });
+      expect(mergeKeyInfo("$boxShadow")).toStrictEqual({
+        isMergeToComma: false,
+        isMergeToSpace: false,
+        isMergeSymbol: false
+      });
+      expect(mergeKeyInfo("_transform")).toStrictEqual({
+        isMergeToComma: false,
+        isMergeToSpace: false,
+        isMergeSymbol: false
+      });
     });
   });
 }
