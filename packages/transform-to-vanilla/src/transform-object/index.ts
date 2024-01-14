@@ -24,7 +24,9 @@ export function transformStyle(style: CSSRule) {
   ][]) {
     const transformedValue =
       typeof value === "object"
-        ? transformStyle(value as CSSRule) // TODO: Array
+        ? Array.isArray(value)
+          ? value
+          : transformStyle(value as CSSRule) // TODO: Array
         : typeof value === "string"
         ? simplyImportant(value)
         : value;
@@ -39,6 +41,16 @@ if (import.meta.vitest) {
   const { describe, it, expect } = import.meta.vitest;
 
   describe.concurrent("transform", () => {
+    it("Fallback style", () => {
+      expect(
+        transformStyle({
+          overflow: ["auto", "overlay"]
+        })
+      ).toStrictEqual({
+        overflow: ["auto", "overlay"]
+      });
+    });
+
     it("Simply Important", () => {
       expect(
         transformStyle({
