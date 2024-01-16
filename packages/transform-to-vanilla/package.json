@@ -46,6 +46,7 @@
   },
   "devDependencies": {
     "@vanilla-extract/css": "^1.13.0",
+    "@vanilla-extract/vite-plugin": "^3.9.3",
     "eslint-config-custom": "workspace:^",
     "prettier-config-custom": "workspace:^",
     "tsconfig-custom": "workspace:^",

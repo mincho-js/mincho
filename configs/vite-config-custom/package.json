@@ -6,6 +6,7 @@
   "typings": "index.d.ts",
   "main": "index.js",
   "devDependencies": {
+    "@vanilla-extract/vite-plugin": "^3.9.3",
     "vite-config-builder": "^0.0.2",
     "vite-plugin-dts": "^3.6.3",
     "vite-tsconfig-paths": "^4.2.1"

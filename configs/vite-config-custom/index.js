@@ -4,6 +4,7 @@ import { mergeConfig } from "vite";
 
 import tsconfigPaths from "vite-tsconfig-paths";
 import dts from "vite-plugin-dts";
+import { vanillaExtractPlugin } from "@vanilla-extract/vite-plugin";
 
 // == Main Configs ============================================================
 export function NodeConfig(viteConfigEnv, extendConfigs = {}) {
@@ -28,6 +29,7 @@ function NodeBuilder(viteConfigEnv) {
       })
     );
   }
+  plugins.add(vanillaExtractPlugin())
 
   configs.add({
     build: {

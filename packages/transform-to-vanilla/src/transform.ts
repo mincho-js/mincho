@@ -1,4 +1,4 @@
-import { transformStyle } from "./transform-object/index";
+import { transformStyle } from "./transform-object/index.css";
 import type { ComplexStyleRule } from "@vanilla-extract/css";
 import type {
   ComplexCSSRule,
