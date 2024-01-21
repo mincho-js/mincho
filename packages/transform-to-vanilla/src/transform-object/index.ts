@@ -1,4 +1,5 @@
 import { replacePseudoSelectors } from "@/transform-keys/simple-pseudo-selectors";
+import { complexKeyInfo } from "@/transform-keys/complex-selectors";
 import { removeMergeSymbol, mergeKeyInfo } from "@/transform-keys/merge-key";
 import { mergeToComma, mergeToSpace } from "@/transform-values/merge-values";
 import { simplyImportant } from "@/transform-values/simply-important";
@@ -22,9 +23,10 @@ export function transformStyle(style: CSSRule) {
 
   for (const [key, value] of Object.entries(style) as [
     CSSRuleKey,
-    CSSRuleValue
+    Exclude<CSSRuleValue, undefined>
   ][]) {
     const { isMergeToComma, isMergeToSpace, isMergeSymbol } = mergeKeyInfo(key);
+    const isComplexSelector = complexKeyInfo(key);
 
     const transformedValue =
       typeof value === "object"
@@ -35,7 +37,17 @@ export function transformStyle(style: CSSRule) {
     const transformedKey = replacePseudoSelectors(
       isMergeSymbol ? removeMergeSymbol(key) : key
     );
-    result[transformedKey] = transformedValue as VanillaStyleRuleValue;
+
+    if (isComplexSelector) {
+      result["selectors"] = {
+        ...(result["selectors"] ?? {}),
+        // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+        // @ts-ignore
+        [key]: transformStyle(value as CSSRule)
+      };
+    } else {
+      result[transformedKey] = transformedValue as VanillaStyleRuleValue;
+    }
   }
   return result as StyleRule;
 }
@@ -138,6 +150,28 @@ if (import.meta.vitest) {
         },
         "::-moz-selection": {
           background: "blue"
+        }
+      } satisfies StyleRule);
+    });
+
+    it("Complex Selectors", () => {
+      expect(
+        transformStyle({
+          "&:hover:not(:active)": {
+            border: "2px solid aquamarine"
+          },
+          "nav li > &": {
+            textDecoration: "underline"
+          }
+        })
+      ).toStrictEqual({
+        selectors: {
+          "&:hover:not(:active)": {
+            border: "2px solid aquamarine"
+          },
+          "nav li > &": {
+            textDecoration: "underline"
+          }
         }
       } satisfies StyleRule);
     });
