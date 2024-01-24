@@ -1,5 +1,6 @@
 import { replacePseudoSelectors } from "@/transform-keys/simple-pseudo-selectors";
 import { complexKeyInfo } from "@/transform-keys/complex-selectors";
+import { atRuleKeyInfo } from "@/transform-keys/at-rules";
 import { removeMergeSymbol, mergeKeyInfo } from "@/transform-keys/merge-key";
 import { mergeToComma, mergeToSpace } from "@/transform-values/merge-values";
 import { simplyImportant } from "@/transform-values/simply-important";
@@ -26,6 +27,8 @@ export function transformStyle(style: CSSRule) {
     Exclude<CSSRuleValue, undefined>
   ][]) {
     const { isMergeToComma, isMergeToSpace, isMergeSymbol } = mergeKeyInfo(key);
+    const { isRules, isToplevelRules, atRuleKey, atRuleNestedKey } =
+      atRuleKeyInfo(key);
     const isComplexSelector = complexKeyInfo(key);
 
     const transformedValue =
@@ -44,6 +47,16 @@ export function transformStyle(style: CSSRule) {
         // eslint-disable-next-line @typescript-eslint/ban-ts-comment
         // @ts-ignore
         [key]: transformStyle(value as CSSRule)
+      };
+    } else if (isRules) {
+      const ruleValue = isToplevelRules
+        ? {
+            [atRuleNestedKey]: value
+          }
+        : value;
+      result[atRuleKey] = {
+        ...(result[atRuleKey] ?? {}),
+        ...ruleValue
       };
     } else {
       result[transformedKey] = transformedValue as VanillaStyleRuleValue;
@@ -171,6 +184,50 @@ if (import.meta.vitest) {
           },
           "nav li > &": {
             textDecoration: "underline"
+          }
+        }
+      } satisfies StyleRule);
+    });
+
+    it("At Rules", () => {
+      expect(
+        transformStyle({
+          // Top level
+          "@media print": {
+            padding: 5
+          },
+
+          // Nested
+          "@media": {
+            "screen and (min-width: 768px)": {
+              padding: 10
+            },
+            "(prefers-reduced-motion)": {
+              transitionProperty: "color"
+            }
+          },
+
+          // Another query
+          "@supports (display: grid)": {
+            display: "grid"
+          }
+        })
+      ).toStrictEqual({
+        "@media": {
+          print: {
+            padding: 5
+          },
+          "screen and (min-width: 768px)": {
+            padding: 10
+          },
+          "(prefers-reduced-motion)": {
+            transitionProperty: "color"
+          }
+        },
+
+        "@supports": {
+          "(display: grid)": {
+            display: "grid"
           }
         }
       } satisfies StyleRule);
