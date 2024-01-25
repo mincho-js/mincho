@@ -426,7 +426,7 @@ if (import.meta.vitest) {
         fontFamily: "sans-serif"
       });
 
-      // Anonymouse AtRules
+      // Anonymous AtRules
       assertType<CSSRule>({
         animationName: {
           from: {

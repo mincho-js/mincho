@@ -1,9 +1,11 @@
 import { replacePseudoSelectors } from "@/transform-keys/simple-pseudo-selectors";
 import { complexKeyInfo } from "@/transform-keys/complex-selectors";
-import { atRuleKeyInfo } from "@/transform-keys/at-rules";
+import { atRuleKeyInfo, anonymousKeyInfo } from "@/transform-keys/at-rules";
 import { removeMergeSymbol, mergeKeyInfo } from "@/transform-keys/merge-key";
 import { mergeToComma, mergeToSpace } from "@/transform-values/merge-values";
 import { simplyImportant } from "@/transform-values/simply-important";
+import { keyframes, fontFace } from "@vanilla-extract/css";
+import { setFileScope } from "@vanilla-extract/css/fileScope";
 import type { StyleRule } from "@vanilla-extract/css";
 import type {
   CSSRule,
@@ -34,8 +36,8 @@ export function transformStyle(style: CSSRule) {
     const transformedValue =
       typeof value === "object"
         ? Array.isArray(value)
-          ? transformArrayValue(value, isMergeToComma, isMergeToSpace)
-          : transformStyle(value as CSSRule)
+          ? transformArrayValue(key, value, isMergeToComma, isMergeToSpace)
+          : transformObjectValue(key, value)
         : transformCommonValue(value);
     const transformedKey = replacePseudoSelectors(
       isMergeSymbol ? removeMergeSymbol(key) : key
@@ -66,22 +68,62 @@ export function transformStyle(style: CSSRule) {
 }
 
 // == Utils ====================================================================
-function transformArrayValue(
-  value: CSSRuleValue,
+function transformArrayValue<T>(
+  key: string,
+  values: T[],
   isMergeToComma: boolean,
   isMergeToSpace: boolean
 ): CSSRuleValue {
+  // Make to string
+  const resolvedAnonymous = values.map((value) => {
+    if (typeof value === "object") {
+      return Array.isArray(value)
+        ? value.map((fallbackValue) =>
+            transformArrayAnonymousValue(key, fallbackValue)
+          )
+        : transformArrayAnonymousValue(key, value as CSSRuleValue);
+    }
+    return value;
+  });
+
   const transformed = isMergeToComma
-    ? mergeToComma(value as string[])
+    ? mergeToComma(resolvedAnonymous as string[])
     : isMergeToSpace
-    ? mergeToSpace(value as string[])
-    : value;
+    ? mergeToSpace(resolvedAnonymous as string[])
+    : resolvedAnonymous;
 
   return Array.isArray(transformed)
     ? // eslint-disable-next-line @typescript-eslint/ban-ts-comment
       // @ts-ignore: error TS2590: Expression produces a union type that is too complex to represent
       (transformed.map(transformCommonValue) as CSSRuleValue)
     : transformed;
+}
+
+function transformArrayAnonymousValue(key: string, value: CSSRuleValue) {
+  return typeof value === "object" ? transformAnonymous(key, value) : value;
+}
+
+function transformObjectValue(key: string, value: CSSRuleValue) {
+  const transformed = transformAnonymous(key, value);
+  return typeof transformed === "string"
+    ? transformed
+    : transformStyle(value as CSSRule);
+}
+
+function transformAnonymous(key: string, value: CSSRuleValue) {
+  const { isAnimationName, isFontFamily } = anonymousKeyInfo(key);
+
+  if (isAnimationName) {
+    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+    // @ts-ignore: error TS2590: Expression produces a union type that is too complex to represent
+    return keyframes(value);
+  }
+  if (isFontFamily) {
+    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+    // @ts-ignore: error TS2590: Expression produces a union type that is too complex to represent
+    return fontFace(value);
+  }
+  return value;
 }
 
 function transformCommonValue(value: CSSRuleValue) {
@@ -92,6 +134,7 @@ function transformCommonValue(value: CSSRuleValue) {
 if (import.meta.vitest) {
   const { describe, it, expect } = import.meta.vitest;
 
+  setFileScope("test");
   describe.concurrent("transform", () => {
     it("Fallback style", () => {
       expect(
@@ -231,6 +274,42 @@ if (import.meta.vitest) {
           }
         }
       } satisfies StyleRule);
+    });
+
+    it("Anonymous AtRules", () => {
+      expect(
+        transformStyle({
+          animationName: "none",
+          fontFamily: "sans-serif"
+        })
+      ).toStrictEqual({
+        animationName: "none",
+        fontFamily: "sans-serif"
+      } satisfies StyleRule);
+
+      const anonymous = transformStyle({
+        animationName: {
+          from: {
+            opacity: 0
+          },
+          "50%": {
+            opacity: 0.3
+          },
+          to: {
+            opacity: 1
+          }
+        },
+        fontFamily: {
+          fontWeight: 900,
+          src$: [
+            "local('Pretendard Regular')",
+            "url(../../../packages/pretendard/dist/web/static/woff2/Pretendard-Regular.woff2) format('woff2')",
+            "url(../../../packages/pretendard/dist/web/static/woff/Pretendard-Regular.woff) format('woff')"
+          ]
+        }
+      });
+      expect(anonymous.animationName).toBeTypeOf("string");
+      expect(anonymous.fontFamily).toBeTypeOf("string");
     });
   });
 }
