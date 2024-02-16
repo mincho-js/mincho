@@ -1,17 +1,15 @@
+export function isRuleKey(key: string) {
+  return key.startsWith("@");
+}
+
 export function atRuleKeyInfo(key: string) {
   const spaceIndex = key.indexOf(" ");
 
-  const isRules = key.startsWith("@");
-  const isToplevelRules = isRules && spaceIndex !== -1;
+  const isToplevelRules = spaceIndex !== -1;
 
   return {
-    isRules,
     isToplevelRules,
-    atRuleKey: isRules
-      ? isToplevelRules
-        ? key.substring(0, spaceIndex)
-        : key
-      : "",
+    atRuleKey: isToplevelRules ? key.substring(0, spaceIndex) : key,
     atRuleNestedKey: isToplevelRules ? key.substring(spaceIndex + 1) : ""
   };
 }
@@ -40,11 +38,18 @@ if (import.meta.vitest) {
   const { describe, it, expect } = import.meta.vitest;
 
   describe.concurrent("Toplevel atRule", () => {
+    it("Is AtRule", () => {
+      expect(isRuleKey("@media screen and (min-width: 768px)")).toBeTruthy();
+      expect(isRuleKey("@media")).toBeTruthy();
+
+      expect(isRuleKey("screen and (min-width: 768px)")).toBeFalsy();
+      expect(isRuleKey("_hover")).toBeFalsy();
+    });
+
     it("Is Toplevel", () => {
       expect(
         atRuleKeyInfo("@media screen and (min-width: 768px)")
       ).toStrictEqual({
-        isRules: true,
         isToplevelRules: true,
         atRuleKey: "@media",
         atRuleNestedKey: "screen and (min-width: 768px)"
@@ -53,7 +58,6 @@ if (import.meta.vitest) {
 
     it("Nested atRule", () => {
       expect(atRuleKeyInfo("@media")).toStrictEqual({
-        isRules: true,
         isToplevelRules: false,
         atRuleKey: "@media",
         atRuleNestedKey: ""

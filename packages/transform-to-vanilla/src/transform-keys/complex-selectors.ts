@@ -1,4 +1,4 @@
-export function complexKeyInfo(key: string) {
+export function isComplexKey(key: string) {
   return key.includes("&");
 }
 
@@ -8,12 +8,12 @@ if (import.meta.vitest) {
 
   describe.concurrent("Is complex selector", () => {
     it("complex selector", () => {
-      expect(complexKeyInfo("&:hover:not(:active)")).toBeTruthy();
-      expect(complexKeyInfo("nav li > &")).toBeTruthy();
+      expect(isComplexKey("&:hover:not(:active)")).toBeTruthy();
+      expect(isComplexKey("nav li > &")).toBeTruthy();
     });
 
     it("Not complex selecot", () => {
-      expect(complexKeyInfo(":hover")).toBeFalsy();
+      expect(isComplexKey(":hover")).toBeFalsy();
     });
   });
 }

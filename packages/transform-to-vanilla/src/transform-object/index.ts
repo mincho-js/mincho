@@ -1,6 +1,10 @@
 import { replacePseudoSelectors } from "@/transform-keys/simple-pseudo-selectors";
-import { complexKeyInfo } from "@/transform-keys/complex-selectors";
-import { atRuleKeyInfo, anonymousKeyInfo } from "@/transform-keys/at-rules";
+import { isComplexKey } from "@/transform-keys/complex-selectors";
+import {
+  isRuleKey,
+  atRuleKeyInfo,
+  anonymousKeyInfo
+} from "@/transform-keys/at-rules";
 import { removeMergeSymbol, mergeKeyInfo } from "@/transform-keys/merge-key";
 import { mergeToComma, mergeToSpace } from "@/transform-values/merge-values";
 import { simplyImportant } from "@/transform-values/simply-important";
@@ -15,56 +19,81 @@ import type {
 } from "@/types/style-rule";
 
 // == Interface ================================================================
+type StyleResult = {
+  // key in StyleRuleKey occur a error
+  // Type '{}' is missing the following properties from type
+  // '{ accentColor: StyleRuleValue; alignContent: StyleRuleValue; alignItems: StyleRuleValue; alignSelf: StyleRuleValue; ... 904 more ...;
+  //  vars: StyleRuleValue; }': accentColor, alignContent, alignItems, alignSelf, and 905 more.ts(2740)
+  [key in string]: VanillaStyleRuleValue;
+};
+type CSSRuleExistValue = Exclude<CSSRuleValue, undefined>;
+
 export function transformStyle(style: CSSRule) {
-  const result: {
-    // key in StyleRuleKey occur a error
-    // Type '{}' is missing the following properties from type
-    // '{ accentColor: StyleRuleValue; alignContent: StyleRuleValue; alignItems: StyleRuleValue; alignSelf: StyleRuleValue; ... 904 more ...;
-    //  vars: StyleRuleValue; }': accentColor, alignContent, alignItems, alignSelf, and 905 more.ts(2740)
-    [key in string]: VanillaStyleRuleValue;
-  } = {};
+  const result: StyleResult = {};
 
   for (const [key, value] of Object.entries(style) as [
     CSSRuleKey,
-    Exclude<CSSRuleValue, undefined>
+    CSSRuleExistValue
   ][]) {
-    const { isMergeToComma, isMergeToSpace, isMergeSymbol } = mergeKeyInfo(key);
-    const { isRules, isToplevelRules, atRuleKey, atRuleNestedKey } =
-      atRuleKeyInfo(key);
-    const isComplexSelector = complexKeyInfo(key);
-
-    const transformedValue =
-      typeof value === "object"
-        ? Array.isArray(value)
-          ? transformArrayValue(key, value, isMergeToComma, isMergeToSpace)
-          : transformObjectValue(key, value)
-        : transformCommonValue(value);
-    const transformedKey = replacePseudoSelectors(
-      isMergeSymbol ? removeMergeSymbol(key) : key
-    );
-
-    if (isComplexSelector) {
-      result["selectors"] = {
-        ...(result["selectors"] ?? {}),
-        // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-        // @ts-ignore
-        [key]: transformStyle(value as CSSRule)
-      };
-    } else if (isRules) {
-      const ruleValue = isToplevelRules
-        ? {
-            [atRuleNestedKey]: value
-          }
-        : value;
-      result[atRuleKey] = {
-        ...(result[atRuleKey] ?? {}),
-        ...ruleValue
-      };
+    if (isComplexKey(key)) {
+      transformComplexStyle(result, key, value);
+    } else if (isRuleKey(key)) {
+      transformRuleStyle(result, key, value);
     } else {
-      result[transformedKey] = transformedValue as VanillaStyleRuleValue;
+      transformValueStyle(result, key, value);
     }
   }
   return result as StyleRule;
+}
+
+function transformComplexStyle(
+  result: StyleResult,
+  key: CSSRuleKey,
+  value: CSSRuleExistValue
+) {
+  if (result["selectors"] === undefined) {
+    result["selectors"] = {};
+  }
+  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+  // @ts-ignore: error TS2590: Expression produces a union type that is too complex to represent
+  result["selectors"][key] = transformStyle(value as CSSRule);
+}
+
+function transformRuleStyle(
+  result: StyleResult,
+  key: CSSRuleKey,
+  value: CSSRuleExistValue
+) {
+  const { isToplevelRules, atRuleKey, atRuleNestedKey } = atRuleKeyInfo(key);
+  const transformed = transformStyle(value as CSSRule);
+  const ruleValue = isToplevelRules
+    ? {
+        [atRuleNestedKey]: transformed
+      }
+    : transformed;
+  result[atRuleKey] = {
+    ...(result[atRuleKey] ?? {}),
+    ...ruleValue
+  };
+}
+
+function transformValueStyle(
+  result: StyleResult,
+  key: CSSRuleKey,
+  value: CSSRuleExistValue
+) {
+  const { isMergeToComma, isMergeToSpace, isMergeSymbol } = mergeKeyInfo(key);
+
+  const transformedValue =
+    typeof value === "object"
+      ? Array.isArray(value)
+        ? transformArrayValue(key, value, isMergeToComma, isMergeToSpace)
+        : transformObjectValue(key, value)
+      : transformCommonValue(value);
+  const transformedKey = replacePseudoSelectors(
+    isMergeSymbol ? removeMergeSymbol(key) : key
+  );
+  result[transformedKey] = transformedValue as VanillaStyleRuleValue;
 }
 
 // == Utils ====================================================================
