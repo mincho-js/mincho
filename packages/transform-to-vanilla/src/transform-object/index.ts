@@ -37,6 +37,12 @@ export function transformStyle(style: CSSRule) {
   ][]) {
     if (isComplexKey(key)) {
       transformComplexStyle(result, key, value);
+    } else if (key === "selectors") {
+      for (const [selector, style] of Object.entries(value)) {
+        // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+        // @ts-ignore: error TS2345
+        transformComplexStyle(result, selector, style);
+      }
     } else if (isRuleKey(key)) {
       transformRuleStyle(result, key, value);
     } else {
@@ -247,6 +253,11 @@ if (import.meta.vitest) {
           },
           "nav li > &": {
             textDecoration: "underline"
+          },
+          selectors: {
+            "a:nth-of-type(2) &": {
+              opacity: 1
+            }
           }
         })
       ).toStrictEqual({
@@ -256,6 +267,9 @@ if (import.meta.vitest) {
           },
           "nav li > &": {
             textDecoration: "underline"
+          },
+          "a:nth-of-type(2) &": {
+            opacity: 1
           }
         }
       } satisfies StyleRule);
