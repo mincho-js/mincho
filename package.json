@@ -5,7 +5,8 @@
   "packageManager": "yarn@3.6.4",
   "workspaces": [
     "configs/*",
-    "packages/*"
+    "packages/*",
+    "examples/*"
   ],
   "scripts": {
     "clean": "turbo run clean",
@@ -36,9 +37,11 @@
     ]
   },
   "devDependencies": {
+    "@mincho/css": "workspace:^",
     "@types/eslint": "^8.44.7",
     "@types/node": "^20.8.10",
     "@typescript-eslint/eslint-plugin": "^6.10.0",
+    "@vanilla-extract/vite-plugin": "^4.0.4",
     "@vitest/coverage-v8": "^0.34.6",
     "c8": "^8.0.1",
     "eslint": "^8.53.0",
