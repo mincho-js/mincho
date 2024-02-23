@@ -1,5 +1,8 @@
 import { replacePseudoSelectors } from "@/transform-keys/simple-pseudo-selectors";
-import { isComplexKey } from "@/transform-keys/complex-selectors";
+import {
+  isSelectorskey,
+  isComplexKey
+} from "@/transform-keys/complex-selectors";
 import {
   isRuleKey,
   atRuleKeyInfo,
@@ -35,7 +38,13 @@ export function transformStyle(style: CSSRule) {
     CSSRuleKey,
     CSSRuleExistValue
   ][]) {
-    if (isComplexKey(key)) {
+    if (isSelectorskey(key)) {
+      for (const [selector, style] of Object.entries(value)) {
+        // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+        // @ts-ignore: error TS2345
+        transformComplexStyle(result, selector, style);
+      }
+    } else if (isComplexKey(key)) {
       transformComplexStyle(result, key, value);
     } else if (isRuleKey(key)) {
       transformRuleStyle(result, key, value);
@@ -247,6 +256,11 @@ if (import.meta.vitest) {
           },
           "nav li > &": {
             textDecoration: "underline"
+          },
+          selectors: {
+            "a:nth-of-type(2) &": {
+              opacity: 1
+            }
           }
         })
       ).toStrictEqual({
@@ -256,6 +270,9 @@ if (import.meta.vitest) {
           },
           "nav li > &": {
             textDecoration: "underline"
+          },
+          "a:nth-of-type(2) &": {
+            opacity: 1
           }
         }
       } satisfies StyleRule);

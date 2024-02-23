@@ -1,3 +1,7 @@
+export function isSelectorskey(key: string) {
+  return key === "selectors";
+}
+
 export function isComplexKey(key: string) {
   return key.includes("&");
 }
