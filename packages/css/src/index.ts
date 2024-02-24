@@ -32,7 +32,9 @@ export type GlobalStyleRule = GlobalCSSRule;
 export type StyleRule = CSSRule;
 
 export function globalCss(selector: string, rule: GlobalCSSRule) {
-  gStyle(selector, transform(rule as CSSRule));
+  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+  // @ts-ignore: error TS2345 Argument of type 'ComplexStyleRule' is not assignable to parameter of type 'GlobalStyleRule'
+  gStyle(selector, transform(rule));
 }
 export const globalStyle = globalCss;
 
