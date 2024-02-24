@@ -1,7 +1,8 @@
 import { replacePseudoSelectors } from "@/transform-keys/simple-pseudo-selectors";
 import {
   isSelectorskey,
-  isComplexKey
+  isComplexKey,
+  isSimpleSelectorKey
 } from "@/transform-keys/complex-selectors";
 import {
   isRuleKey,
@@ -46,6 +47,8 @@ export function transformStyle(style: CSSRule) {
       }
     } else if (isComplexKey(key)) {
       transformComplexStyle(result, key, value);
+    } else if (isSimpleSelectorKey(key)) {
+      transformComplexStyle(result, `&${key}`, value);
     } else if (isRuleKey(key)) {
       transformRuleStyle(result, key, value);
     } else {
@@ -244,6 +247,34 @@ if (import.meta.vitest) {
         },
         "::-moz-selection": {
           background: "blue"
+        }
+      } satisfies StyleRule);
+    });
+
+    it("Simple selecor", () => {
+      expect(
+        transformStyle({
+          ":hover:active": {
+            color: "red"
+          },
+          "[disabled]": {
+            color: "green"
+          },
+          '[href^="https://"][href$=".org"]': {
+            color: "blue"
+          }
+        })
+      ).toStrictEqual({
+        selectors: {
+          "&:hover:active": {
+            color: "red"
+          },
+          "&[disabled]": {
+            color: "green"
+          },
+          '&[href^="https://"][href$=".org"]': {
+            color: "blue"
+          }
         }
       } satisfies StyleRule);
     });

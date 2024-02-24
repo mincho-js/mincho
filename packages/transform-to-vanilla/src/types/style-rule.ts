@@ -45,12 +45,15 @@ type SelectorProperty = {
    *
    * @see https://vanilla-extract.style/documentation/styling/#complex-selectors
    */
-  selectors?: SelectorMap;
+  selectors?: ComplexSelectorMap;
 };
-type ToplevelSelector = Partial<SelectorMap>;
+type ToplevelSelector = Partial<ComplexSelectorMap> & Partial<SimplyNestedMap>;
 
-type SelectorMap = {
+type ComplexSelectorMap = {
   [selector: `${string}&${string}`]: SelectorValues;
+};
+type SimplyNestedMap = {
+  [selector in `:${string}` | `[${string}`]: SelectorValues;
 };
 type SelectorValues = CSSPropertiesWithVars &
   WithQueries<CSSPropertiesWithVars>;
@@ -357,6 +360,23 @@ if (import.meta.vitest) {
         },
         "::before": {
           content: ""
+        }
+      });
+    });
+
+    it("Simply nested selectors", () => {
+      assertType<CSSRule>({
+        // Pseudo selectors
+        ":hover:active": {
+          color: "red"
+        },
+
+        // Attribute selectors
+        "[disabled]": {
+          color: "green"
+        },
+        '[href^="https://"][href$=".org"]': {
+          color: "blue"
         }
       });
     });
