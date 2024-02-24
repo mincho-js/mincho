@@ -24,22 +24,18 @@ export const logo = style({
   willChange: "filter",
   transition: "filter 300ms",
 
-  ":hover": {
+  _hover: {
     filter: "drop-shadow(002em#646cffaa)",
   },
-  "selectors": {
+  selectors: {
     [`&${react}:hover`]: {
       filter: "drop-shadow(002em#61dafbaa)",
     },
   },
 
-  "@media": {
-    "(prefers-reduced-motion: no-preference)": {
-      "selectors": {
-        "a:nth-of-type(2) &": {
-          animation: `${logoSpin} infinite 20s linear`,
-        },
-      },
+  "@media (prefers-reduced-motion: no-preference)": {
+    "a:nth-of-type(2) &": {
+      animation: `${logoSpin} infinite 20s linear`,
     },
   },
 });

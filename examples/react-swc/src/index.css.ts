@@ -14,11 +14,9 @@ globalStyle(":root", {
   WebkitFontSmoothing: "antialiased",
   MozOsxFontSmoothing: "grayscale",
 
-  "@media": {
-    "(prefers-color-scheme: light)": {
-      color: "#213547",
-      backgroundColor: "#ffffff",
-    },
+  "@media (prefers-color-scheme: light)": {
+    color: "#213547",
+    backgroundColor: "#ffffff",
   },
 });
 
@@ -29,10 +27,8 @@ globalStyle("a", {
 });
 globalStyle("a:hover", {
   color: "#535bf2",
-  "@media": {
-    "(prefers-color-scheme: light)": {
-      color: "#747bff",
-    },
+  "@media (prefers-color-scheme: light)": {
+    color: "#747bff",
   },
 });
 
@@ -59,10 +55,8 @@ globalStyle("button", {
   backgroundColor: "#1a1a1a",
   cursor: "pointer",
   transition: "border-color 0.25s",
-  "@media": {
-    "(prefers-color-scheme: light)": {
-      backgroundColor: "#f9f9f9",
-    },
+  "@media (prefers-color-scheme: light)": {
+    backgroundColor: "#f9f9f9",
   },
 });
 
