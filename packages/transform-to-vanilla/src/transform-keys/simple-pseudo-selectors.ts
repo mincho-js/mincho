@@ -1,5 +1,6 @@
-import { NonNullableString } from "../types/string";
-import { SimplePseudos, CamelPseudos } from "../types/simple-pseudo";
+import { camelToKebab } from "../utils/string";
+import type { NonNullableString } from "../types/string";
+import type { SimplePseudos, CamelPseudos } from "../types/simple-pseudo";
 
 // == Type ================================================================
 type PseudoSelectorsSign = `_${string}` | `__${string}`;
@@ -22,10 +23,6 @@ export function replacePseudoSelectors(keyStr: InputKeyValue): ReturnKeyValue {
 }
 
 // == Utils ====================================================================
-const upperCaseRegex = /[A-Z]/g;
-function camelToKebab(camelCase: InputKeyValue) {
-  return camelCase.replace(upperCaseRegex, "-$&").toLowerCase();
-}
 function hasSinglePseudoSelector(
   value: InputKeyValue
 ): value is PseudoSelectorsSign {
