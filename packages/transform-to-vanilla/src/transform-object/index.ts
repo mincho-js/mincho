@@ -5,6 +5,13 @@ import {
   isSimpleSelectorKey
 } from "@/transform-keys/complex-selectors";
 import {
+  isVarsKey,
+  isCSSVarKey,
+  isPureCSSVarKey,
+  replaceCSSVarKey
+} from "@/transform-keys/css-var";
+import { replaceCSSVar } from "@/transform-values/css-var";
+import {
   isRuleKey,
   atRuleKeyInfo,
   anonymousKeyInfo
@@ -49,6 +56,21 @@ export function transformStyle(style: CSSRule) {
       transformComplexStyle(result, key, value);
     } else if (isSimpleSelectorKey(key)) {
       transformComplexStyle(result, `&${key}`, value);
+    } else if (isVarsKey(key)) {
+      for (const [varKey, varValue] of Object.entries(value)) {
+        const transformedVarKey = isCSSVarKey(varKey)
+          ? replaceCSSVarKey(varKey)
+          : varKey;
+        // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+        // @ts-ignore: error TS2345
+        transformCSSVarStyle(result, transformedVarKey, varValue);
+      }
+    } else if (isCSSVarKey(key)) {
+      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+      // @ts-ignore: error TS2345
+      transformCSSVarStyle(result, replaceCSSVarKey(key), value);
+    } else if (isPureCSSVarKey(key)) {
+      transformCSSVarStyle(result, key, value);
     } else if (isRuleKey(key)) {
       transformRuleStyle(result, key, value);
     } else {
@@ -58,17 +80,35 @@ export function transformStyle(style: CSSRule) {
   return result as StyleRule;
 }
 
+function insertResultValue(
+  result: Record<string, unknown>,
+  accessKey: string,
+  key: string,
+  value: unknown
+) {
+  if (result[accessKey] === undefined) {
+    result[accessKey] = {};
+  }
+  (result[accessKey] as Record<string, unknown>)[key] = value;
+}
+
 function transformComplexStyle(
   result: StyleResult,
   key: CSSRuleKey,
   value: CSSRuleExistValue
 ) {
-  if (result["selectors"] === undefined) {
-    result["selectors"] = {};
-  }
   // eslint-disable-next-line @typescript-eslint/ban-ts-comment
   // @ts-ignore: error TS2590: Expression produces a union type that is too complex to represent
-  result["selectors"][key] = transformStyle(value as CSSRule);
+  insertResultValue(result, "selectors", key, transformStyle(value as CSSRule));
+}
+
+function transformCSSVarStyle(
+  result: StyleResult,
+  key: CSSRuleKey,
+  value: CSSRuleExistValue
+) {
+  console.log(replaceCSSVarKey(key));
+  insertResultValue(result, "vars", key, value);
 }
 
 function transformRuleStyle(
@@ -168,7 +208,9 @@ function transformAnonymous(key: string, value: CSSRuleValue) {
 }
 
 function transformCommonValue(value: CSSRuleValue) {
-  return typeof value === "string" ? simplyImportant(value) : value;
+  return typeof value === "string"
+    ? simplyImportant(replaceCSSVar(value))
+    : value;
 }
 
 // == Tests ====================================================================
@@ -251,7 +293,43 @@ if (import.meta.vitest) {
       } satisfies StyleRule);
     });
 
-    it("Simple selecor", () => {
+    it("CSS variables", () => {
+      expect(
+        transformStyle({
+          $myCssVariable1: "red",
+          "--my-css-variable2": "green",
+          vars: {
+            $myCssVariable3: "blue",
+            "--my-css-variable4": "black"
+          }
+        })
+      ).toStrictEqual({
+        vars: {
+          "--my-css-variable1": "red",
+          "--my-css-variable2": "green",
+          "--my-css-variable3": "blue",
+          "--my-css-variable4": "black"
+        }
+      } satisfies StyleRule);
+
+      expect(
+        transformStyle({
+          color: "$myCssVariable",
+          _hover: {
+            padding: "calc($myCssVariable2 - 1px)",
+            margin: "calc(--my-css-variable3 - 1px)"
+          }
+        })
+      ).toStrictEqual({
+        color: "var(--my-css-variable)",
+        ":hover": {
+          padding: "calc(var(--my-css-variable2) - 1px)",
+          margin: "calc(--my-css-variable3 - 1px)"
+        }
+      } satisfies StyleRule);
+    });
+
+    it("Simple selector", () => {
       expect(
         transformStyle({
           ":hover:active": {
