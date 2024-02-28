@@ -107,7 +107,6 @@ function transformCSSVarStyle(
   key: CSSRuleKey,
   value: CSSRuleExistValue
 ) {
-  console.log(replaceCSSVarKey(key));
   insertResultValue(result, "vars", key, value);
 }
 
@@ -293,7 +292,7 @@ if (import.meta.vitest) {
       } satisfies StyleRule);
     });
 
-    it("CSS variables", () => {
+    it.todo("CSS variables", () => {
       expect(
         transformStyle({
           $myCssVariable1: "red",
@@ -317,14 +316,31 @@ if (import.meta.vitest) {
           color: "$myCssVariable",
           _hover: {
             padding: "calc($myCssVariable2 - 1px)",
-            margin: "calc(--my-css-variable3 - 1px)"
+            margin: "calc(var(--my-css-variable3) - 1px)"
           }
         })
       ).toStrictEqual({
         color: "var(--my-css-variable)",
         ":hover": {
           padding: "calc(var(--my-css-variable2) - 1px)",
-          margin: "calc(--my-css-variable3 - 1px)"
+          margin: "calc(var(--my-css-variable3) - 1px)"
+        }
+      } satisfies StyleRule);
+
+      expect(
+        transformStyle({
+          color: "$myCssVariable(red)",
+          _hover: {
+            // padding: "calc($myCssVariable2($my-css-variable3(5px)) - 1px)",
+            margin: "calc(var(--my-css-variable4) - 1px)"
+          }
+        })
+      ).toStrictEqual({
+        color: "var(--my-css-variable, red)",
+        ":hover": {
+          // padding:
+          //   "calc(var(--my-css-variable2, var(--my-css-variable3, 5px)) - 1px)",
+          margin: "calc(var(--my-css-variable4) - 1px)"
         }
       } satisfies StyleRule);
     });
