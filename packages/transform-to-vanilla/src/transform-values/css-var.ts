@@ -1,21 +1,113 @@
 import { convertToCSSVar } from "../utils/string";
 
 // == Interface ================================================================
-const cssVarRegex = /\B\$([\w-_]+)(?:\((.*?)\))?/g;
-export function replaceCSSVar(value: string): string {
-  return value.replace(cssVarRegex, (matched) => {
-    const index = matched.indexOf("(");
-    if (index === -1) {
-      const cssVar = convertToCSSVar(matched);
-      return `var(${cssVar})`;
-    }
-    const varPart = matched.substring(0, index);
-    const fallbackPart = matched.substring(index + 1, matched.length - 1);
+export function replaceCSSVar(input: string) {
+  let result = "";
+  let parenLevel = 0;
+  let isInVariable = false;
+  const stack: CSSVarItem[] = [];
 
-    const varConverted = convertToCSSVar(varPart);
-    const fallbackConverted = replaceCSSVar(fallbackPart);
-    return `var(${varConverted}, ${fallbackConverted})`;
-  });
+  for (let i = 0; i < input.length; i++) {
+    const char = input[i];
+
+    if (char === "$") {
+      stack.push({
+        varPart: "$",
+        fallbackPart: "",
+        parenLevel
+      });
+      isInVariable = true;
+    } else if (stack.length === 0) {
+      result += char;
+    } else if (char === "(") {
+      parenLevel += 1;
+      if (isInVariable) {
+        isInVariable = false;
+        stack[stack.length - 1].parenLevel = parenLevel;
+      } else {
+        stack[stack.length - 1].fallbackPart += char;
+      }
+    } else if (char === ")") {
+      if (stack[stack.length - 1].parenLevel === parenLevel) {
+        if (stack.length > 1) {
+          stackReolsve(stack);
+        } else {
+          if (stack[stack.length - 1].varPart.length <= 1) {
+            stack[stack.length - 1].fallbackPart += char;
+          }
+          result += stackPop(stack);
+        }
+      } else {
+        stack[stack.length - 1].fallbackPart += char;
+      }
+      parenLevel -= 1;
+    } else if (isVarChar(char)) {
+      if (isInVariable) {
+        stack[stack.length - 1].varPart += char;
+      } else {
+        stack[stack.length - 1].fallbackPart += char;
+      }
+    } else {
+      isInVariable = false;
+      if (stack[stack.length - 1].fallbackPart.length > 0) {
+        stack[stack.length - 1].fallbackPart += char;
+      } else {
+        result += `${stackPop(stack)}${char}`;
+      }
+    }
+  }
+
+  if (stack.length > 0) {
+    for (let i = 1; i < stack.length; i++) {
+      stackReolsve(stack);
+    }
+    result += stackPop(stack);
+  }
+
+  return result;
+}
+
+// == Utils ====================================================================
+interface CSSVarItem {
+  varPart: string;
+  fallbackPart: string;
+  parenLevel: number;
+}
+function stackReolsve(stack: CSSVarItem[]) {
+  const { varPart, fallbackPart } = stack.pop() ?? {
+    varPart: "",
+    fallbackPart: ""
+  };
+  stack[stack.length - 1].fallbackPart += getVarValue(varPart, fallbackPart);
+}
+function stackPop(stack: CSSVarItem[]) {
+  const { varPart, fallbackPart } = stack.pop() ?? {
+    varPart: "",
+    fallbackPart: ""
+  };
+  return getVarValue(varPart, fallbackPart);
+}
+
+function getVarValue(varPart: string, fallbackPart: string) {
+  return varPart.length <= 1
+    ? `${varPart}${fallbackPart}`
+    : fallbackPart === ""
+    ? `var(${convertToCSSVar(varPart)})`
+    : `var(${convertToCSSVar(varPart)}, ${fallbackPart})`;
+}
+
+// Target
+// [\w-] == [a-zA-Z0-9_-]
+// ASCII: a-z(97~122), A-Z(65~90), 0-9(48~57), _(95), -(45)
+function isVarChar(char: string) {
+  const ascii = char.charCodeAt(0);
+  return (
+    ascii === 45 ||
+    (ascii >= 48 && ascii <= 57) ||
+    (ascii >= 65 && ascii <= 90) ||
+    (ascii >= 97 && ascii <= 122) ||
+    ascii === 95
+  );
 }
 
 // == Tests ====================================================================
