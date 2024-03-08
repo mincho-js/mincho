@@ -292,7 +292,7 @@ if (import.meta.vitest) {
       } satisfies StyleRule);
     });
 
-    it.todo("CSS variables", () => {
+    it("CSS variables", () => {
       expect(
         transformStyle({
           $myCssVariable1: "red",

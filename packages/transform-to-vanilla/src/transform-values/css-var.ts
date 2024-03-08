@@ -2,9 +2,9 @@ import { convertToCSSVar } from "../utils/string";
 
 // == Interface ================================================================
 export function replaceCSSVar(input: string) {
-  let result = "";
   let parenLevel = 0;
   let isInVariable = false;
+  const resultParts: string[] = [];
   const stack: CSSVarItem[] = [];
 
   for (let i = 0; i < input.length; i++) {
@@ -18,7 +18,7 @@ export function replaceCSSVar(input: string) {
       });
       isInVariable = true;
     } else if (stack.length === 0) {
-      result += char;
+      resultParts.push(char);
     } else if (char === "(") {
       parenLevel += 1;
       if (isInVariable) {
@@ -30,12 +30,17 @@ export function replaceCSSVar(input: string) {
     } else if (char === ")") {
       if (stack[stack.length - 1].parenLevel === parenLevel) {
         if (stack.length > 1) {
-          stackReolsve(stack);
+          do {
+            stackResolve(stack);
+          } while (
+            stack.length > 1 &&
+            stack[stack.length - 1].parenLevel === parenLevel
+          );
         } else {
           if (stack[stack.length - 1].varPart.length <= 1) {
             stack[stack.length - 1].fallbackPart += char;
           }
-          result += stackPop(stack);
+          resultParts.push(stackPop(stack));
         }
       } else {
         stack[stack.length - 1].fallbackPart += char;
@@ -52,19 +57,19 @@ export function replaceCSSVar(input: string) {
       if (stack[stack.length - 1].fallbackPart.length > 0) {
         stack[stack.length - 1].fallbackPart += char;
       } else {
-        result += `${stackPop(stack)}${char}`;
+        resultParts.push(`${stackPop(stack)}${char}`);
       }
     }
   }
 
   if (stack.length > 0) {
-    for (let i = 1; i < stack.length; i++) {
-      stackReolsve(stack);
+    while (stack.length > 1) {
+      stackResolve(stack);
     }
-    result += stackPop(stack);
+    resultParts.push(stackPop(stack));
   }
 
-  return result;
+  return resultParts.join("");
 }
 
 // == Utils ====================================================================
@@ -73,7 +78,7 @@ interface CSSVarItem {
   fallbackPart: string;
   parenLevel: number;
 }
-function stackReolsve(stack: CSSVarItem[]) {
+function stackResolve(stack: CSSVarItem[]) {
   const { varPart, fallbackPart } = stack.pop() ?? {
     varPart: "",
     fallbackPart: ""
@@ -137,11 +142,11 @@ if (import.meta.vitest) {
       );
     });
 
-    it.todo("Convet to nested css fallback var", () => {
+    it("Convet to nested css fallback var", () => {
       expect(
         replaceCSSVar("$myCssVariable1($myCssVariable2($myCssVariable3))")
       ).toBe(
-        "var(--my-css-variable1, var(--my-css-variable2, var(var(--my-css-variable2))))"
+        "var(--my-css-variable1, var(--my-css-variable2, var(--my-css-variable3)))"
       );
       expect(
         replaceCSSVar("calc($myCssVariable4($my-css-variable5(5px)) - 1px)")
