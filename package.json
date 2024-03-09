@@ -24,6 +24,7 @@
     "g:clean": "cd $INIT_CWD && yarn run -T rimraf dist coverage .turbo tsconfig.tsbuildinfo node_modules/.vite",
     "g:build": "cd $INIT_CWD && yarn run -T vite build",
     "g:build-watch": "cd $INIT_CWD && yarn run build --watch",
+    "g:generate": "cd $INIT_CWD && yarn run -T vite-node src/index.ts",
     "g:test": "cd $INIT_CWD && yarn run -T vitest run",
     "g:test-watch": "cd $INIT_CWD && yarn run -T vitest",
     "g:coverage": "yarn g:test --coverage",
@@ -55,6 +56,7 @@
     "turbo": "^1.10.16",
     "typescript": "^5.2.2",
     "vite": "^4.5.1",
+    "vite-node": "^1.3.1",
     "vitest": "^0.34.6"
   },
   "dependencies": {

@@ -1019,6 +1019,19 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@mincho/css-additional-types@workspace:packages/css-additional-types":
+  version: 0.0.0-use.local
+  resolution: "@mincho/css-additional-types@workspace:packages/css-additional-types"
+  dependencies:
+    csstype: ^3.1.3
+    eslint-config-custom: "workspace:^"
+    mdn-data: "git+https://github.com/mdn/data.git#7f0c865a3c4b5d891285c93308ee5c25cb5cfee8"
+    prettier-config-custom: "workspace:^"
+    tsconfig-custom: "workspace:^"
+    vite-config-custom: "workspace:^"
+  languageName: unknown
+  linkType: soft
+
 "@mincho/css@workspace:^, @mincho/css@workspace:packages/css":
   version: 0.0.0-use.local
   resolution: "@mincho/css@workspace:packages/css"
@@ -4153,6 +4166,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"mdn-data@git+https://github.com/mdn/data.git#7f0c865a3c4b5d891285c93308ee5c25cb5cfee8":
+  version: 2.3.0
+  resolution: "mdn-data@https://github.com/mdn/data.git#commit=7f0c865a3c4b5d891285c93308ee5c25cb5cfee8"
+  checksum: 2c95ed357fe6fab3e774af90b0205c565c2303c74352a0d36a751214fd470999df52e3ca2e599acd749f58a89ee6accbde75d1d00d21cc7b11adfe6379206d88
+  languageName: node
+  linkType: hard
+
 "media-query-parser@npm:^2.0.2":
   version: 2.0.2
   resolution: "media-query-parser@npm:2.0.2"
@@ -4223,6 +4243,7 @@ __metadata:
     turbo: ^1.10.16
     typescript: ^5.2.2
     vite: ^4.5.1
+    vite-node: ^1.3.1
     vitest: ^0.34.6
   languageName: unknown
   linkType: soft
@@ -5712,7 +5733,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"vite-node@npm:^1.2.0":
+"vite-node@npm:^1.2.0, vite-node@npm:^1.3.1":
   version: 1.3.1
   resolution: "vite-node@npm:1.3.1"
   dependencies:

@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "@mincho/css-additional-types",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "typings": "./dist/index.ts",
+  "main": "./dist/index.ts",
+  "module": "./dist/index.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.ts",
+      "require": "./dist/index.ts"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "clean": "yarn g:clean",
+    "build": "yarn g:generate ",
+    "lint": "yarn g:lint",
+    "fix": "yarn g:fix",
+    "check": "yarn g:check"
+  },
+  "prettier": "prettier-config-custom",
+  "eslintConfig": {
+    "extends": [
+      "custom"
+    ],
+    "parserOptions": {
+      "project": [
+        "./tsconfig.json",
+        "./tsconfig.node.json"
+      ]
+    }
+  },
+  "devDependencies": {
+    "eslint-config-custom": "workspace:^",
+    "mdn-data": "git+https://github.com/mdn/data.git#7f0c865a3c4b5d891285c93308ee5c25cb5cfee8",
+    "prettier-config-custom": "workspace:^",
+    "tsconfig-custom": "workspace:^",
+    "vite-config-custom": "workspace:^"
+  },
+  "dependencies": {
+    "csstype": "^3.1.3"
+  }
+}
