@@ -52,6 +52,7 @@
     "vite-config-custom": "workspace:^"
   },
   "dependencies": {
+    "@mincho/css-additional-types": "workspace:^",
     "csstype": "^3.1.3"
   }
 }

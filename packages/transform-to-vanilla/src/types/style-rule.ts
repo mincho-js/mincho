@@ -1,5 +1,9 @@
 import type { StyleRule, fontFace } from "@vanilla-extract/css";
 import type { Properties, Property } from "csstype";
+import type {
+  SpacePropertiesKey,
+  CommaPropertiesKey
+} from "@mincho/css-additional-types";
 import type { NonNullableString } from "./string";
 import type { SimplePseudos, CamelPseudos } from "./simple-pseudo";
 import type { IntRange, ExcludeArray, Arr } from "./utils";
@@ -96,15 +100,25 @@ export type CSSVarFunction =
   | `$${string}`
   | `$${string}(${CSSVarValue})`;
 
-// TODO: Instead of enabling all properties, we recommend enabling only some properties.
+// Instead of enabling all properties, we recommend enabling only some properties.
 // https://github.com/mincho-js/working-group/blob/main/text/000-css-literals.md#7-merge-values
 // https://developer.mozilla.org/en-US/docs/Web/CSS/Shorthand_properties
 // https://github.com/mdn/data/blob/main/css/README.md
-export type CSSMergeProperties = {
-  [Property in keyof CSSProperties as `${Property}$` | `${Property}_`]: Array<
-    CSSProperties[Property]
+interface SpaceProperties extends Pick<CSSProperties, SpacePropertiesKey> {}
+interface CommaProperties extends Pick<CSSProperties, CommaPropertiesKey> {}
+type SpaceMergeProperties = {
+  [SpaceProperty in keyof SpaceProperties as `${SpaceProperty}_`]: Array<
+    SpaceProperties[SpaceProperty]
   >;
 };
+type CommaMergeProperties = {
+  [CommaProperty in keyof CommaProperties as `${CommaProperty}$`]: Array<
+    CommaProperties[CommaProperty]
+  >;
+};
+export interface CSSMergeProperties
+  extends SpaceMergeProperties,
+    CommaMergeProperties {}
 
 type CSSTypeProperties = WithAnonymousCSSProperty & ContainerProperties;
 

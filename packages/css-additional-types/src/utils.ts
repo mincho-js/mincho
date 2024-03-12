@@ -1,6 +1,15 @@
 const kebabCaseRegex = /-./g;
 export function kebabToCamel(kebabCase: string) {
-  return kebabCase.replace(kebabCaseRegex, (match) => match[1].toUpperCase());
+  const camel = kebabCase.replace(kebabCaseRegex, (match) =>
+    match[1].toUpperCase()
+  );
+
+  // Vender Prefix for IE
+  // https://github.com/frenic/csstype/issues/192
+  if (camel.startsWith("Ms")) {
+    return firstCharToLower(camel);
+  }
+  return camel;
 }
 
 export function isArray<T>(value: T | T[]): value is T[] {
