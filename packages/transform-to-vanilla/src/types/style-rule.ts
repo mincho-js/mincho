@@ -1,12 +1,12 @@
 import type { StyleRule, fontFace } from "@vanilla-extract/css";
-import type { Properties, Property } from "csstype";
+import type { Properties, Property, NonNullableString } from "csstype";
 import type {
   SpacePropertiesKey,
-  CommaPropertiesKey
+  CommaPropertiesKey,
+  NestedPropertiesMap
 } from "@mincho/css-additional-types";
-import type { NonNullableString } from "./string";
 import type { SimplePseudos, CamelPseudos } from "./simple-pseudo";
-import type { IntRange, ExcludeArray, Arr } from "./utils";
+import type { IntRange, ExcludeArray, Arr, PartialDeepMerge } from "./utils";
 
 // == Vanilla Extract Inteface ================================================
 // https://github.com/vanilla-extract-css/vanilla-extract/blob/master/packages/css/src/types.ts
@@ -20,7 +20,9 @@ export type VanillaClassNames = ClassNames;
 export type ComplexCSSRule = CSSRule | Array<ComplexCSSItem>;
 export type ComplexCSSItem = CSSRule | ClassNames;
 
-export type CSSRule = StyleWithSelectors & WithQueries<StyleWithSelectors>;
+export type CSSRule = Partial<
+  StyleWithNestedProperties & WithQueries<StyleWithNestedProperties>
+>;
 export type GlobalCSSRule = CSSPropertiesWithVars &
   WithQueries<CSSPropertiesWithVars>;
 
@@ -28,6 +30,20 @@ export type CSSRuleKey = keyof CSSRule;
 export type CSSRuleValue = CSSRule[CSSRuleKey];
 
 export type ClassNames = string | Array<ClassNames>;
+
+// == Style with Nested Properties ============================================
+export type StyleWithNestedProperties = PartialDeepMerge<
+  StyleWithSelectors,
+  NestedCSSProperties
+>;
+export type NestedCSSProperties = {
+  [Key in keyof NestedPropertiesMap]?: {
+    [NestedKey in keyof NestedPropertiesMap[Key]]?: StyleWithSelectors[Extract<
+      NestedPropertiesMap[Key][NestedKey],
+      keyof StyleWithSelectors
+    >];
+  };
+};
 
 // == Style with Selectors ====================================================
 // -- Main --------------------------------------------------------------------
@@ -378,7 +394,20 @@ if (import.meta.vitest) {
       });
     });
 
-    it("Simply nested selectors", () => {
+    it("Nested properties", () => {
+      assertType<CSSRule>({
+        padding: {
+          blockEnd: 3,
+          right: "20px"
+        },
+        background: {
+          color: "red",
+          image: "none"
+        }
+      });
+    });
+
+    it("Simply toplevel selectors", () => {
       assertType<CSSRule>({
         // Pseudo selectors
         ":hover:active": {

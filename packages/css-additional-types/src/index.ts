@@ -18,6 +18,9 @@ const syntaxProperties = Object.entries(syntaxes);
 interface CssEntries {
   [key: string]: string[];
 }
+interface CssNested {
+  [key: string]: Record<string, string>;
+}
 
 // == Merge Values =============================================================
 // -- Utils --------------------------------------------------------------------
@@ -132,17 +135,21 @@ function makeNestedKey(originKey: string, shorthandKey: string) {
     kebabToCamel(removeFirstString(originKey, shorthandKey))
   );
 }
-const nested: CssEntries = cssProperties.reduce((acc: CssEntries, [key]) => {
+const nested: CssNested = cssProperties.reduce((acc: CssNested, [key]) => {
   const nestedEntries = cssProperties.filter(([originKey]) =>
     originKey.startsWith(`${key}-`)
   );
   if (nestedEntries.length > 0) {
-    acc[kebabToCamel(key)] = nestedEntries.map(([originKey]) =>
-      makeNestedKey(originKey, key)
+    acc[kebabToCamel(key)] = nestedEntries.reduce(
+      (acc: Record<string, string>, [originKey]) => {
+        acc[makeNestedKey(originKey, key)] = kebabToCamel(originKey);
+        return acc;
+      },
+      {} as Record<string, string>
     );
   }
   return acc;
-}, {} as CssEntries);
+}, {} as CssNested);
 
 // == Main =====================================================================
 // -- Setup --------------------------------------------------------------------
@@ -158,8 +165,8 @@ export type CommaPropertiesKey = ${makeMergeTypes(comma)};
 export const shorthandProperties = ${stringify(shorthanded)} as const;
 export type ShorthandProperties = DeepWriteable<typeof shorthandProperties>;
 
-export const nestedProperties = ${stringify(nested)} as const;
-export type NestedProperties = DeepWriteable<typeof nestedProperties>;
+export const nestedPropertiesMap = ${stringify(nested)} as const;
+export type NestedPropertiesMap = DeepWriteable<typeof nestedPropertiesMap>;
 `;
 
 // -- Run ----------------------------------------------------------------------

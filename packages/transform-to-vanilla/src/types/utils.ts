@@ -20,6 +20,21 @@ export type Arr<
   Acc extends T[] = []
 > = Acc["length"] extends N ? Acc : Arr<T, N, [...Acc, T]>;
 
+// == Object ==================================================================
+export type PartialDeepMerge<T, U> = {
+  [P in keyof T | keyof U]?: P extends keyof T & keyof U
+    ? T[P] extends object
+      ? U[P] extends object
+        ? PartialDeepMerge<T[P], U[P]> // Both are objects, merge recursively
+        : T[P] | U[P] // One is an object, one is not, use union
+      : T[P] | U[P] // At least one is not an object, use union
+    : P extends keyof T
+    ? T[P] // Exists only in T
+    : P extends keyof U
+    ? U[P] // Exists only in U
+    : never;
+};
+
 // == Test ====================================================================
 if (import.meta.vitest) {
   const { describe, it, expectTypeOf } = import.meta.vitest;
@@ -56,6 +71,35 @@ if (import.meta.vitest) {
       expectTypeOf<Arr<number | string, 2>>().toEqualTypeOf<
         [number | string, number | string]
       >();
+    });
+
+    it("DeepMerge<T, U>", () => {
+      expectTypeOf<
+        PartialDeepMerge<{ a: number; b: boolean }, { a: string | boolean }>
+      >().toEqualTypeOf<{
+        a?: number | string | boolean;
+        b?: boolean;
+      }>();
+      expectTypeOf<
+        PartialDeepMerge<
+          { a: { b: number; c: boolean } },
+          { a: { b: string | boolean } }
+        >
+      >().toEqualTypeOf<{
+        a?: { b?: number | string | boolean; c?: boolean };
+      }>();
+      expectTypeOf<
+        PartialDeepMerge<{ a: number; b: boolean }, { a: { b: string } }>
+      >().toEqualTypeOf<{ a?: number | { b: string }; b?: boolean }>();
+      expectTypeOf<
+        PartialDeepMerge<
+          { a: number | string[]; b: boolean },
+          { a: { b: string } | boolean[] }
+        >
+      >().toEqualTypeOf<{
+        a?: number | string[] | { b: string } | boolean[];
+        b?: boolean;
+      }>();
     });
   });
 }

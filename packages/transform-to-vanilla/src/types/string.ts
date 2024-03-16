@@ -1,4 +1,5 @@
 // == Interface ================================================================
+// It has a string properties
 export type NonNullableString = string & NonNullable<unknown>;
 
 export type ToKebabCase<
