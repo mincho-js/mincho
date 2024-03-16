@@ -15,17 +15,17 @@
   },
   "devDependencies": {
     "@mincho/css": "workspace:^",
-    "@types/react": "^18.2.56",
-    "@types/react-dom": "^18.2.19",
-    "@typescript-eslint/eslint-plugin": "^7.0.2",
-    "@typescript-eslint/parser": "^7.0.2",
-    "@vanilla-extract/css": "^1.13.0",
+    "@types/react": "^18.2.66",
+    "@types/react-dom": "^18.2.22",
+    "@typescript-eslint/eslint-plugin": "^7.2.0",
+    "@typescript-eslint/parser": "^7.2.0",
+    "@vanilla-extract/css": "^1.14.1",
     "@vanilla-extract/esbuild-plugin": "^2.3.5",
-    "@vitejs/plugin-react-swc": "^3.5.0",
-    "eslint": "^8.56.0",
+    "@vitejs/plugin-react-swc": "^3.6.0",
+    "eslint": "^8.57.0",
     "eslint-plugin-react-hooks": "^4.6.0",
-    "eslint-plugin-react-refresh": "^0.4.5",
-    "typescript": "^5.2.2",
-    "vite": "^5.1.4"
+    "eslint-plugin-react-refresh": "^0.4.6",
+    "typescript": "^5.4.2",
+    "vite": "^5.1.6"
   }
 }

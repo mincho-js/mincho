@@ -7,8 +7,8 @@
   "main": "index.js",
   "devDependencies": {
     "vite-config-builder": "^0.0.2",
-    "vite-plugin-dts": "^3.6.3",
-    "vite-tsconfig-paths": "^4.2.1"
+    "vite-plugin-dts": "^3.7.3",
+    "vite-tsconfig-paths": "^4.3.2"
   },
   "peerDependencies": {
     "vite": "*"

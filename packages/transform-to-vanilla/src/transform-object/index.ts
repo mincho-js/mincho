@@ -169,8 +169,8 @@ function transformArrayValue<T>(
   const transformed = isMergeToComma
     ? mergeToComma(resolvedAnonymous as string[])
     : isMergeToSpace
-    ? mergeToSpace(resolvedAnonymous as string[])
-    : resolvedAnonymous;
+      ? mergeToSpace(resolvedAnonymous as string[])
+      : resolvedAnonymous;
 
   return Array.isArray(transformed)
     ? // eslint-disable-next-line @typescript-eslint/ban-ts-comment

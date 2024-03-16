@@ -29,10 +29,10 @@ export type PartialDeepMerge<T, U> = {
         : T[P] | U[P] // One is an object, one is not, use union
       : T[P] | U[P] // At least one is not an object, use union
     : P extends keyof T
-    ? T[P] // Exists only in T
-    : P extends keyof U
-    ? U[P] // Exists only in U
-    : never;
+      ? T[P] // Exists only in T
+      : P extends keyof U
+        ? U[P] // Exists only in U
+        : never;
 };
 
 // == Test ====================================================================

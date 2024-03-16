@@ -5,7 +5,7 @@
   "main": "index.js",
   "license": "MIT",
   "devDependencies": {
-    "eslint-define-config": "^1.24.1",
+    "eslint-define-config": "^2.1.0",
     "yaml-eslint-parser": "^1.2.2"
   },
   "peerDependencies": {

@@ -18,8 +18,8 @@ export function replacePseudoSelectors(keyStr: InputKeyValue): ReturnKeyValue {
   return hasSinglePseudoSelector(kebabKeyStr)
     ? `:${kebabKeyStr.substring(1, kebabKeyStr.length)}`
     : hasDoublePseudoSelector(kebabKeyStr)
-    ? `::${kebabKeyStr.substring(2, kebabKeyStr.length)}`
-    : kebabKeyStr;
+      ? `::${kebabKeyStr.substring(2, kebabKeyStr.length)}`
+      : kebabKeyStr;
 }
 
 // == Utils ====================================================================

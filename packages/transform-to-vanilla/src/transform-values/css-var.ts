@@ -97,8 +97,8 @@ function getVarValue(varPart: string, fallbackPart: string) {
   return varPart.length <= 1
     ? `${varPart}${fallbackPart}`
     : fallbackPart === ""
-    ? `var(${convertToCSSVar(varPart)})`
-    : `var(${convertToCSSVar(varPart)}, ${fallbackPart})`;
+      ? `var(${convertToCSSVar(varPart)})`
+      : `var(${convertToCSSVar(varPart)}, ${fallbackPart})`;
 }
 
 // Target

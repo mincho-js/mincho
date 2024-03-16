@@ -45,7 +45,7 @@
     }
   },
   "devDependencies": {
-    "@vanilla-extract/css": "^1.13.0",
+    "@vanilla-extract/css": "^1.14.1",
     "eslint-config-custom": "workspace:^",
     "prettier-config-custom": "workspace:^",
     "tsconfig-custom": "workspace:^",

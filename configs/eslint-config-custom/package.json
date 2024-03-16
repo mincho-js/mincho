@@ -5,8 +5,8 @@
   "main": "index.js",
   "license": "MIT",
   "devDependencies": {
-    "@typescript-eslint/parser": "^6.10.0",
-    "eslint-define-config": "^1.24.1"
+    "@typescript-eslint/parser": "^7.2.0",
+    "eslint-define-config": "^2.1.0"
   },
   "peerDependencies": {
     "eslint": "*"
