@@ -30,7 +30,8 @@
     "g:coverage": "yarn g:test --coverage",
     "g:lint": "cd $INIT_CWD && yarn run -T eslint . --report-unused-disable-directives --max-warnings 0",
     "g:fix": "cd $INIT_CWD && yarn g:lint --fix",
-    "g:check": "cd $INIT_CWD && yarn run -T tsc --noEmit"
+    "g:check": "cd $INIT_CWD && yarn run -T tsc --noEmit",
+    "g:check-trace": "cd $INIT_CWD && yarn run -T rimraf tsconfig.tsbuildinfo && yarn run -T tsc -p tsconfig.json --generateTrace traceDir && yarn run -T analyze-trace traceDir"
   },
   "eslintConfig": {
     "extends": [
@@ -42,6 +43,7 @@
     "@types/eslint": "^8.56.5",
     "@types/node": "^20.11.28",
     "@typescript-eslint/eslint-plugin": "^7.2.0",
+    "@typescript/analyze-trace": "^0.10.1",
     "@vanilla-extract/vite-plugin": "^4.0.6",
     "@vitest/coverage-v8": "^1.4.0",
     "c8": "^9.1.0",
