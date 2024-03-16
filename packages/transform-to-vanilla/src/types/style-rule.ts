@@ -73,7 +73,7 @@ type ComplexSelectorMap = {
   [selector: `${string}&${string}`]: SelectorValues;
 };
 type SimplyNestedMap = {
-  [selector in `:${string}` | `[${string}`]: SelectorValues;
+  [selector: `:${string}` | `[${string}`]: SelectorValues;
 };
 type SelectorValues = CSSPropertiesWithVars &
   WithQueries<CSSPropertiesWithVars>;
@@ -100,11 +100,28 @@ export type CSSComplexProperties = CSSProperties & CSSMergeProperties;
 
 // -- Properties --------------------------------------------------------------
 export type CSSProperties = {
+  [Property in keyof CSSBaseProperties]:
+    | CSSBaseProperties[Property]
+    | PropertyBasedCondition<CSSBaseProperties[Property]>;
+};
+export interface PropertyBasedCondition<PropertyValue> {
+  base?: PropertyValue;
+  [
+    selector:
+      | `${string}&${string}`
+      | `:${string}`
+      | `[${string}`
+      | ":-moz-any-link" //  | SimplePseudos
+  ]: PropertyValue;
+}
+export type CSSBaseProperties = {
   [Property in keyof CSSTypeProperties]:
-    | CSSTypeProperties[Property]
-    | CSSVarFunction
+    | RemoveStringKeys<CSSTypeProperties[Property]>
+    | RemoveStringKeys<CSSVarFunction>
     | Array<CSSVarFunction | CSSTypeProperties[Property]>;
 };
+type StringKeys = keyof string;
+type RemoveStringKeys<CSSValue> = Omit<CSSValue, StringKeys>;
 
 export type CSSVarKey = `--${string}` | `$${string}`;
 export type CSSVarValue = `${string | number}`;
