@@ -3,6 +3,7 @@ import { join } from "path";
 import { cwd } from "process";
 import properties from "mdn-data/css/properties.json";
 import syntaxes from "mdn-data/css/syntaxes.json";
+import { camelPseudo } from "./simple-pseudo";
 import {
   kebabToCamel,
   isArray,
@@ -113,9 +114,11 @@ const [comma, whiteSpace]: [CssEntries, CssEntries] = cssProperties.reduce(
 );
 
 function makeMergeTypes(entries: CssEntries) {
-  return Object.keys(entries)
-    .map((key) => `"${key}"`)
-    .join("\n  | ");
+  return arrayKeyTypes(Object.keys(entries));
+}
+
+function arrayKeyTypes(arr: string[]) {
+  return arr.map((key) => `"${key}"`).join("\n  | ");
 }
 
 // == Shorthanded & Nested =====================================================
@@ -158,6 +161,8 @@ const savePath = join(saveDir, "index.ts");
 
 const result = `// https://stackoverflow.com/questions/42999983/typescript-removing-readonly-modifier
 type DeepWriteable<T> = { -readonly [P in keyof T]: DeepWriteable<T[P]> };
+
+export type CamelPseudos = ${arrayKeyTypes(camelPseudo)};
 
 export type SpacePropertiesKey = ${makeMergeTypes(whiteSpace)};
 export type CommaPropertiesKey = ${makeMergeTypes(comma)};

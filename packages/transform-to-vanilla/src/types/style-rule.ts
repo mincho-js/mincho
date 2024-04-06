@@ -1,12 +1,12 @@
-import type { StyleRule, fontFace } from "@vanilla-extract/css";
+import type { StyleRule, FontFaceRule } from "@vanilla-extract/css";
 import type { Properties, Property, NonNullableString } from "csstype";
 import type {
+  CamelPseudos,
   SpacePropertiesKey,
   CommaPropertiesKey,
   NestedPropertiesMap
 } from "@mincho/css-additional-types";
-import type { SimplePseudos, CamelPseudos } from "./simple-pseudo";
-import type { IntRange, ExcludeArray, Arr, PartialDeepMerge } from "./utils";
+import type { IntRange, Arr, PartialDeepMerge } from "./utils";
 
 // == Vanilla Extract Inteface ================================================
 // https://github.com/vanilla-extract-css/vanilla-extract/blob/master/packages/css/src/types.ts
@@ -20,11 +20,13 @@ export type VanillaClassNames = ClassNames;
 export type ComplexCSSRule = CSSRule | Array<ComplexCSSItem>;
 export type ComplexCSSItem = CSSRule | ClassNames;
 
-export type CSSRule = Partial<
-  StyleWithNestedProperties & WithQueries<StyleWithNestedProperties>
->;
-export type GlobalCSSRule = CSSPropertiesWithVars &
-  WithQueries<CSSPropertiesWithVars>;
+export interface CSSRule
+  extends Partial<
+    StyleWithNestedProperties & WithQueries<StyleWithNestedProperties>
+  > {}
+export interface GlobalCSSRule
+  extends CSSPropertiesWithVars,
+    WithQueries<CSSPropertiesWithVars> {}
 
 export type CSSRuleKey = keyof CSSRule;
 export type CSSRuleValue = CSSRule[CSSRuleKey];
@@ -47,81 +49,89 @@ export type NestedCSSProperties = {
 
 // == Style with Selectors ====================================================
 // -- Main --------------------------------------------------------------------
-export type StyleWithSelectors = CSSPropertiesAndPseudos & SelectorProperties;
+export interface StyleWithSelectors
+  extends CSSPropertiesAndPseudos,
+    SelectorProperties {}
 
 // -- Psesudo -----------------------------------------------------------------
-type CSSPropertiesAndPseudos = CSSPropertiesWithVars & PseudoProperties;
+interface CSSPropertiesAndPseudos
+  extends CSSPropertiesWithVars,
+    PseudoProperties {}
 
 type PseudoProperties = {
-  [key in SimplePseudos | CamelPseudos]?: CSSPropertiesWithVars;
+  [key in CamelPseudos]?: CSSPropertiesWithVars;
 };
 
 // -- Selector ----------------------------------------------------------------
-export type SelectorProperties = ToplevelSelector & SelectorProperty;
+export interface SelectorProperties
+  extends ToplevelSelector,
+    SelectorProperty {}
 
-type SelectorProperty = {
+interface SelectorProperty {
   /**
    * More complex rules can be written using the `selectors` key.
    *
    * @see https://vanilla-extract.style/documentation/styling/#complex-selectors
    */
   selectors?: ComplexSelectorMap;
-};
-type ToplevelSelector = Partial<ComplexSelectorMap> & Partial<SimplyNestedMap>;
+}
+interface ToplevelSelector
+  extends Partial<ComplexSelectorMap>,
+    Partial<SimplyNestedMap> {}
 
-type ComplexSelectorMap = {
+interface ComplexSelectorMap {
   [selector: `${string}&${string}`]: SelectorValues;
-};
-type SimplyNestedMap = {
+}
+interface SimplyNestedMap {
   [selector: `:${string}` | `[${string}`]: SelectorValues;
-};
-type SelectorValues = CSSPropertiesWithVars &
-  WithQueries<CSSPropertiesWithVars>;
+}
+interface SelectorValues
+  extends CSSPropertiesWithVars,
+    WithQueries<CSSPropertiesWithVars> {}
 
 // == CSS Properties ==========================================================
 // -- Main --------------------------------------------------------------------
-export type CSSPropertiesWithVars = CSSComplexProperties &
-  VarProperty &
-  TopLevelVar;
-export type VarProperty = {
+export interface CSSPropertiesWithVars
+  extends CSSComplexProperties,
+    VarProperty,
+    TopLevelVar {}
+export interface VarProperty {
   /**
    * Custom properties are scoped to the element(s) they are declared on, and participate in the cascade: the value of such a custom property is that from the declaration decided by the cascading algorithm.
    *
    * @see https://developer.mozilla.org/en-US/docs/Web/CSS/--*
    */
   vars?: CSSVarMap;
-};
-export type TopLevelVar = Partial<CSSVarMap>;
-type CSSVarMap = {
+}
+export interface TopLevelVar extends Partial<CSSVarMap> {}
+interface CSSVarMap {
   [key: CSSVarKey]: CSSVarValue;
-};
+}
 
-export type CSSComplexProperties = CSSProperties & CSSMergeProperties;
+export interface CSSComplexProperties
+  extends CSSProperties,
+    CSSMergeProperties {}
 
 // -- Properties --------------------------------------------------------------
 export type CSSProperties = {
-  [Property in keyof CSSBaseProperties]:
-    | CSSBaseProperties[Property]
-    | PropertyBasedCondition<CSSBaseProperties[Property]>;
+  [Property in keyof WithAnonymousCSSProperties]:
+    | WithAnonymousCSSProperties[Property]
+    | CSSVarFunction
+    | Array<CSSVarFunction | WithAnonymousCSSProperties[Property]>
+    | PropertyBasedCondition<
+        | WithAnonymousCSSProperties[Property]
+        | CSSVarFunction
+        | Array<CSSVarFunction | WithAnonymousCSSProperties[Property]>
+      >;
 };
-export interface PropertyBasedCondition<PropertyValue> {
-  base?: PropertyValue;
-  [
-    selector:
-      | `${string}&${string}`
-      | `:${string}`
-      | `[${string}`
-      | ":-moz-any-link" //  | SimplePseudos
-  ]: PropertyValue;
-}
-export type CSSBaseProperties = {
-  [Property in keyof CSSTypeProperties]:
-    | RemoveStringKeys<CSSTypeProperties[Property]>
-    | RemoveStringKeys<CSSVarFunction>
-    | Array<CSSVarFunction | CSSTypeProperties[Property]>;
+export type PropertyBasedCondition<PropertyValue> = {
+  [selector in
+    | "base"
+    | `${string}&${string}`
+    | `:${string}`
+    | `[${string}`
+    | CamelPseudos]: PropertyValue;
 };
-type StringKeys = keyof string;
-type RemoveStringKeys<CSSValue> = Omit<CSSValue, StringKeys>;
 
 export type CSSVarKey = `--${string}` | `$${string}`;
 export type CSSVarValue = `${string | number}`;
@@ -153,26 +163,18 @@ export interface CSSMergeProperties
   extends SpaceMergeProperties,
     CommaMergeProperties {}
 
-type CSSTypeProperties = WithAnonymousCSSProperty & ContainerProperties;
-
-// csstype is yet to ship container property types as they are not in
-// the output MDN spec files yet. Remove this once that's done.
-// https://developer.mozilla.org/en-US/docs/Web/CSS/CSS_Container_Queries
-interface ContainerProperties {
-  container?: string;
-  containerType?: "size" | "inline-size" | NonNullableString;
-  containerName?: string;
-}
-
 // == CSS Queries =============================================================
 // -- Main --------------------------------------------------------------------
 export type WithQueries<StyleType> = StyleType & AllQueries<StyleType>;
 
 // -- Utils -------------------------------------------------------------------
-type AtRulesKeywords = "media" | "supports" | "container" | "layer";
-type AtRules<StyleType> = NestedAtRules<StyleType> & TopLevelAtRules<StyleType>;
 interface AllQueries<StyleType>
   extends AtRules<StyleType & AllQueries<StyleType>> {}
+
+type AtRulesKeywords = "media" | "supports" | "container" | "layer";
+interface AtRules<StyleType>
+  extends NestedAtRules<StyleType>,
+    TopLevelAtRules<StyleType> {}
 
 type NestedAtRules<StyleType> = {
   [key in AtRulesKeywords as `@${key}`]?: {
@@ -185,10 +187,11 @@ type TopLevelAtRules<StyleType> = {
 };
 
 // == Anonymous At-Rules ======================================================
-type WithAnonymousCSSProperty = Omit<ResolvedProperties, AnonymousPropertyKey> &
-  Partial<AnonymousProperty>;
+interface WithAnonymousCSSProperties
+  extends Omit<ResolvedProperties, AnonymousPropertyKey>,
+    AnonymousProperty {}
 
-export type AnonymousProperty = {
+export interface AnonymousProperty {
   /**
    * The **`animation-name`** CSS property specifies the names of one or more `@keyframes` at-rules that describe the animation to apply to an element. Multiple `@keyframe` at-rules are specified as a comma-separated list of names. If the specified name does not match any `@keyframe` at-rule, no properties are animated.
    *
@@ -203,9 +206,9 @@ export type AnonymousProperty = {
    *
    * @see https://developer.mozilla.org/docs/Web/CSS/animation-name
    */
-  animationName:
+  animationName?:
     | Property.AnimationName
-    | { [key in CSSKeyframeFromTo]: CSSComplexProperties };
+    | { [key in CSSKeyframeFromTo]?: CSSComplexProperties };
 
   /**
    * The **`font-family`** CSS property specifies a prioritized list of one or more font family names and/or generic family names for the selected element.
@@ -220,7 +223,7 @@ export type AnonymousProperty = {
    *
    * @see https://developer.mozilla.org/docs/Web/CSS/font-family
    */
-  fontFamily:
+  fontFamily?:
     | Property.FontFamily
     | ({
         /**
@@ -232,11 +235,11 @@ export type AnonymousProperty = {
          */
         fontFamily: string;
       } & FontFaceRule &
-        Partial<FontFaceMergeRule>);
-};
+        FontFaceMergeRule);
+}
 export type AnonymousPropertyKey = keyof AnonymousProperty;
 
-type ResolvedProperties = Properties<number | NonNullableString>;
+interface ResolvedProperties extends Properties<number | NonNullableString> {}
 
 type CSSKeyframeFromTo =
   | "from"
@@ -244,9 +247,7 @@ type CSSKeyframeFromTo =
   | `${IntRange<1, 10>}0%`
   | `${number & NonNullable<unknown>}%`;
 
-type FontFaceRule = ExcludeArray<Parameters<typeof fontFace>[0]>;
-type RequiredFontFaceRule = Required<FontFaceRule>;
-type FontFaceMergeRule = {
+interface FontFaceMergeRule {
   /**
    * The **font-stretch** CSS descriptor allows authors to specify a normal, condensed, or expanded face for the fonts specified in the [`@font-face`](https://developer.mozilla.org/en-US/docs/Web/CSS/@font-face) at-rule.
    *
@@ -254,7 +255,7 @@ type FontFaceMergeRule = {
    *
    * @see https://developer.mozilla.org/en-US/docs/Web/CSS/@font-face/font-stretch
    */
-  fontStretch_: Arr<Exclude<RequiredFontFaceRule["fontStretch"], "normal">, 2>;
+  fontStretch_?: Arr<Exclude<RequiredFontFaceRule["fontStretch"], "normal">, 2>;
 
   /**
    * The **`font-style`** CSS descriptor allows authors to specify font styles for the fonts specified in the [`@font-face`](https://developer.mozilla.org/en-US/docs/Web/CSS/@font-face) at-rule.
@@ -263,7 +264,7 @@ type FontFaceMergeRule = {
    *
    * @see https://developer.mozilla.org/en-US/docs/Web/CSS/@font-face/font-style
    */
-  fontStyle_: ["oblique", ...`${number}${Angle}`[]];
+  fontStyle_?: ["oblique", ...`${number}${Angle}`[]];
 
   /**
    * The **`font-weight`** CSS descriptor allows authors to specify font weights for the fonts specified in the [`@font-face`](https://developer.mozilla.org/en-US/docs/Web/CSS/@font-face) at-rule. The [`font-weight`](https://developer.mozilla.org/en-US/docs/Web/CSS/font-weight) property can separately be used to set how thick or thin characters in text should be displayed.
@@ -272,7 +273,7 @@ type FontFaceMergeRule = {
    *
    * @see https://developer.mozilla.org/en-US/docs/Web/CSS/@font-face/font-weight
    */
-  fontWeight_: RequiredFontFaceRule["fontWeight"][];
+  fontWeight_?: RequiredFontFaceRule["fontWeight"][];
 
   /**
    * The **`font-feature-settings`** CSS descriptor allows you to define the initial settings to use for the font defined by the [`@font-face`](https://developer.mozilla.org/en-US/docs/Web/CSS/@font-face) at-rule. You can further use this descriptor to control typographic font features such as ligatures, small caps, and swashes, for the font defined by `@font-face`.
@@ -281,7 +282,7 @@ type FontFaceMergeRule = {
    *
    * @see https://developer.mozilla.org/en-US/docs/Web/CSS/@font-face/font-feature-settings
    */
-  fontFeatureSettings$: FeatureTagValue;
+  fontFeatureSettings$?: FeatureTagValue;
   /**
    * The **`font-feature-settings`** CSS descriptor allows you to define the initial settings to use for the font defined by the [`@font-face`](https://developer.mozilla.org/en-US/docs/Web/CSS/@font-face) at-rule. You can further use this descriptor to control typographic font features such as ligatures, small caps, and swashes, for the font defined by `@font-face`.
    *
@@ -289,7 +290,7 @@ type FontFaceMergeRule = {
    *
    * @see https://developer.mozilla.org/en-US/docs/Web/CSS/@font-face/font-feature-settings
    */
-  MozFontFeatureSettings$: FeatureTagValue;
+  MozFontFeatureSettings$?: FeatureTagValue;
 
   /**
    * The **`font-variation-settings`** CSS descriptor allows authors to specify low-level OpenType or TrueType font variations in the [`@font-face`](https://developer.mozilla.org/en-US/docs/Web/CSS/@font-face) at-rule.
@@ -298,7 +299,7 @@ type FontFaceMergeRule = {
    *
    * @see https://developer.mozilla.org/en-US/docs/Web/CSS/@font-face/font-variation-settings
    */
-  fontVariationSettings$: `${string} ${number}`[];
+  fontVariationSettings$?: `${string} ${number}`[];
 
   /**
    * The **`src`** CSS descriptor for the [`@font-face`](https://developer.mozilla.org/en-US/docs/Web/CSS/@font-face) at-rule specifies the resource containing font data.
@@ -307,7 +308,7 @@ type FontFaceMergeRule = {
    *
    * @see https://developer.mozilla.org/en-US/docs/Web/CSS/@font-face/src
    */
-  src$: FontFaceSrc[];
+  src$?: FontFaceSrc[];
 
   /**
    * The **`unicode-range`** CSS descriptor sets the specific range of characters to be used from a font defined using the [`@font-face`](https://developer.mozilla.org/en-US/docs/Web/CSS/@font-face) at-rule and made available for use on the current page.
@@ -316,12 +317,13 @@ type FontFaceMergeRule = {
    *
    * @see https://developer.mozilla.org/en-US/docs/Web/CSS/@font-face/unicode-range
    */
-  unicodeRange$: `U+${string}`[];
-};
+  unicodeRange$?: `U+${string}`[];
+}
 
 type Angle = "deg" | "grad" | "rad" | "turn";
 type FeatureTagValue = (NonNullableString &
   `${string} ${number | "on" | "off"}`)[];
+type RequiredFontFaceRule = Required<FontFaceRule>;
 type FontFaceSrc =
   | `local(${string})`
   | `url(${string})`

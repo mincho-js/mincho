@@ -27,3 +27,6 @@ export function removeFirstString(str: string, remove: string) {
 export function firstCharToLower(str: string) {
   return str.charAt(0).toLowerCase() + str.slice(1);
 }
+
+// Recursive type alias for expansion
+export type Expand<T> = T extends object ? { [K in keyof T]: Expand<T[K]> } : T;
