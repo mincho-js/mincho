@@ -35,6 +35,32 @@ export type PartialDeepMerge<T, U> = {
         : never;
 };
 
+// == Spread ==================================================================
+// https://stackoverflow.com/questions/49682569/typescript-merge-object-types
+export type Spread<A extends readonly [...unknown[]]> = A extends [
+  infer L,
+  ...infer R
+]
+  ? SpreadTwo<L, Spread<R>>
+  : unknown;
+
+type SpreadTwo<L, R> = Id<
+  Pick<L, Exclude<keyof L, keyof R>> &
+    Pick<R, Exclude<keyof R, OptionalPropertyNames<R>>> &
+    Pick<R, Exclude<OptionalPropertyNames<R>, keyof L>> &
+    SpreadProperties<L, R, OptionalPropertyNames<R> & keyof L>
+>;
+
+type Id<T> = T extends infer U ? { [K in keyof U]: U[K] } : never;
+
+type SpreadProperties<L, R, K extends keyof L & keyof R> = {
+  [P in K]: L[P] | Exclude<R[P], undefined>;
+};
+
+type OptionalPropertyNames<T> = {
+  [K in keyof T]-?: object extends { [P in K]: T[K] } ? K : never;
+}[keyof T];
+
 // == Test ====================================================================
 if (import.meta.vitest) {
   const { describe, it, expectTypeOf } = import.meta.vitest;

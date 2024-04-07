@@ -159,6 +159,7 @@ const nested: CssNested = cssProperties.reduce((acc: CssNested, [key]) => {
 const saveDir = join(cwd(), "dist");
 const savePath = join(saveDir, "index.ts");
 
+const stringifyNested = stringify(nested);
 const result = `// https://stackoverflow.com/questions/42999983/typescript-removing-readonly-modifier
 type DeepWriteable<T> = { -readonly [P in keyof T]: DeepWriteable<T[P]> };
 
@@ -170,8 +171,8 @@ export type CommaPropertiesKey = ${makeMergeTypes(comma)};
 export const shorthandProperties = ${stringify(shorthanded)} as const;
 export type ShorthandProperties = DeepWriteable<typeof shorthandProperties>;
 
-export const nestedPropertiesMap = ${stringify(nested)} as const;
-export type NestedPropertiesMap = DeepWriteable<typeof nestedPropertiesMap>;
+export const nestedPropertiesMap: NestedPropertiesMap = ${stringifyNested};
+export type NestedPropertiesMap = ${stringifyNested};
 `;
 
 // -- Run ----------------------------------------------------------------------

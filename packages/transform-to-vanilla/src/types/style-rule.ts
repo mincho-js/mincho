@@ -6,7 +6,7 @@ import type {
   CommaPropertiesKey,
   NestedPropertiesMap
 } from "@mincho/css-additional-types";
-import type { IntRange, Arr, PartialDeepMerge } from "./utils";
+import type { IntRange, Arr, Spread } from "./utils";
 
 // == Vanilla Extract Inteface ================================================
 // https://github.com/vanilla-extract-css/vanilla-extract/blob/master/packages/css/src/types.ts
@@ -21,92 +21,25 @@ export type ComplexCSSRule = CSSRule | Array<ComplexCSSItem>;
 export type ComplexCSSItem = CSSRule | ClassNames;
 
 export interface CSSRule
-  extends Partial<
-    StyleWithNestedProperties & WithQueries<StyleWithNestedProperties>
-  > {}
-export interface GlobalCSSRule
-  extends CSSPropertiesWithVars,
-    WithQueries<CSSPropertiesWithVars> {}
+  extends CSSPropertiesWithConditions,
+    SelectorProperty {}
+export interface GlobalCSSRule extends CSSPropertiesWithConditions {}
 
 export type CSSRuleKey = keyof CSSRule;
 export type CSSRuleValue = CSSRule[CSSRuleKey];
 
 export type ClassNames = string | Array<ClassNames>;
 
-// == Style with Nested Properties ============================================
-export type StyleWithNestedProperties = PartialDeepMerge<
-  StyleWithSelectors,
-  NestedCSSProperties
->;
-export type NestedCSSProperties = {
-  [Key in keyof NestedPropertiesMap]?: {
-    [NestedKey in keyof NestedPropertiesMap[Key]]?: StyleWithSelectors[Extract<
-      NestedPropertiesMap[Key][NestedKey],
-      keyof StyleWithSelectors
-    >];
-  };
-};
-
-// == Style with Selectors ====================================================
-// -- Main --------------------------------------------------------------------
-export interface StyleWithSelectors
-  extends CSSPropertiesAndPseudos,
-    SelectorProperties {}
-
-// -- Psesudo -----------------------------------------------------------------
-interface CSSPropertiesAndPseudos
-  extends CSSPropertiesWithVars,
-    PseudoProperties {}
-
-type PseudoProperties = {
-  [key in CamelPseudos]?: CSSPropertiesWithVars;
-};
-
-// -- Selector ----------------------------------------------------------------
-export interface SelectorProperties
-  extends ToplevelSelector,
-    SelectorProperty {}
-
-interface SelectorProperty {
-  /**
-   * More complex rules can be written using the `selectors` key.
-   *
-   * @see https://vanilla-extract.style/documentation/styling/#complex-selectors
-   */
-  selectors?: ComplexSelectorMap;
-}
-interface ToplevelSelector
-  extends Partial<ComplexSelectorMap>,
-    Partial<SimplyNestedMap> {}
-
-interface ComplexSelectorMap {
-  [selector: `${string}&${string}`]: SelectorValues;
-}
-interface SimplyNestedMap {
-  [selector: `:${string}` | `[${string}`]: SelectorValues;
-}
-interface SelectorValues
-  extends CSSPropertiesWithVars,
-    WithQueries<CSSPropertiesWithVars> {}
-
 // == CSS Properties ==========================================================
 // -- Main --------------------------------------------------------------------
+export interface CSSPropertiesWithConditions
+  extends CSSPropertiesWithVars,
+    WithConditions<CSSPropertiesWithVars> {}
+
 export interface CSSPropertiesWithVars
   extends CSSComplexProperties,
     VarProperty,
     TopLevelVar {}
-export interface VarProperty {
-  /**
-   * Custom properties are scoped to the element(s) they are declared on, and participate in the cascade: the value of such a custom property is that from the declaration decided by the cascading algorithm.
-   *
-   * @see https://developer.mozilla.org/en-US/docs/Web/CSS/--*
-   */
-  vars?: CSSVarMap;
-}
-export interface TopLevelVar extends Partial<CSSVarMap> {}
-interface CSSVarMap {
-  [key: CSSVarKey]: CSSVarValue;
-}
 
 export interface CSSComplexProperties
   extends CSSProperties,
@@ -115,23 +48,58 @@ export interface CSSComplexProperties
 // -- Properties --------------------------------------------------------------
 export type CSSProperties = {
   [Property in keyof WithAnonymousCSSProperties]:
-    | WithAnonymousCSSProperties[Property]
-    | CSSVarFunction
-    | Array<CSSVarFunction | WithAnonymousCSSProperties[Property]>
-    | PropertyBasedCondition<
-        | WithAnonymousCSSProperties[Property]
-        | CSSVarFunction
-        | Array<CSSVarFunction | WithAnonymousCSSProperties[Property]>
-      >;
+    | CSSPropertyValue<WithAnonymousCSSProperties[Property]>
+    | (Property extends keyof NestedPropertiesMap
+        ? Spread<
+            [
+              PropertyBasedCondition<
+                CSSPropertyValue<WithAnonymousCSSProperties[Property]>
+              >,
+              {
+                [NestedProperty in keyof NestedPropertiesMap[Property]]?: CSSPropertyValue<
+                  WithAnonymousCSSProperties[Extract<
+                    NestedPropertiesMap[Property][NestedProperty],
+                    keyof WithAnonymousCSSProperties
+                  >]
+                >;
+              }
+            ]
+          >
+        : PropertyBasedCondition<
+            CSSPropertyValue<WithAnonymousCSSProperties[Property]>
+          >);
 };
-export type PropertyBasedCondition<PropertyValue> = {
-  [selector in
-    | "base"
-    | `${string}&${string}`
-    | `:${string}`
-    | `[${string}`
-    | CamelPseudos]: PropertyValue;
-};
+type CSSPropertyValue<PropertyValue> =
+  | PropertyValue
+  | CSSVarFunction
+  | Array<PropertyValue | CSSVarFunction>;
+export interface PropertyBasedCondition<PropertyValue>
+  extends CSSConditions<PropertyValue> {
+  base?: PropertyValue;
+}
+
+// -- Selector ----------------------------------------------------------------
+interface SelectorProperty {
+  /**
+   * More complex rules can be written using the `selectors` key.
+   *
+   * @see https://vanilla-extract.style/documentation/styling/#complex-selectors
+   */
+  selectors?: ComplexSelectors<CSSPropertiesWithConditions>;
+}
+
+// -- Var Properties ----------------------------------------------------------
+export interface VarProperty {
+  /**
+   * Custom properties are scoped to the element(s) they are declared on, and participate in the cascade: the value of such a custom property is that from the declaration decided by the cascading algorithm.
+   *
+   * @see https://developer.mozilla.org/en-US/docs/Web/CSS/--*
+   */
+  vars?: TopLevelVar;
+}
+interface TopLevelVar {
+  [key: CSSVarKey]: CSSVarValue;
+}
 
 export type CSSVarKey = `--${string}` | `$${string}`;
 export type CSSVarValue = `${string | number}`;
@@ -143,6 +111,7 @@ export type CSSVarFunction =
   | `$${string}`
   | `$${string}(${CSSVarValue})`;
 
+// -- Merge Properties --------------------------------------------------------
 // Instead of enabling all properties, we recommend enabling only some properties.
 // https://github.com/mincho-js/working-group/blob/main/text/000-css-literals.md#7-merge-values
 // https://developer.mozilla.org/en-US/docs/Web/CSS/Shorthand_properties
@@ -163,14 +132,38 @@ export interface CSSMergeProperties
   extends SpaceMergeProperties,
     CommaMergeProperties {}
 
-// == CSS Queries =============================================================
+// == CSS Contidions ==========================================================
 // -- Main --------------------------------------------------------------------
-export type WithQueries<StyleType> = StyleType & AllQueries<StyleType>;
+export type WithConditions<StyleType> = StyleType & NestedConditions<StyleType>;
 
-// -- Utils -------------------------------------------------------------------
-interface AllQueries<StyleType>
-  extends AtRules<StyleType & AllQueries<StyleType>> {}
+interface NestedConditions<StyleType>
+  extends CSSConditions<StyleType & NestedConditions<StyleType>> {}
 
+interface CSSConditions<StyleType>
+  extends AtRules<StyleType>,
+    ToplevelSelectors<StyleType> {}
+
+// -- Selectors ---------------------------------------------------------------
+export interface ToplevelSelectors<StyleType>
+  extends ComplexSelectors<StyleType>,
+    SimplyNestedSelectors<StyleType>,
+    PseudoSelectorMap<StyleType> {}
+interface ComplexSelectors<StyleType> {
+  /**
+   * Toplevel complex selector.
+   *
+   * @see https://vanilla-extract.style/documentation/styling/#complex-selectors
+   */
+  [selector: `${string}&${string}`]: StyleType;
+}
+interface SimplyNestedSelectors<StyleType> {
+  [selector: `:${string}` | `[${string}`]: StyleType;
+}
+type PseudoSelectorMap<StyleType> = {
+  [key in CamelPseudos]?: StyleType;
+};
+
+// -- At Rules ----------------------------------------------------------------
 type AtRulesKeywords = "media" | "supports" | "container" | "layer";
 interface AtRules<StyleType>
   extends NestedAtRules<StyleType>,
@@ -422,6 +415,21 @@ if (import.meta.vitest) {
         background: {
           color: "red",
           image: "none"
+        }
+      });
+    });
+
+    it("Property conditions", () => {
+      assertType<CSSRule>({
+        background: {
+          base: "red",
+          _hover: "green",
+          "[disabled]": "blue",
+          "nav li > &": "black",
+          "@media (prefers-color-scheme: dark)": "white",
+          "@media": {
+            "screen and (min-width: 768px)": "grey"
+          }
         }
       });
     });

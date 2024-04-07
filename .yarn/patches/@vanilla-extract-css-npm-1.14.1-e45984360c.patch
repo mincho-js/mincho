@@ -1,0 +1,13 @@
+diff --git a/dist/vanilla-extract-css.cjs.d.ts b/dist/vanilla-extract-css.cjs.d.ts
+index a3b3ed0aae215fd089a4effc5aec654db181ecbc..31fb804348f6e6bee5798fcfabfd5bad99a4f639 100644
+--- a/dist/vanilla-extract-css.cjs.d.ts
++++ b/dist/vanilla-extract-css.cjs.d.ts
+@@ -174,7 +174,7 @@ interface StyleWithSelectors extends CSSPropertiesAndPseudos {
+ type StyleRule = StyleWithSelectors & WithQueries<StyleWithSelectors>;
+ type GlobalStyleRule = CSSPropertiesWithVars & WithQueries<CSSPropertiesWithVars>;
+ type GlobalFontFaceRule = Omit<AtRule.FontFaceFallback, 'src'> & Required<Pick<AtRule.FontFaceFallback, 'src'>>;
+-type FontFaceRule = Omit<GlobalFontFaceRule, 'fontFamily'>;
++export type FontFaceRule = Omit<GlobalFontFaceRule, 'fontFamily'>;
+ type CSSStyleBlock = {
+     type: 'local';
+     selector: string;
