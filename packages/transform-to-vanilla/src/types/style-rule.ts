@@ -1,4 +1,4 @@
-import type { StyleRule, FontFaceRule } from "@vanilla-extract/css";
+import type { StyleRule } from "@vanilla-extract/css";
 import type { Properties, Property, NonNullableString } from "csstype";
 import type {
   CamelPseudos,
@@ -6,7 +6,8 @@ import type {
   CommaPropertiesKey,
   NestedPropertiesMap
 } from "@mincho/css-additional-types";
-import type { IntRange, Arr, Spread } from "./utils";
+import type { GlobalFontFaceRule } from "./fontface-rule";
+import type { IntRange, Spread } from "./utils";
 
 // == Vanilla Extract Inteface ================================================
 // https://github.com/vanilla-extract-css/vanilla-extract/blob/master/packages/css/src/types.ts
@@ -183,7 +184,6 @@ type TopLevelAtRules<StyleType> = {
 interface WithAnonymousCSSProperties
   extends Omit<ResolvedProperties, AnonymousPropertyKey>,
     AnonymousProperty {}
-
 export interface AnonymousProperty {
   /**
    * The **`animation-name`** CSS property specifies the names of one or more `@keyframes` at-rules that describe the animation to apply to an element. Multiple `@keyframe` at-rules are specified as a comma-separated list of names. If the specified name does not match any `@keyframe` at-rule, no properties are animated.
@@ -216,19 +216,7 @@ export interface AnonymousProperty {
    *
    * @see https://developer.mozilla.org/docs/Web/CSS/font-family
    */
-  fontFamily?:
-    | Property.FontFamily
-    | ({
-        /**
-         * The **`font-family`** CSS descriptor sets the font family for a font specified in an [`@font-face`](https://developer.mozilla.org/en-US/docs/Web/CSS/@font-face) at-rule.
-         *
-         * **Syntax**: `<family-name>`
-         *
-         * @see https://developer.mozilla.org/en-US/docs/Web/CSS/@font-face/font-family
-         */
-        fontFamily: string;
-      } & FontFaceRule &
-        FontFaceMergeRule);
+  fontFamily?: Property.FontFamily | GlobalFontFaceRule;
 }
 export type AnonymousPropertyKey = keyof AnonymousProperty;
 
@@ -239,90 +227,6 @@ type CSSKeyframeFromTo =
   | "to"
   | `${IntRange<1, 10>}0%`
   | `${number & NonNullable<unknown>}%`;
-
-interface FontFaceMergeRule {
-  /**
-   * The **font-stretch** CSS descriptor allows authors to specify a normal, condensed, or expanded face for the fonts specified in the [`@font-face`](https://developer.mozilla.org/en-US/docs/Web/CSS/@font-face) at-rule.
-   *
-   * **Syntax**: `<'font-stretch'>{1,2} `
-   *
-   * @see https://developer.mozilla.org/en-US/docs/Web/CSS/@font-face/font-stretch
-   */
-  fontStretch_?: Arr<Exclude<RequiredFontFaceRule["fontStretch"], "normal">, 2>;
-
-  /**
-   * The **`font-style`** CSS descriptor allows authors to specify font styles for the fonts specified in the [`@font-face`](https://developer.mozilla.org/en-US/docs/Web/CSS/@font-face) at-rule.
-   *
-   * **Syntax**: `oblique <angle [-90deg,90deg]>?]`
-   *
-   * @see https://developer.mozilla.org/en-US/docs/Web/CSS/@font-face/font-style
-   */
-  fontStyle_?: ["oblique", ...`${number}${Angle}`[]];
-
-  /**
-   * The **`font-weight`** CSS descriptor allows authors to specify font weights for the fonts specified in the [`@font-face`](https://developer.mozilla.org/en-US/docs/Web/CSS/@font-face) at-rule. The [`font-weight`](https://developer.mozilla.org/en-US/docs/Web/CSS/font-weight) property can separately be used to set how thick or thin characters in text should be displayed.
-   *
-   * **Syntax**: `<font-weight-absolute>{1,2}`
-   *
-   * @see https://developer.mozilla.org/en-US/docs/Web/CSS/@font-face/font-weight
-   */
-  fontWeight_?: RequiredFontFaceRule["fontWeight"][];
-
-  /**
-   * The **`font-feature-settings`** CSS descriptor allows you to define the initial settings to use for the font defined by the [`@font-face`](https://developer.mozilla.org/en-US/docs/Web/CSS/@font-face) at-rule. You can further use this descriptor to control typographic font features such as ligatures, small caps, and swashes, for the font defined by `@font-face`.
-   *
-   * **Syntax**: `<feature-tag-value>#`
-   *
-   * @see https://developer.mozilla.org/en-US/docs/Web/CSS/@font-face/font-feature-settings
-   */
-  fontFeatureSettings$?: FeatureTagValue;
-  /**
-   * The **`font-feature-settings`** CSS descriptor allows you to define the initial settings to use for the font defined by the [`@font-face`](https://developer.mozilla.org/en-US/docs/Web/CSS/@font-face) at-rule. You can further use this descriptor to control typographic font features such as ligatures, small caps, and swashes, for the font defined by `@font-face`.
-   *
-   * **Syntax**: `<feature-tag-value>#`
-   *
-   * @see https://developer.mozilla.org/en-US/docs/Web/CSS/@font-face/font-feature-settings
-   */
-  MozFontFeatureSettings$?: FeatureTagValue;
-
-  /**
-   * The **`font-variation-settings`** CSS descriptor allows authors to specify low-level OpenType or TrueType font variations in the [`@font-face`](https://developer.mozilla.org/en-US/docs/Web/CSS/@font-face) at-rule.
-   *
-   * **Syntax**: `[ <string> <number> ]#`
-   *
-   * @see https://developer.mozilla.org/en-US/docs/Web/CSS/@font-face/font-variation-settings
-   */
-  fontVariationSettings$?: `${string} ${number}`[];
-
-  /**
-   * The **`src`** CSS descriptor for the [`@font-face`](https://developer.mozilla.org/en-US/docs/Web/CSS/@font-face) at-rule specifies the resource containing font data.
-   *
-   * **Syntax**: `<font-src-list>`
-   *
-   * @see https://developer.mozilla.org/en-US/docs/Web/CSS/@font-face/src
-   */
-  src$?: FontFaceSrc[];
-
-  /**
-   * The **`unicode-range`** CSS descriptor sets the specific range of characters to be used from a font defined using the [`@font-face`](https://developer.mozilla.org/en-US/docs/Web/CSS/@font-face) at-rule and made available for use on the current page.
-   *
-   * **Syntax**: `<urange>`
-   *
-   * @see https://developer.mozilla.org/en-US/docs/Web/CSS/@font-face/unicode-range
-   */
-  unicodeRange$?: `U+${string}`[];
-}
-
-type Angle = "deg" | "grad" | "rad" | "turn";
-type FeatureTagValue = (NonNullableString &
-  `${string} ${number | "on" | "off"}`)[];
-type RequiredFontFaceRule = Required<FontFaceRule>;
-type FontFaceSrc =
-  | `local(${string})`
-  | `url(${string})`
-  | `url(${string}) format(${string})`
-  | `url(${string}) tech(${string})`
-  | `url(${string}) format(${string}) tech(${string})`;
 
 // == Tests ====================================================================
 if (import.meta.vitest) {

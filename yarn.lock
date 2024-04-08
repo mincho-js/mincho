@@ -668,7 +668,7 @@ __metadata:
   resolution: "@mincho/css@workspace:packages/css"
   dependencies:
     "@mincho/transform-to-vanilla": "workspace:^"
-    "@vanilla-extract/css": "patch:@vanilla-extract/css@npm%3A1.14.1#~/.yarn/patches/@vanilla-extract-css-npm-1.14.1-e45984360c.patch"
+    "@vanilla-extract/css": "npm:^1.14.1"
     eslint-config-custom: "workspace:^"
     prettier-config-custom: "workspace:^"
     tsconfig-custom: "workspace:^"
@@ -683,7 +683,7 @@ __metadata:
   resolution: "@mincho/transform-to-vanilla@workspace:packages/transform-to-vanilla"
   dependencies:
     "@mincho/css-additional-types": "workspace:^"
-    "@vanilla-extract/css": "patch:@vanilla-extract/css@npm%3A1.14.1#~/.yarn/patches/@vanilla-extract-css-npm-1.14.1-e45984360c.patch"
+    "@vanilla-extract/css": "npm:^1.14.1"
     csstype: "npm:^3.1.3"
     eslint-config-custom: "workspace:^"
     prettier-config-custom: "workspace:^"
@@ -1281,12 +1281,12 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@vanilla-extract/css@npm:1.14.1":
-  version: 1.14.1
-  resolution: "@vanilla-extract/css@npm:1.14.1"
+"@vanilla-extract/css@npm:^1.14.0, @vanilla-extract/css@npm:^1.14.1":
+  version: 1.14.2
+  resolution: "@vanilla-extract/css@npm:1.14.2"
   dependencies:
     "@emotion/hash": "npm:^0.9.0"
-    "@vanilla-extract/private": "npm:^1.0.3"
+    "@vanilla-extract/private": "npm:^1.0.4"
     chalk: "npm:^4.1.1"
     css-what: "npm:^6.1.0"
     cssesc: "npm:^3.0.0"
@@ -1296,26 +1296,7 @@ __metadata:
     media-query-parser: "npm:^2.0.2"
     modern-ahocorasick: "npm:^1.0.0"
     outdent: "npm:^0.8.0"
-  checksum: 10/7ecdddfc6d24e80ee43496577294b580c71fa6fdbaa022c91930abf0dbe0923dd3f886e452b1f5ebe12dbfb61b080a5e3ef8939a897bf5b5e0dd8c93f04267f0
-  languageName: node
-  linkType: hard
-
-"@vanilla-extract/css@patch:@vanilla-extract/css@npm%3A1.14.1#~/.yarn/patches/@vanilla-extract-css-npm-1.14.1-e45984360c.patch":
-  version: 1.14.1
-  resolution: "@vanilla-extract/css@patch:@vanilla-extract/css@npm%3A1.14.1#~/.yarn/patches/@vanilla-extract-css-npm-1.14.1-e45984360c.patch::version=1.14.1&hash=cd0d8a"
-  dependencies:
-    "@emotion/hash": "npm:^0.9.0"
-    "@vanilla-extract/private": "npm:^1.0.3"
-    chalk: "npm:^4.1.1"
-    css-what: "npm:^6.1.0"
-    cssesc: "npm:^3.0.0"
-    csstype: "npm:^3.0.7"
-    deep-object-diff: "npm:^1.1.9"
-    deepmerge: "npm:^4.2.2"
-    media-query-parser: "npm:^2.0.2"
-    modern-ahocorasick: "npm:^1.0.0"
-    outdent: "npm:^0.8.0"
-  checksum: 10/083a4ac2fabdef6d6f77db26e75f267acac195e4e66c6ea16c044139d9350d10f7f604cd0172e730f43015485e15d0c30ce624148097a091d90e8e0106699c75
+  checksum: 10/db88ce6d92c0ca9bbddd34b6ec38b7ad3290006fe782459cd0bfc2c67c353f343d38914cdc5de0fec0dbefe17d2307711012ef9a872ba4b1b1f8ff9e66e6afe5
   languageName: node
   linkType: hard
 
@@ -1354,10 +1335,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@vanilla-extract/private@npm:^1.0.3":
-  version: 1.0.3
-  resolution: "@vanilla-extract/private@npm:1.0.3"
-  checksum: 10/5f27238d711fc190146869cb76258328d8d8c09bf4fca9df65168ce13704a5c78750824eb469fa961a2ab1cfefca43c37607d755b8a4aa937c8dd7df478036df
+"@vanilla-extract/private@npm:^1.0.4":
+  version: 1.0.4
+  resolution: "@vanilla-extract/private@npm:1.0.4"
+  checksum: 10/173eee950ae84cc7a4f1a525f75ca2847f7e0daaeef3e0815c8d8373599b36af696e87f8f8577a0ebee96529af084af817f2479fdcb26f906aed2e32faf35f42
   languageName: node
   linkType: hard
 
@@ -4014,7 +3995,7 @@ __metadata:
     "@types/react-dom": "npm:^18.2.22"
     "@typescript-eslint/eslint-plugin": "npm:^7.2.0"
     "@typescript-eslint/parser": "npm:^7.2.0"
-    "@vanilla-extract/css": "patch:@vanilla-extract/css@npm%3A1.14.1#~/.yarn/patches/@vanilla-extract-css-npm-1.14.1-e45984360c.patch"
+    "@vanilla-extract/css": "npm:^1.14.1"
     "@vanilla-extract/esbuild-plugin": "npm:^2.3.5"
     "@vitejs/plugin-react-swc": "npm:^3.6.0"
     eslint: "npm:^8.57.0"

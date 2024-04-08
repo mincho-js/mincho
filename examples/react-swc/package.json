@@ -19,7 +19,7 @@
     "@types/react-dom": "^18.2.22",
     "@typescript-eslint/eslint-plugin": "^7.2.0",
     "@typescript-eslint/parser": "^7.2.0",
-    "@vanilla-extract/css": "patch:@vanilla-extract/css@npm%3A1.14.1#~/.yarn/patches/@vanilla-extract-css-npm-1.14.1-e45984360c.patch",
+    "@vanilla-extract/css": "^1.14.1",
     "@vanilla-extract/esbuild-plugin": "^2.3.5",
     "@vitejs/plugin-react-swc": "^3.6.0",
     "eslint": "^8.57.0",
