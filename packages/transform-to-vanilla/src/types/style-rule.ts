@@ -49,32 +49,47 @@ export interface CSSComplexProperties
 // -- Properties --------------------------------------------------------------
 export type CSSProperties = {
   [Property in keyof WithAnonymousCSSProperties]:
-    | CSSPropertyValue<WithAnonymousCSSProperties[Property]>
-    | (Property extends keyof NestedPropertiesMap
+    | AnonymousCSSPropertyValue<Property>
+    | (Property extends KeyofNestedPropertiesMap
         ? Spread<
             [
+              NestedProperty<Property>,
               PropertyBasedCondition<
-                CSSPropertyValue<WithAnonymousCSSProperties[Property]>
-              >,
-              {
-                [NestedProperty in keyof NestedPropertiesMap[Property]]?: CSSPropertyValue<
-                  WithAnonymousCSSProperties[Extract<
-                    NestedPropertiesMap[Property][NestedProperty],
-                    keyof WithAnonymousCSSProperties
-                  >]
-                >;
-              }
+                AnonymousCSSPropertyValue<Property> | NestedProperty<Property>
+              >
             ]
           >
-        : PropertyBasedCondition<
-            CSSPropertyValue<WithAnonymousCSSProperties[Property]>
-          >);
+        : PropertyBasedCondition<AnonymousCSSPropertyValue<Property>>);
 };
+
+type KeyofAnonymousCSSProperties = keyof WithAnonymousCSSProperties;
+type KeyofNestedPropertiesMap = keyof NestedPropertiesMap;
+
+type AnonymousCSSPropertyValue<Property extends KeyofAnonymousCSSProperties> =
+  CSSPropertyValue<WithAnonymousCSSProperties[Property]>;
+
 type CSSPropertyValue<PropertyValue> =
   | PropertyValue
   | CSSVarFunction
   | Array<PropertyValue | CSSVarFunction>;
+type NestedPropertyValue<PropertyValue> =
+  | PropertyValue
+  | PropertyBasedCondition<PropertyValue>;
+
+type NestedProperty<Property extends KeyofNestedPropertiesMap> = {
+  [NestedProperty in keyof NestedPropertiesMap[Property]]?: NestedPropertyValue<
+    AnonymousCSSPropertyValue<
+      Extract<
+        NestedPropertiesMap[Property][NestedProperty],
+        keyof WithAnonymousCSSProperties
+      >
+    >
+  >;
+};
+
 export interface PropertyBasedCondition<PropertyValue>
+  extends CSSPropertyConditions<NestedPropertyValue<PropertyValue>> {}
+interface CSSPropertyConditions<PropertyValue>
   extends CSSConditions<PropertyValue> {
   base?: PropertyValue;
 }
@@ -313,12 +328,12 @@ if (import.meta.vitest) {
     it("Nested properties", () => {
       assertType<CSSRule>({
         padding: {
-          blockEnd: 3,
-          right: "20px"
+          BlockEnd: 3,
+          Right: "20px"
         },
         background: {
-          color: "red",
-          image: "none"
+          Color: "red",
+          Image: "none"
         }
       });
     });

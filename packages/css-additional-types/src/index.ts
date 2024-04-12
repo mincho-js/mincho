@@ -4,13 +4,7 @@ import { cwd } from "process";
 import properties from "mdn-data/css/properties.json";
 import syntaxes from "mdn-data/css/syntaxes.json";
 import { camelPseudo } from "./simple-pseudo";
-import {
-  kebabToCamel,
-  isArray,
-  stringify,
-  removeFirstString,
-  firstCharToLower
-} from "./utils";
+import { kebabToCamel, isArray, stringify, removeFirstString } from "./utils";
 
 // == Common ===================================================================
 const cssProperties = Object.entries(properties);
@@ -134,9 +128,7 @@ const shorthanded: CssEntries = cssProperties.reduce(
 );
 
 function makeNestedKey(originKey: string, shorthandKey: string) {
-  return firstCharToLower(
-    kebabToCamel(removeFirstString(originKey, shorthandKey))
-  );
+  return kebabToCamel(removeFirstString(originKey, shorthandKey));
 }
 const nested: CssNested = cssProperties.reduce((acc: CssNested, [key]) => {
   const nestedEntries = cssProperties.filter(([originKey]) =>
