@@ -39,81 +39,86 @@ type StyleResult = {
 };
 type CSSRuleExistValue = Exclude<CSSRuleValue, undefined>;
 
-export function transformStyle(style: CSSRule) {
-  const result: StyleResult = {};
+interface TransformContext {
+  result: StyleResult;
+}
+const initTransformContext: TransformContext = {
+  result: {}
+};
 
+export function transformStyle(
+  style: CSSRule,
+  context = structuredClone(initTransformContext)
+) {
   for (const [key, value] of Object.entries(style) as [
     CSSRuleKey,
     CSSRuleExistValue
   ][]) {
     if (isSelectorskey(key)) {
       for (const [selector, style] of Object.entries(value)) {
-        // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-        // @ts-ignore: error TS2345
-        transformComplexStyle(result, selector, style);
+        transformComplexStyle(selector, style, context);
       }
     } else if (isComplexKey(key)) {
-      transformComplexStyle(result, key, value);
+      transformComplexStyle(key, value, context);
     } else if (isSimpleSelectorKey(key)) {
-      transformComplexStyle(result, `&${key}`, value);
+      transformComplexStyle(`&${key}`, value, context);
     } else if (isVarsKey(key)) {
       for (const [varKey, varValue] of Object.entries(value)) {
         const transformedVarKey = isCSSVarKey(varKey)
           ? replaceCSSVarKey(varKey)
           : varKey;
-        // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-        // @ts-ignore: error TS2345
-        transformCSSVarStyle(result, transformedVarKey, varValue);
+        transformCSSVarStyle(transformedVarKey, varValue, context);
       }
     } else if (isCSSVarKey(key)) {
-      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-      // @ts-ignore: error TS2345
-      transformCSSVarStyle(result, replaceCSSVarKey(key), value);
+      transformCSSVarStyle(replaceCSSVarKey(key), value, context);
     } else if (isPureCSSVarKey(key)) {
-      transformCSSVarStyle(result, key, value);
+      transformCSSVarStyle(key, value, context);
     } else if (isRuleKey(key)) {
-      transformRuleStyle(result, key, value);
+      transformRuleStyle(key, value, context);
     } else {
-      transformValueStyle(result, key, value);
+      transformValueStyle(key, value, context);
     }
   }
-  return result as StyleRule;
+  return context.result as StyleRule;
 }
 
 function insertResultValue(
-  result: Record<string, unknown>,
   accessKey: string,
   key: string,
-  value: unknown
+  value: unknown,
+  context: TransformContext
 ) {
-  if (result[accessKey] === undefined) {
-    result[accessKey] = {};
+  if (context.result[accessKey] === undefined) {
+    context.result[accessKey] = {};
   }
-  (result[accessKey] as Record<string, unknown>)[key] = value;
+  (context.result[accessKey] as Record<string, unknown>)[key] = value;
 }
 
 function transformComplexStyle(
-  result: StyleResult,
-  key: CSSRuleKey,
-  value: CSSRuleExistValue
+  key: string,
+  value: CSSRuleExistValue,
+  context: TransformContext
 ) {
-  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-  // @ts-ignore: error TS2590: Expression produces a union type that is too complex to represent
-  insertResultValue(result, "selectors", key, transformStyle(value as CSSRule));
+  insertResultValue(
+    "selectors",
+    key,
+    transformStyle(value as CSSRule),
+    context
+  );
 }
 
 function transformCSSVarStyle(
-  result: StyleResult,
-  key: CSSRuleKey,
-  value: CSSRuleExistValue
+  key: string,
+  value: CSSRuleExistValue,
+  context: TransformContext
 ) {
-  insertResultValue(result, "vars", key, value);
+  insertResultValue("vars", key, value, context);
 }
 
 function transformRuleStyle(
-  result: StyleResult,
   key: CSSRuleKey,
-  value: CSSRuleExistValue
+  value: CSSRuleExistValue,
+  context: TransformContext
 ) {
   const { isToplevelRules, atRuleKey, atRuleNestedKey } = atRuleKeyInfo(key);
   const transformed = transformStyle(value as CSSRule);
@@ -122,16 +127,16 @@ function transformRuleStyle(
         [atRuleNestedKey]: transformed
       }
     : transformed;
-  result[atRuleKey] = {
-    ...(result[atRuleKey] ?? {}),
+  context.result[atRuleKey] = {
+    ...(context.result[atRuleKey] ?? {}),
     ...ruleValue
   };
 }
 
 function transformValueStyle(
-  result: StyleResult,
   key: CSSRuleKey,
-  value: CSSRuleExistValue
+  value: CSSRuleExistValue,
+  context: TransformContext
 ) {
   const { isMergeToComma, isMergeToSpace, isMergeSymbol } = mergeKeyInfo(key);
 
@@ -144,7 +149,7 @@ function transformValueStyle(
   const transformedKey = replacePseudoSelectors(
     isMergeSymbol ? removeMergeSymbol(key) : key
   );
-  result[transformedKey] = transformedValue as VanillaStyleRuleValue;
+  context.result[transformedKey] = transformedValue as VanillaStyleRuleValue;
 }
 
 // == Utils ====================================================================
@@ -272,7 +277,7 @@ if (import.meta.vitest) {
       } satisfies StyleRule);
     });
 
-    it("Simple Psudo", () => {
+    it("Simple Psudo Selectors", () => {
       expect(
         transformStyle({
           _hover: {
