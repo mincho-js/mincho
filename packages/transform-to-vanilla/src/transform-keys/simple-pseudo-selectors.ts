@@ -22,6 +22,10 @@ export function replacePseudoSelectors(keyStr: InputKeyValue): ReturnKeyValue {
       : kebabKeyStr;
 }
 
+export function isSimplePseudoSelectorKey(value: InputKeyValue) {
+  return value.startsWith("_");
+}
+
 // == Utils ====================================================================
 function hasSinglePseudoSelector(
   value: InputKeyValue

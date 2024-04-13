@@ -1,4 +1,7 @@
-import { replacePseudoSelectors } from "@/transform-keys/simple-pseudo-selectors";
+import {
+  isSimplePseudoSelectorKey,
+  replacePseudoSelectors
+} from "@/transform-keys/simple-pseudo-selectors";
 import {
   isSelectorskey,
   isComplexKey,
@@ -41,9 +44,13 @@ type CSSRuleExistValue = Exclude<CSSRuleValue, undefined>;
 
 interface TransformContext {
   result: StyleResult;
+  basedKey: string;
+  parentSelector: string;
 }
 const initTransformContext: TransformContext = {
-  result: {}
+  result: {},
+  basedKey: "",
+  parentSelector: ""
 };
 
 export function transformStyle(
@@ -51,15 +58,17 @@ export function transformStyle(
   context = structuredClone(initTransformContext)
 ) {
   for (const [key, value] of Object.entries(style) as [
-    CSSRuleKey,
+    CSSRuleKey | "base",
     CSSRuleExistValue
   ][]) {
     if (isSelectorskey(key)) {
       for (const [selector, style] of Object.entries(value)) {
         transformComplexStyle(selector, style, context);
       }
-    } else if (isComplexKey(key)) {
+    } else if (isComplexKey(key) || key === "base") {
       transformComplexStyle(key, value, context);
+    } else if (isSimplePseudoSelectorKey(key)) {
+      transformComplexStyle(`&${replacePseudoSelectors(key)}`, value, context);
     } else if (isSimpleSelectorKey(key)) {
       transformComplexStyle(`&${key}`, value, context);
     } else if (isVarsKey(key)) {
@@ -99,12 +108,27 @@ function transformComplexStyle(
   value: CSSRuleExistValue,
   context: TransformContext
 ) {
-  insertResultValue(
-    "selectors",
-    key,
-    transformStyle(value as CSSRule),
-    context
-  );
+  if (isPropertyCondition(context)) {
+    if (key === "base") {
+      context.result[context.basedKey] = value;
+    } else {
+      insertResultValue(
+        "selectors",
+        key,
+        {
+          [context.basedKey]: value
+        },
+        context
+      );
+    }
+  } else {
+    insertResultValue(
+      "selectors",
+      key,
+      transformStyle(value as CSSRule),
+      context
+    );
+  }
 }
 
 function transformCSSVarStyle(
@@ -121,12 +145,21 @@ function transformRuleStyle(
   context: TransformContext
 ) {
   const { isToplevelRules, atRuleKey, atRuleNestedKey } = atRuleKeyInfo(key);
-  const transformed = transformStyle(value as CSSRule);
-  const ruleValue = isToplevelRules
-    ? {
-        [atRuleNestedKey]: transformed
-      }
-    : transformed;
+
+  const propertyCondition = isPropertyCondition(context);
+  const ruleValue: Record<string, StyleRule> = {};
+  if (isToplevelRules) {
+    ruleValue[atRuleNestedKey] = propertyCondition
+      ? { [context.basedKey]: value }
+      : transformStyle(value as CSSRule);
+  } else {
+    for (const [atRuleNestedKey, atRuleStyle] of Object.entries(value)) {
+      ruleValue[atRuleNestedKey] = propertyCondition
+        ? { [context.basedKey]: atRuleStyle }
+        : transformStyle(atRuleStyle);
+    }
+  }
+
   context.result[atRuleKey] = {
     ...(context.result[atRuleKey] ?? {}),
     ...ruleValue
@@ -140,16 +173,24 @@ function transformValueStyle(
 ) {
   const { isMergeToComma, isMergeToSpace, isMergeSymbol } = mergeKeyInfo(key);
 
-  const transformedValue =
-    typeof value === "object"
-      ? Array.isArray(value)
-        ? transformArrayValue(key, value, isMergeToComma, isMergeToSpace)
-        : transformObjectValue(key, value)
-      : transformCommonValue(value);
   const transformedKey = replacePseudoSelectors(
     isMergeSymbol ? removeMergeSymbol(key) : key
   );
-  context.result[transformedKey] = transformedValue as VanillaStyleRuleValue;
+
+  if (typeof value === "object") {
+    Array.isArray(value)
+      ? transformArrayValue(
+          key,
+          value,
+          isMergeToComma,
+          isMergeToSpace,
+          transformedKey,
+          context
+        )
+      : transformObjectValue(key, value, transformedKey, context);
+  } else {
+    context.result[transformedKey] = transformCommonValue(value);
+  }
 }
 
 // == Utils ====================================================================
@@ -157,8 +198,10 @@ function transformArrayValue<T>(
   key: string,
   values: T[],
   isMergeToComma: boolean,
-  isMergeToSpace: boolean
-): CSSRuleValue {
+  isMergeToSpace: boolean,
+  transformedKey: string,
+  context: TransformContext
+) {
   // Make to string
   const resolvedAnonymous = values.map((value) => {
     if (typeof value === "object") {
@@ -177,22 +220,33 @@ function transformArrayValue<T>(
       ? mergeToSpace(resolvedAnonymous as string[])
       : resolvedAnonymous;
 
-  return Array.isArray(transformed)
-    ? // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-      // @ts-ignore: error TS2590: Expression produces a union type that is too complex to represent
-      (transformed.map(transformCommonValue) as CSSRuleValue)
-    : transformed;
+  if (Array.isArray(transformed)) {
+    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+    // @ts-ignore: error ts2590: expression produces a union type that is too complex to represent
+    context.result[transformedKey] = transformed.map(transformCommonValue);
+  } else {
+    context.result[transformedKey] = transformed;
+  }
 }
 
 function transformArrayAnonymousValue(key: string, value: CSSRuleValue) {
   return typeof value === "object" ? transformAnonymous(key, value) : value;
 }
 
-function transformObjectValue(key: string, value: CSSRuleValue) {
+function transformObjectValue(
+  key: string,
+  value: CSSRuleValue,
+  transformedKey: string,
+  context: TransformContext
+) {
   const transformed = transformAnonymous(key, value);
-  return typeof transformed === "string"
-    ? transformed
-    : transformStyle(value as CSSRule);
+  if (typeof transformed === "string") {
+    context.result[transformedKey] = transformed;
+  } else {
+    context.basedKey = transformedKey;
+    transformStyle(value as CSSRule, context);
+    context.basedKey = "";
+  }
 }
 
 function transformAnonymous(key: string, value: CSSRuleValue) {
@@ -215,6 +269,10 @@ function transformCommonValue(value: CSSRuleValue) {
   return typeof value === "string"
     ? simplyImportant(replaceCSSVar(value))
     : value;
+}
+
+function isPropertyCondition(context: TransformContext) {
+  return context.basedKey !== "";
 }
 
 // == Tests ====================================================================
@@ -288,11 +346,51 @@ if (import.meta.vitest) {
           }
         })
       ).toStrictEqual({
-        ":hover": {
-          color: "red !important"
+        selectors: {
+          "&:hover": {
+            color: "red !important"
+          },
+          "&::-moz-selection": {
+            background: "blue"
+          }
+        }
+      } satisfies StyleRule);
+    });
+
+    it("Property conditions", () => {
+      expect(
+        transformStyle({
+          background: {
+            base: "red",
+            _hover: "green",
+            "[disabled]": "blue",
+            "nav li > &": "black",
+            "@media (prefers-color-scheme: dark)": "white",
+            "@media": {
+              "screen and (min-width: 768px)": "grey"
+            }
+          }
+        })
+      ).toStrictEqual({
+        background: "red",
+        selectors: {
+          "&:hover": {
+            background: "green"
+          },
+          "&[disabled]": {
+            background: "blue"
+          },
+          "nav li > &": {
+            background: "black"
+          }
         },
-        "::-moz-selection": {
-          background: "blue"
+        "@media": {
+          "(prefers-color-scheme: dark)": {
+            background: "white"
+          },
+          "screen and (min-width: 768px)": {
+            background: "grey"
+          }
         }
       } satisfies StyleRule);
     });
@@ -326,9 +424,11 @@ if (import.meta.vitest) {
         })
       ).toStrictEqual({
         color: "var(--my-css-variable)",
-        ":hover": {
-          padding: "calc(var(--my-css-variable2) - 1px)",
-          margin: "calc(var(--my-css-variable3) - 1px)"
+        selectors: {
+          "&:hover": {
+            padding: "calc(var(--my-css-variable2) - 1px)",
+            margin: "calc(var(--my-css-variable3) - 1px)"
+          }
         }
       } satisfies StyleRule);
 
@@ -342,10 +442,12 @@ if (import.meta.vitest) {
         })
       ).toStrictEqual({
         color: "var(--my-css-variable, red)",
-        ":hover": {
-          // padding:
-          //   "calc(var(--my-css-variable2, var(--my-css-variable3, 5px)) - 1px)",
-          margin: "calc(var(--my-css-variable4) - 1px)"
+        selectors: {
+          "&:hover": {
+            // padding:
+            //   "calc(var(--my-css-variable2, var(--my-css-variable3, 5px)) - 1px)",
+            margin: "calc(var(--my-css-variable4) - 1px)"
+          }
         }
       } satisfies StyleRule);
     });
