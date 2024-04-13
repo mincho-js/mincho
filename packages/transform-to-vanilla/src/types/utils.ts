@@ -127,5 +127,24 @@ if (import.meta.vitest) {
         b?: boolean;
       }>();
     });
+
+    it("Spread<[T, U]>", () => {
+      expectTypeOf<
+        Spread<[{ a: number; b: boolean }, { a: string | boolean }]>
+      >().toEqualTypeOf<{
+        a: string | boolean;
+        b: boolean;
+      }>();
+      expectTypeOf<
+        Spread<
+          [{ a: { b: number; c: boolean } }, { a: { b: string | boolean } }]
+        >
+      >().toEqualTypeOf<{
+        a: { b: string | boolean };
+      }>();
+      expectTypeOf<
+        Spread<[{ a: number; b: boolean }, { a: { b: string } }]>
+      >().toEqualTypeOf<{ a: { b: string }; b: boolean }>();
+    });
   });
 }

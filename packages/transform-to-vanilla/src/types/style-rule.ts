@@ -459,5 +459,49 @@ if (import.meta.vitest) {
         }
       });
     });
+
+    it("Complex Nested Properties & Selectors & AtRules", () => {
+      // It's a just test sample.
+      // In practice, don't write code like this.
+      assertType<CSSRule>({
+        "&:hover:not(:active)": {
+          // Anonymous AtRules
+          animationName: {
+            from: {
+              opacity: 0,
+
+              // Nested properties
+              background: {
+                Color: {
+                  // Property conditions
+                  base: "red",
+                  _hover: "green",
+
+                  // Nested at rules
+                  "@media (prefers-color-scheme: dark)": {
+                    "@media (prefers-reduced-motion)": "blue",
+                    "@media (min-width: 900px)": "yellow",
+
+                    "@layer framework": {
+                      "@layer": {
+                        layout: "black",
+                        utilities: {
+                          base: "white",
+                          _hover: "grey"
+                        }
+                      }
+                    }
+                  }
+                },
+                Image: "none"
+              }
+            },
+            to: {
+              opacity: 1
+            }
+          }
+        }
+      });
+    });
   });
 }
