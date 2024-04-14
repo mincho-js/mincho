@@ -1,3 +1,4 @@
+import deepmerge from "@fastify/deepmerge";
 import {
   isSimplePseudoSelectorKey,
   replacePseudoSelectors
@@ -32,6 +33,8 @@ import type {
   CSSRuleValue,
   VanillaStyleRuleValue
 } from "@/types/style-rule";
+
+const mergeObject = deepmerge();
 
 // == Interface ================================================================
 type StyleResult = {
@@ -103,7 +106,10 @@ function insertResultValue(
   if (context.result[accessKey] === undefined) {
     context.result[accessKey] = {};
   }
-  (context.result[accessKey] as Record<string, unknown>)[key] = value;
+  (context.result[accessKey] as Record<string, unknown>)[key] = mergeObject(
+    (context.result[accessKey] as Record<string, unknown>)?.[key] ?? {},
+    value
+  );
 }
 
 function transformComplexStyle(
@@ -129,9 +135,11 @@ function transformPropertyNested(
   context: TransformContext
 ) {
   if (isUppercase(key)) {
-    context.result[context.basedKey + key] = value;
+    // context.result[context.basedKey + key] = value;
+    transformValueStyle(context.basedKey + key, value, context);
   } else if (key === "base") {
-    context.result[context.basedKey] = value;
+    // context.result[context.basedKey] = value;
+    transformValueStyle(context.basedKey, value, context);
   } else {
     insertResultValue(
       "selectors",
@@ -159,28 +167,40 @@ function transformRuleStyle(
 ) {
   const { isToplevelRules, atRuleKey, atRuleNestedKey } = atRuleKeyInfo(key);
 
-  const propertyCondition = isPropertyNested(context);
   const ruleValue: Record<string, StyleRule> = {};
   if (isToplevelRules) {
-    ruleValue[atRuleNestedKey] = propertyCondition
-      ? { [context.basedKey]: value }
-      : transformStyle(value as CSSRule);
+    createRuleValue(ruleValue, atRuleNestedKey, value, context);
   } else {
     for (const [atRuleNestedKey, atRuleStyle] of Object.entries(value)) {
-      ruleValue[atRuleNestedKey] = propertyCondition
-        ? { [context.basedKey]: atRuleStyle }
-        : transformStyle(atRuleStyle);
+      createRuleValue(ruleValue, atRuleNestedKey, atRuleStyle, context);
     }
   }
 
-  context.result[atRuleKey] = {
-    ...(context.result[atRuleKey] ?? {}),
-    ...ruleValue
+  context.result[atRuleKey] = mergeObject(
+    context.result[atRuleKey] ?? {},
+    ruleValue
+  );
+}
+function createRuleValue(
+  ruleValue: Record<string, unknown>,
+  key: string,
+  value: CSSRuleExistValue,
+  context: TransformContext
+) {
+  const otherContext = createOtherContext(context);
+  transformValueStyle(context.basedKey, value, otherContext);
+  ruleValue[key] = otherContext.result;
+}
+function createOtherContext(context: TransformContext) {
+  const otherContext = {
+    ...context,
+    result: {}
   };
+  return otherContext;
 }
 
 function transformValueStyle(
-  key: CSSRuleKey,
+  key: CSSRuleKey | string,
   value: CSSRuleExistValue,
   context: TransformContext
 ) {
@@ -256,9 +276,7 @@ function transformObjectValue(
   if (typeof transformed === "string") {
     context.result[transformedKey] = transformed;
   } else {
-    context.basedKey = transformedKey;
-    transformStyle(value as CSSRule, context);
-    context.basedKey = "";
+    transformStyle(value as CSSRule, { ...context, basedKey: transformedKey });
   }
 }
 
@@ -621,6 +639,117 @@ if (import.meta.vitest) {
       });
       expect(anonymous.animationName).toBeTypeOf("string");
       expect(anonymous.fontFamily).toBeTypeOf("string");
+    });
+  });
+
+  describe.concurrent("Complex transform", () => {
+    it("Nested properties", () => {
+      expect(
+        transformStyle({
+          "@media": {
+            "screen and (min-width: 768px)": {
+              _hover: {
+                padding: {
+                  BlockEnd: 3,
+                  Right: "20px"
+                }
+              },
+              "@supports (display: grid)": {
+                background: {
+                  Color: "red",
+                  Image: "none"
+                }
+              }
+            }
+          }
+        })
+      ).toStrictEqual({
+        "@media": {
+          "screen and (min-width: 768px)": {
+            selectors: {
+              "&:hover": {
+                paddingBlockEnd: 3,
+                paddingRight: "20px"
+              }
+            },
+            "@supports": {
+              "(display: grid)": {
+                backgroundColor: "red",
+                backgroundImage: "none"
+              }
+            }
+          }
+        }
+      } satisfies StyleRule);
+    });
+
+    it("Property conditions", () => {
+      expect(
+        transformStyle({
+          "@supports (display: grid)": {
+            background: {
+              base: "red",
+              _hover: "green",
+              "[disabled]": "blue",
+              "nav li > &": "black",
+              "@media (prefers-color-scheme: dark)": "white",
+              "@media": {
+                "screen and (min-width: 768px)": "grey"
+              },
+
+              // With Nested property
+              Color: {
+                base: "transparent",
+                _hover: "Highlight",
+                "@media (prefers-reduced-motion)": "MenuText"
+              },
+              "@media (prefers-reduced-motion)": {
+                Image: {
+                  base: "none",
+                  _hover: "unset"
+                }
+              }
+            }
+          }
+        })
+      ).toStrictEqual({
+        "@supports": {
+          "(display: grid)": {
+            background: "red",
+            backgroundColor: "transparent",
+            selectors: {
+              "&:hover": {
+                background: "green",
+                backgroundColor: "Highlight"
+              },
+              "&[disabled]": {
+                background: "blue"
+              },
+              "nav li > &": {
+                background: "black"
+              }
+            },
+            "@media": {
+              "(prefers-color-scheme: dark)": {
+                background: "white"
+              },
+              "screen and (min-width: 768px)": {
+                background: "grey"
+              },
+              "(prefers-reduced-motion)": {
+                backgroundColor: "MenuText",
+
+                backgroundImage: "none",
+                selectors: {
+                  "&:hover": {
+                    backgroundImage: "unset"
+                  }
+                }
+              }
+            }
+          }
+        }
+      } satisfies StyleRule);
     });
   });
 }
