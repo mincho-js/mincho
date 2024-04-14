@@ -8,3 +8,8 @@ export function convertToCSSVar(cssVar: string) {
   const kebabCase = camelToKebab(without$);
   return `--${kebabCase}`;
 }
+
+export function isUppercase(str: string) {
+  const firstLetter = str.charCodeAt(0);
+  return firstLetter >= 65 && firstLetter <= 90;
+}

@@ -22,6 +22,7 @@ import {
 import { removeMergeSymbol, mergeKeyInfo } from "@/transform-keys/merge-key";
 import { mergeToComma, mergeToSpace } from "@/transform-values/merge-values";
 import { simplyImportant } from "@/transform-values/simply-important";
+import { isUppercase } from "@/utils/string";
 import { keyframes, fontFace } from "@vanilla-extract/css";
 import { setFileScope } from "@vanilla-extract/css/fileScope";
 import type { StyleRule } from "@vanilla-extract/css";
@@ -58,14 +59,14 @@ export function transformStyle(
   context = structuredClone(initTransformContext)
 ) {
   for (const [key, value] of Object.entries(style) as [
-    CSSRuleKey | "base",
+    CSSRuleKey,
     CSSRuleExistValue
   ][]) {
     if (isSelectorskey(key)) {
       for (const [selector, style] of Object.entries(value)) {
         transformComplexStyle(selector, style, context);
       }
-    } else if (isComplexKey(key) || key === "base") {
+    } else if (isComplexKey(key)) {
       transformComplexStyle(key, value, context);
     } else if (isSimplePseudoSelectorKey(key)) {
       transformComplexStyle(`&${replacePseudoSelectors(key)}`, value, context);
@@ -84,6 +85,8 @@ export function transformStyle(
       transformCSSVarStyle(key, value, context);
     } else if (isRuleKey(key)) {
       transformRuleStyle(key, value, context);
+    } else if (isPropertyNested(context)) {
+      transformPropertyNested(key, value, context);
     } else {
       transformValueStyle(key, value, context);
     }
@@ -108,24 +111,34 @@ function transformComplexStyle(
   value: CSSRuleExistValue,
   context: TransformContext
 ) {
-  if (isPropertyCondition(context)) {
-    if (key === "base") {
-      context.result[context.basedKey] = value;
-    } else {
-      insertResultValue(
-        "selectors",
-        key,
-        {
-          [context.basedKey]: value
-        },
-        context
-      );
-    }
+  if (isPropertyNested(context)) {
+    transformPropertyNested(key, value, context);
   } else {
     insertResultValue(
       "selectors",
       key,
       transformStyle(value as CSSRule),
+      context
+    );
+  }
+}
+
+function transformPropertyNested(
+  key: string,
+  value: CSSRuleExistValue,
+  context: TransformContext
+) {
+  if (isUppercase(key)) {
+    context.result[context.basedKey + key] = value;
+  } else if (key === "base") {
+    context.result[context.basedKey] = value;
+  } else {
+    insertResultValue(
+      "selectors",
+      key,
+      {
+        [context.basedKey]: value
+      },
       context
     );
   }
@@ -146,7 +159,7 @@ function transformRuleStyle(
 ) {
   const { isToplevelRules, atRuleKey, atRuleNestedKey } = atRuleKeyInfo(key);
 
-  const propertyCondition = isPropertyCondition(context);
+  const propertyCondition = isPropertyNested(context);
   const ruleValue: Record<string, StyleRule> = {};
   if (isToplevelRules) {
     ruleValue[atRuleNestedKey] = propertyCondition
@@ -271,7 +284,7 @@ function transformCommonValue(value: CSSRuleValue) {
     : value;
 }
 
-function isPropertyCondition(context: TransformContext) {
+function isPropertyNested(context: TransformContext) {
   return context.basedKey !== "";
 }
 
@@ -354,6 +367,26 @@ if (import.meta.vitest) {
             background: "blue"
           }
         }
+      } satisfies StyleRule);
+    });
+
+    it("Nested properties", () => {
+      expect(
+        transformStyle({
+          padding: {
+            BlockEnd: 3,
+            Right: "20px"
+          },
+          background: {
+            Color: "red",
+            Image: "none"
+          }
+        })
+      ).toStrictEqual({
+        paddingBlockEnd: 3,
+        paddingRight: "20px",
+        backgroundColor: "red",
+        backgroundImage: "none"
       } satisfies StyleRule);
     });
 
