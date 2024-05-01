@@ -6,7 +6,8 @@ import {
 import {
   isSelectorskey,
   isComplexKey,
-  isSimpleSelectorKey
+  isSimpleSelectorKey,
+  nestedSelectorKey
 } from "@/transform-keys/complex-selectors";
 import {
   isVarsKey,
@@ -46,7 +47,7 @@ type StyleResult = {
 };
 type CSSRuleExistValue = Exclude<CSSRuleValue, undefined>;
 
-interface TransformContext {
+export interface TransformContext {
   result: StyleResult;
   basedKey: string;
   parentSelector: string;
@@ -97,19 +98,31 @@ export function transformStyle(
   return context.result as StyleRule;
 }
 
+type AccessedResult = Record<string, unknown>;
 function insertResultValue(
   accessKey: string,
   key: string,
-  value: unknown,
+  value: NonNullable<unknown>,
   context: TransformContext
 ) {
   if (context.result[accessKey] === undefined) {
     context.result[accessKey] = {};
   }
-  (context.result[accessKey] as Record<string, unknown>)[key] = mergeObject(
-    (context.result[accessKey] as Record<string, unknown>)?.[key] ?? {},
-    value
-  );
+
+  if (typeof value === "object" && accessKey in value) {
+    const mapValue = new Map(Object.entries(value));
+    mapValue.delete(accessKey);
+
+    context.result[accessKey] = mergeObject(context.result[accessKey], {
+      [key]: Object.fromEntries(mapValue),
+      ...(value as Record<string, object>)[accessKey]
+    });
+  } else {
+    (context.result[accessKey] as AccessedResult)[key] = mergeObject(
+      (context.result[accessKey] as AccessedResult)?.[key] ?? {},
+      value
+    );
+  }
 }
 
 function transformComplexStyle(
@@ -120,10 +133,18 @@ function transformComplexStyle(
   if (isPropertyNested(context)) {
     transformPropertyNested(key, value, context);
   } else {
+    const selector = isNestedSelector(context)
+      ? nestedSelectorKey(key, context)
+      : key;
+
     insertResultValue(
       "selectors",
-      key,
-      transformStyle(value as CSSRule),
+      selector,
+      transformStyle(value as CSSRule, {
+        ...context,
+        result: {},
+        parentSelector: selector
+      }),
       context
     );
   }
@@ -304,6 +325,10 @@ function transformCommonValue(value: CSSRuleValue) {
 
 function isPropertyNested(context: TransformContext) {
   return context.basedKey !== "";
+}
+
+function isNestedSelector(context: TransformContext) {
+  return context.parentSelector !== "";
 }
 
 // == Tests ====================================================================
@@ -503,7 +528,7 @@ if (import.meta.vitest) {
       } satisfies StyleRule);
     });
 
-    it("Simple selector", () => {
+    it("Simply toplevel selector", () => {
       expect(
         transformStyle({
           ":hover:active": {
@@ -556,6 +581,40 @@ if (import.meta.vitest) {
           },
           "a:nth-of-type(2) &": {
             opacity: 1
+          }
+        }
+      } satisfies StyleRule);
+    });
+
+    it("Nested selectors", () => {
+      expect(
+        transformStyle({
+          "nav li > &": {
+            color: "red",
+            _hover: {
+              color: "green"
+            },
+            "&:hover:not(:active)": {
+              color: "blue"
+            },
+            ":root[dir=rtl] &": {
+              color: "black"
+            }
+          }
+        })
+      ).toStrictEqual({
+        selectors: {
+          "nav li > &": {
+            color: "red"
+          },
+          "nav li > &:hover": {
+            color: "green"
+          },
+          "nav li > &:hover:not(:active)": {
+            color: "blue"
+          },
+          ":root[dir=rtl] nav li > &": {
+            color: "black"
           }
         }
       } satisfies StyleRule);

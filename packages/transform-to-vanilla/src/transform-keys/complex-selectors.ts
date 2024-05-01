@@ -1,3 +1,5 @@
+import type { TransformContext } from "../transform-object/index";
+
 export function isSelectorskey(key: string) {
   return key === "selectors";
 }
@@ -8,6 +10,10 @@ export function isComplexKey(key: string) {
 
 export function isSimpleSelectorKey(key: string) {
   return key.startsWith("[") || key.startsWith(":");
+}
+
+export function nestedSelectorKey(key: string, context: TransformContext) {
+  return key.replaceAll("&", context.parentSelector);
 }
 
 // == Tests ====================================================================
@@ -33,6 +39,21 @@ if (import.meta.vitest) {
         isSimpleSelectorKey(`[href^="https://"][href$=".org"]`)
       ).toBeTruthy();
       expect(isSimpleSelectorKey(":hover:active")).toBeTruthy();
+    });
+
+    it("Nested Selector", () => {
+      const context: TransformContext = {
+        result: {},
+        basedKey: "",
+        parentSelector: "nav li > &"
+      };
+      expect(nestedSelectorKey("&:hover", context)).toBe("nav li > &:hover");
+      expect(nestedSelectorKey("&:hover:not(:active)", context)).toBe(
+        "nav li > &:hover:not(:active)"
+      );
+      expect(nestedSelectorKey(":root[dir=rtl] &", context)).toBe(
+        ":root[dir=rtl] nav li > &"
+      );
     });
   });
 }

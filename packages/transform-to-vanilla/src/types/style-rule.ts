@@ -392,6 +392,23 @@ if (import.meta.vitest) {
       });
     });
 
+    it("Nested selectors", () => {
+      assertType<CSSRule>({
+        "nav li > &": {
+          color: "red",
+          _hover: {
+            color: "green"
+          },
+          "&:hover:not(:active)": {
+            color: "blue"
+          },
+          ":root[dir=rtl] &": {
+            color: "black"
+          }
+        }
+      });
+    });
+
     it("AtRules", () => {
       assertType<CSSRule>({
         // Toplevel rules
