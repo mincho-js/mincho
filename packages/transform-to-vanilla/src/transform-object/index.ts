@@ -135,21 +135,20 @@ function transformComplexStyle(
     : key;
 
   if (isPropertyNested(context)) {
-    if (typeof value === "object") {
+    if (typeof value === "object" && !Array.isArray(value)) {
       const nestedContext = {
         ...context,
         basedKey: ""
       };
       Object.entries(value).forEach(([key, value]) => {
-        insertSelectorResult(
-          selector,
-          {
-            [key]: {
-              [context.basedKey]: value
-            }
-          },
-          nestedContext
-        );
+        const nestedValue = isUppercase(key)
+          ? { [context.basedKey + key]: value }
+          : {
+              [key]: {
+                [context.basedKey]: value
+              }
+            };
+        insertSelectorResult(selector, nestedValue, nestedContext);
       });
     } else {
       insertSelectorResult(
@@ -456,6 +455,24 @@ if (import.meta.vitest) {
         backgroundColor: "red",
         backgroundImage: "none"
       } satisfies StyleRule);
+
+      expect(
+        transformStyle({
+          background: {
+            Color: [
+              "#b32323",
+              "color(display-p3 .643308 .192455 .167712)",
+              "lab(40% 56.6 39)"
+            ]
+          }
+        })
+      ).toStrictEqual({
+        backgroundColor: [
+          "#b32323",
+          "color(display-p3 .643308 .192455 .167712)",
+          "lab(40% 56.6 39)"
+        ]
+      } satisfies StyleRule);
     });
 
     it("Property conditions", () => {
@@ -491,6 +508,50 @@ if (import.meta.vitest) {
           },
           "screen and (min-width: 768px)": {
             background: "grey"
+          }
+        }
+      } satisfies StyleRule);
+
+      expect(
+        transformStyle({
+          background: {
+            _hover: {
+              base: [
+                "#706a43",
+                "color-mix(in hsl, hsl(120deg 10% 20%) 25%, hsl(30deg 30% 40%))"
+              ],
+              Color: [
+                "#b32323",
+                "color(display-p3 .643308 .192455 .167712)",
+                "lab(40% 56.6 39)"
+              ]
+            },
+            "nav > &": {
+              Color: {
+                base: ["#6a805d", "color(a98-rgb .44091 .49971 .37408)"],
+                __after: ["#00c4ff", "hwb(194 0% 0%)"]
+              }
+            }
+          }
+        })
+      ).toStrictEqual({
+        selectors: {
+          "&:hover": {
+            background: [
+              "#706a43",
+              "color-mix(in hsl, hsl(120deg 10% 20%) 25%, hsl(30deg 30% 40%))"
+            ],
+            backgroundColor: [
+              "#b32323",
+              "color(display-p3 .643308 .192455 .167712)",
+              "lab(40% 56.6 39)"
+            ]
+          },
+          "nav > &": {
+            backgroundColor: ["#6a805d", "color(a98-rgb .44091 .49971 .37408)"]
+          },
+          "nav > &::after": {
+            backgroundColor: ["#00c4ff", "hwb(194 0% 0%)"]
           }
         }
       } satisfies StyleRule);
@@ -793,13 +854,15 @@ if (import.meta.vitest) {
               _hover: {
                 padding: {
                   BlockEnd: 3,
-                  Right: "20px"
+                  Right: "20px",
+                  InlineEnd: ["16px", "1rem"]
                 }
               },
               "@supports (display: grid)": {
                 background: {
                   Color: "red",
-                  Image: "none"
+                  Image: "none",
+                  Clip: ["initial", "-moz-initial"]
                 }
               }
             }
@@ -811,13 +874,15 @@ if (import.meta.vitest) {
             selectors: {
               "&:hover": {
                 paddingBlockEnd: 3,
-                paddingRight: "20px"
+                paddingRight: "20px",
+                paddingInlineEnd: ["16px", "1rem"]
               }
             },
             "@supports": {
               "(display: grid)": {
                 backgroundColor: "red",
-                backgroundImage: "none"
+                backgroundImage: "none",
+                backgroundClip: ["initial", "-moz-initial"]
               }
             }
           }
@@ -836,7 +901,7 @@ if (import.meta.vitest) {
               "nav li > &": "black",
               "@media (prefers-color-scheme: dark)": "white",
               "@media": {
-                "screen and (min-width: 768px)": "grey"
+                "screen and (min-width: 768px)": ["#00c4ff", "hwb(194 0% 0%)"]
               },
 
               // With Nested property
@@ -847,8 +912,8 @@ if (import.meta.vitest) {
               },
               "@media (prefers-reduced-motion)": {
                 Image: {
-                  base: "none",
-                  _hover: "unset"
+                  base: ["none", "-moz-initial"],
+                  _hover: ["unset", "-moz-initial"]
                 }
               }
             }
@@ -876,15 +941,15 @@ if (import.meta.vitest) {
                 background: "white"
               },
               "screen and (min-width: 768px)": {
-                background: "grey"
+                background: ["#00c4ff", "hwb(194 0% 0%)"]
               },
               "(prefers-reduced-motion)": {
                 backgroundColor: "MenuText",
 
-                backgroundImage: "none",
+                backgroundImage: ["none", "-moz-initial"],
                 selectors: {
                   "&:hover": {
-                    backgroundImage: "unset"
+                    backgroundImage: ["unset", "-moz-initial"]
                   }
                 }
               }
