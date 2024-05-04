@@ -114,7 +114,7 @@ function insertResultValue(
     mapValue.delete(accessKey);
 
     context.result[accessKey] = mergeObject(context.result[accessKey], {
-      [key]: Object.fromEntries(mapValue),
+      ...(mapValue.size > 0 ? { [key]: Object.fromEntries(mapValue) } : {}),
       ...(value as Record<string, object>)[accessKey]
     });
   } else {
@@ -130,24 +130,56 @@ function transformComplexStyle(
   value: CSSRuleExistValue,
   context: TransformContext
 ) {
-  if (isPropertyNested(context)) {
-    transformPropertyNested(key, value, context);
-  } else {
-    const selector = isNestedSelector(context)
-      ? nestedSelectorKey(key, context)
-      : key;
+  const selector = isNestedSelector(context)
+    ? nestedSelectorKey(key, context)
+    : key;
 
-    insertResultValue(
-      "selectors",
-      selector,
-      transformStyle(value as CSSRule, {
+  if (isPropertyNested(context)) {
+    if (typeof value === "object") {
+      const nestedContext = {
         ...context,
-        result: {},
-        parentSelector: selector
-      }),
-      context
-    );
+        basedKey: ""
+      };
+      Object.entries(value).forEach(([key, value]) => {
+        insertSelectorResult(
+          selector,
+          {
+            [key]: {
+              [context.basedKey]: value
+            }
+          },
+          nestedContext
+        );
+      });
+    } else {
+      insertSelectorResult(
+        selector,
+        {
+          [context.basedKey]: value
+        },
+        context
+      );
+    }
+  } else {
+    insertSelectorResult(selector, value, context);
   }
+}
+
+function insertSelectorResult(
+  selector: string,
+  value: CSSRuleExistValue,
+  context: TransformContext
+) {
+  insertResultValue(
+    "selectors",
+    selector,
+    transformStyle(value as CSSRule, {
+      ...context,
+      result: {},
+      parentSelector: selector
+    }),
+    context
+  );
 }
 
 function transformPropertyNested(
@@ -162,14 +194,7 @@ function transformPropertyNested(
     // context.result[context.basedKey] = value;
     transformValueStyle(context.basedKey, value, context);
   } else {
-    insertResultValue(
-      "selectors",
-      key,
-      {
-        [context.basedKey]: value
-      },
-      context
-    );
+    transformValueStyle(key, value, context);
   }
 }
 
@@ -614,6 +639,64 @@ if (import.meta.vitest) {
             color: "blue"
           },
           ":root[dir=rtl] nav li > &": {
+            color: "black"
+          }
+        }
+      } satisfies StyleRule);
+
+      expect(
+        transformStyle({
+          _hover: {
+            _active: {
+              color: "red",
+              "& li": {
+                color: "green"
+              },
+              "li > &": {
+                color: "blue"
+              }
+            }
+          }
+        })
+      ).toStrictEqual({
+        selectors: {
+          "&:hover:active": {
+            color: "red"
+          },
+          "&:hover:active li": {
+            color: "green"
+          },
+          "li > &:hover:active": {
+            color: "blue"
+          }
+        }
+      } satisfies StyleRule);
+
+      expect(
+        transformStyle({
+          _hover: {
+            color: {
+              base: "red",
+              __before: "green",
+              _focus: {
+                __after: "blue",
+                "nav > &": "black"
+              }
+            }
+          }
+        })
+      ).toStrictEqual({
+        selectors: {
+          "&:hover": {
+            color: "red"
+          },
+          "&:hover::before": {
+            color: "green"
+          },
+          "&:hover:focus::after": {
+            color: "blue"
+          },
+          "nav > &:hover:focus": {
             color: "black"
           }
         }
