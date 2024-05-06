@@ -180,7 +180,7 @@ type PseudoSelectorMap<StyleType> = {
 };
 
 // -- At Rules ----------------------------------------------------------------
-type AtRulesKeywords = "media" | "supports" | "container" | "layer";
+export type AtRulesKeywords = "media" | "supports" | "container" | "layer";
 interface AtRules<StyleType>
   extends NestedAtRules<StyleType>,
     TopLevelAtRules<StyleType> {}

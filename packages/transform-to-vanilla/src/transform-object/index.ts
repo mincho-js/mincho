@@ -19,7 +19,8 @@ import { replaceCSSVar } from "@/transform-values/css-var";
 import {
   isRuleKey,
   atRuleKeyInfo,
-  anonymousKeyInfo
+  anonymousKeyInfo,
+  atRuleKeyMerge
 } from "@/transform-keys/at-rules";
 import { removeMergeSymbol, mergeKeyInfo } from "@/transform-keys/merge-key";
 import { mergeToComma, mergeToSpace } from "@/transform-values/merge-values";
@@ -32,7 +33,8 @@ import type {
   CSSRule,
   CSSRuleKey,
   CSSRuleValue,
-  VanillaStyleRuleValue
+  VanillaStyleRuleValue,
+  AtRulesKeywords
 } from "@/types/style-rule";
 
 const mergeObject = deepmerge();
@@ -47,15 +49,25 @@ type StyleResult = {
 };
 type CSSRuleExistValue = Exclude<CSSRuleValue, undefined>;
 
+export type AtRulesPrefix = `@${AtRulesKeywords}`;
 export interface TransformContext {
   result: StyleResult;
   basedKey: string;
   parentSelector: string;
+  parentAtRules: {
+    [key in AtRulesPrefix]: string;
+  };
 }
-const initTransformContext: TransformContext = {
+export const initTransformContext: TransformContext = {
   result: {},
   basedKey: "",
-  parentSelector: ""
+  parentSelector: "",
+  parentAtRules: {
+    "@media": "",
+    "@supports": "",
+    "@container": "",
+    "@layer": ""
+  }
 };
 
 export function transformStyle(
@@ -214,10 +226,16 @@ function transformRuleStyle(
 
   const ruleValue: Record<string, StyleRule> = {};
   if (isToplevelRules) {
-    createRuleValue(ruleValue, atRuleNestedKey, value, context);
+    createRuleValue(ruleValue, atRuleKey, atRuleNestedKey, value, context);
   } else {
     for (const [atRuleNestedKey, atRuleStyle] of Object.entries(value)) {
-      createRuleValue(ruleValue, atRuleNestedKey, atRuleStyle, context);
+      createRuleValue(
+        ruleValue,
+        atRuleKey,
+        atRuleNestedKey,
+        atRuleStyle,
+        context
+      );
     }
   }
 
@@ -228,20 +246,46 @@ function transformRuleStyle(
 }
 function createRuleValue(
   ruleValue: Record<string, unknown>,
-  key: string,
+  atRuleKey: string,
+  atRuleNestedKey: string,
   value: CSSRuleExistValue,
   context: TransformContext
 ) {
-  const otherContext = createOtherContext(context);
-  transformValueStyle(context.basedKey, value, otherContext);
-  ruleValue[key] = otherContext.result;
-}
-function createOtherContext(context: TransformContext) {
-  const otherContext = {
+  const mergedAtRuleKey = atRuleKeyMerge(
+    atRuleKey,
+    context.parentAtRules[atRuleKey as AtRulesPrefix],
+    atRuleNestedKey
+  );
+  const otherContext: TransformContext = {
     ...context,
-    result: {}
+    result: {},
+    parentAtRules: {
+      ...context.parentAtRules,
+      [atRuleKey]: mergedAtRuleKey
+    }
   };
-  return otherContext;
+
+  transformValueStyle(context.basedKey, value, otherContext);
+
+  const atRuleResult = otherContext.result;
+  if (atRuleKey in atRuleResult) {
+    const mapValue = new Map(Object.entries(atRuleResult));
+    mapValue.delete(atRuleKey);
+
+    if (mapValue.size > 0) {
+      ruleValue[mergedAtRuleKey] = Object.fromEntries(mapValue);
+    }
+    Object.entries(atRuleResult[atRuleKey] as Record<string, unknown>).forEach(
+      ([key, value]) => {
+        ruleValue[key] = mergeObject(ruleValue?.[key] ?? {}, value);
+      }
+    );
+  } else {
+    ruleValue[mergedAtRuleKey] = mergeObject(
+      ruleValue?.[mergedAtRuleKey] ?? {},
+      atRuleResult
+    );
+  }
 }
 
 function transformValueStyle(
@@ -803,6 +847,54 @@ if (import.meta.vitest) {
         "@supports": {
           "(display: grid)": {
             display: "grid"
+          }
+        }
+      } satisfies StyleRule);
+    });
+
+    it("Nested AtRules", () => {
+      expect(
+        transformStyle({
+          "@media (prefers-color-scheme: dark)": {
+            color: "red",
+            "@media (min-width: 768px)": {
+              color: {
+                base: "green",
+                "@media": {
+                  print: "blue"
+                }
+              }
+            }
+          },
+          "@layer framework": {
+            "@layer": {
+              layout: {
+                color: "black"
+              },
+              utilities: {
+                color: "white"
+              }
+            }
+          }
+        })
+      ).toStrictEqual({
+        "@media": {
+          "(prefers-color-scheme: dark)": {
+            color: "red"
+          },
+          "(prefers-color-scheme: dark) and (min-width: 768px)": {
+            color: "green"
+          },
+          "(prefers-color-scheme: dark) and (min-width: 768px) and print": {
+            color: "blue"
+          }
+        },
+        "@layer": {
+          "framework.layout": {
+            color: "black"
+          },
+          "framework.utilities": {
+            color: "white"
           }
         }
       } satisfies StyleRule);

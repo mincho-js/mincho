@@ -1,3 +1,6 @@
+import type { AtRulesPrefix } from "../transform-object/index";
+import type { NonNullableString } from "../types/string";
+
 export function isRuleKey(key: string) {
   return key.startsWith("@");
 }
@@ -31,6 +34,34 @@ function isAnonymousSymbol(anonymousKey: string, keyStr: string) {
     keyStr === `${anonymousKey}$` ||
     keyStr === `${anonymousKey}_`
   );
+}
+
+export function atRuleKeyMerge(
+  atRule: AtRulesPrefix | NonNullableString,
+  firstKey: string,
+  secondKey: string
+) {
+  if (firstKey === "") {
+    return secondKey;
+  }
+
+  switch (atRule) {
+    case "@layer":
+      return atRuleKeyMergeByDot(firstKey, secondKey);
+    default:
+      return atRuleKeyMergeByAnd(firstKey, secondKey);
+  }
+}
+
+function atRuleKeyMergeByAnd(firstKey: string, secondKey: string) {
+  if (firstKey === "not") {
+    return `not(${secondKey})`;
+  }
+  return `${firstKey} and ${secondKey}`;
+}
+
+function atRuleKeyMergeByDot(firstKey: string, secondKey: string) {
+  return `${firstKey}.${secondKey}`;
 }
 
 // == Tests ====================================================================
@@ -100,6 +131,63 @@ if (import.meta.vitest) {
         isFontFamily: true,
         isAnonymousSymbol: true
       });
+    });
+
+    it("Nested Rule Key", () => {
+      // Media
+      expect(
+        atRuleKeyMerge(
+          "@media",
+          "(prefers-color-scheme: dark)",
+          "(prefers-reduced-motion)"
+        )
+      ).toBe("(prefers-color-scheme: dark) and (prefers-reduced-motion)");
+
+      // Supports
+      expect(
+        atRuleKeyMerge(
+          "@supports",
+          "selector(h2 > p)",
+          "font-tech(color-COLRv1)"
+        )
+      ).toBe("selector(h2 > p) and font-tech(color-COLRv1)");
+
+      // Container
+      expect(
+        atRuleKeyMerge("@container", "(width > 400px)", "(height > 400px)")
+      ).toBe("(width > 400px) and (height > 400px)");
+
+      // Layer
+      expect(atRuleKeyMerge("@layer", "framework", "layout")).toBe(
+        "framework.layout"
+      );
+
+      // With empty
+      expect(
+        atRuleKeyMerge(
+          "@media",
+          "",
+          "(prefers-color-scheme: dark) and (prefers-reduced-motion)"
+        )
+      ).toBe("(prefers-color-scheme: dark) and (prefers-reduced-motion)");
+
+      // Not
+      expect(
+        atRuleKeyMerge(
+          "@media",
+          "not",
+          "(prefers-color-scheme: dark) and (prefers-reduced-motion)"
+        )
+      ).toBe("not((prefers-color-scheme: dark) and (prefers-reduced-motion))");
+      expect(
+        atRuleKeyMerge(
+          "@media",
+          "not all",
+          "(prefers-color-scheme: dark) and (prefers-reduced-motion)"
+        )
+      ).toBe(
+        "not all and (prefers-color-scheme: dark) and (prefers-reduced-motion)"
+      );
     });
   });
 }

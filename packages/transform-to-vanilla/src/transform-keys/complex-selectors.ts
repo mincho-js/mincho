@@ -1,4 +1,7 @@
-import type { TransformContext } from "../transform-object/index";
+import {
+  type TransformContext,
+  initTransformContext
+} from "../transform-object/index";
 
 export function isSelectorskey(key: string) {
   return key === "selectors";
@@ -43,8 +46,7 @@ if (import.meta.vitest) {
 
     it("Nested Selector", () => {
       const context: TransformContext = {
-        result: {},
-        basedKey: "",
+        ...structuredClone(initTransformContext),
         parentSelector: "nav li > &"
       };
       expect(nestedSelectorKey("&:hover", context)).toBe("nav li > &:hover");
