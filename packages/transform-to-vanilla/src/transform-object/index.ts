@@ -117,23 +117,33 @@ function insertResultValue(
   value: NonNullable<unknown>,
   context: TransformContext
 ) {
-  if (context.result[accessKey] === undefined) {
-    context.result[accessKey] = {};
-  }
-
-  if (typeof value === "object" && accessKey in value) {
-    const mapValue = new Map(Object.entries(value));
-    mapValue.delete(accessKey);
-
-    context.result[accessKey] = mergeObject(context.result[accessKey], {
-      ...(mapValue.size > 0 ? { [key]: Object.fromEntries(mapValue) } : {}),
-      ...(value as Record<string, object>)[accessKey]
-    });
+  if (typeof value === "object") {
+    for (const [valueKey, valueValue] of Object.entries(value)) {
+      if (isRuleKey(valueKey)) {
+        context.result[valueKey] = mergeObject(
+          context.result[valueKey] ?? {},
+          valueValue
+        );
+      } else if (valueKey === accessKey) {
+        context.result[accessKey] = mergeObject(
+          context.result[accessKey] ?? {},
+          valueValue
+        );
+      } else {
+        if (context.result[accessKey] === undefined) {
+          context.result[accessKey] = {};
+        }
+        (context.result[accessKey] as AccessedResult)[key] = mergeObject(
+          (context.result[accessKey] as AccessedResult)?.[key] ?? {},
+          { [valueKey]: valueValue }
+        );
+      }
+    }
   } else {
-    (context.result[accessKey] as AccessedResult)[key] = mergeObject(
-      (context.result[accessKey] as AccessedResult)?.[key] ?? {},
-      value
-    );
+    if (context.result[accessKey] === undefined) {
+      context.result[accessKey] = {};
+    }
+    (context.result[accessKey] as AccessedResult)[key] = value;
   }
 }
 
@@ -863,6 +873,9 @@ if (import.meta.vitest) {
                 "@media": {
                   print: "blue"
                 }
+              },
+              "@supports (display: grid)": {
+                color: "black"
               }
             }
           },
@@ -883,7 +896,12 @@ if (import.meta.vitest) {
             color: "red"
           },
           "(prefers-color-scheme: dark) and (min-width: 768px)": {
-            color: "green"
+            color: "green",
+            "@supports": {
+              "(display: grid)": {
+                color: "black"
+              }
+            }
           },
           "(prefers-color-scheme: dark) and (min-width: 768px) and print": {
             color: "blue"
@@ -895,6 +913,86 @@ if (import.meta.vitest) {
           },
           "framework.utilities": {
             color: "white"
+          }
+        }
+      } satisfies StyleRule);
+    });
+
+    it("Nested selector & AtRules", () => {
+      expect(
+        transformStyle({
+          "@media (prefers-color-scheme: dark)": {
+            "nav li > &": {
+              _hover: {
+                background: "red"
+              }
+            }
+          }
+        })
+      ).toStrictEqual({
+        "@media": {
+          "(prefers-color-scheme: dark)": {
+            selectors: {
+              "nav li > &:hover": {
+                background: "red"
+              }
+            }
+          }
+        }
+      } satisfies StyleRule);
+
+      // Case with top lelvel selector
+      expect(
+        transformStyle({
+          "nav li > &": {
+            background: "red",
+            "@media (prefers-color-scheme: dark)": {
+              background: "blue",
+              _hover: {
+                background: "white"
+              }
+            }
+          }
+        })
+      ).toStrictEqual({
+        selectors: {
+          "nav li > &": {
+            background: "red"
+          }
+        },
+        "@media": {
+          "(prefers-color-scheme: dark)": {
+            background: "blue",
+            selectors: {
+              "nav li > &:hover": {
+                background: "white"
+              }
+            }
+          }
+        }
+      } satisfies StyleRule);
+
+      // Case without top lelvel selector
+      expect(
+        transformStyle({
+          "nav li > &": {
+            "@media (prefers-color-scheme: dark)": {
+              background: "blue",
+              _hover: {
+                background: "white"
+              }
+            }
+          }
+        })
+      ).toStrictEqual({
+        "@media": {
+          "(prefers-color-scheme: dark)": {
+            background: "blue",
+            selectors: {
+              "nav li > &:hover": {
+                background: "white"
+              }
+            }
           }
         }
       } satisfies StyleRule);
