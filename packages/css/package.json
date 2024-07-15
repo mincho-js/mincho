@@ -22,17 +22,6 @@
     "check": "yarn g:check"
   },
   "prettier": "prettier-config-custom",
-  "eslintConfig": {
-    "extends": [
-      "custom"
-    ],
-    "parserOptions": {
-      "project": [
-        "./tsconfig.json",
-        "./tsconfig.node.json"
-      ]
-    }
-  },
   "dependencies": {
     "@mincho/transform-to-vanilla": "workspace:^"
   },
