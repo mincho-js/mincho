@@ -41,8 +41,11 @@ export function atRuleKeyMerge(
   firstKey: string,
   secondKey: string
 ) {
-  if (firstKey === "") {
+  if (firstKey === "" || secondKey.startsWith(firstKey)) {
     return secondKey;
+  }
+  if (secondKey === "") {
+    return firstKey;
   }
 
   switch (atRule) {

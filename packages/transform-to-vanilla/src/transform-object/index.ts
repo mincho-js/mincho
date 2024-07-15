@@ -28,6 +28,7 @@ import { simplyImportant } from "@/transform-values/simply-important";
 import { isUppercase } from "@/utils/string";
 import { keyframes, fontFace } from "@vanilla-extract/css";
 import { setFileScope } from "@vanilla-extract/css/fileScope";
+import { createNestedObject, processNestedResult } from "./rule-context";
 import type { StyleRule } from "@vanilla-extract/css";
 import type {
   CSSRule,
@@ -40,7 +41,7 @@ import type {
 const mergeObject = deepmerge();
 
 // == Interface ================================================================
-type StyleResult = {
+export type StyleResult = {
   // key in StyleRuleKey occur a error
   // Type '{}' is missing the following properties from type
   // '{ accentColor: StyleRuleValue; alignContent: StyleRuleValue; alignItems: StyleRuleValue; alignSelf: StyleRuleValue; ... 904 more ...;
@@ -234,28 +235,15 @@ function transformRuleStyle(
 ) {
   const { isToplevelRules, atRuleKey, atRuleNestedKey } = atRuleKeyInfo(key);
 
-  const ruleValue: Record<string, StyleRule> = {};
   if (isToplevelRules) {
-    createRuleValue(ruleValue, atRuleKey, atRuleNestedKey, value, context);
+    createRuleValue(atRuleKey, atRuleNestedKey, value, context);
   } else {
     for (const [atRuleNestedKey, atRuleStyle] of Object.entries(value)) {
-      createRuleValue(
-        ruleValue,
-        atRuleKey,
-        atRuleNestedKey,
-        atRuleStyle,
-        context
-      );
+      createRuleValue(atRuleKey, atRuleNestedKey, atRuleStyle, context);
     }
   }
-
-  context.result[atRuleKey] = mergeObject(
-    context.result[atRuleKey] ?? {},
-    ruleValue
-  );
 }
 function createRuleValue(
-  ruleValue: Record<string, unknown>,
   atRuleKey: string,
   atRuleNestedKey: string,
   value: CSSRuleExistValue,
@@ -277,25 +265,8 @@ function createRuleValue(
 
   transformValueStyle(context.basedKey, value, otherContext);
 
-  const atRuleResult = otherContext.result;
-  if (atRuleKey in atRuleResult) {
-    const mapValue = new Map(Object.entries(atRuleResult));
-    mapValue.delete(atRuleKey);
-
-    if (mapValue.size > 0) {
-      ruleValue[mergedAtRuleKey] = Object.fromEntries(mapValue);
-    }
-    Object.entries(atRuleResult[atRuleKey] as Record<string, unknown>).forEach(
-      ([key, value]) => {
-        ruleValue[key] = mergeObject(ruleValue?.[key] ?? {}, value);
-      }
-    );
-  } else {
-    ruleValue[mergedAtRuleKey] = mergeObject(
-      ruleValue?.[mergedAtRuleKey] ?? {},
-      atRuleResult
-    );
-  }
+  const atRuleResult = createNestedObject(otherContext, otherContext.result);
+  processNestedResult(context.result, atRuleResult);
 }
 
 function transformValueStyle(
@@ -873,12 +844,32 @@ if (import.meta.vitest) {
                 "@media": {
                   print: "blue"
                 }
-              },
-              "@supports (display: grid)": {
-                color: "black"
               }
             }
           },
+
+          "@supports (display: table-cell)": {
+            "@supports": {
+              "(display: list-item)": {
+                color: "cyan"
+              },
+              "(display: contents)": {
+                color: "magenta"
+              }
+            }
+          },
+
+          "@container tall (width > 400px)": {
+            "@container": {
+              "(height > 30rem)": {
+                color: "-moz-initial"
+              },
+              "(orientation: landscape)": {
+                color: "Highlight"
+              }
+            }
+          },
+
           "@layer framework": {
             "@layer": {
               layout: {
@@ -896,23 +887,79 @@ if (import.meta.vitest) {
             color: "red"
           },
           "(prefers-color-scheme: dark) and (min-width: 768px)": {
-            color: "green",
-            "@supports": {
-              "(display: grid)": {
-                color: "black"
-              }
-            }
+            color: "green"
           },
           "(prefers-color-scheme: dark) and (min-width: 768px) and print": {
             color: "blue"
           }
         },
+
+        "@supports": {
+          "(display: table-cell) and (display: list-item)": {
+            color: "cyan"
+          },
+          "(display: table-cell) and (display: contents)": {
+            color: "magenta"
+          }
+        },
+
+        "@container": {
+          "tall (width > 400px) and (height > 30rem)": {
+            color: "-moz-initial"
+          },
+          "tall (width > 400px) and (orientation: landscape)": {
+            color: "Highlight"
+          }
+        },
+
         "@layer": {
           "framework.layout": {
             color: "black"
           },
           "framework.utilities": {
             color: "white"
+          }
+        }
+      } satisfies StyleRule);
+    });
+
+    it("Nested AtRules mutiple", () => {
+      expect(
+        transformStyle({
+          "@media (prefers-color-scheme: dark)": {
+            color: "red",
+            "@media (min-width: 768px)": {
+              color: {
+                base: "green",
+                "@media": {
+                  print: "blue"
+                }
+              },
+              "@supports (display: grid)": {
+                color: "black"
+              }
+            }
+          }
+        })
+      ).toStrictEqual({
+        "@media": {
+          "(prefers-color-scheme: dark)": {
+            color: "red"
+          },
+          "(prefers-color-scheme: dark) and (min-width: 768px)": {
+            color: "green"
+          },
+          "(prefers-color-scheme: dark) and (min-width: 768px) and print": {
+            color: "blue"
+          }
+        },
+        "@supports": {
+          "(display: grid)": {
+            "@media": {
+              "(prefers-color-scheme: dark) and (min-width: 768px)": {
+                color: "black"
+              }
+            }
           }
         }
       } satisfies StyleRule);
@@ -962,8 +1009,10 @@ if (import.meta.vitest) {
         },
         "@media": {
           "(prefers-color-scheme: dark)": {
-            background: "blue",
             selectors: {
+              "nav li > &": {
+                background: "blue"
+              },
               "nav li > &:hover": {
                 background: "white"
               }
@@ -987,8 +1036,10 @@ if (import.meta.vitest) {
       ).toStrictEqual({
         "@media": {
           "(prefers-color-scheme: dark)": {
-            background: "blue",
             selectors: {
+              "nav li > &": {
+                background: "blue"
+              },
               "nav li > &:hover": {
                 background: "white"
               }
@@ -1067,9 +1118,13 @@ if (import.meta.vitest) {
                 paddingRight: "20px",
                 paddingInlineEnd: ["16px", "1rem"]
               }
-            },
-            "@supports": {
-              "(display: grid)": {
+            }
+          }
+        },
+        "@supports": {
+          "(display: grid)": {
+            "@media": {
+              "screen and (min-width: 768px)": {
                 backgroundColor: "red",
                 backgroundImage: "none",
                 backgroundClip: ["initial", "-moz-initial"]
