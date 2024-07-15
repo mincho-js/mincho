@@ -6,7 +6,7 @@
   "license": "MIT",
   "devDependencies": {
     "eslint-define-config": "^2.1.0",
-    "yaml-eslint-parser": "^1.2.2"
+    "yaml-eslint-parser": "^1.2.3"
   },
   "peerDependencies": {
     "eslint": "*"

@@ -1,39 +1,73 @@
 {
   "$schema": "https://turborepo.org/schema.json",
-  "pipeline": {
+  "tasks": {
     "clean": {
       "cache": false
     },
     "build": {
-      "dependsOn": ["^build"],
-      "inputs": ["src/**/*.ts", "vite.config.ts"],
-      "outputs": ["dist/**"]
+      "dependsOn": [
+        "^build"
+      ],
+      "inputs": [
+        "src/**/*.ts",
+        "vite.config.ts"
+      ],
+      "outputs": [
+        "dist/**"
+      ]
     },
-    "lint": {
-    },
-    "fix": {
-    },
+    "lint": {},
+    "fix": {},
     "check": {
-      "dependsOn": ["^build"],
-      "outputs": ["tsconfig.tsbuildinfo"]
+      "dependsOn": [
+        "^build"
+      ],
+      "outputs": [
+        "tsconfig.tsbuildinfo"
+      ]
     },
     "check:all": {
-      "dependsOn": ["lint", "check"]
+      "dependsOn": [
+        "lint",
+        "check"
+      ]
     },
     "test": {
-      "dependsOn": ["^build"],
-      "inputs": ["src/**/*.ts", "__test__/**/*.ts", "vite.config.ts"]
+      "dependsOn": [
+        "^build"
+      ],
+      "inputs": [
+        "src/**/*.ts",
+        "__test__/**/*.ts",
+        "vite.config.ts"
+      ]
     },
     "test:all": {
-      "dependsOn": ["build", "test", "check:all"]
+      "dependsOn": [
+        "build",
+        "test",
+        "check:all"
+      ]
     },
     "coverage": {
-      "dependsOn": ["^build"],
-      "inputs": ["src/**/*.ts", "__test__/**/*.ts", "vite.config.ts"],
-      "outputs": ["coverage/**"]
+      "dependsOn": [
+        "^build"
+      ],
+      "inputs": [
+        "src/**/*.ts",
+        "__test__/**/*.ts",
+        "vite.config.ts"
+      ],
+      "outputs": [
+        "coverage/**"
+      ]
     },
     "coverage:all": {
-      "dependsOn": ["build", "coverage", "check:all"]
+      "dependsOn": [
+        "build",
+        "coverage",
+        "check:all"
+      ]
     }
   }
 }
