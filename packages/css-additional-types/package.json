@@ -25,6 +25,7 @@
   },
   "prettier": "prettier-config-custom",
   "devDependencies": {
+    "@mincho/debug-log": "workspace:^",
     "eslint-config-custom": "workspace:^",
     "mdn-data": "git+https://github.com/mdn/data.git#7f0c865a3c4b5d891285c93308ee5c25cb5cfee8",
     "prettier-config-custom": "workspace:^",

@@ -26,6 +26,7 @@
     "@mincho/transform-to-vanilla": "workspace:^"
   },
   "devDependencies": {
+    "@mincho/debug-log": "workspace:^",
     "@vanilla-extract/css": "^1.15.3",
     "eslint-config-custom": "workspace:^",
     "prettier-config-custom": "workspace:^",

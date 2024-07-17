@@ -1,0 +1,62 @@
+{
+  // From https://vitest.dev/guide/debugging#vs-code
+  // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Debug Current Test File",
+      "autoAttachChildProcesses": true,
+      "skipFiles": ["<node_internals>/**", "**/node_modules/**"],
+      "program": "${input:GIT_ROOT}/node_modules/vitest/vitest.mjs",
+      "args": [
+        "watch", "${relativeFile}",
+
+        // https://vitest.dev/guide/improving-performance
+        "--no-isolate", "--no-file-parallelism",
+        "--pool", "threads", "--poolOptions.threads.singleThread"
+        // "--pool", "forks", "--poolOptions.forks.singleFork"
+      ],
+      "smartStep": true,
+      "outFiles": ["${workspaceRoot}/dist/**/*.js"],
+      "console": "integratedTerminal",
+      "cwd": "${workspaceRoot}",
+    },
+    
+    // https://www.builder.io/blog/debug-nodejs
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Debug Current Test File with Remote Debugger",
+      "autoAttachChildProcesses": true,
+      "skipFiles": ["<node_internals>/**", "**/node_modules/**"],
+      "program": "${input:GIT_ROOT}/node_modules/vitest/vitest.mjs",
+      "args": [
+        "watch", "${relativeFile}",
+        "--inspect-brk", "--inspect",
+        "--no-isolate", "--no-file-parallelism",
+        "--pool", "threads", "--poolOptions.threads.singleThread"
+        // "--pool", "forks", "--poolOptions.forks.singleFork"
+      ],
+      "smartStep": true,
+      "outFiles": ["${workspaceRoot}/dist/**/*.js"],
+      "console": "integratedTerminal",
+      "cwd": "${workspaceRoot}",
+    }
+  ],
+
+  // Need to install `augustocdias.tasks-shell-input` extension
+  "inputs": [
+    {
+      "id": "GIT_ROOT",
+      "type": "command",
+      "command": "shellCommand.execute",
+      "args": {
+        "command": "git rev-parse --show-toplevel",
+        "useSingleResult": true,
+        "useFirstResult": true
+      }
+    }
+  ]
+}
