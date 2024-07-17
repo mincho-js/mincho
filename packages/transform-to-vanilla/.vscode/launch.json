@@ -1,0 +1,19 @@
+{
+  // From https://vitest.dev/guide/debugging#vs-code
+  // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Vitest Watch",
+      "runtimeExecutable": "yarn",
+      "runtimeArgs": ["test:watch", "${relativeFile}"],
+      "console": "integratedTerminal",
+      "internalConsoleOptions": "neverOpen",
+      "skipFiles": ["<node_internals>/**", "**/node_modules/**"],
+      "autoAttachChildProcesses": true,
+      "smartStep": true
+    },
+  ]
+}
