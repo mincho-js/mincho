@@ -34,7 +34,7 @@
     "g:check-trace": "cd $INIT_CWD && yarn run -T rimraf tsconfig.tsbuildinfo && yarn run -T tsc -p tsconfig.json --generateTrace traceDir && yarn run -T analyze-trace traceDir"
   },
   "devDependencies": {
-    "@mincho/css": "workspace:^",
+    "@mincho/debug-log": "workspace:^",
     "@types/eslint": "^8.56.10",
     "@types/node": "^20.14.10",
     "@typescript/analyze-trace": "^0.10.1",

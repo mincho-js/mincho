@@ -64,6 +64,35 @@ function NodeBuilder(viteConfigEnv) {
     );
   }
 
+  if (ViteEnv.isTest()) {
+    plugins.add({
+      name: "extend-import-meta-debuglog",
+      transform(code, id) {
+        const excludedPackages = ["debug-log"];
+        const isExcluded = excludedPackages.some((pkg) => id.includes(pkg));
+
+        if (!isExcluded && (id.endsWith(".js") || id.endsWith(".ts"))) {
+          return {
+            code: `
+              import * as debugLog from "@mincho/debug-log";
+              if (!import.meta.debugLog) {
+                import.meta.debugLog = debugLog;
+              }
+              ${code}
+            `,
+            map: null
+          };
+        }
+      }
+    });
+  } else {
+    configs.add({
+      define: {
+        "import.meta.debugLog": "undefined"
+      }
+    });
+  }
+
   configs.add({
     build: {
       // https://vitejs.dev/guide/build.html#library-mode

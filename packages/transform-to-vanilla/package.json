@@ -34,7 +34,6 @@
   },
   "prettier": "prettier-config-custom",
   "devDependencies": {
-    "@mincho/debug-log": "workspace:^",
     "@vanilla-extract/css": "^1.15.3",
     "eslint-config-custom": "workspace:^",
     "prettier-config-custom": "workspace:^",

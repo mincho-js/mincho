@@ -718,7 +718,6 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@mincho/css-additional-types@workspace:packages/css-additional-types"
   dependencies:
-    "@mincho/debug-log": "workspace:^"
     csstype: "npm:^3.1.3"
     eslint-config-custom: "workspace:^"
     mdn-data: "git+https://github.com/mdn/data.git#7f0c865a3c4b5d891285c93308ee5c25cb5cfee8"
@@ -732,7 +731,6 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@mincho/css@workspace:packages/css"
   dependencies:
-    "@mincho/debug-log": "workspace:^"
     "@mincho/transform-to-vanilla": "workspace:^"
     "@vanilla-extract/css": "npm:^1.15.3"
     eslint-config-custom: "workspace:^"
@@ -767,7 +765,6 @@ __metadata:
   dependencies:
     "@fastify/deepmerge": "npm:^2.0.0"
     "@mincho/css-additional-types": "workspace:^"
-    "@mincho/debug-log": "workspace:^"
     "@vanilla-extract/css": "npm:^1.15.3"
     csstype: "npm:^3.1.3"
     eslint-config-custom: "workspace:^"
@@ -3840,7 +3837,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "mincho@workspace:."
   dependencies:
-    "@mincho/css": "workspace:^"
+    "@mincho/debug-log": "workspace:^"
     "@types/eslint": "npm:^8.56.10"
     "@types/node": "npm:^20.14.10"
     "@typescript/analyze-trace": "npm:^0.10.1"
