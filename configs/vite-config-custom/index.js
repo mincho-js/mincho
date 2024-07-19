@@ -4,6 +4,7 @@ import { resolve } from "path";
 import { initConfigBuilder, ViteEnv, PluginBuilder } from "vite-config-builder";
 import { mergeConfig } from "vite";
 
+import { externalizeDeps } from "vite-plugin-externalize-deps";
 import tsconfigPaths from "vite-tsconfig-paths";
 import dts from "vite-plugin-dts";
 
@@ -30,7 +31,8 @@ function NodeBuilder(viteConfigEnv) {
       dts({
         entryRoot: resolve(process.cwd(), "src/"),
         include: ["src"]
-      })
+      }),
+      externalizeDeps()
     );
   }
 

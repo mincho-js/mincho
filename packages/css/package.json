@@ -17,6 +17,8 @@
   ],
   "scripts": {
     "clean": "yarn g:clean",
+    "build": "yarn g:build",
+    "build:watch": "yarn g:build-watch",
     "lint": "yarn g:lint",
     "fix": "yarn g:fix",
     "check": "yarn g:check"

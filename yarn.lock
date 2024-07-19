@@ -752,7 +752,6 @@ __metadata:
     "@types/deep-diff": "npm:^1"
     boxen: "npm:^8.0.0"
     chalk: "npm:^5.3.0"
-    consola: "npm:^3.2.3"
     deep-diff: "npm:^1.0.2"
     eslint-config-custom: "workspace:^"
     pretify-deep-diff: "patch:pretify-deep-diff@npm%3A1.0.1#~/.yarn/patches/pretify-deep-diff-npm-1.0.1-587f0078e3.patch"
@@ -2205,13 +2204,6 @@ __metadata:
   version: 0.0.1
   resolution: "concat-map@npm:0.0.1"
   checksum: 10/9680699c8e2b3af0ae22592cb764acaf973f292a7b71b8a06720233011853a58e256c89216a10cbe889727532fd77f8bcd49a760cedfde271b8e006c20e079f2
-  languageName: node
-  linkType: hard
-
-"consola@npm:^3.2.3":
-  version: 3.2.3
-  resolution: "consola@npm:3.2.3"
-  checksum: 10/02972dcb048c337357a3628438e5976b8e45bcec22fdcfbe9cd17622992953c4d695d5152f141464a02deac769b1d23028e8ac87f56483838df7a6bbf8e0f5a2
   languageName: node
   linkType: hard
 
@@ -5433,6 +5425,7 @@ __metadata:
     prettier-config-custom: "workspace:^"
     vite-config-builder: "npm:^0.0.2"
     vite-plugin-dts: "npm:^3.9.1"
+    vite-plugin-externalize-deps: "npm:^0.8.0"
     vite-tsconfig-paths: "npm:^4.3.2"
   peerDependencies:
     vite: "*"
@@ -5487,6 +5480,15 @@ __metadata:
     vite:
       optional: true
   checksum: 10/3a0c65fb45dd5ce6e83e7525df2de3d7c27d92f39e7d363d27b6c2daf66feaf820c4bc014f326cb903dc816db8027845df7add47a8f33e80aa3927443299e812
+  languageName: node
+  linkType: hard
+
+"vite-plugin-externalize-deps@npm:^0.8.0":
+  version: 0.8.0
+  resolution: "vite-plugin-externalize-deps@npm:0.8.0"
+  peerDependencies:
+    vite: ^2.0.0 || ^3.0.0 || ^4.0.0 || ^5.0.0
+  checksum: 10/a87b7bc44c810e5ef16314d76ccdd442d27018ea3fae531d22fc6bd803c20e0de4268d981bfc5db604ceb382cd9f646804da84df5a77dac98914be8ddc15b6ec
   languageName: node
   linkType: hard
 
