@@ -5,7 +5,9 @@
   "type": "module",
   "typings": "index.d.ts",
   "main": "index.js",
+  "prettier": "prettier-config-custom",
   "devDependencies": {
+    "prettier-config-custom": "workspace:^",
     "vite-config-builder": "^0.0.2",
     "vite-plugin-dts": "^3.9.1",
     "vite-tsconfig-paths": "^4.3.2"

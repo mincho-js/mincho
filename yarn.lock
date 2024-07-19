@@ -5430,6 +5430,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "vite-config-custom@workspace:configs/vite-config-custom"
   dependencies:
+    prettier-config-custom: "workspace:^"
     vite-config-builder: "npm:^0.0.2"
     vite-plugin-dts: "npm:^3.9.1"
     vite-tsconfig-paths: "npm:^4.3.2"

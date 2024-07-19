@@ -1,3 +1,5 @@
+// @ts-check
+
 import { resolve } from "path";
 import { initConfigBuilder, ViteEnv, PluginBuilder } from "vite-config-builder";
 import { mergeConfig } from "vite";
@@ -11,9 +13,12 @@ export function NodeConfig(viteConfigEnv, extendConfigs = {}) {
 }
 
 function buildConfig(viteConfigEnv, extendConfigs, configBuilder) {
-  return mergeConfig({
-    ...configBuilder(viteConfigEnv).build()
-  }, extendConfigs);
+  return mergeConfig(
+    {
+      ...configBuilder(viteConfigEnv).build()
+    },
+    extendConfigs
+  );
 }
 
 // == Main Configs ============================================================
@@ -35,9 +40,9 @@ function NodeBuilder(viteConfigEnv) {
       lib: {
         entry: resolve(process.cwd(), "src/index.ts"),
         formats: ["es", "cjs"],
-        fileName: format => (format === "es" ? "index.mjs" : "index.cjs")
+        fileName: (format) => (format === "es" ? "index.mjs" : "index.cjs")
       },
-      target: [ "es2020" ]
+      target: ["es2020"]
     },
     plugins: plugins.build()
   });
@@ -83,9 +88,7 @@ function initCommonBuilder(viteConfigEnv) {
     });
   }
 
-  const plugins = new PluginBuilder([
-    tsconfigPaths()
-  ]);
+  const plugins = new PluginBuilder([tsconfigPaths()]);
 
   return {
     configs,
