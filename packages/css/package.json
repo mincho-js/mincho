@@ -3,13 +3,19 @@
   "name": "@mincho/css",
   "version": "0.0.1",
   "type": "module",
-  "typings": "./src/index.ts",
-  "main": "./src/index.ts",
-  "module": "./src/index.ts",
+  "typings": "./src/esm/index.ts",
+  "main": "./dist/cjs/index.cjs",
+  "module": "./dist/esm/index.mjs",
   "exports": {
     ".": {
-      "import": "./src/index.ts",
-      "require": "./src/index.ts"
+      "import": {
+        "types": "./dist/esm/index.d.ts",
+        "default": "./dist/esm/index.mjs"
+      },
+      "require": {
+        "types": "./dist/cjs/index.d.ts",
+        "default": "./dist/cjs/index.cjs"
+      }
     }
   },
   "files": [

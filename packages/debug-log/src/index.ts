@@ -78,8 +78,12 @@ export function jsonExpect(arg1: unknown, obj1?: unknown, obj2?: unknown) {
 }
 
 // == Tests ====================================================================
-
+// Ignore errors when compiling to CommonJS.
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: error TS1343: The 'import.meta' meta-property is only allowed when the '--module' option is 'es2020', 'es2022', 'esnext', 'system', 'node16', or 'nodenext'.
 if (import.meta.vitest) {
+  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+  // @ts-ignore: error TS1343: The 'import.meta' meta-property is only allowed when the '--module' option is 'es2020', 'es2022', 'esnext', 'system', 'node16', or 'nodenext'.
   const { it, expect } = import.meta.vitest;
 
   const TEST_PASS = () => {

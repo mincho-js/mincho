@@ -3,18 +3,18 @@
   "name": "@mincho/transform-to-vanilla",
   "version": "0.0.1",
   "type": "module",
-  "typings": "./dist/index.d.ts",
-  "main": "./dist/index.cjs",
-  "module": "./dist/index.mjs",
+  "typings": "./dist/esm/index.d.ts",
+  "main": "./dist/cjs/index.cjs",
+  "module": "./dist/esm/index.mjs",
   "exports": {
     ".": {
       "import": {
-        "types": "./dist/index.d.ts",
-        "default": "./dist/index.mjs"
+        "types": "./dist/esm/index.d.ts",
+        "default": "./dist/esm/index.mjs"
       },
       "require": {
-        "types": "./dist/index.d.ts",
-        "default": "./dist/index.cjs"
+        "types": "./dist/cjs/index.d.ts",
+        "default": "./dist/cjs/index.cjs"
       }
     }
   },

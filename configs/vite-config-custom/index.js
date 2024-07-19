@@ -1,9 +1,12 @@
 // @ts-check
 
-import { resolve } from "path";
+import { readdirSync, renameSync } from "node:fs";
+import { resolve, join } from "node:path";
+
 import { initConfigBuilder, ViteEnv, PluginBuilder } from "vite-config-builder";
 import { mergeConfig } from "vite";
 
+import { ModuleKind } from "typescript";
 import { externalizeDeps } from "vite-plugin-externalize-deps";
 import tsconfigPaths from "vite-tsconfig-paths";
 import dts from "vite-plugin-dts";
@@ -28,9 +31,34 @@ function NodeBuilder(viteConfigEnv) {
 
   if (ViteEnv.isProd()) {
     plugins.add(
+      // This is currently a proprietary implementation. You might also like to see
+      // https://github.com/qmhc/vite-plugin-dts/issues/267
       dts({
         entryRoot: resolve(process.cwd(), "src/"),
-        include: ["src"]
+        include: ["src"],
+        outDir: "./dist/esm"
+      }),
+      dts({
+        entryRoot: resolve(process.cwd(), "src/"),
+        include: ["src"],
+        outDir: "./dist/cjs",
+        compilerOptions: {
+          module: ModuleKind.CommonJS,
+          outDir: "./dist/cjs",
+          declarationDir: "./dist/cjs"
+        },
+        afterBuild: () => {
+          // Rename the CommonJS declaration file to .d.cts
+          const cjsDir = resolve(process.cwd(), "dist/cjs");
+          readdirSync(cjsDir).forEach((file) => {
+            if (file.endsWith(".d.ts")) {
+              renameSync(
+                join(cjsDir, file),
+                join(cjsDir, file.replace(".d.ts", ".d.cts"))
+              );
+            }
+          });
+        }
       }),
       externalizeDeps()
     );
@@ -42,7 +70,8 @@ function NodeBuilder(viteConfigEnv) {
       lib: {
         entry: resolve(process.cwd(), "src/index.ts"),
         formats: ["es", "cjs"],
-        fileName: (format) => (format === "es" ? "index.mjs" : "index.cjs")
+        fileName: (format) =>
+          format === "es" ? "esm/index.mjs" : "cjs/index.cjs"
       },
       target: ["es2020"]
     },
