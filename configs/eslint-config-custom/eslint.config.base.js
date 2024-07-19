@@ -14,6 +14,11 @@ export default tseslint.config(
 
   // == Ignores ================================================================
   {
-    ignores: ["dist/**", "node_modules/**", "coverage/**", "vite.config.ts.timestamp*.mjs"]
+    ignores: [
+      "dist/**",
+      "node_modules/**",
+      "coverage/**",
+      "vite.config.ts.timestamp*.mjs"
+    ]
   }
 );
