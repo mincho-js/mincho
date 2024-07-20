@@ -1,0 +1,73 @@
+name: Bug report
+description: Create a report to help us improve
+labels: [bug]
+
+body:
+  # == Bug Infos ===============================================================
+  - type: markdown
+    id: bug-infos
+    attributes:
+      value: "## Bug Infos"
+  - type: dropdown
+    attributes:
+      label: Packages with the problem
+      options:
+        - "@mincho/css"
+        - "@mincho/transform-to-vanilla"
+        - "@mincho/css-additional-types"
+        - "@mincho/debug-log"
+        - Examples
+        - Configs (Vite, Lint, Typescript ..etc)
+        - Unknown
+      multiple: true
+    validations:
+      required: true
+
+  - type: textarea
+    id: describe-the-bug
+    attributes:
+      label: Describe the bug
+      description: A clear and concise description of what the bug is.
+      placeholder: Tell us what you see!
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected-behavior
+    attributes:
+      label: Expected behavior
+      description: A clear and concise description of what you expected to happen.
+      placeholder: Tell us what you want!
+    validations:
+      required: false
+
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots
+      description: If is helpful to attach screenshots or video similar to the desired features.
+      placeholder: Drag or paste images or videos to upload
+    validations:
+      required: false
+
+  # == Others ==================================================================
+  - type: textarea
+    attributes:
+      label: Steps To Reproduce
+      description: Steps to reproduce the behavior.
+      placeholder: |
+        1. In this environment...
+        2. With this config...
+        3. Run '...'
+        4. See error...
+    validations:
+      required: false
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional context
+      description: Add any other context about the problem here.
+      placeholder: Anything to write down or refer to is fine
+    validations:
+      required: false

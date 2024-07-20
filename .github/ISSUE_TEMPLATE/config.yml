@@ -1,0 +1,7 @@
+# https://docs.github.com/en/communities/using-templates-to-encourage-useful-issues-and-pull-requests/configuring-issue-templates-for-your-repository#configuring-the-template-chooser
+
+blank_issues_enabled: true
+contact_links:
+  - name: Feature requests with RFC
+    url: https://github.com/mincho-js/working-group
+    about: Suggest more specific features and designs.

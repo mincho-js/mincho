@@ -1,0 +1,43 @@
+name: Meta issues
+description: Collect related issues
+labels: [meta]
+title: "[Meta] "
+
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: A clear and concise description of what the issue is.
+      placeholder: Write what the issue is
+    validations:
+      required: true
+
+  - type: input
+    id: related-rfc
+    attributes:
+      label: Related RFC
+      description: Related RFC in the [working group](https://github.com/mincho-js/working-group).
+      placeholder: Paste the RFC link
+    validations:
+      required: false
+
+  - type: textarea
+    id: task-or-issue-list
+    attributes:
+      label: Task or issue list
+      description: Organise relevant tasks, issues, and PR lists.
+      placeholder: |
+        - "- [ ] task 1"
+        - "- [ ] #issue_or_pr_number"
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional context
+      description: Add any other context about the problem here.
+      placeholder: Anything to write down or refer to is fine
+    validations:
+      required: false
