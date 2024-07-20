@@ -1,9 +1,9 @@
-## debug-log
+# @mincho/debug-log
 
 This was created to make console debugging easier when you often need to compare JavaScript object values.
 
-### API
-#### `debugLog`
+## API
+### `debugLog`
 
 The count is incremented automatically with each call.
 
@@ -17,7 +17,7 @@ debugLog("with title debugLog");
 console.log("test2");
 ```
 
-#### `jsonLog`
+### `jsonLog`
 
 Output JSON with the debug log.
 If you just want to print JSON purely, use `jsonPrint`.
@@ -29,7 +29,7 @@ jsonLog({ key1: true, key2: 1, key3: null, key4: "string" });
 jsonLog("with title jsonLog", { others: undefined });
 ```
 
-#### `jsonExpect`
+### `jsonExpect`
 
 Compare the JSON and show the differences.
 
