@@ -19,7 +19,12 @@ const consola = {
     console.log(
       boxen(isExistArgs ? args.join(" ") : (arg1 as string), {
         title: isExistArgs ? (arg1 as string) : undefined,
-        padding: 1,
+        padding: {
+          top: 1,
+          bottom: 1,
+          left: 2,
+          right: 2
+        },
         borderStyle: "round"
       })
     );
@@ -62,18 +67,28 @@ export function jsonLog(arg1: unknown, obj?: unknown) {
 export function jsonExpect(arg1: unknown, obj1?: unknown, obj2?: unknown) {
   if (obj2 === undefined) {
     debugLog();
-    jsonPrint("Expected", arg1);
-    jsonPrint("Real", obj1);
-
     const changes = diff(arg1, obj1);
-    console.log(pretifyDeepDiff(changes ?? []));
+
+    if (changes === undefined) {
+      jsonPrint("Same Contents", arg1);
+    } else {
+      jsonPrint("Expected", arg1);
+      jsonPrint("Real", obj1);
+
+      console.log(pretifyDeepDiff(changes ?? []));
+    }
   } else {
     debugLog(arg1);
-    jsonPrint("Expected", obj1);
-    jsonPrint("Real", obj2);
-
     const changes = diff(obj1, obj2);
-    console.log(pretifyDeepDiff(changes ?? []));
+
+    if (changes === undefined) {
+      jsonPrint("Same Contents", obj1);
+    } else {
+      jsonPrint("Expected", obj1);
+      jsonPrint("Real", obj2);
+
+      console.log(pretifyDeepDiff(changes ?? []));
+    }
   }
 }
 
