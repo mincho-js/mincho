@@ -27,11 +27,11 @@
 
 I'm really glad you're reading this, because we need volunteer developers to help this project come to fruition.
 
-This document is intended for onboarding and is intended to clarify as much as possible.
+This document is intended for onboarding and aims to clarify as much as possible.
 
 You can use it as a reference for various guidelines and information, and PR comfortably.
 
-Please note we have a code of conduct, please follow it in all your interactions with the project.
+Please note that we have a code of conduct. Follow it in all your interactions with the project.
 
 ### Code of Conduct
 
@@ -41,7 +41,7 @@ Refer to [CODE\_OF\_CONDUCT.md](./CODE_OF_CONDUCT.md).
 
 We use [github](https://github.com/mincho-js/mincho) to host code, to track [issues](https://github.com/mincho-js/mincho/issues) and [feature requests](https://github.com/mincho-js/working-group), as well as accept [pull requests](https://github.com/mincho-js/mincho/pull).
 
-After feedback has been given we expect responses within two weeks. After two weeks we may close the issue and pull request if it isn't showing any activity.
+After feedback has been given, we expect responses within two weeks. After two weeks we may close the issue and pull request if it isn't showing any activity.
 
 ### Your First Contribution
 
@@ -73,7 +73,7 @@ We love your input! We want to make contributing to this project as easy and tra
 - Discussing the current state of the code.
 - Tell us about related or relevant projects and documents.
 - Help other users issue.
-- Proposing others..
+- Proposing others.
 
 **Documents**
 - Suggestion RFC.
@@ -162,7 +162,7 @@ https://github.com/user-attachments/assets/cd325adf-9ed4-46e9-b7db-8688bd9f84bf
 
 Milestone, The versioning scheme we use is [SemVer](https://semver.org/).
 
-We will release the feature as soon as it is complete, but the cycle should be 2-4 weeks. Rapid releases.
+We will release the feature as soon as it is complete, but the cycle should be 2–4 weeks. Rapid releases.
 
 **Issue**
 
@@ -187,7 +187,7 @@ Reproduction:
   - Doing one per task makes [revert](https://git-scm.com/docs/git-revert) possible
 - **Often:** Large-scale changes leave more room for things to go wrong in the code and make it harder to review.
   - To be reviewed within an hour, it should be [inside 200 lines](https://smallbusinessprogramming.com/optimal-pull-request-size/).
-  - Unless there are special circumstances, try to stay within 300-400 lines per commit. Anything larger than 500 lines becomes [nearly impossible to review](https://smartbear.com/learn/code-review/best-practices-for-peer-code-review/).
+  - Unless there are special circumstances, try to stay within 300–400 lines per commit. Anything larger than 500 lines becomes [nearly impossible to review](https://smartbear.com/learn/code-review/best-practices-for-peer-code-review/).
 - **Linear log**: Merge commits are difficult to manage and track. **This is a very enforced rule**
 
 **Recommended Git settings**
@@ -275,7 +275,7 @@ These are the types of commit messages we use.
 Use [Stacked PR](https://timothya.com/blog/git-stack/) for short reviews and linear record keeping.
 - If a commit has a weak dependency, think of #1 #2 #3 being [merged sequentially](https://newsletter.pragmaticengineer.com/p/stacked-diffs).
 - If a commit has a strong dependency, think of #1 #2 #3 being [merged in reverse order](https://www.michaelagreiler.com/stacked-pull-requests/).
-- If you use [git-branchless](https://github.com/arxanas/git-branchless), you can easily rebase with the [`git sync --pull`](https://github.com/arxanas/git-branchless/wiki/Command:-git-sync#fetching-remote-references) command. After that, do `git push -f origin <your-branch>`.
+- If you are use [git-branchless](https://github.com/arxanas/git-branchless), you can easily rebase with the [`git sync --pull`](https://github.com/arxanas/git-branchless/wiki/Command:-git-sync#fetching-remote-references) command. After that, do `git push -f origin <your-branch>`.
 
 **Review**
 

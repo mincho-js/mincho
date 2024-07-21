@@ -10,7 +10,7 @@ Natural CSS in the Typescript
 
 ## Motivation
 
-It started with contemplation on approaches management methods for CSS styling.
+It started with contemplation on approaches and management methods for CSS styling.
 
 Methodologies for CSS selectors are largely divided into visual hierarchy and semantic hierarchy.
 
@@ -18,7 +18,7 @@ The visual hierarchy uses visual names like `.text-red { color: red; }`,
 while the semantic hierarchy uses meaningful names like `.error { color: red; }`.
 
 Due to these characteristics, the methods of achieving goals also differ.  
-For example, what if we need to create various designs with the same content, [as CSS Zen Garden](https://csszengarden.com/pages/alldesigns/)?
+For example, what if we need to create various designs with the same content, like [as CSS Zen Garden](https://csszengarden.com/pages/alldesigns/)?
 
 The visual approach would keep the CSS fixed but change the HTML to achieve the goal,  
 while the semantic approach would keep the HTML the same but change the CSS to achieve the goal.
@@ -40,7 +40,7 @@ This is achieved under several principles:
 1. Be declarative rather than listing logic
 2. The API of each layer should be isomorphic
 3. Expression and content presuppose each other, so they should be considered
-4. If the hierarchy(perspective) is different, the law of excluded middle applies
+4. If the hierarchy (perspective) is different, the law of excluded middle applies
 5. Consider both developers and designers
 
 Our CSS in JS framework will consist of 5 layers (Literal, Theme, Atomic, Variant, Styled Component).
@@ -75,7 +75,7 @@ Interested in contributing?
 We have a [contributing guide](./CONTRIBUTING.md).
 
 If you need support, ask in [discussions](https://github.com/mincho-js/mincho/discussions).  
-Participation is open. Welcome :hugs:
+Participation is open. Welcome! :hugs: :hugs:
 
 ## Support
 
