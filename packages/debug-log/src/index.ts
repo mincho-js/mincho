@@ -4,6 +4,7 @@ import colorize from "@pinojs/json-colorizer";
 import diff from "deep-diff";
 import pretifyDeepDiff from "pretify-deep-diff";
 
+// == Console ==================================================================
 // consola fancy is not works in test
 // Use an alternate implementation for a while until the issue is resolved.
 // https://github.com/unjs/consola/issues/310
@@ -31,61 +32,108 @@ const consola = {
   }
 };
 
+// == Json Comportable Type ====================================================
+type NotAssignableToJson = bigint | symbol | ((...args: unknown[]) => unknown);
+
+type JSONPrimitive = string | number | boolean | null | undefined;
+type JSONValue =
+  | JSONPrimitive
+  | JSONValue[]
+  | {
+      [key: string]: JSONValue;
+    };
+
+type JSONCompatible<T> = unknown extends T
+  ? never
+  : {
+      [P in keyof T]: T[P] extends JSONValue
+        ? T[P]
+        : T[P] extends NotAssignableToJson
+          ? never
+          : JSONCompatible<T[P]>;
+    };
+
+// == DebugLog =================================================================
 let count = 0;
 
 function getCount() {
   return (count++).toString().padStart(4, "0");
 }
 
-export function debugLog(name?: unknown) {
+export function debugLog(name?: string) {
   const message =
     name === undefined ? `DEBUG-${getCount()}` : `DEBUG-${getCount()}: ${name}`;
 
   consola.info(chalk.bold(message));
 }
 
-export function jsonPrint(arg1: unknown, obj?: unknown) {
+export function jsonPrint<T>(obj: JSONCompatible<T>): void;
+export function jsonPrint<T>(name: string, obj?: JSONCompatible<T>): void;
+export function jsonPrint<T>(
+  nameOrObj: string | JSONCompatible<T>,
+  obj?: JSONCompatible<T>
+) {
   if (obj === undefined) {
-    const json = JSON.stringify(arg1, null, 2);
+    const json = JSON.stringify(nameOrObj, null, 2);
     consola.box(colorize(json));
   } else {
     const json = JSON.stringify(obj, null, 2);
-    consola.box(arg1, colorize(json));
+    consola.box(nameOrObj, colorize(json));
   }
 }
 
-export function jsonLog(arg1: unknown, obj?: unknown) {
+export function jsonLog<T>(obj: JSONCompatible<T>): void;
+export function jsonLog<T>(name: string, obj?: JSONCompatible<T>): void;
+export function jsonLog<T>(
+  nameOrObj: string | JSONCompatible<T>,
+  obj?: JSONCompatible<T>
+) {
   if (obj === undefined) {
     debugLog();
-    jsonPrint(arg1);
+    // We will forced assert, becasue don't want to overhead
+    jsonPrint(nameOrObj as JSONCompatible<T>);
   } else {
-    debugLog(arg1);
+    debugLog(nameOrObj as string);
     jsonPrint(obj);
   }
 }
 
-export function jsonExpect(arg1: unknown, obj1?: unknown, obj2?: unknown) {
+export function jsonExpect<T, K = T>(
+  obj1: JSONCompatible<T>,
+  obj2?: JSONCompatible<K>
+): void;
+export function jsonExpect<T, K = T>(
+  name: string,
+  obj1?: JSONCompatible<T>,
+  obj2?: JSONCompatible<K>
+): void;
+export function jsonExpect<T, K = T>(
+  nameOrObj: string | JSONCompatible<T>,
+  obj1?: JSONCompatible<T> | JSONCompatible<K>,
+  obj2?: JSONCompatible<K>
+) {
   if (obj2 === undefined) {
     debugLog();
-    const changes = diff(arg1, obj1);
+    const changes = diff(nameOrObj, obj1);
 
     if (changes === undefined) {
-      jsonPrint("Same Contents", arg1);
+      // We will forced assert, becasue don't want to overhead
+      jsonPrint("Same Contents", nameOrObj as JSONCompatible<T>);
     } else {
-      jsonPrint("Expected", arg1);
-      jsonPrint("Real", obj1);
+      jsonPrint("Expected", nameOrObj as JSONCompatible<T>);
+      jsonPrint("Real", obj1 as JSONCompatible<K>);
 
       console.log(pretifyDeepDiff(changes ?? []));
     }
   } else {
-    debugLog(arg1);
+    debugLog(nameOrObj as string);
     const changes = diff(obj1, obj2);
 
     if (changes === undefined) {
-      jsonPrint("Same Contents", obj1);
+      jsonPrint("Same Contents", obj1 as JSONCompatible<T>);
     } else {
-      jsonPrint("Expected", obj1);
-      jsonPrint("Real", obj2);
+      jsonPrint("Expected", obj1 as JSONCompatible<T>);
+      jsonPrint("Real", obj2 as JSONCompatible<K>);
 
       console.log(pretifyDeepDiff(changes ?? []));
     }
