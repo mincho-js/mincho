@@ -35,7 +35,8 @@
     "coverage": "yarn g:coverage",
     "lint": "yarn g:lint",
     "fix": "yarn g:fix",
-    "check": "yarn g:check"
+    "check": "yarn g:check",
+    "publish": "yarn g:publish"
   },
   "prettier": "prettier-config-custom",
   "devDependencies": {

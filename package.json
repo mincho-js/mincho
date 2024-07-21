@@ -31,7 +31,8 @@
     "g:lint": "cd $INIT_CWD && yarn run -T eslint . --report-unused-disable-directives --max-warnings 0",
     "g:fix": "cd $INIT_CWD && yarn g:lint --fix",
     "g:check": "cd $INIT_CWD && yarn run -T tsc --noEmit",
-    "g:check-trace": "cd $INIT_CWD && yarn run -T rimraf tsconfig.tsbuildinfo && yarn run -T tsc -p tsconfig.json --generateTrace traceDir && yarn run -T analyze-trace traceDir"
+    "g:check-trace": "cd $INIT_CWD && yarn run -T rimraf tsconfig.tsbuildinfo && yarn run -T tsc -p tsconfig.json --generateTrace traceDir && yarn run -T analyze-trace traceDir",
+    "g:publish": "cd $INIT_CWD && yarn npm publish --access public"
   },
   "devDependencies": {
     "@mincho/debug-log": "workspace:^",
