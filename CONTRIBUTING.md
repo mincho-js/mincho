@@ -149,6 +149,12 @@ You don't need to write an RFC first, but if you need to make a design change to
 4. Coding the implementation...
 5. Turn off the `it.only()` option, and when you return, run the full test with `yarn test:all` command
 
+#### Debugger & debugLog Video
+
+Here's a [simple video](/assets/debug-log.mp4) using debugger and `debugLog`.
+
+https://github.com/user-attachments/assets/cd325adf-9ed4-46e9-b7db-8688bd9f84bf
+
 ### Rules
 #### Basics
 

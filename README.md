@@ -4,6 +4,10 @@ Natural CSS in the Typescript
 > [!WARNING]
 > This project is still in its initial stage, which means it is not ready for production.
 
+<p align="center">
+  <img src="./assets/logo.png" alt="logo" width="300" height="300">
+</p>
+
 ## Motivation
 
 It started with contemplation on approaches management methods for CSS styling.
@@ -36,7 +40,7 @@ This is achieved under several principles:
 1. Be declarative rather than listing logic
 2. The API of each layer should be isomorphic
 3. Expression and content presuppose each other, so they should be considered
-4. If the hierarchy (perspective) is different, the law of excluded middle applies
+4. If the hierarchy(perspective) is different, the law of excluded middle applies
 5. Consider both developers and designers
 
 Our CSS in JS framework will consist of 5 layers (Literal, Theme, Atomic, Variant, Styled Component).
@@ -54,7 +58,6 @@ This can also be compared with State[[1](https://react-spectrum.adobe.com/archit
 5. Component: Component blocks including design
 
 However, since we cannot provide all features from the beginning, we plan to achieve them step by step.
-
 1. Natural CSS in TypeScript: We will bind various CSS preprocessing features to be specialized for TypeScript.
 2. A CSS in JS that integrates AtomicCSS and Variants: We will achieve the integration of visual hierarchy (AtomicCSS) and semantic hierarchy (Variants), which was the original goal.
 3. Build your own design system: It functions as a framework for creating design systems through design token management and Figma plugins, among others.
