@@ -37,6 +37,8 @@ import type {
   VanillaStyleRuleValue,
   AtRulesKeywords
 } from "@/types/style-rule";
+import type { Properties } from "csstype";
+import { replacePropertyReference } from "@/transform-values/proerty-reference";
 
 const mergeObject = deepmerge();
 
@@ -58,6 +60,7 @@ export interface TransformContext {
   parentAtRules: {
     [key in AtRulesPrefix]: string;
   };
+  propertyReference: Properties;
 }
 export const initTransformContext: TransformContext = {
   result: {},
@@ -68,47 +71,61 @@ export const initTransformContext: TransformContext = {
     "@supports": "",
     "@container": "",
     "@layer": ""
-  }
+  },
+  propertyReference: {}
 };
 
 export function transformStyle(
   style: CSSRule,
   context = structuredClone(initTransformContext)
 ) {
+  const newContext: TransformContext = {
+    ...context,
+    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+    // @ts-ignore: error ts2322: Type '`var(--${string})`' is not assignable to type 'Appearance | undefined'
+    propertyReference: {
+      ...context.propertyReference,
+      ...style
+    }
+  };
   for (const [key, value] of Object.entries(style) as [
     CSSRuleKey,
     CSSRuleExistValue
   ][]) {
     if (isSelectorskey(key)) {
       for (const [selector, style] of Object.entries(value)) {
-        transformComplexStyle(selector, style, context);
+        transformComplexStyle(selector, style, newContext);
       }
     } else if (isComplexKey(key)) {
-      transformComplexStyle(key, value, context);
+      transformComplexStyle(key, value, newContext);
     } else if (isSimplePseudoSelectorKey(key)) {
-      transformComplexStyle(`&${replacePseudoSelectors(key)}`, value, context);
+      transformComplexStyle(
+        `&${replacePseudoSelectors(key)}`,
+        value,
+        newContext
+      );
     } else if (isSimpleSelectorKey(key)) {
-      transformComplexStyle(`&${key}`, value, context);
+      transformComplexStyle(`&${key}`, value, newContext);
     } else if (isVarsKey(key)) {
       for (const [varKey, varValue] of Object.entries(value)) {
         const transformedVarKey = isCSSVarKey(varKey)
           ? replaceCSSVarKey(varKey)
           : varKey;
-        transformCSSVarStyle(transformedVarKey, varValue, context);
+        transformCSSVarStyle(transformedVarKey, varValue, newContext);
       }
     } else if (isCSSVarKey(key)) {
-      transformCSSVarStyle(replaceCSSVarKey(key), value, context);
+      transformCSSVarStyle(replaceCSSVarKey(key), value, newContext);
     } else if (isPureCSSVarKey(key)) {
-      transformCSSVarStyle(key, value, context);
+      transformCSSVarStyle(key, value, newContext);
     } else if (isRuleKey(key)) {
-      transformRuleStyle(key, value, context);
-    } else if (isPropertyNested(context)) {
-      transformPropertyNested(key, value, context);
+      transformRuleStyle(key, value, newContext);
+    } else if (isPropertyNested(newContext)) {
+      transformPropertyNested(key, value, newContext);
     } else {
-      transformValueStyle(key, value, context);
+      transformValueStyle(key, value, newContext);
     }
   }
-  return context.result as StyleRule;
+  return newContext.result as StyleRule;
 }
 
 type AccessedResult = Record<string, unknown>;
@@ -292,7 +309,7 @@ function transformValueStyle(
         )
       : transformObjectValue(key, value, transformedKey, context);
   } else {
-    context.result[transformedKey] = transformCommonValue(value);
+    context.result[transformedKey] = transformCommonValue(value, context);
   }
 }
 
@@ -324,11 +341,13 @@ function transformArrayValue<T>(
       : resolvedAnonymous;
 
   if (Array.isArray(transformed)) {
-    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-    // @ts-ignore: error ts2590: expression produces a union type that is too complex to represent
-    context.result[transformedKey] = transformed.map(transformCommonValue);
+    context.result[transformedKey] = transformed.map((value) =>
+      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+      // @ts-ignore: error ts2590: expression produces a union type that is too complex to represent
+      transformCommonValue(value, context)
+    );
   } else {
-    context.result[transformedKey] = transformed;
+    context.result[transformedKey] = transformCommonValue(transformed, context);
   }
 }
 
@@ -366,9 +385,9 @@ function transformAnonymous(key: string, value: CSSRuleValue) {
   return value;
 }
 
-function transformCommonValue(value: CSSRuleValue) {
+function transformCommonValue(value: CSSRuleValue, context: TransformContext) {
   return typeof value === "string"
-    ? simplyImportant(replaceCSSVar(value))
+    ? simplyImportant(replaceCSSVar(replacePropertyReference(value, context)))
     : value;
 }
 
@@ -1088,6 +1107,82 @@ if (import.meta.vitest) {
       });
       expect(anonymous.animationName).toBeTypeOf("string");
       expect(anonymous.fontFamily).toBeTypeOf("string");
+    });
+
+    it("Property Reference", () => {
+      expect(
+        transformStyle({
+          width: "50px",
+          height: "@width",
+          margin: "calc(@width / 2)",
+          paddingInline: "calc(@width + @height)",
+          paddingBlock: "@margin"
+        })
+      ).toStrictEqual({
+        width: "50px",
+        height: "50px",
+        margin: "calc(50px / 2)",
+        paddingInline: "calc(50px + 50px)",
+        paddingBlock: "calc(50px / 2)"
+      } satisfies StyleRule);
+    });
+
+    it("Property Reference & Merge Values", () => {
+      expect(
+        transformStyle({
+          padding: "10px",
+          background: "black",
+          boxShadow$: ["inset 0 0 @padding #555", "0 0 20px @background"],
+
+          lineHeight: 2,
+          rotate: "15deg",
+          transform_: ["scale(@lineHeight)", "rotate(@rotate)"]
+        })
+      ).toStrictEqual({
+        padding: "10px",
+        background: "black",
+        boxShadow: "inset 0 0 10px #555, 0 0 20px black",
+
+        lineHeight: 2,
+        rotate: "15deg",
+        transform: "scale(2) rotate(15deg)"
+      } satisfies StyleRule);
+    });
+
+    it("Property Reference & Nested", () => {
+      expect(
+        transformStyle({
+          padding: "10px",
+          _hover: {
+            margin: "@padding"
+          }
+        })
+      ).toStrictEqual({
+        padding: "10px",
+        selectors: {
+          "&:hover": {
+            margin: "10px"
+          }
+        }
+      } satisfies StyleRule);
+
+      expect(
+        transformStyle({
+          padding: "10px",
+          _hover: {
+            margin: "@padding",
+            padding: "20px"
+          }
+        })
+      ).toStrictEqual({
+        padding: "10px",
+        selectors: {
+          "&:hover": {
+            margin: "20px",
+            padding: "20px"
+          }
+        }
+      } satisfies StyleRule);
     });
   });
 

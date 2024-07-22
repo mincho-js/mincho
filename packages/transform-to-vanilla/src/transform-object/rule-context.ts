@@ -122,7 +122,8 @@ if (import.meta.vitest) {
           "@supports": "gap: 1rem",
           "@media": "(prefers-color-scheme: dark) and (prefers-reduced-motion)",
           "@container": "(min-width: 500px)"
-        }
+        },
+        propertyReference: {}
       };
       const target: StyleResult = { color: "red" };
 
@@ -159,7 +160,8 @@ if (import.meta.vitest) {
           "@supports": "gap: 1rem",
           "@media": "(prefers-color-scheme: dark) and (prefers-reduced-motion)",
           "@container": "(min-width: 500px)"
-        }
+        },
+        propertyReference: {}
       };
       const target: StyleResult = { color: "red" };
 
@@ -194,7 +196,8 @@ if (import.meta.vitest) {
           "@supports": "",
           "@media": "",
           "@container": ""
-        }
+        },
+        propertyReference: {}
       };
       const target: StyleResult = { color: "red" };
 
@@ -215,7 +218,8 @@ if (import.meta.vitest) {
           "@supports": "",
           "@container": "",
           "@layer": ""
-        }
+        },
+        propertyReference: {}
       };
       const target: StyleResult = {
         background: "red",
@@ -252,7 +256,8 @@ if (import.meta.vitest) {
           "@supports": "",
           "@media": "(prefers-color-scheme: dark) and (prefers-reduced-motion)",
           "@container": "(min-width: 500px)"
-        }
+        },
+        propertyReference: {}
       };
       const target: StyleResult = {
         color: "red",
@@ -321,7 +326,8 @@ if (import.meta.vitest) {
           "@supports": "",
           "@container": "",
           "@layer": ""
-        }
+        },
+        propertyReference: {}
       };
       const target: StyleResult = {
         color: "red",
