@@ -1,23 +1,42 @@
-import type { TransformContext } from "@/transform-object";
+import type { TransformContext, CSSRuleExistValue } from "@/transform-object";
 
 // == Interface ================================================================
-const propertyReferenceRegex = /\B@[\w\-_]+/g;
+const LITERAL_PROPERTY_REFERENCE_REGEX = /^@[\w\-_]+$/;
+const PROPERTY_REFERENCE_REGEX = /\B@[\w\-_]+/g;
 
 export function replacePropertyReference(
   valueStr: string,
   context: TransformContext
-) {
-  return valueStr.replaceAll(propertyReferenceRegex, (matched: string) => {
-    const withoutPrefix = matched.substring(1);
-    if (isPropertyKeyExist(withoutPrefix, context)) {
-      const target = context.propertyReference[withoutPrefix];
-      return typeof target === "string"
-        ? replacePropertyReference(target, context)
-        : (target as string); // Can be number, undefined
-    } else {
-      throw new Error(`Property reference not found: ${matched}`);
-    }
+): string | CSSRuleExistValue | (string | CSSRuleExistValue)[] {
+  if (LITERAL_PROPERTY_REFERENCE_REGEX.test(valueStr)) {
+    return getReplacement(valueStr, context);
+  }
+
+  return valueStr.replace(PROPERTY_REFERENCE_REGEX, (matched: string) => {
+    const result = getReplacement(matched, context);
+    if (typeof result === "object") return JSON.stringify(result);
+    return String(result);
   });
+}
+
+function getReplacement(
+  reference: string,
+  context: TransformContext
+): string | CSSRuleExistValue | (string | CSSRuleExistValue)[] {
+  const withoutPrefix = reference.substring(1);
+  if (isPropertyKeyExist(withoutPrefix, context)) {
+    const target = context.propertyReference[withoutPrefix];
+    if (Array.isArray(target)) {
+      return target.map((v) =>
+        typeof v === "string" ? replacePropertyReference(v, context) : v
+      );
+    }
+    return typeof target === "string"
+      ? replacePropertyReference(target, context)
+      : (target as CSSRuleExistValue);
+  } else {
+    throw new Error(`Property reference not found: ${reference}`);
+  }
 }
 
 function isPropertyKeyExist(
@@ -77,6 +96,28 @@ if (import.meta.vitest) {
       ).toBe("50px");
     });
 
+    it("One reference with literal type", () => {
+      // Number
+      expect(
+        replacePropertyReference("@width", {
+          ...initTransformContext,
+          propertyReference: {
+            width: 10
+          }
+        })
+      ).toBe(10);
+
+      // Array
+      expect(
+        replacePropertyReference("@width", {
+          ...initTransformContext,
+          propertyReference: {
+            width: [1, 2]
+          }
+        })
+      ).toStrictEqual([1, 2]);
+    });
+
     it("With complex string", () => {
       expect(
         replacePropertyReference("calc(@width / 2)", {
@@ -130,6 +171,16 @@ if (import.meta.vitest) {
           }
         })
       ).toBe("calc(50px + 50px)");
+
+      expect(
+        replacePropertyReference("@height", {
+          ...initTransformContext,
+          propertyReference: {
+            width: "50px",
+            height: ["@width", "@width"]
+          }
+        })
+      ).toStrictEqual(["50px", "50px"]);
     });
   });
 }

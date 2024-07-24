@@ -28,5 +28,9 @@ if (import.meta.vitest) {
     it("! to End with space", () => {
       expect(simplyImportant("red !")).toBe("red !important");
     });
+
+    it("!important to End", () => {
+      expect(simplyImportant("red !important")).toBe("red !important");
+    });
   });
 }

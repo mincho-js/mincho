@@ -38,7 +38,7 @@ import type {
   AtRulesKeywords
 } from "@/types/style-rule";
 import type { Properties } from "csstype";
-import { replacePropertyReference } from "@/transform-values/proerty-reference";
+import { replacePropertyReference } from "@/transform-values/property-reference";
 
 const mergeObject = deepmerge();
 
@@ -50,7 +50,7 @@ export type StyleResult = {
   //  vars: StyleRuleValue; }': accentColor, alignContent, alignItems, alignSelf, and 905 more.ts(2740)
   [key in string]: VanillaStyleRuleValue;
 };
-type CSSRuleExistValue = Exclude<CSSRuleValue, undefined>;
+export type CSSRuleExistValue = Exclude<CSSRuleValue, undefined>;
 
 export type AtRulesPrefix = `@${AtRulesKeywords}`;
 export interface TransformContext {
@@ -386,9 +386,13 @@ function transformAnonymous(key: string, value: CSSRuleValue) {
 }
 
 function transformCommonValue(value: CSSRuleValue, context: TransformContext) {
-  return typeof value === "string"
-    ? simplyImportant(replaceCSSVar(replacePropertyReference(value, context)))
-    : value;
+  if (typeof value === "string") {
+    const result = replacePropertyReference(value, context);
+    return typeof result === "string"
+      ? simplyImportant(replaceCSSVar(result))
+      : result;
+  }
+  return value;
 }
 
 function isPropertyNested(context: TransformContext) {
@@ -1149,6 +1153,20 @@ if (import.meta.vitest) {
       } satisfies StyleRule);
     });
 
+    it("Property Reference & Fallback style", () => {
+      expect(
+        transformStyle({
+          fontSize: "1rem",
+          padding: ["16px", "@fontSize"],
+          margin: "@padding"
+        })
+      ).toStrictEqual({
+        fontSize: "1rem",
+        padding: ["16px", "1rem"],
+        margin: ["16px", "1rem"]
+      } satisfies StyleRule);
+    });
+
     it("Property Reference & Nested", () => {
       expect(
         transformStyle({
@@ -1183,6 +1201,38 @@ if (import.meta.vitest) {
           }
         }
       } satisfies StyleRule);
+
+      expect(
+        transformStyle({
+          "nav li > &": {
+            background: "red",
+            "@media (prefers-color-scheme: dark)": {
+              background: "blue",
+              _hover: {
+                color: "@background"
+              }
+            }
+          }
+        })
+      ).toStrictEqual({
+        selectors: {
+          "nav li > &": {
+            background: "red"
+          }
+        },
+        "@media": {
+          "(prefers-color-scheme: dark)": {
+            selectors: {
+              "nav li > &": {
+                background: "blue"
+              },
+              "nav li > &:hover": {
+                color: "blue"
+              }
+            }
+          }
+        }
+      } satisfies StyleRule);
     });
   });
 
@@ -1192,10 +1242,13 @@ if (import.meta.vitest) {
         transformStyle({
           "@media": {
             "screen and (min-width: 768px)": {
+              margin: 10,
               _hover: {
                 padding: {
                   BlockEnd: 3,
                   Right: "20px",
+                  Left: "@margin",
+                  InlineStart: ["@Left", "@Right"],
                   InlineEnd: ["16px", "1rem"]
                 }
               },
@@ -1203,7 +1256,8 @@ if (import.meta.vitest) {
                 background: {
                   Color: "red",
                   Image: "none",
-                  Clip: ["initial", "-moz-initial"]
+                  Clip: ["initial", "-moz-initial"],
+                  Attachment: "@Clip"
                 }
               }
             }
@@ -1212,10 +1266,13 @@ if (import.meta.vitest) {
       ).toStrictEqual({
         "@media": {
           "screen and (min-width: 768px)": {
+            margin: 10,
             selectors: {
               "&:hover": {
                 paddingBlockEnd: 3,
                 paddingRight: "20px",
+                paddingLeft: 10,
+                paddingInlineStart: [10, "20px"],
                 paddingInlineEnd: ["16px", "1rem"]
               }
             }
@@ -1227,7 +1284,8 @@ if (import.meta.vitest) {
               "screen and (min-width: 768px)": {
                 backgroundColor: "red",
                 backgroundImage: "none",
-                backgroundClip: ["initial", "-moz-initial"]
+                backgroundClip: ["initial", "-moz-initial"],
+                backgroundAttachment: ["initial", "-moz-initial"]
               }
             }
           }
@@ -1242,6 +1300,7 @@ if (import.meta.vitest) {
             background: {
               base: "red",
               _hover: "green",
+              _active: "@base",
               "[disabled]": "blue",
               "nav li > &": "black",
               "@media (prefers-color-scheme: dark)": "white",
@@ -1253,6 +1312,7 @@ if (import.meta.vitest) {
               Color: {
                 base: "transparent",
                 _hover: "Highlight",
+                _active: "@_hover",
                 "@media (prefers-reduced-motion)": "MenuText"
               },
               "@media (prefers-reduced-motion)": {
@@ -1272,6 +1332,10 @@ if (import.meta.vitest) {
             selectors: {
               "&:hover": {
                 background: "green",
+                backgroundColor: "Highlight"
+              },
+              "&:active": {
+                background: "red",
                 backgroundColor: "Highlight"
               },
               "&[disabled]": {
