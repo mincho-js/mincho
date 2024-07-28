@@ -2,7 +2,7 @@ import chalk from "chalk";
 import boxen from "boxen";
 import colorize from "@pinojs/json-colorizer";
 import diff from "deep-diff";
-import pretifyDeepDiff from "pretify-deep-diff";
+import pretifyDeepDiff from "@mincho-js/pretify-deep-diff";
 
 // == Console ==================================================================
 // consola fancy is not works in test

@@ -746,18 +746,28 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@mincho-js/debug-log@workspace:packages/debug-log"
   dependencies:
+    "@mincho-js/pretify-deep-diff": "npm:^1.0.5"
     "@pinojs/json-colorizer": "npm:^4.0.0"
     "@types/deep-diff": "npm:^1"
     boxen: "npm:^8.0.0"
     chalk: "npm:^5.3.0"
     deep-diff: "npm:^1.0.2"
     eslint-config-custom: "workspace:^"
-    pretify-deep-diff: "patch:pretify-deep-diff@npm%3A1.0.1#~/.yarn/patches/pretify-deep-diff-npm-1.0.1-587f0078e3.patch"
     prettier-config-custom: "workspace:^"
     tsconfig-custom: "workspace:^"
     vite-config-custom: "workspace:^"
   languageName: unknown
   linkType: soft
+
+"@mincho-js/pretify-deep-diff@npm:^1.0.5":
+  version: 1.0.5
+  resolution: "@mincho-js/pretify-deep-diff@npm:1.0.5"
+  dependencies:
+    "@mincho-js/pretify-deep-diff": "npm:^1.0.5"
+    deep-diff: "npm:^1.0.2"
+  checksum: 10/139f999912720ff0bc4a120aadbcdadff1a263e8d90e78cea9e26c95dbb742363182d3d78688a9f35420b3a657428b8e15c9bfd93cceda8a668b8f357af56ced
+  languageName: node
+  linkType: hard
 
 "@mincho-js/transform-to-vanilla@workspace:^, @mincho-js/transform-to-vanilla@workspace:packages/transform-to-vanilla":
   version: 0.0.0-use.local
@@ -4322,26 +4332,6 @@ __metadata:
   version: 1.2.1
   resolution: "prelude-ls@npm:1.2.1"
   checksum: 10/0b9d2c76801ca652a7f64892dd37b7e3fab149a37d2424920099bf894acccc62abb4424af2155ab36dea8744843060a2d8ddc983518d0b1e22265a22324b72ed
-  languageName: node
-  linkType: hard
-
-"pretify-deep-diff@npm:1.0.1":
-  version: 1.0.1
-  resolution: "pretify-deep-diff@npm:1.0.1"
-  dependencies:
-    deep-diff: "npm:^1.0.2"
-    pretify-deep-diff: "npm:^1.0.0"
-  checksum: 10/629cfe5a3eef84c4a812c40f00dbf2327d737bcc10f2b3d21594e8d43b332e78649cfa1c9c16514da8e1897ae47b0e1b52924c6d64a39bb61144b90f429d5f85
-  languageName: node
-  linkType: hard
-
-"pretify-deep-diff@patch:pretify-deep-diff@npm%3A1.0.1#~/.yarn/patches/pretify-deep-diff-npm-1.0.1-587f0078e3.patch":
-  version: 1.0.1
-  resolution: "pretify-deep-diff@patch:pretify-deep-diff@npm%3A1.0.1#~/.yarn/patches/pretify-deep-diff-npm-1.0.1-587f0078e3.patch::version=1.0.1&hash=a24c30"
-  dependencies:
-    deep-diff: "npm:^1.0.2"
-    pretify-deep-diff: "npm:^1.0.0"
-  checksum: 10/0dea9da431bcd96b0ae7945d9592387d07bc49cacbac291b5a4121b05c4301c84c5d88043ed9ee5938c6cb540600a21bb56b7981908af3a5dc1c5c7b80307866
   languageName: node
   linkType: hard
 

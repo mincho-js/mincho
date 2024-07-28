@@ -1,8 +1,22 @@
 {
   "$schema": "https://json.schemastore.org/package.json",
   "name": "@mincho-js/debug-log",
-  "version": "0.0.1",
+  "version": "1.0.0",
   "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mincho-js/mincho.git"
+  },
+  "keywords": [
+    "debug",
+    "debug-log",
+    "log"
+  ],
+  "bugs": {
+    "url": "https://github.com/mincho-js/mincho/issues"
+  },
+  "homepage": "https://github.com/mincho-js/mincho/tree/main/packages/debug-log#readme",
   "typings": "./dist/esm/index.d.ts",
   "main": "./dist/cjs/index.cjs",
   "module": "./dist/esm/index.mjs",
@@ -46,10 +60,10 @@
     "vite-config-custom": "workspace:^"
   },
   "dependencies": {
+    "@mincho-js/pretify-deep-diff": "^1.0.5",
     "@pinojs/json-colorizer": "^4.0.0",
     "boxen": "^8.0.0",
     "chalk": "^5.3.0",
-    "deep-diff": "^1.0.2",
-    "pretify-deep-diff": "patch:pretify-deep-diff@npm%3A1.0.1#~/.yarn/patches/pretify-deep-diff-npm-1.0.1-587f0078e3.patch"
+    "deep-diff": "^1.0.2"
   }
 }
