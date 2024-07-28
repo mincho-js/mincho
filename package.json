@@ -35,7 +35,7 @@
     "g:publish": "cd $INIT_CWD && yarn npm publish --access public"
   },
   "devDependencies": {
-    "@mincho/debug-log": "workspace:^",
+    "@mincho-js/debug-log": "workspace:^",
     "@types/eslint": "^8.56.10",
     "@types/node": "^20.14.11",
     "@typescript/analyze-trace": "^0.10.1",

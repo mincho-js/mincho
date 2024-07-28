@@ -1,4 +1,4 @@
-import { globalStyle, keyframes, style } from "@mincho/css"
+import { globalStyle, keyframes, style } from "@mincho-js/css"
 
 globalStyle("#root", {
   maxWidth: "1280px",

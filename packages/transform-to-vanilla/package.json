@@ -1,6 +1,6 @@
 {
   "$schema": "https://json.schemastore.org/package.json",
-  "name": "@mincho/transform-to-vanilla",
+  "name": "@mincho-js/transform-to-vanilla",
   "version": "0.0.1",
   "type": "module",
   "typings": "./dist/esm/index.d.ts",
@@ -42,7 +42,7 @@
   },
   "dependencies": {
     "@fastify/deepmerge": "^2.0.0",
-    "@mincho/css-additional-types": "workspace:^",
+    "@mincho-js/css-additional-types": "workspace:^",
     "csstype": "^3.1.3"
   }
 }

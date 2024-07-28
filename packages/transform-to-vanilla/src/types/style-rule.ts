@@ -5,7 +5,7 @@ import type {
   SpacePropertiesKey,
   CommaPropertiesKey,
   NestedPropertiesMap
-} from "@mincho/css-additional-types";
+} from "@mincho-js/css-additional-types";
 import type { GlobalFontFaceRule } from "./fontface-rule";
 import type { IntRange, Spread } from "./utils";
 

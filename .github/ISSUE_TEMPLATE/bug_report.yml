@@ -12,10 +12,10 @@ body:
     attributes:
       label: Packages with the problem
       options:
-        - "@mincho/css"
-        - "@mincho/transform-to-vanilla"
-        - "@mincho/css-additional-types"
-        - "@mincho/debug-log"
+        - "@mincho-js/css"
+        - "@mincho-js/transform-to-vanilla"
+        - "@mincho-js/css-additional-types"
+        - "@mincho-js/debug-log"
         - Examples
         - Configs (Vite, Lint, Typescript ..etc)
         - Unknown

@@ -1,3 +1,3 @@
-# @mincho/css
+# @mincho-js/css
 
-The @mincho/css package is framework agnostic APIs.
+The @mincho-js/css package is framework agnostic APIs.

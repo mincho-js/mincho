@@ -38,7 +38,7 @@
     "types": [                                           /* Specify type package names to be included without being referenced in a source file. */
       "vitest/importMeta",
       "vite/client",
-      "@mincho/debug-log/importMeta"
+      "@mincho-js/debug-log/importMeta"
     ],
     // "allowUmdGlobalAccess": true,                     /* Allow accessing UMD globals from modules. */
     // "moduleSuffixes": [],                             /* List of file name suffixes to search when resolving a module. */

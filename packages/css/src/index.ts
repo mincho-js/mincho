@@ -1,10 +1,10 @@
-import { transform } from "@mincho/transform-to-vanilla";
+import { transform } from "@mincho-js/transform-to-vanilla";
 import type {
   CSSProperties,
   ComplexCSSRule,
   GlobalCSSRule,
   CSSRule
-} from "@mincho/transform-to-vanilla";
+} from "@mincho-js/transform-to-vanilla";
 import { style as vStyle, globalStyle as gStyle } from "@vanilla-extract/css";
 export type { Adapter, FileScope } from "@vanilla-extract/css";
 export {

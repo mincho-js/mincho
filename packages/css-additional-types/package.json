@@ -1,6 +1,6 @@
 {
   "$schema": "https://json.schemastore.org/package.json",
-  "name": "@mincho/css-additional-types",
+  "name": "@mincho-js/css-additional-types",
   "private": true,
   "version": "0.0.1",
   "type": "module",

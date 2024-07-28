@@ -74,7 +74,7 @@ function NodeBuilder(viteConfigEnv) {
         if (!isExcluded && (id.endsWith(".js") || id.endsWith(".ts"))) {
           return {
             code: `
-              import * as debugLog from "@mincho/debug-log";
+              import * as debugLog from "@mincho-js/debug-log";
               if (!import.meta.debugLog) {
                 import.meta.debugLog = debugLog;
               }

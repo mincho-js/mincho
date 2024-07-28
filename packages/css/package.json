@@ -1,6 +1,6 @@
 {
   "$schema": "https://json.schemastore.org/package.json",
-  "name": "@mincho/css",
+  "name": "@mincho-js/css",
   "version": "0.0.1",
   "type": "module",
   "typings": "./src/esm/index.ts",
@@ -31,7 +31,7 @@
   },
   "prettier": "prettier-config-custom",
   "dependencies": {
-    "@mincho/transform-to-vanilla": "workspace:^"
+    "@mincho-js/transform-to-vanilla": "workspace:^"
   },
   "devDependencies": {
     "@vanilla-extract/css": "^1.15.3",

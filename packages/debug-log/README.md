@@ -1,4 +1,4 @@
-# @mincho/debug-log
+# @mincho-js/debug-log
 
 This was created to make console debugging easier when you often need to compare JavaScript object values.
 

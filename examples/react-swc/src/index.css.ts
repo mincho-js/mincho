@@ -1,4 +1,4 @@
-import { globalStyle } from "@mincho/css"
+import { globalStyle } from "@mincho-js/css"
 
 globalStyle(":root", {
   fontFamily: "Inter , system-ui , Avenir , Helvetica , Arial , sans-serif",

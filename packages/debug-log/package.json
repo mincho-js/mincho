@@ -1,7 +1,6 @@
 {
   "$schema": "https://json.schemastore.org/package.json",
-  "name": "@mincho/debug-log",
-  "private": true,
+  "name": "@mincho-js/debug-log",
   "version": "0.0.1",
   "type": "module",
   "typings": "./dist/esm/index.d.ts",
