@@ -36,23 +36,23 @@
   },
   "devDependencies": {
     "@mincho-js/debug-log": "workspace:^",
-    "@types/eslint": "^8.56.10",
+    "@types/eslint": "^9.6.0",
     "@types/node": "^20.14.11",
     "@typescript/analyze-trace": "^0.10.1",
     "@vanilla-extract/vite-plugin": "^4.0.13",
-    "@vitest/coverage-v8": "^2.0.3",
+    "@vitest/coverage-v8": "^2.0.4",
     "c8": "^10.1.2",
-    "eslint": "^9.7.0",
+    "eslint": "^9.8.0",
     "eslint-config-custom": "workspace:^",
     "prettier": "^3.3.3",
     "prettier-eslint": "^16.3.0",
     "rimraf": "^5.0.9",
     "terser": "^5.31.3",
     "turbo": "^2.0.9",
-    "typescript": "^5.5.3",
-    "vite": "^5.3.4",
-    "vite-node": "^2.0.3",
-    "vitest": "^2.0.3"
+    "typescript": "^5.5.4",
+    "vite": "^5.3.5",
+    "vite-node": "^2.0.4",
+    "vitest": "^2.0.4"
   },
   "dependencies": {
     "tslib": "^2.6.3"
