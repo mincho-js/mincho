@@ -35,6 +35,7 @@
     "g:publish": "cd $INIT_CWD && yarn npm publish --access public"
   },
   "devDependencies": {
+    "@changesets/cli": "^2.27.7",
     "@mincho-js/debug-log": "workspace:^",
     "@types/eslint": "^9.6.0",
     "@types/node": "^22.2.0",
