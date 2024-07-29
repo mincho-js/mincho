@@ -3,6 +3,7 @@
 import colorize from "@pinojs/json-colorizer";
 import diff from "deep-diff";
 import pretifyDeepDiff from "@mincho-js/pretify-deep-diff";
+import { sleep } from "deasync";
 import type Chalk from "chalk";
 import type Boxen from "boxen";
 
@@ -25,19 +26,25 @@ Instead change the require of index.js in null to a dynamic import() which is av
 ```
  */
 
-// let chalk: typeof Chalk;
-// (async () => {
-//   chalk = (await import("chalk")).default;
-// })();
-let chalkPromise: Promise<typeof Chalk>;
-(async () => {
-  chalkPromise = import("chalk").then((module) => module.default);
-})();
+let chalk: typeof Chalk;
+let boxen: typeof Boxen;
+import("chalk").then((module) => {
+  chalk = module.default;
+});
+import("boxen").then((module) => {
+  boxen = module.default;
+});
 
-let boxenPromise: Promise<typeof Boxen>;
-(async () => {
-  boxenPromise = import("boxen").then((module) => module.default);
-})();
+while (
+  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+  // @ts-ignore error TS2454: Variable 'chalk' is used before being assigned
+  chalk === undefined &&
+  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+  // @ts-ignore error TS2454: Variable 'boxen' is used before being assigned
+  boxen === undefined
+) {
+  sleep(100);
+}
 
 // == Console ==================================================================
 // consola fancy is not works in test
@@ -47,12 +54,10 @@ const consola = {
   log(...args: unknown[]) {
     console.log(...args);
   },
-  async info(...args: unknown[]) {
-    const chalk = await chalkPromise;
+  info(...args: unknown[]) {
     console.log(chalk.cyan("\nℹ"), ...args);
   },
-  async box(arg1: unknown, ...args: unknown[]) {
-    const boxen = await boxenPromise;
+  box(arg1: unknown, ...args: unknown[]) {
     const isExistArgs = args.length !== 0;
     console.log(
       boxen(isExistArgs ? args.join(" ") : (arg1 as string), {
@@ -97,87 +102,80 @@ function getCount() {
   return (count++).toString().padStart(4, "0");
 }
 
-export async function debugLog(name?: string) {
-  const chalk = await chalkPromise;
+export function debugLog(name?: string) {
   const message =
     name === undefined ? `DEBUG-${getCount()}` : `DEBUG-${getCount()}: ${name}`;
 
   consola.info(chalk.bold(message));
 }
 
-export async function jsonPrint<T>(obj: JSONCompatible<T>): Promise<void>;
-export async function jsonPrint<T>(
-  name: string,
-  obj?: JSONCompatible<T>
-): Promise<void>;
-export async function jsonPrint<T>(
+export function jsonPrint<T>(obj: JSONCompatible<T>): void;
+export function jsonPrint<T>(name: string, obj?: JSONCompatible<T>): void;
+export function jsonPrint<T>(
   nameOrObj: string | JSONCompatible<T>,
   obj?: JSONCompatible<T>
 ) {
   if (obj === undefined) {
     const json = JSON.stringify(nameOrObj, null, 2);
-    await consola.box(colorize(json));
+    consola.box(colorize(json));
   } else {
     const json = JSON.stringify(obj, null, 2);
-    await consola.box(nameOrObj, colorize(json));
+    consola.box(nameOrObj, colorize(json));
   }
 }
 
-export async function jsonLog<T>(obj: JSONCompatible<T>): Promise<void>;
-export async function jsonLog<T>(
-  name: string,
-  obj?: JSONCompatible<T>
-): Promise<void>;
-export async function jsonLog<T>(
+export function jsonLog<T>(obj: JSONCompatible<T>): void;
+export function jsonLog<T>(name: string, obj?: JSONCompatible<T>): void;
+export function jsonLog<T>(
   nameOrObj: string | JSONCompatible<T>,
   obj?: JSONCompatible<T>
 ) {
   if (obj === undefined) {
-    await debugLog();
+    debugLog();
     // We will forced assert, becasue don't want to overhead
-    await jsonPrint(nameOrObj as JSONCompatible<T>);
+    jsonPrint(nameOrObj as JSONCompatible<T>);
   } else {
-    await debugLog(nameOrObj as string);
-    await jsonPrint(obj);
+    debugLog(nameOrObj as string);
+    jsonPrint(obj);
   }
 }
 
-export async function jsonExpect<T, K = T>(
+export function jsonExpect<T, K = T>(
   obj1: JSONCompatible<T>,
   obj2?: JSONCompatible<K>
-): Promise<void>;
-export async function jsonExpect<T, K = T>(
+): void;
+export function jsonExpect<T, K = T>(
   name: string,
   obj1?: JSONCompatible<T>,
   obj2?: JSONCompatible<K>
-): Promise<void>;
-export async function jsonExpect<T, K = T>(
+): void;
+export function jsonExpect<T, K = T>(
   nameOrObj: string | JSONCompatible<T>,
   obj1?: JSONCompatible<T> | JSONCompatible<K>,
   obj2?: JSONCompatible<K>
 ) {
   if (obj2 === undefined) {
-    await debugLog();
+    debugLog();
     const changes = diff(nameOrObj, obj1);
 
     if (changes === undefined) {
       // We will forced assert, becasue don't want to overhead
-      await jsonPrint("Same Contents", nameOrObj as JSONCompatible<T>);
+      jsonPrint("Same Contents", nameOrObj as JSONCompatible<T>);
     } else {
-      await jsonPrint("Expected", nameOrObj as JSONCompatible<T>);
-      await jsonPrint("Real", obj1 as JSONCompatible<K>);
+      jsonPrint("Expected", nameOrObj as JSONCompatible<T>);
+      jsonPrint("Real", obj1 as JSONCompatible<K>);
 
       console.log(pretifyDeepDiff(changes ?? []));
     }
   } else {
-    await debugLog(nameOrObj as string);
+    debugLog(nameOrObj as string);
     const changes = diff(obj1, obj2);
 
     if (changes === undefined) {
-      await jsonPrint("Same Contents", obj1 as JSONCompatible<T>);
+      jsonPrint("Same Contents", obj1 as JSONCompatible<T>);
     } else {
-      await jsonPrint("Expected", obj1 as JSONCompatible<T>);
-      await jsonPrint("Real", obj2 as JSONCompatible<K>);
+      jsonPrint("Expected", obj1 as JSONCompatible<T>);
+      jsonPrint("Real", obj2 as JSONCompatible<K>);
 
       console.log(pretifyDeepDiff(changes ?? []));
     }
@@ -197,11 +195,11 @@ if (import.meta.vitest) {
     expect(1).toBeLessThan(100);
   };
 
-  it("debugLog", async () => {
-    await debugLog();
+  it("debugLog", () => {
+    debugLog();
     console.log("test");
 
-    await debugLog("with title debugLog");
+    debugLog("with title debugLog");
     console.log("test2");
 
     /** OUTPUT
@@ -214,9 +212,9 @@ if (import.meta.vitest) {
     TEST_PASS();
   });
 
-  it("jsonLog", async () => {
-    await jsonLog({ key1: true, key2: 1, key3: null, key4: "string" });
-    await jsonLog("with title jsonLog", { others: undefined });
+  it("jsonLog", () => {
+    jsonLog({ key1: true, key2: 1, key3: null, key4: "string" });
+    jsonLog("with title jsonLog", { others: undefined });
 
     /* OUTPUT
       ℹ DEBUG-0002
@@ -241,9 +239,9 @@ if (import.meta.vitest) {
     TEST_PASS();
   });
 
-  it("jsonExpect", async () => {
-    await jsonExpect({ a: 1 }, { a: 2 });
-    await jsonExpect("with title jsonExpect", { b: 1 }, { c: "1" });
+  it("jsonExpect", () => {
+    jsonExpect({ a: 1 }, { a: 2 });
+    jsonExpect("with title jsonExpect", { b: 1 }, { c: "1" });
 
     /* OUTPUT
       ℹ DEBUG-0004

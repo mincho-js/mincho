@@ -53,6 +53,7 @@
   },
   "prettier": "prettier-config-custom",
   "devDependencies": {
+    "@types/deasync": "^0",
     "@types/deep-diff": "^1",
     "eslint-config-custom": "workspace:^",
     "prettier-config-custom": "workspace:^",
@@ -64,6 +65,7 @@
     "@pinojs/json-colorizer": "^4.0.0",
     "boxen": "^8.0.0",
     "chalk": "^5.3.0",
+    "deasync": "^0.1.30",
     "deep-diff": "^1.0.2"
   }
 }
