@@ -784,6 +784,15 @@ __metadata:
   languageName: unknown
   linkType: soft
 
+"@mincho/debug-log-test@workspace:packages/test-debug-log":
+  version: 0.0.0-use.local
+  resolution: "@mincho/debug-log-test@workspace:packages/test-debug-log"
+  dependencies:
+    "@mincho-js/debug-log": "workspace:^"
+    prettier-config-custom: "workspace:^"
+  languageName: unknown
+  linkType: soft
+
 "@nodelib/fs.scandir@npm:2.1.5":
   version: 2.1.5
   resolution: "@nodelib/fs.scandir@npm:2.1.5"

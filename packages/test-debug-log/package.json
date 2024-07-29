@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "@mincho/debug-log-test",
+  "private": true,
+  "version": "0.0.1",
+  "type": "commonjs",
+  "scripts": {
+    "clean": "yarn g:clean"
+  },
+  "prettier": "prettier-config-custom",
+  "devDependencies": {
+    "prettier-config-custom": "workspace:^"
+  },
+  "dependencies": {
+    "@mincho-js/debug-log": "workspace:^"
+  }
+}

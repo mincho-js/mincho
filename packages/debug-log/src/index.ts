@@ -1,8 +1,43 @@
-import chalk from "chalk";
-import boxen from "boxen";
+// import chalk from "chalk";
+// import boxen from "boxen";
 import colorize from "@pinojs/json-colorizer";
 import diff from "deep-diff";
 import pretifyDeepDiff from "@mincho-js/pretify-deep-diff";
+import type Chalk from "chalk";
+import type Boxen from "boxen";
+
+/** Dynamic import for commonjs
+Will will use IIFE for import.
+
+```text
+Uncaught:
+Error [ERR_REQUIRE_ESM]: require() of ES Module /home/black7375/mincho/node_modules/.store/boxen-npm-8.0.0-0f4620e170/package/index.js not supported.
+Instead change the require of index.js in null to a dynamic import() which is available in all CommonJS modules.
+    at Module._extensions..js (node:internal/modules/cjs/loader:1519:19)
+    at Module.load (node:internal/modules/cjs/loader:1282:32)
+    at Module._load (node:internal/modules/cjs/loader:1098:12)
+    at TracingChannel.traceSync (node:diagnostics_channel:315:14)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:215:24)
+    at Module.require (node:internal/modules/cjs/loader:1304:12)
+    at require (node:internal/modules/helpers:123:16) {
+  code: 'ERR_REQUIRE_ESM'
+}
+```
+ */
+
+// let chalk: typeof Chalk;
+// (async () => {
+//   chalk = (await import("chalk")).default;
+// })();
+let chalkPromise: Promise<typeof Chalk>;
+(async () => {
+  chalkPromise = import("chalk").then((module) => module.default);
+})();
+
+let boxenPromise: Promise<typeof Boxen>;
+(async () => {
+  boxenPromise = import("boxen").then((module) => module.default);
+})();
 
 // == Console ==================================================================
 // consola fancy is not works in test
@@ -12,10 +47,12 @@ const consola = {
   log(...args: unknown[]) {
     console.log(...args);
   },
-  info(...args: unknown[]) {
+  async info(...args: unknown[]) {
+    const chalk = await chalkPromise;
     console.log(chalk.cyan("\nℹ"), ...args);
   },
-  box(arg1: unknown, ...args: unknown[]) {
+  async box(arg1: unknown, ...args: unknown[]) {
+    const boxen = await boxenPromise;
     const isExistArgs = args.length !== 0;
     console.log(
       boxen(isExistArgs ? args.join(" ") : (arg1 as string), {
@@ -60,80 +97,87 @@ function getCount() {
   return (count++).toString().padStart(4, "0");
 }
 
-export function debugLog(name?: string) {
+export async function debugLog(name?: string) {
+  const chalk = await chalkPromise;
   const message =
     name === undefined ? `DEBUG-${getCount()}` : `DEBUG-${getCount()}: ${name}`;
 
   consola.info(chalk.bold(message));
 }
 
-export function jsonPrint<T>(obj: JSONCompatible<T>): void;
-export function jsonPrint<T>(name: string, obj?: JSONCompatible<T>): void;
-export function jsonPrint<T>(
+export async function jsonPrint<T>(obj: JSONCompatible<T>): Promise<void>;
+export async function jsonPrint<T>(
+  name: string,
+  obj?: JSONCompatible<T>
+): Promise<void>;
+export async function jsonPrint<T>(
   nameOrObj: string | JSONCompatible<T>,
   obj?: JSONCompatible<T>
 ) {
   if (obj === undefined) {
     const json = JSON.stringify(nameOrObj, null, 2);
-    consola.box(colorize(json));
+    await consola.box(colorize(json));
   } else {
     const json = JSON.stringify(obj, null, 2);
-    consola.box(nameOrObj, colorize(json));
+    await consola.box(nameOrObj, colorize(json));
   }
 }
 
-export function jsonLog<T>(obj: JSONCompatible<T>): void;
-export function jsonLog<T>(name: string, obj?: JSONCompatible<T>): void;
-export function jsonLog<T>(
+export async function jsonLog<T>(obj: JSONCompatible<T>): Promise<void>;
+export async function jsonLog<T>(
+  name: string,
+  obj?: JSONCompatible<T>
+): Promise<void>;
+export async function jsonLog<T>(
   nameOrObj: string | JSONCompatible<T>,
   obj?: JSONCompatible<T>
 ) {
   if (obj === undefined) {
-    debugLog();
+    await debugLog();
     // We will forced assert, becasue don't want to overhead
-    jsonPrint(nameOrObj as JSONCompatible<T>);
+    await jsonPrint(nameOrObj as JSONCompatible<T>);
   } else {
-    debugLog(nameOrObj as string);
-    jsonPrint(obj);
+    await debugLog(nameOrObj as string);
+    await jsonPrint(obj);
   }
 }
 
-export function jsonExpect<T, K = T>(
+export async function jsonExpect<T, K = T>(
   obj1: JSONCompatible<T>,
   obj2?: JSONCompatible<K>
-): void;
-export function jsonExpect<T, K = T>(
+): Promise<void>;
+export async function jsonExpect<T, K = T>(
   name: string,
   obj1?: JSONCompatible<T>,
   obj2?: JSONCompatible<K>
-): void;
-export function jsonExpect<T, K = T>(
+): Promise<void>;
+export async function jsonExpect<T, K = T>(
   nameOrObj: string | JSONCompatible<T>,
   obj1?: JSONCompatible<T> | JSONCompatible<K>,
   obj2?: JSONCompatible<K>
 ) {
   if (obj2 === undefined) {
-    debugLog();
+    await debugLog();
     const changes = diff(nameOrObj, obj1);
 
     if (changes === undefined) {
       // We will forced assert, becasue don't want to overhead
-      jsonPrint("Same Contents", nameOrObj as JSONCompatible<T>);
+      await jsonPrint("Same Contents", nameOrObj as JSONCompatible<T>);
     } else {
-      jsonPrint("Expected", nameOrObj as JSONCompatible<T>);
-      jsonPrint("Real", obj1 as JSONCompatible<K>);
+      await jsonPrint("Expected", nameOrObj as JSONCompatible<T>);
+      await jsonPrint("Real", obj1 as JSONCompatible<K>);
 
       console.log(pretifyDeepDiff(changes ?? []));
     }
   } else {
-    debugLog(nameOrObj as string);
+    await debugLog(nameOrObj as string);
     const changes = diff(obj1, obj2);
 
     if (changes === undefined) {
-      jsonPrint("Same Contents", obj1 as JSONCompatible<T>);
+      await jsonPrint("Same Contents", obj1 as JSONCompatible<T>);
     } else {
-      jsonPrint("Expected", obj1 as JSONCompatible<T>);
-      jsonPrint("Real", obj2 as JSONCompatible<K>);
+      await jsonPrint("Expected", obj1 as JSONCompatible<T>);
+      await jsonPrint("Real", obj2 as JSONCompatible<K>);
 
       console.log(pretifyDeepDiff(changes ?? []));
     }
@@ -153,11 +197,11 @@ if (import.meta.vitest) {
     expect(1).toBeLessThan(100);
   };
 
-  it("debugLog", () => {
-    debugLog();
+  it("debugLog", async () => {
+    await debugLog();
     console.log("test");
 
-    debugLog("with title debugLog");
+    await debugLog("with title debugLog");
     console.log("test2");
 
     /** OUTPUT
@@ -170,9 +214,9 @@ if (import.meta.vitest) {
     TEST_PASS();
   });
 
-  it("jsonLog", () => {
-    jsonLog({ key1: true, key2: 1, key3: null, key4: "string" });
-    jsonLog("with title jsonLog", { others: undefined });
+  it("jsonLog", async () => {
+    await jsonLog({ key1: true, key2: 1, key3: null, key4: "string" });
+    await jsonLog("with title jsonLog", { others: undefined });
 
     /* OUTPUT
       ℹ DEBUG-0002
@@ -197,9 +241,9 @@ if (import.meta.vitest) {
     TEST_PASS();
   });
 
-  it("jsonExpect", () => {
-    jsonExpect({ a: 1 }, { a: 2 });
-    jsonExpect("with title jsonExpect", { b: 1 }, { c: "1" });
+  it("jsonExpect", async () => {
+    await jsonExpect({ a: 1 }, { a: 2 });
+    await jsonExpect("with title jsonExpect", { b: 1 }, { c: "1" });
 
     /* OUTPUT
       ℹ DEBUG-0004
