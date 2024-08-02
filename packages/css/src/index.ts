@@ -1,4 +1,9 @@
-import { transform } from "@mincho-js/transform-to-vanilla";
+import {
+  transform,
+  replaceVariantReference,
+  initTransformContext,
+  type TransformContext
+} from "@mincho-js/transform-to-vanilla";
 import type {
   CSSProperties,
   ComplexCSSRule,
@@ -64,12 +69,25 @@ export function cssVariants(...args: any[]) {
     const mapData = args[1];
     const debugId = args[2];
 
+    const contexts: TransformContext[] = [];
+    const variantMap: Record<string, string> = {};
     const classMap: Record<string | number, string> = {};
     for (const key in data) {
-      classMap[key] = css(
-        mapData(data[key], key),
+      const context = structuredClone(initTransformContext);
+      const className = vStyle(
+        transform(mapData(data[key], key), context),
         debugId ? `${debugId}_${key}` : key
       );
+      contexts.push(context);
+      variantMap[`%${key}`] = className;
+      classMap[key] = className;
+    }
+    for (const context of contexts) {
+      context.variantMap = variantMap;
+      replaceVariantReference(context);
+      for (const [key, value] of Object.entries(context.variantReference)) {
+        globalCss(key, value as StyleRule);
+      }
     }
 
     return classMap;
@@ -78,9 +96,25 @@ export function cssVariants(...args: any[]) {
   const styleMap = args[0];
   const debugId = args[1];
 
+  const contexts: TransformContext[] = [];
+  const variantMap: Record<string, string> = {};
   const classMap: Record<string | number, string> = {};
   for (const key in styleMap) {
-    classMap[key] = css(styleMap[key], debugId ? `${debugId}_${key}` : key);
+    const context = structuredClone(initTransformContext);
+    const className = vStyle(
+      transform(styleMap[key], context),
+      debugId ? `${debugId}_${key}` : key
+    );
+    contexts.push(context);
+    variantMap[`%${key}`] = className;
+    classMap[key] = className;
+  }
+  for (const context of contexts) {
+    context.variantMap = variantMap;
+    replaceVariantReference(context);
+    for (const [key, value] of Object.entries(context.variantReference)) {
+      globalCss(key, value as StyleRule);
+    }
   }
 
   return classMap;

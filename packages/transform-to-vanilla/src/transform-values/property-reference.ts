@@ -1,3 +1,4 @@
+import { initTransformContext } from "@/transform-object";
 import type { TransformContext, CSSRuleExistValue } from "@/transform-object";
 
 // == Interface ================================================================
@@ -56,19 +57,6 @@ if (import.meta.vitest) {
   const { describe, it, expect } = import.meta.vitest;
 
   describe.concurrent("propertyRefence", () => {
-    const initTransformContext: TransformContext = {
-      result: {},
-      basedKey: "",
-      parentSelector: "",
-      parentAtRules: {
-        "@media": "",
-        "@supports": "",
-        "@container": "",
-        "@layer": ""
-      },
-      propertyReference: {}
-    };
-
     it("Not used", () => {
       expect(
         replacePropertyReference("50px", {

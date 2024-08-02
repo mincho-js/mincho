@@ -26,9 +26,14 @@ import { removeMergeSymbol, mergeKeyInfo } from "@/transform-keys/merge-key";
 import { mergeToComma, mergeToSpace } from "@/transform-values/merge-values";
 import { simplyImportant } from "@/transform-values/simply-important";
 import { isUppercase } from "@/utils/string";
+import { isEmptyObject } from "@/utils/object";
 import { keyframes, fontFace } from "@vanilla-extract/css";
 import { setFileScope } from "@vanilla-extract/css/fileScope";
-import { createNestedObject, processNestedResult } from "./rule-context";
+import {
+  createNestedObject,
+  createPathSetter,
+  processNestedResult
+} from "./rule-context";
 import type { StyleRule } from "@vanilla-extract/css";
 import type {
   CSSRule,
@@ -61,6 +66,8 @@ export interface TransformContext {
     [key in AtRulesPrefix]: string;
   };
   propertyReference: Properties;
+  variantMap: Record<string, string>;
+  variantReference: Record<string, StyleResult>;
 }
 export const initTransformContext: TransformContext = {
   result: {},
@@ -72,7 +79,9 @@ export const initTransformContext: TransformContext = {
     "@container": "",
     "@layer": ""
   },
-  propertyReference: {}
+  propertyReference: {},
+  variantMap: {},
+  variantReference: {}
 };
 
 export function transformStyle(
@@ -125,6 +134,8 @@ export function transformStyle(
       transformValueStyle(key, value, newContext);
     }
   }
+
+  mergeVariantReference(context, newContext);
   return newContext.result as StyleRule;
 }
 
@@ -209,15 +220,55 @@ function insertSelectorResult(
   value: CSSRuleExistValue,
   context: TransformContext
 ) {
-  insertResultValue(
-    "selectors",
-    selector,
-    transformStyle(value as CSSRule, {
+  if (selector.includes("%")) {
+    const tempContext: TransformContext = {
       ...context,
       result: {},
       parentSelector: selector
-    }),
-    context
+    };
+    insertVariantReferenceValue(
+      selector,
+      transformStyle(value as CSSRule, tempContext),
+      context
+    );
+
+    mergeVariantReference(context, tempContext);
+  } else {
+    insertResultValue(
+      "selectors",
+      selector,
+      transformStyle(value as CSSRule, {
+        ...context,
+        result: {},
+        parentSelector: selector
+      }),
+      context
+    );
+  }
+}
+
+function insertVariantReferenceValue(
+  key: string,
+  value: NonNullable<unknown>,
+  context: TransformContext
+) {
+  const tempContext: TransformContext = {
+    ...context,
+    parentSelector: ""
+  };
+  const result: StyleResult = {};
+  const pathSetter = createPathSetter(result, tempContext);
+  for (const [eachKey, eachValue] of Object.entries(value)) {
+    pathSetter(eachKey, eachValue as VanillaStyleRuleValue);
+  }
+
+  context.variantReference = mergeObject(
+    context.variantReference,
+    isEmptyObject(result)
+      ? {}
+      : {
+          [key]: result
+        }
   );
 }
 
@@ -283,6 +334,7 @@ function createRuleValue(
   transformValueStyle(context.basedKey, value, otherContext);
 
   const atRuleResult = createNestedObject(otherContext, otherContext.result);
+  mergeVariantReference(context, otherContext);
   processNestedResult(context.result, atRuleResult);
 }
 
@@ -365,7 +417,12 @@ function transformObjectValue(
   if (typeof transformed === "string") {
     context.result[transformedKey] = transformed;
   } else {
-    transformStyle(value as CSSRule, { ...context, basedKey: transformedKey });
+    const tempContext = {
+      ...context,
+      basedKey: transformedKey
+    };
+    transformStyle(value as CSSRule, tempContext);
+    mergeVariantReference(context, tempContext);
   }
 }
 
@@ -393,6 +450,16 @@ function transformCommonValue(value: CSSRuleValue, context: TransformContext) {
       : result;
   }
   return value;
+}
+
+export function mergeVariantReference(
+  context: TransformContext,
+  tempContext: TransformContext
+) {
+  context.variantReference = mergeObject(
+    context.variantReference,
+    tempContext.variantReference
+  );
 }
 
 function isPropertyNested(context: TransformContext) {
@@ -1233,6 +1300,82 @@ if (import.meta.vitest) {
           }
         }
       } satisfies StyleRule);
+    });
+
+    it("Variant Reference", () => {
+      const context = structuredClone(initTransformContext);
+      expect(
+        transformStyle(
+          {
+            "&:hover:not(:active) %someVariant": {
+              border: "2px solid red"
+            },
+            "nav li > &": {
+              textDecoration: "underline"
+            },
+            selectors: {
+              "a:nth-of-type(2) &": {
+                opacity: 1
+              }
+            }
+          },
+          context
+        )
+      ).toStrictEqual({
+        selectors: {
+          "nav li > &": {
+            textDecoration: "underline"
+          },
+          "a:nth-of-type(2) &": {
+            opacity: 1
+          }
+        }
+      } satisfies StyleRule);
+
+      expect(context.variantReference).toStrictEqual({
+        "&:hover:not(:active) %someVariant": {
+          border: "2px solid red"
+        }
+      } satisfies Record<string, StyleRule>);
+
+      const variantContext = structuredClone(initTransformContext);
+      const result = transformStyle(
+        {
+          "@media (prefers-color-scheme: dark)": {
+            "&:hover:not(:active) %someVariant": {
+              "@supports (display: grid)": {
+                border: "2px solid blue"
+              },
+              "nav li > &": {
+                textDecoration: "underline"
+              }
+            }
+          }
+        },
+        variantContext
+      );
+      expect(result).toStrictEqual({} satisfies StyleRule);
+
+      expect(variantContext.variantReference).toStrictEqual({
+        "&:hover:not(:active) %someVariant": {
+          "@supports": {
+            "(display: grid)": {
+              "@media": {
+                "(prefers-color-scheme: dark)": {
+                  border: "2px solid blue"
+                }
+              }
+            }
+          }
+        },
+        "nav li > &:hover:not(:active) %someVariant": {
+          "@media": {
+            "(prefers-color-scheme: dark)": {
+              textDecoration: "underline"
+            }
+          }
+        }
+      } satisfies Record<string, StyleRule>);
     });
   });
 

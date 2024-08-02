@@ -1,6 +1,7 @@
 import { setFileScope } from "@vanilla-extract/css/fileScope";
 import deepmerge from "@fastify/deepmerge";
 import { isRuleKey, atRuleKeyMerge } from "@/transform-keys/at-rules";
+import { initTransformContext } from "./index";
 import type { StyleResult, AtRulesPrefix, TransformContext } from "./index";
 import type { VanillaStyleRuleValue } from "@/types/style-rule";
 
@@ -32,17 +33,22 @@ export function createNestedObject(
   return result;
 }
 
-function createPathSetter(result: StyleResult, context: TransformContext) {
+export function createPathSetter(
+  result: StyleResult,
+  context: TransformContext
+) {
   const nestedPath = AT_RULE_ORDER.filter(
     (rule) => context.parentAtRules[rule]
   ).flatMap((rule) => [rule, context.parentAtRules[rule]]);
 
-  if (context.parentSelector) {
+  const isVariantReference = context.parentSelector.includes("%");
+  if (context.parentSelector && !isVariantReference) {
     nestedPath.push("selectors", context.parentSelector);
   }
 
+  const variantResult: StyleResult = {};
   return (key: string, value: VanillaStyleRuleValue) => {
-    let current = result;
+    let current = isVariantReference ? variantResult : result;
     for (const path of nestedPath) {
       if (current[path] === undefined) {
         current[path] = {};
@@ -50,6 +56,12 @@ function createPathSetter(result: StyleResult, context: TransformContext) {
       current = current[path] || {};
     }
     current[key] = value;
+
+    if (isVariantReference) {
+      context.variantReference = mergeObject(context.variantReference, {
+        [context.parentSelector]: variantResult
+      });
+    }
   };
 }
 
@@ -60,16 +72,19 @@ function processRules(
   result: StyleResult
 ) {
   for (const [atRule, atRuleValue] of Object.entries(value)) {
-    const nestedResult = createNestedObject(
-      {
-        ...context,
-        parentAtRules: {
-          ...context.parentAtRules,
-          [key]: atRuleKeyMerge(key, context.parentAtRules[key], atRule)
-        }
-      },
-      atRuleValue
+    const tempContext: TransformContext = {
+      ...context,
+      parentAtRules: {
+        ...context.parentAtRules,
+        [key]: atRuleKeyMerge(key, context.parentAtRules[key], atRule)
+      }
+    };
+    const nestedResult = createNestedObject(tempContext, atRuleValue);
+    context.variantReference = mergeObject(
+      context.variantReference,
+      tempContext.variantReference
     );
+
     processNestedResult(result, nestedResult);
   }
 }
@@ -80,12 +95,14 @@ function processSelectors(
   result: StyleResult
 ) {
   for (const [selector, selectorValue] of Object.entries(value)) {
-    const nestedResult = createNestedObject(
-      {
-        ...context,
-        parentSelector: selector
-      },
-      selectorValue
+    const tempContext: TransformContext = {
+      ...context,
+      parentSelector: selector
+    };
+    const nestedResult = createNestedObject(tempContext, selectorValue);
+    context.variantReference = mergeObject(
+      context.variantReference,
+      tempContext.variantReference
     );
     processNestedResult(result, nestedResult);
   }
@@ -114,16 +131,14 @@ if (import.meta.vitest) {
   describe.concurrent("createNestedObject", () => {
     it("should create nested objects based on context rules", () => {
       const context: TransformContext = {
-        result: {},
-        basedKey: "color",
+        ...structuredClone(initTransformContext),
         parentSelector: "nav li > &",
         parentAtRules: {
           "@layer": "framework.layout",
           "@supports": "gap: 1rem",
           "@media": "(prefers-color-scheme: dark) and (prefers-reduced-motion)",
           "@container": "(min-width: 500px)"
-        },
-        propertyReference: {}
+        }
       };
       const target: StyleResult = { color: "red" };
 
@@ -152,16 +167,14 @@ if (import.meta.vitest) {
 
     it("should handle empty parentSelector", () => {
       const context: TransformContext = {
-        result: {},
-        basedKey: "color",
+        ...structuredClone(initTransformContext),
         parentSelector: "",
         parentAtRules: {
           "@layer": "framework.layout",
           "@supports": "gap: 1rem",
           "@media": "(prefers-color-scheme: dark) and (prefers-reduced-motion)",
           "@container": "(min-width: 500px)"
-        },
-        propertyReference: {}
+        }
       };
       const target: StyleResult = { color: "red" };
 
@@ -188,16 +201,14 @@ if (import.meta.vitest) {
 
     it("should handle empty parentAtRules", () => {
       const context: TransformContext = {
-        result: {},
-        basedKey: "color",
+        ...structuredClone(initTransformContext),
         parentSelector: "nav li > &",
         parentAtRules: {
           "@layer": "",
           "@supports": "",
           "@media": "",
           "@container": ""
-        },
-        propertyReference: {}
+        }
       };
       const target: StyleResult = { color: "red" };
 
@@ -210,16 +221,14 @@ if (import.meta.vitest) {
 
     it("should handle parentSelector", () => {
       const context: TransformContext = {
-        result: {},
-        basedKey: "color",
+        ...structuredClone(initTransformContext),
         parentSelector: "nav li > &",
         parentAtRules: {
           "@media": "(prefers-color-scheme: dark)",
           "@supports": "",
           "@container": "",
           "@layer": ""
-        },
-        propertyReference: {}
+        }
       };
       const target: StyleResult = {
         background: "red",
@@ -248,16 +257,14 @@ if (import.meta.vitest) {
 
     it("should merge with nested object", () => {
       const context: TransformContext = {
-        result: {},
-        basedKey: "color",
+        ...structuredClone(initTransformContext),
         parentSelector: "nav li > &",
         parentAtRules: {
           "@layer": "framework.layout",
           "@supports": "",
           "@media": "(prefers-color-scheme: dark) and (prefers-reduced-motion)",
           "@container": "(min-width: 500px)"
-        },
-        propertyReference: {}
+        }
       };
       const target: StyleResult = {
         color: "red",
@@ -318,16 +325,14 @@ if (import.meta.vitest) {
 
     it("should merge with nested object - Check for empty objects", () => {
       const context: TransformContext = {
-        result: {},
-        basedKey: "",
+        ...structuredClone(initTransformContext),
         parentSelector: "",
         parentAtRules: {
           "@media": "(prefers-color-scheme: dark)",
           "@supports": "",
           "@container": "",
           "@layer": ""
-        },
-        propertyReference: {}
+        }
       };
       const target: StyleResult = {
         color: "red",
@@ -368,6 +373,45 @@ if (import.meta.vitest) {
               "(prefers-color-scheme: dark) and (min-width: 768px)": {
                 color: "black"
               }
+            }
+          }
+        }
+      });
+    });
+
+    it("should support variant reference", () => {
+      const context: TransformContext = {
+        ...structuredClone(initTransformContext),
+        parentSelector: "&:hover:not(:active) %someVariant",
+        parentAtRules: {
+          "@media": "(prefers-color-scheme: dark)",
+          "@supports": "",
+          "@container": "",
+          "@layer": ""
+        }
+      };
+      const target: StyleResult = {
+        background: "red",
+        selectors: {
+          "&:hover:not(:active) %someVariant:focus": {
+            background: "blue"
+          }
+        }
+      };
+
+      expect(createNestedObject(context, target)).toStrictEqual({});
+      expect(context.variantReference).toStrictEqual({
+        "&:hover:not(:active) %someVariant": {
+          "@media": {
+            "(prefers-color-scheme: dark)": {
+              background: "red"
+            }
+          }
+        },
+        "&:hover:not(:active) %someVariant:focus": {
+          "@media": {
+            "(prefers-color-scheme: dark)": {
+              background: "blue"
             }
           }
         }
