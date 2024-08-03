@@ -1,4 +1,3 @@
-import deepmerge from "@fastify/deepmerge";
 import {
   isSimplePseudoSelectorKey,
   replacePseudoSelectors
@@ -25,8 +24,9 @@ import {
 import { removeMergeSymbol, mergeKeyInfo } from "@/transform-keys/merge-key";
 import { mergeToComma, mergeToSpace } from "@/transform-values/merge-values";
 import { simplyImportant } from "@/transform-values/simply-important";
+import { replacePropertyReference } from "@/transform-values/property-reference";
 import { isUppercase } from "@/utils/string";
-import { isEmptyObject } from "@/utils/object";
+import { isEmptyObject, mergeObject } from "@/utils/object";
 import { keyframes, fontFace } from "@vanilla-extract/css";
 import { setFileScope } from "@vanilla-extract/css/fileScope";
 import {
@@ -43,9 +43,6 @@ import type {
   AtRulesKeywords
 } from "@/types/style-rule";
 import type { Properties } from "csstype";
-import { replacePropertyReference } from "@/transform-values/property-reference";
-
-const mergeObject = deepmerge();
 
 // == Interface ================================================================
 export type StyleResult = {

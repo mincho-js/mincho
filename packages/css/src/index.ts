@@ -56,59 +56,50 @@ export function cssVariants<
 >(styleMap: StyleMap, debugId?: string): Record<keyof StyleMap, string>;
 export function cssVariants<
   Data extends Record<string | number, unknown>,
-  Key extends keyof Data
+  Key extends keyof Data,
+  MapData extends (value: Data[Key], key: Key) => ComplexCSSRule
+>(data: Data, mapData: MapData, debugId?: string): Record<keyof Data, string>;
+export function cssVariants<
+  StyleMap extends Record<string | number, ComplexCSSRule>,
+  Data extends Record<string | number, unknown>,
+  MapData extends (value: unknown, key: string | number) => ComplexCSSRule
 >(
-  data: Data,
-  mapData: (value: Data[Key], key: Key) => ComplexCSSRule,
+  styleMapOrData: StyleMap | Data,
+  mapDataOrDebugId?: MapData | string,
   debugId?: string
-): Record<keyof Data, string>;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function cssVariants(...args: any[]) {
-  if (typeof args[1] === "function") {
-    const data = args[0];
-    const mapData = args[1];
-    const debugId = args[2];
-
-    const contexts: TransformContext[] = [];
-    const variantMap: Record<string, string> = {};
-    const classMap: Record<string | number, string> = {};
-    for (const key in data) {
-      const context = structuredClone(initTransformContext);
-      const className = vStyle(
-        transform(mapData(data[key], key), context),
-        debugId ? `${debugId}_${key}` : key
-      );
-      contexts.push(context);
-      variantMap[`%${key}`] = className;
-      classMap[key] = className;
-    }
-    for (const context of contexts) {
-      context.variantMap = variantMap;
-      replaceVariantReference(context);
-      for (const [key, value] of Object.entries(context.variantReference)) {
-        globalCss(key, value as StyleRule);
-      }
-    }
-
-    return classMap;
+): Record<string | number, string> {
+  if (typeof mapDataOrDebugId === "function") {
+    const data = styleMapOrData as Data;
+    const mapData = mapDataOrDebugId as MapData;
+    return processVariants(data, mapData, debugId);
+  } else {
+    const styleMap = styleMapOrData as StyleMap;
+    const debugId = mapDataOrDebugId as string | undefined;
+    return processVariants(styleMap, (style) => style, debugId);
   }
+}
+export const styleVariants = cssVariants;
 
-  const styleMap = args[0];
-  const debugId = args[1];
-
+function processVariants<T>(
+  items: Record<string | number, T>,
+  transformItem: (item: T, key: string | number) => ComplexCSSRule,
+  debugId?: string
+): Record<string | number, string> {
   const contexts: TransformContext[] = [];
   const variantMap: Record<string, string> = {};
   const classMap: Record<string | number, string> = {};
-  for (const key in styleMap) {
+
+  for (const key in items) {
     const context = structuredClone(initTransformContext);
     const className = vStyle(
-      transform(styleMap[key], context),
+      transform(transformItem(items[key], key), context),
       debugId ? `${debugId}_${key}` : key
     );
     contexts.push(context);
     variantMap[`%${key}`] = className;
     classMap[key] = className;
   }
+
   for (const context of contexts) {
     context.variantMap = variantMap;
     replaceVariantReference(context);
@@ -119,4 +110,3 @@ export function cssVariants(...args: any[]) {
 
   return classMap;
 }
-export const styleVariants = cssVariants;

@@ -1,11 +1,9 @@
 import { setFileScope } from "@vanilla-extract/css/fileScope";
-import deepmerge from "@fastify/deepmerge";
 import { isRuleKey, atRuleKeyMerge } from "@/transform-keys/at-rules";
 import { initTransformContext } from "./index";
+import { mergeObject } from "@/utils/object";
 import type { StyleResult, AtRulesPrefix, TransformContext } from "./index";
 import type { VanillaStyleRuleValue } from "@/types/style-rule";
-
-const mergeObject = deepmerge();
 
 const AT_RULE_ORDER: AtRulesPrefix[] = [
   "@layer",
@@ -113,7 +111,7 @@ export function processNestedResult(
   nestedResult: StyleResult
 ) {
   for (const [atRule, atRuleValue] of Object.entries(nestedResult)) {
-    result[atRule] = mergeObject(result[atRule] ?? {}, atRuleValue);
+    result[atRule] = mergeObject(result[atRule] ?? {}, atRuleValue ?? {});
   }
 }
 
