@@ -68,18 +68,25 @@ export function cssVariants<
   mapDataOrDebugId?: MapData | string,
   debugId?: string
 ): Record<string | number, string> {
-  if (typeof mapDataOrDebugId === "function") {
+  if (isMapDataFunction(mapDataOrDebugId)) {
     const data = styleMapOrData as Data;
-    const mapData = mapDataOrDebugId as MapData;
+    const mapData = mapDataOrDebugId;
     return processVariants(data, mapData, debugId);
   } else {
     const styleMap = styleMapOrData as StyleMap;
-    const debugId = mapDataOrDebugId as string | undefined;
+    const debugId = mapDataOrDebugId;
     return processVariants(styleMap, (style) => style, debugId);
   }
 }
 export const styleVariants = cssVariants;
 
+function isMapDataFunction<
+  Data extends Record<string | number, unknown>,
+  Key extends keyof Data,
+  MapData extends (value: Data[Key], key: Key) => ComplexCSSRule
+>(mapDataOrDebugId?: MapData | string): mapDataOrDebugId is MapData {
+  return typeof mapDataOrDebugId === "function";
+}
 function processVariants<T>(
   items: Record<string | number, T>,
   transformItem: (item: T, key: string | number) => ComplexCSSRule,

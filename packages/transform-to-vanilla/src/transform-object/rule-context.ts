@@ -47,13 +47,22 @@ export function createPathSetter(
   const variantResult: StyleResult = {};
   return (key: string, value: VanillaStyleRuleValue) => {
     let current = isVariantReference ? variantResult : result;
+    // Prevent  Prototype-polluting assignment
+    // https://codeql.github.com/codeql-query-help/javascript/js-prototype-polluting-assignment/
     for (const path of nestedPath) {
-      if (current[path] === undefined) {
+      if (
+        path !== "__proto__" &&
+        path !== "constructor" &&
+        path !== "prototype" &&
+        current[path] === undefined
+      ) {
         current[path] = {};
       }
       current = current[path] || {};
     }
-    current[key] = value;
+    if (key !== "__proto__" && key !== "constructor" && key !== "prototype") {
+      current[key] = value;
+    }
 
     if (isVariantReference) {
       context.variantReference = mergeObject(context.variantReference, {
