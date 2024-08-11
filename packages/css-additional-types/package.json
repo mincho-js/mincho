@@ -1,9 +1,28 @@
 {
   "$schema": "https://json.schemastore.org/package.json",
   "name": "@mincho-js/css-additional-types",
-  "private": true,
+  "description": "Additional typeScript types for style based on MDN data",
   "version": "0.0.1",
+  "sideEffects": false,
   "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mincho-js/mincho.git",
+    "directory": "packages/css-additional-types"
+  },
+  "keywords": [
+    "css",
+    "style",
+    "typescript",
+    "typings",
+    "types",
+    "definitions"
+  ],
+  "bugs": {
+    "url": "https://github.com/mincho-js/mincho/issues"
+  },
+  "homepage": "https://github.com/mincho-js/mincho/tree/main/packages/css-additional-types#readme",
   "typings": "./dist/index.ts",
   "main": "./dist/index.ts",
   "module": "./dist/index.ts",
@@ -14,14 +33,16 @@
     }
   },
   "files": [
-    "dist"
+    "README.md",
+    "dist/"
   ],
   "scripts": {
     "clean": "yarn g:clean",
     "build": "yarn g:generate ",
     "lint": "yarn g:lint",
     "fix": "yarn g:fix",
-    "check": "yarn g:check"
+    "check": "yarn g:check",
+    "publish": "yarn g:publish"
   },
   "prettier": "prettier-config-custom",
   "devDependencies": {
@@ -30,8 +51,5 @@
     "prettier-config-custom": "workspace:^",
     "tsconfig-custom": "workspace:^",
     "vite-config-custom": "workspace:^"
-  },
-  "dependencies": {
-    "csstype": "^3.1.3"
   }
 }

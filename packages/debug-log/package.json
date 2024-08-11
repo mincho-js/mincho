@@ -1,12 +1,15 @@
 {
   "$schema": "https://json.schemastore.org/package.json",
   "name": "@mincho-js/debug-log",
+  "description": "A utility library for easier console debugging and comparison of JavaScript object values",
   "version": "1.0.0",
+  "sideEffects": true,
   "type": "module",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/mincho-js/mincho.git"
+    "url": "git+https://github.com/mincho-js/mincho.git",
+    "directory": "packages/debug-log"
   },
   "keywords": [
     "debug",
@@ -31,13 +34,15 @@
         "default": "./dist/cjs/index.cjs"
       }
     },
+    "./package.json": "./package.json",
     "./importMeta": {
       "types": "./importMeta.d.ts"
     }
   },
   "files": [
+    "README.md",
     "importMeta.d.ts",
-    "dist"
+    "dist/"
   ],
   "scripts": {
     "clean": "yarn g:clean",
