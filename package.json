@@ -37,7 +37,7 @@
   "devDependencies": {
     "@mincho-js/debug-log": "workspace:^",
     "@types/eslint": "^9.6.0",
-    "@types/node": "^20.14.11",
+    "@types/node": "^22.2.0",
     "@typescript/analyze-trace": "^0.10.1",
     "@vanilla-extract/vite-plugin": "^4.0.13",
     "@vitest/coverage-v8": "^2.0.5",
