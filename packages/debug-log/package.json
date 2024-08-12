@@ -67,7 +67,7 @@
   "dependencies": {
     "@mincho-js/pretify-deep-diff": "^1.0.5",
     "@pinojs/json-colorizer": "^4.0.0",
-    "boxen": "^8.0.0",
+    "boxen": "^8.0.1",
     "chalk": "^5.3.0",
     "deep-diff": "^1.0.2"
   }
