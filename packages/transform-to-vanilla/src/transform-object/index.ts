@@ -42,7 +42,7 @@ import type {
   VanillaStyleRuleValue,
   AtRulesKeywords
 } from "@/types/style-rule";
-import type { Properties } from "csstype";
+import type { Properties } from "@mincho-js/csstype";
 
 // == Interface ================================================================
 export type StyleResult = {
@@ -147,12 +147,12 @@ function insertResultValue(
     for (const [valueKey, valueValue] of Object.entries(value)) {
       if (isRuleKey(valueKey)) {
         context.result[valueKey] = mergeObject(
-          context.result[valueKey] ?? {},
+          (context.result[valueKey] as Record<string, unknown>) ?? {},
           valueValue
         );
       } else if (valueKey === accessKey) {
         context.result[accessKey] = mergeObject(
-          context.result[accessKey] ?? {},
+          (context.result[valueKey] as Record<string, unknown>) ?? {},
           valueValue
         );
       } else {

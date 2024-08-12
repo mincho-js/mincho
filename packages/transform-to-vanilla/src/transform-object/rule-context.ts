@@ -58,7 +58,7 @@ export function createPathSetter(
       ) {
         current[path] = {};
       }
-      current = current[path] || {};
+      current = (current[path] as StyleResult) || ({} as StyleResult);
     }
     if (key !== "__proto__" && key !== "constructor" && key !== "prototype") {
       current[key] = value;
@@ -120,7 +120,10 @@ export function processNestedResult(
   nestedResult: StyleResult
 ) {
   for (const [atRule, atRuleValue] of Object.entries(nestedResult)) {
-    result[atRule] = mergeObject(result[atRule] ?? {}, atRuleValue ?? {});
+    result[atRule] = mergeObject(
+      (result[atRule] as Record<string, unknown>) ?? {},
+      (atRuleValue as Record<string, unknown>) ?? {}
+    );
   }
 }
 

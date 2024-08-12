@@ -741,6 +741,13 @@ __metadata:
   languageName: unknown
   linkType: soft
 
+"@mincho-js/csstype@npm:^3.1.4":
+  version: 3.1.4
+  resolution: "@mincho-js/csstype@npm:3.1.4"
+  checksum: 10/da0901386f67c25e3d889866be1dbdd39c0eb1d8ab2de647a49c302901a971fba0d98f2d1c866e3c49a02035d89e82096a09ae0b7a5b17f7ef45a63a3b1a2124
+  languageName: node
+  linkType: hard
+
 "@mincho-js/debug-log@workspace:^, @mincho-js/debug-log@workspace:packages/debug-log":
   version: 0.0.0-use.local
   resolution: "@mincho-js/debug-log@workspace:packages/debug-log"
@@ -774,8 +781,8 @@ __metadata:
   dependencies:
     "@fastify/deepmerge": "npm:^2.0.0"
     "@mincho-js/css-additional-types": "workspace:^"
+    "@mincho-js/csstype": "npm:^3.1.4"
     "@vanilla-extract/css": "npm:^1.15.3"
-    csstype: "npm:^3.1.3"
     eslint-config-custom: "workspace:^"
     prettier-config-custom: "workspace:^"
     tsconfig-custom: "workspace:^"

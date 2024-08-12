@@ -1,5 +1,9 @@
 import type { StyleRule } from "@vanilla-extract/css";
-import type { Properties, Property, NonNullableString } from "csstype";
+import type {
+  Properties,
+  Property,
+  NonNullableString
+} from "@mincho-js/csstype";
 import type {
   CamelPseudos,
   SpacePropertiesKey,
