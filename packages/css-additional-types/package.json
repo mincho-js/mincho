@@ -32,6 +32,9 @@
       "require": "./dist/index.ts"
     }
   },
+  "publishConfig": {
+    "directory": "_release/package"
+  },
   "files": [
     "README.md",
     "dist/"

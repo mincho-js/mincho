@@ -21,7 +21,12 @@
     "coverage:all": "turbo run coverage:all",
     "lint:action": "yarn run -T eslint '.github/**/*.{js,yaml,yml}'",
     "fix:action": "yarn lint:action --fix",
-    "g:clean": "cd $INIT_CWD && yarn run -T rimraf dist coverage .turbo tsconfig.tsbuildinfo node_modules/.vite",
+    "forallpackages": "yarn workspaces foreach -Aptv --no-private --verbose",
+    "build:release": "yarn build && yarn forallpackages exec rimraf _release && yarn forallpackages pack && yarn forallpackages exec \"mkdir _release && tar zxvf package.tgz --directory _release && rm package.tgz\"",
+    "changeset": "changeset",
+    "version": "changeset version",
+    "publish": "yarn build:release && changeset publish",
+    "g:clean": "cd $INIT_CWD && yarn run -T rimraf _release dist coverage .turbo tsconfig.tsbuildinfo node_modules/.vite",
     "g:build": "cd $INIT_CWD && yarn run -T vite build",
     "g:build-watch": "cd $INIT_CWD && yarn run build --watch",
     "g:generate": "cd $INIT_CWD && yarn run -T vite-node src/index.ts",
@@ -35,6 +40,7 @@
     "g:publish": "cd $INIT_CWD && yarn npm publish --access public"
   },
   "devDependencies": {
+    "@changesets/changelog-github": "^0.5.0",
     "@changesets/cli": "^2.27.7",
     "@mincho-js/debug-log": "workspace:^",
     "@types/eslint": "^9.6.0",

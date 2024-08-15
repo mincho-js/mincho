@@ -39,6 +39,9 @@
       "types": "./importMeta.d.ts"
     }
   },
+  "publishConfig": {
+    "directory": "_release/package"
+  },
   "files": [
     "README.md",
     "importMeta.d.ts",
