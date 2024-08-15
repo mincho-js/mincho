@@ -2,6 +2,18 @@
 
 This was created to make console debugging easier when you often need to compare JavaScript object values.
 
+## Install
+
+```shell
+npm install @mincho-js/debug-log
+
+# or
+yarn add @mincho-js/debug-log
+
+# or
+pnpm install @mincho-js/debug-log
+```
+
 ## API
 ### `debugLog`
 

@@ -2,11 +2,15 @@
 Natural CSS in the Typescript
 
 > [!WARNING]
-> This project is still in its initial stage, which means it is not ready for production.
+> This project is still in WIP, which means it is not ready for production.
 
 <p align="center">
   <img src="./assets/logo.png" alt="logo" width="300" height="300">
 </p>
+
+## Documentation
+
+See [`@mincho-js/css`](./packages/css) README.
 
 ## Motivation
 
@@ -67,7 +71,7 @@ However, since we cannot provide all features from the beginning, we plan to ach
 Currently, most of the features are related to the CSS preprocessor.
 
 - [CSS Literals](https://github.com/mincho-js/working-group/blob/main/text/000-css-literals.md): Expressing more natural CSS in Typescript.
-- [CSS Nesting(WIP)](https://github.com/mincho-js/working-group/blob/main/text/001-css-nesting.md): Expressing better nesting and referencing.
+- [CSS Nesting](https://github.com/mincho-js/working-group/blob/main/text/001-css-nesting.md): Expressing better nesting and referencing.
 
 ## Contributing
 
