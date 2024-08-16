@@ -1,4 +1,13 @@
+# Set the default behavior, in case people don't have core.autocrlf set.
+* text=auto
+
+# Package manager files
 /.yarn/**            linguist-vendored
 /.yarn/releases/*    binary
 /.yarn/plugins/**/*  binary
 /.pnp.*              binary linguist-generated
+
+# Denote all files that are truly binary and should not be modified.
+*.png binary
+*.jpg binary
+*.mp4 binary
