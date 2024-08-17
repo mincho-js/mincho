@@ -38,6 +38,7 @@ jobs:
           comment: always
 
       - name: Check target branch
+        if: env.MATCH == 'true'
         id: check_branch
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
