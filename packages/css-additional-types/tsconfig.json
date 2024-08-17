@@ -3,7 +3,7 @@
   "compilerOptions": {
     "baseUrl": "./"
   },
-  "include": ["src/**/*.ts",  "__tests__/**/*.ts"],
-  "exclude": ["dist"],
+  "include": ["global.d.ts", "src/**/*.ts",  "__tests__/**/*.ts"],
+  "exclude": ["dist", "_release"],
   "references": [{ "path": "tsconfig.node.json" }]
 }

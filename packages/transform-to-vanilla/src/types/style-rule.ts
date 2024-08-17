@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-empty-object-type */
 import type { StyleRule } from "@vanilla-extract/css";
 import type {
   Properties,

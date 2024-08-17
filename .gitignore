@@ -129,5 +129,8 @@ dist
 .yarn/install-state.gz
 .pnp.*
 
+# Relase
+_release/
+
 # Turborepo
 .turbo

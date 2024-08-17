@@ -9,6 +9,9 @@ updates:
     directory: / # Location of package manifests
     schedule:
       interval: weekly
+    ignore:
+      - dependency-name: rimraf
+        versions: [6.0.x]
     groups:
       # Specify a name for the group, which will be used in pull request titles
       # and branch names

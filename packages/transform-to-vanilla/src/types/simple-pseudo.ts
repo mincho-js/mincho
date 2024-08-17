@@ -1,14 +1,14 @@
 import { FromKebabCase, ColonToSnake } from "./string";
 
 // == Interface ================================================================
-export type SimplePseudos = keyof typeof simplePseudoMap;
+export type SimplePseudos = keyof typeof _simplePseudoMap;
 export type CamelPseudos = CamelPseudo<SimplePseudos>;
 
 // == Utils ====================================================================
 type CamelPseudo<T extends string> = ColonToSnake<FromKebabCase<T>>;
 
 // This types are refer to vanilla-extract/css
-declare const simplePseudoMap: {
+declare const _simplePseudoMap: {
   readonly ":-moz-any-link": true;
   readonly ":-moz-full-screen": true;
   readonly ":-moz-placeholder": true;

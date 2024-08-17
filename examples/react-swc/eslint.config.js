@@ -4,7 +4,6 @@ import globals from "globals";
 import eslint from "@eslint/js";
 import tseslint from "typescript-eslint";
 import tsParser from "@typescript-eslint/parser";
-import tsPlugin from "@typescript-eslint/eslint-plugin";
 import reactRefreshPlugin from "eslint-plugin-react-refresh";
 import reactHooksPlugin from "eslint-plugin-react-hooks";
 import { fixupPluginRules } from "@eslint/compat";
@@ -32,7 +31,6 @@ export default tseslint.config(
       globals: { ...globals.browser, ...globals.es2020 },
     },
     plugins: {
-      "@typescript-eslint": tsPlugin,
       "react-refresh": reactRefreshPlugin,
       // eslint-disable-next-line @typescript-eslint/ban-ts-comment
       // @ts-ignore: error TS2345: Index signature for type 'string' is missing in type 'string[]'.ts

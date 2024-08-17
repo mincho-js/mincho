@@ -347,16 +347,18 @@ function transformValueStyle(
   );
 
   if (typeof value === "object") {
-    Array.isArray(value)
-      ? transformArrayValue(
-          key,
-          value,
-          isMergeToComma,
-          isMergeToSpace,
-          transformedKey,
-          context
-        )
-      : transformObjectValue(key, value, transformedKey, context);
+    if (Array.isArray(value)) {
+      transformArrayValue(
+        key,
+        value,
+        isMergeToComma,
+        isMergeToSpace,
+        transformedKey,
+        context
+      );
+    } else {
+      transformObjectValue(key, value, transformedKey, context);
+    }
   } else {
     context.result[transformedKey] = transformCommonValue(value, context);
   }

@@ -61,7 +61,7 @@
   },
   "prettier": "prettier-config-custom",
   "devDependencies": {
-    "@types/deep-diff": "^1",
+    "@types/deep-diff": "^1.0.5",
     "eslint-config-custom": "workspace:^",
     "prettier-config-custom": "workspace:^",
     "tsconfig-custom": "workspace:^",

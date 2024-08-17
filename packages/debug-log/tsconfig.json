@@ -4,6 +4,6 @@
     "baseUrl": "./"
   },
   "include": ["src/**/*.ts",  "__tests__/**/*.ts"],
-  "exclude": ["dist"],
+  "exclude": ["dist", "_release"],
   "references": [{ "path": "tsconfig.node.json" }]
 }
