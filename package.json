@@ -24,7 +24,7 @@
     "forallpackages": "yarn workspaces foreach -Aptv --no-private --verbose",
     "build:release": "yarn build && yarn forallpackages exec rimraf _release && yarn forallpackages pack && yarn forallpackages exec \"mkdir _release && tar zxvf package.tgz --directory _release && rm package.tgz\"",
     "changeset": "changeset",
-    "version": "changeset version",
+    "changeset:version": "changeset version",
     "publish": "yarn build:release && changeset publish",
     "g:clean": "cd $INIT_CWD && yarn run -T rimraf _release dist coverage .turbo tsconfig.tsbuildinfo node_modules/.vite",
     "g:build": "cd $INIT_CWD && yarn run -T vite build",
@@ -36,8 +36,7 @@
     "g:lint": "cd $INIT_CWD && yarn run -T eslint . --report-unused-disable-directives --max-warnings 0",
     "g:fix": "cd $INIT_CWD && yarn g:lint --fix",
     "g:check": "cd $INIT_CWD && yarn run -T tsc --noEmit",
-    "g:check-trace": "cd $INIT_CWD && yarn run -T rimraf tsconfig.tsbuildinfo && yarn run -T tsc -p tsconfig.json --generateTrace traceDir && yarn run -T analyze-trace traceDir",
-    "g:publish": "cd $INIT_CWD && yarn npm publish --access public"
+    "g:check-trace": "cd $INIT_CWD && yarn run -T rimraf tsconfig.tsbuildinfo && yarn run -T tsc -p tsconfig.json --generateTrace traceDir && yarn run -T analyze-trace traceDir"
   },
   "devDependencies": {
     "@changesets/changelog-github": "^0.5.0",

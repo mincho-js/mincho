@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/package.json",
   "name": "@mincho-js/debug-log",
   "description": "A utility library for easier console debugging and comparison of JavaScript object values",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "sideEffects": true,
   "type": "module",
   "license": "MIT",
@@ -56,8 +56,7 @@
     "coverage": "yarn g:coverage",
     "lint": "yarn g:lint",
     "fix": "yarn g:fix",
-    "check": "yarn g:check",
-    "publish": "yarn g:publish"
+    "check": "yarn g:check"
   },
   "prettier": "prettier-config-custom",
   "devDependencies": {

@@ -44,8 +44,7 @@
     "build": "yarn g:generate ",
     "lint": "yarn g:lint",
     "fix": "yarn g:fix",
-    "check": "yarn g:check",
-    "publish": "yarn g:publish"
+    "check": "yarn g:check"
   },
   "prettier": "prettier-config-custom",
   "devDependencies": {

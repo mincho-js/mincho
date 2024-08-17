@@ -56,8 +56,7 @@
     "build:watch": "yarn g:build-watch",
     "lint": "yarn g:lint",
     "fix": "yarn g:fix",
-    "check": "yarn g:check",
-    "publish": "yarn g:publish"
+    "check": "yarn g:check"
   },
   "prettier": "prettier-config-custom",
   "dependencies": {
