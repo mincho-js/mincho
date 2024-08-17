@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/package.json",
   "name": "@mincho-js/css-additional-types",
   "description": "Additional typeScript types for style based on MDN data",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "sideEffects": false,
   "type": "module",
   "license": "MIT",
