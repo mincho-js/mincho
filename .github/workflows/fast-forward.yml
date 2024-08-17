@@ -118,3 +118,13 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Show log on failure
+        if: failure()
+        run: |
+          cd /home/runner/.npm/_logs/
+          for file in *; do
+            echo "=== File: $file ==="
+            cat "$file"
+            echo -e "\n\n"
+          done

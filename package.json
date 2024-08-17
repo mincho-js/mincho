@@ -25,7 +25,7 @@
     "build:release": "yarn build && yarn forallpackages exec rimraf _release && yarn forallpackages pack && yarn forallpackages exec \"mkdir _release && tar zxvf package.tgz --directory _release && rm package.tgz\"",
     "changeset": "changeset",
     "version": "changeset version",
-    "publish": "yarn build && changeset publish",
+    "publish": "yarn build:release && changeset publish",
     "g:clean": "cd $INIT_CWD && yarn run -T rimraf _release dist coverage .turbo tsconfig.tsbuildinfo node_modules/.vite",
     "g:build": "cd $INIT_CWD && yarn run -T vite build",
     "g:build-watch": "cd $INIT_CWD && yarn run build --watch",
