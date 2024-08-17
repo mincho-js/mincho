@@ -1,5 +1,11 @@
 # @mincho-js/debug-log
 
+## 1.0.4
+
+### Patch Changes
+
+- Publish test again
+
 ## 1.0.3
 
 ### Patch Changes
