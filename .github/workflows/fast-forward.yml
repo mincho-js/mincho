@@ -1,4 +1,4 @@
-name: fast-forward and release
+name: fast-forward
 on:
   issue_comment:
     types: [created, edited]
@@ -24,35 +24,3 @@ jobs:
           # never post a comment.  (In all cases the information is
           # still available in the step's summary.)
           comment: always
-
-  release:
-    name: Release
-    if: ${{ github.event.pull_request.base.ref == 'main' }}
-    needs: fast-forward
-    runs-on: ubuntu-latest
-    # https://docs.github.com/ko/actions/writing-workflows/workflow-syntax-for-github-actions#permissions
-    permissions:
-      contents: write
-      packages: write
-      pull-requests: write
-    steps:
-      - name: Checkout Repo
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Setup
-        uses: ./.github/actions/node-setup
-
-      - name: Create Release Pull Request or Publish to npm
-        id: changesets
-        uses: changesets/action@v1
-        with:
-          commit: "Chore: Version Packages"
-          publish: yarn run publish
-          version: yarn run version
-          setupGitUser: true
-          createGithubReleases: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
