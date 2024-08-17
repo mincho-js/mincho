@@ -1,11 +1,15 @@
 # mincho
-Natural CSS in the Typescript
+Natural CSS in TypeScript
 
 > [!WARNING]
 > This project is still in WIP, which means it is not ready for production.
 
 <p align="center">
   <img src="./assets/logo.png" alt="logo" width="300" height="300">
+  <br/>
+  <a href="https://x.com/mincho_js" target="_blank">
+    <img src="https://img.shields.io/twitter/follow/mincho_js?style=social" alt="Twitter Follow" />
+  </a>
 </p>
 
 ## Documentation
@@ -16,7 +20,7 @@ See [`@mincho-js/css`](./packages/css) README.
 
 It started with contemplation on approaches and management methods for CSS styling.
 
-Methodologies for CSS selectors are largely divided into visual hierarchy and semantic hierarchy.
+Methodologies for CSS selectors can be largely divided into visual hierarchy and semantic hierarchy.
 
 The visual hierarchy uses visual names like `.text-red { color: red; }`,  
 while the semantic hierarchy uses meaningful names like `.error { color: red; }`.
@@ -70,7 +74,7 @@ However, since we cannot provide all features from the beginning, we plan to ach
 
 Currently, most of the features are related to the CSS preprocessor.
 
-- [CSS Literals](https://github.com/mincho-js/working-group/blob/main/text/000-css-literals.md): Expressing more natural CSS in Typescript.
+- [CSS Literals](https://github.com/mincho-js/working-group/blob/main/text/000-css-literals.md): Expressing more natural CSS in TypeScript.
 - [CSS Nesting](https://github.com/mincho-js/working-group/blob/main/text/001-css-nesting.md): Expressing better nesting and referencing.
 
 ## Contributing

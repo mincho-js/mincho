@@ -4,17 +4,20 @@ The @mincho-js/css package provides framework-agnostic APIs for CSS-in-JS stylin
 
 <p align="center">
   <img src="/assets/logo.png" alt="logo" width="300" height="300">
+  <a href="https://x.com/mincho_js" target="_blank">
+    <img src="https://img.shields.io/twitter/follow/mincho_js?style=social" alt="Twitter Follow" />
+  </a>
 </p>
 
 :seedling: Easy adoption from Vanilla Extract.
 
 :syringe: Vanilla Extract with the power of a preprocessor — Features inspired by [Sass](https://sass-lang.com/), [Less](https://lesscss.org/), [Stylus](https://stylus-lang.com/), etc.
 
-:cartwheeling: Syntax optimized for Typescript — Carefully designed as if it were native to Typescript.
+:cartwheeling: Syntax optimized for TypeScript — Carefully designed as if it were native to TypeScript.
 
 :globe_with_meridians: Works with any front-end framework — or even without one.
 
-:lock: Still type-safe styles for Typescript.
+:lock: Still type-safe styles for TypeScript.
 
 ---
 

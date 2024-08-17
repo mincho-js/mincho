@@ -111,7 +111,7 @@ git clone https://github.com/<your-fork>/mincho.git
 cd mincho
 ```
 4. Install the package, and **build it once**.  
-   If you don't build it, you might get errors for packages that depend on the build results of internal packages.
+   Building is crucial as it prevents potential errors in packages that rely on the build output of internal packages.
 ```shell
 # Installing packages
 yarn install
@@ -181,7 +181,7 @@ Reproduction:
 #### Commits
 
 **Principles**
-- **Meaningfully:** It doesn't make meaningless commits.
+- **Meaningfully:** Avoid making meaningless commits.
 - **One per task:** It's difficult to distinguish when various tasks are mixed.
   - A one- or two-line commit is fine, as long as it makes sense.
   - Doing one per task makes [revert](https://git-scm.com/docs/git-revert) possible
@@ -302,7 +302,7 @@ Use [Stacked PR](https://timothya.com/blog/git-stack/) for short reviews and lin
     - Missing edge cases in test code
     - Sensitive information hardcoded into your code (API keys, passwords, etc.)
   - `P2`[Strongly Recommended]: Please actively consider it. Changes are strongly encouraged, and if you don't make a change, you need a good reason.
-    - USe `Request changes`
+    - Use `Request changes`
     - Needs performance optimisation
     - Consistency in code
     - From here, if you disagree with the reviewer, discuss it.
