@@ -5,8 +5,7 @@ on:
 jobs:
   fast-forward:
     # Only run if the comment contains the /fast-forward command.
-    if: ${{ matches(github.event.comment.body, '(^|\s)/fast-forward($|\s)')
-      && github.event.issue.pull_request }}
+    if: ${{ github.event.issue.pull_request && contains(github.event.comment.body, '/fast-forward') }}
     runs-on: ubuntu-latest
 
     permissions:
@@ -18,7 +17,17 @@ jobs:
       should_run: ${{ steps.check_branch.outputs.should_run }}
 
     steps:
+      - name: Check comment
+        id: check_comment
+        run: |
+          if [[ "${{ github.event.comment.body }}" =~ (^|[[:space:]])/fast-forward($|[[:space:]]) ]]; then
+            echo "MATCH=true" >> $GITHUB_ENV
+          else
+            echo "MATCH=false" >> $GITHUB_ENV
+          fi
+
       - name: Fast forwarding
+        if: env.MATCH == 'true'
         uses: sequoia-pgp/fast-forward@v1
         with:
           merge: true
