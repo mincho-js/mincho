@@ -3,7 +3,8 @@
 The @mincho-js/css package provides framework-agnostic APIs for CSS-in-JS styling.
 
 <p align="center">
-  <img src="/assets/logo.png" alt="logo" width="300" height="300">
+  <img src="https://raw.githubusercontent.com/mincho-js/mincho/main/assets/logo.png" alt="logo" width="300" height="300">
+  <br/>
   <a href="https://x.com/mincho_js" target="_blank">
     <img src="https://img.shields.io/twitter/follow/mincho_js?style=social" alt="Twitter Follow" />
   </a>
