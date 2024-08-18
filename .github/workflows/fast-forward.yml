@@ -122,7 +122,7 @@ jobs:
         with:
           commit: "Chore: Version Packages"
           publish: yarn run publish
-          version: yarn run version
+          version: yarn run changeset:version
           setupGitUser: true
           createGithubReleases: true
         env:
