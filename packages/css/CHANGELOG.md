@@ -1,5 +1,11 @@
 # @mincho-js/css
 
+## 0.0.3
+
+### Patch Changes
+
+- [#84](https://github.com/mincho-js/mincho/pull/84) [`747fc29`](https://github.com/mincho-js/mincho/commit/747fc29ef35ad113981bb31ac2e7617dc280d05b) Thanks [@Jeong-jj](https://github.com/Jeong-jj)! - Edit logo image raw path
+
 ## 0.0.2
 
 ### Patch Changes
