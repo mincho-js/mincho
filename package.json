@@ -45,7 +45,7 @@
     "@types/eslint": "^9.6.0",
     "@types/node": "^22.4.0",
     "@typescript/analyze-trace": "^0.10.1",
-    "@vanilla-extract/vite-plugin": "^4.0.13",
+    "@vanilla-extract/vite-plugin": "^4.0.14",
     "@vitest/coverage-v8": "^2.0.5",
     "c8": "^10.1.2",
     "eslint": "^9.9.0",
