@@ -63,7 +63,7 @@
     "@mincho-js/transform-to-vanilla": "workspace:^"
   },
   "devDependencies": {
-    "@vanilla-extract/css": "^1.15.4",
+    "@vanilla-extract/css": "^1.15.5",
     "eslint-config-custom": "workspace:^",
     "prettier-config-custom": "workspace:^",
     "tsconfig-custom": "workspace:^",
