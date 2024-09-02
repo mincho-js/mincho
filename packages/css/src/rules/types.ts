@@ -1,10 +1,10 @@
-import type { ComplexStyleRule } from "@vanilla-extract/css";
+import type { ComplexCSSRule } from "@mincho-js/transform-to-vanilla";
 
 type Resolve<T> = {
   [Key in keyof T]: T[Key];
 } & {};
 
-type RecipeStyleRule = ComplexStyleRule | string;
+type RecipeStyleRule = ComplexCSSRule | string;
 
 export type VariantDefinitions = Record<string, RecipeStyleRule>;
 
@@ -54,6 +54,8 @@ export type RuntimeFn<Variants extends VariantGroups> = ((
   classNames: RecipeClassNames<Variants>;
 };
 
-export type RecipeVariants<RecipeFn extends RuntimeFn<VariantGroups>> = Resolve<
-  Parameters<RecipeFn>[0]
+export type RulesVariants<RuleFn extends RuntimeFn<VariantGroups>> = Resolve<
+  Parameters<RuleFn>[0]
 >;
+export type RecipeVariants<RecipeFn extends RuntimeFn<VariantGroups>> =
+  RulesVariants<RecipeFn>;

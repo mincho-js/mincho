@@ -1,5 +1,5 @@
 import { addFunctionSerializer } from "@vanilla-extract/css/functionSerializer";
-import { style, styleVariants } from "@vanilla-extract/css";
+import { css, cssVariants } from "../index";
 
 import { createRuntimeFn } from "./createRuntimeFn";
 import type {
@@ -11,9 +11,7 @@ import type {
 } from "./types";
 import { mapValues } from "./utils";
 
-export type { RecipeVariants, RuntimeFn } from "./types";
-
-export function recipe<Variants extends VariantGroups>(
+export function rules<Variants extends VariantGroups>(
   options: PatternOptions<Variants>,
   debugId?: string
 ): RuntimeFn<Variants> {
@@ -27,16 +25,16 @@ export function recipe<Variants extends VariantGroups>(
   let defaultClassName;
 
   if (!base || typeof base === "string") {
-    const baseClassName = style({});
+    const baseClassName = css({});
     defaultClassName = base ? `${baseClassName} ${base}` : baseClassName;
   } else {
-    defaultClassName = style(base, debugId);
+    defaultClassName = css(base, debugId);
   }
 
   // @ts-expect-error - Temporarily ignoring the error as the PatternResult type is not fully defined
   const variantClassNames: PatternResult<Variants>["variantClassNames"] =
     mapValues(variants, (variantGroup, variantGroupName) =>
-      styleVariants(
+      cssVariants(
         variantGroup,
         (styleRule) =>
           typeof styleRule === "string" ? [styleRule] : styleRule,
@@ -51,7 +49,7 @@ export function recipe<Variants extends VariantGroups>(
       variants,
       typeof theStyle === "string"
         ? theStyle
-        : style(theStyle, `${debugId}_compound_${compounds.length}`)
+        : css(theStyle, `${debugId}_compound_${compounds.length}`)
     ]);
   }
 
