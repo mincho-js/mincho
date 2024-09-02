@@ -1,4 +1,4 @@
-import type { ComplexStyleRule } from '@vanilla-extract/css';
+import type { ComplexStyleRule } from "@vanilla-extract/css";
 
 type Resolve<T> = {
   [Key in keyof T]: T[Key];
@@ -8,7 +8,7 @@ type RecipeStyleRule = ComplexStyleRule | string;
 
 export type VariantDefinitions = Record<string, RecipeStyleRule>;
 
-type BooleanMap<T> = T extends 'true' | 'false' ? boolean : T;
+type BooleanMap<T> = T extends "true" | "false" ? boolean : T;
 
 export type VariantGroups = Record<string, VariantDefinitions>;
 export type VariantSelection<Variants extends VariantGroups> = {
@@ -48,7 +48,7 @@ export type RecipeClassNames<Variants extends VariantGroups> = {
 };
 
 export type RuntimeFn<Variants extends VariantGroups> = ((
-  options?: Resolve<VariantSelection<Variants>>,
+  options?: Resolve<VariantSelection<Variants>>
 ) => string) & {
   variants: () => (keyof Variants)[];
   classNames: RecipeClassNames<Variants>;

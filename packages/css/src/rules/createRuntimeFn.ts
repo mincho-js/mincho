@@ -3,14 +3,14 @@ import type {
   RecipeClassNames,
   RuntimeFn,
   VariantGroups,
-  VariantSelection,
-} from './types';
-import { mapValues } from './utils';
+  VariantSelection
+} from "./types";
+import { mapValues } from "./utils";
 
 const shouldApplyCompound = <Variants extends VariantGroups>(
   compoundCheck: VariantSelection<Variants>,
   selections: VariantSelection<Variants>,
-  defaultVariants: VariantSelection<Variants>,
+  defaultVariants: VariantSelection<Variants>
 ) => {
   for (const key of Object.keys(compoundCheck)) {
     if (compoundCheck[key] !== (selections[key] ?? defaultVariants[key])) {
@@ -22,14 +22,14 @@ const shouldApplyCompound = <Variants extends VariantGroups>(
 };
 
 export const createRuntimeFn = <Variants extends VariantGroups>(
-  config: PatternResult<Variants>,
+  config: PatternResult<Variants>
 ): RuntimeFn<Variants> => {
   const runtimeFn: RuntimeFn<Variants> = (options) => {
     let className = config.defaultClassName;
 
     const selections: VariantSelection<Variants> = {
       ...config.defaultVariants,
-      ...options,
+      ...options
     };
     for (const variantName in selections) {
       const variantSelection =
@@ -38,17 +38,18 @@ export const createRuntimeFn = <Variants extends VariantGroups>(
       if (variantSelection != null) {
         let selection = variantSelection;
 
-        if (typeof selection === 'boolean') {
-          // @ts-expect-error
-          selection = selection === true ? 'true' : 'false';
+        if (typeof selection === "boolean") {
+          // @ts-expect-error - Needed to convert boolean to string
+          selection = selection === true ? "true" : "false";
         }
 
         const selectionClassName =
-          // @ts-expect-error
-          config.variantClassNames[variantName][selection];
+          config.variantClassNames[variantName]?.[
+            selection as keyof (typeof config.variantClassNames)[typeof variantName]
+          ];
 
         if (selectionClassName) {
-          className += ' ' + selectionClassName;
+          className += " " + selectionClassName;
         }
       }
     }
@@ -57,7 +58,7 @@ export const createRuntimeFn = <Variants extends VariantGroups>(
       if (
         shouldApplyCompound(compoundCheck, selections, config.defaultVariants)
       ) {
-        className += ' ' + compoundClassName;
+        className += " " + compoundClassName;
       }
     }
 
@@ -68,14 +69,14 @@ export const createRuntimeFn = <Variants extends VariantGroups>(
 
   runtimeFn.classNames = {
     get base() {
-      return config.defaultClassName.split(' ')[0];
+      return config.defaultClassName.split(" ")[0];
     },
 
     get variants() {
       return mapValues(config.variantClassNames, (classNames) =>
-        mapValues(classNames, (className) => className.split(' ')[0]),
-      ) as RecipeClassNames<Variants>['variants'];
-    },
+        mapValues(classNames, (className) => className.split(" ")[0])
+      ) as RecipeClassNames<Variants>["variants"];
+    }
   };
 
   return runtimeFn;
