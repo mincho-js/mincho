@@ -12,11 +12,15 @@ Natural CSS in TypeScript
   </a>
 </p>
 
+- [Demo with StackBliz](https://stackblitz.com/~/github.com/black7375/mincho-example-stackblitz?file=src/App.css.ts)
+
 ## Documentation
 
 See [`@mincho-js/css`](./packages/css) README.
 
 ## Motivation
+
+- [Rethinking CSS in JS](https://dev.to/black7375/rethinking-css-in-js-5dip)
 
 It started with contemplation on approaches and management methods for CSS styling.
 
@@ -67,7 +71,7 @@ This can also be compared with State[[1](https://react-spectrum.adobe.com/archit
 
 However, since we cannot provide all features from the beginning, we plan to achieve them step by step.
 1. Natural CSS in TypeScript: We will bind various CSS preprocessing features to be specialized for TypeScript.
-2. A CSS in JS that integrates AtomicCSS and Variants: We will achieve the integration of visual hierarchy (AtomicCSS) and semantic hierarchy (Variants), which was the original goal.
+2. CSS in JS for Scalable: We will achieve the integration of visual hierarchy (AtomicCSS) and semantic hierarchy (Variants), which was the original goal.
 3. Build your own design system: It functions as a framework for creating design systems through design token management and Figma plugins, among others.
 
 ## Features
