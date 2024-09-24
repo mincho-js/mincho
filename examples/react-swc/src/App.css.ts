@@ -25,11 +25,11 @@ export const logo = style({
   transition: "filter 300ms",
 
   _hover: {
-    filter: "drop-shadow(002em#646cffaa)",
+    filter: "drop-shadow(0 0 2em #646cffaa)",
   },
   selectors: {
     [`&${react}:hover`]: {
-      filter: "drop-shadow(002em#61dafbaa)",
+      filter: "drop-shadow(0 0 2em #61dafbaa)",
     },
   },
 
