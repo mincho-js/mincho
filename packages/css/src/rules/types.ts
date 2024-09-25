@@ -1,4 +1,4 @@
-import type { ComplexCSSRule } from "@mincho-js/transform-to-vanilla";
+import type { ComplexCSSRule, CSSRule } from "@mincho-js/transform-to-vanilla";
 
 type Resolve<T> = {
   [Key in keyof T]: T[Key];
@@ -35,7 +35,7 @@ export interface CompoundVariant<Variants extends VariantGroups> {
   style: RecipeStyleRule;
 }
 
-export type PatternOptions<Variants extends VariantGroups> = {
+export type PatternOptions<Variants extends VariantGroups> = CSSRule & {
   base?: RecipeStyleRule;
   variants?: Variants;
   defaultVariants?: VariantSelection<Variants>;

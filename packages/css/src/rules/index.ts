@@ -1,3 +1,4 @@
+import deepmerge from "@fastify/deepmerge";
 import { addFunctionSerializer } from "@vanilla-extract/css/functionSerializer";
 import { css, cssVariants } from "../index";
 
@@ -11,6 +12,8 @@ import type {
 } from "./types";
 import { mapValues } from "./utils";
 
+const mergeObject = deepmerge();
+
 export function rules<Variants extends VariantGroups>(
   options: PatternOptions<Variants>,
   debugId?: string
@@ -19,16 +22,22 @@ export function rules<Variants extends VariantGroups>(
     variants = {},
     defaultVariants = {},
     compoundVariants = [],
-    base
+    base,
+    ...baseStyles
   } = options;
 
   let defaultClassName;
 
   if (!base || typeof base === "string") {
-    const baseClassName = css({});
+    const baseClassName = css(baseStyles);
     defaultClassName = base ? `${baseClassName} ${base}` : baseClassName;
   } else {
-    defaultClassName = css(base, debugId);
+    defaultClassName = css(
+      Array.isArray(base)
+        ? [baseStyles, ...base]
+        : mergeObject(baseStyles, base),
+      debugId
+    );
   }
 
   // @ts-expect-error - Temporarily ignoring the error as the PatternResult type is not fully defined

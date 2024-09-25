@@ -60,6 +60,7 @@
   },
   "prettier": "prettier-config-custom",
   "dependencies": {
+    "@fastify/deepmerge": "^2.0.0",
     "@mincho-js/transform-to-vanilla": "workspace:^"
   },
   "devDependencies": {

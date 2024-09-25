@@ -1192,6 +1192,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@mincho-js/css@workspace:packages/css"
   dependencies:
+    "@fastify/deepmerge": "npm:^2.0.0"
     "@mincho-js/transform-to-vanilla": "workspace:^"
     "@vanilla-extract/css": "npm:^1.15.5"
     eslint-config-custom: "workspace:^"
