@@ -3,14 +3,15 @@ import type {
   RecipeClassNames,
   RuntimeFn,
   VariantGroups,
-  VariantSelection
+  VariantSelection,
+  VariantObjectSelection
 } from "./types";
-import { mapValues } from "./utils";
+import { mapValues, transformVariantSelection } from "./utils";
 
 const shouldApplyCompound = <Variants extends VariantGroups>(
-  compoundCheck: VariantSelection<Variants>,
-  selections: VariantSelection<Variants>,
-  defaultVariants: VariantSelection<Variants>
+  compoundCheck: VariantObjectSelection<Variants>,
+  selections: VariantObjectSelection<Variants>,
+  defaultVariants: VariantObjectSelection<Variants>
 ) => {
   for (const key of Object.keys(compoundCheck)) {
     if (compoundCheck[key] !== (selections[key] ?? defaultVariants[key])) {
@@ -27,9 +28,11 @@ export const createRuntimeFn = <Variants extends VariantGroups>(
   const runtimeFn: RuntimeFn<Variants> = (options) => {
     let className = config.defaultClassName;
 
-    const selections: VariantSelection<Variants> = {
+    const selections: VariantObjectSelection<Variants> = {
       ...config.defaultVariants,
-      ...options
+      ...transformVariantSelection<Variants>(
+        options as VariantSelection<Variants>
+      )
     };
     for (const variantName in selections) {
       const variantSelection =

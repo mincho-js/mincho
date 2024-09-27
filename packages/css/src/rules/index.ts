@@ -11,9 +11,10 @@ import type {
   VariantGroups,
   VariantDefinitions,
   ToggleVariantMap,
-  VariantSelection
+  VariantObjectSelection,
+  Serializable
 } from "./types";
-import { mapValues } from "./utils";
+import { mapValues, transformVariantSelection } from "./utils";
 
 const mergeObject = deepmerge();
 
@@ -47,16 +48,14 @@ export function rules<
     );
   }
 
+  type CombinedVariants = Variants & ToggleVariantMap<ToggleVariants>;
   const mergedVariants = mergeObject(
     variants,
     transformToggleVariants(toggles)
-  ) as Variants & ToggleVariantMap<ToggleVariants>;
+  ) as CombinedVariants;
   // @ts-expect-error - Temporarily ignoring the error as the PatternResult type is not fully defined
-  const variantClassNames: PatternResult<
-    Variants & ToggleVariantMap<ToggleVariants>
-  >["variantClassNames"] = mapValues(
-    mergedVariants,
-    (variantGroup, variantGroupName) =>
+  const variantClassNames: PatternResult<CombinedVariants>["variantClassNames"] =
+    mapValues(mergedVariants, (variantGroup, variantGroupName) =>
       cssVariants(
         variantGroup,
         (styleRule) =>
@@ -67,34 +66,39 @@ export function rules<
           ? `${debugId}_${String(variantGroupName)}`
           : String(variantGroupName)
       )
-  );
+    );
 
-  const compounds: Array<
-    [VariantSelection<Variants & ToggleVariantMap<ToggleVariants>>, string]
-  > = [];
+  const compounds: Array<[VariantObjectSelection<CombinedVariants>, string]> =
+    [];
 
   for (const { style: theStyle, variants } of compoundVariants) {
     compounds.push([
-      variants,
+      transformVariantSelection<Variants, ToggleVariants>(variants),
       typeof theStyle === "string"
         ? theStyle
         : css(theStyle, `${debugId}_compound_${compounds.length}`)
     ]);
   }
 
-  const config: PatternResult<ToggleVariantMap<ToggleVariants> & Variants> = {
+  const config: PatternResult<CombinedVariants> = {
     defaultClassName,
     variantClassNames,
     defaultVariants,
     compoundVariants: compounds
   };
 
-  return addFunctionSerializer(createRuntimeFn(config), {
-    importPath: "@mincho-js/css/rules/createRuntimeFn",
-    importName: "createRuntimeFn",
-    // @ts-expect-error - Mismatch between return type of createRuntimeFn and argument type of addFunctionSerializer
-    args: [config]
-  });
+  return addFunctionSerializer<
+    RuntimeFn<Variants & ToggleVariantMap<ToggleVariants>>
+  >(
+    createRuntimeFn(config) as RuntimeFn<
+      Variants & ToggleVariantMap<ToggleVariants>
+    >,
+    {
+      importPath: "@mincho-js/css/rules/createRuntimeFn",
+      importName: "createRuntimeFn",
+      args: [config as Serializable]
+    }
+  );
 }
 
 function transformToggleVariants<ToggleVariants extends VariantDefinitions>(

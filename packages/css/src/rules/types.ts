@@ -3,6 +3,19 @@ import type { ComplexCSSRule, CSSRule } from "@mincho-js/transform-to-vanilla";
 type Resolve<T> = {
   [Key in keyof T]: T[Key];
 } & {};
+export type ResolveComplex<T> =
+  T extends Array<infer U> ? Array<Resolve<U>> : Resolve<T>;
+type RemoveUndefined<T> = T extends undefined ? never : T;
+export type RemoveUndefinedFromIntersection<T> = {
+  [K in keyof T]: RemoveUndefined<T[K]>;
+}[keyof T];
+
+type Primitive = string | number | boolean | null | undefined;
+export type Serializable =
+  | {
+      [Key in string | number]: Primitive | Serializable;
+    }
+  | ReadonlyArray<Primitive | Serializable>;
 
 type RecipeStyleRule = ComplexCSSRule | string;
 
@@ -16,11 +29,21 @@ export type ToggleVariantMap<ToggleVariants extends VariantDefinitions> = {
 };
 
 export type VariantGroups = Record<string, VariantDefinitions>;
-export type VariantSelection<Variants extends VariantGroups> = {
+export type VariantObjectSelection<Variants extends VariantGroups> = {
   [VariantGroup in keyof Variants]?:
     | BooleanMap<keyof Variants[VariantGroup]>
     | undefined;
 };
+export type VariantToggleSelection<Variants extends VariantGroups> = {
+  [VariantGroup in keyof Variants]: keyof Variants[VariantGroup] extends
+    | "true"
+    | "false"
+    ? VariantGroup
+    : never;
+}[keyof Variants];
+export type VariantSelection<Variants extends VariantGroups> =
+  | VariantObjectSelection<Variants>
+  | Array<VariantToggleSelection<Variants> | VariantObjectSelection<Variants>>;
 
 export type VariantsClassNames<Variants extends VariantGroups> = {
   [P in keyof Variants]: {
@@ -31,8 +54,8 @@ export type VariantsClassNames<Variants extends VariantGroups> = {
 export type PatternResult<Variants extends VariantGroups> = {
   defaultClassName: string;
   variantClassNames: VariantsClassNames<Variants>;
-  defaultVariants: VariantSelection<Variants>;
-  compoundVariants: Array<[VariantSelection<Variants>, string]>;
+  defaultVariants: VariantObjectSelection<Variants>;
+  compoundVariants: Array<[VariantObjectSelection<Variants>, string]>;
 };
 
 export interface CompoundVariant<Variants extends VariantGroups> {
@@ -61,15 +84,14 @@ export type RecipeClassNames<Variants extends VariantGroups> = {
 };
 
 export type RuntimeFn<Variants extends VariantGroups> = ((
-  options?: Resolve<VariantSelection<Variants>>
+  options?: ResolveComplex<VariantSelection<Variants>>
 ) => string) & {
   variants: () => (keyof Variants)[];
   classNames: RecipeClassNames<Variants>;
 };
 
-export type RulesVariants<RuleFn extends RuntimeFn<VariantGroups>> = Resolve<
-  Parameters<RuleFn>[0]
->;
+export type RulesVariants<RuleFn extends RuntimeFn<VariantGroups>> =
+  ResolveComplex<Parameters<RuleFn>[0]>;
 export type RecipeVariants<RecipeFn extends RuntimeFn<VariantGroups>> =
   RulesVariants<RecipeFn>;
 
