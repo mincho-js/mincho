@@ -97,10 +97,12 @@ function NodeBuilder(viteConfigEnv) {
     build: {
       // https://vitejs.dev/guide/build.html#library-mode
       lib: {
-        entry: resolve(process.cwd(), "src/index.ts"),
+        entry: {
+          index: resolve(process.cwd(), "src/index.ts")
+        },
         formats: ["es", "cjs"],
-        fileName: (format) =>
-          format === "es" ? "esm/index.mjs" : "cjs/index.cjs"
+        fileName: (format, entryName) =>
+          `${format === "es" ? "esm" : "cjs"}/${entryName}.${format === "es" ? "mjs" : "cjs"}`
       },
       target: ["es2020"]
     },

@@ -70,7 +70,7 @@ export function rules<Variants extends VariantGroups>(
   };
 
   return addFunctionSerializer(createRuntimeFn(config), {
-    importPath: "@vanilla-extract/recipes/createRuntimeFn",
+    importPath: "@mincho-js/css/rules/createRuntimeFn",
     importName: "createRuntimeFn",
     // @ts-expect-error - Mismatch between return type of createRuntimeFn and argument type of addFunctionSerializer
     args: [config]

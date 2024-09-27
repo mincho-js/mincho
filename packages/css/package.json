@@ -41,6 +41,16 @@
         "types": "./dist/cjs/index.d.cts",
         "default": "./dist/cjs/index.cjs"
       }
+    },
+    "./rules/createRuntimeFn": {
+      "import": {
+        "types": "./dist/esm/rules/createRuntimeFn.d.ts",
+        "default": "./dist/esm/rules/createRuntimeFn.mjs"
+      },
+      "require": {
+        "types": "./dist/cjs/rules/createRuntimeFn.d.cts",
+        "default": "./dist/cjs/rules/createRuntimeFn.cjs"
+      }
     }
   },
   "publishConfig": {
