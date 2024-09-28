@@ -20,8 +20,10 @@ jobs:
     steps:
       - name: Check comment
         id: check_comment
+        env:
+          COMMENT_BODY: ${{ github.event.comment.body }}
         run: |
-          if [[ "${{ github.event.comment.body }}" =~ (^|[[:space:]])/fast-forward($|[[:space:]]) ]]; then
+          if [[ "$COMMENT_BODY" =~ (^|[[:space:]])/fast-forward($|[[:space:]]) ]]; then
             echo "MATCH=true" >> $GITHUB_ENV
           else
             echo "MATCH=false" >> $GITHUB_ENV
