@@ -59,3 +59,132 @@ export type RulesVariants<RuleFn extends RuntimeFn<VariantGroups>> = Resolve<
 >;
 export type RecipeVariants<RecipeFn extends RuntimeFn<VariantGroups>> =
   RulesVariants<RecipeFn>;
+
+// == Tests ====================================================================
+if (import.meta.vitest) {
+  const { describe, it, assertType } = import.meta.vitest;
+
+  describe.concurrent("VariantSelection Type Test", () => {
+    type ExampleVariants = {
+      size: {
+        small: string;
+        large: string;
+      };
+      color: {
+        red: string;
+        blue: string;
+      };
+    };
+    function assertSelectedVariant(
+      variants: VariantSelection<ExampleVariants>
+    ) {
+      assertType<VariantSelection<ExampleVariants>>(variants);
+      return variants;
+    }
+
+    it("Valid VariantSelection Type", () => {
+      assertSelectedVariant({
+        size: "small",
+        color: "red"
+      });
+    });
+
+    it("Invalid VariantSelection Type", () => {
+      assertSelectedVariant({
+        // @ts-expect-error: selected variant value is not included in `size` key.
+        size: "medium", // error occurred here
+        color: "red"
+      });
+    });
+  });
+
+  describe.concurrent("Compound Variants Type Test", () => {
+    function assertCompoundVariants<Variants extends VariantGroups>(
+      optionValue: CompoundVariant<Variants>
+    ) {
+      assertType(optionValue);
+      return optionValue;
+    }
+
+    it("Valid CompoundVariant", () => {
+      assertCompoundVariants({
+        variants: {
+          color: "brand",
+          size: "small"
+        },
+        style: {
+          fontSize: "16px"
+        }
+      });
+    });
+
+    it("Invalid CompoundVariant with default key", () => {
+      assertCompoundVariants({
+        // @ts-expect-error: selected variant key is not invalid
+        variantss: {
+          // ↑↑ error occurred here
+          color: "brand",
+          size: "small"
+        },
+        style: {
+          fontSize: "16px"
+        }
+      });
+    });
+    it("Invalid CompoundVariant with style value", () => {
+      assertCompoundVariants({
+        variants: {
+          color: "brand",
+          size: "small"
+        },
+        style: {
+          // @ts-expect-error: fonTsize does not exist in `ComplexCSSRule` Type
+          fonTsize: "16px" // error occurred here
+        }
+      });
+    });
+  });
+
+  describe.concurrent("Types related to Rules", () => {
+    it("Valid PatternOptions", () => {
+      function assertValidOptions<Variants extends VariantGroups>(
+        options: PatternOptions<Variants>
+      ) {
+        assertType<PatternOptions<Variants>>(options);
+        return options;
+      }
+
+      assertValidOptions({
+        base: { color: "red", fontSize: 16 },
+
+        variants: {
+          color: {
+            brand: { color: "#FFFFA0" },
+            accent: { color: "#FFE4B5" }
+          },
+
+          size: {
+            small: { padding: 12 },
+            medium: { padding: 16 },
+            large: { padding: 24 }
+          }
+        },
+
+        defaultVariants: {
+          size: "small"
+        },
+        compoundVariants: [
+          {
+            variants: {
+              color: "brand",
+              size: "small"
+            },
+            style: {
+              fontSize: "16px"
+            }
+          }
+        ]
+      });
+    });
+  });
+}
