@@ -11,7 +11,9 @@ import type {
   VariantGroups,
   VariantDefinitions,
   ToggleVariantMap,
+  VariantSelection,
   VariantObjectSelection,
+  ConditionalVariants,
   Serializable
 } from "./types";
 import { mapValues, transformVariantSelection } from "./utils";
@@ -19,12 +21,12 @@ import { mapValues, transformVariantSelection } from "./utils";
 const mergeObject = deepmerge();
 
 export function rules<
-  Variants extends VariantGroups,
-  ToggleVariants extends VariantDefinitions
+  Variants extends VariantGroups | undefined = undefined,
+  ToggleVariants extends VariantDefinitions | undefined = undefined
 >(
   options: PatternOptions<Variants, ToggleVariants>,
   debugId?: string
-): RuntimeFn<Variants & ToggleVariantMap<ToggleVariants>> {
+): RuntimeFn<ConditionalVariants<Variants, ToggleVariants>> {
   const {
     toggles = {},
     variants = {},
@@ -48,7 +50,9 @@ export function rules<
     );
   }
 
-  type CombinedVariants = Variants & ToggleVariantMap<ToggleVariants>;
+  type PureVariants = Exclude<Variants, undefined>;
+  type PureToggleVariants = Exclude<ToggleVariants, undefined>;
+  type CombinedVariants = ConditionalVariants<PureVariants, PureToggleVariants>;
   const mergedVariants = mergeObject(
     variants,
     transformToggleVariants(toggles)
@@ -73,7 +77,9 @@ export function rules<
 
   for (const { style: theStyle, variants } of compoundVariants) {
     compounds.push([
-      transformVariantSelection<Variants, ToggleVariants>(variants),
+      transformVariantSelection<CombinedVariants>(
+        variants as VariantSelection<CombinedVariants>
+      ),
       typeof theStyle === "string"
         ? theStyle
         : css(theStyle, `${debugId}_compound_${compounds.length}`)
@@ -88,10 +94,10 @@ export function rules<
   };
 
   return addFunctionSerializer<
-    RuntimeFn<Variants & ToggleVariantMap<ToggleVariants>>
+    RuntimeFn<ConditionalVariants<Variants, ToggleVariants>>
   >(
     createRuntimeFn(config) as RuntimeFn<
-      Variants & ToggleVariantMap<ToggleVariants>
+      ConditionalVariants<Variants, ToggleVariants>
     >,
     {
       importPath: "@mincho-js/css/rules/createRuntimeFn",
