@@ -10,13 +10,16 @@ import type {
   RuntimeFn,
   VariantGroups,
   VariantDefinitions,
-  ToggleVariantMap,
   VariantSelection,
   VariantObjectSelection,
   ConditionalVariants,
   Serializable
 } from "./types";
-import { mapValues, transformVariantSelection } from "./utils";
+import {
+  mapValues,
+  transformVariantSelection,
+  transformToggleVariants
+} from "./utils";
 
 const mergeObject = deepmerge();
 
@@ -105,20 +108,4 @@ export function rules<
       args: [config as Serializable]
     }
   );
-}
-
-function transformToggleVariants<ToggleVariants extends VariantDefinitions>(
-  toggleVariants: ToggleVariants
-): ToggleVariantMap<ToggleVariants> {
-  const variants: Partial<ToggleVariantMap<ToggleVariants>> = {};
-
-  for (const [variantsName, variantsStyle] of Object.entries(toggleVariants)) {
-    // ts(2862) Error: Type 'Partial<ToggleVariantMap<ToggleVariants>>' is generic and can only be indexed for reading.
-    // @ts-expect-error - Temporarily ignoring the error
-    variants[variantsName] = {
-      true: variantsStyle
-    };
-  }
-
-  return variants as ToggleVariantMap<ToggleVariants>;
 }

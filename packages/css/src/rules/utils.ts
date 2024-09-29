@@ -40,25 +40,42 @@ export function transformVariantSelection<
 ): VariantObjectSelection<Variants & ToggleVariantMap<ToggleVariants>> {
   if (Array.isArray(variants)) {
     return variants.reduce<
-      VariantObjectSelection<Variants & ToggleVariantMap<ToggleVariants>>
+      VariantObjectSelection<Variants & ToggleVariantMap<ToggleVariants>> & {
+        [key: string]: boolean | string;
+      }
     >((acc, variant) => {
       if (typeof variant === "string") {
-        return {
-          ...acc,
-          [variant]: true as const
-        };
+        // @ts-expect-error - https://github.com/mincho-js/mincho/pull/110#discussion_r1780050654
+        acc[variant] = true;
+      } else {
+        Object.assign(
+          acc,
+          variant as VariantObjectSelection<
+            Variants & ToggleVariantMap<ToggleVariants>
+          >
+        );
       }
 
-      return {
-        ...acc,
-        ...(variant as VariantObjectSelection<
-          Variants & ToggleVariantMap<ToggleVariants>
-        >)
-      };
+      return acc;
     }, {});
   }
 
   return variants ?? {};
+}
+
+export function transformToggleVariants<
+  ToggleVariants extends VariantDefinitions
+>(toggleVariants: ToggleVariants): ToggleVariantMap<ToggleVariants> {
+  const variants: Partial<ToggleVariantMap<ToggleVariants>> = {};
+
+  for (const variantsName in toggleVariants) {
+    const variantsStyle = toggleVariants[variantsName];
+    variants[variantsName] = {
+      true: variantsStyle
+    };
+  }
+
+  return variants as ToggleVariantMap<ToggleVariants>;
 }
 
 // == Tests ====================================================================
@@ -177,6 +194,23 @@ if (import.meta.vitest) {
         color: "primary",
         size: "medium",
         rounded: true
+      });
+    });
+  });
+
+  describe("transformToggleVariants", () => {
+    it("should handle toggle variants", () => {
+      const input = {
+        disabled: { opacity: 0.5 },
+        rounded: { borderRadius: "4px" }
+      };
+      expect(transformToggleVariants(input)).toEqual({
+        disabled: {
+          true: { opacity: 0.5 }
+        },
+        rounded: {
+          true: { borderRadius: "4px" }
+        }
       });
     });
   });
