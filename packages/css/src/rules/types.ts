@@ -9,6 +9,11 @@ type RecipeStyleRule = ComplexCSSRule | string;
 export type VariantDefinitions = Record<string, RecipeStyleRule>;
 
 type BooleanMap<T> = T extends "true" | "false" ? boolean : T;
+export type ToggleVariantMap<ToggleVariants extends VariantDefinitions> = {
+  [VariantGroup in keyof ToggleVariants]: {
+    true: ToggleVariants[VariantGroup];
+  };
+};
 
 export type VariantGroups = Record<string, VariantDefinitions>;
 export type VariantSelection<Variants extends VariantGroups> = {
@@ -35,11 +40,19 @@ export interface CompoundVariant<Variants extends VariantGroups> {
   style: RecipeStyleRule;
 }
 
-export type PatternOptions<Variants extends VariantGroups> = CSSRule & {
+export type PatternOptions<
+  Variants extends VariantGroups,
+  ToggleVariants extends VariantDefinitions
+> = CSSRule & {
   base?: RecipeStyleRule;
+  toggles?: ToggleVariants;
   variants?: Variants;
-  defaultVariants?: VariantSelection<Variants>;
-  compoundVariants?: Array<CompoundVariant<Variants>>;
+  defaultVariants?: VariantSelection<
+    Variants & ToggleVariantMap<ToggleVariants>
+  >;
+  compoundVariants?: Array<
+    CompoundVariant<Variants & ToggleVariantMap<ToggleVariants>>
+  >;
 };
 
 export type RecipeClassNames<Variants extends VariantGroups> = {
@@ -147,15 +160,23 @@ if (import.meta.vitest) {
 
   describe.concurrent("Types related to Rules", () => {
     it("Valid PatternOptions", () => {
-      function assertValidOptions<Variants extends VariantGroups>(
-        options: PatternOptions<Variants>
-      ) {
-        assertType<PatternOptions<Variants>>(options);
+      function assertValidOptions<
+        Variants extends VariantGroups,
+        ToggleVariants extends VariantDefinitions
+      >(options: PatternOptions<Variants, ToggleVariants>) {
+        assertType<PatternOptions<Variants, ToggleVariants>>(options);
         return options;
       }
 
       assertValidOptions({
+        backgroundColor: "gray",
         base: { color: "red", fontSize: 16 },
+
+        toggles: {
+          disabled: {
+            textDecoration: "line-through"
+          }
+        },
 
         variants: {
           color: {

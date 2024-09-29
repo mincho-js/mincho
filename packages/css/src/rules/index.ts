@@ -1,6 +1,7 @@
 import deepmerge from "@fastify/deepmerge";
 import { addFunctionSerializer } from "@vanilla-extract/css/functionSerializer";
 import { css, cssVariants } from "../index";
+import type { ComplexCSSRule } from "@mincho-js/transform-to-vanilla";
 
 import { createRuntimeFn } from "./createRuntimeFn";
 import type {
@@ -8,17 +9,23 @@ import type {
   PatternResult,
   RuntimeFn,
   VariantGroups,
+  VariantDefinitions,
+  ToggleVariantMap,
   VariantSelection
 } from "./types";
 import { mapValues } from "./utils";
 
 const mergeObject = deepmerge();
 
-export function rules<Variants extends VariantGroups>(
-  options: PatternOptions<Variants>,
+export function rules<
+  Variants extends VariantGroups,
+  ToggleVariants extends VariantDefinitions
+>(
+  options: PatternOptions<Variants, ToggleVariants>,
   debugId?: string
-): RuntimeFn<Variants> {
+): RuntimeFn<Variants & ToggleVariantMap<ToggleVariants>> {
   const {
+    toggles = {},
     variants = {},
     defaultVariants = {},
     compoundVariants = [],
@@ -40,18 +47,31 @@ export function rules<Variants extends VariantGroups>(
     );
   }
 
+  const mergedVariants = mergeObject(
+    variants,
+    transformToggleVariants(toggles)
+  ) as Variants & ToggleVariantMap<ToggleVariants>;
   // @ts-expect-error - Temporarily ignoring the error as the PatternResult type is not fully defined
-  const variantClassNames: PatternResult<Variants>["variantClassNames"] =
-    mapValues(variants, (variantGroup, variantGroupName) =>
+  const variantClassNames: PatternResult<
+    Variants & ToggleVariantMap<ToggleVariants>
+  >["variantClassNames"] = mapValues(
+    mergedVariants,
+    (variantGroup, variantGroupName) =>
       cssVariants(
         variantGroup,
         (styleRule) =>
-          typeof styleRule === "string" ? [styleRule] : styleRule,
-        debugId ? `${debugId}_${variantGroupName}` : variantGroupName
+          typeof styleRule === "string"
+            ? [styleRule]
+            : (styleRule satisfies ComplexCSSRule),
+        debugId
+          ? `${debugId}_${String(variantGroupName)}`
+          : String(variantGroupName)
       )
-    );
+  );
 
-  const compounds: Array<[VariantSelection<Variants>, string]> = [];
+  const compounds: Array<
+    [VariantSelection<Variants & ToggleVariantMap<ToggleVariants>>, string]
+  > = [];
 
   for (const { style: theStyle, variants } of compoundVariants) {
     compounds.push([
@@ -62,7 +82,7 @@ export function rules<Variants extends VariantGroups>(
     ]);
   }
 
-  const config: PatternResult<Variants> = {
+  const config: PatternResult<ToggleVariantMap<ToggleVariants> & Variants> = {
     defaultClassName,
     variantClassNames,
     defaultVariants,
@@ -75,4 +95,20 @@ export function rules<Variants extends VariantGroups>(
     // @ts-expect-error - Mismatch between return type of createRuntimeFn and argument type of addFunctionSerializer
     args: [config]
   });
+}
+
+function transformToggleVariants<ToggleVariants extends VariantDefinitions>(
+  toggleVariants: ToggleVariants
+): ToggleVariantMap<ToggleVariants> {
+  const variants: Partial<ToggleVariantMap<ToggleVariants>> = {};
+
+  for (const [variantsName, variantsStyle] of Object.entries(toggleVariants)) {
+    // ts(2862) Error: Type 'Partial<ToggleVariantMap<ToggleVariants>>' is generic and can only be indexed for reading.
+    // @ts-expect-error - Temporarily ignoring the error
+    variants[variantsName] = {
+      true: variantsStyle
+    };
+  }
+
+  return variants as ToggleVariantMap<ToggleVariants>;
 }
