@@ -30,7 +30,7 @@ export {
   keyframes,
   layer
 } from "@vanilla-extract/css";
-export { rules } from "./rules";
+export { rules, recipe } from "./rules";
 export type { RulesVariants, RecipeVariants, RuntimeFn } from "./rules/types";
 
 export type { CSSProperties, ComplexCSSRule, GlobalCSSRule, CSSRule };

@@ -109,3 +109,4 @@ export function rules<
     }
   );
 }
+export const recipe = rules;
