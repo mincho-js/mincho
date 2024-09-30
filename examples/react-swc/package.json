@@ -24,7 +24,7 @@
     "@vanilla-extract/css": "^1.15.5",
     "@vanilla-extract/esbuild-plugin": "^2.3.10",
     "@vanilla-extract/vite-plugin": "^4.0.15",
-    "@vitejs/plugin-react-swc": "^3.7.0",
+    "@vitejs/plugin-react-swc": "^3.7.1",
     "eslint": "^9.11.1",
     "eslint-plugin-react-hooks": "^4.6.2",
     "eslint-plugin-react-refresh": "^0.4.12",
