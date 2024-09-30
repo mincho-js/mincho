@@ -24,7 +24,11 @@ export type VanillaClassNames = ClassNames;
 
 // == Interface ===============================================================
 export type ComplexCSSRule = CSSRule | Array<ComplexCSSItem>;
-export type ComplexCSSItem = CSSRule | ClassNames;
+export type ComplexCSSItem =
+  | CSSRule
+  | ClassNames
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  | ((...args: any[]) => ClassNames);
 
 export interface CSSRule
   extends CSSPropertiesWithConditions,
@@ -524,6 +528,59 @@ if (import.meta.vitest) {
           }
         }
       });
+    });
+  });
+
+  describe.concurrent("Complex CSS Rules", () => {
+    it("className", () => {
+      assertType<ComplexCSSRule>(["className1", "className2"]);
+    });
+
+    it("function", () => {
+      assertType<ComplexCSSRule>([
+        () => "className1",
+        (_arg: number) => "className2",
+        (_arg: CSSRule, _debugId: string) => "className3"
+      ]);
+    });
+
+    it("CSS Rules", () => {
+      assertType<ComplexCSSRule>({
+        padding: 10,
+        marginTop: 25
+      });
+      assertType<ComplexCSSRule>([
+        {
+          padding: 10,
+          marginTop: 25
+        },
+        {
+          color: "red",
+          _hover: {
+            color: "blue"
+          }
+        }
+      ]);
+    });
+
+    it("Complex", () => {
+      assertType<ComplexCSSRule>([
+        "className1",
+        "className2",
+        () => "className3",
+        (_arg: number) => "className4",
+        (_arg: CSSRule, _debugId: string) => "className5",
+        {
+          padding: 10,
+          marginTop: 25
+        },
+        {
+          color: "red",
+          _hover: {
+            color: "blue"
+          }
+        }
+      ]);
     });
   });
 }

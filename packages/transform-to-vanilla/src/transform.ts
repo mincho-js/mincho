@@ -22,6 +22,9 @@ export function transform(
       if (isClassNames(eachStyle)) {
         return eachStyle;
       }
+      if (typeof eachStyle === "function") {
+        return eachStyle();
+      }
 
       const tempContext = structuredClone(context);
       const result = transformStyle(eachStyle, tempContext);
@@ -61,6 +64,15 @@ if (import.meta.vitest) {
       expect(resultNestedClassNames).toStrictEqual(nestedClassNames);
     });
 
+    it("Functions", () => {
+      const classNameFunctions = [
+        () => "myClassName1",
+        (_arg: number) => "myClassName2"
+      ];
+      const result = transform(classNameFunctions);
+      expect(result).toStrictEqual(["myClassName1", "myClassName2"]);
+    });
+
     it("Style", () => {
       const style = {
         color: "red",
@@ -94,6 +106,10 @@ if (import.meta.vitest) {
         ["nestedClassName2", "nestedClassName3"],
         "nestedClassName4"
       ];
+      const classNameFunctions = [
+        () => "myClassName3",
+        (_arg: number) => "myClassName4"
+      ];
       const style1 = {
         color: "red",
         borderRadius: 5
@@ -102,16 +118,19 @@ if (import.meta.vitest) {
         background: "blue"
       };
 
-      expect([classNames, nestedClassNames, style1, style2]).toStrictEqual([
-        classNames,
-        nestedClassNames,
+      const result = transform([
+        ...classNames,
+        ...nestedClassNames,
+        ...classNameFunctions,
         style1,
         style2
       ]);
-      expect([style1, nestedClassNames, classNames, style2]).toStrictEqual([
+      expect(result).toStrictEqual([
+        ...classNames,
+        ...nestedClassNames,
+        "myClassName3",
+        "myClassName4",
         style1,
-        nestedClassNames,
-        classNames,
         style2
       ]);
     });
