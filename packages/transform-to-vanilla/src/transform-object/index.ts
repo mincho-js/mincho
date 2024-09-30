@@ -87,8 +87,7 @@ export function transformStyle(
 ) {
   const newContext: TransformContext = {
     ...context,
-    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-    // @ts-ignore: error ts2322: Type '`var(--${string})`' is not assignable to type 'Appearance | undefined'
+    // @ts-expect-error: error ts2322: Type '`var(--${string})`' is not assignable to type 'Appearance | undefined'
     propertyReference: {
       ...context.propertyReference,
       ...style
@@ -393,8 +392,7 @@ function transformArrayValue<T>(
 
   if (Array.isArray(transformed)) {
     context.result[transformedKey] = transformed.map((value) =>
-      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-      // @ts-ignore: error ts2590: expression produces a union type that is too complex to represent
+      // @ts-expect-error: error ts2590: expression produces a union type that is too complex to represent
       transformCommonValue(value, context)
     );
   } else {
@@ -429,13 +427,11 @@ function transformAnonymous(key: string, value: CSSRuleValue) {
   const { isAnimationName, isFontFamily } = anonymousKeyInfo(key);
 
   if (isAnimationName) {
-    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-    // @ts-ignore: error TS2590: Expression produces a union type that is too complex to represent
+    // @ts-expect-error: error TS2590: Expression produces a union type that is too complex to represent
     return keyframes(value);
   }
   if (isFontFamily) {
-    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-    // @ts-ignore: error TS2590: Expression produces a union type that is too complex to represent
+    // @ts-expect-error: error TS2590: Expression produces a union type that is too complex to represent
     return fontFace(value);
   }
   return value;
@@ -470,12 +466,7 @@ function isNestedSelector(context: TransformContext) {
 }
 
 // == Tests ====================================================================
-// Ignore errors when compiling to CommonJS.
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-ignore: error TS1343: The 'import.meta' meta-property is only allowed when the '--module' option is 'es2020', 'es2022', 'esnext', 'system', 'node16', or 'nodenext'.
 if (import.meta.vitest) {
-  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-  // @ts-ignore: error TS1343: The 'import.meta' meta-property is only allowed when the '--module' option is 'es2020', 'es2022', 'esnext', 'system', 'node16', or 'nodenext'.
   const { describe, it, expect } = import.meta.vitest;
 
   setFileScope("test");
@@ -534,7 +525,7 @@ if (import.meta.vitest) {
       } satisfies StyleRule);
     });
 
-    it("Simple Psudo Selectors", () => {
+    it("Simple Pseudo Selectors", () => {
       expect(
         transformStyle({
           _hover: {
@@ -1017,7 +1008,7 @@ if (import.meta.vitest) {
       } satisfies StyleRule);
     });
 
-    it("Nested AtRules mutiple", () => {
+    it("Nested AtRules multiple", () => {
       expect(
         transformStyle({
           "@media (prefers-color-scheme: dark)": {
@@ -1082,7 +1073,7 @@ if (import.meta.vitest) {
         }
       } satisfies StyleRule);
 
-      // Case with top lelvel selector
+      // Case with top level selector
       expect(
         transformStyle({
           "nav li > &": {
@@ -1115,7 +1106,7 @@ if (import.meta.vitest) {
         }
       } satisfies StyleRule);
 
-      // Case without top lelvel selector
+      // Case without top level selector
       expect(
         transformStyle({
           "nav li > &": {

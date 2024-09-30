@@ -89,7 +89,7 @@ function syntaxIncludes(targetSyntax: string, syntaxes: string[]) {
   return syntaxes.some((syntax) => targetSyntax.includes(syntax));
 }
 
-// -- Inteface -----------------------------------------------------------------
+// -- Interface ----------------------------------------------------------------
 const [comma, whiteSpace]: [CssEntries, CssEntries] = cssProperties.reduce(
   (acc: [CssEntries, CssEntries], [key, value]) => {
     const syntax = value.syntax;

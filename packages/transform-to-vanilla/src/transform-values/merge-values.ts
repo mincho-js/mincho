@@ -57,18 +57,18 @@ function transformArray(
 
     const currentElement = values[index];
     const nextIndex = index + 1;
-    const seperatedStr = `${string}${index === 0 ? "" : joinMethod}`;
+    const separatedStr = `${string}${index === 0 ? "" : joinMethod}`;
     if (Array.isArray(currentElement)) {
       for (let i = currentElement.length - 1; i >= 0; i--) {
         stack.push({
           index: nextIndex,
-          string: seperatedStr + currentElement[i]
+          string: separatedStr + currentElement[i]
         });
       }
     } else {
       stack.push({
         index: nextIndex,
-        string: seperatedStr + currentElement
+        string: separatedStr + currentElement
       });
     }
   }
@@ -77,12 +77,7 @@ function transformArray(
 }
 
 // == Tests ====================================================================
-// Ignore errors when compiling to CommonJS.
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-ignore: error TS1343: The 'import.meta' meta-property is only allowed when the '--module' option is 'es2020', 'es2022', 'esnext', 'system', 'node16', or 'nodenext'.
 if (import.meta.vitest) {
-  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-  // @ts-ignore: error TS1343: The 'import.meta' meta-property is only allowed when the '--module' option is 'es2020', 'es2022', 'esnext', 'system', 'node16', or 'nodenext'.
   const { describe, it, expect, expectTypeOf } = import.meta.vitest;
 
   describe.concurrent("mergeToComma", () => {

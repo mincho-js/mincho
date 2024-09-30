@@ -14,7 +14,7 @@ import type {
 import type { GlobalFontFaceRule } from "./fontface-rule";
 import type { IntRange, Spread } from "./utils";
 
-// == Vanilla Extract Inteface ================================================
+// == Vanilla Extract Interface ===============================================
 // https://github.com/vanilla-extract-css/vanilla-extract/blob/master/packages/css/src/types.ts
 export type VanillaStyleRuleKey = keyof StyleRule;
 export type VanillaStyleRuleValue = StyleRule[VanillaStyleRuleKey];
@@ -153,7 +153,7 @@ export interface CSSMergeProperties
   extends SpaceMergeProperties,
     CommaMergeProperties {}
 
-// == CSS Contidions ==========================================================
+// == CSS Conditions ==========================================================
 // -- Main --------------------------------------------------------------------
 export type WithConditions<StyleType> = StyleType & NestedConditions<StyleType>;
 
@@ -249,12 +249,7 @@ type CSSKeyframeFromTo =
   | `${number & NonNullable<unknown>}%`;
 
 // == Tests ====================================================================
-// Ignore errors when compiling to CommonJS.
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-ignore: error TS1343: The 'import.meta' meta-property is only allowed when the '--module' option is 'es2020', 'es2022', 'esnext', 'system', 'node16', or 'nodenext'.
 if (import.meta.vitest) {
-  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-  // @ts-ignore: error TS1343: The 'import.meta' meta-property is only allowed when the '--module' option is 'es2020', 'es2022', 'esnext', 'system', 'node16', or 'nodenext'.
   const { describe, it, assertType } = import.meta.vitest;
 
   describe.concurrent("CSS Rules", () => {

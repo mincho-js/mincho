@@ -2,7 +2,7 @@ import chalk from "chalk";
 import boxen from "boxen";
 import colorize from "@pinojs/json-colorizer";
 import diff from "deep-diff";
-import pretifyDeepDiff from "@mincho-js/pretify-deep-diff";
+import prettifyDeepDiff from "@mincho-js/pretify-deep-diff";
 
 // == Console ==================================================================
 // consola fancy is not works in test
@@ -90,7 +90,7 @@ export function jsonLog<T>(
 ) {
   if (obj === undefined) {
     debugLog();
-    // We will forced assert, becasue don't want to overhead
+    // We will forced assert, because don't want to overhead
     jsonPrint(nameOrObj as JSONCompatible<T>);
   } else {
     debugLog(nameOrObj as string);
@@ -117,13 +117,13 @@ export function jsonExpect<T, K = T>(
     const changes = diff(nameOrObj, obj1);
 
     if (changes === undefined) {
-      // We will forced assert, becasue don't want to overhead
+      // We will forced assert, because don't want to overhead
       jsonPrint("Same Contents", nameOrObj as JSONCompatible<T>);
     } else {
       jsonPrint("Expected", nameOrObj as JSONCompatible<T>);
       jsonPrint("Real", obj1 as JSONCompatible<K>);
 
-      console.log(pretifyDeepDiff(changes ?? []));
+      console.log(prettifyDeepDiff(changes ?? []));
     }
   } else {
     debugLog(nameOrObj as string);
@@ -135,18 +135,13 @@ export function jsonExpect<T, K = T>(
       jsonPrint("Expected", obj1 as JSONCompatible<T>);
       jsonPrint("Real", obj2 as JSONCompatible<K>);
 
-      console.log(pretifyDeepDiff(changes ?? []));
+      console.log(prettifyDeepDiff(changes ?? []));
     }
   }
 }
 
 // == Tests ====================================================================
-// Ignore errors when compiling to CommonJS.
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-ignore: error TS1343: The 'import.meta' meta-property is only allowed when the '--module' option is 'es2020', 'es2022', 'esnext', 'system', 'node16', or 'nodenext'.
 if (import.meta.vitest) {
-  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-  // @ts-ignore: error TS1343: The 'import.meta' meta-property is only allowed when the '--module' option is 'es2020', 'es2022', 'esnext', 'system', 'node16', or 'nodenext'.
   const { it, expect } = import.meta.vitest;
 
   const TEST_PASS = () => {
