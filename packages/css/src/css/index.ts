@@ -9,7 +9,10 @@ import type {
   ComplexCSSRule,
   GlobalCSSRule
 } from "@mincho-js/transform-to-vanilla";
+import { setFileScope } from "@vanilla-extract/css/fileScope";
 import { style as vStyle, globalStyle as gStyle } from "@vanilla-extract/css";
+
+import { className } from "../utils";
 
 // == Global CSS ===============================================================
 export function globalCss(selector: string, rule: GlobalCSSRule) {
@@ -92,4 +95,88 @@ function processVariants<T>(
   }
 
   return classMap;
+}
+
+// == Tests ====================================================================
+if (import.meta.vitest) {
+  const { describe, it, assert, expect } = import.meta.vitest;
+
+  const debugId = "myCSS";
+  setFileScope("test");
+
+  describe.concurrent("css()", () => {
+    it("className", () => {
+      // myCSS__[HASH]
+      const result = css({ color: "red" }, debugId);
+
+      assert.isString(result);
+      expect(result).toMatch(className(debugId));
+    });
+
+    it("composition", () => {
+      const base = style({ padding: 12 }, "base");
+      const result = css([base, { color: "red" }], debugId);
+
+      assert.isString(result);
+      expect(result).toMatch(className(debugId, "base"));
+    });
+  });
+
+  describe.concurrent("cssVariants()", () => {
+    it("Variants", () => {
+      const result = cssVariants(
+        {
+          primary: { background: "blue" },
+          secondary: { background: "aqua" }
+        },
+        debugId
+      );
+
+      assert.hasAllKeys(result, ["primary", "secondary"]);
+      expect(result.primary).toMatch(className(`${debugId}_primary`));
+      expect(result.secondary).toMatch(className(`${debugId}_secondary`));
+    });
+
+    it("Mapping Variants", () => {
+      const result = cssVariants(
+        {
+          primary: "blue",
+          secondary: "aqua"
+        },
+        (paletteColor) => ({
+          background: paletteColor
+        }),
+        debugId
+      );
+
+      assert.hasAllKeys(result, ["primary", "secondary"]);
+      expect(result.primary).toMatch(className(`${debugId}_primary`));
+      expect(result.secondary).toMatch(className(`${debugId}_secondary`));
+    });
+
+    it("Mapping Variants with composition", () => {
+      const base = style({ padding: 12 }, "base");
+      const result = cssVariants(
+        {
+          primary: "blue",
+          secondary: "aqua"
+        },
+        (paletteColor) => [
+          base,
+          {
+            background: paletteColor
+          }
+        ],
+        debugId
+      );
+
+      assert.hasAllKeys(result, ["primary", "secondary"]);
+      expect(result.primary).toMatch(className(`${debugId}_primary`, "base"));
+      expect(result.secondary).toMatch(
+        className(`${debugId}_secondary`, "base")
+      );
+    });
+
+    // TODO: Mocking globalCSS() for Variant Reference
+  });
 }
