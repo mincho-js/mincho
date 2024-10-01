@@ -1,8 +1,8 @@
 import deepmerge from "@fastify/deepmerge";
 import { addFunctionSerializer } from "@vanilla-extract/css/functionSerializer";
-import { css, cssVariants } from "../index";
 import type { ComplexCSSRule } from "@mincho-js/transform-to-vanilla";
 
+import { css, cssVariants } from "../index";
 import { createRuntimeFn } from "./createRuntimeFn";
 import type {
   PatternOptions,
