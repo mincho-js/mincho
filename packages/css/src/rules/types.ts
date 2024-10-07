@@ -108,7 +108,7 @@ export type RecipeVariants<RecipeFn extends RuntimeFn<VariantGroups>> =
 
 // == Tests ====================================================================
 if (import.meta.vitest) {
-  const { describe, it, assertType } = import.meta.vitest;
+  const { describe, it, assertType, expectTypeOf } = import.meta.vitest;
 
   describe.concurrent("ConditionVariants Type Test", () => {
     it("Conditional Type", () => {
@@ -236,6 +236,59 @@ if (import.meta.vitest) {
           }
         }
       });
+    });
+  });
+
+  describe.concurrent("RuntimeFn Type Test", () => {
+    type TestVariantsType = {
+      color: {
+        brand: { color: string };
+        accent: { color: string };
+      };
+      size: {
+        small: { padding: number };
+        medium: { padding: number };
+        large: { padding: number };
+      };
+      outlined: {
+        true: { border: string };
+        false: { border: string };
+      };
+    };
+
+    it("RuntimeFn Type Check", () => {
+      type ExpectedResultType = RuntimeFn<TestVariantsType>;
+      expectTypeOf<ExpectedResultType>().toBeFunction();
+      expectTypeOf<ExpectedResultType["variants"]>().toBeFunction();
+      expectTypeOf<ExpectedResultType["classNames"]>().toBeObject();
+
+      const expectedResult = Object.assign(
+        (_options?: ResolveComplex<VariantSelection<TestVariantsType>>) =>
+          "my-class",
+        {
+          variants: () =>
+            ["color", "size", "outlined"] satisfies (keyof TestVariantsType)[],
+          classNames: {
+            base: "basic-class",
+            variants: {
+              color: {
+                brand: "color-brand",
+                accent: "color-accent"
+              },
+              size: {
+                small: "size-small",
+                medium: "size-medium",
+                large: "size-large"
+              },
+              outlined: {
+                true: "outlined-true",
+                false: "outlined-false"
+              }
+            }
+          } satisfies RecipeClassNames<TestVariantsType>
+        }
+      );
+      assertType<ExpectedResultType>(expectedResult);
     });
   });
 
