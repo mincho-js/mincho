@@ -213,6 +213,32 @@ if (import.meta.vitest) {
     });
   });
 
+  describe.concurrent("RecipeClassNames Type Test", () => {
+    function assertValidClassNames<Variants extends VariantGroups>(
+      classNames: RecipeClassNames<Variants>
+    ) {
+      assertType(classNames);
+      return classNames;
+    }
+
+    it("Valid ClassNames Type Check", () => {
+      assertValidClassNames({
+        base: "base-class",
+        variants: {
+          color: {
+            brand: "color-brand-class",
+            accent: "color-accent-class"
+          },
+          size: {
+            small: "size-small-class",
+            medium: "size-medium-class",
+            large: "size-large-class"
+          }
+        }
+      });
+    });
+  });
+
   describe.concurrent("Types related to Rules", () => {
     function assertValidOptions<
       Variants extends VariantGroups | undefined = undefined,
