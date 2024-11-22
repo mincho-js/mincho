@@ -1,4 +1,9 @@
-import type { ComplexCSSRule, CSSRule } from "@mincho-js/transform-to-vanilla";
+import type {
+  ComplexCSSRule,
+  CSSRule,
+  ResolvedProperties,
+  NonNullableString
+} from "@mincho-js/transform-to-vanilla";
 
 type Resolve<T> = {
   [Key in keyof T]: T[Key];
@@ -9,6 +14,12 @@ type RemoveUndefined<T> = T extends undefined ? never : T;
 export type RemoveUndefinedFromIntersection<T> = {
   [K in keyof T]: RemoveUndefined<T[K]>;
 }[keyof T];
+
+type UnionToIntersection<U> = (
+  U extends unknown ? (k: U) => void : never
+) extends (k: infer I) => void
+  ? I
+  : never;
 
 type Primitive = string | number | boolean | null | undefined;
 export type Serializable =
@@ -51,6 +62,70 @@ export type VariantsClassNames<Variants extends VariantGroups> = {
   };
 };
 
+export type PropTarget = keyof ResolvedProperties;
+
+export type ComplexPropDefinition<PropKeys extends PropTarget | undefined> =
+  | PropDefinition<PropKeys>
+  | Array<PropKeys | PropDefinition<PropKeys>>;
+export type PropDefinition<PropKeys extends PropTarget | undefined> =
+  | PropDefinitionWithPropTarget<PropKeys>
+  | PropDefinitionWithString<PropKeys>;
+
+type PropDefinitionWithPropTarget<PropKeys extends PropTarget | undefined> = {
+  [Key in Exclude<PropKeys, undefined>]?: {
+    base: ResolvedProperties[Key];
+  };
+};
+type PropDefinitionWithString<PropKeys extends PropTarget | undefined> = {
+  [Key in NonNullableString]?:
+    | {
+        base?: ResolvedProperties[Exclude<PropKeys, undefined>];
+        targets: PropKeys[];
+      }
+    | PropKeys[];
+};
+
+export type PropDefinitionOutput<
+  T extends ComplexPropDefinition<PropTarget | undefined>
+> = UnionToIntersection<
+  T extends unknown[]
+    ? PropDefinitionOutputElement<T[number]>
+    : PropDefinitionOutputElement<T>
+>;
+type PropDefinitionOutputElement<DefinitionElement> =
+  DefinitionElement extends string
+    ? HandlePropTarget<DefinitionElement>
+    : DefinitionElement extends { [key: string]: unknown }
+      ? HandlePropDefinition<DefinitionElement>
+      : never;
+
+type HandlePropTarget<PropKeys extends string> = PropKeys extends PropTarget
+  ? { [Key in PropKeys]: ResolvedProperties[Key] }
+  : never;
+type HandlePropDefinition<PropObject extends { [key: string]: unknown }> =
+  UnionToIntersection<
+    {
+      [Key in keyof PropObject & string]: HandlePropDefinitionEntry<
+        Key,
+        PropObject[Key]
+      >;
+    }[keyof PropObject & string]
+  >;
+type HandlePropDefinitionEntry<
+  Key extends string,
+  PropValue
+> = PropValue extends {
+  targets: infer T;
+}
+  ? T extends unknown[]
+    ? { [P in Key]: ResolvedProperties[Extract<T[number], PropTarget>] }
+    : never
+  : PropValue extends unknown[]
+    ? { [P in Key]: ResolvedProperties[Extract<PropValue[number], PropTarget>] }
+    : Key extends PropTarget
+      ? { [P in Key]: ResolvedProperties[Key] }
+      : never;
+
 export type PatternResult<Variants extends VariantGroups> = {
   defaultClassName: string;
   variantClassNames: VariantsClassNames<Variants>;
@@ -76,9 +151,11 @@ export type ConditionalVariants<
 
 export type PatternOptions<
   Variants extends VariantGroups | undefined,
-  ToggleVariants extends VariantDefinitions | undefined
+  ToggleVariants extends VariantDefinitions | undefined,
+  Props extends ComplexPropDefinition<PropTarget> | undefined
 > = CSSRule & {
   base?: RecipeStyleRule;
+  props?: Props;
   toggles?: ToggleVariants;
   variants?: Variants;
   defaultVariants?: VariantSelection<
@@ -295,9 +372,10 @@ if (import.meta.vitest) {
   describe.concurrent("Types related to Rules", () => {
     function assertValidOptions<
       Variants extends VariantGroups | undefined = undefined,
-      ToggleVariants extends VariantDefinitions | undefined = undefined
-    >(options: PatternOptions<Variants, ToggleVariants>) {
-      assertType<PatternOptions<Variants, ToggleVariants>>(options);
+      ToggleVariants extends VariantDefinitions | undefined = undefined,
+      Props extends ComplexPropDefinition<PropTarget> | undefined = undefined
+    >(options: PatternOptions<Variants, ToggleVariants, Props>) {
+      assertType<PatternOptions<Variants, ToggleVariants, Props>>(options);
       return options;
     }
 
@@ -534,6 +612,47 @@ if (import.meta.vitest) {
         ],
         toggles: toggleVariants,
         variants
+      });
+    });
+
+    it("Props PatternOptions", () => {
+      // Property Array
+      assertValidOptions({
+        props: ["color", "background"]
+      });
+
+      // Property with base value
+      assertValidOptions({
+        props: {
+          background: { base: "red" }
+        }
+      });
+
+      // Property with aliased
+      assertValidOptions({
+        props: {
+          size: ["padding", "margin"]
+        }
+      });
+      assertValidOptions({
+        props: {
+          size: { base: "3px", targets: ["padding", "margin"] }
+        }
+      });
+
+      // Complex Props
+      assertValidOptions({
+        props: ["color", "background", { size: ["padding", "margin"] }]
+      });
+      assertValidOptions({
+        props: [
+          "color",
+          {
+            background: { base: "red" },
+            contour: ["border", "outline"],
+            size: { base: "3px", targets: ["padding", "margin"] }
+          }
+        ]
       });
     });
 

@@ -244,7 +244,8 @@ export interface AnonymousProperty {
 }
 export type AnonymousPropertyKey = keyof AnonymousProperty;
 
-interface ResolvedProperties extends Properties<number | NonNullableString> {}
+export interface ResolvedProperties
+  extends Properties<number | NonNullableString> {}
 
 type CSSKeyframeFromTo =
   | "from"
