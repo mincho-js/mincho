@@ -14,6 +14,8 @@ import type {
   VariantDefinitions,
   VariantSelection,
   VariantObjectSelection,
+  ComplexPropDefinitions,
+  PropTarget,
   ConditionalVariants,
   Serializable
 } from "./types";
@@ -27,9 +29,10 @@ const mergeObject = deepmerge();
 
 export function rules<
   Variants extends VariantGroups | undefined = undefined,
-  ToggleVariants extends VariantDefinitions | undefined = undefined
+  ToggleVariants extends VariantDefinitions | undefined = undefined,
+  Props extends ComplexPropDefinitions<PropTarget> | undefined = undefined
 >(
-  options: PatternOptions<Variants, ToggleVariants>,
+  options: PatternOptions<Variants, ToggleVariants, Props>,
   debugId?: string
 ): RuntimeFn<ConditionalVariants<Variants, ToggleVariants>> {
   const {

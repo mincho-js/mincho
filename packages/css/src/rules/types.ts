@@ -64,29 +64,18 @@ export type VariantsClassNames<Variants extends VariantGroups> = {
 
 export type PropTarget = keyof ResolvedProperties;
 
-export type ComplexPropDefinition<PropKeys extends PropTarget | undefined> =
+export type ComplexPropDefinitions<PropKeys extends PropTarget | undefined> =
   | PropDefinition<PropKeys>
   | Array<PropKeys | PropDefinition<PropKeys>>;
-export type PropDefinition<PropKeys extends PropTarget | undefined> =
-  | PropDefinitionWithPropTarget<PropKeys>
-  | PropDefinitionWithString<PropKeys>;
-
-type PropDefinitionWithPropTarget<PropKeys extends PropTarget | undefined> = {
-  [Key in Exclude<PropKeys, undefined>]?: {
-    base: ResolvedProperties[Key];
+type PropDefinition<PropKeys extends PropTarget | undefined> = {
+  [Key in NonNullableString | PropTarget]?: {
+    base?: ResolvedProperties[Exclude<PropKeys, undefined>];
+    targets: PropKeys[];
   };
-};
-type PropDefinitionWithString<PropKeys extends PropTarget | undefined> = {
-  [Key in NonNullableString]?:
-    | {
-        base?: ResolvedProperties[Exclude<PropKeys, undefined>];
-        targets: PropKeys[];
-      }
-    | PropKeys[];
 };
 
 export type PropDefinitionOutput<
-  T extends ComplexPropDefinition<PropTarget | undefined>
+  T extends ComplexPropDefinitions<PropTarget | undefined>
 > = UnionToIntersection<
   T extends unknown[]
     ? PropDefinitionOutputElement<T[number]>
@@ -120,11 +109,7 @@ type HandlePropDefinitionEntry<
   ? T extends unknown[]
     ? { [P in Key]: ResolvedProperties[Extract<T[number], PropTarget>] }
     : never
-  : PropValue extends unknown[]
-    ? { [P in Key]: ResolvedProperties[Extract<PropValue[number], PropTarget>] }
-    : Key extends PropTarget
-      ? { [P in Key]: ResolvedProperties[Key] }
-      : never;
+  : never;
 
 export type PatternResult<Variants extends VariantGroups> = {
   defaultClassName: string;
@@ -152,7 +137,7 @@ export type ConditionalVariants<
 export type PatternOptions<
   Variants extends VariantGroups | undefined,
   ToggleVariants extends VariantDefinitions | undefined,
-  Props extends ComplexPropDefinition<PropTarget> | undefined
+  Props extends ComplexPropDefinitions<PropTarget> | undefined
 > = CSSRule & {
   base?: RecipeStyleRule;
   props?: Props;
@@ -373,7 +358,7 @@ if (import.meta.vitest) {
     function assertValidOptions<
       Variants extends VariantGroups | undefined = undefined,
       ToggleVariants extends VariantDefinitions | undefined = undefined,
-      Props extends ComplexPropDefinition<PropTarget> | undefined = undefined
+      Props extends ComplexPropDefinitions<PropTarget> | undefined = undefined
     >(options: PatternOptions<Variants, ToggleVariants, Props>) {
       assertType<PatternOptions<Variants, ToggleVariants, Props>>(options);
       return options;
@@ -621,17 +606,10 @@ if (import.meta.vitest) {
         props: ["color", "background"]
       });
 
-      // Property with base value
+      // Property object
       assertValidOptions({
         props: {
-          background: { base: "red" }
-        }
-      });
-
-      // Property with aliased
-      assertValidOptions({
-        props: {
-          size: ["padding", "margin"]
+          size: { targets: ["padding", "margin"] }
         }
       });
       assertValidOptions({
@@ -642,16 +620,10 @@ if (import.meta.vitest) {
 
       // Complex Props
       assertValidOptions({
-        props: ["color", "background", { size: ["padding", "margin"] }]
-      });
-      assertValidOptions({
         props: [
           "color",
-          {
-            background: { base: "red" },
-            contour: ["border", "outline"],
-            size: { base: "3px", targets: ["padding", "margin"] }
-          }
+          "background",
+          { size: { targets: ["padding", "margin"] } }
         ]
       });
     });
