@@ -9,9 +9,9 @@
   "devDependencies": {
     "prettier-config-custom": "workspace:^",
     "vite-config-builder": "^0.0.2",
-    "vite-plugin-dts": "^4.2.2",
+    "vite-plugin-dts": "^4.3.0",
     "vite-plugin-externalize-deps": "^0.8.0",
-    "vite-tsconfig-paths": "^5.0.1"
+    "vite-tsconfig-paths": "^5.1.3"
   },
   "peerDependencies": {
     "vite": "*"
