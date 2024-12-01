@@ -62,7 +62,12 @@ type OptionalPropertyNames<T> = {
 }[keyof T];
 
 // == Test ====================================================================
+// Ignore errors when compiling to CommonJS.
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore error TS1343: The 'import.meta' meta-property is only allowed when the '--module' option is 'es2020', 'es2022', 'esnext', 'system', 'node16', or 'nodenext'.
 if (import.meta.vitest) {
+  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+  // @ts-ignore error TS1343: The 'import.meta' meta-property is only allowed when the '--module' option is 'es2020', 'es2022', 'esnext', 'system', 'node16', or 'nodenext'.
   const { describe, it, expectTypeOf } = import.meta.vitest;
 
   describe.concurrent("Type utils", () => {

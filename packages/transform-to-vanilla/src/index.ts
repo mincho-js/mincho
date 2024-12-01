@@ -1,4 +1,4 @@
-export * from "./transform";
+export { transform } from "./transform";
 export {
   initTransformContext,
   type TransformContext
