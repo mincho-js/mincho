@@ -17,14 +17,14 @@
     }
   },
   "devDependencies": {
-    "@eslint/js": "^9.16.0",
-    "@typescript-eslint/parser": "^8.17.0",
+    "@eslint/js": "^9.17.0",
+    "@typescript-eslint/parser": "^8.18.1",
     "eslint-config-prettier": "^9.1.0",
     "eslint-plugin-prettier": "^5.2.1",
     "eslint-plugin-yml": "^1.16.0",
-    "globals": "^15.13.0",
+    "globals": "^15.14.0",
     "prettier-config-custom": "workspace:^",
-    "typescript-eslint": "^8.17.0",
+    "typescript-eslint": "^8.18.1",
     "yaml-eslint-parser": "^1.2.3"
   },
   "peerDependencies": {
