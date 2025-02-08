@@ -28,7 +28,7 @@ export type ComplexCSSItem =
   | CSSRule
   | ClassNames
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  | ((...args: any[]) => ClassNames);
+  | ((...args: any[]) => ClassNames | CSSRule);
 
 export interface CSSRule
   extends CSSPropertiesWithConditions,
@@ -546,7 +546,8 @@ if (import.meta.vitest) {
       assertType<ComplexCSSRule>([
         () => "className1",
         (_arg: number) => "className2",
-        (_arg: CSSRule, _debugId: string) => "className3"
+        (_arg: CSSRule, _debugId: string) => "className3",
+        (_arg: CSSRule, _debugId: string) => ({ padding: 10 }) satisfies CSSRule
       ]);
     });
 
@@ -576,10 +577,8 @@ if (import.meta.vitest) {
         () => "className3",
         (_arg: number) => "className4",
         (_arg: CSSRule, _debugId: string) => "className5",
-        {
-          padding: 10,
-          marginTop: 25
-        },
+        (_arg: CSSRule, _debugId: string) =>
+          ({ padding: 10, marginTop: 25 }) satisfies CSSRule,
         {
           color: "red",
           _hover: {

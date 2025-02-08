@@ -6,6 +6,7 @@ import {
 } from "./transform-object/index";
 import type { ComplexStyleRule, StyleRule } from "@vanilla-extract/css";
 import type {
+  CSSRule,
   ComplexCSSRule,
   ComplexCSSItem,
   ClassNames
@@ -19,15 +20,15 @@ export function transform(
   if (Array.isArray(style)) {
     const contexts: TransformContext[] = [];
     const results = style.map((eachStyle) => {
-      if (isClassNames(eachStyle)) {
-        return eachStyle;
-      }
-      if (typeof eachStyle === "function") {
-        return eachStyle();
+      const styleValue =
+        typeof eachStyle === "function" ? eachStyle() : eachStyle;
+
+      if (isClassNames(styleValue)) {
+        return styleValue;
       }
 
       const tempContext = structuredClone(context);
-      const result = transformStyle(eachStyle, tempContext);
+      const result = transformStyle(styleValue, tempContext);
       contexts.push(tempContext);
       return result;
     });
@@ -72,10 +73,16 @@ if (import.meta.vitest) {
     it("Functions", () => {
       const classNameFunctions = [
         () => "myClassName1",
-        (_arg: number) => "myClassName2"
+        (_arg: number) => "myClassName2",
+        (size = 10) =>
+          ({ padding: size, margin: size, border: "none" }) satisfies CSSRule
       ];
       const result = transform(classNameFunctions);
-      expect(result).toStrictEqual(["myClassName1", "myClassName2"]);
+      expect(result).toStrictEqual([
+        "myClassName1",
+        "myClassName2",
+        { padding: 10, margin: 10, border: "none" } satisfies CSSRule
+      ]);
     });
 
     it("Style", () => {
