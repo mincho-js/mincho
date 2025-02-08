@@ -55,6 +55,10 @@ This is achieved under several principles:
 4. If the hierarchy (perspective) is different, the law of excluded middle applies
 5. Consider both developers and designers
 
+<p align="center">
+  <img src="./assets/StyleStack.png" alt="StyleStack">
+</p>
+
 Our CSS in JS framework will consist of 5 layers (Literal, Theme, Atomic, Variant, Styled Component).
 1. Literal: Provides various CSS-specific syntax of CSS preprocessors, considering the syntactic limitations of JavaScript
 2. Theme: Design token values and customization for Color, Typography, Spaces, etc.
