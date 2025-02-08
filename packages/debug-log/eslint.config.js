@@ -1,3 +1,2 @@
-// @ts-check
-
-export { default } from "eslint-config-custom/typescript";
+import { eslintConfig } from "eslint-config-custom/typescript";
+export default eslintConfig();
