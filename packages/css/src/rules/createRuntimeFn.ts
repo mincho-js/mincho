@@ -1,10 +1,14 @@
+import type { CSSRule } from "@mincho-js/transform-to-vanilla";
 import type {
   PatternResult,
   RecipeClassNames,
   RuntimeFn,
   VariantGroups,
   VariantSelection,
-  VariantObjectSelection
+  VariantObjectSelection,
+  ComplexPropDefinitions,
+  PropDefinitionOutput,
+  PropTarget
 } from "./types";
 import { mapValues, transformVariantSelection } from "./utils";
 
@@ -22,10 +26,13 @@ const shouldApplyCompound = <Variants extends VariantGroups>(
   return true;
 };
 
-export const createRuntimeFn = <Variants extends VariantGroups>(
-  config: PatternResult<Variants>
-): RuntimeFn<Variants> => {
-  const runtimeFn: RuntimeFn<Variants> = (options) => {
+export const createRuntimeFn = <
+  Variants extends VariantGroups,
+  Props extends ComplexPropDefinitions<PropTarget | undefined>
+>(
+  config: PatternResult<Variants, Props>
+): RuntimeFn<Variants, Props> => {
+  const runtimeFn: RuntimeFn<Variants, Props> = (options) => {
     let className = config.defaultClassName;
 
     const selections: VariantObjectSelection<Variants> = {
@@ -66,6 +73,19 @@ export const createRuntimeFn = <Variants extends VariantGroups>(
     }
 
     return className;
+  };
+
+  runtimeFn.props = (props) => {
+    const result: CSSRule = {};
+    for (const [propName, propValue] of Object.entries(props)) {
+      const varName =
+        config.propVars[propName as keyof PropDefinitionOutput<Props>];
+
+      if (varName !== undefined) {
+        result[varName] = propValue as string;
+      }
+    }
+    return result;
   };
 
   runtimeFn.variants = () => Object.keys(config.variantClassNames);

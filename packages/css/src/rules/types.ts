@@ -1,4 +1,5 @@
 import type {
+  PureCSSVarKey,
   ComplexCSSRule,
   CSSRule,
   ResolvedProperties,
@@ -67,7 +68,7 @@ export type PropTarget = keyof ResolvedProperties;
 export type ComplexPropDefinitions<PropKeys extends PropTarget | undefined> =
   | PropDefinition<PropKeys>
   | Array<PropKeys | PropDefinition<PropKeys>>;
-type PropDefinition<PropKeys extends PropTarget | undefined> = {
+export type PropDefinition<PropKeys extends PropTarget | undefined> = {
   [Key in NonNullableString | PropTarget]?: {
     base?: ResolvedProperties[Exclude<PropKeys, undefined>];
     targets: PropKeys[];
@@ -89,7 +90,7 @@ type PropDefinitionOutputElement<DefinitionElement> =
       : never;
 
 type HandlePropTarget<PropKeys extends string> = PropKeys extends PropTarget
-  ? { [Key in PropKeys]: ResolvedProperties[Key] }
+  ? { [Key in PropKeys]?: ResolvedProperties[Key] }
   : never;
 type HandlePropDefinition<PropObject extends { [key: string]: unknown }> =
   UnionToIntersection<
@@ -107,15 +108,23 @@ type HandlePropDefinitionEntry<
   targets: infer T;
 }
   ? T extends unknown[]
-    ? { [P in Key]: ResolvedProperties[Extract<T[number], PropTarget>] }
+    ? { [P in Key]?: ResolvedProperties[Extract<T[number], PropTarget>] }
     : never
   : never;
 
-export type PatternResult<Variants extends VariantGroups> = {
+export type PropVars<
+  Props extends ComplexPropDefinitions<PropTarget | undefined>
+> = Record<keyof PropDefinitionOutput<Props>, PureCSSVarKey>;
+
+export type PatternResult<
+  Variants extends VariantGroups,
+  Props extends ComplexPropDefinitions<PropTarget | undefined>
+> = {
   defaultClassName: string;
   variantClassNames: VariantsClassNames<Variants>;
   defaultVariants: VariantObjectSelection<Variants>;
   compoundVariants: Array<[VariantObjectSelection<Variants>, string]>;
+  propVars: PropVars<Props>;
 };
 
 export interface CompoundVariant<Variants extends VariantGroups> {
@@ -156,17 +165,27 @@ export type RecipeClassNames<Variants extends VariantGroups> = {
   variants: VariantsClassNames<Variants>;
 };
 
-export type RuntimeFn<Variants extends VariantGroups> = ((
-  options?: ResolveComplex<VariantSelection<Variants>>
-) => string) & {
+export type RuntimeFn<
+  Variants extends VariantGroups,
+  Props extends ComplexPropDefinitions<PropTarget | undefined>
+> = ((options?: ResolveComplex<VariantSelection<Variants>>) => string) & {
+  props: (options: Resolve<PropDefinitionOutput<Props>>) => CSSRule;
   variants: () => (keyof Variants)[];
   classNames: RecipeClassNames<Variants>;
 };
 
-export type RulesVariants<RuleFn extends RuntimeFn<VariantGroups>> =
-  ResolveComplex<Parameters<RuleFn>[0]>;
-export type RecipeVariants<RecipeFn extends RuntimeFn<VariantGroups>> =
-  RulesVariants<RecipeFn>;
+export type RulesVariants<
+  RuleFn extends RuntimeFn<
+    VariantGroups,
+    ComplexPropDefinitions<PropTarget | undefined>
+  >
+> = ResolveComplex<Parameters<RuleFn>[0]>;
+export type RecipeVariants<
+  RecipeFn extends RuntimeFn<
+    VariantGroups,
+    ComplexPropDefinitions<PropTarget | undefined>
+  >
+> = RulesVariants<RecipeFn>;
 
 // == Tests ====================================================================
 // Ignore errors when compiling to CommonJS.
@@ -322,9 +341,13 @@ if (import.meta.vitest) {
         false: { border: string };
       };
     };
+    type TestPropsType = [
+      "background",
+      { corner: { targets: ["borderColor", "outlineColor"] } }
+    ];
 
     it("RuntimeFn Type Check", () => {
-      type ExpectedResultType = RuntimeFn<TestVariantsType>;
+      type ExpectedResultType = RuntimeFn<TestVariantsType, TestPropsType>;
       expectTypeOf<ExpectedResultType>().toBeFunction();
       expectTypeOf<ExpectedResultType["variants"]>().toBeFunction();
       expectTypeOf<ExpectedResultType["classNames"]>().toBeObject();
@@ -333,6 +356,10 @@ if (import.meta.vitest) {
         (_options?: ResolveComplex<VariantSelection<TestVariantsType>>) =>
           "my-class",
         {
+          props: (_options: {
+            background?: CSSRule["background"];
+            corner?: CSSRule["borderColor"] & CSSRule["outlineColor"];
+          }) => ({}) as CSSRule,
           variants: () =>
             ["color", "size", "outlined"] satisfies (keyof TestVariantsType)[],
           classNames: {

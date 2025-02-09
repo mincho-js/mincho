@@ -126,13 +126,16 @@ interface TopLevelVar {
   [key: CSSVarKey]: CSSVarValue;
 }
 
-export type CSSVarKey = `--${string}` | `$${string}`;
+export type PureCSSVarKey = `--${string}`;
+export type CSSVarKey = PureCSSVarKey | `$${string}`;
 export type CSSVarValue = `${string | number}`;
 
 // https://github.com/vanilla-extract-css/vanilla-extract/blob/master/packages/private/src/types.ts
-export type CSSVarFunction =
+export type PureCSSVarFunction =
   | `var(--${string})`
-  | `var(--${string}, ${CSSVarValue})`
+  | `var(--${string}, ${CSSVarValue})`;
+export type CSSVarFunction =
+  | PureCSSVarFunction
   | `$${string}`
   | `$${string}(${CSSVarValue})`;
 

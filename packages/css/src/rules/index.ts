@@ -1,10 +1,15 @@
 import deepmerge from "@fastify/deepmerge";
+import { createVar, fallbackVar } from "@vanilla-extract/css";
 import { addFunctionSerializer } from "@vanilla-extract/css/functionSerializer";
 import { setFileScope } from "@vanilla-extract/css/fileScope";
-import type { ComplexCSSRule } from "@mincho-js/transform-to-vanilla";
+import type {
+  ComplexCSSRule,
+  CSSRule,
+  PureCSSVarKey
+} from "@mincho-js/transform-to-vanilla";
 
 import { css, cssVariants } from "../css";
-import { className } from "../utils";
+import { className, getVarName } from "../utils";
 import { createRuntimeFn } from "./createRuntimeFn";
 import type {
   PatternOptions,
@@ -15,7 +20,10 @@ import type {
   VariantSelection,
   VariantObjectSelection,
   ComplexPropDefinitions,
+  PropDefinition,
+  PropDefinitionOutput,
   PropTarget,
+  PropVars,
   ConditionalVariants,
   Serializable
 } from "./types";
@@ -34,25 +42,48 @@ export function rules<
 >(
   options: PatternOptions<Variants, ToggleVariants, Props>,
   debugId?: string
-): RuntimeFn<ConditionalVariants<Variants, ToggleVariants>> {
+): RuntimeFn<
+  ConditionalVariants<Variants, ToggleVariants>,
+  Exclude<Props, undefined>
+> {
   const {
     toggles = {},
     variants = {},
     defaultVariants = {},
     compoundVariants = [],
+    props = {},
     base,
     ...baseStyles
   } = options;
 
+  type PureProps = Exclude<Props, undefined>;
+  const propVars = {} as PropVars<PureProps>;
+  const propStyles: CSSRule = {};
+  if (Array.isArray(props)) {
+    for (const prop of props) {
+      if (typeof prop === "string") {
+        const propVar = createVar(`${debugId}_${prop}`);
+        propVars[prop as keyof PropDefinitionOutput<PureProps>] =
+          getVarName(propVar);
+        // @ts-expect-error Expression produces a union type that is too complex to represent.ts(2590)
+        propStyles[prop] = propVar;
+      } else {
+        processPropObject(prop, propVars, propStyles, debugId);
+      }
+    }
+  } else {
+    processPropObject(props, propVars, propStyles, debugId);
+  }
+
   let defaultClassName: string;
   if (!base || typeof base === "string") {
-    const baseClassName = css(baseStyles, debugId);
+    const baseClassName = css([baseStyles, propStyles], debugId);
     defaultClassName = base ? `${baseClassName} ${base}` : baseClassName;
   } else {
     defaultClassName = css(
       Array.isArray(base)
-        ? [baseStyles, ...base]
-        : mergeObject(baseStyles, base),
+        ? [baseStyles, ...base, propStyles]
+        : [mergeObject(baseStyles, base), propStyles],
       debugId
     );
   }
@@ -92,18 +123,20 @@ export function rules<
     ]);
   }
 
-  const config: PatternResult<CombinedVariants> = {
+  const config: PatternResult<CombinedVariants, PureProps> = {
     defaultClassName,
     variantClassNames,
     defaultVariants: transformVariantSelection(defaultVariants),
-    compoundVariants: compounds
+    compoundVariants: compounds,
+    propVars
   };
 
   return addFunctionSerializer<
-    RuntimeFn<ConditionalVariants<Variants, ToggleVariants>>
+    RuntimeFn<ConditionalVariants<Variants, ToggleVariants>, PureProps>
   >(
     createRuntimeFn(config) as RuntimeFn<
-      ConditionalVariants<Variants, ToggleVariants>
+      ConditionalVariants<Variants, ToggleVariants>,
+      PureProps
     >,
     {
       importPath: "@mincho-js/css/rules/createRuntimeFn",
@@ -113,6 +146,25 @@ export function rules<
   );
 }
 export const recipe = rules;
+
+function processPropObject<Target extends PropTarget>(
+  props: PropDefinition<Target>,
+  propVars: Record<string, PureCSSVarKey>,
+  propStyles: CSSRule,
+  debugId?: string
+) {
+  Object.entries(props).forEach(([propName, propValue]) => {
+    const propVar = createVar(`${debugId}_${propName}`);
+    propVars[propName] = getVarName(propVar);
+
+    const isBaseValue = propValue?.base !== undefined;
+    propValue?.targets.forEach((target) => {
+      propStyles[target] = isBaseValue
+        ? fallbackVar(propVar, `${propValue.base}`)
+        : propVar;
+    });
+  });
+}
 
 // == Tests ====================================================================
 // Ignore errors when compiling to CommonJS.
@@ -131,8 +183,9 @@ if (import.meta.vitest) {
       const result = rules({ base: { color: "red" } }, debugId);
 
       assert.isFunction(result);
-      assert.hasAllKeys(result, ["variants", "classNames"]);
+      assert.hasAllKeys(result, ["props", "variants", "classNames"]);
       assert.hasAllKeys(result.classNames, ["base", "variants"]);
+      assert.isFunction(result.props);
 
       expect(result()).toMatch(className(debugId));
       expect(result.classNames.base).toMatch(className(debugId));
@@ -144,8 +197,9 @@ if (import.meta.vitest) {
       const result = rules({ color: "red" }, debugId);
 
       assert.isFunction(result);
-      assert.hasAllKeys(result, ["variants", "classNames"]);
+      assert.hasAllKeys(result, ["props", "variants", "classNames"]);
       assert.hasAllKeys(result.classNames, ["base", "variants"]);
+      assert.isFunction(result.props);
 
       expect(result()).toMatch(className(debugId));
       expect(result.classNames.base).toMatch(className(debugId));
@@ -177,8 +231,9 @@ if (import.meta.vitest) {
 
       // Base check
       assert.isFunction(result);
-      assert.hasAllKeys(result, ["variants", "classNames"]);
+      assert.hasAllKeys(result, ["props", "variants", "classNames"]);
       assert.hasAllKeys(result.classNames, ["base", "variants"]);
+      assert.isFunction(result.props);
 
       expect(result()).toMatch(className(debugId));
       expect(result.classNames.base).toMatch(className(debugId));
@@ -273,8 +328,9 @@ if (import.meta.vitest) {
 
       // Base check
       assert.isFunction(result);
-      assert.hasAllKeys(result, ["variants", "classNames"]);
+      assert.hasAllKeys(result, ["props", "variants", "classNames"]);
       assert.hasAllKeys(result.classNames, ["base", "variants"]);
+      assert.isFunction(result.props);
 
       expect(result()).toMatch(className(debugId));
       expect(result.classNames.base).toMatch(className(debugId));
@@ -337,8 +393,9 @@ if (import.meta.vitest) {
 
       // Base check
       assert.isFunction(result);
-      assert.hasAllKeys(result, ["variants", "classNames"]);
+      assert.hasAllKeys(result, ["props", "variants", "classNames"]);
       assert.hasAllKeys(result.classNames, ["base", "variants"]);
+      assert.isFunction(result.props);
 
       expect(result()).toMatch(className(debugId, `${debugId}_disabled_true`));
       expect(result.classNames.base).toMatch(className(debugId));
@@ -438,8 +495,9 @@ if (import.meta.vitest) {
 
       // Base check
       assert.isFunction(result);
-      assert.hasAllKeys(result, ["variants", "classNames"]);
+      assert.hasAllKeys(result, ["props", "variants", "classNames"]);
       assert.hasAllKeys(result.classNames, ["base", "variants"]);
+      assert.isFunction(result.props);
 
       expect(result()).toMatch(className(debugId));
       expect(result.classNames.base).toMatch(className(debugId));
@@ -542,6 +600,119 @@ if (import.meta.vitest) {
       expect(result(["outlined", { outlined: false }, "outlined"])).toMatch(
         className(debugId, `${debugId}_outlined_true`)
       );
+    });
+
+    it("Props", () => {
+      const result1 = rules(
+        {
+          props: ["color", "background"]
+        },
+        debugId
+      );
+
+      assert.isFunction(result1);
+      assert.hasAllKeys(result1, ["props", "variants", "classNames"]);
+      assert.hasAllKeys(result1.classNames, ["base", "variants"]);
+      assert.isFunction(result1.props);
+
+      Object.entries(
+        result1.props({
+          color: "red"
+        })
+      ).forEach(([varName, propValue]) => {
+        // Partial
+        expect(propValue).toBe("red");
+        expect(varName).toMatch(className(`--${debugId}_color`));
+      });
+      Object.entries(
+        result1.props({
+          color: "red",
+          background: "blue"
+        })
+      ).forEach(([varName, propValue]) => {
+        // Fully
+        expect(propValue).toBeOneOf(["red", "blue"]);
+
+        if (propValue === "red") {
+          expect(varName).toMatch(className(`--${debugId}_color`));
+        }
+        if (propValue === "blue") {
+          expect(varName).toMatch(className(`--${debugId}_background`));
+        }
+      });
+      Object.entries(
+        result1.props({
+          // @ts-expect-error Not valid property
+          "something-else": "red"
+        })
+      ).forEach(([varName, propValue]) => {
+        expect(varName).toBeUndefined();
+        expect(propValue).toBeUndefined();
+      });
+
+      const result2 = rules(
+        {
+          props: {
+            rounded: { targets: ["borderRadius"] },
+            size: { base: 0, targets: ["padding", "margin"] }
+          }
+        },
+        debugId
+      );
+      Object.entries(
+        result2.props({
+          rounded: "999px",
+          size: "2rem"
+        })
+      ).forEach(([varName, propValue]) => {
+        // Fully
+        expect(propValue).toBeOneOf(["999px", "2rem"]);
+
+        if (propValue === "999px") {
+          expect(varName).toMatch(className(`--${debugId}_rounded`));
+        }
+        if (propValue === "2rem") {
+          expect(varName).toMatch(className(`--${debugId}_size`));
+        }
+      });
+
+      const result3 = rules(
+        {
+          props: [
+            "color",
+            "background",
+            {
+              rounded: { targets: ["borderRadius"] },
+              size: { base: 0, targets: ["padding", "margin"] }
+            }
+          ]
+        },
+        debugId
+      );
+      Object.entries(
+        result3.props({
+          color: "red",
+          background: "blue",
+          rounded: "999px",
+          size: "2rem"
+        })
+      ).forEach(([varName, propValue]) => {
+        // Fully
+        expect(propValue).toBeOneOf(["red", "blue", "999px", "2rem"]);
+
+        if (propValue === "red") {
+          expect(varName).toMatch(className(`--${debugId}_color`));
+        }
+        if (propValue === "blue") {
+          expect(varName).toMatch(className(`--${debugId}_background`));
+        }
+        if (propValue === "999px") {
+          expect(varName).toMatch(className(`--${debugId}_rounded`));
+        }
+        if (propValue === "2rem") {
+          expect(varName).toMatch(className(`--${debugId}_size`));
+        }
+      });
     });
   });
 }
