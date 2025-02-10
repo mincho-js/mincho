@@ -1,11 +1,11 @@
 name: fast-forward and release
 on:
-  issue_comment:
-    types: [created, edited]
+  pull_request_review:
+    types: [submitted]
 jobs:
   fast-forward:
     # Only run if the comment contains the /fast-forward command.
-    if: ${{ github.event.issue.pull_request && contains(github.event.comment.body, '/fast-forward') }}
+    if: github.event.review.state == 'approved'
     runs-on: ubuntu-latest
 
     # https://docs.github.com/ko/actions/writing-workflows/workflow-syntax-for-github-actions#permissions
@@ -13,25 +13,51 @@ jobs:
       contents: write
       pull-requests: write
       issues: write
+      checks: read
 
     outputs:
       should_run: ${{ steps.check_branch.outputs.should_run }}
       pr_sha: ${{ steps.check_branch.outputs.pr_sha }}
 
     steps:
-      - name: Check comment
-        id: check_comment
+      - name: Checkout Repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: main
+
+      - name: Check Conditions and Enable Auto-Merge
         env:
-          COMMENT_BODY: ${{ github.event.comment.body }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if [[ "$COMMENT_BODY" =~ (^|[[:space:]])/fast-forward($|[[:space:]]) ]]; then
-            echo "MATCH=true" >> $GITHUB_ENV
-          else
-            echo "MATCH=false" >> $GITHUB_ENV
+          # Check 'No Auto Merge' label
+          labels=$(curl -s -H "Authorization: Bearer $GITHUB_TOKEN" \
+            "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/labels")
+          if echo "$labels" | jq -e '.[] | select(.name=="No Auto Merge")'; then
+            echo "PR has 'No Auto Merge' label"
+            exit 0
+          fi
+
+          # Reviewer permission check
+          reviewer="${{ github.event.review.user.login }}"
+          permissions=$(curl -s -H "Authorization: Bearer $GITHUB_TOKEN" \
+            "https://api.github.com/repos/${{ github.repository }}/collaborators/$reviewer/permission")
+          permission_level=$(echo "$permissions" | jq -r '.permission')
+          if [[ "$permission_level" != "admin" && "$permission_level" != "write" ]]; then
+            echo "Reviewer doesn't have sufficient permissions"
+            exit 1
+          fi
+
+          # CI Check
+          checks=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            "https://api.github.com/repos/${{ github.repository }}/commits/${{ github.event.pull_request.head.sha }}/check-runs")
+          failed_checks=$(echo "$checks" | jq '.check_runs[] | select(.conclusion != "success" and .conclusion != null)')
+          if [[ ! -z "$failed_checks" ]]; then
+            echo "CI checks have not all passed"
+            exit 1
           fi
 
       - name: Fast forwarding
-        if: env.MATCH == 'true'
         uses: sequoia-pgp/fast-forward@v1
         with:
           merge: true
@@ -42,13 +68,12 @@ jobs:
           comment: always
 
       - name: Check target branch
-        if: env.MATCH == 'true'
         id: check_branch
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           # From https://github.com/sequoia-pgp/fast-forward/blob/main/src/fast-forward.sh
-          PR_URL="${{ github.event.issue.pull_request.url }}"
+          PR_URL="${{ github.event.pull_request.url }}"
           if test "x$PR_URL" = x
           then
             echo "Unable to find pull request's context."
