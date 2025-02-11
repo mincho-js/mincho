@@ -275,6 +275,7 @@ if (import.meta.vitest) {
     it("Invalid CompoundVariant with default key", () => {
       assertCompoundVariants({
         // @ts-expect-error: selected variant key is not invalid
+        // cspell:disable-next-line
         variantss: {
           // ↑↑ error occurred here
           color: "brand",

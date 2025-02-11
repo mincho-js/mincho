@@ -24,5 +24,9 @@
     "typescript",
     "typescriptreact",
     "vue"
+  ],
+  "cSpell.words": [
+    "mincho",
+    "nodenext"
   ]
 }

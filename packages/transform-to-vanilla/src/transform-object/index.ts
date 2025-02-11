@@ -3,7 +3,7 @@ import {
   replacePseudoSelectors
 } from "@/transform-keys/simple-pseudo-selectors";
 import {
-  isSelectorskey,
+  isSelectorsKey,
   isComplexKey,
   isSimpleSelectorKey,
   nestedSelectorKey
@@ -97,7 +97,7 @@ export function transformStyle(
     CSSRuleKey,
     CSSRuleExistValue
   ][]) {
-    if (isSelectorskey(key)) {
+    if (isSelectorsKey(key)) {
       for (const [selector, style] of Object.entries(value)) {
         transformComplexStyle(selector, style, newContext);
       }

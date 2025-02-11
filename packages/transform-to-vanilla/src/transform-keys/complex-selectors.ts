@@ -3,7 +3,7 @@ import {
   initTransformContext
 } from "../transform-object/index";
 
-export function isSelectorskey(key: string) {
+export function isSelectorsKey(key: string) {
   return key === "selectors";
 }
 
@@ -30,7 +30,7 @@ if (import.meta.vitest) {
 
   describe.concurrent("Is complex selector", () => {
     it("selectors", () => {
-      expect(isSelectorskey("selectors")).toBeTruthy();
+      expect(isSelectorsKey("selectors")).toBeTruthy();
     });
 
     it("complex selector", () => {
