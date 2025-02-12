@@ -5,6 +5,8 @@ import type {
   VariantSelection,
   VariantObjectSelection
 } from "./types";
+import type { ComplexCSSRule } from "@mincho-js/transform-to-vanilla";
+import { css } from "../css";
 
 export function mapValues<Input extends Record<string, unknown>, OutputValue>(
   input: Input,
@@ -17,6 +19,16 @@ export function mapValues<Input extends Record<string, unknown>, OutputValue>(
   }
 
   return result;
+}
+
+export function processCompoundStyle(
+  style: ComplexCSSRule | string,
+  debugId: string | undefined,
+  index: number
+): string {
+  return typeof style === "string"
+    ? style
+    : css(style, `${debugId}_compound_${index}`);
 }
 
 export function transformVariantSelection<Variants extends VariantGroups>(

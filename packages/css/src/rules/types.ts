@@ -132,6 +132,30 @@ export interface CompoundVariant<Variants extends VariantGroups> {
   style: RecipeStyleRule;
 }
 
+export type Brand<K, T> = K & { __brand: T };
+export type VariantStringMap<Variants extends VariantGroups> = {
+  [VariantKey in keyof Variants]: {
+    [VariantTarget in keyof Variants[VariantKey]]: Brand<
+      string,
+      `${VariantKey & string}_${VariantTarget & string}`
+    >;
+  };
+};
+export type BrandValue<Variants extends VariantGroups> = {
+  [VariantKey in keyof Variants]: VariantStringMap<Variants>[VariantKey][keyof Variants[VariantKey]];
+}[keyof Variants];
+
+export type CompoundVariantFn<Variants extends VariantGroups> = (
+  variants: VariantStringMap<Variants>
+) => Array<{
+  condition: Array<BrandValue<Variants>>;
+  style: RecipeStyleRule;
+}>;
+
+export type CompoundVariants<Variants extends VariantGroups> =
+  | Array<CompoundVariant<Variants>>
+  | CompoundVariantFn<Variants>;
+
 export type ConditionalVariants<
   Variants extends VariantGroups | undefined,
   ToggleVariants extends VariantDefinitions | undefined
@@ -155,8 +179,8 @@ export type PatternOptions<
   defaultVariants?: VariantSelection<
     ConditionalVariants<Variants, ToggleVariants>
   >;
-  compoundVariants?: Array<
-    CompoundVariant<ConditionalVariants<Variants, ToggleVariants>>
+  compoundVariants?: CompoundVariants<
+    ConditionalVariants<Variants, ToggleVariants>
   >;
 };
 
@@ -612,6 +636,7 @@ if (import.meta.vitest) {
         toggles: toggleVariants,
         variants
       });
+      // Array compoundVariants
       assertValidOptions({
         compoundVariants: [
           {
@@ -626,6 +651,17 @@ if (import.meta.vitest) {
             style: {
               color: "red"
             }
+          }
+        ],
+        toggles: toggleVariants,
+        variants
+      });
+      // Functional compoundVariants
+      assertValidOptions({
+        compoundVariants: ({ color, outlined, size }) => [
+          {
+            condition: [color.accent, outlined.false, size.large],
+            style: { color: "red" }
           }
         ],
         toggles: toggleVariants,

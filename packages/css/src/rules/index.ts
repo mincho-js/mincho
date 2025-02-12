@@ -12,6 +12,8 @@ import { css, cssVariants } from "../css";
 import { className, getVarName } from "../utils";
 import { createRuntimeFn } from "./createRuntimeFn";
 import type {
+  ComplexPropDefinitions,
+  ConditionalVariants,
   PatternOptions,
   PatternResult,
   RuntimeFn,
@@ -19,18 +21,18 @@ import type {
   VariantDefinitions,
   VariantSelection,
   VariantObjectSelection,
-  ComplexPropDefinitions,
   PropDefinition,
   PropDefinitionOutput,
   PropTarget,
   PropVars,
-  ConditionalVariants,
-  Serializable
+  Serializable,
+  VariantStringMap
 } from "./types";
 import {
   mapValues,
-  transformVariantSelection,
-  transformToggleVariants
+  processCompoundStyle,
+  transformToggleVariants,
+  transformVariantSelection
 } from "./utils";
 
 const mergeObject = deepmerge();
@@ -112,15 +114,45 @@ export function rules<
 
   const compounds: Array<[VariantObjectSelection<CombinedVariants>, string]> =
     [];
-  for (const { style: theStyle, variants } of compoundVariants) {
-    compounds.push([
-      transformVariantSelection<CombinedVariants>(
-        variants as VariantSelection<CombinedVariants>
-      ),
-      typeof theStyle === "string"
-        ? theStyle
-        : css(theStyle, `${debugId}_compound_${compounds.length}`)
-    ]);
+
+  if (typeof compoundVariants === "function") {
+    const variantConditions = mapValues(
+      mergedVariants,
+      (variantGroup, variantName) =>
+        mapValues(variantGroup, (_, optionKey) => ({
+          [variantName]:
+            optionKey === "true"
+              ? true
+              : optionKey === "false"
+                ? false
+                : optionKey
+        }))
+    );
+    const compoundRules = compoundVariants(
+      variantConditions as unknown as VariantStringMap<CombinedVariants>
+    );
+    compoundRules.forEach((rule, index) => {
+      const variants = rule.condition.reduce((acc, condition) => {
+        return {
+          ...acc,
+          ...(condition as VariantObjectSelection<CombinedVariants>)
+        };
+      }, {});
+
+      compounds.push([
+        transformVariantSelection<CombinedVariants>(variants),
+        processCompoundStyle(rule.style, debugId, index)
+      ]);
+    });
+  } else {
+    for (const { style: theStyle, variants } of compoundVariants) {
+      compounds.push([
+        transformVariantSelection<CombinedVariants>(
+          variants as VariantSelection<CombinedVariants>
+        ),
+        processCompoundStyle(theStyle, debugId, compounds.length)
+      ]);
+    }
   }
 
   const config: PatternResult<CombinedVariants, PureProps> = {
@@ -599,6 +631,104 @@ if (import.meta.vitest) {
       );
       expect(result(["outlined", { outlined: false }, "outlined"])).toMatch(
         className(debugId, `${debugId}_outlined_true`)
+      );
+    });
+
+    it("function-based compoundVariants", () => {
+      const variants = {
+        color: {
+          brand: { color: "#FFFFA0" },
+          accent: { color: "#FFE4B5" }
+        },
+        size: {
+          small: { padding: 12 },
+          medium: { padding: 16 },
+          large: { padding: 24 }
+        },
+        outlined: {
+          true: { border: "1px solid black" },
+          false: { border: "1px solid transparent" }
+        }
+      } as const;
+      // Test variant conditions generation
+      const result = rules(
+        {
+          variants,
+          compoundVariants: ({ color, size }) => {
+            return [
+              {
+                condition: [color.brand, size.small],
+                style: { fontSize: 16 }
+              }
+            ];
+          }
+        },
+        debugId
+      );
+      // Test variant transformation
+      expect(result({ color: "brand", size: "small" })).toMatch(
+        className(
+          debugId,
+          `${debugId}_color_brand`,
+          `${debugId}_size_small`,
+          `${debugId}_compound_0`
+        )
+      );
+      // Test multiple conditions
+      const resultMultiple = rules(
+        {
+          variants,
+          compoundVariants: ({ color, size, outlined }) => [
+            {
+              condition: [color.brand, size.small],
+              style: { fontSize: 16 }
+            },
+            {
+              condition: [color.accent, outlined.true],
+              style: { opacity: 0.8 }
+            }
+          ]
+        },
+        debugId
+      );
+      // Test multiple compounds applying correctly
+      expect(
+        resultMultiple({ color: "brand", size: "small", outlined: true })
+      ).toMatch(
+        className(
+          debugId,
+          `${debugId}_color_brand`,
+          `${debugId}_size_small`,
+          `${debugId}_outlined_true`,
+          `${debugId}_compound_0`
+        )
+      );
+      // Test variant string to boolean conversion
+      const resultBoolean = rules(
+        {
+          variants,
+          compoundVariants: ({ outlined }) => [
+            {
+              condition: [outlined.true],
+              style: { opacity: 0.8 }
+            }
+          ]
+        },
+        debugId
+      );
+      expect(resultBoolean({ outlined: true })).toMatch(
+        className(debugId, `${debugId}_outlined_true`, `${debugId}_compound_0`)
+      );
+      // Test empty conditions
+      const resultEmpty = rules(
+        {
+          variants,
+          compoundVariants: () => []
+        },
+        debugId
+      );
+      expect(resultEmpty({ color: "brand" })).toMatch(
+        className(debugId, `${debugId}_color_brand`)
       );
     });
 
