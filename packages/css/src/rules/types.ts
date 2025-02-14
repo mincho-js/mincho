@@ -108,9 +108,26 @@ type HandlePropDefinitionEntry<
   targets: infer T;
 }
   ? T extends unknown[]
-    ? { [P in Key]?: ResolvedProperties[Extract<T[number], PropTarget>] }
+    ? { [P in Key]?: ConditionalDelayed<Extract<T[number], PropTarget>> }
     : never
   : never;
+
+const DELAY_MARKER: unique symbol = Symbol("@MINCHO/DELAY_MARKER");
+type Delayed<T> = { _wrapped: T } extends { _wrapped: infer U }
+  ? U & { [DELAY_MARKER]?: never }
+  : never;
+type Properties<T extends keyof ResolvedProperties> = {
+  [K in T]: ResolvedProperties[K] extends unknown
+    ? Delayed<ResolvedProperties[K]>
+    : never;
+}[T];
+type IsUnion<T, U = T> = T extends unknown
+  ? [U] extends [T]
+    ? false
+    : true
+  : never;
+type ConditionalDelayed<T extends keyof ResolvedProperties> =
+  IsUnion<T> extends true ? Properties<T> : ResolvedProperties[T];
 
 export type PropVars<
   Props extends ComplexPropDefinitions<PropTarget | undefined>
