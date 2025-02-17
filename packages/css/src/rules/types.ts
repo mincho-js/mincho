@@ -136,7 +136,7 @@ export type Brand<K, T> = K & { __brand: T };
 export type VariantStringMap<Variants extends VariantGroups> = {
   [VariantKey in keyof Variants]: {
     [VariantTarget in keyof Variants[VariantKey]]: Brand<
-      string,
+      Record<VariantKey, VariantTarget>,
       `${VariantKey & string}_${VariantTarget & string}`
     >;
   };

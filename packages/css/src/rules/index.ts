@@ -127,15 +127,14 @@ export function rules<
                 ? false
                 : optionKey
         }))
-    );
-    const compoundRules = compoundVariants(
-      variantConditions as unknown as VariantStringMap<CombinedVariants>
-    );
+    ) as VariantStringMap<CombinedVariants>;
+
+    const compoundRules = compoundVariants(variantConditions);
     compoundRules.forEach((rule, index) => {
       const variants = rule.condition.reduce((acc, condition) => {
         return {
           ...acc,
-          ...(condition as VariantObjectSelection<CombinedVariants>)
+          ...condition
         };
       }, {});
 
@@ -650,6 +649,7 @@ if (import.meta.vitest) {
           false: { border: "1px solid transparent" }
         }
       } as const;
+
       // Test variant conditions generation
       const result = rules(
         {
@@ -665,6 +665,7 @@ if (import.meta.vitest) {
         },
         debugId
       );
+
       // Test variant transformation
       expect(result({ color: "brand", size: "small" })).toMatch(
         className(
@@ -674,6 +675,7 @@ if (import.meta.vitest) {
           `${debugId}_compound_0`
         )
       );
+
       // Test multiple conditions
       const resultMultiple = rules(
         {
@@ -691,6 +693,7 @@ if (import.meta.vitest) {
         },
         debugId
       );
+
       // Test multiple compounds applying correctly
       expect(
         resultMultiple({ color: "brand", size: "small", outlined: true })
@@ -703,6 +706,7 @@ if (import.meta.vitest) {
           `${debugId}_compound_0`
         )
       );
+
       // Test variant string to boolean conversion
       const resultBoolean = rules(
         {
@@ -719,6 +723,7 @@ if (import.meta.vitest) {
       expect(resultBoolean({ outlined: true })).toMatch(
         className(debugId, `${debugId}_outlined_true`, `${debugId}_compound_0`)
       );
+
       // Test empty conditions
       const resultEmpty = rules(
         {
