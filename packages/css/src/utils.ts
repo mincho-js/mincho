@@ -2,10 +2,16 @@ import { createVar } from "@vanilla-extract/css";
 import { setFileScope } from "@vanilla-extract/css/fileScope";
 import type { PureCSSVarKey } from "@mincho-js/transform-to-vanilla";
 
-export function className(...debugIds: string[]) {
+export function className(...debugIds: Array<string | undefined>) {
   const hashRegex = "[a-zA-Z0-9]+";
-  const classStr = debugIds.map((id) => `${id}__${hashRegex}`).join(" ");
+  const classStr = debugIds
+    .map((id) => (id === undefined ? hashRegex : `${id}__${hashRegex}`))
+    .join(" ");
   return new RegExp(`^${classStr}$`);
+}
+
+export function getDebugName(debugId: string | undefined, name: string) {
+  return debugId ? `${debugId}_${name}` : name;
 }
 
 // Optimized version

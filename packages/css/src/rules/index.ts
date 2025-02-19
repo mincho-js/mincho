@@ -9,7 +9,7 @@ import type {
 } from "@mincho-js/transform-to-vanilla";
 
 import { css, cssVariants } from "../css";
-import { className, getVarName } from "../utils";
+import { className, getDebugName, getVarName } from "../utils";
 import { createRuntimeFn } from "./createRuntimeFn";
 import type {
   ComplexPropDefinitions,
@@ -30,7 +30,6 @@ import type {
 } from "./types";
 import {
   mapValues,
-  processCompoundStyle,
   transformToggleVariants,
   transformVariantSelection
 } from "./utils";
@@ -64,7 +63,8 @@ export function rules<
   if (Array.isArray(props)) {
     for (const prop of props) {
       if (typeof prop === "string") {
-        const propVar = createVar(`${debugId}_${prop}`);
+        const debugName = getDebugName(debugId, prop);
+        const propVar = createVar(debugName);
         propVars[prop as keyof PropDefinitionOutput<PureProps>] =
           getVarName(propVar);
         // @ts-expect-error Expression produces a union type that is too complex to represent.ts(2590)
@@ -106,9 +106,7 @@ export function rules<
           typeof styleRule === "string"
             ? [styleRule]
             : (styleRule satisfies ComplexCSSRule),
-        debugId
-          ? `${debugId}_${String(variantGroupName)}`
-          : String(variantGroupName)
+        getDebugName(debugId, String(variantGroupName))
       )
     );
 
@@ -185,7 +183,8 @@ function processPropObject<Target extends PropTarget>(
   debugId?: string
 ) {
   Object.entries(props).forEach(([propName, propValue]) => {
-    const propVar = createVar(`${debugId}_${propName}`);
+    const debugName = getDebugName(debugId, propName);
+    const propVar = createVar(debugName);
     propVars[propName] = getVarName(propVar);
 
     const isBaseValue = propValue?.base !== undefined;
@@ -195,6 +194,16 @@ function processPropObject<Target extends PropTarget>(
         : propVar;
     });
   });
+}
+
+function processCompoundStyle(
+  style: ComplexCSSRule | string,
+  debugId: string | undefined,
+  index: number
+): string {
+  return typeof style === "string"
+    ? style
+    : css(style, getDebugName(debugId, `compound_${index}`));
 }
 
 // == Tests ====================================================================
@@ -239,26 +248,24 @@ if (import.meta.vitest) {
     });
 
     it("variants", () => {
-      const result = rules(
-        {
-          variants: {
-            color: {
-              brand: { color: "#FFFFA0" },
-              accent: { color: "#FFE4B5" }
-            },
-            size: {
-              small: { padding: 12 },
-              medium: { padding: 16 },
-              large: { padding: 24 }
-            },
-            outlined: {
-              true: { border: "1px solid black" },
-              false: { border: "1px solid transparent" }
-            }
+      const variants = {
+        variants: {
+          color: {
+            brand: { color: "#FFFFA0" },
+            accent: { color: "#FFE4B5" }
+          },
+          size: {
+            small: { padding: 12 },
+            medium: { padding: 16 },
+            large: { padding: 24 }
+          },
+          outlined: {
+            true: { border: "1px solid black" },
+            false: { border: "1px solid transparent" }
           }
-        },
-        debugId
-      );
+        }
+      } as const;
+      const result = rules(variants, debugId);
 
       // Base check
       assert.isFunction(result);
@@ -343,6 +350,21 @@ if (import.meta.vitest) {
       );
       expect(result(["outlined", { outlined: false }, "outlined"])).toMatch(
         className(debugId, `${debugId}_outlined_true`)
+      );
+
+      // Without debugId
+      const resultWithoutDebugId = rules(variants);
+      expect(resultWithoutDebugId({ color: "brand" })).toMatch(
+        className(undefined, `color_brand`)
+      );
+      expect(resultWithoutDebugId({ size: "small" })).toMatch(
+        className(undefined, `size_small`)
+      );
+      expect(resultWithoutDebugId({ outlined: true })).toMatch(
+        className(undefined, `outlined_true`)
+      );
+      expect(resultWithoutDebugId(["outlined"])).toMatch(
+        className(undefined, `outlined_true`)
       );
     });
 

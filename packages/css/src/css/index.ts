@@ -12,7 +12,7 @@ import type {
 import { setFileScope } from "@vanilla-extract/css/fileScope";
 import { style as vStyle, globalStyle as gStyle } from "@vanilla-extract/css";
 
-import { className } from "../utils";
+import { className, getDebugName } from "../utils";
 
 // == Global CSS ===============================================================
 export function globalCss(selector: string, rule: GlobalCSSRule) {
@@ -79,7 +79,7 @@ function processVariants<T>(
     const context = structuredClone(initTransformContext);
     const className = vStyle(
       transform(transformItem(items[key], key), context),
-      debugId ? `${debugId}_${key}` : key
+      getDebugName(debugId, key)
     );
     contexts.push(context);
     variantMap[`%${key}`] = className;
