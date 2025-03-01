@@ -1,0 +1,23 @@
+{
+  "name": "@macaron-css/esbuild",
+  "version": "1.6.1",
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mokshit06/macaron.git",
+    "directory": "packages/esbuild"
+  },
+  "dependencies": {
+    "@vanilla-extract/esbuild-plugin": "^2.0.5",
+    "@vanilla-extract/integration": "^6.0.0",
+    "esbuild": "^0.14.42",
+    "@macaron-css/integration": "1.5.1"
+  },
+  "files": [
+    "dist",
+    "src"
+  ]
+}
