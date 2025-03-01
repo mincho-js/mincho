@@ -1,0 +1,30 @@
+{
+  "name": "@macaron-css/vite",
+  "version": "1.5.1",
+  "type": "module",
+  "license": "MIT",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs"
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mokshit06/macaron.git",
+    "directory": "packages/vite"
+  },
+  "dependencies": {
+    "@macaron-css/integration": "1.5.1",
+    "@vanilla-extract/integration": "^6.0.0",
+    "@vanilla-extract/vite-plugin": "^3.1.6"
+  },
+  "devDependencies": {
+    "@vanilla-extract/recipes": "^0.2.5",
+    "vite": "^3.0.0"
+  },
+  "files": [
+    "dist",
+    "src"
+  ]
+}

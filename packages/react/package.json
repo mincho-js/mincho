@@ -1,0 +1,43 @@
+{
+  "name": "@macaron-css/react",
+  "version": "1.5.3",
+  "license": "MIT",
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mokshit06/macaron.git",
+    "directory": "packages/react"
+  },
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    },
+    "./dist/*": "./dist/*",
+    "./runtime": {
+      "import": "./dist/runtime.mjs",
+      "require": "./dist/runtime.js"
+    }
+  },
+  "dependencies": {
+    "@macaron-css/core": "1.5.2"
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "peerDependencies": {
+    "@vanilla-extract/recipes": "^0.2.5",
+    "react": ">=17",
+    "react-dom": ">=17"
+  },
+  "devDependencies": {
+    "@types/react": "^18.0.12",
+    "@types/react-dom": "^18.0.6",
+    "@vanilla-extract/recipes": "^0.2.5",
+    "react": "^18.1.0",
+    "react-dom": "^18.2.0"
+  }
+}
