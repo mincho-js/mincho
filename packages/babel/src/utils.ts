@@ -1,55 +1,62 @@
-import { type NodePath, types as t } from '@babel/core';
-import { addNamed } from '@babel/helper-module-imports';
-import type { ProgramScope } from './types';
+import { NodePath, types as t } from "@babel/core";
+import { addNamed } from "@babel/helper-module-imports";
+import type { ProgramScope } from "./types";
 
-export function invariant(cond: boolean, message: string): asserts cond {
+export function invariant(cond: boolean, msg: string): asserts cond {
   if (!cond) {
-    throw new Error(message);
+    throw new Error(msg);
   }
 }
 
 export function registerImportMethod(
   path: NodePath<t.Node>,
-  name: string,
-  moduleName = '@macaron-css/core'
+  methodName: string,
+  moduleName: string = "@mincho-js/css"
 ) {
   const imports =
-    (path.scope.getProgramParent() as ProgramScope).macaronData.imports ||
-    ((path.scope.getProgramParent() as ProgramScope).macaronData.imports =
+    (path.scope.getProgramParent() as ProgramScope).minchoData.imports ||
+    ((path.scope.getProgramParent() as ProgramScope).minchoData.imports =
       new Map());
 
-  if (!imports.has(`${moduleName}:${name}`)) {
-    let id = addNamed(path, name, moduleName);
-    imports.set(`${moduleName}:${name}`, id);
+  if (!imports.has(`${moduleName}:${methodName}`)) {
+    const id = addNamed(path, methodName, moduleName);
+    imports.set(`${moduleName}:${methodName}`, id);
     return id;
   } else {
-    let iden = imports.get(`${moduleName}:${name}`)!;
-    // the cloning is required to play well with babel-preset-env which is
-    // transpiling import as we add them and using the same identifier causes
-    // problems with the multiple identifiers of the same thing
-    return t.cloneNode(iden);
+    const id = imports.get(`${moduleName}:${methodName}`) as t.Identifier;
+    return t.cloneNode(id);
   }
 }
 
+/**
+ * Get the nearest identifier from the current path
+ * @param path - The path to search for an identifier
+ * @returns The nearest identifier or null if not found
+ */
 export function getNearestIdentifier(path: NodePath<t.Node>) {
-  let currentPath: NodePath<t.Node> | null = path;
+  let currentPath: NodePath<t.Node> = path;
 
   while (currentPath.parentPath !== null) {
+    // Check if current path is already an identifier
     if (currentPath.isIdentifier()) {
       return currentPath;
     }
-
-    let id = currentPath.get('id');
+    // Check for id property (typical for declarations)
+    const id = currentPath.get("id");
     if (!Array.isArray(id)) {
-      if (id.isIdentifier()) return id;
+      if (id.isIdentifier()) {
+        return id;
+      }
       if (id.isArrayPattern()) {
-        for (const el of id.get('elements')) {
-          if (el.isIdentifier()) return el;
+        for (const element of id.get("elements")) {
+          if (element.isIdentifier()) {
+            return element;
+          }
         }
       }
     }
-
-    let key = currentPath.get('key');
+    // Check for key property (for object properties)
+    const key = currentPath.get("key");
     if (!Array.isArray(key) && key.isIdentifier()) {
       return key;
     }
@@ -61,37 +68,37 @@ export function getNearestIdentifier(path: NodePath<t.Node>) {
 }
 
 export const extractionAPIs = [
-  // @macaron-css/core
-  'macaron$',
+  // @mincho-js/css
+  "mincho$",
   // @vanilla-extract/css
-  'style',
-  'styleVariants',
-  'globalStyle',
-  'createTheme',
-  'createGlobalTheme',
-  'createThemeContract',
-  'createGlobalThemeContract',
-  'assignVars',
-  'createVar',
-  'fallbackVar',
-  'fontFace',
-  'globalFontFace',
-  'keyframes',
-  'globalKeyframes',
-  'style',
-  'styleVariants',
-  'globalStyle',
-  'createTheme',
-  'createGlobalTheme',
-  'createThemeContract',
-  'createGlobalThemeContract',
-  'assignVars',
-  'createVar',
-  'fallbackVar',
-  'fontFace',
-  'globalFontFace',
-  'keyframes',
-  'globalKeyframes',
+  "style",
+  "styleVariants",
+  "globalStyle",
+  "createTheme",
+  "createGlobalTheme",
+  "createThemeContract",
+  "createGlobalThemeContract",
+  "assignVars",
+  "createVar",
+  "fallbackVar",
+  "fontFace",
+  "globalFontFace",
+  "keyframes",
+  "globalKeyframes",
+  "style",
+  "styleVariants",
+  "globalStyle",
+  "createTheme",
+  "createGlobalTheme",
+  "createThemeContract",
+  "createGlobalThemeContract",
+  "assignVars",
+  "createVar",
+  "fallbackVar",
+  "fontFace",
+  "globalFontFace",
+  "keyframes",
+  "globalKeyframes",
   // @vanilla-extract/recipes
-  'recipe',
+  "recipe"
 ];

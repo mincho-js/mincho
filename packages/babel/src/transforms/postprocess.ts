@@ -1,15 +1,20 @@
-import { type NodePath, types as t } from '@babel/core';
-import * as generator from '@babel/generator';
-import type { PluginState, ProgramScope } from '../types';
+import { NodePath, types as t, transformFromAstSync } from "@babel/core";
+import type { PluginState, ProgramScope } from "@/types";
 
 export default function postprocess(
-  path: NodePath<t.Program>,
+  path: NodePath<t.Node>,
   state: PluginState
 ) {
   const programParent = path.scope as ProgramScope;
-  const cssExtract = generator.default(
-    t.program(programParent.macaronData.nodes as t.Statement[])
-  ).code;
 
-  state.opts.result = [programParent.macaronData.cssFile, cssExtract];
+  // Use transformFromAstSync instead of generator
+  const program = t.program(programParent.minchoData.nodes as t.Statement[]);
+  const result = transformFromAstSync(program, "", {
+    ast: false,
+    code: true
+  });
+
+  const cssExtract = result?.code || "";
+
+  state.opts.result = [programParent.minchoData.cssFile, cssExtract];
 }

@@ -1,68 +1,103 @@
-import { types as t, type PluginObj } from '@babel/core';
-import type { PluginState, ProgramScope } from './types';
-import { registerImportMethod } from './utils';
-import * as generator from '@babel/generator';
-export function styledComponentsPlugin(): PluginObj<PluginState> {
+import { types as t, PluginObj } from "@babel/core";
+import type { PluginState, ProgramScope } from "@/types";
+import { registerImportMethod } from "@/utils";
+
+/**
+ * The plugin for transforming styled components
+ *
+ * This plugin transforms calls to `styled` from "@mincho-js/react" into runtime
+ * calls with proper tree-shaking annotations.
+ *
+ * @returns The plugin object
+ */
+export function styledComponentPlugin(): PluginObj<PluginState> {
   return {
-    name: 'macaron-css-babel:styled',
+    name: "mincho-js-babel:styled",
     visitor: {
       Program: {
         enter(path) {
-          (path.scope as any).macaronData ??= {};
+          (path.scope as ProgramScope).minchoData ??= {
+            imports: new Map(),
+            bindings: [],
+            nodes: [],
+            cssFile: ""
+          };
+
           path.traverse({
             CallExpression(callPath) {
-              const callee = callPath.get('callee');
+              const callee = callPath.get("callee");
 
-              const isSolidAdapter = callee.referencesImport(
-                '@macaron-css/solid',
-                'styled'
-              );
               const isReactAdapter = callee.referencesImport(
-                '@macaron-css/react',
-                'styled'
+                "@mincho-js/react",
+                "styled"
               );
-              if (!isSolidAdapter && !isReactAdapter) return;
 
-              const runtimeImport = isSolidAdapter
-                ? '@macaron-css/solid/runtime'
-                : '@macaron-css/react/runtime';
+              if (!isReactAdapter) {
+                return;
+              }
 
-              const [tag, styles, ...args] = callPath.node.arguments;
-              const styledIdent = registerImportMethod(
+              const runtimeImport = "@mincho-js/react/runtime";
+
+              const args = callPath.node.arguments;
+
+              // Validate arguments
+              if (args.length < 2) {
+                return;
+              }
+
+              const [tag, styles, ...restArgs] = args;
+
+              const styledIdentifier = registerImportMethod(
                 callPath,
-                '$$styled',
+                "$$styled",
                 runtimeImport
               );
-              const recipeIdent = registerImportMethod(
+
+              const recipeIdentifier = registerImportMethod(
                 callPath,
-                'recipe',
-                '@macaron-css/core'
+                "recipe",
+                "@mincho-js/css"
               );
 
-              const recipeCallExpression = t.callExpression(recipeIdent, [
-                t.cloneNode(styles),
+              // Create the recipe call expression
+              const recipeCallExpression = t.callExpression(recipeIdentifier, [
+                t.cloneNode(styles)
               ]);
-              t.addComments(
-                recipeCallExpression,
-                'leading',
-                callPath.node.leadingComments ?? []
-              );
-              const callExpression = t.callExpression(styledIdent, [
+
+              // Preserve existing comments if any
+              if (callPath.node.leadingComments?.length) {
+                t.addComments(
+                  recipeCallExpression,
+                  "leading",
+                  callPath.node.leadingComments
+                );
+              }
+
+              // Preserve source locations for better source maps
+              recipeCallExpression.loc = styles.loc;
+
+              const callExpression = t.callExpression(styledIdentifier, [
                 t.cloneNode(tag),
                 recipeCallExpression,
-                ...args,
+                ...restArgs
               ]);
-              t.addComment(callExpression, 'leading', ' @__PURE__ ');
+
+              // Add @__PURE__ annotation for tree-shaking
+              t.addComments(callExpression, "leading", [
+                { type: "CommentBlock", value: " @__PURE__ " }
+              ]);
+
+              // Preserve source locations
+              callExpression.loc = callPath.node.loc;
 
               callPath.replaceWith(callExpression);
 
-              // recompute the references
-              // later used in `referencesImports` to check if imported from macaron
+              // recompute the references later used in `referencesImport` to check if the import is used
               path.scope.crawl();
-            },
+            }
           });
-        },
-      },
-    },
+        }
+      }
+    }
   };
 }

@@ -1,86 +1,86 @@
-import { useMemo, createElement, forwardRef, FC } from 'react';
+import {
+  ComplexPropDefinitions,
+  PropTarget,
+  RuntimeFn,
+  VariantGroups,
+  VariantObjectSelection
+} from "@mincho-js/css";
+import {
+  ComponentProps,
+  ComponentType,
+  createElement,
+  ElementType,
+  forwardRef,
+  useMemo
+} from "react";
 
-export function $$styled(
-  Comp: any,
-  styles: ((options?: any) => string) & {
-    macaronMeta: {
-      variants: string[];
-      defaultClassName: string;
-      variantConcat(options: any): string;
-    };
-  }
+export function $$styled<T extends ComponentType<unknown>>(
+  component: T,
+  styles: RuntimeFn<
+    VariantGroups,
+    ComplexPropDefinitions<PropTarget | undefined>
+  >
 ) {
-  const StyledComponent: any = forwardRef(({ as, ...props }: any, ref) => {
-    let CompToRender = as ?? Comp;
-    const [variants, others] = useMemo(() => {
-      const [classes, others]: any[] = [{}, {}];
+  type Props = ComponentProps<typeof component> & {
+    as?: ElementType;
+    className?: string;
+    // Add any variant props with an index signature
+    [key: string]: unknown;
+  };
 
-      for (const [key, value] of Object.entries(props)) {
-        if (StyledComponent.variants.includes(key)) {
-          classes[key] = value;
-        } else {
-          others[key] = value;
+  const StyledComponent = forwardRef<unknown, Props>(
+    ({ as, className: classNameProp, ...props }, ref) => {
+      const componentToRender = as ?? component;
+
+      // More efficient variant/props separation using predefined variant keys
+      const [variantSelection, otherProps] = useMemo(() => {
+        const variantSelection: VariantObjectSelection<VariantGroups> = {};
+        const otherProps: Record<string, unknown> = {};
+
+        for (const [key, value] of Object.entries(props)) {
+          if (styles.variants().includes(key)) {
+            variantSelection[key] = value;
+          } else {
+            otherProps[key] = value;
+          }
         }
+
+        return [variantSelection, otherProps];
+      }, [props]);
+
+      const className = [styles(variantSelection), classNameProp].join(" ");
+
+      // Create element with proper types
+      if (typeof componentToRender === "string") {
+        return createElement(componentToRender, {
+          ...otherProps,
+          className,
+          ref
+        });
       }
 
-      return [classes, others];
-    }, [props]);
-    const className = useMemo(() => {
-      const classes = StyledComponent.classes(variants, props.className);
-      return classes.join(' ');
-    }, [variants, props.className]);
-
-    if (typeof CompToRender === 'string') {
-      return createElement(CompToRender, { ...others, className, ref });
+      return createElement(
+        componentToRender as ComponentType<{
+          className?: string;
+          ref?: unknown;
+          [key: string]: unknown;
+        }>,
+        {
+          ...otherProps,
+          className,
+          ref
+        }
+      );
     }
+  );
 
-    return createElement(CompToRender, { ...props, className, ref });
-  });
-
-  StyledComponent.displayName = `Macaron(${Comp})`;
-  StyledComponent.toString = () => StyledComponent.selector(null);
-  StyledComponent.variants = [
-    ...(styles.macaronMeta.variants ?? []),
-    ...(Comp.variants ?? []),
-  ];
-  StyledComponent.variantConcat = styles.macaronMeta.variantConcat;
-  StyledComponent.classes = (
-    variants: any,
-    merge?: string,
-    fn: any = styles
-  ) => {
-    const classes = new Set(
-      classNames(fn(variants) + (merge ? ` ${merge}` : ''))
-    );
-
-    if (Comp.classes) {
-      for (const c of Comp.classes(
-        variants,
-        merge,
-        Comp.variantConcat
-      ) as string[]) {
-        classes.add(c);
-      }
-    }
-
-    return Array.from(classes);
-  };
-  StyledComponent.selector = (variants: any) => {
-    const classes = StyledComponent.classes(
-      variants,
-      undefined,
-      styles.macaronMeta.variantConcat
-    );
-    // first element isn't empty
-    if (classes.length > 0 && classes[0].length > 0) {
-      return '.' + classes.join('.');
-    }
-    return classes.join('.');
-  };
+  // Set component static properties
+  // StyledComponent.displayName = `Mincho(${getDisplayName(component)})`;
 
   return StyledComponent;
 }
 
-function classNames(className: string) {
-  return className.split(' ');
-}
+// Helper function to get display name
+// function getDisplayName(component: ComponentType<unknown>): string {
+//   return component.displayName || component.name || "Component";
+// }
