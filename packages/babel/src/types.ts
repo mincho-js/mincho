@@ -1,18 +1,16 @@
-import type { NodePath, PluginPass, types as t } from '@babel/core';
-import type { Scope } from '@babel/traverse';
+import type { NodePath, PluginPass, types as t } from "@babel/core";
+import type { Scope } from "@babel/traverse";
 
 export type PluginOptions = {
   result: [string, string];
-  /**
-   * @deprecated no longer used
-   */
-  path?: string;
 };
 
-export type PluginState = PluginPass & { opts: PluginOptions };
+export type PluginState = PluginPass & {
+  opts: PluginOptions;
+};
 
 export type ProgramScope = Scope & {
-  macaronData: {
+  minchoData: {
     imports: Map<string, t.Identifier>;
     bindings: Array<NodePath<t.Node>>;
     nodes: Array<t.Node>;
@@ -20,4 +18,4 @@ export type ProgramScope = Scope & {
   };
 };
 
-export type MacaronNode = ProgramScope['macaronData']['nodes'][number];
+export type MinchoNode = ProgramScope["minchoData"]["nodes"][number];
