@@ -97,6 +97,9 @@ function processVariants<T>(
   return classMap;
 }
 
+export function mincho$<T>(block: () => T) {
+  return block();
+}
 // == Tests ====================================================================
 // Ignore errors when compiling to CommonJS.
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment

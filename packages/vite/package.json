@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "@mincho-js/vite",
+  "description": "Vite for Mincho.js",
+  "version": "0.0.0",
+  "private": true,
+  "sideEffects": false,
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mincho-js/mincho.git",
+    "directory": "packages/vite"
+  },
+  "keywords": [
+    "vite"
+  ],
+  "bugs": {
+    "url": "https://github.com/mincho-js/mincho/issues"
+  },
+  "homepage": "https://github.com/mincho-js/mincho/tree/main/packages/vite#readme",
+  "typings": "./dist/esm/index.d.ts",
+  "main": "./dist/cjs/index.cjs",
+  "module": "./dist/esm/index.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/esm/index.mjs",
+      "require": "./dist/cjs/index.cjs",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "publishConfig": {
+    "directory": "_release/package"
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "clean": "yarn g:clean",
+    "build": "vite build",
+    "build:watch": "yarn g:build-watch",
+    "test": "yarn g:test",
+    "test:watch": "yarn g:test-watch",
+    "coverage": "yarn g:coverage",
+    "lint": "eslint .",
+    "fix": "yarn g:fix",
+    "check": "yarn g:check"
+  },
+  "prettier": "prettier-config-custom",
+  "dependencies": {
+    "@babel/core": "^7.18.2",
+    "@mincho-js/css": "workspace:^",
+    "@mincho-js/integration": "workspace:^",
+    "@mincho-js/transform-to-vanilla": "workspace:^",
+    "@vanilla-extract/integration": "^6.0.0",
+    "vite": "6.1.0"
+  },
+  "devDependencies": {
+    "@types/babel__core": "^7",
+    "@types/node": "^20.11.16",
+    "@vanilla-extract/recipes": "^0.2.5",
+    "eslint": "^8.56.0",
+    "eslint-config-custom": "workspace:^",
+    "prettier-config-custom": "workspace:^",
+    "tsconfig-custom": "workspace:^",
+    "typescript": "~5.3.3",
+    "typescript-eslint": "^7.0.1",
+    "vite-config-custom": "workspace:^"
+  }
+}
