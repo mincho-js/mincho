@@ -72,9 +72,10 @@ The `css()` function takes a style object and generates a unique class name for 
 **Usage Example**
 
 ```typescript
+// button.css.ts
 import { css } from "@mincho-js/css";
 
-const buttonStyle = css({
+export const buttonCss = css({
   backgroundColor: "blue",
   color: "white",
   padding: {
@@ -85,18 +86,27 @@ const buttonStyle = css({
     backgroundColor: "darkblue"
   }
 });
+
+
+// button.tsx
+import { buttonCss } from "./button.css";
+
+export function MyButton() {
+  return <button className={buttonCss}></button>;
+}
 ```
 
 ### cssVariant()
 
-The `cssVariant()` function is used to define conditional styles. It allows easy creation of components with multiple variants.
+The `cssVariant()` function is used to define multiple styles. It allows easy creation of components with multiple variants.
 
 **Usage Example**
 
 ```typescript
+// button.css.ts
 import { cssVariant } from '@mincho-js/css';
 
-const buttonVariants = cssVariant({
+export const buttonVariants = cssVariant({
   primary: {
     backgroundColor: "blue",
     color: "white"
@@ -116,6 +126,73 @@ const buttonVariants = cssVariant({
     }
   }
 });
+
+// button.tsx
+import { buttonVariants } from "./button.css";
+
+interface ButtonProps {
+  state: "primary" | "secondary" | "danger";
+}
+
+export function MyButton({ state }: ButtonProps) {
+  return <button className={buttonVariants[state]}></button>;
+}
+```
+
+### rules()
+
+The `rules()` function is used to define both static and dynamic styles for reusable blocks.
+
+```typescript
+// button.css.ts
+import { rules } from '@mincho-js/css';
+
+export const button = rules({
+  padding: {
+    Block: 10,
+    Inline: 20
+  },
+  
+  props: ["margin"],
+  
+  toggles: {
+    rounded: { borderRadius: 999 }
+  }
+
+  variants: {
+    color: {
+      brand: { color: "#FFFFA0" },
+      accent: { color: "#FFE4B5" }
+    },
+    size: {
+      small: { padding: 12 },
+      medium: { padding: 16 },
+      large: { padding: 24 }
+    }
+  }
+
+  compoundVariants: ({ color, size }) => [
+    {
+      condition: [color.brand, size.small],
+      style: {
+        fontSize: "16px"
+      }
+    }
+  ]
+});
+
+
+// button.tsx
+import { button } from "./button.css";
+
+export function MyButton() {
+  return (<button
+    className={button(["rounded", { color: "brand", size: "small" }])}
+    style={button.props({
+      margin: "20px"
+    })}
+  ></button>);
+}
 ```
 
 ## Features
@@ -877,6 +954,324 @@ const secondary = css([base, { background: "aqua" }]);
 .[FILE_NAME]_base__[HASH] {
   background: aqua;
 }
+```
+
+### 20. CSS Rules :cupcake:
+
+Define it as an object style, similar to css.
+
+**Code:**
+```typescript
+const myRule = rules({
+  color: "blue",
+  backgroundColor: "red"
+});
+```
+
+**Compiled:**
+```css
+.[FILE_NAME]_myRule__[HASH] {
+  color: blue;
+  background-color: red;
+}
+```
+
+However, it is returned as a function, so you need to run it to use it.
+```typescript
+function MyComponent() {
+  return <div className={myCSS()}></div>;
+}
+```
+
+### 21. Rules Props :icecream:
+
+Provides dynamic styles using CSS Variables.
+
+**Code:**
+```typescript
+const myRule = rules({
+  props: ["color", "background", { size: { targets: ["padding", "margin"] }}]
+});
+```
+
+**Compiled:**
+```css
+.[FILE_NAME]_myRule__[HASH] {
+  color: var(--[FILE_NAME]_myRule_color__[HASH]);
+  background: var(--[FILE_NAME]_myRule_background__[HASH]);
+  padding: var(--[FILE_NAME]_myRule_size__[HASH]);
+  margin: var(--[FILE_NAME]_myRule_size__[HASH]);
+}
+```
+
+You can also set a default value.
+
+**Code:**
+```typescript
+const myRule = rules({
+  props: [
+    "color",
+    {
+      background: { base: "red", targets: ["background"] },
+      size: { base: "3px", targets: ["padding", "margin"] }
+    }
+  ]
+});
+```
+
+**Compiled:**
+```css
+.[FILE_NAME]_myRule__[HASH] {
+  color: var(--[FILE_NAME]_myRule_color__[HASH]);
+  background: var(--[FILE_NAME]_myRule_background__[HASH], red);
+  padding: var(--[FILE_NAME]_myRule_size__[HASH], 3px);
+  margin: var(--[FILE_NAME]_myRule_size__[HASH], 3px);
+}
+```
+
+You can think of use cases as those that are statically extracted and those that are dynamically assigned.
+
+
+**Static Usage:**
+```typescript
+const myCSS = css([
+  myRule.props({ color: "red", background: "blue", size: "5px" }),
+  { borderRadius: 999 }
+]);
+```
+
+**Compiled:**
+```css
+.[FILE_NAME]_myCSS__[HASH] {
+  --myCSS_color__[HASH]: red;
+  --myCSS_background__[HASH]: blue;
+  --myCSS_size__[HASH]: 5px;
+  border-radius: 999px;
+}
+```
+
+If dynamic case, it is assigned as an inline style.
+
+**Dynamic Usage**
+```typescript
+import { myRule } from "sample.css";
+
+function Sample({ color }) {
+  return <div style={myRule.props({ color })}>contents...</div>;
+}
+```
+
+### 22. Rules Variants :cupcake:
+
+[Stitches's `variants`](https://stitches.dev/docs/variants#adding-variants) is well enough made.
+
+**Code:**
+```typescript
+const button = rules({
+  color: "black",
+  backgroundColor: "white",
+  borderRadius: 6,
+
+  variants: {
+    color: {
+      brand: {
+        color: "#FFFFA0",
+        backgroundColor: "blueviolet"
+      },
+      accent: {
+        color: "#FFE4B5",
+        backgroundColor: "slateblue"
+      }
+    },
+    size: {
+      small: { padding: 12 },
+      medium: { padding: 16 },
+      large: { padding: 24 }
+    },
+    rounded: {
+      true: { borderRadius: 999 }
+    }
+  }
+});
+```
+
+**Compiled:**
+```css
+.[FILE_NAME]_button__[HASH] {
+  color: black;
+  background-color: white;
+  border-radius: 6px;
+}
+
+.[FILE_NAME]_button_color_brand__[HASH] {
+  color: #ffffa0;
+  background-color: blueviolet;
+}
+.[FILE_NAME]_button_color_accent__[HASH] {
+  color: #ffe4b5;
+  background-color: slateblue;
+}
+
+.[FILE_NAME]_button_size_small__[HASH] {
+  padding: 12px;
+}
+.[FILE_NAME]_button_size_medium__[HASH] {
+  padding: 16px;
+}
+.[FILE_NAME]_button_size_large__[HASH] {
+  padding: 24px;
+}
+```
+
+You can use it as if you were using `css`.
+
+**Usage:**
+```typescript
+button({
+  color: "accent",
+  size: "large",
+  rounded: true
+});
+```
+
+### 23. Toggle Variants :cupcake: / :icecream:
+
+[Stitches's `boolean variants`](https://stitches.dev/docs/variants#boolean-variants) are a special case, but the syntax for defining them is awkward.
+
+Therefore, we introduce a specialized syntax.
+
+**Code Before:**
+```typescript
+const button = rules({
+  // base styles
+
+  variants: {
+    // common variants
+    rounded: {
+      true: { borderRadius: 999 }
+    }
+  }
+});
+```
+
+**Code After:**
+```typescript
+const button = rules({
+  // base styles
+
+  toggles: {
+    rounded: { borderRadius: 999 }
+  }
+
+  variants: {
+    // common variants
+  }
+});
+```
+
+### 24. Compound Variants :icecream: 
+
+[Stitches's `Compound Variants`](https://stitches.dev/docs/variants#compound-variants) is an effective way to set up additional css by leveraging the combination of variations you have already set up.
+
+However, the method of writing the conditions seems quite inconvenient when conditions are complicated.  
+So we want to improve the UX in this area.
+
+**Code Before:**
+```typescript
+const button = rules({
+  // base styles
+
+  variants: {
+    color: {
+      brand: { color: "#FFFFA0" },
+      accent: { color: "#FFE4B5" }
+    },
+    size: {
+      small: { padding: 12 },
+      medium: { padding: 16 },
+      large: { padding: 24 }
+    }
+  },
+  compoundVariants: [
+    {
+      variants: {
+        color: "brand",
+        size: "small",
+      },
+      style: {
+        fontSize: "16px"
+      }
+    }
+  ]
+});
+```
+
+It doesn't seem uncomfortable when the conditions are not as demanding as they are now.
+But if the conditions become complicated, it will be inconvenient to fill out.
+
+**Code After:**
+```typescript
+const button = rules({
+  // base styles
+
+  variants: {
+    color: {
+      brand: { color: "#FFFFA0" },
+      accent: { color: "#FFE4B5" }
+    },
+    size: {
+      small: { padding: 12 },
+      medium: { padding: 16 },
+      large: { padding: 24 }
+    }
+  },
+  compoundVariants: ({ color, size }) => [
+    {
+      condition: [color.brand, size.small],
+      style: {
+        fontSize: "16px"
+      }
+    }
+  ]
+});
+```
+
+**Compiled:**
+```css
+.[FILE_NAME]_button_compound_0__[HASH] {
+  font-size: 16px;
+}
+.[FILE_NAME]_button_compound_1__[HASH] {
+  font-size: 24px;
+  font-weight: bold;
+}
+```
+
+### 25. Default Variants :cupcake:
+
+The way of [Stitches's `Default Variants`](https://stitches.dev/docs/variants#default-variants) is already good to use, so we keep this method in ours.
+
+**Code:**
+```typescript
+const button = rules({
+  // base styles
+
+  variants: {
+    color: {
+      brand: {
+        color: "#FFFFA0",
+        backgroundColor: "blueviolet"
+      },
+      accent: {
+        color: "#FFE4B5",
+        backgroundColor: "slateblue"
+      }
+    }
+  },
+  defaultVariants: {
+    color: "brand"
+  }
+});
 ```
 
 ## Contributing

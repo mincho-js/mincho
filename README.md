@@ -84,6 +84,7 @@ Currently, most of the features are related to the CSS preprocessor.
 
 - [CSS Literals](https://github.com/mincho-js/working-group/blob/main/text/000-css-literals.md): Expressing more natural CSS in TypeScript.
 - [CSS Nesting](https://github.com/mincho-js/working-group/blob/main/text/001-css-nesting.md): Expressing better nesting and referencing.
+- [CSS Rules](https://github.com/mincho-js/working-group/blob/main/text/002-css-rules.md): Expressing static and dynamic styles for reusable blocks.
 
 ## Contributing
 
@@ -106,7 +107,7 @@ Without them, this would not be possible!!
 ### Special Thanks
 
 - [Vanilla Extract](https://vanilla-extract.style/): This project is based on vanilla extract. It has a very fancy API.
-- [Sass](https://sass-lang.com/): Inspired so many different features [variables](https://sass-lang.com/documentation/variables/), [nesting](https://sass-lang.com/documentation/style-rules/declarations/#nesting), [parent selector](https://sass-lang.com/documentation/style-rules/parent-selector/) ...etc
+- [Sass](https://sass-lang.com/): Inspired so many different features [variables](https://sass-lang.com/documentation/variables/), [nesting](https://sass-lang.com/documentation/style-rules/declarations/#nesting), [parent selector](https://sass-lang.com/documentation/style-rules/parent-selector/), [`@mixin`](https://sass-lang.com/documentation/at-rules/mixin/) ...etc
 
 ### CSS Preprocessors or CSS Frameworks
 - [Less](https://lesscss.org/): Inspired by [merge properties](https://lesscss.org/features/#merge-feature).
@@ -117,6 +118,7 @@ Without them, this would not be possible!!
 - [Panda CSS](https://panda-css.com/): Inspired by the [conditional styles](https://panda-css.com/docs/concepts/conditional-styles).
 - [Griffel](https://griffel.js.org): Inspired by the [`@keyframes`(anonymous at-rules)](https://griffel.js.org/react/api/make-styles/#keyframes-animations).
 - [JSS](https://cssinjs.org): Inspired by the [reference a local rule ](https://cssinjs.org/jss-plugin-nested/?v=v10.10.0#use-rulename-to-reference-a-local-rule-within-the-same-style-sheet).
+- [Stitches](https://stitches.dev/): Inspired by the [variants](https://stitches.dev/docs/variants).
 
 ## License
 
