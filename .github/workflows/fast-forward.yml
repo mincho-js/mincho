@@ -16,7 +16,6 @@ jobs:
 
     outputs:
       should_run: ${{ steps.check_branch.outputs.should_run }}
-      pr_sha: ${{ steps.check_branch.outputs.pr_sha }}
 
     steps:
       - name: Check comment
@@ -95,9 +94,6 @@ jobs:
           if [ "$BASE_REF" = "main" ]; then
             echo "should_run=true" >> $GITHUB_OUTPUT
             check_pr_merged
-
-            HEAD_SHA=$(jq -r ".head.sha" <$GITHUB_PR)
-            echo "pr_sha=$HEAD_SHA" >> $GITHUB_OUTPUT
           else
             echo "should_run=false" >> $GITHUB_OUTPUT
           fi
@@ -124,23 +120,13 @@ jobs:
       - name: Setup
         uses: ./.github/actions/node-setup
 
-      - name: Is versioning PR
-        run: |
-          cd ./.changeset || exit
-          md_files=$(find . -maxdepth 1 -type f -name "*.md" ! -name "README.md")
-          if [ -n "$md_files" ]; then
-          git branch changeset-release/main $PR_SHA
-          fi
-        env:
-          PR_SHA: ${{ needs.fast-forward.outputs.pr_sha }}
-
       - name: Create Release Pull Request or Publish to npm
         id: changesets
         uses: changesets/action@v1
         with:
           commit: "Chore: Version Packages"
           publish: yarn run publish
-          version: git reset --hard changeset-release/main && yarn run changeset:version
+          version: yarn run changeset:version
           setupGitUser: true
           createGithubReleases: true
         env:
