@@ -1,5 +1,18 @@
 # @mincho-js/css
 
+## 0.1.0
+
+### Minor Changes
+
+- [#164](https://github.com/mincho-js/mincho/pull/164) [`69b3b39`](https://github.com/mincho-js/mincho/commit/69b3b3990e3507da43ee68058a2d02ee28aef26a) Thanks [@black7375](https://github.com/black7375)! - Support `rules` known as variants
+
+### Patch Changes
+
+- [#167](https://github.com/mincho-js/mincho/pull/167) [`8cb8a01`](https://github.com/mincho-js/mincho/commit/8cb8a01e378ade3a881098e65f57509eaef0c8c2) Thanks [@dependabot](https://github.com/apps/dependabot)! - update dependencies
+
+- Updated dependencies [[`69b3b39`](https://github.com/mincho-js/mincho/commit/69b3b3990e3507da43ee68058a2d02ee28aef26a)]:
+  - @mincho-js/transform-to-vanilla@0.1.0
+
 ## 0.0.4
 
 ### Patch Changes

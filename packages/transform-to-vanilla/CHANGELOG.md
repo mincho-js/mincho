@@ -1,5 +1,11 @@
 # @mincho-js/transform-to-vanilla
 
+## 0.1.0
+
+### Minor Changes
+
+- [#164](https://github.com/mincho-js/mincho/pull/164) [`69b3b39`](https://github.com/mincho-js/mincho/commit/69b3b3990e3507da43ee68058a2d02ee28aef26a) Thanks [@black7375](https://github.com/black7375)! - Support `rules` known as variants
+
 ## 0.0.3
 
 ### Patch Changes
