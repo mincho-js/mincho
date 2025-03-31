@@ -109,6 +109,8 @@ jobs:
       contents: write
       packages: write
       pull-requests: write
+      actions: write
+      workflows: write
 
     steps:
       - name: Checkout Repo
