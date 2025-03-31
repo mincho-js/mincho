@@ -126,7 +126,7 @@ jobs:
         with:
           commit: "Chore: Version Packages"
           publish: yarn run publish
-          version: yarn run changeset:version
+          version: yarn install && yarn run changeset:version
           setupGitUser: true
           createGithubReleases: true
         env:
