@@ -36,6 +36,16 @@ import {
 
 const mergeObject = deepmerge();
 
+// Helper function to safely set properties on a CSSRule
+function setCSSProperty(
+  styles: CSSRule,
+  property: string,
+  value: string
+): void {
+  // @ts-expect-error: Intentionally bypassing type checking for dynamic property assignment
+  styles[property] = value;
+}
+
 export function rules<
   Variants extends VariantGroups | undefined = undefined,
   ToggleVariants extends VariantDefinitions | undefined = undefined,
@@ -67,8 +77,7 @@ export function rules<
         const propVar = createVar(debugName);
         propVars[prop as keyof PropDefinitionOutput<PureProps>] =
           getVarName(propVar);
-        // @ts-expect-error Expression produces a union type that is too complex to represent.ts(2590)
-        propStyles[prop] = propVar;
+        setCSSProperty(propStyles, prop, propVar);
       } else {
         processPropObject(prop, propVars, propStyles, debugId);
       }
@@ -189,9 +198,11 @@ function processPropObject<Target extends PropTarget>(
 
     const isBaseValue = propValue?.base !== undefined;
     propValue?.targets.forEach((target) => {
-      propStyles[target] = isBaseValue
-        ? fallbackVar(propVar, `${propValue.base}`)
-        : propVar;
+      setCSSProperty(
+        propStyles,
+        target,
+        isBaseValue ? fallbackVar(propVar, `${propValue.base}`) : propVar
+      );
     });
   });
 }

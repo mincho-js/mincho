@@ -1,67 +1,70 @@
-import { processVanillaFile } from '@vanilla-extract/integration';
-import { Plugin as EsbuildPlugin } from 'esbuild';
-import { dirname, join } from 'path';
-import { babelTransform, compile } from '@macaron-css/integration';
+import { processVanillaFile } from "@vanilla-extract/integration";
+import { vanillaExtractPlugin } from "@vanilla-extract/esbuild-plugin";
+import { Plugin as EsbuildPlugin } from "esbuild";
+import { dirname, join } from "path";
+import { babelTransform, compile } from "@mincho-js/integration";
 
-/*
-  -> load /(t|j)sx?/
-  -> extract css and inject imports (extracted_HASH.css.ts)
-    -> resolve all imports
-    -> load imports, bundle code again
-      -> add file scope to all files
-      -> evaluate and generate .vanilla.css.ts files
-      -> gets resolved by @vanilla-extract/esbuild-plugin
-    -> process the file with vanilla-extract
-    -> resolve with js loader
-*/
-
-interface MacaronEsbuildPluginOptions {
+interface MinchoEsbuildPluginOptions {
   includeNodeModulesPattern?: RegExp;
 }
 
-export function macaronEsbuildPlugin({
-  includeNodeModulesPattern,
-}: MacaronEsbuildPluginOptions = {}): EsbuildPlugin {
+/**
+ * Plugin flow:
+ * 1. Intercepts TypeScript/JavaScript files (*.tsx, *.jsx, *.ts, *.js)
+ * 2. Extracts CSS using Babel and injects imports to generated CSS files (extracted_[hash].css.ts)
+ * 3. Processes extracted CSS:
+ *    - Resolves all imports in the CSS files
+ *    - Bundles the code with proper file scoping
+ *    - Generates vanilla-extract compatible .css.ts files
+ *    - Hands off to @vanilla-extract/esbuild-plugin for final CSS processing
+ * 4. Returns the transformed JavaScript with proper CSS imports
+ *
+ * This plugin integrates Mincho.js styling with ESBuild's build process,
+ * enabling zero-runtime CSS-in-JS with type safety.
+ */
+export function minchoEsbuildPlugin({
+  includeNodeModulesPattern
+}: MinchoEsbuildPluginOptions = {}): EsbuildPlugin {
   return {
-    name: 'macaron-css-esbuild',
+    name: "mincho-js-esbuild",
     setup(build) {
-      let resolvers = new Map<string, string>();
-      let resolverCache = new Map<string, string>();
+      const resolvers = new Map<string, string>();
+      const resolverCache = new Map<string, string>();
 
       build.onEnd(() => {
         resolvers.clear();
         resolverCache.clear();
       });
 
-      build.onResolve({ filter: /^extracted_(.*)\.css\.ts$/ }, async args => {
+      build.onResolve({ filter: /^extracted_(.*)\.css\.ts$/ }, async (args) => {
         if (!resolvers.has(args.path)) {
           return;
         }
 
-        let resolvedPath = join(args.importer, '..', args.path);
+        const resolvedPath = join(args.importer, "..", args.path);
 
         return {
-          namespace: 'extracted-css',
+          namespace: "extracted-css",
           path: resolvedPath,
           pluginData: {
             path: args.path,
-            mainFilePath: args.pluginData.mainFilePath,
-          },
+            mainFilePath: args.pluginData?.mainFilePath
+          }
         };
       });
 
       build.onLoad(
-        { filter: /.*/, namespace: 'extracted-css' },
+        { filter: /.*/, namespace: "extracted-css" },
         async ({ path, pluginData }) => {
           const resolverContents = resolvers.get(pluginData.path)!;
-          const { source, watchFiles } = await compile({
+          const { source } = await compile({
             esbuild: build.esbuild,
             filePath: path,
             originalPath: pluginData.mainFilePath!,
             contents: resolverContents,
             externals: [],
             cwd: build.initialOptions.absWorkingDir,
-            resolverCache,
+            resolverCache
           });
 
           try {
@@ -69,14 +72,13 @@ export function macaronEsbuildPlugin({
               source,
               filePath: path,
               outputCss: undefined,
-              identOption:
-                undefined ?? (build.initialOptions.minify ? 'short' : 'debug'),
+              identOption: build.initialOptions.minify ? "short" : "debug"
             });
 
             return {
               contents,
-              loader: 'js',
-              resolveDir: dirname(path),
+              loader: "js",
+              resolverDir: dirname(path)
             };
           } catch (error) {
             if (error instanceof ReferenceError) {
@@ -85,9 +87,9 @@ export function macaronEsbuildPlugin({
                   {
                     text: error.toString(),
                     detail:
-                      'This usually happens if you use a browser api at the top level of a file being imported.',
-                  },
-                ],
+                      "This usually happens if you use a browser api at the top level of a file being imported."
+                  }
+                ]
               };
             }
 
@@ -96,39 +98,38 @@ export function macaronEsbuildPlugin({
         }
       );
 
-      build.onLoad({ filter: /\.(j|t)sx?$/ }, async args => {
-        if (args.path.includes('node_modules')) {
-          if(!includeNodeModulesPattern) return;
-          if(!includeNodeModulesPattern.test(args.path)) return;
-        };
+      build.onLoad({ filter: /\.(j|t)sx?$/ }, async (args) => {
+        if (args.path.includes("node_modules")) {
+          if (!includeNodeModulesPattern) return;
+          if (!includeNodeModulesPattern.test(args.path)) return;
+        }
 
-        // gets handled by @vanilla-extract/esbuild-plugin
-        if (args.path.endsWith('.css.ts')) return;
+        // gets handled by vanilla-extract/esbuild-plugin
+        if (args.path.endsWith(".css.ts")) return;
 
         const {
           code,
-          result: [file, cssExtract],
+          result: [file, cssExtract]
         } = await babelTransform(args.path);
 
         // the extracted code and original are the same -> no css extracted
-        if (file && cssExtract && cssExtract !== code) {
+        if (file && cssExtract && cssExtract != code) {
           resolvers.set(file, cssExtract);
           resolverCache.delete(args.path);
         }
 
         return {
-          contents: code!,
-          loader: args.path.match(/\.(ts|tsx)$/i) ? 'ts' : 'js',
+          contents: code,
+          loader: args.path.match(/\.(ts|tsx)$/i) ? "ts" : "js",
           pluginData: {
-            mainFilePath: args.path,
-          },
+            mainFilePath: args.path
+          }
         };
       });
-    },
+    }
   };
 }
 
-export const macaronEsbuildPlugins = (options: MacaronEsbuildPluginOptions = {}) => [
-  macaronEsbuildPlugin(options),
-  require('@vanilla-extract/esbuild-plugin').vanillaExtractPlugin(),
-];
+export const minchoEsbuildPlugins = (
+  options: MinchoEsbuildPluginOptions = {}
+) => [minchoEsbuildPlugin(options), vanillaExtractPlugin()];

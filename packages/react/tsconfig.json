@@ -1,19 +1,9 @@
 {
+  "extends": "tsconfig-custom/tsconfig.json",
   "compilerOptions": {
-    "target": "ESNext",
-    "moduleResolution": "node16",
-    "esModuleInterop": true,
-    "declaration": true,
-    "outDir": "build",
-    "strict": true,
-    "skipLibCheck": true,
-    "emitDeclarationOnly": true,
+    "baseUrl": "./"
   },
-  "include": [
-    "src/**/*.ts",
-  ],
-  "exclude": [
-    "dist",
-    "node_modules"
-  ]
+  "include": ["src/**/*.ts", "__tests__/**/*.ts"],
+  "exclude": ["dist", "_release"],
+  "references": [{ "path": "tsconfig.node.json" }]
 }

@@ -1,21 +1,54 @@
-import {
-  babelTransform,
-  compile,
-  BabelOptions,
-} from '@macaron-css/integration';
-import { processVanillaFile } from '@vanilla-extract/integration';
-import fs from 'fs';
-import { join, resolve } from 'path';
-import {
-  normalizePath,
-  PluginOption,
-  ResolvedConfig,
-  ViteDevServer,
-} from 'vite';
+import { BabelOptions, babelTransform, compile } from "@mincho-js/integration";
+import { processVanillaFile } from "@vanilla-extract/integration";
+import { join, resolve } from "path";
+import { normalizePath } from "@rollup/pluginutils";
+import * as fs from "fs";
 
-const extractedCssFileFilter = /extracted_(.*)\.css\.ts(\?used)?$/;
+interface Module {
+  lastHMRTimestamp?: number;
+  lastInvalidationTimestamp?: number;
+}
 
-export function macaronVitePlugin(options?: {
+// Define local interfaces instead of importing directly from Vite
+interface ViteDevServer {
+  moduleGraph: {
+    getModuleById: (id: string) => Module;
+    invalidateModule: (module: Module) => void;
+  };
+}
+
+interface ResolvedConfig {
+  root: string;
+  command: string;
+  mode: string;
+  build: {
+    watch: boolean;
+  };
+}
+
+interface PluginContext {
+  addWatchFile: (id: string) => void;
+}
+
+// Simplified Plugin interface with only what we need
+interface Plugin {
+  name: string;
+  enforce?: string;
+  buildStart?: () => void;
+  configureServer?: (server: ViteDevServer) => void;
+  configResolved?: (config: ResolvedConfig) => void;
+  resolveId?: (id: string, importer?: string) => string | undefined;
+  load?: (id: string) => unknown;
+  transform?: (code: string, id: string) => unknown;
+}
+
+// Alias for Plugin to match PluginOption
+type PluginOption = Plugin;
+
+// Update the regex to match both the old format and the new virtual format
+const extractedCssFileFilter = /extracted_[^/]+\.css\.ts(\?used)?$/;
+
+export function minchoVitePlugin(_options?: {
   babel?: BabelOptions;
 }): PluginOption {
   let config: ResolvedConfig;
@@ -24,40 +57,38 @@ export function macaronVitePlugin(options?: {
   const resolverCache = new Map<string, string>();
   const resolvers = new Map<string, string>();
   const idToPluginData = new Map<string, Record<string, string>>();
-
-  const virtualExt = '.vanilla.css';
+  const virtualExt = ".vanilla.css";
 
   return {
-    name: 'macaron-css-vite',
-    enforce: 'pre',
+    name: "mincho-css-vite",
+    enforce: "pre",
     buildStart() {
       // resolvers.clear();
-      // idToPluginData.clear();
       // resolverCache.clear();
       // cssMap.clear();
+      // idToPluginData.clear();
     },
-    configureServer(_server) {
-      server = _server;
+    configureServer(serverInstance: ViteDevServer) {
+      server = serverInstance;
     },
-    async configResolved(resolvedConfig) {
+    async configResolved(resolvedConfig: ResolvedConfig) {
       config = resolvedConfig;
     },
-    resolveId(id, importer, options) {
-      if (id.startsWith('\0')) return;
+    resolveId(id: string, importer?: string) {
+      if (id.startsWith("\0")) return;
 
       if (extractedCssFileFilter.test(id)) {
-        const normalizedId = id.startsWith('/') ? id.slice(1) : id;
-        let resolvedPath = normalizePath(join(importer!, '..', normalizedId));
+        const normalizedId = id.startsWith("/") ? id.slice(1) : id;
+        const resolvedPath = normalizePath(join(importer!, "..", normalizedId));
 
         if (!resolvers.has(resolvedPath)) {
           return;
         }
-
         return resolvedPath;
       }
 
       if (id.endsWith(virtualExt)) {
-        const normalizedId = id.startsWith('/') ? id.slice(1) : id;
+        const normalizedId = id.startsWith("/") ? id.slice(1) : id;
 
         const key = normalizePath(resolve(config.root, normalizedId));
         if (cssMap.has(key)) {
@@ -65,12 +96,17 @@ export function macaronVitePlugin(options?: {
         }
       }
     },
-    async load(id, options) {
-      if (id.startsWith('\0')) return;
+    async load(
+      id: string
+    ): Promise<string | null | { code: string; map?: object | null }> {
+      if (id.startsWith("\0")) {
+        return null;
+      }
 
+      // Handle both old and new CSS file formats
       if (extractedCssFileFilter.test(id)) {
-        let normalizedId = customNormalize(id);
-        let pluginData = idToPluginData.get(normalizedId);
+        const normalizedId = customNormalize(id);
+        const pluginData = idToPluginData.get(normalizedId);
 
         if (!pluginData) {
           return null;
@@ -85,7 +121,7 @@ export function macaronVitePlugin(options?: {
         idToPluginData.set(id, {
           ...idToPluginData.get(id),
           filePath: id,
-          originalPath: pluginData.mainFilePath,
+          originalPath: pluginData.mainFilePath
         });
 
         return resolverContents;
@@ -95,59 +131,52 @@ export function macaronVitePlugin(options?: {
         const cssFileId = normalizePath(resolve(config.root, id));
         const css = cssMap.get(cssFileId);
 
-        if (typeof css !== 'string') {
-          return;
+        if (typeof css !== "string") {
+          return null;
         }
 
         return css;
       }
+      return null;
     },
-    async transform(code, id, ssrParam) {
-      if (id.startsWith('\0')) return;
+    async transform(this: PluginContext, code: string, id: string) {
+      if (id.startsWith("\0")) return;
 
       const moduleInfo = idToPluginData.get(id);
 
-      let ssr: boolean | undefined;
-
-      if (typeof ssrParam === 'boolean') {
-        ssr = ssrParam;
-      } else {
-        ssr = ssrParam?.ssr;
-      }
-
-      // is returned from extracted_HASH.css.ts
+      // Handle both old and new CSS file formats for transformation
       if (
         moduleInfo &&
         moduleInfo.originalPath &&
         moduleInfo.filePath &&
         extractedCssFileFilter.test(id)
       ) {
-        const { source, watchFiles } = await compile({
-          filePath: moduleInfo.filePath,
-          cwd: config.root,
-          originalPath: moduleInfo.originalPath,
-          contents: code,
-          resolverCache,
-          externals: [],
-        });
-
-        for (const file of watchFiles) {
-          if (extractedCssFileFilter.test(file)) {
-            continue;
-          }
-          // In start mode, we need to prevent the file from rewatching itself.
-          // If it's a `build --watch`, it needs to watch everything.
-          if (config.command === 'build' || file !== id) {
-            this.addWatchFile(file);
-          }
-        }
-
         try {
+          const { source, watchFiles } = await compile({
+            filePath: moduleInfo.filePath,
+            cwd: config.root,
+            originalPath: moduleInfo.originalPath,
+            contents: code,
+            resolverCache,
+            externals: []
+          });
+
+          for (const file of watchFiles) {
+            if (extractedCssFileFilter.test(file)) {
+              continue;
+            }
+
+            // In start mode, we need to prevent the file from rewatching itself.
+            // If it's a `build --watch`, it needs to watch everything.
+            if (config.command === "build" || file !== id) {
+              this.addWatchFile(file);
+            }
+          }
+
           const contents = await processVanillaFile({
             source,
             filePath: moduleInfo.filePath,
-            identOption:
-              undefined ?? (config.mode === 'production' ? 'short' : 'debug'),
+            identOption: config.mode === "production" ? "short" : "debug",
             serializeVirtualCssPath: async ({ fileScope, source }) => {
               const id: string = `${fileScope.filePath}${virtualExt}`;
               const cssFileId = normalizePath(resolve(config.root, id));
@@ -167,40 +196,37 @@ export function macaronVitePlugin(options?: {
               cssMap.set(cssFileId, source);
 
               return `import "${id}";`;
-            },
+            }
           });
-
           return contents;
         } catch (error) {
-          throw error;
+          console.error(error);
         }
       }
 
-      if (/(j|t)sx?(\?used)?$/.test(id) && !id.endsWith('.vanilla.js')) {
-        if (id.includes('node_modules')) return;
+      if (/(j|t)sx?(\?used)?$/.test(id) && !id.endsWith(".vanilla.js")) {
+        if (id.includes("node_modules")) return;
 
-        // gets handled by @vanilla-extract/vite-plugin
-        if (id.endsWith('.css.ts')) return;
+        if (id.endsWith(".css.ts")) return;
 
         try {
           await fs.promises.access(id, fs.constants.F_OK);
         } catch {
-          // probably a virtual file, to be handled by other plugin
           return;
         }
 
         const {
           code,
-          result: [file, cssExtract],
-        } = await babelTransform(id, options?.babel);
+          result: [file, cssExtract]
+        } = await babelTransform(id, _options?.babel);
 
         if (!cssExtract || !file) return null;
 
-        if (config.command === 'build' && config.build.watch) {
-          this.addWatchFile(id);
+        if (config.command === "build" && config.build.watch) {
+          this.addWatchFile(file);
         }
 
-        let resolvedCssPath = normalizePath(join(id, '..', file));
+        const resolvedCssPath = normalizePath(join(id, "..", file));
 
         if (server && resolvers.has(resolvedCssPath)) {
           const { moduleGraph } = server;
@@ -220,25 +246,24 @@ export function macaronVitePlugin(options?: {
 
         idToPluginData.set(id, {
           ...idToPluginData.get(id),
-          mainFilePath: id,
+          mainFilePath: id
         });
         idToPluginData.set(normalizedCssPath, {
           ...idToPluginData.get(normalizedCssPath),
           mainFilePath: id,
-          path: resolvedCssPath,
+          path: resolvedCssPath
         });
 
         return {
           code,
-          map: { mappings: '' },
+          map: { mappings: "" }
         };
       }
-
       return null;
-    },
-  };
+    }
+  } as PluginOption;
 }
 
 function customNormalize(path: string) {
-  return path.startsWith('/') ? path.slice(1) : path;
+  return path.startsWith("/") ? path.slice(1) : path;
 }
