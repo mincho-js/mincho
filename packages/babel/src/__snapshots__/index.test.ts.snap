@@ -1,0 +1,624 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`already exported 1`] = `
+Array [
+  "extracted_ndq7ki.css.ts",
+  "import { style } from '@macaron-css/core';
+export var _$macaron$$red = style({
+  color: 'red'
+});
+var _$macaron$$red2 = _$macaron$$red;",
+]
+`;
+
+exports[`already exported 2`] = `
+"import { _$macaron$$red as _$macaron$$red2 } from \\"extracted_ndq7ki.css.ts\\";
+import { style } from '@macaron-css/core';
+export const red = _$macaron$$red2;
+console.log(red);"
+`;
+
+exports[`array pattern hoisting 1`] = `
+Array [
+  "extracted_14e7vm3.css.ts",
+  "import { createTheme } from '@macaron-css/core';
+export var _$macaron$$themeClass = createTheme({
+  colors: {
+    brand: 'red'
+  }
+});
+var _$macaron$$themeClass2 = _$macaron$$themeClass;",
+]
+`;
+
+exports[`array pattern hoisting 2`] = `
+"import { _$macaron$$themeClass as _$macaron$$themeClass2 } from \\"extracted_14e7vm3.css.ts\\";
+import { createTheme } from '@macaron-css/core';
+const [themeClass, vars] = _$macaron$$themeClass2;
+console.log(themeClass, vars);"
+`;
+
+exports[`arrow function bindings 1`] = `
+Array [
+  "extracted_2lv0q1.css.ts",
+  "import { style } from '@macaron-css/core';
+const utility = {
+  gap: size => ({
+    gap: size
+  })
+};
+export var _$macaron$$red = style({
+  ...utility.gap('10px')
+});
+var _$macaron$$red2 = _$macaron$$red;",
+]
+`;
+
+exports[`arrow function bindings 2`] = `
+"import { _$macaron$$red as _$macaron$$red2 } from \\"extracted_2lv0q1.css.ts\\";
+import { style } from '@macaron-css/core';
+const utility = {
+  gap: size => ({
+    gap: size
+  })
+};
+const red = _$macaron$$red2;
+console.log(red);"
+`;
+
+exports[`arrow function bindings 3`] = `
+Array [
+  "extracted_1u6937j.css.ts",
+  "import { style } from '@macaron-css/core';
+const getStyles = color => ({
+  color
+});
+export var _$macaron$$red = style({
+  ...getStyles('red')
+});
+var _$macaron$$red2 = _$macaron$$red;",
+]
+`;
+
+exports[`arrow function bindings 4`] = `
+"import { _$macaron$$red as _$macaron$$red2 } from \\"extracted_1u6937j.css.ts\\";
+import { style } from '@macaron-css/core';
+const getStyles = color => ({
+  color
+});
+const red = _$macaron$$red2;
+console.log(red);"
+`;
+
+exports[`binding ordering 1`] = `
+Array [
+  "extracted_meded.css.ts",
+  "import { style } from '@macaron-css/core';
+const color = 'red';
+export var _$macaron$$red = style({
+  color
+});
+var _$macaron$$red2 = _$macaron$$red;",
+]
+`;
+
+exports[`binding ordering 2`] = `
+"import { _$macaron$$red as _$macaron$$red2 } from \\"extracted_meded.css.ts\\";
+import { style } from '@macaron-css/core';
+const color = 'red';
+const red = _$macaron$$red2;
+const longClass = \`abc \${red}\`;
+console.log(longClass);"
+`;
+
+exports[`css variables 1`] = `
+Array [
+  "extracted_1v9qx3q.css.ts",
+  "import { style, createVar } from '@macaron-css/core';
+export var _$macaron$$colorVar = createVar();
+var _$macaron$$colorVar2 = _$macaron$$colorVar;
+import { style, createVar } from '@macaron-css/core';
+const colorVar = _$macaron$$colorVar2;
+export var _$macaron$$red = style({
+  color: 'red',
+  vars: {
+    [colorVar]: 'red'
+  }
+});
+var _$macaron$$red2 = _$macaron$$red;",
+]
+`;
+
+exports[`css variables 2`] = `
+"import { _$macaron$$red as _$macaron$$red2 } from \\"extracted_1v9qx3q.css.ts\\";
+import { _$macaron$$colorVar as _$macaron$$colorVar2 } from \\"extracted_1v9qx3q.css.ts\\";
+import { style, createVar } from '@macaron-css/core';
+const colorVar = _$macaron$$colorVar2;
+const red = _$macaron$$red2;
+console.log(red);"
+`;
+
+exports[`export default style 1`] = `
+Array [
+  "extracted_5qasdd.css.ts",
+  "import { style } from '@macaron-css/core';
+export var _$macaron$$unknown = style({
+  color: 'red'
+});
+var _$macaron$$unknown2 = _$macaron$$unknown;",
+]
+`;
+
+exports[`export default style 2`] = `
+"import { _$macaron$$unknown as _$macaron$$unknown2 } from \\"extracted_5qasdd.css.ts\\";
+import { style } from '@macaron-css/core';
+export default _$macaron$$unknown2;"
+`;
+
+exports[`extracts $macaron function 1`] = `
+Array [
+  "extracted_1mgt78u.css.ts",
+  "import { macaron$ } from '@macaron-css/core';
+export var _$macaron$$red = macaron$(() => {
+  return 2 + 2;
+});
+var _$macaron$$red2 = _$macaron$$red;",
+]
+`;
+
+exports[`extracts $macaron function 2`] = `
+"import { _$macaron$$red as _$macaron$$red2 } from \\"extracted_1mgt78u.css.ts\\";
+import { macaron$ } from '@macaron-css/core';
+const red = _$macaron$$red2;
+console.log(red);"
+`;
+
+exports[`extracts style function 1`] = `
+Array [
+  "extracted_1sozav4.css.ts",
+  "import { style } from '@macaron-css/core';
+export var _$macaron$$red = style({
+  color: 'red'
+});
+var _$macaron$$red2 = _$macaron$$red;",
+]
+`;
+
+exports[`extracts style function 2`] = `
+"import { _$macaron$$red as _$macaron$$red2 } from \\"extracted_1sozav4.css.ts\\";
+import { style } from '@macaron-css/core';
+const red = _$macaron$$red2;
+console.log(red);"
+`;
+
+exports[`function declaration bindings 1`] = `
+Array [
+  "extracted_4nfvg9.css.ts",
+  "import { style } from '@macaron-css/core';
+function getColor() {
+  return 'red';
+}
+export var _$macaron$$red = style({
+  color: getColor()
+});
+var _$macaron$$red2 = _$macaron$$red;",
+]
+`;
+
+exports[`function declaration bindings 2`] = `
+"import { _$macaron$$red as _$macaron$$red2 } from \\"extracted_4nfvg9.css.ts\\";
+import { style } from '@macaron-css/core';
+function getColor() {
+  return 'red';
+}
+const red = _$macaron$$red2;
+console.log(red);"
+`;
+
+exports[`function declaration bindings 3`] = `
+Array [
+  "extracted_r41e9b.css.ts",
+  "import { style } from '@macaron-css/core';
+function getStyles(color) {
+  return {
+    color
+  };
+}
+function getStyles(color) {
+  return {
+    color
+  };
+}
+export var _$macaron$$red = style({
+  ...getStyles('red')
+});
+var _$macaron$$red2 = _$macaron$$red;",
+]
+`;
+
+exports[`function declaration bindings 4`] = `
+"import { _$macaron$$red as _$macaron$$red2 } from \\"extracted_r41e9b.css.ts\\";
+import { style } from '@macaron-css/core';
+function getStyles(color) {
+  return {
+    color
+  };
+}
+const red = _$macaron$$red2;
+console.log(red);"
+`;
+
+exports[`global styles 1`] = `
+Array [
+  "extracted_hg9qeo.css.ts",
+  "import { globalStyle } from '@macaron-css/core';
+export var _$macaron$$unknown = globalStyle('html, body', {
+  color: 'red'
+});
+var _$macaron$$unknown2 = _$macaron$$unknown;",
+]
+`;
+
+exports[`global styles 2`] = `
+"import { _$macaron$$unknown as _$macaron$$unknown2 } from \\"extracted_hg9qeo.css.ts\\";
+import { globalStyle } from '@macaron-css/core';
+_$macaron$$unknown2;"
+`;
+
+exports[`hoisting same variable name in different scope 1`] = `
+Array [
+  "extracted_1fuj30t.css.ts",
+  "import { style } from '@macaron-css/core';
+export var _$macaron$$red = style({
+  color: 'red'
+});
+var _$macaron$$red2 = _$macaron$$red;
+export var _$macaron$$red3 = style({
+  color: 'blue'
+});
+var _$macaron$$red4 = _$macaron$$red3;",
+]
+`;
+
+exports[`hoisting same variable name in different scope 2`] = `
+"import { _$macaron$$red3 as _$macaron$$red4 } from \\"extracted_1fuj30t.css.ts\\";
+import { _$macaron$$red as _$macaron$$red2 } from \\"extracted_1fuj30t.css.ts\\";
+import { style } from '@macaron-css/core';
+const red = _$macaron$$red2;
+console.log(red);
+function SomeComponent() {
+  const red = _$macaron$$red4;
+  console.log(red);
+}"
+`;
+
+exports[`hoists array member 1`] = `
+Array [
+  "extracted_rkwtxb.css.ts",
+  "import { style } from '@macaron-css/core';
+export var _$macaron$$arr = style({
+  color: 'red'
+});
+var _$macaron$$arr2 = _$macaron$$arr;
+export var _$macaron$$arr3 = style({
+  color: 'blue'
+});
+var _$macaron$$arr4 = _$macaron$$arr3;",
+]
+`;
+
+exports[`hoists array member 2`] = `
+"import { _$macaron$$arr3 as _$macaron$$arr4 } from \\"extracted_rkwtxb.css.ts\\";
+import { _$macaron$$arr as _$macaron$$arr2 } from \\"extracted_rkwtxb.css.ts\\";
+import { style } from '@macaron-css/core';
+const arr = [1, 2, _$macaron$$arr2, 4, _$macaron$$arr4];
+console.log(arr);"
+`;
+
+exports[`hoists inline expression 1`] = `
+Array [
+  "extracted_47l5xi.css.ts",
+  "import { style } from '@macaron-css/core';
+export var _$macaron$$str = style({
+  color: 'red'
+});
+var _$macaron$$str2 = _$macaron$$str;",
+]
+`;
+
+exports[`hoists inline expression 2`] = `
+"import { _$macaron$$str as _$macaron$$str2 } from \\"extracted_47l5xi.css.ts\\";
+import { style } from '@macaron-css/core';
+const str = \`abc \${_$macaron$$str2}\`;
+console.log(str);"
+`;
+
+exports[`hoists object property 1`] = `
+Array [
+  "extracted_2e1qtp.css.ts",
+  "import { style } from '@macaron-css/core';
+export var _$macaron$$key = style({
+  color: 'red'
+});
+var _$macaron$$key2 = _$macaron$$key;",
+]
+`;
+
+exports[`hoists object property 2`] = `
+"import { _$macaron$$key as _$macaron$$key2 } from \\"extracted_2e1qtp.css.ts\\";
+import { style } from '@macaron-css/core';
+const obj = {
+  nested: {
+    key: _$macaron$$key2
+  }
+};
+console.log(obj);"
+`;
+
+exports[`inside block scope 1`] = `
+Array [
+  "extracted_ugie7r.css.ts",
+  "import { style } from '@macaron-css/core';
+export var _$macaron$$red = style({
+  color: 'red'
+});
+var _$macaron$$red2 = _$macaron$$red;",
+]
+`;
+
+exports[`inside block scope 2`] = `
+"import { _$macaron$$red as _$macaron$$red2 } from \\"extracted_ugie7r.css.ts\\";
+import { style } from '@macaron-css/core';
+{
+  const red = _$macaron$$red2;
+  console.log(red);
+}"
+`;
+
+exports[`inside jsx expression 1`] = `
+Array [
+  "extracted_1m4c166.css.ts",
+  "import { style } from '@macaron-css/core';
+export var _$macaron$$App = style({
+  color: 'red'
+});
+var _$macaron$$App2 = _$macaron$$App;",
+]
+`;
+
+exports[`inside jsx expression 2`] = `
+"import { _$macaron$$App as _$macaron$$App2 } from \\"extracted_1m4c166.css.ts\\";
+import { style } from '@macaron-css/core';
+function App() {
+  return <div class={_$macaron$$App2}>Hello</div>;
+}
+console.log(red);"
+`;
+
+exports[`leading comments of \`styled\` get passed to recipe 1`] = `
+Array [
+  "extracted_1aibn3u.css.ts",
+  "import { macaron$ } from '@macaron-css/core';
+import { $$styled as _$$styled } from \\"@macaron-css/solid/runtime\\";
+import { recipe as _recipe } from \\"@macaron-css/core\\";
+const fn = () => {
+  const arr = [1, 2];
+  for (const _ of arr) {
+    const Button =
+    /* @__PURE__ */
+    /* macaron-ignore */
+    _$$styled(\\"button\\", _recipe({
+      base: {
+        color: _
+      }
+    }));
+  }
+  return Button;
+};
+export var _$macaron$$test = macaron$(() => {
+  console.log(fn());
+  return \\"test\\";
+});
+var _$macaron$$test2 = _$macaron$$test;",
+]
+`;
+
+exports[`leading comments of \`styled\` get passed to recipe 2`] = `
+"import { _$macaron$$test as _$macaron$$test2 } from \\"extracted_1aibn3u.css.ts\\";
+import { recipe as _recipe } from \\"@macaron-css/core\\";
+import { $$styled as _$$styled } from \\"@macaron-css/solid/runtime\\";
+import { macaron$ } from '@macaron-css/core';
+const fn = () => {
+  const arr = [1, 2];
+  for (const _ of arr) {
+    const Button =
+    /* @__PURE__ */
+    /* macaron-ignore */
+    _$$styled(\\"button\\", _recipe({
+      base: {
+        color: _
+      }
+    }));
+  }
+  return Button;
+};
+const test = _$macaron$$test2;
+console.log(test);"
+`;
+
+exports[`macaron-ignore doesn't extract expression 1`] = `
+Array [
+  "extracted_10ccc6g.css.ts",
+  "",
+]
+`;
+
+exports[`macaron-ignore doesn't extract expression 2`] = `
+"import { style } from '@macaron-css/core';
+const red = /* macaron-ignore */style({
+  color: \\"red\\"
+});
+console.log(red);"
+`;
+
+exports[`macaron-ignore on parent node 1`] = `
+Array [
+  "extracted_d3cr0p.css.ts",
+  "",
+]
+`;
+
+exports[`macaron-ignore on parent node 2`] = `
+"import { globalStyle } from '@macaron-css/core';
+
+/* macaron-ignore */
+globalStyle(\\"html\\", {
+  color: 'red'
+});"
+`;
+
+exports[`move bindings along with extracted style 1`] = `
+Array [
+  "extracted_7ip2jg.css.ts",
+  "import { style } from '@macaron-css/core';
+const redColor = 'red';
+export var _$macaron$$red = style({
+  color: redColor
+});
+var _$macaron$$red2 = _$macaron$$red;",
+]
+`;
+
+exports[`move bindings along with extracted style 2`] = `
+"import { _$macaron$$red as _$macaron$$red2 } from \\"extracted_7ip2jg.css.ts\\";
+import { style } from '@macaron-css/core';
+const redColor = 'red';
+const red = _$macaron$$red2;
+console.log(red);"
+`;
+
+exports[`multiple variable declarators in one declaration 1`] = `
+Array [
+  "extracted_6n9ako.css.ts",
+  "import { style } from '@macaron-css/core';
+export var _$macaron$$red = style({
+  color: 'red'
+});
+var _$macaron$$red2 = _$macaron$$red;
+export var _$macaron$$blue = style({
+  color: 'blue'
+});
+var _$macaron$$blue2 = _$macaron$$blue;
+export var _$macaron$$green = style({
+  color: 'green'
+});
+var _$macaron$$green2 = _$macaron$$green;",
+]
+`;
+
+exports[`multiple variable declarators in one declaration 2`] = `
+"import { _$macaron$$green as _$macaron$$green2 } from \\"extracted_6n9ako.css.ts\\";
+import { _$macaron$$blue as _$macaron$$blue2 } from \\"extracted_6n9ako.css.ts\\";
+import { _$macaron$$red as _$macaron$$red2 } from \\"extracted_6n9ako.css.ts\\";
+import { style } from '@macaron-css/core';
+const red = _$macaron$$red2,
+  blue = _$macaron$$blue2,
+  green = _$macaron$$green2;
+console.log(red, blue, green);"
+`;
+
+exports[`nested bindings 1`] = `
+Array [
+  "extracted_15sqdx.css.ts",
+  "import { style } from '@macaron-css/core';
+const theme = {
+  color: 'red'
+};
+const themeColor = theme.color;
+const color = themeColor;
+export var _$macaron$$red = style({
+  color
+});
+var _$macaron$$red2 = _$macaron$$red;",
+]
+`;
+
+exports[`nested bindings 2`] = `
+"import { _$macaron$$red as _$macaron$$red2 } from \\"extracted_15sqdx.css.ts\\";
+import { style } from '@macaron-css/core';
+const theme = {
+  color: 'red'
+};
+const themeColor = theme.color;
+const color = themeColor;
+const red = _$macaron$$red2;
+console.log(red);"
+`;
+
+exports[`react styled components get converted to recipe 1`] = `
+Array [
+  "extracted_5dzqko.css.ts",
+  "import { recipe as _recipe } from \\"@macaron-css/core\\";
+export var _$macaron$$Button = _recipe({
+  base: {
+    color: 'red'
+  }
+});
+var _$macaron$$Button2 = _$macaron$$Button;",
+]
+`;
+
+exports[`react styled components get converted to recipe 2`] = `
+"import { _$macaron$$Button as _$macaron$$Button2 } from \\"extracted_5dzqko.css.ts\\";
+import { recipe as _recipe } from \\"@macaron-css/core\\";
+import { $$styled as _$$styled } from \\"@macaron-css/react/runtime\\";
+const Button = /* @__PURE__ */_$$styled(\\"button\\", _$macaron$$Button2);
+console.log(Button);"
+`;
+
+exports[`same binding in multiple declarations 1`] = `
+Array [
+  "extracted_s8bnpw.css.ts",
+  "import { style } from '@macaron-css/core';
+const color = 'red';
+export var _$macaron$$foreground = style({
+  color
+});
+var _$macaron$$foreground2 = _$macaron$$foreground;
+export var _$macaron$$background = style({
+  background: color
+});
+var _$macaron$$background2 = _$macaron$$background;",
+]
+`;
+
+exports[`same binding in multiple declarations 2`] = `
+"import { _$macaron$$background as _$macaron$$background2 } from \\"extracted_s8bnpw.css.ts\\";
+import { _$macaron$$foreground as _$macaron$$foreground2 } from \\"extracted_s8bnpw.css.ts\\";
+import { style } from '@macaron-css/core';
+const color = 'red';
+const foreground = _$macaron$$foreground2;
+const background = _$macaron$$background2;
+console.log(foreground, background);"
+`;
+
+exports[`solid styled components get converted to recipe 1`] = `
+Array [
+  "extracted_304vki.css.ts",
+  "import { recipe as _recipe } from \\"@macaron-css/core\\";
+export var _$macaron$$Button = _recipe({
+  base: {
+    color: 'red'
+  }
+});
+var _$macaron$$Button2 = _$macaron$$Button;",
+]
+`;
+
+exports[`solid styled components get converted to recipe 2`] = `
+"import { _$macaron$$Button as _$macaron$$Button2 } from \\"extracted_304vki.css.ts\\";
+import { recipe as _recipe } from \\"@macaron-css/core\\";
+import { $$styled as _$$styled } from \\"@macaron-css/solid/runtime\\";
+const Button = /* @__PURE__ */_$$styled(\\"button\\", _$macaron$$Button2);
+console.log(Button);"
+`;
