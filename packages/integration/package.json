@@ -1,24 +1,67 @@
 {
-  "name": "@macaron-css/integration",
-  "version": "1.5.1",
-  "main": "dist/index.js",
-  "module": "dist/index.mjs",
-  "types": "dist/index.d.ts",
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "@mincho-js/integration",
+  "description": "Integration for Mincho.js",
+  "version": "0.0.3",
+  "sideEffects": false,
+  "type": "module",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/mokshit06/macaron.git",
+    "url": "git+https://github.com/mincho-js/mincho.git",
     "directory": "packages/integration"
   },
-  "dependencies": {
-    "@babel/core": "^7.18.2",
-    "@babel/plugin-syntax-jsx": "^7.17.12",
-    "@macaron-css/babel": "1.5.1",
-    "@vanilla-extract/integration": "^6.0.0",
-    "esbuild": "^0.14.42"
+  "keywords": [
+    "integration"
+  ],
+  "bugs": {
+    "url": "https://github.com/mincho-js/mincho/issues"
+  },
+  "homepage": "https://github.com/mincho-js/mincho/tree/main/packages/integration#readme",
+  "typings": "./dist/esm/index.d.ts",
+  "main": "./dist/cjs/index.cjs",
+  "module": "./dist/esm/index.mjs",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/esm/index.d.ts",
+        "default": "./dist/esm/index.mjs"
+      },
+      "require": {
+        "types": "./dist/cjs/index.d.cts",
+        "default": "./dist/cjs/index.cjs"
+      }
+    }
+  },
+  "publishConfig": {
+    "directory": "_release/package"
   },
   "files": [
     "dist",
     "src"
-  ]
+  ],
+  "scripts": {
+    "clean": "yarn g:clean",
+    "build": "yarn g:build",
+    "build:watch": "yarn g:build-watch",
+    "coverage": "yarn g:coverage",
+    "lint": "yarn g:lint",
+    "fix": "yarn g:fix",
+    "check": "yarn g:check"
+  },
+  "prettier": "prettier-config-custom",
+  "dependencies": {
+    "@babel/core": "^7.18.2",
+    "@babel/plugin-syntax-jsx": "^7.17.12",
+    "@mincho-js/babel": "workspace:^",
+    "@vanilla-extract/integration": "^6.0.0",
+    "esbuild": "^0.14.42"
+  },
+  "devDependencies": {
+    "@types/babel__core": "^7.20.5",
+    "eslint-config-custom": "workspace:^",
+    "prettier-config-custom": "workspace:^",
+    "tsconfig-custom": "workspace:^",
+    "vite-config-custom": "workspace:^"
+  }
 }

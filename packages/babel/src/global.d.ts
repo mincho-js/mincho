@@ -1,10 +1,9 @@
-// import { NodePath, Node } from '@babel/core';
-
-declare module '@babel/helper-module-imports' {
+declare module "@babel/helper-module-imports" {
+  import { NodePath, Node, types as t } from "@babel/core";
   export function addNamed(
-    path: import('@babel/core').NodePath<import('@babel/core').Node>,
-    named: string,
+    path: NodePath<Node>,
+    name: string,
     source: string,
-    opts?: { nameHint: string }
-  ): import('@babel/types').Identifier;
+    opts?: { nameHint?: string }
+  ): t.Identifier;
 }

@@ -34,9 +34,23 @@ export {
   styleVariants
 } from "./css";
 export { rules, recipe } from "./rules";
-export type { RulesVariants, RecipeVariants, RuntimeFn } from "./rules/types";
+export { createRuntimeFn } from "./rules/createRuntimeFn";
+export type {
+  RulesVariants,
+  RecipeVariants,
+  RuntimeFn,
+  VariantGroups,
+  PatternOptions,
+  VariantSelection,
+  ComplexPropDefinitions,
+  PropTarget,
+  VariantDefinitions,
+  ConditionalVariants,
+  VariantObjectSelection,
+  ResolveComplex
+} from "./rules/types";
 
 export type { CSSProperties, ComplexCSSRule, GlobalCSSRule, CSSRule };
 export type ComplexStyleRule = ComplexCSSRule;
-export type GlobalStyleRule = GlobalCSSRule;
+export type GlobalStyleRule = GlobalCSSRule | ComplexCSSRule;
 export type StyleRule = CSSRule;

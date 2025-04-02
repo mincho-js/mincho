@@ -1,17 +1,11 @@
 {
+  "extends": "tsconfig-custom/tsconfig.json",
   "compilerOptions": {
-    "target": "ESNext",
-    "moduleResolution": "node16",
-    "esModuleInterop": true,
-    "declaration": true,
-    "outDir": "build",
-    "strict": true,
-    "skipLibCheck": true,
-    "isolatedModules": true,
-    "noEmit": true
+    "baseUrl": "./",
+    "module": "es2020",
+    "moduleResolution": "bundler"
   },
-  "exclude": [
-    "dist",
-    "node_modules"
-  ]
+  "include": ["global.d.ts", "src/**/*.ts",  "__tests__/**/*.ts"],
+  "exclude": ["dist", "_release"],
+  "references": [{ "path": "tsconfig.node.json" }]
 }
