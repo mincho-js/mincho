@@ -55,7 +55,7 @@
     "@babel/plugin-syntax-jsx": "^7.17.12",
     "@mincho-js/babel": "workspace:^",
     "@vanilla-extract/integration": "^6.0.0",
-    "esbuild": "^0.14.42"
+    "esbuild": "^0.25.2"
   },
   "devDependencies": {
     "@types/babel__core": "^7.20.5",
