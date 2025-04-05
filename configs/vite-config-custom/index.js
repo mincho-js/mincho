@@ -130,7 +130,7 @@ function initCommonBuilder(viteConfigEnv) {
     configs.add({
       build: {
         sourcemap: false,
-        minify: "terser"
+        minify: false
       }
     });
   }
