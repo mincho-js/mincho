@@ -922,7 +922,51 @@ if (import.meta.vitest) {
   describe.concurrent("rulesVariants()", () => {
     setFileScope("test");
 
-    it("multiple rules at once", () => {
+    it("empty slots", () => {
+      const result = rulesVariants(
+        {
+          text: {
+            fontWeight: "bold",
+            variants: {
+              color: {
+                main: { color: "#0078e5" },
+                sub: { color: "#fff7ed" }
+              },
+              size: {
+                large: { fontSize: "24px" },
+                medium: { fontSize: "18px" },
+                small: { fontSize: "12px" }
+              }
+            },
+            toggles: {
+              accent: { textDecoration: "underline" }
+            }
+          },
+          image: {
+            width: "100%",
+            border: "1px solid #ccc",
+            borderRadius: "5px",
+            variants: {
+              style: {
+                thumbnail: {
+                  width: "50px"
+                },
+                detail: {
+                  width: "80%",
+                  marginBottom: "10px"
+                }
+              }
+            }
+          }
+        },
+        "contents"
+      );
+
+      expect(result.text()).toMatch(className("contents_text__"));
+      expect(result.image()).toMatch(className("contents_image__"));
+    });
+
+    it("multiple slot combinations", () => {
       const contents = rulesVariants(
         {
           text: {
@@ -983,6 +1027,182 @@ if (import.meta.vitest) {
       ).toMatch(
         /^contents_image__[a-zA-Z0-9]+ contents_image_style_thumbnail__[a-zA-Z0-9]+$/
       );
+    });
+
+    it("slot variants", () => {
+      const result = rulesVariants(
+        {
+          text: {
+            fontWeight: "bold",
+            variants: {
+              color: {
+                main: { color: "#0078e5" },
+                sub: { color: "#fff7ed" }
+              },
+              size: {
+                large: { fontSize: "24px" },
+                medium: { fontSize: "18px" },
+                small: { fontSize: "12px" }
+              }
+            },
+            toggles: {
+              accent: { textDecoration: "underline" }
+            }
+          },
+          image: {
+            width: "100%",
+            border: "1px solid #ccc",
+            borderRadius: "5px",
+            variants: {
+              style: {
+                thumbnail: {
+                  width: "50px"
+                },
+                detail: {
+                  width: "80%",
+                  marginBottom: "10px"
+                }
+              }
+            }
+          }
+        },
+        "contents"
+      );
+
+      expect(result.text()).toMatch(className("contents_text__"));
+      expect(result.image()).toMatch(className("contents_image__"));
+    });
+
+    it("slot toggles", () => {
+      const result = rulesVariants(
+        {
+          text: {
+            fontWeight: "bold",
+            variants: {
+              color: {
+                main: { color: "#0078e5" },
+                sub: { color: "#fff7ed" }
+              },
+              size: {
+                large: { fontSize: "24px" },
+                medium: { fontSize: "18px" },
+                small: { fontSize: "12px" }
+              }
+            },
+            toggles: {
+              accent: { textDecoration: "underline" }
+            }
+          },
+          image: {
+            width: "100%",
+            border: "1px solid #ccc",
+            borderRadius: "5px",
+            variants: {
+              style: {
+                thumbnail: {
+                  width: "50px"
+                },
+                detail: {
+                  width: "80%",
+                  marginBottom: "10px"
+                }
+              }
+            }
+          }
+        },
+        "contents"
+      );
+
+      expect(result.text()).toMatch(className("contents_text__"));
+      expect(result.image()).toMatch(className("contents_image__"));
+    });
+
+    it("slot defaultVariants", () => {
+      const result = rulesVariants(
+        {
+          text: {
+            fontWeight: "bold",
+            variants: {
+              color: {
+                main: { color: "#0078e5" },
+                sub: { color: "#fff7ed" }
+              },
+              size: {
+                large: { fontSize: "24px" },
+                medium: { fontSize: "18px" },
+                small: { fontSize: "12px" }
+              }
+            },
+            toggles: {
+              accent: { textDecoration: "underline" }
+            }
+          },
+          image: {
+            width: "100%",
+            border: "1px solid #ccc",
+            borderRadius: "5px",
+            variants: {
+              style: {
+                thumbnail: {
+                  width: "50px"
+                },
+                detail: {
+                  width: "80%",
+                  marginBottom: "10px"
+                }
+              }
+            }
+          }
+        },
+        "contents"
+      );
+
+      expect(result.text()).toMatch(className("contents_text__"));
+      expect(result.image()).toMatch(className("contents_image__"));
+    });
+
+    it("slot compoundVariants", () => {
+      const result = rulesVariants(
+        {
+          text: {
+            fontWeight: "bold",
+            variants: {
+              color: {
+                main: { color: "#0078e5" },
+                sub: { color: "#fff7ed" }
+              },
+              size: {
+                large: { fontSize: "24px" },
+                medium: { fontSize: "18px" },
+                small: { fontSize: "12px" }
+              }
+            },
+            toggles: {
+              accent: { textDecoration: "underline" }
+            }
+          },
+          image: {
+            width: "100%",
+            border: "1px solid #ccc",
+            borderRadius: "5px",
+            variants: {
+              style: {
+                thumbnail: {
+                  width: "50px"
+                },
+                detail: {
+                  width: "80%",
+                  marginBottom: "10px"
+                }
+              }
+            }
+          }
+        },
+        "contents"
+      );
+
+      expect(result.text()).toMatch(className("contents_text__"));
+      expect(result.image()).toMatch(className("contents_image__"));
     });
   });
 }
