@@ -26,7 +26,10 @@ import type {
   PropTarget,
   PropVars,
   Serializable,
-  VariantStringMap
+  VariantStringMap,
+  RecipeStyleRule,
+  SlotRecipeDefinition,
+  SlotRecipeResult
 } from "./types";
 import {
   mapValues,
@@ -208,13 +211,45 @@ function processPropObject<Target extends PropTarget>(
 }
 
 function processCompoundStyle(
-  style: ComplexCSSRule | string,
+  style: RecipeStyleRule,
   debugId: string | undefined,
   index: number
 ): string {
   return typeof style === "string"
     ? style
     : css(style, getDebugName(debugId, `compound_${index}`));
+}
+
+export function rulesVariants<Slots extends SlotRecipeDefinition>(
+  slots: Slots,
+  debugId?: string
+): SlotRecipeResult<Slots> {
+  const result: Partial<SlotRecipeResult<Slots>> = {};
+
+  Object.entries(slots).forEach(([slotName, slotConfig]) => {
+    const slotDebugId = debugId ? `${debugId}_${slotName}` : slotName;
+    result[slotName as keyof Slots] = rules(
+      {
+        base: slotConfig.base,
+        variants: slotConfig.variants,
+        toggles: slotConfig.toggles,
+        ...slotConfig
+      } as PatternOptions<
+        Slots[typeof slotName]["variants"],
+        Slots[typeof slotName]["toggles"],
+        undefined
+      >,
+      slotDebugId
+    ) as RuntimeFn<
+      ConditionalVariants<
+        Slots[typeof slotName]["variants"],
+        Slots[typeof slotName]["toggles"]
+      >,
+      ComplexPropDefinitions<PropTarget>
+    >;
+  });
+
+  return result as SlotRecipeResult<Slots>;
 }
 
 // == Tests ====================================================================
@@ -881,6 +916,293 @@ if (import.meta.vitest) {
           expect(varName).toMatch(className(`--${debugId}_size`));
         }
       });
+    });
+  });
+
+  describe.concurrent("rulesVariants()", () => {
+    setFileScope("test");
+
+    it("empty slots", () => {
+      const result = rulesVariants(
+        {
+          text: {
+            fontWeight: "bold",
+            variants: {
+              color: {
+                main: { color: "#0078e5" },
+                sub: { color: "#fff7ed" }
+              },
+              size: {
+                large: { fontSize: "24px" },
+                medium: { fontSize: "18px" },
+                small: { fontSize: "12px" }
+              }
+            },
+            toggles: {
+              accent: { textDecoration: "underline" }
+            }
+          },
+          image: {
+            width: "100%",
+            border: "1px solid #ccc",
+            borderRadius: "5px",
+            variants: {
+              style: {
+                thumbnail: {
+                  width: "50px"
+                },
+                detail: {
+                  width: "80%",
+                  marginBottom: "10px"
+                }
+              }
+            }
+          }
+        },
+        "contents"
+      );
+
+      expect(result.text()).toMatch(className("contents_text"));
+      expect(result.image()).toMatch(className("contents_image"));
+    });
+
+    it("multiple slot combinations", () => {
+      const contents = rulesVariants(
+        {
+          text: {
+            fontWeight: "bold",
+            variants: {
+              color: {
+                main: { color: "#0078e5" },
+                sub: { color: "#fff7ed" }
+              },
+              size: {
+                large: { fontSize: "24px" },
+                medium: { fontSize: "18px" },
+                small: { fontSize: "12px" }
+              }
+            },
+            toggles: {
+              accent: { textDecoration: "underline" }
+            }
+          },
+          image: {
+            width: "100%",
+            border: "1px solid #ccc",
+            borderRadius: "5px",
+            variants: {
+              style: {
+                thumbnail: {
+                  width: "50px"
+                },
+                detail: {
+                  width: "80%",
+                  marginBottom: "10px"
+                }
+              }
+            }
+          }
+        },
+        "contents"
+      );
+
+      // Test case 1
+      expect(
+        contents.text([
+          "accent",
+          {
+            color: "sub",
+            size: "medium"
+          }
+        ])
+      ).toMatch(
+        /^contents_text__[a-zA-Z0-9]+ contents_text_accent_true__[a-zA-Z0-9]+ contents_text_color_sub__[a-zA-Z0-9]+ contents_text_size_medium__[a-zA-Z0-9]+$/
+      );
+
+      // Test case 2
+      expect(
+        contents.image({
+          style: "thumbnail"
+        })
+      ).toMatch(
+        /^contents_image__[a-zA-Z0-9]+ contents_image_style_thumbnail__[a-zA-Z0-9]+$/
+      );
+    });
+
+    it("slot variants", () => {
+      const result = rulesVariants(
+        {
+          text: {
+            fontWeight: "bold",
+            variants: {
+              color: {
+                main: { color: "#0078e5" },
+                sub: { color: "#fff7ed" }
+              },
+              size: {
+                large: { fontSize: "24px" },
+                medium: { fontSize: "18px" },
+                small: { fontSize: "12px" }
+              }
+            },
+            toggles: {
+              accent: { textDecoration: "underline" }
+            }
+          },
+          image: {
+            width: "100%",
+            border: "1px solid #ccc",
+            borderRadius: "5px",
+            variants: {
+              style: {
+                thumbnail: {
+                  width: "50px"
+                },
+                detail: {
+                  width: "80%",
+                  marginBottom: "10px"
+                }
+              }
+            }
+          }
+        },
+        "contents"
+      );
+
+      expect(result.text()).toMatch(className("contents_text"));
+      expect(result.image()).toMatch(className("contents_image"));
+    });
+
+    it("slot toggles", () => {
+      const result = rulesVariants(
+        {
+          text: {
+            fontWeight: "bold",
+            variants: {
+              color: {
+                main: { color: "#0078e5" },
+                sub: { color: "#fff7ed" }
+              },
+              size: {
+                large: { fontSize: "24px" },
+                medium: { fontSize: "18px" },
+                small: { fontSize: "12px" }
+              }
+            },
+            toggles: {
+              accent: { textDecoration: "underline" }
+            }
+          },
+          image: {
+            width: "100%",
+            border: "1px solid #ccc",
+            borderRadius: "5px",
+            variants: {
+              style: {
+                thumbnail: {
+                  width: "50px"
+                },
+                detail: {
+                  width: "80%",
+                  marginBottom: "10px"
+                }
+              }
+            }
+          }
+        },
+        "contents"
+      );
+
+      expect(result.text()).toMatch(className("contents_text"));
+      expect(result.image()).toMatch(className("contents_image"));
+    });
+
+    it("slot defaultVariants", () => {
+      const result = rulesVariants(
+        {
+          text: {
+            fontWeight: "bold",
+            variants: {
+              color: {
+                main: { color: "#0078e5" },
+                sub: { color: "#fff7ed" }
+              },
+              size: {
+                large: { fontSize: "24px" },
+                medium: { fontSize: "18px" },
+                small: { fontSize: "12px" }
+              }
+            },
+            toggles: {
+              accent: { textDecoration: "underline" }
+            }
+          },
+          image: {
+            width: "100%",
+            border: "1px solid #ccc",
+            borderRadius: "5px",
+            variants: {
+              style: {
+                thumbnail: {
+                  width: "50px"
+                },
+                detail: {
+                  width: "80%",
+                  marginBottom: "10px"
+                }
+              }
+            }
+          }
+        },
+        "contents"
+      );
+
+      expect(result.text()).toMatch(className("contents_text"));
+      expect(result.image()).toMatch(className("contents_image"));
+    });
+
+    it("slot compoundVariants", () => {
+      const result = rulesVariants(
+        {
+          text: {
+            fontWeight: "bold",
+            variants: {
+              color: {
+                main: { color: "#0078e5" },
+                sub: { color: "#fff7ed" }
+              },
+              size: {
+                large: { fontSize: "24px" },
+                medium: { fontSize: "18px" },
+                small: { fontSize: "12px" }
+              }
+            },
+            toggles: {
+              accent: { textDecoration: "underline" }
+            }
+          },
+          image: {
+            width: "100%",
+            border: "1px solid #ccc",
+            borderRadius: "5px",
+            variants: {
+              style: {
+                thumbnail: {
+                  width: "50px"
+                },
+                detail: {
+                  width: "80%",
+                  marginBottom: "10px"
+                }
+              }
+            }
+          }
+        },
+        "contents"
+      );
+
+      expect(result.text()).toMatch(className("contents_text"));
+      expect(result.image()).toMatch(className("contents_image"));
     });
   });
 }

@@ -3,7 +3,8 @@ import type {
   ComplexCSSRule,
   CSSRule,
   ResolvedProperties,
-  NonNullableString
+  NonNullableString,
+  CSSPropertiesWithVars
 } from "@mincho-js/transform-to-vanilla";
 
 type Resolve<T> = {
@@ -29,7 +30,7 @@ export type Serializable =
     }
   | ReadonlyArray<Primitive | Serializable>;
 
-type RecipeStyleRule = ComplexCSSRule | string;
+export type RecipeStyleRule = ComplexCSSRule | string;
 
 export type VariantDefinitions = Record<string, RecipeStyleRule>;
 
@@ -171,7 +172,7 @@ export type PatternOptions<
   Variants extends VariantGroups | undefined,
   ToggleVariants extends VariantDefinitions | undefined,
   Props extends ComplexPropDefinitions<PropTarget> | undefined
-> = CSSRule & {
+> = (CSSRule | CSSPropertiesWithVars) & {
   base?: RecipeStyleRule;
   props?: Props;
   toggles?: ToggleVariants;
@@ -210,6 +211,21 @@ export type RecipeVariants<
     ComplexPropDefinitions<PropTarget | undefined>
   >
 > = RulesVariants<RecipeFn>;
+
+export type SlotRecipeStyleRule = {
+  base?: RecipeStyleRule | CSSPropertiesWithVars;
+  variants?: VariantGroups;
+  toggles?: VariantDefinitions;
+} & (CSSRule | CSSPropertiesWithVars);
+
+export type SlotRecipeDefinition = Record<string, SlotRecipeStyleRule>;
+
+export type SlotRecipeResult<Slots extends SlotRecipeDefinition> = {
+  [Slot in keyof Slots]: RuntimeFn<
+    ConditionalVariants<Slots[Slot]["variants"], Slots[Slot]["toggles"]>,
+    ComplexPropDefinitions<PropTarget>
+  >;
+};
 
 // == Tests ====================================================================
 // Ignore errors when compiling to CommonJS.
