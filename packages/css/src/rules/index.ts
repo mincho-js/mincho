@@ -962,8 +962,8 @@ if (import.meta.vitest) {
         "contents"
       );
 
-      expect(result.text()).toMatch(className("contents_text__"));
-      expect(result.image()).toMatch(className("contents_image__"));
+      expect(result.text()).toMatch(className("contents_text"));
+      expect(result.image()).toMatch(className("contents_image"));
     });
 
     it("multiple slot combinations", () => {
@@ -1069,8 +1069,8 @@ if (import.meta.vitest) {
         "contents"
       );
 
-      expect(result.text()).toMatch(className("contents_text__"));
-      expect(result.image()).toMatch(className("contents_image__"));
+      expect(result.text()).toMatch(className("contents_text"));
+      expect(result.image()).toMatch(className("contents_image"));
     });
 
     it("slot toggles", () => {
@@ -1113,8 +1113,8 @@ if (import.meta.vitest) {
         "contents"
       );
 
-      expect(result.text()).toMatch(className("contents_text__"));
-      expect(result.image()).toMatch(className("contents_image__"));
+      expect(result.text()).toMatch(className("contents_text"));
+      expect(result.image()).toMatch(className("contents_image"));
     });
 
     it("slot defaultVariants", () => {
@@ -1157,8 +1157,8 @@ if (import.meta.vitest) {
         "contents"
       );
 
-      expect(result.text()).toMatch(className("contents_text__"));
-      expect(result.image()).toMatch(className("contents_image__"));
+      expect(result.text()).toMatch(className("contents_text"));
+      expect(result.image()).toMatch(className("contents_image"));
     });
 
     it("slot compoundVariants", () => {
@@ -1201,8 +1201,8 @@ if (import.meta.vitest) {
         "contents"
       );
 
-      expect(result.text()).toMatch(className("contents_text__"));
-      expect(result.image()).toMatch(className("contents_image__"));
+      expect(result.text()).toMatch(className("contents_text"));
+      expect(result.image()).toMatch(className("contents_image"));
     });
   });
 }

@@ -30,7 +30,7 @@ export type Serializable =
     }
   | ReadonlyArray<Primitive | Serializable>;
 
-export type RecipeStyleRule = ComplexCSSRule | string | CSSPropertiesWithVars;
+export type RecipeStyleRule = ComplexCSSRule | string;
 
 export type VariantDefinitions = Record<string, RecipeStyleRule>;
 
