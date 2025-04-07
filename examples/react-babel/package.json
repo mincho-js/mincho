@@ -30,7 +30,7 @@
     "media-query-parser": "2.0.0",
     "modern-ahocorasick": "^2.0.4",
     "picocolors": "^1.1.1",
-    "react": "^18.2.0",
+    "react": "^19.1.0",
     "react-dom": "^18.2.0",
     "scheduler": "^0.25.0"
   },
@@ -38,7 +38,7 @@
     "@eslint/js": "^8.56.0",
     "@types/babel__core": "^7",
     "@types/cssesc": "^3",
-    "@types/react": "^18.2.48",
+    "@types/react": "^19.1.0",
     "@types/react-dom": "^18.2.18",
     "@types/scheduler": "^0",
     "@vitejs/plugin-react": "^4.3.4",
