@@ -1482,17 +1482,24 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@eslint/js@npm:8.57.1, @eslint/js@npm:^8.56.0":
+"@eslint/js@npm:8.57.1":
   version: 8.57.1
   resolution: "@eslint/js@npm:8.57.1"
   checksum: 10/7562b21be10c2adbfa4aa5bb2eccec2cb9ac649a3569560742202c8d1cb6c931ce634937a2f0f551e078403a1c1285d6c2c0aa345dafc986149665cd69fe8b59
   languageName: node
   linkType: hard
 
-"@eslint/js@npm:9.23.0, @eslint/js@npm:^9.23.0":
+"@eslint/js@npm:9.23.0":
   version: 9.23.0
   resolution: "@eslint/js@npm:9.23.0"
   checksum: 10/d1d38fa2c4234f6ebed8e202530c9dccf565c47283f4e3c53955a47fed2bf8c59988f535672a32b53c14fed72e456c1c5cb050cd98a45474086b9693cbfa97d6
+  languageName: node
+  linkType: hard
+
+"@eslint/js@npm:^9.24.0":
+  version: 9.24.0
+  resolution: "@eslint/js@npm:9.24.0"
+  checksum: 10/d210114c147a1c1ebfaed5f32734e7c1f8ef551a5ea48ea67f9469668aa4079565ccd038412437bca87515d51dc9e8b8c788473dcf3d08e35dfb27e92cb3ce1b
   languageName: node
   linkType: hard
 
@@ -4726,7 +4733,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "eslint-config-custom@workspace:configs/eslint-config-custom"
   dependencies:
-    "@eslint/js": "npm:^9.23.0"
+    "@eslint/js": "npm:^9.24.0"
     "@typescript-eslint/parser": "npm:^8.28.0"
     eslint-config-prettier: "npm:^10.1.1"
     eslint-plugin-prettier: "npm:^5.2.5"
@@ -6983,7 +6990,7 @@ __metadata:
     "@babel/core": "npm:^7.18.2"
     "@babel/preset-typescript": "npm:^7.18.2"
     "@emotion/hash": "npm:^0.9.2"
-    "@eslint/js": "npm:^8.56.0"
+    "@eslint/js": "npm:^9.24.0"
     "@mincho-js/css": "workspace:*"
     "@mincho-js/integration": "workspace:*"
     "@mincho-js/react": "workspace:*"
@@ -7061,7 +7068,7 @@ __metadata:
   resolution: "react-swc@workspace:examples/react-swc"
   dependencies:
     "@eslint/compat": "npm:^1.2.7"
-    "@eslint/js": "npm:^9.23.0"
+    "@eslint/js": "npm:^9.24.0"
     "@mincho-js/css": "workspace:^"
     "@types/react": "npm:^19.0.12"
     "@types/react-dom": "npm:^19.0.4"
