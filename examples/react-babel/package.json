@@ -42,7 +42,7 @@
     "@types/react-dom": "^18.2.18",
     "@types/scheduler": "^0",
     "@vitejs/plugin-react": "^4.3.4",
-    "eslint": "^8.56.0",
+    "eslint": "^9.24.0",
     "eslint-plugin-react-hooks": "^4.6.0",
     "eslint-plugin-react-refresh": "^0.4.18",
     "globals": "^15.14.0",

@@ -63,7 +63,7 @@
     "@types/babel__core": "^7",
     "@types/node": "^20.11.16",
     "@vanilla-extract/recipes": "^0.2.5",
-    "eslint": "^8.56.0",
+    "eslint": "^9.24.0",
     "eslint-config-custom": "workspace:^",
     "prettier-config-custom": "workspace:^",
     "tsconfig-custom": "workspace:^",
