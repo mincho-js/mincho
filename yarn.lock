@@ -1884,11 +1884,11 @@ __metadata:
   resolution: "@mincho-js/react@workspace:packages/react"
   dependencies:
     "@mincho-js/css": "workspace:*"
-    "@types/react": "npm:^18.2.0"
+    "@types/react": "npm:^19.1.0"
     "@types/react-dom": "npm:^18.2.0"
     eslint-config-custom: "workspace:^"
     prettier-config-custom: "workspace:^"
-    react: "npm:^18.2.0"
+    react: "npm:^19.1.0"
     react-dom: "npm:^18.2.0"
     tsconfig-custom: "workspace:^"
     vite-config-custom: "workspace:^"
@@ -2619,13 +2619,6 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@types/prop-types@npm:*":
-  version: 15.7.14
-  resolution: "@types/prop-types@npm:15.7.14"
-  checksum: 10/d0c5407b9ccc3dd5fae0ccf9b1007e7622ba5e6f1c18399b4f24dff33619d469da4b9fa918a374f19dc0d9fe6a013362aab0b844b606cfc10676efba3f5f736d
-  languageName: node
-  linkType: hard
-
 "@types/react-dom@npm:^18.2.0, @types/react-dom@npm:^18.2.18":
   version: 18.3.5
   resolution: "@types/react-dom@npm:18.3.5"
@@ -2644,22 +2637,12 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@types/react@npm:^18.2.0, @types/react@npm:^18.2.48":
-  version: 18.3.20
-  resolution: "@types/react@npm:18.3.20"
-  dependencies:
-    "@types/prop-types": "npm:*"
-    csstype: "npm:^3.0.2"
-  checksum: 10/020c51e63b60862e6d772f0cdea0b9441182eedab6289dabd8add0708ded62003834c4e7c6f23a1ccd3ca9486b46296057c3f881c34261a0483765351f8d0bc3
-  languageName: node
-  linkType: hard
-
-"@types/react@npm:^19.0.12":
-  version: 19.0.12
-  resolution: "@types/react@npm:19.0.12"
+"@types/react@npm:^19.1.0":
+  version: 19.1.0
+  resolution: "@types/react@npm:19.1.0"
   dependencies:
     csstype: "npm:^3.0.2"
-  checksum: 10/2476295f27371ea67f0ba3ca8fae3c683fc8d086b8b387e0519e67ff5731072c6ff0372fbd5a4c6d760895b1e7dc8997ac518f07bf6b6a8d1e40aeb5d2068b9e
+  checksum: 10/bfa3bb7e2efe929bdf41bf36461f2598611a29647852b8b7ecde510e83f797caf7f290388d13e2b71055df10587b3c41fc4345c1d9cbc38b4e897b03ad11c02f
   languageName: node
   linkType: hard
 
@@ -6990,7 +6973,7 @@ __metadata:
     "@mincho-js/vite": "workspace:*"
     "@types/babel__core": "npm:^7"
     "@types/cssesc": "npm:^3"
-    "@types/react": "npm:^18.2.48"
+    "@types/react": "npm:^19.1.0"
     "@types/react-dom": "npm:^18.2.18"
     "@types/scheduler": "npm:^0"
     "@vanilla-extract/css": "npm:^1.14.0"
@@ -7010,7 +6993,7 @@ __metadata:
     media-query-parser: "npm:2.0.0"
     modern-ahocorasick: "npm:^2.0.4"
     picocolors: "npm:^1.1.1"
-    react: "npm:^18.2.0"
+    react: "npm:^19.1.0"
     react-dom: "npm:^18.2.0"
     scheduler: "npm:^0.25.0"
     typescript: "npm:~5.3.3"
@@ -7063,7 +7046,7 @@ __metadata:
     "@eslint/compat": "npm:^1.2.7"
     "@eslint/js": "npm:^9.23.0"
     "@mincho-js/css": "workspace:^"
-    "@types/react": "npm:^19.0.12"
+    "@types/react": "npm:^19.1.0"
     "@types/react-dom": "npm:^19.0.4"
     "@typescript-eslint/eslint-plugin": "npm:^8.28.0"
     "@typescript-eslint/parser": "npm:^8.28.0"
@@ -7082,15 +7065,6 @@ __metadata:
     vite: "npm:^6.1.2"
   languageName: unknown
   linkType: soft
-
-"react@npm:^18.2.0":
-  version: 18.3.1
-  resolution: "react@npm:18.3.1"
-  dependencies:
-    loose-envify: "npm:^1.1.0"
-  checksum: 10/261137d3f3993eaa2368a83110466fc0e558bc2c7f7ae7ca52d94f03aac945f45146bd85e5f481044db1758a1dbb57879e2fcdd33924e2dde1bdc550ce73f7bf
-  languageName: node
-  linkType: hard
 
 "react@npm:^19.1.0":
   version: 19.1.0
