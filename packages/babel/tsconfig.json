@@ -1,9 +1,11 @@
 {
   "extends": "tsconfig-custom/tsconfig.json",
   "compilerOptions": {
+    "rootDir": "./src",
     "baseUrl": "./",
-    "module": "es2020",
-    "moduleResolution": "bundler"
+    "tsBuildInfoFile": "./.cache/typescript/tsbuildinfo-esm",
+    "outDir": "./dist/esm",
+    "declarationDir": "./dist/esm"
   },
   "include": ["global.d.ts", "src/**/*.ts",  "__tests__/**/*.ts"],
   "exclude": ["dist", "_release"],

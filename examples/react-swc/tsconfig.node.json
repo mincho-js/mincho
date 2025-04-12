@@ -9,7 +9,9 @@
     "strict": true,
     "paths": {
       "vite": ["./node_modules/vite"]
-    }
+    },
+
+    "tsBuildInfoFile": "./.cache/typescript/tsbuildinfo-node"
   },
   "include": ["vite.config.ts"]
 }

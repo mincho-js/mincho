@@ -1,4 +1,5 @@
 name: Setup
+description: Node.js setup for CI/CD
 
 runs:
   using: composite

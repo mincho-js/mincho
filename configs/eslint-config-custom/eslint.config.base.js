@@ -22,7 +22,8 @@ export default tseslint.config(
       "_release/**",
       "node_modules/**",
       "coverage/**",
-      "vite.config.ts.timestamp*.mjs"
+      "vite.config.ts.timestamp*.mjs",
+      ".cache"
     ]
   }
 );

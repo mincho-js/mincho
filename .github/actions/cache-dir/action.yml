@@ -1,0 +1,27 @@
+name: Cache Dir
+description: Caching for **/.cache
+
+inputs:
+  key:
+    description: Additional key to be added to the cache key
+    required: true
+  paths:
+    description: Paths to cache
+    required: false
+    default: "**/.cache"
+
+runs:
+  using: composite
+  steps:
+    - name: Get current day
+      id: cache-time
+      run: echo "time=$(date +%Y-%j)" >> $GITHUB_OUTPUT
+      shell: bash
+
+    - uses: actions/cache@v4
+      id: cache
+      with:
+        path: ${{ inputs.paths }}
+        key: ${{ runner.os }}-cache-${{ inputs.key }}-${{ hashFiles('**/yarn.lock') }}-${{ steps.cache-time.outputs.time }}
+        restore-keys: |
+          ${{ runner.os }}-cache-${{ inputs.key }}-

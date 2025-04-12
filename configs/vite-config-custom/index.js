@@ -2,6 +2,7 @@
 
 import { readdirSync, renameSync } from "node:fs";
 import { resolve, join } from "node:path";
+import { cwd } from "node:process";
 
 import { initConfigBuilder, ViteEnv, PluginBuilder } from "vite-config-builder";
 import { mergeConfig } from "vite";
@@ -28,33 +29,43 @@ function buildConfig(viteConfigEnv, extendConfigs, configBuilder) {
 // == Main Configs ============================================================
 function NodeBuilder(viteConfigEnv) {
   const { configs, plugins } = initCommonBuilder(viteConfigEnv);
+  const packageRoot = cwd();
+  const entryRoot = resolve(packageRoot, "src");
+  const entryFile = resolve(entryRoot, "index.ts");
+  const outEsmDir = resolve(packageRoot, "dist", "esm");
+  const outCjsDir = resolve(packageRoot, "dist", "cjs");
 
   if (ViteEnv.isProd()) {
     plugins.add(
       // This is currently a proprietary implementation. You might also like to see
       // https://github.com/qmhc/vite-plugin-dts/issues/267
       dts({
-        entryRoot: resolve(process.cwd(), "src/"),
+        entryRoot,
         include: ["src"],
-        outDir: "./dist/esm"
+        outDir: outEsmDir
       }),
       dts({
-        entryRoot: resolve(process.cwd(), "src/"),
+        entryRoot,
         include: ["src"],
-        outDir: "./dist/cjs",
+        outDir: outCjsDir,
         compilerOptions: {
           module: ModuleKind.CommonJS,
-          outDir: "./dist/cjs",
-          declarationDir: "./dist/cjs"
+          outDir: outCjsDir,
+          declarationDir: outCjsDir,
+          tsBuildInfoFile: resolve(
+            packageRoot,
+            ".cache",
+            "typescript",
+            "tsbuildinfo-cjs"
+          )
         },
         afterBuild: () => {
           // Rename the CommonJS declaration file to .d.cts
-          const cjsDir = resolve(process.cwd(), "dist/cjs");
-          readdirSync(cjsDir).forEach((file) => {
+          readdirSync(outCjsDir).forEach((file) => {
             if (file.endsWith(".d.ts")) {
               renameSync(
-                join(cjsDir, file),
-                join(cjsDir, file.replace(".d.ts", ".d.cts"))
+                join(outCjsDir, file),
+                join(outCjsDir, file.replace(".d.ts", ".d.cts"))
               );
             }
           });
@@ -98,13 +109,14 @@ function NodeBuilder(viteConfigEnv) {
       // https://vitejs.dev/guide/build.html#library-mode
       lib: {
         entry: {
-          index: resolve(process.cwd(), "src/index.ts")
+          index: entryFile
         },
         formats: ["es", "cjs"],
         fileName: (format, entryName) =>
           `${format === "es" ? "esm" : "cjs"}/${entryName}.${format === "es" ? "mjs" : "cjs"}`
       },
-      target: ["es2020"]
+      target: ["es2020"],
+      minify: false
     },
     plugins: plugins.build()
   });
@@ -114,6 +126,10 @@ function NodeBuilder(viteConfigEnv) {
 function initCommonBuilder(viteConfigEnv) {
   const configs = initConfigBuilder(viteConfigEnv);
 
+  configs.add({
+    cacheDir: join(".cache", "vite")
+  });
+
   if (ViteEnv.isDev()) {
     configs.add({
       build: {
@@ -122,15 +138,6 @@ function initCommonBuilder(viteConfigEnv) {
         rollupOptions: {
           treeshake: false
         }
-      }
-    });
-  }
-
-  if (ViteEnv.isProd()) {
-    configs.add({
-      build: {
-        sourcemap: false,
-        minify: false
       }
     });
   }

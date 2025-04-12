@@ -1,4 +1,5 @@
 name: Check skip action
+description: Skip action if the same content was already run
 
 # https://github.com/fkirc/skip-duplicate-actions
 runs:

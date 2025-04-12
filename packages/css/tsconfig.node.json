@@ -1,4 +1,7 @@
 {
   "extends": "tsconfig-custom/tsconfig.json",
+  "compilerOptions": {
+    "tsBuildInfoFile": "./.cache/typescript/tsbuildinfo-node"
+  },
   "include": ["vite.config.ts", "eslint.config.js"],
 }
