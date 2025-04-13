@@ -72,7 +72,7 @@
   },
   "prettier": "prettier-config-custom",
   "dependencies": {
-    "@fastify/deepmerge": "^2.0.2",
+    "@fastify/deepmerge": "^3.1.0",
     "@mincho-js/transform-to-vanilla": "workspace:^"
   },
   "devDependencies": {

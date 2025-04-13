@@ -4,5 +4,12 @@
     "tsBuildInfoFile": "./.cache/typescript/tsbuildinfo-node",
     "outDir": "./.cache/tsbuild-node"
   },
-  "include": ["vite.config.ts", "eslint.config.js"],
+  "include": [
+    "vite.config.ts",
+    "eslint.config.js"
+  ],
+  "exclude": [
+    "dist",
+    "_release"
+  ]
 }

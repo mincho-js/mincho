@@ -1,12 +1,12 @@
 // @ts-check
 
+import { cwd } from "node:process";
 import globals from "globals";
 import eslint from "@eslint/js";
 import tseslint from "typescript-eslint";
 import tsParser from "@typescript-eslint/parser";
 import reactRefreshPlugin from "eslint-plugin-react-refresh";
 import reactHooksPlugin from "eslint-plugin-react-hooks";
-import { fixupPluginRules } from "@eslint/compat";
 
 export default tseslint.config(
   eslint.configs.recommended,
@@ -14,7 +14,9 @@ export default tseslint.config(
   {
     languageOptions: {
       parserOptions: {
-        project: ["./tsconfig.json", "./tsconfig.node.json"],
+        project: ["tsconfig.json"],
+        tsconfigRootDir: cwd(),
+        projectService: true,
       },
     },
   },
@@ -23,7 +25,9 @@ export default tseslint.config(
     languageOptions: {
       parser: tsParser,
       parserOptions: {
-        project: ["tsconfig.json", "tsconfig.node.json"],
+        project: ["tsconfig.json"],
+        tsconfigRootDir: cwd(),
+        projectService: true,
         ecmaFeatures: { jsx: true },
       },
       ecmaVersion: "latest",
@@ -32,12 +36,8 @@ export default tseslint.config(
     },
     plugins: {
       "react-refresh": reactRefreshPlugin,
-      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-      // @ts-ignore: error TS2345: Index signature for type 'string' is missing in type 'string[]'.ts
-      "react-hooks": fixupPluginRules(reactHooksPlugin),
+      "react-hooks": reactHooksPlugin,
     },
-    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-    // @ts-ignore: error TS2322: type 'string' is not assignable to type 'RuleEntry | undefined'.ts(2322)
     rules: {
       ...reactHooksPlugin.configs.recommended.rules,
       "react-refresh/only-export-components": [
@@ -47,7 +47,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ["*.js"],
+    files: ["*.js", "*.cjs", "*.mjs"],
     extends: [tseslint.configs.disableTypeChecked],
   },
   {
