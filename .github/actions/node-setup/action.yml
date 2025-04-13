@@ -1,6 +1,12 @@
 name: Setup
 description: Node.js setup for CI/CD
 
+inputs:
+  strict:
+    description: Paths to cache
+    required: false
+    default: "true"
+
 runs:
   using: composite
   steps:
@@ -20,5 +26,11 @@ runs:
           ${{ runner.os }}-yarn-
 
     - name: Package Install
-      run: yarn install --immutable
+      run: |
+        if [ "${{ inputs.strict }}" = "true" ]; then
+          yarn install --immutable --check-resolutions --refresh-lockfile
+          yarn constraints
+        else
+          yarn install
+        fi
       shell: bash

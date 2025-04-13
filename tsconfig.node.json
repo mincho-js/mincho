@@ -1,0 +1,12 @@
+{
+  "extends": "tsconfig-custom/tsconfig.node.json",
+  "compilerOptions": {
+    "tsBuildInfoFile": "./.cache/typescript/tsbuildinfo-node",
+    "outDir": "./.cache/tsbuild-node"
+  },
+  "include": [
+    "yarn.config.cjs",
+    "eslint.config.js",
+    "vitest.workspace.ts"
+  ]
+}

@@ -117,11 +117,6 @@ jobs:
       - name: Setup
         uses: ./.github/actions/node-setup
 
-      - name: More setup cache
-        uses: ./.github/actions/cache-dir
-        with:
-          key: build-and-test
-
       - name: Create Release Pull Request or Publish to npm
         id: changesets
         uses: changesets/action@v1
@@ -132,6 +127,7 @@ jobs:
           setupGitUser: true
           createGithubReleases: true
         env:
+          PACKAGE_PUBLISH: "true"
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
 

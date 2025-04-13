@@ -17,8 +17,8 @@
       ]
     },
     "lint": {
-      "dependsOn": [
-        "^build"
+      "inputs": [
+        "$TURBO_HASH_GLOBAL_DEPS"
       ],
       "outputs": [
         ".cache/eslint"
@@ -76,5 +76,8 @@
         "check:all"
       ]
     }
-  }
+  },
+  "globalDependencies": [
+    "packages.json"
+  ]
 }

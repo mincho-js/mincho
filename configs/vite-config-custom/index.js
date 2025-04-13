@@ -2,7 +2,7 @@
 
 import { readdirSync, renameSync } from "node:fs";
 import { resolve, join } from "node:path";
-import { cwd } from "node:process";
+import { cwd, env } from "node:process";
 
 import { initConfigBuilder, ViteEnv, PluginBuilder } from "vite-config-builder";
 import { mergeConfig } from "vite";
@@ -35,46 +35,49 @@ function NodeBuilder(viteConfigEnv) {
   const outEsmDir = resolve(packageRoot, "dist", "esm");
   const outCjsDir = resolve(packageRoot, "dist", "cjs");
 
+  const isCI = isGithubCI();
   if (ViteEnv.isProd()) {
-    plugins.add(
-      // This is currently a proprietary implementation. You might also like to see
-      // https://github.com/qmhc/vite-plugin-dts/issues/267
-      dts({
-        entryRoot,
-        include: ["src"],
-        outDir: outEsmDir,
-        tsconfigPath: resolve(packageRoot, "tsconfig.lib.json")
-      }),
-      dts({
-        entryRoot,
-        include: ["src"],
-        outDir: outCjsDir,
-        tsconfigPath: resolve(packageRoot, "tsconfig.lib.json"),
-        compilerOptions: {
-          module: ModuleKind.CommonJS,
+    if (!isCI) {
+      plugins.add(
+        // This is currently a proprietary implementation. You might also like to see
+        // https://github.com/qmhc/vite-plugin-dts/issues/267
+        dts({
+          entryRoot,
+          include: ["src"],
+          outDir: outEsmDir,
+          tsconfigPath: resolve(packageRoot, "tsconfig.lib.json")
+        }),
+        dts({
+          entryRoot,
+          include: ["src"],
           outDir: outCjsDir,
-          declarationDir: outCjsDir,
-          tsBuildInfoFile: resolve(
-            packageRoot,
-            ".cache",
-            "typescript",
-            "tsbuildinfo-cjs"
-          )
-        },
-        afterBuild: () => {
-          // Rename the CommonJS declaration file to .d.cts
-          readdirSync(outCjsDir).forEach((file) => {
-            if (file.endsWith(".d.ts")) {
-              renameSync(
-                join(outCjsDir, file),
-                join(outCjsDir, file.replace(".d.ts", ".d.cts"))
-              );
-            }
-          });
-        }
-      }),
-      externalizeDeps()
-    );
+          tsconfigPath: resolve(packageRoot, "tsconfig.lib.json"),
+          compilerOptions: {
+            module: ModuleKind.CommonJS,
+            outDir: outCjsDir,
+            declarationDir: outCjsDir,
+            tsBuildInfoFile: resolve(
+              packageRoot,
+              ".cache",
+              "typescript",
+              "tsbuildinfo-cjs"
+            )
+          },
+          afterBuild: () => {
+            // Rename the CommonJS declaration file to .d.cts
+            readdirSync(outCjsDir).forEach((file) => {
+              if (file.endsWith(".d.ts")) {
+                renameSync(
+                  join(outCjsDir, file),
+                  join(outCjsDir, file.replace(".d.ts", ".d.cts"))
+                );
+              }
+            });
+          }
+        })
+      );
+    }
+    plugins.add(externalizeDeps());
   }
 
   if (ViteEnv.isTest()) {
@@ -113,7 +116,7 @@ function NodeBuilder(viteConfigEnv) {
         entry: {
           index: entryFile
         },
-        formats: ["es", "cjs"],
+        formats: isCI ? ["es"] : ["es", "cjs"],
         fileName: (format, entryName) =>
           `${format === "es" ? "esm" : "cjs"}/${entryName}.${format === "es" ? "mjs" : "cjs"}`
       },
@@ -165,4 +168,15 @@ function initCommonBuilder(viteConfigEnv) {
     configs,
     plugins
   };
+}
+
+function isGithubCI() {
+  if (env["PACKAGE_PUBLISH"] === "true") {
+    return false;
+  }
+
+  if (env["GITHUB_ACTIONS"] === "true") {
+    return true;
+  }
+  return false;
 }

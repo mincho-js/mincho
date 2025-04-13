@@ -1,9 +1,25 @@
 export default {
   $schema: "https://json.schemastore.org/prettierrc",
-  parser: "typescript",
-  trailingComma: "none",
   tabWidth: 2,
-  semi: true,
-  bracketSpacing: true,
-  arrowParens: "always"
+
+  overrides: [
+    {
+      files: [
+        "*.js",
+        "*.cjs",
+        "*.mjs",
+        "*.ts",
+        "*.cts",
+        "*.mts",
+        "*.jsx",
+        "*.tsx"
+      ],
+      options: {
+        trailingComma: "none",
+        semi: true,
+        bracketSpacing: true,
+        arrowParens: "always"
+      }
+    }
+  ]
 };

@@ -20,7 +20,7 @@ jobs:
           skip_after_successful_duplicate: "true"
           paths_ignore: '["**/README.md"]'
 
-  build:
+  checks:
     needs: pre_job
     if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
     runs-on: ubuntu-latest
@@ -35,10 +35,38 @@ jobs:
       - name: More setup cache
         uses: ./.github/actions/cache-dir
         with:
+          key: checker
+
+      - name: Typechecker
+        run: yarn build:type
+
+      - name: Lint & format
+        run: |
+          ## Workflow lint
+          yarn lint:action
+
+          ## Require type build
+          # https://typescript-eslint.io/getting-started/typed-linting/
+          yarn lint
+
+  build:
+    needs: pre_job
+    if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup
+        uses: ./.github/actions/node-setup
+        with:
+          strict: false
+
+      - name: More setup cache
+        uses: ./.github/actions/cache-dir
+        with:
           key: build-and-test
 
-      - name: Workflow lint
-        run: yarn lint:action
-
       - name: Test
-        run: yarn test:all
+        run: yarn test
