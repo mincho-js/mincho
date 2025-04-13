@@ -1,14 +1,14 @@
 {
-  "extends": "tsconfig-custom/tsconfig.json",
-  "compilerOptions": {
-    "rootDir": "./src",
-    "baseUrl": "./",
-    "tsBuildInfoFile": "./.cache/typescript/tsbuildinfo-esm",
-    "outDir": "./dist/esm",
-    "declarationDir": "./dist/esm"
-  },
-  "include": ["src/**/*.ts", "__tests__/**/*.ts"],
-  "exclude": ["dist", "_release"],
-  "references": [{ "path": "tsconfig.node.json" }]
+  "files": [],
+  "references": [
+    {
+      "path": "../babel"
+    },
+    { 
+      "path": "./tsconfig.node.json"
+    },
+    { 
+      "path": "./tsconfig.lib.json"
+    }
+  ]
 }
-

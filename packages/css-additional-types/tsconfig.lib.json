@@ -1,0 +1,19 @@
+{
+  "extends": "tsconfig-custom/tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "./src",
+    "baseUrl": "./",
+    "tsBuildInfoFile": "./.cache/typescript/tsbuildinfo-esm",
+    "outDir": "./dist/esm",
+    "declarationDir": "./dist/esm"
+  },
+  "include": [
+    "global.d.ts",
+    "src/**/*.ts",
+    "__tests__/**/*.ts"
+  ],
+  "exclude": [
+    "dist",
+    "_release"
+  ]
+}

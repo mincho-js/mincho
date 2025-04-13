@@ -1,7 +1,23 @@
 {
   "files": [],
   "references": [
-    { "path": "./tsconfig.app.json" },
-    { "path": "./tsconfig.node.json" }
+    {
+      "path": "../../packages/css"
+    },
+    {
+      "path": "../../packages/integration"
+    },
+    {
+      "path": "../../packages/react"
+    },
+    {
+      "path": "../../packages/vite"
+    },
+    { 
+      "path": "./tsconfig.app.json"
+    },
+    { 
+      "path": "./tsconfig.node.json"
+    }
   ]
 }

@@ -42,12 +42,14 @@ function NodeBuilder(viteConfigEnv) {
       dts({
         entryRoot,
         include: ["src"],
-        outDir: outEsmDir
+        outDir: outEsmDir,
+        tsconfigPath: resolve(packageRoot, "tsconfig.lib.json")
       }),
       dts({
         entryRoot,
         include: ["src"],
         outDir: outCjsDir,
+        tsconfigPath: resolve(packageRoot, "tsconfig.lib.json"),
         compilerOptions: {
           module: ModuleKind.CommonJS,
           outDir: outCjsDir,

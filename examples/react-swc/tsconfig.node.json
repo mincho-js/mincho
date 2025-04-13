@@ -1,17 +1,24 @@
 {
   "compilerOptions": {
-    "composite": true,
-    "skipLibCheck": true,
+    "target": "ESNext",
     "module": "ESNext",
+    
+    /* Bundler mode */
     "moduleResolution": "bundler",
+    "isolatedModules": true,
     "allowSyntheticDefaultImports": true,
-    "preserveSymlinks": true,
+    "noEmit": true,
+    
+    /* Linting */
     "strict": true,
-    "paths": {
-      "vite": ["./node_modules/vite"]
-    },
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedSideEffectImports": true,
+    "skipLibCheck": true,
 
-    "tsBuildInfoFile": "./.cache/typescript/tsbuildinfo-node"
+    "tsBuildInfoFile": "./.cache/typescript/tsbuildinfo-node",
+    "outDir": "./.cache/tsbuild-node"
   },
   "include": ["vite.config.ts"]
 }

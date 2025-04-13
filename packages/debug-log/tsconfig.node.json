@@ -1,7 +1,8 @@
 {
-  "extends": "tsconfig-custom/tsconfig.json",
+  "extends": "tsconfig-custom/tsconfig.base.json",
   "compilerOptions": {
-    "tsBuildInfoFile": "./.cache/typescript/tsbuildinfo-node"
+    "tsBuildInfoFile": "./.cache/typescript/tsbuildinfo-node",
+    "outDir": "./.cache/tsbuild-node"
   },
   "include": ["vite.config.ts", "eslint.config.js"]
 }

@@ -1,6 +1,5 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
-// @ts-expect-error - TypeScript can't resolve types due to package.json exports configuration
 import { minchoVitePlugin } from "@mincho-js/vite";
 import type { PluginOption } from "vite";
 

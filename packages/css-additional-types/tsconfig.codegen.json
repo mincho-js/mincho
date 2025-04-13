@@ -1,0 +1,18 @@
+{
+  "extends": "tsconfig-custom/tsconfig.node.json",
+  "compilerOptions": {
+    "rootDir": "./codegen",
+    "baseUrl": "./",
+    "tsBuildInfoFile": "./.cache/typescript/tsbuildinfo-codegen",
+    "outDir": "./.cache/codegen/"
+  },
+  "include": [
+    "global.d.ts",
+    "codegen/**/*.ts",
+    "__tests__/**/*.ts"
+  ],
+  "exclude": [
+    "dist",
+    "_release"
+  ],
+}

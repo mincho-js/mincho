@@ -19,6 +19,9 @@
     "lint": {
       "dependsOn": [
         "^build"
+      ],
+      "outputs": [
+        ".cache/eslint"
       ]
     },
     "fix": {},
@@ -27,7 +30,7 @@
         "^build"
       ],
       "outputs": [
-        "tsconfig.tsbuildinfo"
+        ".cache/typescript/*"
       ]
     },
     "check:all": {

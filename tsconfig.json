@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "files": [],
+  "references": [
+    {
+      "path": "packages/babel"
+    },
+    {
+      "path": "packages/css"
+    },
+    {
+      "path": "packages/css-additional-types"
+    },
+    {
+      "path": "packages/debug-log"
+    },
+    {
+      "path": "packages/esbuild"
+    },
+    {
+      "path": "packages/integration"
+    },
+    {
+      "path": "packages/react"
+    },
+    {
+      "path": "packages/transform-to-vanilla"
+    },
+    {
+      "path": "packages/vite"
+    },
+    {
+      "path": "examples/react-babel"
+    },
+    {
+      "path": "examples/react-swc"
+    }
+  ]
+}

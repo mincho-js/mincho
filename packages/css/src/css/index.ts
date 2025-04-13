@@ -11,12 +11,12 @@ import type {
 } from "@mincho-js/transform-to-vanilla";
 import { setFileScope } from "@vanilla-extract/css/fileScope";
 import { style as vStyle, globalStyle as gStyle } from "@vanilla-extract/css";
-
+import type { GlobalStyleRule } from "@vanilla-extract/css";
 import { className, getDebugName } from "../utils";
 
 // == Global CSS ===============================================================
 export function globalCss(selector: string, rule: GlobalCSSRule) {
-  gStyle(selector, transform(rule));
+  gStyle(selector, transform(rule) as GlobalStyleRule);
 }
 export const globalStyle = globalCss;
 
