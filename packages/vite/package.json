@@ -62,12 +62,12 @@
   "devDependencies": {
     "@types/babel__core": "^7",
     "@types/node": "^20.11.16",
-    "@vanilla-extract/recipes": "^0.2.5",
+    "@vanilla-extract/recipes": "^0.5.5",
     "eslint": "^8.56.0",
     "eslint-config-custom": "workspace:^",
     "prettier-config-custom": "workspace:^",
     "tsconfig-custom": "workspace:^",
-    "typescript": "~5.3.3",
+    "typescript": "~5.8.3",
     "typescript-eslint": "^7.0.1",
     "vite-config-custom": "workspace:^"
   }
