@@ -1,6 +1,6 @@
 import { NodePath, types as t } from "@babel/core";
 import { addNamed } from "@babel/helper-module-imports";
-import type { ProgramScope } from "./types";
+import type { ProgramScope } from "./types.js";
 
 export function invariant(cond: boolean, msg: string): asserts cond {
   if (!cond) {

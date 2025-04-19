@@ -1,4 +1,4 @@
-import type { ProgramScope } from "@/types";
+import type { ProgramScope } from "@/types.js";
 import { NodePath, types as t } from "@babel/core";
 import hash from "@emotion/hash";
 

@@ -1,2 +1,2 @@
-export { babelTransform, type BabelOptions } from "@/babel";
-export { compile } from "@/compile";
+export { babelTransform, type BabelOptions } from "@/babel.js";
+export { compile } from "@/compile.js";

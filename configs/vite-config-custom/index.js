@@ -1,9 +1,10 @@
 // @ts-check
 
-import { readdirSync, renameSync } from "node:fs";
+import { readdir, readFile, writeFile, unlink } from "node:fs/promises";
 import { resolve, join } from "node:path";
 import { cwd, env } from "node:process";
 
+import { PromisePool } from "@supercharge/promise-pool";
 import { initConfigBuilder, ViteEnv, PluginBuilder } from "vite-config-builder";
 import { mergeConfig } from "vite";
 
@@ -63,16 +64,9 @@ function NodeBuilder(viteConfigEnv) {
               "tsbuildinfo-cjs"
             )
           },
-          afterBuild: () => {
+          afterBuild: async () => {
             // Rename the CommonJS declaration file to .d.cts
-            readdirSync(outCjsDir).forEach((file) => {
-              if (file.endsWith(".d.ts")) {
-                renameSync(
-                  join(outCjsDir, file),
-                  join(outCjsDir, file.replace(".d.ts", ".d.cts"))
-                );
-              }
-            });
+            await renameDeclarationFiles(outCjsDir);
           }
         })
       );
@@ -168,6 +162,69 @@ function initCommonBuilder(viteConfigEnv) {
     configs,
     plugins
   };
+}
+
+async function renameDeclarationFiles(dir) {
+  try {
+    const allFiles = await collectDeclarationFiles(dir);
+
+    if (allFiles.length === 0) {
+      return;
+    }
+    console.log(`Processing ${allFiles.length} declaration files...`);
+
+    const { errors } = await PromisePool.for(allFiles)
+      .withConcurrency(10)
+      .process(processCtsFile);
+
+    if (errors.length > 0) {
+      console.error(`${errors.length} files failed to process`);
+    }
+  } catch (error) {
+    console.error(`Error processing: ${error.message}`);
+  }
+}
+
+async function collectDeclarationFiles(dir, fileList = []) {
+  try {
+    const fileOrDirs = await readdir(dir, { withFileTypes: true });
+    const subDirectories = [];
+
+    for (const fileOrDir of fileOrDirs) {
+      const fullPath = join(dir, fileOrDir.name);
+
+      if (fileOrDir.isDirectory()) {
+        subDirectories.push(fullPath);
+      } else if (fileOrDir.name.endsWith(".d.ts")) {
+        fileList.push(fullPath);
+      }
+    }
+
+    if (subDirectories.length > 0) {
+      await PromisePool.for(subDirectories)
+        .withConcurrency(8)
+        .process(async (subDir) => {
+          await collectDeclarationFiles(subDir, fileList);
+        });
+    }
+
+    return fileList;
+  } catch (error) {
+    console.error(`Error reading directory ${dir}: ${error.message}`);
+    return fileList;
+  }
+}
+
+async function processCtsFile(fullPath) {
+  // Change import paths from .js to .cjs
+  const content = await readFile(fullPath, "utf8");
+  const importRegex = /from ['"](.+)\.js['"];?$/gm;
+  const modifiedContent = content.replace(importRegex, "from '$1.cjs'");
+
+  // Change file extension from .d.ts to .d.cts
+  const newPath = fullPath.replace(".d.ts", ".d.cts");
+  await writeFile(newPath, modifiedContent, "utf8");
+  await unlink(fullPath);
 }
 
 function isGithubCI() {

@@ -1,4 +1,4 @@
-import { FromKebabCase, ColonToSnake } from "./string";
+import { FromKebabCase, ColonToSnake } from "./string.js";
 
 // == Interface ================================================================
 export type SimplePseudos = keyof typeof _simplePseudoMap;

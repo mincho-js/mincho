@@ -1,4 +1,4 @@
-import { convertToCSSVar } from "../utils/string";
+import { convertToCSSVar } from "../utils/string.js";
 
 // == Interface ================================================================
 export function isCSSVarKey(keyStr: string) {

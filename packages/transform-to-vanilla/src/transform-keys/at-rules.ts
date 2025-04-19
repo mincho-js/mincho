@@ -1,5 +1,5 @@
-import type { AtRulesPrefix } from "../transform-object/index";
-import type { NonNullableString } from "../types/string";
+import type { AtRulesPrefix } from "../transform-object/index.js";
+import type { NonNullableString } from "../types/string.js";
 
 export function isRuleKey(key: string) {
   return key.startsWith("@");

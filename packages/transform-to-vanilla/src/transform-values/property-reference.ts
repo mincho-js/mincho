@@ -1,5 +1,8 @@
-import { initTransformContext } from "@/transform-object";
-import type { TransformContext, CSSRuleExistValue } from "@/transform-object";
+import { initTransformContext } from "@/transform-object/index.js";
+import type {
+  TransformContext,
+  CSSRuleExistValue
+} from "@/transform-object/index.js";
 
 // == Interface ================================================================
 const LITERAL_PROPERTY_REFERENCE_REGEX = /^@[\w\-_]+$/;

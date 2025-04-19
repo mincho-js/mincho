@@ -1,6 +1,6 @@
-import { camelToKebab } from "../utils/string";
-import type { NonNullableString } from "../types/string";
-import type { SimplePseudos, CamelPseudos } from "../types/simple-pseudo";
+import { camelToKebab } from "../utils/string.js";
+import type { NonNullableString } from "../types/string.js";
+import type { SimplePseudos, CamelPseudos } from "../types/simple-pseudo.js";
 
 // == Type ================================================================
 type PseudoSelectorsSign = `_${string}` | `__${string}`;

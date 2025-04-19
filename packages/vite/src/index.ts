@@ -1,8 +1,8 @@
 import { BabelOptions, babelTransform, compile } from "@mincho-js/integration";
 import { processVanillaFile } from "@vanilla-extract/integration";
-import { join, resolve } from "path";
 import { normalizePath } from "@rollup/pluginutils";
-import * as fs from "fs";
+import { join, resolve } from "node:path";
+import * as fs from "node:fs";
 
 interface Module {
   lastHMRTimestamp?: number;

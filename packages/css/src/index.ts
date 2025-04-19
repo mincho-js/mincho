@@ -32,9 +32,9 @@ export {
   style,
   cssVariants,
   styleVariants
-} from "./css";
-export { rules, recipe } from "./rules";
-export { createRuntimeFn } from "./rules/createRuntimeFn";
+} from "./css/index.js";
+export { rules, recipe } from "./rules/index.js";
+export { createRuntimeFn } from "./rules/createRuntimeFn.js";
 export type {
   RulesVariants,
   RecipeVariants,
@@ -48,7 +48,7 @@ export type {
   ConditionalVariants,
   VariantObjectSelection,
   ResolveComplex
-} from "./rules/types";
+} from "./rules/types.js";
 
 export type { CSSProperties, ComplexCSSRule, GlobalCSSRule, CSSRule };
 export type ComplexStyleRule = ComplexCSSRule;

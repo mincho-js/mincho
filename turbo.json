@@ -78,6 +78,6 @@
     }
   },
   "globalDependencies": [
-    "packages.json"
+    "packages.json", "yarn.lock"
   ]
 }

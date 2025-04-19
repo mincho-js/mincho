@@ -9,8 +9,8 @@ import type {
   ComplexPropDefinitions,
   PropDefinitionOutput,
   PropTarget
-} from "./types";
-import { mapValues, transformVariantSelection } from "./utils";
+} from "./types.js";
+import { mapValues, transformVariantSelection } from "./utils.js";
 
 const shouldApplyCompound = <Variants extends VariantGroups>(
   compoundCheck: VariantObjectSelection<Variants>,

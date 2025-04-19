@@ -4,7 +4,7 @@ import type {
   ToggleVariantMap,
   VariantSelection,
   VariantObjectSelection
-} from "./types";
+} from "./types.js";
 
 export function mapValues<Input extends Record<string, unknown>, OutputValue>(
   input: Input,

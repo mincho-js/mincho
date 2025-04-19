@@ -8,9 +8,9 @@ import type {
   PureCSSVarKey
 } from "@mincho-js/transform-to-vanilla";
 
-import { css, cssVariants } from "../css";
-import { className, getDebugName, getVarName } from "../utils";
-import { createRuntimeFn } from "./createRuntimeFn";
+import { css, cssVariants } from "../css/index.js";
+import { className, getDebugName, getVarName } from "../utils.js";
+import { createRuntimeFn } from "./createRuntimeFn.js";
 import type {
   ComplexPropDefinitions,
   ConditionalVariants,
@@ -27,12 +27,12 @@ import type {
   PropVars,
   Serializable,
   VariantStringMap
-} from "./types";
+} from "./types.js";
 import {
   mapValues,
   transformToggleVariants,
   transformVariantSelection
-} from "./utils";
+} from "./utils.js";
 
 const mergeObject = deepmerge();
 

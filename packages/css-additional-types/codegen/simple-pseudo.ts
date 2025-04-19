@@ -1,4 +1,4 @@
-import { kebabToCamel } from "./utils";
+import { kebabToCamel } from "./utils.js";
 
 // This types are refer to vanilla-extract/css
 const simplePseudo = [

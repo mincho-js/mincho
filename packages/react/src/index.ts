@@ -17,7 +17,7 @@ import {
   RefAttributes
 } from "react";
 
-export * from "./runtime";
+export { $$styled } from "./runtime.js";
 
 export type StyledComponent<
   TProps = Record<string, unknown>,

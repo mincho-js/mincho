@@ -1,9 +1,9 @@
-import type { ProgramScope } from "@/types";
+import type { ProgramScope } from "@/types.js";
 import {
   extractionAPIs,
   getNearestIdentifier,
   registerImportMethod
-} from "@/utils";
+} from "@/utils.js";
 import { NodePath, types as t } from "@babel/core";
 
 /**

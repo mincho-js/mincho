@@ -1,5 +1,5 @@
 import { NodePath, types as t, transformFromAstSync } from "@babel/core";
-import type { PluginState, ProgramScope } from "@/types";
+import type { PluginState, ProgramScope } from "@/types.js";
 
 export default function postprocess(
   path: NodePath<t.Node>,

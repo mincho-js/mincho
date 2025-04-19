@@ -1,7 +1,7 @@
 import {
   type TransformContext,
   initTransformContext
-} from "../transform-object/index";
+} from "../transform-object/index.js";
 
 export function isSelectorsKey(key: string) {
   return key === "selectors";

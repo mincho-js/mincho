@@ -24,4 +24,4 @@ runs:
         path: ${{ inputs.paths }}
         key: ${{ runner.os }}-cache-${{ inputs.key }}-${{ hashFiles('**/yarn.lock') }}-${{ steps.cache-time.outputs.time }}
         restore-keys: |
-          ${{ runner.os }}-cache-${{ inputs.key }}-
+          ${{ runner.os }}-cache-${{ inputs.key }}-${{ hashFiles('**/yarn.lock') }}-

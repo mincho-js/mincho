@@ -12,7 +12,7 @@ import type {
 import { setFileScope } from "@vanilla-extract/css/fileScope";
 import { style as vStyle, globalStyle as gStyle } from "@vanilla-extract/css";
 import type { GlobalStyleRule } from "@vanilla-extract/css";
-import { className, getDebugName } from "../utils";
+import { className, getDebugName } from "../utils.js";
 
 // == Global CSS ===============================================================
 export function globalCss(selector: string, rule: GlobalCSSRule) {

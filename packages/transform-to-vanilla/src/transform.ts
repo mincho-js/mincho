@@ -3,14 +3,14 @@ import {
   initTransformContext,
   mergeVariantReference,
   type TransformContext
-} from "./transform-object/index";
+} from "./transform-object/index.js";
 import type { ComplexStyleRule, StyleRule } from "@vanilla-extract/css";
 import type {
   CSSRule,
   ComplexCSSRule,
   ComplexCSSItem,
   ClassNames
-} from "./types/style-rule";
+} from "./types/style-rule.js";
 
 // == Interface ================================================================
 export function transform(
@@ -183,7 +183,7 @@ if (import.meta.vitest) {
       } satisfies Record<string, StyleRule>);
 
       const { replaceVariantReference } = await import(
-        "@/transform-object/variant-reference"
+        "@/transform-object/variant-reference.js"
       );
       context.variantMap = {
         "%someVariant": ".myClass"
@@ -268,7 +268,7 @@ if (import.meta.vitest) {
       } satisfies Record<string, StyleRule>);
 
       const { replaceVariantReference } = await import(
-        "@/transform-object/variant-reference"
+        "@/transform-object/variant-reference.js"
       );
       context.variantMap = {
         "%someVariant": ".myClass"

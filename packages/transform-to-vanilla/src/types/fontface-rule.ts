@@ -1,5 +1,5 @@
 import type { NonNullableString, Fallback, DataType } from "@mincho-js/csstype";
-import type { Arr } from "./utils";
+import type { Arr } from "./utils.js";
 
 export type FontFaceRule = Omit<GlobalFontFaceRule, "fontFamily">;
 export interface GlobalFontFaceRule

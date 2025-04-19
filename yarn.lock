@@ -1629,6 +1629,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@supercharge/promise-pool@npm:^3.2.0":
+  version: 3.2.0
+  resolution: "@supercharge/promise-pool@npm:3.2.0"
+  checksum: 10/c6c653a7a56cd93c103266673afe2ea0887091a286f766f9777ef5e3a416cb0faf1c5cad64f3f68de903dbfeb82ecd4e7edae5a35c4957158aa8b1730bc0c48a
+  languageName: node
+  linkType: hard
+
 "@swc/core-darwin-arm64@npm:1.11.13":
   version: 1.11.13
   resolution: "@swc/core-darwin-arm64@npm:1.11.13"
@@ -6973,6 +6980,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "vite-config-custom@workspace:configs/vite-config-custom"
   dependencies:
+    "@supercharge/promise-pool": "npm:^3.2.0"
     prettier-config-custom: "workspace:^"
     vite-config-builder: "npm:^0.0.2"
     vite-plugin-dts: "npm:^4.5.3"

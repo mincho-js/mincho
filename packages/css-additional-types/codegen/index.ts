@@ -2,9 +2,14 @@ import { accessSync, mkdirSync, createWriteStream } from "fs";
 import { join } from "path";
 import { cwd } from "process";
 import properties from "mdn-data/css/properties.json";
-import syntaxes from "mdn-data/css/syntaxes.json";
-import { camelPseudo } from "./simple-pseudo";
-import { kebabToCamel, isArray, stringify, removeFirstString } from "./utils";
+import syntaxes from "mdn-data/css/syntaxes.json" with { type: "json" };
+import { camelPseudo } from "./simple-pseudo.js";
+import {
+  kebabToCamel,
+  isArray,
+  stringify,
+  removeFirstString
+} from "./utils.js";
 
 // == Common ===================================================================
 const cssProperties = Object.entries(properties);

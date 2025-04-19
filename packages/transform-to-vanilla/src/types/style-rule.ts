@@ -11,8 +11,8 @@ import type {
   CommaPropertiesKey,
   NestedPropertiesMap
 } from "@mincho-js/css-additional-types";
-import type { GlobalFontFaceRule } from "./fontface-rule";
-import type { IntRange, Spread } from "./utils";
+import type { GlobalFontFaceRule } from "./fontface-rule.js";
+import type { IntRange, Spread } from "./utils.js";
 
 // == Vanilla Extract Interface ===============================================
 // https://github.com/vanilla-extract-css/vanilla-extract/blob/master/packages/css/src/types.ts

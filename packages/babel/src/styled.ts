@@ -1,6 +1,6 @@
 import { types as t, PluginObj } from "@babel/core";
-import type { PluginState, ProgramScope } from "@/types";
-import { registerImportMethod } from "@/utils";
+import type { PluginState, ProgramScope } from "@/types.js";
+import { registerImportMethod } from "@/utils.js";
 
 /**
  * The plugin for transforming styled components
