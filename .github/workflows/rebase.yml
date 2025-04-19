@@ -1,0 +1,72 @@
+name: Rebase PR
+
+on:
+  issue_comment:
+    types: [created, edited]
+
+jobs:
+  rebase-pr:
+    # Only run if the comment contains the /fast-forward command.
+    if: ${{ github.event.issue.pull_request && contains(github.event.comment.body, '/rebase') }}
+    runs-on: macos-latest
+    permissions:
+      contents: write
+      issues: read
+      pull-requests: write
+      statuses: write
+
+    steps:
+      - name: Check comment
+        id: check_comment
+        env:
+          COMMENT_BODY: ${{ github.event.comment.body }}
+        run: |
+          if [[ "$COMMENT_BODY" =~ (^|[[:space:]])/rebase($|[[:space:]]) ]]; then
+            echo "MATCH=true" >> $GITHUB_ENV
+          else
+            echo "MATCH=false" >> $GITHUB_ENV
+          fi
+
+      - name: Checkout repository
+        if: env.MATCH == 'true'
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install git-branchless
+        if: env.MATCH == 'true'
+        run: |
+          brew install --no-quarantine git-branchless
+          git-branchless init
+
+      - name: Rebase PR
+        if: env.MATCH == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config rebase.instructionFormat "%s%nexec GIT_COMMITTER_DATE=\"%ad\" git commit --amend --no-edit --date=\"%ad\""
+
+          PR_NUMBER=${{ github.event.issue.number }}
+          PR_BRANCH=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+                      "https://api.github.com/repos/${{ github.repository }}/pulls/$PR_NUMBER" \
+                      | jq -r .head.ref)
+
+          git checkout $PR_BRANCH
+          PR_HEAD=$(git rev-parse HEAD)
+          REBASE_OUTPUT=$(git sync 'stack()' --pull 2>&1)
+          REBASE_EXIT_CODE=$?
+
+          echo "$REBASE_OUTPUT"
+          if [ "$(git rev-parse HEAD)" = "$MAIN_HEAD" ]; then
+            echo "Already up to date with $PR_BRANCH"
+          elif echo "$REBASE_OUTPUT" | grep -q "^Merge conflict" || [ $REBASE_EXIT_CODE -ne 0 ]; then
+            echo "Rebase failed due to conflicts"
+            curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+                 -X POST \
+                 -d '{"body": "❌ Rebase failed: A conflict occurred. Please rebase manually locally."}' \
+                 "https://api.github.com/repos/${{ github.repository }}/issues/$PR_NUMBER/comments"
+            exit 1
+          else
+            echo "✅ Rebase successful"
+            git push --force-with-lease origin $PR_BRANCH
+          fi
