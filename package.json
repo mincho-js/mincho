@@ -9,7 +9,7 @@
     "examples/*"
   ],
   "scripts": {
-    "task": "turbo run --cache-dir .cache/turbo",
+    "task": "yarn turbo run --cache-dir .cache/turbo",
     "clean": "yarn g:clean && yarn task clean",
     "build": "yarn task build",
     "build:type": "yarn tsc --build",
@@ -26,9 +26,8 @@
     "coverage": "yarn task coverage",
     "coverage:all": "yarn task coverage:all",
     "forallpackages": "yarn workspaces foreach -Aptv --no-private --verbose",
-    "build:release": "yarn build && yarn forallpackages exec rimraf _release && yarn forallpackages pack && yarn forallpackages exec \"mkdir _release && tar zxvf package.tgz --directory _release && rm package.tgz\"",
-    "changeset": "changeset",
-    "changeset:version": "changeset version",
+    "build:release": "PACKAGE_PUBLISH=true yarn build && yarn forallpackages exec \"rimraf _release && pack && mkdir _release && tar zxvf package.tgz --directory _release && rm package.tgz\"",
+    "changeset:version": "yarn changeset version",
     "publish": "yarn build:release && changeset publish",
     "g:clean": "cd $INIT_CWD && yarn run -T rimraf .cache _release dist coverage .turbo tsconfig.tsbuildinfo node_modules/.vite",
     "g:build": "cd $INIT_CWD && yarn run -T vite build",

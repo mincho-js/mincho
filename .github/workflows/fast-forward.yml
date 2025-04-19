@@ -105,7 +105,12 @@ jobs:
 
     runs-on: ubuntu-latest
 
-    permissions: write-all
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      packages: write
+      statuses: write
 
     steps:
       - name: Checkout Repo
