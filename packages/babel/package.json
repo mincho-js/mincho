@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/package.json",
   "name": "@mincho-js/babel",
   "description": "Babel configuration for Mincho.js",
-  "version": "0.0.3",
+  "version": "0.1.0",
   "sideEffects": false,
   "type": "module",
   "license": "MIT",

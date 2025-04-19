@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/package.json",
   "name": "@mincho-js/debug-log",
   "description": "A utility library for easier console debugging and comparison of JavaScript object values",
-  "version": "1.0.5",
+  "version": "1.1.0",
   "sideEffects": true,
   "type": "module",
   "license": "MIT",
