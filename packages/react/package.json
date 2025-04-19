@@ -65,7 +65,7 @@
     "@mincho-js/css": "workspace:^"
   },
   "devDependencies": {
-    "@types/react": "^19.1.1",
+    "@types/react": "^19.1.2",
     "@types/react-dom": "^19.1.2",
     "eslint-config-custom": "workspace:^",
     "prettier-config-custom": "workspace:^",
