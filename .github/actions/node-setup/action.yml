@@ -22,13 +22,18 @@ runs:
     - uses: actions/cache@v4
       id: yarn-cache # use this to check for `cache-hit` (`steps.yarn-cache.outputs.cache-hit != 'true'`)
       with:
-        path: ${{ steps.yarn-cache-dir-path.outputs.dir }}
+        path: |
+          ${{ steps.yarn-cache-dir-path.outputs.dir }}
+          .yarn/unplugged
+          .yarn/build-state.yml
+          .yarn/install-state.gz
         key: ${{ runner.os }}-yarn-${{ hashFiles('**/yarn.lock') }}
         restore-keys: |
           ${{ runner.os }}-yarn-
 
     - name: Package Install
       run: |
+        yarn config set winLinkType symlinks
         if [ "${{ inputs.strict }}" = "true" ]; then
           yarn install --immutable --check-resolutions --refresh-lockfile
           yarn constraints

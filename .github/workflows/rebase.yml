@@ -22,25 +22,25 @@ jobs:
           COMMENT_BODY: ${{ github.event.comment.body }}
         run: |
           if [[ "$COMMENT_BODY" =~ (^|[[:space:]])/rebase($|[[:space:]]) ]]; then
-            echo "MATCH=true" >> $GITHUB_ENV
+            echo "MATCH=true" >> $GITHUB_OUTPUT
           else
-            echo "MATCH=false" >> $GITHUB_ENV
+            echo "MATCH=false" >> $GITHUB_OUTPUT
           fi
 
       - name: Checkout repository
-        if: env.MATCH == 'true'
+        if: ${{ steps.check_comment.outputs.MATCH == 'true' }}
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Install git-branchless
-        if: env.MATCH == 'true'
+        if: ${{ steps.check_comment.outputs.MATCH == 'true' }}
         run: |
           brew install --no-quarantine git-branchless
           git-branchless init
 
       - name: Rebase PR
-        if: env.MATCH == 'true'
+        if: ${{ steps.check_comment.outputs.MATCH == 'true' }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"

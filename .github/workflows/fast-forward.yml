@@ -24,13 +24,13 @@ jobs:
           COMMENT_BODY: ${{ github.event.comment.body }}
         run: |
           if [[ "$COMMENT_BODY" =~ (^|[[:space:]])/fast-forward($|[[:space:]]) ]]; then
-            echo "MATCH=true" >> $GITHUB_ENV
+            echo "MATCH=true" >> $GITHUB_OUTPUT
           else
-            echo "MATCH=false" >> $GITHUB_ENV
+            echo "MATCH=false" >> $GITHUB_OUTPUT
           fi
 
       - name: Fast forwarding
-        if: env.MATCH == 'true'
+        if: ${{ steps.check_comment.outputs.MATCH == 'true' }}
         uses: sequoia-pgp/fast-forward@v1
         with:
           merge: true
@@ -41,7 +41,7 @@ jobs:
           comment: always
 
       - name: Check target branch
-        if: env.MATCH == 'true'
+        if: ${{ steps.check_comment.outputs.MATCH == 'true' }}
         id: check_branch
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -113,11 +113,21 @@ jobs:
       statuses: write
 
     steps:
+      - name: Get PR Branch
+        id: get_pr_branch
+        run: |
+          PR_NUMBER=${{ github.event.issue.number }}
+          PR_BRANCH=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+                      "https://api.github.com/repos/${{ github.repository }}/pulls/$PR_NUMBER" \
+                      | jq -r .head.ref)
+
+          echo "branch=$PR_BRANCH" >> $GITHUB_OUTPUT
+
       - name: Checkout Repo
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: main
+          ref: ${{ steps.get_pr_branch.outputs.branch }}
 
       - name: Setup
         uses: ./.github/actions/node-setup

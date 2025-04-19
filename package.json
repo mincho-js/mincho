@@ -2,7 +2,7 @@
   "name": "mincho",
   "type": "module",
   "private": true,
-  "packageManager": "yarn@4.6.0",
+  "packageManager": "yarn@4.9.1",
   "workspaces": [
     "configs/*",
     "packages/*",

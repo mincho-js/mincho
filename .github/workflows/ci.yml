@@ -32,11 +32,6 @@ jobs:
       - name: Setup
         uses: ./.github/actions/node-setup
 
-      - name: More setup cache
-        uses: ./.github/actions/cache-dir
-        with:
-          key: checker
-
       - name: Typechecker
         run: yarn build:type
 
