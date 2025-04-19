@@ -16,6 +16,7 @@ jobs:
 
     outputs:
       should_run: ${{ steps.check_branch.outputs.should_run }}
+      head_sha: ${{ steps.check_branch.outputs.head_sha }}
 
     steps:
       - name: Check comment
@@ -93,6 +94,7 @@ jobs:
           BASE_REF=$(jq -r ".base.ref" <$GITHUB_PR)
           if [ "$BASE_REF" = "main" ]; then
             echo "should_run=true" >> $GITHUB_OUTPUT
+            echo "head_sha=$(jq -r ".head.sha" <$GITHUB_PR)" >> $GITHUB_OUTPUT
             check_pr_merged
           else
             echo "should_run=false" >> $GITHUB_OUTPUT
@@ -113,21 +115,11 @@ jobs:
       statuses: write
 
     steps:
-      - name: Get PR Branch
-        id: get_pr_branch
-        run: |
-          PR_NUMBER=${{ github.event.issue.number }}
-          PR_BRANCH=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-                      "https://api.github.com/repos/${{ github.repository }}/pulls/$PR_NUMBER" \
-                      | jq -r .head.ref)
-
-          echo "branch=$PR_BRANCH" >> $GITHUB_OUTPUT
-
       - name: Checkout Repo
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ steps.get_pr_branch.outputs.branch }}
+          ref: ${{ needs.fast-forward.outputs.head_sha }}
 
       - name: Setup
         uses: ./.github/actions/node-setup
