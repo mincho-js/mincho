@@ -35,7 +35,7 @@
     "scheduler": "^0.26.0"
   },
   "devDependencies": {
-    "@eslint/js": "^9.24.0",
+    "@eslint/js": "^9.25.0",
     "@types/babel__core": "^7.20.5",
     "@types/cssesc": "^3.0.2",
     "@types/react": "^19.1.1",

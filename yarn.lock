@@ -890,10 +890,17 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@eslint/js@npm:9.24.0, @eslint/js@npm:^9.24.0":
+"@eslint/js@npm:9.24.0":
   version: 9.24.0
   resolution: "@eslint/js@npm:9.24.0"
   checksum: 10/d210114c147a1c1ebfaed5f32734e7c1f8ef551a5ea48ea67f9469668aa4079565ccd038412437bca87515d51dc9e8b8c788473dcf3d08e35dfb27e92cb3ce1b
+  languageName: node
+  linkType: hard
+
+"@eslint/js@npm:^9.25.0":
+  version: 9.25.0
+  resolution: "@eslint/js@npm:9.25.0"
+  checksum: 10/c00b5abc952d8d45efec12f7b84f143f168261f548cc218451fe14cbfcd801cae05e63013d26c3f7e255a85a164d95225b97441bb32ae1be6162473f3a2d9c71
   languageName: node
   linkType: hard
 
@@ -3472,7 +3479,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "eslint-config-custom@workspace:configs/eslint-config-custom"
   dependencies:
-    "@eslint/js": "npm:^9.24.0"
+    "@eslint/js": "npm:^9.25.0"
     "@typescript-eslint/parser": "npm:^8.29.1"
     eslint-config-prettier: "npm:^10.1.2"
     eslint-plugin-prettier: "npm:^5.2.6"
@@ -5763,7 +5770,7 @@ __metadata:
     "@babel/core": "npm:^7.26.10"
     "@babel/preset-typescript": "npm:^7.27.0"
     "@emotion/hash": "npm:^0.9.2"
-    "@eslint/js": "npm:^9.24.0"
+    "@eslint/js": "npm:^9.25.0"
     "@mincho-js/css": "workspace:^"
     "@mincho-js/integration": "workspace:^"
     "@mincho-js/react": "workspace:^"
@@ -5828,7 +5835,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "react-swc@workspace:examples/react-swc"
   dependencies:
-    "@eslint/js": "npm:^9.24.0"
+    "@eslint/js": "npm:^9.25.0"
     "@mincho-js/css": "workspace:^"
     "@types/react": "npm:^19.1.1"
     "@types/react-dom": "npm:^19.1.2"
