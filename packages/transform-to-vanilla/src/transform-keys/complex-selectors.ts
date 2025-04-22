@@ -16,7 +16,17 @@ export function isSimpleSelectorKey(key: string) {
 }
 
 export function nestedSelectorKey(key: string, context: TransformContext) {
-  return key.replaceAll("&", context.parentSelector);
+  const parentSelectors = context.parentSelector.split(",");
+  const result = [];
+
+  const parentSelectorsLength = parentSelectors.length;
+  for (let i = 0; i < parentSelectorsLength; i++) {
+    const selector = parentSelectors[i].trim();
+    const replacedKey = key.replaceAll("&", selector);
+    result.push(replacedKey);
+  }
+
+  return result.join(", ");
 }
 
 // == Tests ====================================================================
@@ -60,6 +70,22 @@ if (import.meta.vitest) {
       );
       expect(nestedSelectorKey(":root[dir=rtl] &", context)).toBe(
         ":root[dir=rtl] nav li > &"
+      );
+    });
+
+    it("Nested Selector with Commas", () => {
+      const context: TransformContext = {
+        ...structuredClone(initTransformContext),
+        parentSelector: "nav li > &, .myClass > &[data-attr-value]"
+      };
+      expect(nestedSelectorKey("&:hover", context)).toBe(
+        "nav li > &:hover, .myClass > &[data-attr-value]:hover"
+      );
+      expect(nestedSelectorKey("&:hover:not(:active)", context)).toBe(
+        "nav li > &:hover:not(:active), .myClass > &[data-attr-value]:hover:not(:active)"
+      );
+      expect(nestedSelectorKey(":root[dir=rtl] &", context)).toBe(
+        ":root[dir=rtl] nav li > &, :root[dir=rtl] .myClass > &[data-attr-value]"
       );
     });
   });

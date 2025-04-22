@@ -1013,6 +1013,28 @@ if (import.meta.vitest) {
       } satisfies StyleRule);
     });
 
+    it("Nested selectors with comma", () => {
+      expect(
+        transformStyle({
+          "nav li > &, .myClass li > &": {
+            color: "red",
+            _hover: {
+              color: "green"
+            }
+          }
+        })
+      ).toStrictEqual({
+        selectors: {
+          "nav li > &, .myClass li > &": {
+            color: "red"
+          },
+          "nav li > &:hover, .myClass li > &:hover": {
+            color: "green"
+          }
+        }
+      } satisfies StyleRule);
+    });
+
     it("Nested AtRules multiple", () => {
       expect(
         transformStyle({
