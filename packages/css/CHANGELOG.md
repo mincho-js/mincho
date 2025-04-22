@@ -1,5 +1,12 @@
 # @mincho-js/css
 
+## 0.2.1
+
+### Patch Changes
+
+- Updated dependencies [[`98a9c93`](https://github.com/mincho-js/mincho/commit/98a9c9335f84407717cd5fd7d62ce6c6070af284)]:
+  - @mincho-js/transform-to-vanilla@0.2.1
+
 ## 0.2.0
 
 ### Minor Changes

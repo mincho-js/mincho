@@ -1,5 +1,12 @@
 # @mincho-js/react
 
+## 0.1.1
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @mincho-js/css@0.2.1
+
 ## 0.1.0
 
 ### Minor Changes

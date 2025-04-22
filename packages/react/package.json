@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/package.json",
   "name": "@mincho-js/react",
   "description": "React utilities for Mincho",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "sideEffects": false,
   "type": "module",
   "license": "MIT",
