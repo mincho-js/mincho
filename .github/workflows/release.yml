@@ -1,0 +1,50 @@
+name: release
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      packages: write
+      statuses: write
+
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup
+        uses: ./.github/actions/node-setup
+
+      - name: Create Release Pull Request or Publish to npm
+        id: changesets
+        uses: changesets/action@v1
+        with:
+          commit: "Chore: Version Packages"
+          publish: yarn run publish
+          version: yarn run changeset:version
+          setupGitUser: true
+          createGithubReleases: true
+        env:
+          PACKAGE_PUBLISH: "true"
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Show log on failure
+        if: failure()
+        run: |
+          cd /home/runner/.npm/_logs/ || exit
+          for file in *; do
+            echo "=== File: $file ==="
+            cat "$file"
+            echo -e "\n\n"
+          done
