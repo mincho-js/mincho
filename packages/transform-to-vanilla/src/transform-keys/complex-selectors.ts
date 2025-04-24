@@ -16,7 +16,7 @@ export function isSimpleSelectorKey(key: string) {
 }
 
 export function nestedSelectorKey(key: string, context: TransformContext) {
-  const parentSelectors = context.parentSelector.split(",");
+  const parentSelectors = splitSelector(context.parentSelector);
   const result = [];
 
   const parentSelectorsLength = parentSelectors.length;
@@ -27,6 +27,58 @@ export function nestedSelectorKey(key: string, context: TransformContext) {
   }
 
   return result.join(", ");
+}
+
+function splitSelector(selector: string): string[] {
+  if (!selector.includes(",")) {
+    return [selector];
+  }
+
+  const result = [];
+  let currentSelector = "";
+  let parenLevel = 0;
+  let bracketLevel = 0;
+
+  const selectorLength = selector.length;
+  for (let i = 0; i < selectorLength; i++) {
+    const char = selector[i];
+
+    switch (char) {
+      case "(":
+        parenLevel++;
+        currentSelector += char;
+        break;
+      case ")":
+        parenLevel--;
+        currentSelector += char;
+        break;
+      case "[":
+        bracketLevel++;
+        currentSelector += char;
+        break;
+      case "]":
+        bracketLevel--;
+        currentSelector += char;
+        break;
+      case ",":
+        if (parenLevel === 0 && bracketLevel === 0) {
+          result.push(currentSelector);
+          currentSelector = "";
+        } else {
+          currentSelector += char;
+        }
+        break;
+      default:
+        currentSelector += char;
+        break;
+    }
+  }
+
+  if (currentSelector.trim() !== "") {
+    result.push(currentSelector);
+  }
+
+  return result;
 }
 
 // == Tests ====================================================================
@@ -86,6 +138,19 @@ if (import.meta.vitest) {
       );
       expect(nestedSelectorKey(":root[dir=rtl] &", context)).toBe(
         ":root[dir=rtl] nav li > &, :root[dir=rtl] .myClass > &[data-attr-value]"
+      );
+    });
+
+    it("Complex Nested Selectors", () => {
+      const context: TransformContext = {
+        ...structuredClone(initTransformContext),
+        parentSelector: `nav li > &:hover:not(:active, :disabled, [data-list="a, b, c"]), .myClass > &[data-attr-value]:where(:has(> :hover, + :focus), :active)`
+      };
+      expect(nestedSelectorKey("&::before", context)).toBe(
+        `nav li > &:hover:not(:active, :disabled, [data-list="a, b, c"])::before, .myClass > &[data-attr-value]:where(:has(> :hover, + :focus), :active)::before`
+      );
+      expect(nestedSelectorKey(":root[dir=rtl] &", context)).toBe(
+        `:root[dir=rtl] nav li > &:hover:not(:active, :disabled, [data-list="a, b, c"]), :root[dir=rtl] .myClass > &[data-attr-value]:where(:has(> :hover, + :focus), :active)`
       );
     });
   });
