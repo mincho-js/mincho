@@ -1,5 +1,13 @@
 # @mincho-js/vite
 
+## 0.1.2
+
+### Patch Changes
+
+- Updated dependencies [[`1c89ca9`](https://github.com/mincho-js/mincho/commit/1c89ca943c9d1495230145d47cf810d820aeddbb)]:
+  - @mincho-js/transform-to-vanilla@0.2.2
+  - @mincho-js/css@0.2.2
+
 ## 0.1.1
 
 ### Patch Changes

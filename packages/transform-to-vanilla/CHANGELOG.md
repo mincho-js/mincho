@@ -1,5 +1,12 @@
 # @mincho-js/transform-to-vanilla
 
+## 0.2.2
+
+### Patch Changes
+
+- [#199](https://github.com/mincho-js/mincho/pull/199) [`1c89ca9`](https://github.com/mincho-js/mincho/commit/1c89ca943c9d1495230145d47cf810d820aeddbb) Thanks [@black7375](https://github.com/black7375)! - **Nested Selector with commas and parens**
+  - Fixes an error that occurs when parentheses are present.
+
 ## 0.2.1
 
 ### Patch Changes

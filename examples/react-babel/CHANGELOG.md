@@ -1,5 +1,14 @@
 # react-babel
 
+## 0.1.2
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @mincho-js/css@0.2.2
+  - @mincho-js/vite@0.1.2
+  - @mincho-js/react@0.1.2
+
 ## 0.1.1
 
 ### Patch Changes
