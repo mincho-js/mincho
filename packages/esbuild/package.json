@@ -54,7 +54,7 @@
     "@mincho-js/integration": "workspace:^",
     "@vanilla-extract/esbuild-plugin": "^2.3.15",
     "@vanilla-extract/integration": "^8.0.1",
-    "esbuild": "^0.25.2"
+    "esbuild": "^0.25.3"
   },
   "devDependencies": {
     "eslint-config-custom": "workspace:^",
