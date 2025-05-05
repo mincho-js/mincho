@@ -32,14 +32,24 @@ jobs:
       - name: Setup
         uses: ./.github/actions/node-setup
 
+      - name: More setup cache
+        uses: ./.github/actions/cache-dir
+        with:
+          key: install-and-check
+          paths: |
+            .cache
+            **/.cache
+            dist
+            **/dist
+
+      - name: Project Reference Check
+        run: yarn sync:check
+
       - name: Typechecker
         run: yarn build:type
 
       - name: Lint & format
         run: |
-          ## Workflow lint
-          yarn lint:action
-
           ## Require type build
           # https://typescript-eslint.io/getting-started/typed-linting/
           yarn lint

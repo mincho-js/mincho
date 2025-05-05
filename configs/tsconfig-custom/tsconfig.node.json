@@ -5,6 +5,8 @@
     "declaration": false,
     "emitDeclarationOnly": false,
     "noEmit": true,
+    "allowJs": true,
+    "checkJs": true,
     "paths": {}
   }
 }
