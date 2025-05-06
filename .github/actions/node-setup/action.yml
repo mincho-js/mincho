@@ -36,7 +36,7 @@ runs:
         yarn config set winLinkType symlinks
         if [ "${{ inputs.strict }}" = "true" ]; then
           yarn install --immutable --check-resolutions --refresh-lockfile
-          yarn constraints
+          yarn check:pkgs
         else
           yarn install
         fi

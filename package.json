@@ -19,6 +19,8 @@
     "fix:action": "yarn lint:action --fix",
     "check": "yarn task check",
     "check:all": "yarn task check:all",
+    "check:peers": "yarn explain peer-requirements | grep -q '✘' && exit 1 || exit 0",
+    "check:pkgs": "yarn check:peers & yarn constraints",
     "sync": "workspaces-to-typescript-project-references --includesRoot --includesLocal",
     "sync:check": "yarn sync --check",
     "test": "yarn task test",

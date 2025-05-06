@@ -18,15 +18,10 @@ module.exports = defineConfig({
       external: {
         dependencies: false,
         devDependencies: false,
-        peerDependencies: false
+        peerDependencies: true
       }
     });
     enforceWorkspaceDependenciesWhenPossible(ctx);
-    enforcePeerDependencyPresence(ctx, [
-      "vite",
-      "typescript",
-      "eslint",
-      "prettier"
-    ]);
+    enforcePeerDependencyPresence(ctx);
   }
 });
