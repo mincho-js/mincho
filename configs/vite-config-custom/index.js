@@ -8,10 +8,10 @@ import { PromisePool } from "@supercharge/promise-pool";
 import { initConfigBuilder, ViteEnv, PluginBuilder } from "vite-config-builder";
 import { mergeConfig } from "vite";
 
-import { ModuleKind } from "typescript";
+import { ModuleKind, ModuleResolutionKind } from "typescript";
 import { externalizeDeps } from "vite-plugin-externalize-deps";
 import tsconfigPaths from "vite-tsconfig-paths";
-import dts from "vite-plugin-dts";
+import { dts } from "vite-plugin-dts-build";
 
 // == Main Configs ============================================================
 export function NodeConfig(viteConfigEnv, extendConfigs = {}) {
@@ -33,28 +33,35 @@ function NodeBuilder(viteConfigEnv) {
   const packageRoot = cwd();
   const entryRoot = resolve(packageRoot, "src");
   const entryFile = resolve(entryRoot, "index.ts");
+  const cacheEsmDir = resolve(packageRoot, ".cache", "typescript", "esm");
+  const cacheCjsDir = resolve(packageRoot, ".cache", "typescript", "cjs");
   const outEsmDir = resolve(packageRoot, "dist", "esm");
   const outCjsDir = resolve(packageRoot, "dist", "cjs");
 
-  const isCI = isGithubCI();
+  const runtimeEnv = getRuntimeEnv();
   if (ViteEnv.isProd()) {
-    if (!isCI) {
+    if (runtimeEnv === "LOCAL" || runtimeEnv === "PUBLISH") {
       plugins.add(
         // This is currently a proprietary implementation. You might also like to see
         // https://github.com/qmhc/vite-plugin-dts/issues/267
         dts({
-          entryRoot,
           include: ["src"],
+          cacheDir: cacheEsmDir,
           outDir: outEsmDir,
           tsconfigPath: resolve(packageRoot, "tsconfig.lib.json")
-        }),
+        })
+      );
+    }
+    if (runtimeEnv === "PUBLISH") {
+      plugins.add(
         dts({
-          entryRoot,
           include: ["src"],
+          cacheDir: cacheCjsDir,
           outDir: outCjsDir,
           tsconfigPath: resolve(packageRoot, "tsconfig.lib.json"),
           compilerOptions: {
             module: ModuleKind.CommonJS,
+            moduleResolution: ModuleResolutionKind.Node10,
             outDir: outCjsDir,
             declarationDir: outCjsDir,
             tsBuildInfoFile: resolve(
@@ -110,7 +117,7 @@ function NodeBuilder(viteConfigEnv) {
         entry: {
           index: entryFile
         },
-        formats: isCI ? ["es"] : ["es", "cjs"],
+        formats: ["es", "cjs"],
         fileName: (format, entryName) =>
           `${format === "es" ? "esm" : "cjs"}/${entryName}.${format === "es" ? "mjs" : "cjs"}`
       },
@@ -227,13 +234,13 @@ async function processCtsFile(fullPath) {
   await unlink(fullPath);
 }
 
-function isGithubCI() {
+function getRuntimeEnv() {
   if (env["PACKAGE_PUBLISH"] === "true") {
-    return false;
+    return "PUBLISH";
   }
 
   if (env["GITHUB_ACTIONS"] === "true") {
-    return true;
+    return "ACTIONS";
   }
-  return false;
+  return "LOCAL";
 }
