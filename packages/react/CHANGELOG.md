@@ -1,5 +1,12 @@
 # @mincho-js/react
 
+## 0.1.3
+
+### Patch Changes
+
+- Updated dependencies [[`df91f14`](https://github.com/mincho-js/mincho/commit/df91f148cf4c0db6a19f544fb993943cc1f50a70)]:
+  - @mincho-js/css@0.2.3
+
 ## 0.1.2
 
 ### Patch Changes

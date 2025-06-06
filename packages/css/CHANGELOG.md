@@ -1,5 +1,17 @@
 # @mincho-js/css
 
+## 0.2.3
+
+### Patch Changes
+
+- [#209](https://github.com/mincho-js/mincho/pull/209) [`df91f14`](https://github.com/mincho-js/mincho/commit/df91f148cf4c0db6a19f544fb993943cc1f50a70) Thanks [@black7375](https://github.com/black7375)! - ## New
+
+  - Add `VariantStyle` type for constrained variant styles
+
+  ## Changes
+
+  - Allow nested selector in `globalCss` function
+
 ## 0.2.2
 
 ### Patch Changes
