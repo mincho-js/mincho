@@ -31,6 +31,14 @@ export type Serializable =
 
 type RecipeStyleRule = ComplexCSSRule | string;
 
+export type VariantStyle<
+  VariantNames extends string,
+  CssRule extends RecipeStyleRule = RecipeStyleRule
+> = {
+  [VariantName in VariantNames]: CssRule;
+};
+
+// Same of VariantMap but for fast type checking
 export type VariantDefinitions = Record<string, RecipeStyleRule>;
 
 type BooleanMap<T> = T extends "true" | "false" ? boolean : T;

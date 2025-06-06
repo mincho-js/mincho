@@ -16,9 +16,90 @@ import { className, getDebugName } from "../utils.js";
 
 // == Global CSS ===============================================================
 export function globalCss(selector: string, rule: GlobalCSSRule) {
-  gStyle(selector, transform(rule) as GlobalStyleRule);
+  const transformedStyle = transform({
+    selectors: {
+      [selector]: {
+        ...rule
+      }
+    }
+  }) as CSSRule;
+
+  const { selectors, ...atRuleStyles } = transformedStyle;
+  if (selectors !== undefined) {
+    Object.entries(selectors).forEach(([selector, styles]) => {
+      gStyle(selector, styles as GlobalStyleRule);
+    });
+  }
+
+  if (atRuleStyles !== undefined) {
+    const otherStyles = hoistSelectors(atRuleStyles);
+    Object.entries(otherStyles.selectors).forEach(([atRule, atRuleStyles]) => {
+      gStyle(atRule, atRuleStyles as GlobalStyleRule);
+    });
+  }
 }
 export const globalStyle = globalCss;
+
+// TODO: Make more type-safe
+type UnknownObject = Record<string, unknown>;
+type CSSRuleMap = Record<string, CSSRule>;
+interface HoistResult {
+  selectors: CSSRuleMap;
+}
+
+function hoistSelectors(input: CSSRule): HoistResult {
+  const result: HoistResult = {
+    selectors: {}
+  };
+
+  function processAtRules(obj: UnknownObject, path: string[] = []) {
+    for (const key in obj) {
+      if (key === "selectors") {
+        // Hoist each selector when selectors are found
+        const selectors = obj[key] as CSSRuleMap;
+        for (const selector in selectors) {
+          if (!result.selectors[selector]) {
+            result.selectors[selector] = {};
+          }
+
+          // Create nested object structure based on current path
+          let current = result.selectors[selector] as UnknownObject;
+          for (let i = 0; i < path.length; i += 2) {
+            const atRule = path[i];
+            const condition = path[i + 1];
+
+            if (!current[atRule]) {
+              current[atRule] = {};
+            }
+            const atRuleObj = current[atRule] as UnknownObject;
+            if (!atRuleObj[condition]) {
+              atRuleObj[condition] = {};
+            }
+
+            current = atRuleObj[condition] as UnknownObject;
+          }
+
+          // Copy style properties
+          Object.assign(current, selectors[selector]);
+        }
+      } else if (typeof obj[key] === "object" && obj[key] !== null) {
+        // at-rule found (e.g: @media, @supports)
+        const atRules = obj[key] as UnknownObject;
+        for (const condition in atRules) {
+          // Add current at-rule and condition to path and recursively call
+          processAtRules(atRules[condition] as UnknownObject, [
+            ...path,
+            key,
+            condition
+          ]);
+        }
+      }
+    }
+  }
+
+  processAtRules(input as UnknownObject);
+  return result;
+}
 
 // == CSS ======================================================================
 export function css(style: ComplexCSSRule, debugId?: string) {

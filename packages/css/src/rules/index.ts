@@ -26,7 +26,8 @@ import type {
   PropTarget,
   PropVars,
   Serializable,
-  VariantStringMap
+  VariantStringMap,
+  VariantStyle
 } from "./types.js";
 import {
   mapValues,
@@ -264,16 +265,16 @@ if (import.meta.vitest) {
           color: {
             brand: { color: "#FFFFA0" },
             accent: { color: "#FFE4B5" }
-          },
+          } satisfies VariantStyle<"brand" | "accent">,
           size: {
             small: { padding: 12 },
             medium: { padding: 16 },
             large: { padding: 24 }
-          },
+          } satisfies VariantStyle<"small" | "medium" | "large">,
           outlined: {
             true: { border: "1px solid black" },
             false: { border: "1px solid transparent" }
-          }
+          } satisfies VariantStyle<"true" | "false">
         }
       } as const;
       const result = rules(variants, debugId);

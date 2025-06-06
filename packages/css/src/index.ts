@@ -36,6 +36,7 @@ export {
 export { rules, recipe } from "./rules/index.js";
 export { createRuntimeFn } from "./rules/createRuntimeFn.js";
 export type {
+  VariantStyle,
   RulesVariants,
   RecipeVariants,
   RuntimeFn,
