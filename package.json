@@ -50,7 +50,7 @@
     "@mincho-js/debug-log": "workspace:^",
     "@monorepo-utils/workspaces-to-typescript-project-references": "^2.11.0",
     "@types/eslint": "^9.6.1",
-    "@types/node": "^22.15.29",
+    "@types/node": "^22.15.30",
     "@typescript/analyze-trace": "^0.10.1",
     "@vanilla-extract/vite-plugin": "^5.0.3",
     "@vitest/coverage-v8": "^3.2.2",
