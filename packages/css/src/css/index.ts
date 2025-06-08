@@ -101,9 +101,13 @@ function hoistSelectors(input: CSSRule): HoistResult {
 }
 
 // == CSS ======================================================================
-export function css(style: ComplexCSSRule, debugId?: string) {
+export function cssImpl(style: ComplexCSSRule, debugId?: string) {
   return vStyle(transform(style), debugId);
 }
+
+export const css = Object.assign(cssImpl, {
+  multiple: cssVariants
+});
 
 // == CSS Variants =============================================================
 // TODO: Need to optimize
@@ -208,9 +212,9 @@ if (import.meta.vitest) {
     });
   });
 
-  describe.concurrent("cssVariants()", () => {
+  describe.concurrent("css.multiple()", () => {
     it("Variants", () => {
-      const result = cssVariants(
+      const result = css.multiple(
         {
           primary: { background: "blue" },
           secondary: { background: "aqua" }
@@ -224,7 +228,7 @@ if (import.meta.vitest) {
     });
 
     it("Mapping Variants", () => {
-      const result = cssVariants(
+      const result = css.multiple(
         {
           primary: "blue",
           secondary: "aqua"
@@ -242,7 +246,7 @@ if (import.meta.vitest) {
 
     it("Mapping Variants with composition", () => {
       const base = css({ padding: 12 }, "base");
-      const result = cssVariants(
+      const result = css.multiple(
         {
           primary: "blue",
           secondary: "aqua"

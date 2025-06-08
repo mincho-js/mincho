@@ -71,7 +71,6 @@ export const extractionAPIs = [
   // @mincho-js/css
   "mincho$",
   "css",
-  "cssVariants",
   "globalCss",
   "rules",
   // @vanilla-extract/css

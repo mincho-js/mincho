@@ -25,7 +25,7 @@ export {
   layer
 } from "@vanilla-extract/css";
 
-export { globalCss, css, cssVariants } from "./css/index.js";
+export { globalCss, css } from "./css/index.js";
 export { rules } from "./rules/index.js";
 export type {
   VariantStyle,
