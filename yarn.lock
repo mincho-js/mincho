@@ -1182,7 +1182,7 @@ __metadata:
   dependencies:
     "@fastify/deepmerge": "npm:^3.1.0"
     "@mincho-js/transform-to-vanilla": "workspace:^"
-    "@vanilla-extract/css": "npm:^1.17.2"
+    "@vanilla-extract/css": "npm:^1.17.3"
     eslint-config-custom: "workspace:^"
     prettier-config-custom: "workspace:^"
     tsconfig-custom: "workspace:^"
@@ -1221,8 +1221,8 @@ __metadata:
   resolution: "@mincho-js/esbuild@workspace:packages/esbuild"
   dependencies:
     "@mincho-js/integration": "workspace:^"
-    "@vanilla-extract/esbuild-plugin": "npm:^2.3.16"
-    "@vanilla-extract/integration": "npm:^8.0.2"
+    "@vanilla-extract/esbuild-plugin": "npm:^2.3.17"
+    "@vanilla-extract/integration": "npm:^8.0.3"
     esbuild: "npm:^0.25.5"
     eslint-config-custom: "workspace:^"
     prettier-config-custom: "workspace:^"
@@ -1239,7 +1239,7 @@ __metadata:
     "@babel/plugin-syntax-jsx": "npm:^7.27.1"
     "@mincho-js/babel": "workspace:^"
     "@types/babel__core": "npm:^7.20.5"
-    "@vanilla-extract/integration": "npm:^8.0.2"
+    "@vanilla-extract/integration": "npm:^8.0.3"
     esbuild: "npm:^0.25.5"
     eslint-config-custom: "workspace:^"
     prettier-config-custom: "workspace:^"
@@ -1265,7 +1265,7 @@ __metadata:
     "@mincho-js/css": "workspace:^"
     "@types/react": "npm:^19.1.6"
     "@types/react-dom": "npm:^19.1.6"
-    "@vanilla-extract/css": "npm:^1.17.2"
+    "@vanilla-extract/css": "npm:^1.17.3"
     eslint-config-custom: "workspace:^"
     prettier-config-custom: "workspace:^"
     react: "npm:^19.1.0"
@@ -1285,7 +1285,7 @@ __metadata:
     "@fastify/deepmerge": "npm:^3.1.0"
     "@mincho-js/css-additional-types": "workspace:^"
     "@mincho-js/csstype": "npm:^3.1.4"
-    "@vanilla-extract/css": "npm:^1.17.2"
+    "@vanilla-extract/css": "npm:^1.17.3"
     eslint-config-custom: "workspace:^"
     prettier-config-custom: "workspace:^"
     tsconfig-custom: "workspace:^"
@@ -1304,9 +1304,9 @@ __metadata:
     "@rollup/pluginutils": "npm:^5.1.4"
     "@types/babel__core": "npm:^7.20.5"
     "@types/node": "npm:^22.15.30"
-    "@vanilla-extract/css": "npm:^1.17.2"
-    "@vanilla-extract/integration": "npm:^8.0.2"
-    "@vanilla-extract/recipes": "npm:^0.5.5"
+    "@vanilla-extract/css": "npm:^1.17.3"
+    "@vanilla-extract/integration": "npm:^8.0.3"
+    "@vanilla-extract/recipes": "npm:^0.5.6"
     eslint-config-custom: "workspace:^"
     prettier-config-custom: "workspace:^"
     tsconfig-custom: "workspace:^"
@@ -2118,40 +2118,40 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@vanilla-extract/babel-plugin-debug-ids@npm:^1.2.0":
-  version: 1.2.0
-  resolution: "@vanilla-extract/babel-plugin-debug-ids@npm:1.2.0"
+"@vanilla-extract/babel-plugin-debug-ids@npm:^1.2.1":
+  version: 1.2.1
+  resolution: "@vanilla-extract/babel-plugin-debug-ids@npm:1.2.1"
   dependencies:
     "@babel/core": "npm:^7.23.9"
-  checksum: 10/6d3493c30a321e2570e3851286dfcf64eedc62dfe582b755668de482098e42fa0be6ed95a24c5ee760784948ab4ffaaa3b42058a11dea242fe18d704b5a4996c
+  checksum: 10/9b71739bda9eb9629b1f5c79474e3e9a6d0b9717d2b4a5e89d6877d482579405ff594e506088b364e38d3afe56e4c32eedbb1c03192859017fbb39c6106183e7
   languageName: node
   linkType: hard
 
-"@vanilla-extract/compiler@npm:^0.2.0":
-  version: 0.2.0
-  resolution: "@vanilla-extract/compiler@npm:0.2.0"
+"@vanilla-extract/compiler@npm:^0.2.1":
+  version: 0.2.1
+  resolution: "@vanilla-extract/compiler@npm:0.2.1"
   dependencies:
-    "@vanilla-extract/css": "npm:^1.17.2"
-    "@vanilla-extract/integration": "npm:^8.0.2"
+    "@vanilla-extract/css": "npm:^1.17.3"
+    "@vanilla-extract/integration": "npm:^8.0.3"
     vite: "npm:^5.0.0 || ^6.0.0"
     vite-node: "npm:^3.0.4"
-  checksum: 10/19cf8889f5bac2b38033b9b91ac2a29f922f546f9275f5b80824b76aeae62c32f72a9cc8c67bfdb5df6014c58593462c9a97c7f54df3e5c4315ca1ba57af7507
+  checksum: 10/3b297eeeab1fdcdf68a9583b69c7afce2835fbfce255865b2fd8904161adfa641bfdf792b2e7a88285a625767bb32a2557be631fe0946ac0c570475d75b25336
   languageName: node
   linkType: hard
 
-"@vanilla-extract/css-utils@npm:^0.1.4":
-  version: 0.1.4
-  resolution: "@vanilla-extract/css-utils@npm:0.1.4"
-  checksum: 10/37edf1f8a6dae124bc84bc0ed1260b866f563a9e4487cca6888b4eaf8d74c2f07c92566f7290e435deb38c6cba6e4c6b8fb7c22c62917afb22a9491e5d7e4c2c
+"@vanilla-extract/css-utils@npm:^0.1.5":
+  version: 0.1.5
+  resolution: "@vanilla-extract/css-utils@npm:0.1.5"
+  checksum: 10/4aeb4f973c8347e30014f064199056087bb4a1d09c3af9fa1693e78a0f3dfb8d05d8138766ee8a6fb598b401cd2e9ebcc4fc8c9192e6e24cd0f62a4685214585
   languageName: node
   linkType: hard
 
-"@vanilla-extract/css@npm:^1.17.2":
-  version: 1.17.2
-  resolution: "@vanilla-extract/css@npm:1.17.2"
+"@vanilla-extract/css@npm:^1.17.3":
+  version: 1.17.3
+  resolution: "@vanilla-extract/css@npm:1.17.3"
   dependencies:
     "@emotion/hash": "npm:^0.9.0"
-    "@vanilla-extract/private": "npm:^1.0.7"
+    "@vanilla-extract/private": "npm:^1.0.8"
     css-what: "npm:^6.1.0"
     cssesc: "npm:^3.0.0"
     csstype: "npm:^3.0.7"
@@ -2162,67 +2162,67 @@ __metadata:
     media-query-parser: "npm:^2.0.2"
     modern-ahocorasick: "npm:^1.0.0"
     picocolors: "npm:^1.0.0"
-  checksum: 10/eb55a4a794603176dbd99a10a6a8d64eeff17592eb78d8d23014ba195c56cb85f5dd5c0a4e330f4d6f507cb72c00366019f327174e8e1f95b341b616c51644be
+  checksum: 10/f847409e772d6a3261dd6d8159184c62899d706074474c7bdb12a0e2a1809055a3790302d892cf9f4b8a9acd44e725289ffbf8302645869757321bea588f190f
   languageName: node
   linkType: hard
 
-"@vanilla-extract/esbuild-plugin@npm:^2.3.16":
-  version: 2.3.16
-  resolution: "@vanilla-extract/esbuild-plugin@npm:2.3.16"
+"@vanilla-extract/esbuild-plugin@npm:^2.3.17":
+  version: 2.3.17
+  resolution: "@vanilla-extract/esbuild-plugin@npm:2.3.17"
   dependencies:
-    "@vanilla-extract/integration": "npm:^8.0.2"
+    "@vanilla-extract/integration": "npm:^8.0.3"
   peerDependencies:
     esbuild: ">=0.17.6"
   peerDependenciesMeta:
     esbuild:
       optional: true
-  checksum: 10/ea636b292c2b79a7d2f910c1ad828e7ff02f96d7948303df08c56cb330b2014c1c6027d97869055500fe8d5502ed2e3b1512abd76ed4430b3657bc6157d89125
+  checksum: 10/5a8582c16ca0f4a64770682d10d63b668b108404b04bbb1ca35a2cff31575aee5022b1fb052a79aeee785cb19d16cbbbcdefd7b884f4b32d2c9c94a911832d83
   languageName: node
   linkType: hard
 
-"@vanilla-extract/integration@npm:^8.0.2":
-  version: 8.0.2
-  resolution: "@vanilla-extract/integration@npm:8.0.2"
+"@vanilla-extract/integration@npm:^8.0.3":
+  version: 8.0.3
+  resolution: "@vanilla-extract/integration@npm:8.0.3"
   dependencies:
     "@babel/core": "npm:^7.23.9"
     "@babel/plugin-syntax-typescript": "npm:^7.23.3"
-    "@vanilla-extract/babel-plugin-debug-ids": "npm:^1.2.0"
-    "@vanilla-extract/css": "npm:^1.17.2"
+    "@vanilla-extract/babel-plugin-debug-ids": "npm:^1.2.1"
+    "@vanilla-extract/css": "npm:^1.17.3"
     dedent: "npm:^1.5.3"
     esbuild: "npm:esbuild@>=0.17.6 <0.26.0"
     eval: "npm:0.1.8"
     find-up: "npm:^5.0.0"
     javascript-stringify: "npm:^2.0.1"
     mlly: "npm:^1.4.2"
-  checksum: 10/f784263d72ba46ae0fafe04c038818d195853e42c2b3cea4613283197e668c6f5abc39c8f3d47468658dfd8343e1cb428d29203a1de0f5ce846e2952ee1c32ba
+  checksum: 10/28b1c98922c269c77f442b9c2e1e0bc91cfb55a660a7d65caf7e82d8d603f298af24dd937ff647660d67d2bbbaa6e73c17c5505505f2152a6b67f8378eb5c7d9
   languageName: node
   linkType: hard
 
-"@vanilla-extract/private@npm:^1.0.7":
-  version: 1.0.7
-  resolution: "@vanilla-extract/private@npm:1.0.7"
-  checksum: 10/289952db9c557ae552c09e0462d69d2b7101befa1e880125aeb777e75c9a2f71edd41851809148a70d0dd65216e5e8b7af8f052c3a0c7034b78c0b1bda590b5c
+"@vanilla-extract/private@npm:^1.0.8":
+  version: 1.0.8
+  resolution: "@vanilla-extract/private@npm:1.0.8"
+  checksum: 10/cd1c647cf8424de7b2641eedf7f22dbea81e277b996585a4740468e56e4a7cca65ccee67aa0e9d19feb6d5bd087af24e03747e1bf3c3269314307e938d4a601e
   languageName: node
   linkType: hard
 
-"@vanilla-extract/recipes@npm:^0.5.5":
-  version: 0.5.5
-  resolution: "@vanilla-extract/recipes@npm:0.5.5"
+"@vanilla-extract/recipes@npm:^0.5.6":
+  version: 0.5.6
+  resolution: "@vanilla-extract/recipes@npm:0.5.6"
   peerDependencies:
     "@vanilla-extract/css": ^1.0.0
-  checksum: 10/8d2b4f8163369424226ec9a47e754002b8a095bcf86c1a60a91b2183f59508519bd31ed41baefc950ad7ca225d75b3184c3b84d3c741c5c60d91618dd70452aa
+  checksum: 10/fefc65c256ee996863a0dbf431a81eb012d17878650e9012fa9b2e64447a562d82fdc9e7858ac8f6f7a5bf220e3aed7d0c7ddfc34714dc7af32659d0e03d0b6c
   languageName: node
   linkType: hard
 
-"@vanilla-extract/vite-plugin@npm:^5.0.3":
-  version: 5.0.3
-  resolution: "@vanilla-extract/vite-plugin@npm:5.0.3"
+"@vanilla-extract/vite-plugin@npm:^5.0.4":
+  version: 5.0.4
+  resolution: "@vanilla-extract/vite-plugin@npm:5.0.4"
   dependencies:
-    "@vanilla-extract/compiler": "npm:^0.2.0"
-    "@vanilla-extract/integration": "npm:^8.0.2"
+    "@vanilla-extract/compiler": "npm:^0.2.1"
+    "@vanilla-extract/integration": "npm:^8.0.3"
   peerDependencies:
     vite: ^5.0.0 || ^6.0.0
-  checksum: 10/ccef9a136fa001aab57edddcab63277d71e901347064c0431a430d69e98694596089e0bab3c42faa7c002c42c7599fef32efc17ec61e731cde2e078132438ecd
+  checksum: 10/5205eb610ee850eadb277399fd2b3f44c537463d5b0249aa3ccd2ddd0cee6d78183950384909aac4cca106fc2ad01a3e6ed444f9a39977a7f5e17e3cf1bd7206
   languageName: node
   linkType: hard
 
@@ -4778,7 +4778,7 @@ __metadata:
     "@types/eslint": "npm:^9.6.1"
     "@types/node": "npm:^22.15.30"
     "@typescript/analyze-trace": "npm:^0.10.1"
-    "@vanilla-extract/vite-plugin": "npm:^5.0.3"
+    "@vanilla-extract/vite-plugin": "npm:^5.0.4"
     "@vitest/coverage-v8": "npm:^3.2.2"
     "@yarnpkg/types": "npm:^4.0.1"
     c8: "npm:^10.1.3"
@@ -5494,9 +5494,9 @@ __metadata:
     "@types/react": "npm:^19.1.6"
     "@types/react-dom": "npm:^19.1.6"
     "@types/scheduler": "npm:^0.26.0"
-    "@vanilla-extract/css": "npm:^1.17.2"
-    "@vanilla-extract/css-utils": "npm:^0.1.4"
-    "@vanilla-extract/private": "npm:^1.0.7"
+    "@vanilla-extract/css": "npm:^1.17.3"
+    "@vanilla-extract/css-utils": "npm:^0.1.5"
+    "@vanilla-extract/private": "npm:^1.0.8"
     "@vitejs/plugin-react": "npm:^4.5.1"
     css-what: "npm:^6.1.0"
     cssesc: "npm:^3.0.0"
@@ -5555,9 +5555,9 @@ __metadata:
     "@types/react-dom": "npm:^19.1.6"
     "@typescript-eslint/eslint-plugin": "npm:^8.33.1"
     "@typescript-eslint/parser": "npm:^8.33.1"
-    "@vanilla-extract/css": "npm:^1.17.2"
-    "@vanilla-extract/esbuild-plugin": "npm:^2.3.16"
-    "@vanilla-extract/vite-plugin": "npm:^5.0.3"
+    "@vanilla-extract/css": "npm:^1.17.3"
+    "@vanilla-extract/esbuild-plugin": "npm:^2.3.17"
+    "@vanilla-extract/vite-plugin": "npm:^5.0.4"
     "@vitejs/plugin-react-swc": "npm:^3.10.1"
     eslint: "npm:^9.28.0"
     eslint-plugin-react-hooks: "npm:^5.2.0"
