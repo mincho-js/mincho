@@ -105,7 +105,12 @@ export function cssImpl(style: ComplexCSSRule, debugId?: string) {
   return vStyle(transform(style), debugId);
 }
 
+function cssRaw(style: ComplexCSSRule) {
+  return style;
+}
+
 export const css = Object.assign(cssImpl, {
+  raw: cssRaw,
   multiple: cssVariants
 });
 
