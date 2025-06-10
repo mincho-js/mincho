@@ -3,4 +3,8 @@
 "@mincho-js/css": minor
 ---
 
-Separate vanilla extract API to `./compat`
+**Compatibility**
+
+## Changes
+
+- Separate vanilla extract API to `./compat`

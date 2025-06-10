@@ -21,7 +21,7 @@ export {
 export {
   globalCss as globalStyle,
   css as style,
-  cssVariants as styleVariants
+  cssMultiple as styleVariants
 } from "./css/index.js";
 
 export type {

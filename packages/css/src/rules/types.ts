@@ -5,10 +5,8 @@ import type {
   ResolvedProperties,
   NonNullableString
 } from "@mincho-js/transform-to-vanilla";
+import type { Resolve } from "../types.js";
 
-type Resolve<T> = {
-  [Key in keyof T]: T[Key];
-} & {};
 export type ResolveComplex<T> =
   T extends Array<infer U> ? Array<Resolve<U>> : Resolve<T>;
 type RemoveUndefined<T> = T extends undefined ? never : T;

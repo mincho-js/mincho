@@ -8,7 +8,7 @@ import type {
   PureCSSVarKey
 } from "@mincho-js/transform-to-vanilla";
 
-import { css, cssVariants } from "../css/index.js";
+import { css } from "../css/index.js";
 import { className, getDebugName, getVarName } from "../utils.js";
 import { createRuntimeFn } from "./createRuntimeFn.js";
 import type {
@@ -110,7 +110,7 @@ export function rules<
   // @ts-expect-error - Temporarily ignoring the error as the PatternResult type is not fully defined
   const variantClassNames: PatternResult<CombinedVariants>["variantClassNames"] =
     mapValues(mergedVariants, (variantGroup, variantGroupName) =>
-      cssVariants(
+      css.multiple(
         variantGroup,
         (styleRule) =>
           typeof styleRule === "string"

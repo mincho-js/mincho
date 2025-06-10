@@ -13,6 +13,7 @@ import { setFileScope } from "@vanilla-extract/css/fileScope";
 import { style as vStyle, globalStyle as gStyle } from "@vanilla-extract/css";
 import type { GlobalStyleRule } from "@vanilla-extract/css";
 import { className, getDebugName } from "../utils.js";
+import type { RestrictCSSRule } from "./types.js";
 
 // == Global CSS ===============================================================
 export function globalCss(selector: string, rule: GlobalCSSRule) {
@@ -109,27 +110,80 @@ function cssRaw(style: ComplexCSSRule) {
   return style;
 }
 
+function cssWith<const T extends CSSRule>(
+  callback?: (style: RestrictCSSRule<T>) => ComplexCSSRule
+) {
+  type RestrictedCSSRule = RestrictCSSRule<T>;
+  const cssFunction = callback ?? ((style: RestrictedCSSRule) => style);
+
+  function cssWithImpl(style: RestrictedCSSRule, debugId?: string) {
+    return cssImpl(cssFunction(style), debugId);
+  }
+  function cssWithRaw(style: RestrictedCSSRule) {
+    return cssRaw(cssFunction(style));
+  }
+
+  function cssWithVariants<
+    StyleMap extends Record<string | number, RestrictedCSSRule>
+  >(styleMap: StyleMap, debugId?: string): Record<keyof StyleMap, string>;
+  function cssWithVariants<
+    Data extends Record<string | number, RestrictedCSSRule>,
+    Key extends keyof Data,
+    MapData extends (value: Data[Key], key: Key) => ComplexCSSRule
+  >(data: Data, mapData: MapData, debugId?: string): Record<keyof Data, string>;
+  function cssWithVariants<
+    Data extends Record<string | number, RestrictedCSSRule>,
+    MapData extends (
+      value: unknown,
+      key: string | number | symbol
+    ) => ComplexCSSRule
+  >(
+    styleMapOrData: Data,
+    mapDataOrDebugId?: MapData | string,
+    debugId?: string
+  ): Record<string | number, string> {
+    if (isMapDataFunction(mapDataOrDebugId)) {
+      return cssMultiple(
+        styleMapOrData,
+        (value, key) => mapDataOrDebugId(cssFunction(value), key),
+        debugId
+      );
+    } else {
+      return cssMultiple(styleMapOrData, cssFunction, mapDataOrDebugId);
+    }
+  }
+
+  return Object.assign(cssWithImpl, {
+    raw: cssWithRaw,
+    multiple: cssWithVariants
+  });
+}
+
 export const css = Object.assign(cssImpl, {
   raw: cssRaw,
-  multiple: cssVariants
+  multiple: cssMultiple,
+  with: cssWith
 });
 
 // == CSS Variants =============================================================
 // TODO: Need to optimize
 // https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Functions/get#smart_self-overwriting_lazy_getters
 // https://github.com/vanilla-extract-css/vanilla-extract/blob/master/packages/css/src/style.ts
-export function cssVariants<
+export function cssMultiple<
   StyleMap extends Record<string | number, ComplexCSSRule>
 >(styleMap: StyleMap, debugId?: string): Record<keyof StyleMap, string>;
-export function cssVariants<
+export function cssMultiple<
   Data extends Record<string | number, unknown>,
   Key extends keyof Data,
   MapData extends (value: Data[Key], key: Key) => ComplexCSSRule
 >(data: Data, mapData: MapData, debugId?: string): Record<keyof Data, string>;
-export function cssVariants<
+export function cssMultiple<
   StyleMap extends Record<string | number, ComplexCSSRule>,
   Data extends Record<string | number, unknown>,
-  MapData extends (value: unknown, key: string | number) => ComplexCSSRule
+  MapData extends (
+    value: unknown,
+    key: string | number | symbol
+  ) => ComplexCSSRule
 >(
   styleMapOrData: StyleMap | Data,
   mapDataOrDebugId?: MapData | string,
@@ -217,6 +271,23 @@ if (import.meta.vitest) {
     });
   });
 
+  describe.concurrent("css.raw()", () => {
+    it("handles simple CSS properties", () => {
+      const style = {
+        color: "red",
+        fontSize: 16,
+        padding: "10px"
+      };
+      const result = css.raw(style);
+
+      expect(result).toEqual({
+        color: "red",
+        fontSize: 16,
+        padding: "10px"
+      });
+    });
+  });
+
   describe.concurrent("css.multiple()", () => {
     it("Variants", () => {
       const result = css.multiple(
@@ -271,7 +342,105 @@ if (import.meta.vitest) {
         className(`${debugId}_secondary`, "base")
       );
     });
-
-    // TODO: Mocking globalCSS() for Variant Reference
   });
+
+  describe.concurrent("css.with()", () => {
+    it("css.with() with type restrictions", () => {
+      const myCss = css.with<{
+        color: true;
+        background: "blue" | "grey";
+        border: false;
+      }>();
+
+      myCss({
+        color: "red", // Allow all properties
+        background: "blue", // Only some properties are allowed
+        // @ts-expect-error: border is not allowed
+        border: "none"
+      });
+      myCss({
+        // @ts-expect-error: background is allowed only "blue" or "grey"
+        background: "red"
+      });
+    });
+
+    it("Basic callback transformation", () => {
+      const withRedBackground = css.with((style) => ({
+        ...style,
+        backgroundColor: "red"
+      }));
+
+      const result = withRedBackground({ color: "blue" }, debugId);
+
+      assert.isString(result);
+      expect(result).toMatch(className(debugId));
+    });
+
+    it("css.with().raw()", () => {
+      const withRedBackground = css.with((style) => ({
+        ...style,
+        backgroundColor: "red"
+      }));
+
+      const result = withRedBackground.raw({ color: "blue" });
+
+      expect(result).toEqual({
+        color: "blue",
+        backgroundColor: "red"
+      });
+    });
+
+    it("css.with().multiple()", () => {
+      const withRedBackground = css.with((style) => ({
+        ...style,
+        backgroundColor: "red"
+      }));
+
+      const result = withRedBackground.multiple(
+        {
+          primary: { color: "blue" },
+          secondary: { color: "green" }
+        },
+        debugId
+      );
+
+      assert.hasAllKeys(result, ["primary", "secondary"]);
+      expect(result.primary).toMatch(className(`${debugId}_primary`));
+      expect(result.secondary).toMatch(className(`${debugId}_secondary`));
+    });
+
+    it("css.with() with like mixin", () => {
+      const myCss = css.with<{ size: number; radius?: number }>(
+        ({ size, radius = 10 }) => {
+          const styles: CSSRule = {
+            width: size,
+            height: size
+          };
+
+          if (radius !== 0) {
+            styles.borderRadius = radius;
+          }
+
+          return styles;
+        }
+      );
+
+      expect(myCss.raw({ size: 100 })).toStrictEqual({
+        width: 100,
+        height: 100,
+        borderRadius: 10
+      });
+      expect(myCss.raw({ size: 100, radius: 0 })).toStrictEqual({
+        width: 100,
+        height: 100
+      });
+      expect(myCss.raw({ size: 100, radius: 100 })).toStrictEqual({
+        width: 100,
+        height: 100,
+        borderRadius: 100
+      });
+    });
+  });
+
+  // TODO: Mocking globalCSS() for Variant Reference
 }

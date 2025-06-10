@@ -3,4 +3,6 @@
 "@mincho-js/css": minor
 ---
 
-css.multiple() API
+## New
+
+- Add `css.multiple()` API
