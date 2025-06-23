@@ -56,14 +56,14 @@
     "@mincho-js/css": "workspace:^",
     "@mincho-js/integration": "workspace:^",
     "@mincho-js/transform-to-vanilla": "workspace:^",
-    "@rollup/pluginutils": "^5.1.4",
-    "@vanilla-extract/integration": "^8.0.2"
+    "@rollup/pluginutils": "^5.2.0",
+    "@vanilla-extract/integration": "^8.0.4"
   },
   "devDependencies": {
     "@types/babel__core": "^7.20.5",
     "@types/node": "^22.15.30",
-    "@vanilla-extract/css": "^1.17.2",
-    "@vanilla-extract/recipes": "^0.5.5",
+    "@vanilla-extract/css": "^1.17.4",
+    "@vanilla-extract/recipes": "^0.5.7",
     "eslint-config-custom": "workspace:^",
     "prettier-config-custom": "workspace:^",
     "tsconfig-custom": "workspace:^",
