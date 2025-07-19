@@ -14,7 +14,14 @@ import { style as vStyle, globalStyle as gStyle } from "@vanilla-extract/css";
 import type { GlobalStyleRule } from "@vanilla-extract/css";
 import { className, getDebugName } from "../utils.js";
 
-// == Global CSS ===============================================================
+/**
+ * Applies a global CSS rule to the specified selector, supporting nested at-rules.
+ *
+ * Transforms the provided rule and applies it globally, including any nested at-rules such as `@media` or `@supports`.
+ *
+ * @param selector - The CSS selector to which the global rule will be applied
+ * @param rule - The global CSS rule object to apply
+ */
 export function globalCss(selector: string, rule: GlobalCSSRule) {
   const transformedStyle = transform({
     selectors: {
@@ -100,7 +107,15 @@ function hoistSelectors(input: CSSRule): HoistResult {
   return result;
 }
 
-// == CSS ======================================================================
+/**
+ * Creates a CSS class from a complex style rule.
+ *
+ * Transforms the provided style rule and generates a class name using vanilla-extract.
+ *
+ * @param style - The complex CSS rule to transform and apply
+ * @param debugId - Optional identifier for debugging or naming the class
+ * @returns The generated CSS class name
+ */
 export function css(style: ComplexCSSRule, debugId?: string) {
   return vStyle(transform(style), debugId);
 }
@@ -117,6 +132,16 @@ export function cssVariants<
   Key extends keyof Data,
   MapData extends (value: Data[Key], key: Key) => ComplexCSSRule
 >(data: Data, mapData: MapData, debugId?: string): Record<keyof Data, string>;
+/**
+ * Generates a map of class names for style variants, supporting both direct style maps and data-to-style mapping functions.
+ *
+ * Accepts either a map of style objects keyed by variant names, or a data object with a mapping function that produces style rules for each key.
+ *
+ * @param styleMapOrData - Either a style map or a data object to generate variants from
+ * @param mapDataOrDebugId - A mapping function to convert data items to style rules, or a debug identifier if using a style map
+ * @param debugId - Optional debug identifier for naming the generated classes
+ * @returns A map of variant keys to generated class names
+ */
 export function cssVariants<
   StyleMap extends Record<string | number, ComplexCSSRule>,
   Data extends Record<string | number, unknown>,
@@ -137,6 +162,11 @@ export function cssVariants<
   }
 }
 
+/**
+ * Type guard that determines if the provided argument is a mapping function for variant data.
+ *
+ * @returns `true` if the argument is a function; otherwise, `false`
+ */
 function isMapDataFunction<
   Data extends Record<string | number, unknown>,
   Key extends keyof Data,

@@ -3,12 +3,11 @@ import type { PluginState, ProgramScope } from "@/types.js";
 import { registerImportMethod } from "@/utils.js";
 
 /**
- * The plugin for transforming styled components
+ * Babel plugin that transforms `styled` calls from "@mincho-js/react" into runtime calls with tree-shaking annotations.
  *
- * This plugin transforms calls to `styled` from "@mincho-js/react" into runtime
- * calls with proper tree-shaking annotations.
+ * Replaces calls to `styled` with calls to runtime-imported `$$styled` and `rules`, preserving comments and source locations for accurate source maps. Ensures transformed calls are annotated for tree-shaking and updates scope references after transformation.
  *
- * @returns The plugin object
+ * @returns A Babel plugin object for transforming styled component calls.
  */
 export function styledComponentPlugin(): PluginObj<PluginState> {
   return {

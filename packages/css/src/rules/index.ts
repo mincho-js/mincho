@@ -47,6 +47,13 @@ function setCSSProperty(
   styles[property] = value;
 }
 
+/**
+ * Creates a runtime CSS style function supporting variants, toggle variants, compound variants, and CSS property variables.
+ *
+ * @param options - Pattern options defining base styles, variants, toggles, compound variants, default variants, and props
+ * @param debugId - Optional identifier used for debugging and naming generated classes and variables
+ * @returns A runtime function that generates class names and CSS variable mappings based on selected variants and props
+ */
 export function rules<
   Variants extends VariantGroups | undefined = undefined,
   ToggleVariants extends VariantDefinitions | undefined = undefined,
@@ -185,6 +192,16 @@ export function rules<
   );
 }
 
+/**
+ * Processes a prop definition object to generate CSS variables and assign them to specified CSS properties.
+ *
+ * For each prop, creates a CSS variable (optionally with a debug name), stores its key in `propVars`, and sets the variable as the value for each target CSS property in `propStyles`. If a base value is provided, uses it as a fallback.
+ *
+ * @param props - The prop definitions mapping prop names to their configuration
+ * @param propVars - Object to store generated CSS variable keys for each prop
+ * @param propStyles - CSS rule object to which the variables are assigned as property values
+ * @param debugId - Optional identifier used for debugging and variable naming
+ */
 function processPropObject<Target extends PropTarget>(
   props: PropDefinition<Target>,
   propVars: Record<string, PureCSSVarKey>,
