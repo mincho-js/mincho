@@ -38,7 +38,6 @@ export function globalCss(selector: string, rule: GlobalCSSRule) {
     });
   }
 }
-export const globalStyle = globalCss;
 
 // TODO: Make more type-safe
 type UnknownObject = Record<string, unknown>;
@@ -105,7 +104,6 @@ function hoistSelectors(input: CSSRule): HoistResult {
 export function css(style: ComplexCSSRule, debugId?: string) {
   return vStyle(transform(style), debugId);
 }
-export const style = css;
 
 // == CSS Variants =============================================================
 // TODO: Need to optimize
@@ -138,7 +136,6 @@ export function cssVariants<
     return processVariants(styleMap, (style) => style, debugId);
   }
 }
-export const styleVariants = cssVariants;
 
 function isMapDataFunction<
   Data extends Record<string | number, unknown>,
@@ -203,7 +200,7 @@ if (import.meta.vitest) {
     });
 
     it("composition", () => {
-      const base = style({ padding: 12 }, "base");
+      const base = css({ padding: 12 }, "base");
       const result = css([base, { color: "red" }], debugId);
 
       assert.isString(result);
@@ -244,7 +241,7 @@ if (import.meta.vitest) {
     });
 
     it("Mapping Variants with composition", () => {
-      const base = style({ padding: 12 }, "base");
+      const base = css({ padding: 12 }, "base");
       const result = cssVariants(
         {
           primary: "blue",

@@ -1,13 +1,13 @@
-import { globalStyle, keyframes, style } from "@mincho-js/css"
+import { globalCss, keyframes, css } from "@mincho-js/css"
 
-globalStyle("#root", {
+globalCss("#root", {
   maxWidth: "1280px",
   margin: "0 auto",
   padding: "2rem",
   textAlign: "center",
 });
 
-export const react = style({
+export const react = css({
 });
 const logoSpin = keyframes({
   "from": {
@@ -18,7 +18,7 @@ const logoSpin = keyframes({
   },
 });
 
-export const logo = style({
+export const logo = css({
   height: "6em",
   padding: "1.5em",
   willChange: "filter",
@@ -40,11 +40,11 @@ export const logo = style({
   },
 });
 
-export const card = style({
+export const card = css({
   padding: "2em",
 });
 
-export const readTheDocs = style({
+export const readTheDocs = css({
   color: "#888",
 });
 

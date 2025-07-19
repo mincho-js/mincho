@@ -1,6 +1,6 @@
-import { globalStyle } from "@mincho-js/css"
+import { globalCss } from "@mincho-js/css"
 
-globalStyle(":root", {
+globalCss(":root", {
   fontFamily: "Inter , system-ui , Avenir , Helvetica , Arial , sans-serif",
   lineHeight: "1.5",
   fontWeight: "400",
@@ -20,19 +20,19 @@ globalStyle(":root", {
   },
 });
 
-globalStyle("a", {
+globalCss("a", {
   fontWeight: "500",
   color: "#646cff",
   textDecoration: "inherit",
 });
-globalStyle("a:hover", {
+globalCss("a:hover", {
   color: "#535bf2",
   "@media (prefers-color-scheme: light)": {
     color: "#747bff",
   },
 });
 
-globalStyle("body", {
+globalCss("body", {
   margin: "0",
   display: "flex",
   placeItems: "center",
@@ -40,12 +40,12 @@ globalStyle("body", {
   minHeight: "100vh",
 });
 
-globalStyle("h1", {
+globalCss("h1", {
   fontSize: "3.2em",
   lineHeight: "1.1",
 });
 
-globalStyle("button", {
+globalCss("button", {
   borderRadius: "8px",
   border: "1px solid transparent",
   padding: "0.6em 1.2em",
@@ -60,11 +60,11 @@ globalStyle("button", {
   },
 });
 
-globalStyle("button:hover", {
+globalCss("button:hover", {
   borderColor: "#646cff",
 });
 
-globalStyle("button:focus, button:focus-visible", {
+globalCss("button:focus, button:focus-visible", {
   outline: "4px auto -webkit-focus-ring-color",
 });
 

@@ -70,6 +70,10 @@ export function getNearestIdentifier(path: NodePath<t.Node>) {
 export const extractionAPIs = [
   // @mincho-js/css
   "mincho$",
+  "css",
+  "cssVariants",
+  "globalCss",
+  "rules",
   // @vanilla-extract/css
   "style",
   "styleVariants",

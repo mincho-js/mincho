@@ -184,7 +184,6 @@ export function rules<
     }
   );
 }
-export const recipe = rules;
 
 function processPropObject<Target extends PropTarget>(
   props: PropDefinition<Target>,

@@ -55,7 +55,7 @@ export function styledComponentPlugin(): PluginObj<PluginState> {
 
               const recipeIdentifier = registerImportMethod(
                 callPath,
-                "recipe",
+                "rules",
                 "@mincho-js/css"
               );
 

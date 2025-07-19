@@ -1,10 +1,3 @@
-export type {
-  CSSProperties,
-  ComplexCSSRule,
-  GlobalCSSRule,
-  CSSRule
-} from "@mincho-js/transform-to-vanilla";
-
 export type { Adapter, FileScope } from "@vanilla-extract/css";
 export {
   assignVars,
@@ -25,8 +18,12 @@ export {
   layer
 } from "@vanilla-extract/css";
 
-export { globalCss, css, cssVariants } from "./css/index.js";
-export { rules } from "./rules/index.js";
+export {
+  globalCss as globalStyle,
+  css as style,
+  cssVariants as styleVariants
+} from "./css/index.js";
+
 export type {
   VariantStyle,
   RulesVariants,
@@ -42,3 +39,11 @@ export type {
   VariantObjectSelection,
   ResolveComplex
 } from "./rules/types.js";
+export { rules as recipe } from "./rules/index.js";
+
+export type {
+  CSSProperties,
+  ComplexCSSRule as ComplexStyleRule,
+  CSSRule as StyleRule,
+  GlobalCSSRule as GlobalStyleRule
+} from "@mincho-js/transform-to-vanilla";

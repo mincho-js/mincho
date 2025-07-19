@@ -10,7 +10,8 @@ export default (viteConfigEnv: ConfigEnv) => {
     build: {
       lib: {
         entry: {
-          // index: join(packageDir, "src", "index.ts"),
+          index: join(packageDir, "src", "index.ts"),
+          compat: join(packageDir, "src", "compat.ts"),
           "rules/createRuntimeFn": join(
             packageDir,
             "src",
