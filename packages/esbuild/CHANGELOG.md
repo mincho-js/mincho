@@ -1,5 +1,12 @@
 # @mincho-js/esbuild
 
+## 0.1.1
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @mincho-js/integration@0.1.1
+
 ## 0.1.0
 
 ### Minor Changes
