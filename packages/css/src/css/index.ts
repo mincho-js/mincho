@@ -346,22 +346,35 @@ if (import.meta.vitest) {
 
   describe.concurrent("css.with()", () => {
     it("css.with() with type restrictions", () => {
-      const myCss = css.with<{
+      const myCss1 = css.with<{
         color: true;
         background: "blue" | "grey";
         border: false;
       }>();
 
-      myCss({
+      myCss1({
         color: "red", // Allow all properties
         background: "blue", // Only some properties are allowed
         // @ts-expect-error: border is not allowed
         border: "none"
       });
-      myCss({
+      myCss1({
+        color: "red",
         // @ts-expect-error: background is allowed only "blue" or "grey"
         background: "red"
       });
+      // @ts-expect-error: color is required
+      myCss1({
+        background: "blue"
+      });
+      // @ts-expect-error: background is required
+      myCss1({
+        color: "red"
+      });
+
+      const myCss2 = css.with<{ size: number; radius?: number }>();
+      // @ts-expect-error: size is required
+      myCss2.raw({ radius: 10 });
     });
 
     it("Basic callback transformation", () => {

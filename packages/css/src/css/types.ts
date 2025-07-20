@@ -9,7 +9,7 @@ type IsRequired<T, K extends keyof T> =
 export type RestrictCSSRule<T extends CSSRule> = {
   [K in keyof T as T[K] extends false ? never : K]: T[K] extends true
     ? K extends keyof CSSRule
-      ? CSSRule[K]
+      ? NonNullable<CSSRule[K]>
       : never
     : T[K];
 } extends infer U
