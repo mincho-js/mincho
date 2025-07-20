@@ -1,5 +1,12 @@
 # @mincho-js/integration
 
+## 0.1.1
+
+### Patch Changes
+
+- Updated dependencies [[`90cde80`](https://github.com/mincho-js/mincho/commit/90cde801cc0133649869bfed9c2e053aa600f6db), [`ee6e517`](https://github.com/mincho-js/mincho/commit/ee6e51736f26effa8bcb72d8d5cd907c2de629d8)]:
+  - @mincho-js/babel@0.2.0
+
 ## 0.1.0
 
 ### Minor Changes
