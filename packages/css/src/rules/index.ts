@@ -47,7 +47,7 @@ function setCSSProperty(
   styles[property] = value;
 }
 
-export function rules<
+export function rulesImpl<
   Variants extends VariantGroups | undefined = undefined,
   ToggleVariants extends VariantDefinitions | undefined = undefined,
   Props extends ComplexPropDefinitions<PropTarget> | undefined = undefined
@@ -185,6 +185,18 @@ export function rules<
   );
 }
 
+function rulesRaw<
+  Variants extends VariantGroups | undefined = undefined,
+  ToggleVariants extends VariantDefinitions | undefined = undefined,
+  Props extends ComplexPropDefinitions<PropTarget> | undefined = undefined
+>(options: PatternOptions<Variants, ToggleVariants, Props>) {
+  return options;
+}
+
+export const rules = Object.assign(rulesImpl, {
+  raw: rulesRaw
+});
+
 function processPropObject<Target extends PropTarget>(
   props: PropDefinition<Target>,
   propVars: Record<string, PureCSSVarKey>,
@@ -224,7 +236,7 @@ function processCompoundStyle(
 if (import.meta.vitest) {
   // eslint-disable-next-line @typescript-eslint/ban-ts-comment
   // @ts-ignore error TS1343: The 'import.meta' meta-property is only allowed when the '--module' option is 'es2020', 'es2022', 'esnext', 'system', 'node16', or 'nodenext'.
-  const { describe, it, assert, expect } = import.meta.vitest;
+  const { describe, it, assert, expect, assertType } = import.meta.vitest;
 
   const debugId = "myCSS";
   setFileScope("test");
@@ -881,6 +893,136 @@ if (import.meta.vitest) {
           expect(varName).toMatch(className(`--${debugId}_size`));
         }
       });
+    });
+  });
+
+  describe.concurrent("rules.raw()", () => {
+    it("handles simple Rule properties", () => {
+      const ruleObj1 = rules.raw({
+        base: { color: "red" }
+      });
+      assertType<PatternOptions<undefined, undefined, undefined>>(ruleObj1);
+      expect(ruleObj1).toStrictEqual({
+        base: { color: "red" }
+      });
+      rules(ruleObj1); // Ensure it can be used with rules()
+
+      const ruleObj2 = rules.raw({
+        variants: {
+          color: {
+            brand: { color: "#FFFFA0" },
+            accent: { color: "#FFE4B5" }
+          },
+          size: {
+            small: { padding: 12 },
+            medium: { padding: 16 },
+            large: { padding: 24 }
+          },
+          outlined: {
+            true: { border: "1px solid black" },
+            false: { border: "1px solid transparent" }
+          }
+        }
+      });
+      assertType<
+        PatternOptions<
+          {
+            color: {
+              brand: { color: "#FFFFA0" };
+              accent: { color: "#FFE4B5" };
+            };
+            size: {
+              small: { padding: number };
+              medium: { padding: number };
+              large: { padding: number };
+            };
+            outlined: {
+              true: { border: "1px solid black" };
+              false: { border: "1px solid transparent" };
+            };
+          },
+          undefined,
+          undefined
+        >
+      >(ruleObj2);
+      expect(ruleObj2).toStrictEqual({
+        variants: {
+          color: {
+            brand: { color: "#FFFFA0" },
+            accent: { color: "#FFE4B5" }
+          },
+          size: {
+            small: { padding: 12 },
+            medium: { padding: 16 },
+            large: { padding: 24 }
+          },
+          outlined: {
+            true: { border: "1px solid black" },
+            false: { border: "1px solid transparent" }
+          }
+        }
+      });
+      rules(ruleObj2); // Ensure it can be used with rules()
+
+      const ruleObj3 = rules.raw({
+        toggles: {
+          disabled: { textDecoration: "line-through" },
+          rounded: { borderRadius: 999 }
+        }
+      });
+      assertType<
+        PatternOptions<
+          undefined,
+          {
+            disabled: { textDecoration: "line-through" };
+            rounded: { borderRadius: number };
+          },
+          undefined
+        >
+      >(ruleObj3);
+      expect(ruleObj3).toStrictEqual({
+        toggles: {
+          disabled: { textDecoration: "line-through" },
+          rounded: { borderRadius: 999 }
+        }
+      });
+      rules(ruleObj3); // Ensure it can be used with rules()
+
+      const ruleObj4 = rules.raw({
+        props: [
+          "color",
+          "background",
+          {
+            rounded: { targets: ["borderRadius"] },
+            size: { base: 0, targets: ["padding", "margin"] }
+          }
+        ]
+      });
+      assertType<
+        PatternOptions<
+          undefined,
+          undefined,
+          Array<
+            | "color"
+            | "background"
+            | {
+                rounded: { targets: Array<"borderRadius"> };
+                size: { base: number; targets: Array<"padding" | "margin"> };
+              }
+          >
+        >
+      >(ruleObj4);
+      expect(ruleObj4).toStrictEqual({
+        props: [
+          "color",
+          "background",
+          {
+            rounded: { targets: ["borderRadius"] },
+            size: { base: 0, targets: ["padding", "margin"] }
+          }
+        ]
+      });
+      rules(ruleObj4); // Ensure it can be used with rules()
     });
   });
 }
