@@ -13,7 +13,7 @@ import { setFileScope } from "@vanilla-extract/css/fileScope";
 import { style as vStyle, globalStyle as gStyle } from "@vanilla-extract/css";
 import type { GlobalStyleRule } from "@vanilla-extract/css";
 import { className, getDebugName } from "../utils.js";
-import type { RestrictCSSRule } from "./types.js";
+import type { CSSRuleWith } from "./types.js";
 
 // == Global CSS ===============================================================
 export function globalCss(selector: string, rule: GlobalCSSRule) {
@@ -111,9 +111,9 @@ function cssRaw(style: ComplexCSSRule) {
 }
 
 function cssWith<const T extends CSSRule>(
-  callback?: (style: RestrictCSSRule<T>) => ComplexCSSRule
+  callback?: (style: CSSRuleWith<T>) => ComplexCSSRule
 ) {
-  type RestrictedCSSRule = RestrictCSSRule<T>;
+  type RestrictedCSSRule = CSSRuleWith<T>;
   const cssFunction = callback ?? ((style: RestrictedCSSRule) => style);
 
   function cssWithImpl(style: RestrictedCSSRule, debugId?: string) {

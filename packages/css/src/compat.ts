@@ -23,11 +23,11 @@ export {
   css as style,
   cssMultiple as styleVariants
 } from "./css/index.js";
+export type { CSSRuleWith as StyleRuleWith } from "./css/types.js";
 
 export type {
   VariantStyle,
   RulesVariants,
-  RecipeVariants,
   RuntimeFn,
   VariantGroups,
   PatternOptions,

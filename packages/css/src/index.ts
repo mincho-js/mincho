@@ -26,11 +26,11 @@ export {
 } from "@vanilla-extract/css";
 
 export { globalCss, css } from "./css/index.js";
+export type { CSSRuleWith } from "./css/types.js";
 export { rules } from "./rules/index.js";
 export type {
   VariantStyle,
-  RulesVariants,
-  RecipeVariants,
+  RulesVariants as RecipeVariants,
   RuntimeFn,
   VariantGroups,
   PatternOptions,

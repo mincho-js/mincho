@@ -6,6 +6,7 @@ import type {
   NonNullableString
 } from "@mincho-js/transform-to-vanilla";
 import type { Resolve } from "../types.js";
+import type { CSSRuleWith } from "../css/types.js";
 
 export type ResolveComplex<T> =
   T extends Array<infer U> ? Array<Resolve<U>> : Resolve<T>;
@@ -33,7 +34,9 @@ export type VariantStyle<
   VariantNames extends string,
   CssRule extends RecipeStyleRule = RecipeStyleRule
 > = {
-  [VariantName in VariantNames]: CssRule;
+  [VariantName in VariantNames]: CssRule extends CSSRule
+    ? CSSRuleWith<CssRule>
+    : CssRule;
 };
 
 // Same of VariantMap but for fast type checking
@@ -210,12 +213,6 @@ export type RulesVariants<
     ComplexPropDefinitions<PropTarget | undefined>
   >
 > = ResolveComplex<Parameters<RuleFn>[0]>;
-export type RecipeVariants<
-  RecipeFn extends RuntimeFn<
-    VariantGroups,
-    ComplexPropDefinitions<PropTarget | undefined>
-  >
-> = RulesVariants<RecipeFn>;
 
 // == Tests ====================================================================
 // Ignore errors when compiling to CommonJS.
