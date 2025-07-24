@@ -248,7 +248,7 @@ export function mincho$<T>(block: () => T) {
 if (import.meta.vitest) {
   // eslint-disable-next-line @typescript-eslint/ban-ts-comment
   // @ts-ignore error TS1343: The 'import.meta' meta-property is only allowed when the '--module' option is 'es2020', 'es2022', 'esnext', 'system', 'node16', or 'nodenext'.
-  const { describe, it, assert, expect } = import.meta.vitest;
+  const { describe, it, assert, expect, vi } = import.meta.vitest;
 
   const debugId = "myCSS";
   setFileScope("test");
@@ -341,6 +341,173 @@ if (import.meta.vitest) {
       expect(result.secondary).toMatch(
         className(`${debugId}_secondary`, "base")
       );
+    });
+
+    // Additional comprehensive test cases for css.multiple()
+    it("Empty variants", () => {
+      const result = css.multiple({}, debugId);
+
+      assert.isEmpty(result);
+      expect(Object.keys(result)).to.have.lengthOf(0);
+    });
+
+    it("Single variant", () => {
+      const result = css.multiple(
+        {
+          primary: { background: "blue" }
+        },
+        debugId
+      );
+
+      assert.hasAllKeys(result, ["primary"]);
+      expect(result.primary).toMatch(className(`${debugId}_primary`));
+    });
+
+    it("Complex composition with multiple base styles", () => {
+      const base1 = css({ padding: 12 }, "base1");
+      const base2 = css({ margin: 8 }, "base2");
+      const result = css.multiple(
+        {
+          primary: [base1, base2, { background: "blue" }],
+          secondary: [base1, { background: "aqua" }]
+        },
+        debugId
+      );
+
+      assert.hasAllKeys(result, ["primary", "secondary"]);
+      expect(result.primary).toMatch(
+        className(`${debugId}_primary`, "base1", "base2")
+      );
+      expect(result.secondary).toMatch(
+        className(`${debugId}_secondary`, "base1")
+      );
+    });
+
+    it("String class composition", () => {
+      const baseClass = "existing-class";
+      const result = css.multiple(
+        {
+          primary: [baseClass, { background: "blue" }],
+          secondary: [baseClass, { background: "aqua" }]
+        },
+        debugId
+      );
+
+      assert.hasAllKeys(result, ["primary", "secondary"]);
+      // String classes get composed into the final class name
+      expect(result.primary).to.include(`${debugId}_primary`);
+      expect(result.primary).to.include("existing-class");
+      expect(result.secondary).to.include(`${debugId}_secondary`);
+      expect(result.secondary).to.include("existing-class");
+    });
+
+    it("Mapping with complex transformation", () => {
+      const colorPalette = {
+        primary: { color: "blue", shade: "dark" },
+        secondary: { color: "green", shade: "light" },
+        accent: { color: "red", shade: "medium" }
+      };
+
+      const result = css.multiple(
+        colorPalette,
+        ({ color, shade }) => ({
+          background: color,
+          opacity: shade === "dark" ? 0.8 : shade === "light" ? 0.4 : 0.6,
+          borderColor: color
+        }),
+        debugId
+      );
+
+      assert.hasAllKeys(result, ["primary", "secondary", "accent"]);
+      expect(result.primary).toMatch(className(`${debugId}_primary`));
+      expect(result.secondary).toMatch(className(`${debugId}_secondary`));
+      expect(result.accent).toMatch(className(`${debugId}_accent`));
+    });
+
+    it("Mapping with complex transformation", async () => {
+      const colorPalette = {
+        primary: { color: "blue", shade: "dark" },
+        secondary: { color: "green", shade: "light" },
+        accent: { color: "red", shade: "medium" }
+      };
+
+      // Define mapping function
+      const mappingFunction = ({
+        color,
+        shade
+      }: {
+        color: string;
+        shade: string;
+      }) => ({
+        background: color,
+        opacity: shade === "dark" ? 0.8 : shade === "light" ? 0.4 : 0.6,
+        borderColor: color
+      });
+
+      // 1. Unit test for mapping function - verify each item is converted to correct style object
+      const primaryStyle = mappingFunction(colorPalette.primary);
+      const secondaryStyle = mappingFunction(colorPalette.secondary);
+      const accentStyle = mappingFunction(colorPalette.accent);
+
+      // Validate transformed style objects
+      expect(primaryStyle).toEqual({
+        background: "blue",
+        opacity: 0.8,
+        borderColor: "blue"
+      });
+
+      expect(secondaryStyle).toEqual({
+        background: "green",
+        opacity: 0.4,
+        borderColor: "green"
+      });
+
+      expect(accentStyle).toEqual({
+        background: "red",
+        opacity: 0.6,
+        borderColor: "red"
+      });
+
+      // 2. Verify internal behavior of css.multiple with transform function mocking
+      const transformSpy = vi.spyOn(
+        await import("@mincho-js/transform-to-vanilla"),
+        "transform"
+      );
+
+      const result = css.multiple(colorPalette, mappingFunction, debugId);
+
+      // Verify that transform function was called with correct style objects
+      expect(transformSpy).toHaveBeenCalledTimes(3);
+
+      // Validate style objects passed in each call
+      const transformCalls = transformSpy.mock.calls;
+      expect(transformCalls[0][0]).toEqual(primaryStyle); // primary
+      expect(transformCalls[1][0]).toEqual(secondaryStyle); // secondary
+      expect(transformCalls[2][0]).toEqual(accentStyle); // accent
+
+      // Test existing class name generation
+      assert.hasAllKeys(result, ["primary", "secondary", "accent"]);
+      expect(result.primary).toMatch(className(`${debugId}_primary`));
+      expect(result.secondary).toMatch(className(`${debugId}_secondary`));
+      expect(result.accent).toMatch(className(`${debugId}_accent`));
+
+      // Verify that each result is a valid CSS class name string
+      expect(typeof result.primary).toBe("string");
+      expect(typeof result.secondary).toBe("string");
+      expect(typeof result.accent).toBe("string");
+
+      // Verify that class names are not empty
+      expect(result.primary.length).toBeGreaterThan(0);
+      expect(result.secondary.length).toBeGreaterThan(0);
+      expect(result.accent.length).toBeGreaterThan(0);
+
+      // Verify that different class names are generated for each case (no duplicates)
+      expect(result.primary).not.toBe(result.secondary);
+      expect(result.secondary).not.toBe(result.accent);
+      expect(result.primary).not.toBe(result.accent);
+
+      // Clean up spy
+      transformSpy.mockRestore();
     });
   });
 
@@ -454,6 +621,4 @@ if (import.meta.vitest) {
       });
     });
   });
-
-  // TODO: Mocking globalCSS() for Variant Reference
 }
