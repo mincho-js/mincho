@@ -2,6 +2,8 @@
 "@mincho-js/css": minor
 ---
 
-**New**
+**css**
+
+## New
 
 - Add `rules.raw()` API
