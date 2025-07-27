@@ -28,7 +28,7 @@ export type Serializable =
     }
   | ReadonlyArray<Primitive | Serializable>;
 
-type RecipeStyleRule = ComplexCSSRule | string;
+export type RecipeStyleRule = ComplexCSSRule | string;
 
 export type VariantStyle<
   VariantNames extends string,

@@ -27,7 +27,8 @@ import type {
   PropVars,
   Serializable,
   VariantStringMap,
-  VariantStyle
+  VariantStyle,
+  RecipeStyleRule
 } from "./types.js";
 import {
   mapValues,
@@ -185,6 +186,163 @@ export function rulesImpl<
   );
 }
 
+// Improved type-safe transformations that preserve pattern structure
+type RuntimeFnFromPatternOptions<Options> =
+  Options extends PatternOptions<
+    infer Variants extends VariantGroups | undefined,
+    infer ToggleVariants extends VariantDefinitions | undefined,
+    infer Props extends ComplexPropDefinitions<PropTarget> | undefined
+  >
+    ? RuntimeFn<
+        ConditionalVariants<Variants, ToggleVariants>,
+        Exclude<Props, undefined>
+      >
+    : never;
+
+type TransformPatternMap<
+  T extends Record<
+    string | number,
+    PatternOptions<
+      VariantGroups | undefined,
+      VariantDefinitions | undefined,
+      ComplexPropDefinitions<PropTarget> | undefined
+    >
+  >
+> = {
+  [K in keyof T]: RuntimeFnFromPatternOptions<T[K]>;
+};
+
+type TransformDataMapping<
+  Data extends Record<string | number, unknown>,
+  MapData extends (
+    value: Data[keyof Data],
+    key: keyof Data
+  ) => PatternOptions<
+    VariantGroups | undefined,
+    VariantDefinitions | undefined,
+    ComplexPropDefinitions<PropTarget> | undefined
+  >
+> = {
+  [K in keyof Data]: MapData extends (value: Data[K], key: K) => infer Options
+    ? RuntimeFnFromPatternOptions<Options>
+    : RuntimeFnFromPatternOptions<ReturnType<MapData>>;
+};
+
+export function rulesMultiple<
+  PatternMap extends Record<
+    string | number,
+    PatternOptions<
+      VariantGroups | undefined,
+      VariantDefinitions | undefined,
+      ComplexPropDefinitions<PropTarget> | undefined
+    >
+  >
+>(patternMap: PatternMap, debugId?: string): TransformPatternMap<PatternMap>;
+export function rulesMultiple<
+  Data extends Record<string | number, unknown>,
+  MapData extends (
+    value: Data[keyof Data],
+    key: keyof Data
+  ) => PatternOptions<
+    VariantGroups | undefined,
+    VariantDefinitions | undefined,
+    ComplexPropDefinitions<PropTarget> | undefined
+  >
+>(
+  data: Data,
+  mapData: MapData,
+  debugId?: string
+): TransformDataMapping<Data, MapData>;
+export function rulesMultiple<
+  PatternMap extends Record<
+    string | number,
+    PatternOptions<
+      VariantGroups | undefined,
+      VariantDefinitions | undefined,
+      ComplexPropDefinitions<PropTarget> | undefined
+    >
+  >,
+  Data extends Record<string | number, unknown>,
+  MapData extends (
+    value: unknown,
+    key: string | number | symbol
+  ) => PatternOptions<
+    VariantGroups | undefined,
+    VariantDefinitions | undefined,
+    ComplexPropDefinitions<PropTarget> | undefined
+  >
+>(
+  patternMapOrData: PatternMap | Data,
+  mapDataOrDebugId?: MapData | string,
+  debugId?: string
+): TransformPatternMap<PatternMap> | TransformDataMapping<Data, MapData> {
+  if (isMapDataFunction(mapDataOrDebugId)) {
+    const data = patternMapOrData as Data;
+    const mapData = mapDataOrDebugId;
+    return processMultipleRules(data, mapData, debugId) as TransformDataMapping<
+      Data,
+      MapData
+    >;
+  } else {
+    const patternMap = patternMapOrData as PatternMap;
+    const debugId = mapDataOrDebugId;
+    return processMultipleRules(
+      patternMap,
+      (pattern) => pattern,
+      debugId
+    ) as TransformPatternMap<PatternMap>;
+  }
+}
+
+function isMapDataFunction<
+  Data extends Record<string | number, unknown>,
+  Key extends keyof Data,
+  MapData extends (
+    value: Data[Key],
+    key: Key
+  ) => PatternOptions<
+    VariantGroups | undefined,
+    VariantDefinitions | undefined,
+    ComplexPropDefinitions<PropTarget> | undefined
+  >
+>(mapDataOrDebugId?: MapData | string): mapDataOrDebugId is MapData {
+  return typeof mapDataOrDebugId === "function";
+}
+function processMultipleRules<
+  T,
+  Variants extends VariantGroups | undefined = undefined,
+  ToggleVariants extends VariantDefinitions | undefined = undefined,
+  Props extends ComplexPropDefinitions<PropTarget> | undefined = undefined
+>(
+  items: Record<string | number, T>,
+  transformItem: (
+    value: T,
+    key: string | number
+  ) => PatternOptions<Variants, ToggleVariants, Props>,
+  debugId?: string
+): Record<
+  string | number,
+  RuntimeFn<
+    ConditionalVariants<Variants, ToggleVariants>,
+    Exclude<Props, undefined>
+  >
+> {
+  const patternsMap: Record<
+    string | number,
+    RuntimeFn<
+      ConditionalVariants<Variants, ToggleVariants>,
+      Exclude<Props, undefined>
+    >
+  > = {};
+
+  for (const key in items) {
+    const pattern = transformItem(items[key], key);
+    patternsMap[key] = rulesImpl(pattern, getDebugName(debugId, key));
+  }
+
+  return patternsMap;
+}
+
 function rulesRaw<
   Variants extends VariantGroups | undefined = undefined,
   ToggleVariants extends VariantDefinitions | undefined = undefined,
@@ -194,6 +352,7 @@ function rulesRaw<
 }
 
 export const rules = Object.assign(rulesImpl, {
+  multiple: rulesMultiple,
   raw: rulesRaw
 });
 
@@ -220,7 +379,7 @@ function processPropObject<Target extends PropTarget>(
 }
 
 function processCompoundStyle(
-  style: ComplexCSSRule | string,
+  style: RecipeStyleRule,
   debugId: string | undefined,
   index: number
 ): string {
@@ -1023,6 +1182,162 @@ if (import.meta.vitest) {
         ]
       });
       rules(ruleObj4); // Ensure it can be used with rules()
+    });
+  });
+
+  describe.concurrent("rules.multiple()", () => {
+    it("Empty pattern map", () => {
+      const result = rules.multiple({}, debugId);
+
+      assert.isEmpty(result);
+      expect(Object.keys(result)).to.have.lengthOf(0);
+    });
+
+    it("Static pattern map", () => {
+      const result = rules.multiple(
+        {
+          button: {
+            base: { padding: 12 },
+            variants: {
+              variant: {
+                primary: { background: "blue" },
+                secondary: { background: "gray" }
+              }
+            }
+          },
+          input: {
+            base: { padding: 8 },
+            variants: {
+              state: {
+                error: { borderColor: "red" },
+                success: { borderColor: "green" }
+              }
+            }
+          }
+        },
+        debugId
+      );
+
+      assert.hasAllKeys(result, ["button", "input"]);
+
+      // Each result should be a function (RuntimeFn)
+      assert.isFunction(result.button);
+      assert.isFunction(result.input);
+
+      // Check button pattern
+      assert.hasAllKeys(result.button, ["props", "variants", "classNames"]);
+      assert.hasAllKeys(result.button.classNames, ["base", "variants"]);
+      expect(result.button()).toMatch(className(`${debugId}_button`));
+      expect(result.button.classNames.base).toMatch(
+        className(`${debugId}_button`)
+      );
+      assert.hasAllKeys(result.button.classNames.variants, ["variant"]);
+      assert.hasAllKeys(result.button.classNames.variants.variant, [
+        "primary",
+        "secondary"
+      ]);
+
+      // Check input pattern
+      assert.hasAllKeys(result.input, ["props", "variants", "classNames"]);
+      assert.hasAllKeys(result.input.classNames, ["base", "variants"]);
+      expect(result.input()).toMatch(className(`${debugId}_input`));
+      expect(result.input.classNames.base).toMatch(
+        className(`${debugId}_input`)
+      );
+      assert.hasAllKeys(result.input.classNames.variants, ["state"]);
+      assert.hasAllKeys(result.input.classNames.variants.state, [
+        "error",
+        "success"
+      ]);
+
+      // Test usage
+      expect(result.button({ variant: "primary" })).toMatch(
+        className(`${debugId}_button`, `${debugId}_button_variant_primary`)
+      );
+      expect(result.input({ state: "error" })).toMatch(
+        className(`${debugId}_input`, `${debugId}_input_state_error`)
+      );
+    });
+
+    it("Data mapping with theme variations", () => {
+      const result = rules.multiple(
+        {
+          light: { bg: "#ffffff", text: "#000000" },
+          dark: { bg: "#1a1a1a", text: "#ffffff" }
+        },
+        (colors, _themeName) => ({
+          base: {
+            backgroundColor: colors.bg,
+            color: colors.text
+          },
+          variants: {
+            emphasis: {
+              subtle: { opacity: 0.7 },
+              strong: { fontWeight: "bold" }
+            }
+          }
+        }),
+        debugId
+      );
+
+      assert.hasAllKeys(result, ["light", "dark"]);
+
+      // Each result should be a function (RuntimeFn)
+      assert.isFunction(result.light);
+      assert.isFunction(result.dark);
+
+      // Check light theme pattern
+      assert.hasAllKeys(result.light, ["props", "variants", "classNames"]);
+      expect(result.light()).toMatch(className(`${debugId}_light`));
+      assert.hasAllKeys(result.light.classNames.variants, ["emphasis"]);
+      assert.hasAllKeys(result.light.classNames.variants.emphasis, [
+        "subtle",
+        "strong"
+      ]);
+
+      // Check dark theme pattern
+      assert.hasAllKeys(result.dark, ["props", "variants", "classNames"]);
+      expect(result.dark()).toMatch(className(`${debugId}_dark`));
+      assert.hasAllKeys(result.dark.classNames.variants, ["emphasis"]);
+      assert.hasAllKeys(result.dark.classNames.variants.emphasis, [
+        "subtle",
+        "strong"
+      ]);
+
+      // Test usage
+      expect(result.light({ emphasis: "strong" })).toMatch(
+        className(`${debugId}_light`, `${debugId}_light_emphasis_strong`)
+      );
+      expect(result.dark({ emphasis: "subtle" })).toMatch(
+        className(`${debugId}_dark`, `${debugId}_dark_emphasis_subtle`)
+      );
+    });
+
+    it("Size system patterns", () => {
+      const result = rules.multiple(
+        { xs: 4, sm: 8, md: 16 },
+        (spacing, _size) => ({
+          variants: {
+            direction: {
+              all: { padding: spacing },
+              horizontal: { paddingLeft: spacing, paddingRight: spacing }
+            }
+          }
+        }),
+        debugId
+      );
+
+      assert.hasAllKeys(result, ["xs", "sm", "md"]);
+
+      // Each result should be a function (RuntimeFn)
+      assert.isFunction(result.xs);
+      assert.isFunction(result.sm);
+      assert.isFunction(result.md);
+
+      // Test usage
+      expect(result.md({ direction: "horizontal" })).toMatch(
+        className(`${debugId}_md`, `${debugId}_md_direction_horizontal`)
+      );
     });
   });
 }

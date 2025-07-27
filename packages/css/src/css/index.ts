@@ -123,15 +123,15 @@ function cssWith<const T extends CSSRule>(
     return cssRaw(cssFunction(style));
   }
 
-  function cssWithVariants<
+  function cssWithMultiple<
     StyleMap extends Record<string | number, RestrictedCSSRule>
   >(styleMap: StyleMap, debugId?: string): Record<keyof StyleMap, string>;
-  function cssWithVariants<
+  function cssWithMultiple<
     Data extends Record<string | number, RestrictedCSSRule>,
     Key extends keyof Data,
     MapData extends (value: Data[Key], key: Key) => ComplexCSSRule
   >(data: Data, mapData: MapData, debugId?: string): Record<keyof Data, string>;
-  function cssWithVariants<
+  function cssWithMultiple<
     Data extends Record<string | number, RestrictedCSSRule>,
     MapData extends (
       value: unknown,
@@ -155,7 +155,7 @@ function cssWith<const T extends CSSRule>(
 
   return Object.assign(cssWithImpl, {
     raw: cssWithRaw,
-    multiple: cssWithVariants
+    multiple: cssWithMultiple
   });
 }
 
@@ -165,7 +165,7 @@ export const css = Object.assign(cssImpl, {
   with: cssWith
 });
 
-// == CSS Variants =============================================================
+// == CSS Multiple =============================================================
 // TODO: Need to optimize
 // https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Functions/get#smart_self-overwriting_lazy_getters
 // https://github.com/vanilla-extract-css/vanilla-extract/blob/master/packages/css/src/style.ts
@@ -174,8 +174,7 @@ export function cssMultiple<
 >(styleMap: StyleMap, debugId?: string): Record<keyof StyleMap, string>;
 export function cssMultiple<
   Data extends Record<string | number, unknown>,
-  Key extends keyof Data,
-  MapData extends (value: Data[Key], key: Key) => ComplexCSSRule
+  MapData extends (value: Data[keyof Data], key: keyof Data) => ComplexCSSRule
 >(data: Data, mapData: MapData, debugId?: string): Record<keyof Data, string>;
 export function cssMultiple<
   StyleMap extends Record<string | number, ComplexCSSRule>,
@@ -192,22 +191,21 @@ export function cssMultiple<
   if (isMapDataFunction(mapDataOrDebugId)) {
     const data = styleMapOrData as Data;
     const mapData = mapDataOrDebugId;
-    return processVariants(data, mapData, debugId);
+    return processMultiple(data, mapData, debugId);
   } else {
     const styleMap = styleMapOrData as StyleMap;
     const debugId = mapDataOrDebugId;
-    return processVariants(styleMap, (style) => style, debugId);
+    return processMultiple(styleMap, (style) => style, debugId);
   }
 }
 
 function isMapDataFunction<
   Data extends Record<string | number, unknown>,
-  Key extends keyof Data,
-  MapData extends (value: Data[Key], key: Key) => ComplexCSSRule
+  MapData extends (value: Data[keyof Data], key: keyof Data) => ComplexCSSRule
 >(mapDataOrDebugId?: MapData | string): mapDataOrDebugId is MapData {
   return typeof mapDataOrDebugId === "function";
 }
-function processVariants<T>(
+function processMultiple<T>(
   items: Record<string | number, T>,
   transformItem: (item: T, key: string | number) => ComplexCSSRule,
   debugId?: string
