@@ -9,6 +9,7 @@ import type {
 } from "@mincho-js/transform-to-vanilla";
 
 import { css } from "../css/index.js";
+import type { CSSRuleWith } from "../css/types.js";
 import { className, getDebugName, getVarName } from "../utils.js";
 import { createRuntimeFn } from "./createRuntimeFn.js";
 import type {
@@ -39,7 +40,8 @@ import {
 // == Rules ====================================================================
 export const rules = Object.assign(rulesImpl, {
   multiple: rulesMultiple,
-  raw: rulesRaw
+  raw: rulesRaw,
+  with: rulesWith
 });
 
 function rulesRaw<
@@ -48,6 +50,93 @@ function rulesRaw<
   Props extends ComplexPropDefinitions<PropTarget> | undefined = undefined
 >(options: PatternOptions<Variants, ToggleVariants, Props>) {
   return options;
+}
+
+function rulesWith<
+  const T extends CSSRule,
+  Variants extends VariantGroups | undefined = undefined,
+  ToggleVariants extends VariantDefinitions | undefined = undefined,
+  Props extends ComplexPropDefinitions<PropTarget> | undefined = undefined
+>(
+  callback: (
+    style: CSSRuleWith<T>
+  ) => PatternOptions<Variants, ToggleVariants, Props>
+) {
+  type RestrictedCSSRule = CSSRuleWith<T>;
+  type RulePattern = PatternOptions<Variants, ToggleVariants, Props>;
+  type RuntimeFnType = RuntimeFn<
+    ConditionalVariants<Variants, ToggleVariants>,
+    Exclude<Props, undefined>
+  >;
+  type TransformRuleMap<T extends Record<string | number, RestrictedCSSRule>> =
+    {
+      [K in keyof T]: RuntimeFnType;
+    };
+
+  function rulesWithImpl(style: RestrictedCSSRule, debugId?: string) {
+    return rulesImpl(callback(style), debugId) as RuntimeFnType;
+  }
+  function rulesWithRaw(style: RestrictedCSSRule) {
+    return rulesRaw(callback(style)) as RulePattern;
+  }
+
+  function rulesWithMultiple<
+    RuleMap extends Record<string | number, RestrictedCSSRule>
+  >(ruleMap: RuleMap, debugId?: string): TransformRuleMap<RuleMap>;
+  function rulesWithMultiple<
+    Data extends Record<string | number, RestrictedCSSRule>,
+    MapData extends (
+      value: Data[keyof Data],
+      key: keyof Data
+    ) => PatternOptions<
+      VariantGroups | undefined,
+      VariantDefinitions | undefined,
+      ComplexPropDefinitions<PropTarget> | undefined
+    >
+  >(
+    data: Data,
+    mapData: MapData,
+    debugId?: string
+  ): TransformDataMapping<Data, MapData>;
+  function rulesWithMultiple<
+    Data extends Record<string | number, RestrictedCSSRule>,
+    MapData extends (
+      value: unknown,
+      key: string | number | symbol
+    ) => PatternOptions<
+      VariantGroups | undefined,
+      VariantDefinitions | undefined,
+      ComplexPropDefinitions<PropTarget> | undefined
+    >
+  >(
+    ruleMapOrData: Data,
+    mapDataOrDebugId?: MapData | string,
+    debugId?: string
+  ): TransformRuleMap<Data> | TransformDataMapping<Data, MapData> {
+    if (isMapDataFunction(mapDataOrDebugId)) {
+      const data = ruleMapOrData as Data;
+      const mapData = mapDataOrDebugId;
+      return rulesMultiple(
+        data,
+        (value: Parameters<typeof callback>[0], key: keyof Data) =>
+          mapData(callback(value) as Parameters<MapData>[0], key),
+        debugId
+      ) as TransformDataMapping<Data, MapData>;
+    } else {
+      const ruleMap = ruleMapOrData as Data;
+      const debugId = mapDataOrDebugId;
+      return rulesMultiple(
+        ruleMap,
+        callback as unknown as MapData,
+        debugId
+      ) as TransformRuleMap<Data>;
+    }
+  }
+
+  return Object.assign(rulesWithImpl, {
+    raw: rulesWithRaw,
+    multiple: rulesWithMultiple
+  });
 }
 
 // == Rules Impl ===============================================================

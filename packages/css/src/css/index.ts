@@ -134,8 +134,7 @@ function cssWith<const T extends CSSRule>(
   >(styleMap: StyleMap, debugId?: string): Record<keyof StyleMap, string>;
   function cssWithMultiple<
     Data extends Record<string | number, RestrictedCSSRule>,
-    Key extends keyof Data,
-    MapData extends (value: Data[Key], key: Key) => ComplexCSSRule
+    MapData extends (value: Data[keyof Data], key: keyof Data) => ComplexCSSRule
   >(data: Data, mapData: MapData, debugId?: string): Record<keyof Data, string>;
   function cssWithMultiple<
     Data extends Record<string | number, RestrictedCSSRule>,
