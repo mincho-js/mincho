@@ -102,12 +102,18 @@ function hoistSelectors(input: CSSRule): HoistResult {
 }
 
 // == CSS ======================================================================
-export function cssImpl(style: ComplexCSSRule, debugId?: string) {
-  return vStyle(transform(style), debugId);
-}
+export const css = Object.assign(cssImpl, {
+  raw: cssRaw,
+  multiple: cssMultiple,
+  with: cssWith
+});
 
 function cssRaw(style: ComplexCSSRule) {
   return style;
+}
+
+export function cssImpl(style: ComplexCSSRule, debugId?: string) {
+  return vStyle(transform(style), debugId);
 }
 
 function cssWith<const T extends CSSRule>(
@@ -158,12 +164,6 @@ function cssWith<const T extends CSSRule>(
     multiple: cssWithMultiple
   });
 }
-
-export const css = Object.assign(cssImpl, {
-  raw: cssRaw,
-  multiple: cssMultiple,
-  with: cssWith
-});
 
 // == CSS Multiple =============================================================
 // TODO: Need to optimize

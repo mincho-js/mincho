@@ -36,17 +36,22 @@ import {
   transformVariantSelection
 } from "./utils.js";
 
-const mergeObject = deepmerge();
+// == Rules ====================================================================
+export const rules = Object.assign(rulesImpl, {
+  multiple: rulesMultiple,
+  raw: rulesRaw
+});
 
-// Helper function to safely set properties on a CSSRule
-function setCSSProperty(
-  styles: CSSRule,
-  property: string,
-  value: string
-): void {
-  // @ts-expect-error: Intentionally bypassing type checking for dynamic property assignment
-  styles[property] = value;
+function rulesRaw<
+  Variants extends VariantGroups | undefined = undefined,
+  ToggleVariants extends VariantDefinitions | undefined = undefined,
+  Props extends ComplexPropDefinitions<PropTarget> | undefined = undefined
+>(options: PatternOptions<Variants, ToggleVariants, Props>) {
+  return options;
 }
+
+// == Rules Impl ===============================================================
+const mergeObject = deepmerge();
 
 export function rulesImpl<
   Variants extends VariantGroups | undefined = undefined,
@@ -186,7 +191,49 @@ export function rulesImpl<
   );
 }
 
-// Improved type-safe transformations that preserve pattern structure
+// Helper function to safely set properties on a CSSRule
+function setCSSProperty(
+  styles: CSSRule,
+  property: string,
+  value: string
+): void {
+  // @ts-expect-error: Intentionally bypassing type checking for dynamic property assignment
+  styles[property] = value;
+}
+
+function processPropObject<Target extends PropTarget>(
+  props: PropDefinition<Target>,
+  propVars: Record<string, PureCSSVarKey>,
+  propStyles: CSSRule,
+  debugId?: string
+) {
+  Object.entries(props).forEach(([propName, propValue]) => {
+    const debugName = getDebugName(debugId, propName);
+    const propVar = createVar(debugName);
+    propVars[propName] = getVarName(propVar);
+
+    const isBaseValue = propValue?.base !== undefined;
+    propValue?.targets.forEach((target) => {
+      setCSSProperty(
+        propStyles,
+        target,
+        isBaseValue ? fallbackVar(propVar, `${propValue.base}`) : propVar
+      );
+    });
+  });
+}
+
+function processCompoundStyle(
+  style: RecipeStyleRule,
+  debugId: string | undefined,
+  index: number
+): string {
+  return typeof style === "string"
+    ? style
+    : css(style, getDebugName(debugId, `compound_${index}`));
+}
+
+// == Rules Multiple ==========================================================
 type RuntimeFnFromPatternOptions<Options> =
   Options extends PatternOptions<
     infer Variants extends VariantGroups | undefined,
@@ -341,51 +388,6 @@ function processMultipleRules<
   }
 
   return patternsMap;
-}
-
-function rulesRaw<
-  Variants extends VariantGroups | undefined = undefined,
-  ToggleVariants extends VariantDefinitions | undefined = undefined,
-  Props extends ComplexPropDefinitions<PropTarget> | undefined = undefined
->(options: PatternOptions<Variants, ToggleVariants, Props>) {
-  return options;
-}
-
-export const rules = Object.assign(rulesImpl, {
-  multiple: rulesMultiple,
-  raw: rulesRaw
-});
-
-function processPropObject<Target extends PropTarget>(
-  props: PropDefinition<Target>,
-  propVars: Record<string, PureCSSVarKey>,
-  propStyles: CSSRule,
-  debugId?: string
-) {
-  Object.entries(props).forEach(([propName, propValue]) => {
-    const debugName = getDebugName(debugId, propName);
-    const propVar = createVar(debugName);
-    propVars[propName] = getVarName(propVar);
-
-    const isBaseValue = propValue?.base !== undefined;
-    propValue?.targets.forEach((target) => {
-      setCSSProperty(
-        propStyles,
-        target,
-        isBaseValue ? fallbackVar(propVar, `${propValue.base}`) : propVar
-      );
-    });
-  });
-}
-
-function processCompoundStyle(
-  style: RecipeStyleRule,
-  debugId: string | undefined,
-  index: number
-): string {
-  return typeof style === "string"
-    ? style
-    : css(style, getDebugName(debugId, `compound_${index}`));
 }
 
 // == Tests ====================================================================
