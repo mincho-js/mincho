@@ -1,5 +1,5 @@
 ---
-"@mincho-js/css": patch
+"@mincho-js/css": minor
 ---
 
 **rules**

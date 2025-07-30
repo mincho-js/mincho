@@ -21,7 +21,8 @@ export {
 export {
   globalCss as globalStyle,
   css as style,
-  cssMultiple as styleVariants
+  cssMultiple as styleVariants,
+  selector
 } from "./css/index.js";
 export type { CSSRuleWith as StyleRuleWith } from "./css/types.js";
 

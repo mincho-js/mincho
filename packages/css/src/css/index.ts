@@ -238,6 +238,11 @@ function processMultiple<T>(
 export function mincho$<T>(block: () => T) {
   return block();
 }
+
+export function selector(selector: string): `&` {
+  return selector as `&`;
+}
+
 // == Tests ====================================================================
 // Ignore errors when compiling to CommonJS.
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
