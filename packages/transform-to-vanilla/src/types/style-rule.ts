@@ -30,9 +30,7 @@ export type ComplexCSSItem =
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   | ((...args: any[]) => ClassNames | CSSRule);
 
-export interface CSSRule
-  extends CSSPropertiesWithConditions,
-    SelectorProperty {}
+export interface CSSRule extends CSSPropertiesWithConditions {}
 export interface GlobalCSSRule extends CSSPropertiesWithConditions {}
 
 export type CSSRuleKey = keyof CSSRule;
@@ -103,16 +101,6 @@ interface CSSPropertyConditions<PropertyValue>
   base?: PropertyValue;
 }
 
-// -- Selector ----------------------------------------------------------------
-interface SelectorProperty {
-  /**
-   * More complex rules can be written using the `selectors` key.
-   *
-   * @see https://vanilla-extract.style/documentation/styling/#complex-selectors
-   */
-  selectors?: ComplexSelectors<CSSPropertiesWithConditions>;
-}
-
 // -- Var Properties ----------------------------------------------------------
 export interface VarProperty {
   /**
@@ -169,9 +157,19 @@ interface NestedConditions<StyleType>
 
 interface CSSConditions<StyleType>
   extends AtRules<StyleType>,
+    SelectorProperty<StyleType>,
     ToplevelSelectors<StyleType> {}
 
 // -- Selectors ---------------------------------------------------------------
+interface SelectorProperty<StyleType> {
+  /**
+   * More complex rules can be written using the `selectors` key.
+   *
+   * @see https://vanilla-extract.style/documentation/styling/#complex-selectors
+   */
+  selectors?: ComplexSelectors<StyleType>;
+}
+
 export interface ToplevelSelectors<StyleType>
   extends ComplexSelectors<StyleType>,
     SimplyNestedSelectors<StyleType>,
