@@ -255,6 +255,324 @@ if (import.meta.vitest) {
   const debugId = "myCSS";
   setFileScope("test");
 
+  describe.concurrent("hoistSelectors()", () => {
+    it("should hoist simple selector from @media", () => {
+      const input: CSSRule = {
+        "@media": {
+          "screen and (min-width: 768px)": {
+            selectors: {
+              "&:hover": {
+                color: "red"
+              }
+            }
+          }
+        }
+      };
+
+      const result = hoistSelectors(input);
+
+      expect(result).toEqual({
+        selectors: {
+          "&:hover": {
+            "@media": {
+              "screen and (min-width: 768px)": {
+                color: "red"
+              }
+            }
+          }
+        }
+      });
+    });
+
+    it("should hoist multiple selectors from single @media", () => {
+      const input: CSSRule = {
+        "@media": {
+          "screen and (min-width: 768px)": {
+            selectors: {
+              "&:hover": {
+                color: "red"
+              },
+              "&:focus": {
+                color: "blue"
+              }
+            }
+          }
+        }
+      };
+
+      const result = hoistSelectors(input);
+
+      expect(result).toEqual({
+        selectors: {
+          "&:hover": {
+            "@media": {
+              "screen and (min-width: 768px)": {
+                color: "red"
+              }
+            }
+          },
+          "&:focus": {
+            "@media": {
+              "screen and (min-width: 768px)": {
+                color: "blue"
+              }
+            }
+          }
+        }
+      });
+    });
+
+    it("should hoist selectors from nested @media and @supports", () => {
+      const input: CSSRule = {
+        "@media": {
+          "screen and (min-width: 768px)": {
+            "@supports": {
+              "(display: grid)": {
+                selectors: {
+                  "&:hover": {
+                    display: "grid"
+                  }
+                }
+              }
+            }
+          }
+        }
+      };
+
+      const result = hoistSelectors(input);
+
+      expect(result).toEqual({
+        selectors: {
+          "&:hover": {
+            "@media": {
+              "screen and (min-width: 768px)": {
+                "@supports": {
+                  "(display: grid)": {
+                    display: "grid"
+                  }
+                }
+              }
+            }
+          }
+        }
+      });
+    });
+
+    it("should handle multiple nested at-rules with same selector", () => {
+      const input: CSSRule = {
+        "@media": {
+          "screen and (min-width: 768px)": {
+            selectors: {
+              "&:hover": {
+                color: "red"
+              }
+            }
+          },
+          "screen and (min-width: 1024px)": {
+            selectors: {
+              "&:hover": {
+                color: "blue"
+              }
+            }
+          }
+        }
+      };
+
+      const result = hoistSelectors(input);
+
+      expect(result).toEqual({
+        selectors: {
+          "&:hover": {
+            "@media": {
+              "screen and (min-width: 768px)": {
+                color: "red"
+              },
+              "screen and (min-width: 1024px)": {
+                color: "blue"
+              }
+            }
+          }
+        }
+      });
+    });
+
+    it("should handle @supports at-rule", () => {
+      const input: CSSRule = {
+        "@supports": {
+          "(display: flex)": {
+            selectors: {
+              "&:hover": {
+                display: "flex"
+              }
+            }
+          }
+        }
+      };
+
+      const result = hoistSelectors(input);
+
+      expect(result).toEqual({
+        selectors: {
+          "&:hover": {
+            "@supports": {
+              "(display: flex)": {
+                display: "flex"
+              }
+            }
+          }
+        }
+      });
+    });
+
+    it("should handle deeply nested at-rules (3 levels)", () => {
+      const input: CSSRule = {
+        "@media": {
+          screen: {
+            "@supports": {
+              "(display: grid)": {
+                "@layer": {
+                  utilities: {
+                    selectors: {
+                      "&:hover": {
+                        display: "grid",
+                        gap: "1rem"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      };
+
+      const result = hoistSelectors(input);
+
+      expect(result).toEqual({
+        selectors: {
+          "&:hover": {
+            "@media": {
+              screen: {
+                "@supports": {
+                  "(display: grid)": {
+                    "@layer": {
+                      utilities: {
+                        display: "grid",
+                        gap: "1rem"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      });
+    });
+
+    it("should preserve multiple style properties in hoisted selectors", () => {
+      const input: CSSRule = {
+        "@media": {
+          "screen and (min-width: 768px)": {
+            selectors: {
+              "&:hover": {
+                color: "red",
+                backgroundColor: "blue",
+                fontSize: "16px",
+                padding: "10px"
+              }
+            }
+          }
+        }
+      };
+
+      const result = hoistSelectors(input);
+
+      expect(result).toEqual({
+        selectors: {
+          "&:hover": {
+            "@media": {
+              "screen and (min-width: 768px)": {
+                color: "red",
+                backgroundColor: "blue",
+                fontSize: "16px",
+                padding: "10px"
+              }
+            }
+          }
+        }
+      });
+    });
+
+    it("should handle empty selectors object", () => {
+      const input: CSSRule = {
+        "@media": {
+          screen: {}
+        }
+      };
+
+      const result = hoistSelectors(input);
+
+      expect(result).toEqual({
+        selectors: {}
+      });
+    });
+
+    it("should return empty selectors for input without selectors", () => {
+      const input: CSSRule = {
+        "@media": {
+          screen: {
+            color: "red"
+          }
+        }
+      };
+
+      const result = hoistSelectors(input);
+
+      expect(result).toEqual({
+        selectors: {}
+      });
+    });
+
+    it("should handle complex selector strings", () => {
+      const input: CSSRule = {
+        "@media": {
+          print: {
+            selectors: {
+              "& > .child": {
+                display: "none"
+              },
+              "&:not(:first-child)": {
+                marginTop: "1rem"
+              }
+            }
+          }
+        }
+      };
+
+      const result = hoistSelectors(input);
+
+      expect(result).toEqual({
+        selectors: {
+          "& > .child": {
+            "@media": {
+              print: {
+                display: "none"
+              }
+            }
+          },
+          "&:not(:first-child)": {
+            "@media": {
+              print: {
+                marginTop: "1rem"
+              }
+            }
+          }
+        }
+      });
+    });
+  });
+
   describe.concurrent("css()", () => {
     it("className", () => {
       // myCSS__[HASH]
