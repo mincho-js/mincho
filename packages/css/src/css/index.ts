@@ -7,7 +7,8 @@ import type {
   TransformContext,
   CSSRule,
   ComplexCSSRule,
-  GlobalCSSRule
+  GlobalCSSRule,
+  AtRulesKeywords
 } from "@mincho-js/transform-to-vanilla";
 import { setFileScope } from "@vanilla-extract/css/fileScope";
 import { style as vStyle, globalStyle as gStyle } from "@vanilla-extract/css";
@@ -40,65 +41,85 @@ export function globalCss(selector: string, rule: GlobalCSSRule) {
   }
 }
 
-// TODO: Make more type-safe
-type UnknownObject = Record<string, unknown>;
-type CSSRuleMap = Record<string, CSSRule>;
-interface HoistResult {
-  selectors: CSSRuleMap;
+type AtRulePath = readonly [atRule: string, condition: string][];
+interface TypeSafeHoistResult {
+  readonly selectors: Record<string, CSSRule>;
 }
 
-function hoistSelectors(input: CSSRule): HoistResult {
-  const result: HoistResult = {
+function hoistSelectors(input: CSSRule): TypeSafeHoistResult {
+  const result: TypeSafeHoistResult = {
     selectors: {}
   };
 
-  function processAtRules(obj: UnknownObject, path: string[] = []) {
-    for (const key in obj) {
-      if (key === "selectors") {
-        // Hoist each selector when selectors are found
-        const selectors = obj[key] as CSSRuleMap;
-        for (const selector in selectors) {
-          if (!result.selectors[selector]) {
-            result.selectors[selector] = {};
-          }
-
-          // Create nested object structure based on current path
-          let current = result.selectors[selector] as UnknownObject;
-          for (let i = 0; i < path.length; i += 2) {
-            const atRule = path[i];
-            const condition = path[i + 1];
-
-            if (!current[atRule]) {
-              current[atRule] = {};
-            }
-            const atRuleObj = current[atRule] as UnknownObject;
-            if (!atRuleObj[condition]) {
-              atRuleObj[condition] = {};
-            }
-
-            current = atRuleObj[condition] as UnknownObject;
-          }
-
-          // Copy style properties
-          Object.assign(current, selectors[selector]);
+  function processRule(rule: CSSRule, path: AtRulePath = []): void {
+    // Handle selectors property with type safety
+    if (hasSelectorsProperty(rule)) {
+      for (const [selector, styles] of Object.entries(rule.selectors)) {
+        if (!result.selectors[selector]) {
+          result.selectors[selector] = {};
         }
-      } else if (typeof obj[key] === "object" && obj[key] !== null) {
-        // at-rule found (e.g: @media, @supports)
-        const atRules = obj[key] as UnknownObject;
-        for (const condition in atRules) {
-          // Add current at-rule and condition to path and recursively call
-          processAtRules(atRules[condition] as UnknownObject, [
-            ...path,
-            key,
-            condition
-          ]);
+
+        // Build nested structure using path with type safety
+        let current = result.selectors[selector] as Record<string, unknown>;
+        for (const [atRule, condition] of path) {
+          if (!current[atRule]) {
+            current[atRule] = {};
+          }
+          const atRuleObj = current[atRule] as Record<string, unknown>;
+          if (!atRuleObj[condition]) {
+            atRuleObj[condition] = {};
+          }
+          current = atRuleObj[condition] as Record<string, unknown>;
+        }
+
+        // Safely merge styles
+        Object.assign(current, styles);
+      }
+    }
+
+    // Process at-rules with type safety
+    for (const [key, value] of Object.entries(rule)) {
+      if (isAtRuleKey(key) && isAtRuleObject(value)) {
+        for (const [condition, nestedRule] of Object.entries(value)) {
+          if (typeof nestedRule === "object" && nestedRule !== null) {
+            processRule(
+              nestedRule as CSSRule,
+              [...path, [key, condition]] as const
+            );
+          }
         }
       }
     }
   }
 
-  processAtRules(input as UnknownObject);
+  processRule(input);
   return result;
+}
+
+function hasSelectorsProperty(obj: unknown): obj is TypeSafeHoistResult {
+  return (
+    typeof obj === "object" &&
+    obj !== null &&
+    "selectors" in obj &&
+    typeof obj.selectors === "object" &&
+    obj.selectors !== null
+  );
+}
+
+function isAtRuleKey(
+  key: string
+): key is `@${AtRulesKeywords}` | `@${AtRulesKeywords} ${string}` {
+  return (
+    key.startsWith("@") &&
+    (key.startsWith("@media") ||
+      key.startsWith("@supports") ||
+      key.startsWith("@container") ||
+      key.startsWith("@layer"))
+  );
+}
+
+function isAtRuleObject(value: unknown): value is Record<string, CSSRule> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 // == CSS ======================================================================
@@ -939,6 +960,164 @@ if (import.meta.vitest) {
         height: 100,
         borderRadius: 100
       });
+    });
+  });
+
+  describe.concurrent("hoistSelectors() Type Safety", () => {
+    it("hasSelectorsProperty identifies selectors correctly", () => {
+      expect(
+        hasSelectorsProperty({ selectors: { ".test": { color: "red" } } })
+      ).toBe(true);
+      expect(hasSelectorsProperty({ color: "red" })).toBe(false);
+      expect(hasSelectorsProperty(null)).toBe(false);
+      expect(hasSelectorsProperty(undefined)).toBe(false);
+      expect(hasSelectorsProperty({ selectors: null })).toBe(false);
+    });
+
+    it("isAtRuleKey identifies at-rules correctly", () => {
+      expect(isAtRuleKey("@media")).toBe(true);
+      expect(isAtRuleKey("@media screen")).toBe(true);
+      expect(isAtRuleKey("@supports")).toBe(true);
+      expect(isAtRuleKey("@container")).toBe(true);
+      expect(isAtRuleKey("@layer")).toBe(true);
+      expect(isAtRuleKey("color")).toBe(false);
+      expect(isAtRuleKey("@unknown")).toBe(false);
+      expect(isAtRuleKey("media")).toBe(false);
+    });
+
+    it("isAtRuleObject validates objects correctly", () => {
+      expect(isAtRuleObject({ screen: { color: "red" } })).toBe(true);
+      expect(isAtRuleObject({})).toBe(true);
+      expect(isAtRuleObject(null)).toBe(false);
+      expect(isAtRuleObject(undefined)).toBe(false);
+      expect(isAtRuleObject([])).toBe(false);
+      expect(isAtRuleObject("string")).toBe(false);
+    });
+
+    it("handles empty input", () => {
+      const result = hoistSelectors({});
+      expect(result.selectors).toEqual({});
+      expect(Object.keys(result.selectors)).toHaveLength(0);
+    });
+
+    it("handles input without selectors", () => {
+      const input = {
+        color: "red",
+        "@media": {
+          screen: {
+            fontSize: "16px"
+          }
+        }
+      };
+      const result = hoistSelectors(input);
+      expect(result.selectors).toEqual({});
+    });
+
+    it("hoists selectors from nested at-rules", () => {
+      const input = {
+        "@media": {
+          "screen and (min-width: 768px)": {
+            selectors: {
+              "&:hover": { color: "blue" },
+              ".nested": { background: "red" }
+            }
+          }
+        }
+      };
+      const result = hoistSelectors(input);
+
+      expect(result.selectors).toHaveProperty("&:hover");
+      expect(result.selectors).toHaveProperty(".nested");
+      expect(result.selectors["&:hover"]).toEqual({
+        "@media": {
+          "screen and (min-width: 768px)": {
+            color: "blue"
+          }
+        }
+      });
+      expect(result.selectors[".nested"]).toEqual({
+        "@media": {
+          "screen and (min-width: 768px)": {
+            background: "red"
+          }
+        }
+      });
+    });
+
+    it("preserves complex nested at-rule structures", () => {
+      const input = {
+        "@media": {
+          screen: {
+            "@supports": {
+              "(display: grid)": {
+                selectors: {
+                  ".grid": { display: "grid" }
+                }
+              }
+            }
+          }
+        }
+      };
+      const result = hoistSelectors(input);
+
+      expect(result.selectors[".grid"]).toEqual({
+        "@media": {
+          screen: {
+            "@supports": {
+              "(display: grid)": {
+                display: "grid"
+              }
+            }
+          }
+        }
+      });
+    });
+
+    it("merges multiple selectors from different at-rules", () => {
+      const input = {
+        "@media": {
+          screen: {
+            selectors: {
+              ".test": { color: "red" }
+            }
+          }
+        },
+        "@supports": {
+          "(display: flex)": {
+            selectors: {
+              ".test": { display: "flex" }
+            }
+          }
+        }
+      };
+      const result = hoistSelectors(input);
+
+      expect(result.selectors[".test"]).toEqual({
+        "@media": {
+          screen: {
+            color: "red"
+          }
+        },
+        "@supports": {
+          "(display: flex)": {
+            display: "flex"
+          }
+        }
+      });
+    });
+
+    it("handles malformed input gracefully", () => {
+      const input: CSSRule = {
+        "@media": {
+          screen: {
+            // @ts-expect-error: selectors should be an object
+            selectors: null // Invalid selectors
+          }
+        }
+      };
+      // Should not throw and return empty result
+      const result = hoistSelectors(input);
+      expect(result.selectors).toEqual({});
     });
   });
 }
