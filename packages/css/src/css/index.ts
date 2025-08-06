@@ -7,7 +7,8 @@ import type {
   TransformContext,
   CSSRule,
   ComplexCSSRule,
-  GlobalCSSRule
+  GlobalCSSRule,
+  AtRulesKeywords
 } from "@mincho-js/transform-to-vanilla";
 import { setFileScope } from "@vanilla-extract/css/fileScope";
 import { style as vStyle, globalStyle as gStyle } from "@vanilla-extract/css";
@@ -40,65 +41,85 @@ export function globalCss(selector: string, rule: GlobalCSSRule) {
   }
 }
 
-// TODO: Make more type-safe
-type UnknownObject = Record<string, unknown>;
-type CSSRuleMap = Record<string, CSSRule>;
-interface HoistResult {
-  selectors: CSSRuleMap;
+type AtRulePath = readonly [atRule: string, condition: string][];
+interface TypeSafeHoistResult {
+  readonly selectors: Record<string, CSSRule>;
 }
 
-function hoistSelectors(input: CSSRule): HoistResult {
-  const result: HoistResult = {
+function hoistSelectors(input: CSSRule): TypeSafeHoistResult {
+  const result: TypeSafeHoistResult = {
     selectors: {}
   };
 
-  function processAtRules(obj: UnknownObject, path: string[] = []) {
-    for (const key in obj) {
-      if (key === "selectors") {
-        // Hoist each selector when selectors are found
-        const selectors = obj[key] as CSSRuleMap;
-        for (const selector in selectors) {
-          if (!result.selectors[selector]) {
-            result.selectors[selector] = {};
-          }
-
-          // Create nested object structure based on current path
-          let current = result.selectors[selector] as UnknownObject;
-          for (let i = 0; i < path.length; i += 2) {
-            const atRule = path[i];
-            const condition = path[i + 1];
-
-            if (!current[atRule]) {
-              current[atRule] = {};
-            }
-            const atRuleObj = current[atRule] as UnknownObject;
-            if (!atRuleObj[condition]) {
-              atRuleObj[condition] = {};
-            }
-
-            current = atRuleObj[condition] as UnknownObject;
-          }
-
-          // Copy style properties
-          Object.assign(current, selectors[selector]);
+  function processRule(rule: CSSRule, path: AtRulePath = []): void {
+    // Handle selectors property with type safety
+    if (hasSelectorsProperty(rule)) {
+      for (const [selector, styles] of Object.entries(rule.selectors)) {
+        if (!result.selectors[selector]) {
+          result.selectors[selector] = {};
         }
-      } else if (typeof obj[key] === "object" && obj[key] !== null) {
-        // at-rule found (e.g: @media, @supports)
-        const atRules = obj[key] as UnknownObject;
-        for (const condition in atRules) {
-          // Add current at-rule and condition to path and recursively call
-          processAtRules(atRules[condition] as UnknownObject, [
-            ...path,
-            key,
-            condition
-          ]);
+
+        // Build nested structure using path with type safety
+        let current = result.selectors[selector] as Record<string, unknown>;
+        for (const [atRule, condition] of path) {
+          if (!current[atRule]) {
+            current[atRule] = {};
+          }
+          const atRuleObj = current[atRule] as Record<string, unknown>;
+          if (!atRuleObj[condition]) {
+            atRuleObj[condition] = {};
+          }
+          current = atRuleObj[condition] as Record<string, unknown>;
+        }
+
+        // Safely merge styles
+        Object.assign(current, styles);
+      }
+    }
+
+    // Process at-rules with type safety
+    for (const [key, value] of Object.entries(rule)) {
+      if (isAtRuleKey(key) && isAtRuleObject(value)) {
+        for (const [condition, nestedRule] of Object.entries(value)) {
+          if (typeof nestedRule === "object" && nestedRule !== null) {
+            processRule(
+              nestedRule as CSSRule,
+              [...path, [key, condition]] as const
+            );
+          }
         }
       }
     }
   }
 
-  processAtRules(input as UnknownObject);
+  processRule(input);
   return result;
+}
+
+function hasSelectorsProperty(obj: unknown): obj is TypeSafeHoistResult {
+  return (
+    typeof obj === "object" &&
+    obj !== null &&
+    "selectors" in obj &&
+    typeof obj.selectors === "object" &&
+    obj.selectors !== null
+  );
+}
+
+function isAtRuleKey(
+  key: string
+): key is `@${AtRulesKeywords}` | `@${AtRulesKeywords} ${string}` {
+  return (
+    key.startsWith("@") &&
+    (key.startsWith("@media") ||
+      key.startsWith("@supports") ||
+      key.startsWith("@container") ||
+      key.startsWith("@layer"))
+  );
+}
+
+function isAtRuleObject(value: unknown): value is Record<string, CSSRule> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 // == CSS ======================================================================
