@@ -42,6 +42,11 @@ build/Release
 node_modules/
 jspm_packages/
 
+# Package Redirect - Sync with package.json "workspaces"
+configs/*/**/package.json
+packages/*/**/package.json
+examples/*/**/package.json
+
 # Snowpack dependency directory (https://snowpack.dev/)
 web_modules/
 
@@ -90,6 +95,7 @@ out
 # Nuxt.js build / generate output
 .nuxt
 dist
+dist-ssr
 
 # Gatsby files
 .cache/

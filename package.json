@@ -12,6 +12,7 @@
     "task": "yarn turbo run --cache-dir .cache/turbo",
     "clean": "yarn g:clean && yarn task clean",
     "build": "yarn task build",
+    "build:full": "PACKAGE_PUBLISH=true yarn task build",
     "build:type": "yarn tsc --build",
     "lint": "yarn lint:action & yarn task lint",
     "lint:action": "yarn run -T eslint '.github/**/*.{js,yaml,yml}' --cache --cache-location .cache/eslint_action",

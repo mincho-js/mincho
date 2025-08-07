@@ -68,7 +68,8 @@
   },
   "files": [
     "README.md",
-    "dist/"
+    "dist/",
+    "**/package.json"
   ],
   "scripts": {
     "clean": "yarn g:clean",

@@ -6659,12 +6659,11 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "vite-config-custom@workspace:configs/vite-config-custom"
   dependencies:
-    "@supercharge/promise-pool": "npm:^3.2.0"
     prettier-config-custom: "workspace:^"
     typescript: "npm:^5.8.3"
     vite: "npm:^6.3.5"
     vite-config-builder: "npm:^0.0.2"
-    vite-plugin-dts-build: "npm:^0.1.3"
+    vite-plugin-dts-build: "npm:^0.2.2"
     vite-plugin-externalize-deps: "npm:^0.9.0"
     vite-tsconfig-paths: "npm:^5.1.4"
   languageName: unknown
@@ -6685,15 +6684,16 @@ __metadata:
   languageName: node
   linkType: hard
 
-"vite-plugin-dts-build@npm:^0.1.3":
-  version: 0.1.3
-  resolution: "vite-plugin-dts-build@npm:0.1.3"
+"vite-plugin-dts-build@npm:^0.2.2":
+  version: 0.2.2
+  resolution: "vite-plugin-dts-build@npm:0.2.2"
   dependencies:
+    "@supercharge/promise-pool": "npm:^3.2.0"
     fs-extra: "npm:^11.3.0"
   peerDependencies:
     typescript: "*"
     vite: "*"
-  checksum: 10/42ad0e051541a71b4f5e6a992b6abc246c39e15970ef48f4b7c241e3d2034fa65d29fde705e2d7de3f814818bcc50713040c1e38dc65d4c4792be2aa1fad1d79
+  checksum: 10/04028d7bd8fad724ff9a276da685cb2cf7cf008b3b75e8e02e5deaccb70e53e316c9ea1d498d86a1ec71ec575805dfee500021278430ffd58270ac8746148a9c
   languageName: node
   linkType: hard
 

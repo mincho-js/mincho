@@ -39,7 +39,8 @@
   },
   "files": [
     "dist",
-    "src"
+    "src",
+    "**/package.json"
   ],
   "scripts": {
     "clean": "yarn g:clean",
