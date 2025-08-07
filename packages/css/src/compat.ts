@@ -38,7 +38,8 @@ export type {
   VariantDefinitions,
   ConditionalVariants,
   VariantObjectSelection,
-  ResolveComplex
+  ResolveComplex,
+  PropDefinitionOutput
 } from "./rules/types.js";
 export { rules as recipe } from "./rules/index.js";
 
