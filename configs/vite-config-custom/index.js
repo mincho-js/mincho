@@ -48,6 +48,14 @@ function NodeBuilder(viteConfigEnv) {
         dtsForCjs({
           include: ["src"],
           tsconfigPath: resolve(packageRoot, "tsconfig.lib.json"),
+          compilerOptions: {
+            tsBuildInfoFile: resolve(
+              packageRoot,
+              ".cache",
+              "typescript",
+              "tsbuildinfo-cjs"
+            )
+          }
         })
       );
     }

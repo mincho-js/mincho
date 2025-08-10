@@ -8,6 +8,7 @@
       "dependsOn": [
         "^build"
       ],
+      "env": ["NODE_ENV", "PACKAGE_PUBLISH", "GITHUB_ACTIONS"],
       "inputs": [
         "src/**/*.ts",
         "vite.config.ts"
@@ -78,6 +79,7 @@
     }
   },
   "globalDependencies": [
-    "packages.json", "yarn.lock"
-  ]
+    "packages.json", "yarn.lock", "**/tsconfig.json"
+  ],
+  "cacheDir": ".cache/turbo"
 }
