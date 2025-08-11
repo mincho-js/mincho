@@ -4,5 +4,4 @@
 
 **rules**
 
-## New
 - Add `rules.multiple()` API

@@ -4,5 +4,4 @@
 
 **css**
 
-## New
 - Add `rules.with()` API

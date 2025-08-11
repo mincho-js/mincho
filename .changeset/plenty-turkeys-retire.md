@@ -4,6 +4,4 @@
 
 **css**
 
-## New
-
 - Add `rules.raw()` API

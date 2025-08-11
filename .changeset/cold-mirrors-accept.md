@@ -4,6 +4,4 @@
 
 **css**
 
-## New
-
 - Add `css.with()` API

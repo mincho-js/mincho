@@ -5,6 +5,4 @@
 
 **Compatibility**
 
-## Changes
-
-- Separate vanilla extract API to `./compat`
+- Separate vanilla extract API to `./compat` entry point for backward compatibility.

@@ -5,6 +5,4 @@
 
 **css**
 
-## New
-
 - Add `css.multiple()` API
