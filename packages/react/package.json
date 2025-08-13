@@ -63,7 +63,8 @@
   },
   "prettier": "prettier-config-custom",
   "dependencies": {
-    "@mincho-js/css": "workspace:^"
+    "@mincho-js/css": "workspace:^",
+    "@mincho-js/csstype": "^3.1.4"
   },
   "devDependencies": {
     "@types/react": "^19.1.6",

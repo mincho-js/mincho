@@ -1263,6 +1263,7 @@ __metadata:
   resolution: "@mincho-js/react@workspace:packages/react"
   dependencies:
     "@mincho-js/css": "workspace:^"
+    "@mincho-js/csstype": "npm:^3.1.4"
     "@types/react": "npm:^19.1.6"
     "@types/react-dom": "npm:^19.1.6"
     "@vanilla-extract/css": "npm:^1.17.2"

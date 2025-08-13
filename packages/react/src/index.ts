@@ -3,11 +3,13 @@ import {
   ConditionalVariants,
   PatternOptions,
   PropTarget,
-  RuntimeFn,
   VariantDefinitions,
   VariantGroups,
-  VariantSelection
+  VariantObjectSelection,
+  PropDefinitionOutput,
+  ResolveComplex
 } from "@mincho-js/css";
+import { NonNullableString } from "@mincho-js/csstype";
 import {
   ComponentType,
   ElementType,
@@ -19,63 +21,70 @@ import {
 
 export { $$styled } from "./runtime.js";
 
+type KeyofIntrinsicElements = keyof JSX.IntrinsicElements;
+
 export type StyledComponent<
   TProps = Record<string, unknown>,
-  Variants extends VariantGroups = VariantGroups
+  Variants extends VariantGroups | undefined = undefined,
+  ToggleVariants extends VariantDefinitions | undefined = undefined,
+  Props extends ComplexPropDefinitions<PropTarget> | undefined = undefined
 > = ForwardRefExoticComponent<
-  PropsWithChildren<TProps & { as?: ElementType } & RefAttributes<unknown>>
-> & {
-  variants: Array<keyof Variants>;
-  selector: RuntimeFn<Variants, never>;
-  (props: PropsWithChildren<TProps & { as?: ElementType }>): JSX.Element;
-};
+  PropsWithChildren<
+    TProps & { as?: ElementType } & RefAttributes<unknown> &
+      PatternOptionsToProps<Variants, ToggleVariants, Props>
+  >
+>;
 
-type InstrinsicProps<TComponent> =
-  TComponent extends keyof JSX.IntrinsicElements
-    ? JSX.IntrinsicElements[TComponent]
-    : TComponent extends ComponentType<infer P>
-      ? P
-      : never;
+export type PatternOptionsToProps<
+  Variants extends VariantGroups | undefined = undefined,
+  ToggleVariants extends VariantDefinitions | undefined = undefined,
+  Props extends ComplexPropDefinitions<PropTarget> | undefined = undefined
+> = ResolveComplex<
+  NonNever<
+    VariantObjectSelection<ConditionalVariants<Variants, ToggleVariants>>
+  > &
+    NonNever<PropDefinitionOutput<Exclude<Props, undefined>>>
+>;
+type NonNever<T> = [T] extends [never] ? unknown : T;
+
+type IntrinsicProps<TComponent> = TComponent extends KeyofIntrinsicElements
+  ? JSX.IntrinsicElements[TComponent]
+  : TComponent extends ComponentType<infer Props>
+    ? Props
+    : never;
 
 export function styled<
   TProps,
-  Variants extends VariantGroups = VariantGroups,
+  Variants extends VariantGroups | undefined = undefined,
   ToggleVariants extends VariantDefinitions | undefined = undefined,
   Props extends ComplexPropDefinitions<PropTarget> | undefined = undefined
 >(
   component: ComponentType<TProps>,
   options: PatternOptions<Variants, ToggleVariants, Props>
-): StyledComponent<
-  TProps & VariantSelection<ConditionalVariants<Variants, ToggleVariants>>,
-  ConditionalVariants<Variants, ToggleVariants>
->;
+): StyledComponent<TProps, Variants, ToggleVariants, Props>;
 
 export function styled<
-  TComponent extends string | keyof JSX.IntrinsicElements,
-  Variants extends VariantGroups = VariantGroups,
+  TComponent extends NonNullableString | KeyofIntrinsicElements,
+  Variants extends VariantGroups | undefined = undefined,
   ToggleVariants extends VariantDefinitions | undefined = undefined,
   Props extends ComplexPropDefinitions<PropTarget> | undefined = undefined
 >(
   component: TComponent,
   options: PatternOptions<Variants, ToggleVariants, Props>
-): StyledComponent<
-  InstrinsicProps<TComponent> &
-    VariantSelection<ConditionalVariants<Variants, ToggleVariants>>,
-  ConditionalVariants<Variants, ToggleVariants>
->;
+): StyledComponent<IntrinsicProps<TComponent>, Variants, ToggleVariants, Props>;
 
 export function styled<
   TComponentOrProps,
-  Variants extends VariantGroups = VariantGroups,
+  Variants extends VariantGroups | undefined = undefined,
   ToggleVariants extends VariantDefinitions | undefined = undefined,
   Props extends ComplexPropDefinitions<PropTarget> | undefined = undefined
 >(
   _component:
     | ComponentType<TComponentOrProps>
-    | string
-    | keyof JSX.IntrinsicElements,
+    | NonNullableString
+    | KeyofIntrinsicElements,
   _options: PatternOptions<Variants, ToggleVariants, Props>
-): StyledComponent<unknown, Variants> {
+): StyledComponent<TComponentOrProps, Variants, ToggleVariants, Props> {
   throw new Error(
     "This function shouldn't be there in your final code. If you're seeing this, there is probably some issue with your build config."
   );

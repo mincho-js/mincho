@@ -40,5 +40,6 @@ export type {
   VariantDefinitions,
   ConditionalVariants,
   VariantObjectSelection,
-  ResolveComplex
+  ResolveComplex,
+  PropDefinitionOutput
 } from "./rules/types.js";
