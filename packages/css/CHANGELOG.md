@@ -1,5 +1,41 @@
 # @mincho-js/css
 
+## 0.3.0
+
+### Minor Changes
+
+- [#219](https://github.com/mincho-js/mincho/pull/219) [`90cde80`](https://github.com/mincho-js/mincho/commit/90cde801cc0133649869bfed9c2e053aa600f6db) Thanks [@black7375](https://github.com/black7375)! - **Compatibility**
+
+  ## Changes
+
+  - Separate vanilla extract API to `./compat`
+
+- [#227](https://github.com/mincho-js/mincho/pull/227) [`60ebee5`](https://github.com/mincho-js/mincho/commit/60ebee56170b3b683b72eb721fdd26bfc46ce338) Thanks [@black7375](https://github.com/black7375)! - **css**
+
+  ## New
+
+  - Add `css.with()` API
+
+- [#232](https://github.com/mincho-js/mincho/pull/232) [`c268326`](https://github.com/mincho-js/mincho/commit/c268326ae498f7c2d1f0504d517fd4d340a1169f) Thanks [@black7375](https://github.com/black7375)! - **New**
+
+  - Add `rules.raw()` API
+
+- [#222](https://github.com/mincho-js/mincho/pull/222) [`ee6e517`](https://github.com/mincho-js/mincho/commit/ee6e51736f26effa8bcb72d8d5cd907c2de629d8) Thanks [@black7375](https://github.com/black7375)! - ## New
+
+  - Add `css.multiple()` API
+
+### Patch Changes
+
+- [#209](https://github.com/mincho-js/mincho/pull/209) [`df91f14`](https://github.com/mincho-js/mincho/commit/df91f148cf4c0db6a19f544fb993943cc1f50a70) Thanks [@black7375](https://github.com/black7375)! - **Types**
+
+  ## New
+
+  - Add `VariantStyle` type for constrained variant styles
+
+  ## Changes
+
+  - Allow nested selector in `globalCss` function
+
 ## 0.2.2
 
 ### Patch Changes

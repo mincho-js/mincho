@@ -1,5 +1,13 @@
 # @mincho-js/vite
 
+## 0.1.3
+
+### Patch Changes
+
+- Updated dependencies [[`90cde80`](https://github.com/mincho-js/mincho/commit/90cde801cc0133649869bfed9c2e053aa600f6db), [`60ebee5`](https://github.com/mincho-js/mincho/commit/60ebee56170b3b683b72eb721fdd26bfc46ce338), [`c268326`](https://github.com/mincho-js/mincho/commit/c268326ae498f7c2d1f0504d517fd4d340a1169f), [`ee6e517`](https://github.com/mincho-js/mincho/commit/ee6e51736f26effa8bcb72d8d5cd907c2de629d8), [`df91f14`](https://github.com/mincho-js/mincho/commit/df91f148cf4c0db6a19f544fb993943cc1f50a70)]:
+  - @mincho-js/css@0.3.0
+  - @mincho-js/integration@0.1.1
+
 ## 0.1.2
 
 ### Patch Changes
