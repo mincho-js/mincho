@@ -70,7 +70,7 @@
     "@mincho-js/pretify-deep-diff": "^1.0.5",
     "@pinojs/json-colorizer": "^4.0.0",
     "boxen": "^8.0.1",
-    "chalk": "^5.4.1",
+    "chalk": "^5.6.0",
     "deep-diff": "^1.0.2"
   }
 }
