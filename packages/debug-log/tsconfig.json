@@ -1,6 +1,9 @@
 {
   "files": [],
   "references": [
+    {
+      "path": "../../configs/vite-config-custom"
+    },
     { 
       "path": "./tsconfig.node.json"
     },

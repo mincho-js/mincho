@@ -1,31 +1,40 @@
-// @ts-check
-
 import { resolve, join } from "node:path";
 import { cwd, env } from "node:process";
 
 import { initConfigBuilder, ViteEnv, PluginBuilder } from "vite-config-builder";
+import type { ConfigBuilder } from "vite-config-builder";
 import { mergeConfig } from "vite";
+import type { ConfigEnv, UserConfig } from "vite";
+import type { defineConfig, ViteUserConfig } from "vitest/config";
 
 import { externalizeDeps } from "vite-plugin-externalize-deps";
 import tsconfigPaths from "vite-tsconfig-paths";
 import { dtsForEsm, dtsForCjs } from "vite-plugin-dts-build";
 
+declare module "vite" {
+  interface UserConfig extends ViteUserConfig {
+  }
+}
+
 // == Main Configs ============================================================
-export function NodeConfig(viteConfigEnv, extendConfigs = {}) {
+type TInputConfig = Parameters<typeof defineConfig>[0];
+type TOutputConfig = ReturnType<typeof mergeConfig>;
+
+export function NodeConfig(viteConfigEnv: ConfigEnv, extendConfigs: TInputConfig = {}): TOutputConfig {
   return buildConfig(viteConfigEnv, extendConfigs, NodeBuilder);
 }
 
-function buildConfig(viteConfigEnv, extendConfigs, configBuilder) {
+function buildConfig(viteConfigEnv: ConfigEnv, extendConfigs: TInputConfig, configBuilder: (viteConfigEnv: ConfigEnv) => ConfigBuilder): TOutputConfig {
   return mergeConfig(
     {
       ...configBuilder(viteConfigEnv).build()
     },
-    extendConfigs
+    extendConfigs as UserConfig
   );
 }
 
 // == Main Configs ============================================================
-function NodeBuilder(viteConfigEnv) {
+function NodeBuilder(viteConfigEnv: ConfigEnv) {
   const { configs, plugins } = initCommonBuilder(viteConfigEnv);
   const packageRoot = cwd();
   const entryRoot = resolve(packageRoot, "src");
@@ -110,7 +119,7 @@ function NodeBuilder(viteConfigEnv) {
   return configs;
 }
 
-function initCommonBuilder(viteConfigEnv) {
+function initCommonBuilder(viteConfigEnv: ConfigEnv) {
   const configs = initConfigBuilder(viteConfigEnv);
 
   configs.add({

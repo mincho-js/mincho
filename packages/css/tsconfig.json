@@ -2,6 +2,9 @@
   "files": [],
   "references": [
     {
+      "path": "../../configs/vite-config-custom"
+    },
+    {
       "path": "../transform-to-vanilla"
     },
     { 

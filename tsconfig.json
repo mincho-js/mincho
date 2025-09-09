@@ -3,6 +3,9 @@
   "files": [],
   "references": [
     {
+      "path": "configs/vite-config-custom"
+    },
+    {
       "path": "packages/babel"
     },
     {

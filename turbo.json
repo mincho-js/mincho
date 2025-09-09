@@ -79,7 +79,7 @@
     }
   },
   "globalDependencies": [
-    "packages.json", "yarn.lock", "**/tsconfig.json"
+    "package.json", "yarn.lock", "**/tsconfig.json"
   ],
   "cacheDir": ".cache/turbo"
 }
