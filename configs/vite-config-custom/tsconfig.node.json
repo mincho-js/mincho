@@ -1,0 +1,14 @@
+{
+  "extends": "tsconfig-custom/tsconfig.node.json",
+  "compilerOptions": {
+    "tsBuildInfoFile": "./.cache/typescript/tsbuildinfo-node",
+    "outDir": "./.cache/tsbuild-node"
+  },
+  "include": [
+    "eslint.config.js"
+  ],
+  "exclude": [
+    "dist",
+    "_release"
+  ]
+}

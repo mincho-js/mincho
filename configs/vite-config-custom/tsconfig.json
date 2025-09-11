@@ -1,10 +1,7 @@
 {
-  "extends": "tsconfig-custom/tsconfig.base.json",
-  "compilerOptions": {
-    "outDir": "./dist",
-    "rootDir": "./src",
-    "tsBuildInfoFile": "./.cache/typescript/tsbuildinfo-esm"
-  },
-  "include": ["src"],
-  "references": []
+  "files": [],
+  "references": [
+    { "path": "./tsconfig.node.json" },
+    { "path": "./tsconfig.lib.json" }
+  ]
 }

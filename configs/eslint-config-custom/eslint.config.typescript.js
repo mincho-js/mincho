@@ -2,19 +2,25 @@
 
 import { cwd } from "node:process";
 import globals from "globals";
+import { defineConfig } from "eslint/config";
 import eslint from "@eslint/js";
 import tseslint from "typescript-eslint";
 import baseConfig from "./eslint.config.base.js";
 
 /** @typedef {import("typescript-eslint").InfiniteDepthConfigWithExtends} TSConfig */
-/** @typedef {import("typescript-eslint").ConfigArray} ConfigArray */
+/** @typedef {import("eslint").Linter.Config} Config */
+/** @typedef {Config[]} ConfigArray */
 
 /**
  * @export
  * @type {(userConfigs?: TSConfig) => ConfigArray}
  */
 export function eslintConfig(userConfigs = []) {
-  return tseslint.config(
+  const normalizedUserConfigs = /** @type {ConfigArray} */ (
+    Array.isArray(userConfigs) ? userConfigs : [userConfigs ?? {}]
+  );
+
+  return defineConfig(
     // == Typescript =============================================================
     eslint.configs.recommended,
     ...tseslint.configs.recommended,
@@ -59,6 +65,6 @@ export function eslintConfig(userConfigs = []) {
 
     ...baseConfig,
 
-    ...(Array.isArray(userConfigs) ? userConfigs : [userConfigs ?? {}])
+    ...normalizedUserConfigs
   );
 }

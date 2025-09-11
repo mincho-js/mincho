@@ -4,32 +4,34 @@ import { cwd, env } from "node:process";
 import { initConfigBuilder, ViteEnv, PluginBuilder } from "vite-config-builder";
 import type { ConfigBuilder } from "vite-config-builder";
 import { mergeConfig } from "vite";
-import type { ConfigEnv, UserConfig } from "vite";
+import type { ConfigEnv } from "vite";
 import type { defineConfig, ViteUserConfig } from "vitest/config";
 
 import { externalizeDeps } from "vite-plugin-externalize-deps";
 import tsconfigPaths from "vite-tsconfig-paths";
 import { dtsForEsm, dtsForCjs } from "vite-plugin-dts-build";
 
-declare module "vite" {
-  interface UserConfig extends ViteUserConfig {
-  }
-}
-
 // == Main Configs ============================================================
 type TInputConfig = Parameters<typeof defineConfig>[0];
 type TOutputConfig = ReturnType<typeof mergeConfig>;
 
-export function NodeConfig(viteConfigEnv: ConfigEnv, extendConfigs: TInputConfig = {}): TOutputConfig {
+export function NodeConfig(
+  viteConfigEnv: ConfigEnv,
+  extendConfigs: TInputConfig = {}
+): TOutputConfig {
   return buildConfig(viteConfigEnv, extendConfigs, NodeBuilder);
 }
 
-function buildConfig(viteConfigEnv: ConfigEnv, extendConfigs: TInputConfig, configBuilder: (viteConfigEnv: ConfigEnv) => ConfigBuilder): TOutputConfig {
+function buildConfig(
+  viteConfigEnv: ConfigEnv,
+  extendConfigs: TInputConfig,
+  configBuilder: (viteConfigEnv: ConfigEnv) => ConfigBuilder
+): TOutputConfig {
   return mergeConfig(
     {
       ...configBuilder(viteConfigEnv).build()
     },
-    extendConfigs as UserConfig
+    extendConfigs as ViteUserConfig
   );
 }
 

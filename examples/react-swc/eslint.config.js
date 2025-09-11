@@ -1,32 +1,32 @@
-// @ts-check
-
+import { resolve } from "node:path";
 import { cwd } from "node:process";
 import globals from "globals";
+import { defineConfig } from "eslint/config";
 import eslint from "@eslint/js";
 import tseslint from "typescript-eslint";
 import tsParser from "@typescript-eslint/parser";
 import reactRefreshPlugin from "eslint-plugin-react-refresh";
 import reactHooksPlugin from "eslint-plugin-react-hooks";
 
-export default tseslint.config(
+const PACKAGE_ROOT = resolve(cwd());
+
+export default defineConfig(
   eslint.configs.recommended,
   ...tseslint.configs.recommendedTypeChecked,
   {
     languageOptions: {
       parserOptions: {
-        project: ["tsconfig.json"],
-        tsconfigRootDir: cwd(),
+        tsconfigRootDir: PACKAGE_ROOT,
         projectService: true,
       },
     },
   },
   {
-    files: ["*.ts", "*.tsx"],
+    files: ["*.{ts,tsx}"],
     languageOptions: {
       parser: tsParser,
       parserOptions: {
-        project: ["tsconfig.json"],
-        tsconfigRootDir: cwd(),
+        tsconfigRootDir: PACKAGE_ROOT,
         projectService: true,
         ecmaFeatures: { jsx: true },
       },
@@ -39,12 +39,14 @@ export default tseslint.config(
       "react-hooks": reactHooksPlugin,
     },
     rules: {
-      ...reactHooksPlugin.configs.recommended.rules,
       "react-refresh/only-export-components": [
         "warn",
         { allowConstantExport: true },
       ],
     },
+    extends: [
+      "react-hooks/recommended"
+    ]
   },
   {
     files: ["*.js", "*.cjs", "*.mjs"],

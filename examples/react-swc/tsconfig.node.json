@@ -16,9 +16,11 @@
     "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true,
     "skipLibCheck": true,
+    "allowJs": true,
+    "checkJs": true,
 
     "tsBuildInfoFile": "./.cache/typescript/tsbuildinfo-node",
     "outDir": "./.cache/tsbuild-node"
   },
-  "include": ["vite.config.ts"]
+  "include": ["vite.config.ts", "eslint.config.js"]
 }

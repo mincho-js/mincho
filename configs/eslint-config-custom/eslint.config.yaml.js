@@ -1,11 +1,11 @@
 // @ts-check
 
-import tseslint from "typescript-eslint";
+import { defineConfig } from "eslint/config";
 import yamlParser from "yaml-eslint-parser";
 import eslintPluginYml from "eslint-plugin-yml";
 import baseConfig from "./eslint.config.base.js";
 
-export default tseslint.config(
+export default defineConfig(
   ...baseConfig,
 
   // == YAML ===================================================================

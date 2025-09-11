@@ -1,5 +1,6 @@
 {
   "compilerOptions": {
+    "rootDir": "src",
     "target": "ES2020",
     "useDefineForClassFields": true,
     "lib": [
@@ -27,6 +28,8 @@
     "tsBuildInfoFile": "./.cache/typescript/tsbuildinfo-app"
   },
   "include": [
-    "src"
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "src/**/*.css.ts"
   ]
 }
