@@ -36,6 +36,15 @@ jobs:
       - name: Setup
         uses: ./.github/actions/node-setup
 
+      - name: Check peer dependencies
+        run: yarn check:peers
+
+      - name: Check package consistency
+        run: yarn constraints
+
+      - name: Check package audit
+        run: yarn npm audit --all
+
       - name: Project Reference Check
         run: yarn sync:check
 

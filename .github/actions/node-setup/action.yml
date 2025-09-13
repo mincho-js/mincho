@@ -35,12 +35,7 @@ runs:
       run: |
         yarn config set winLinkType symlinks
         if [ "${{ inputs.strict }}" = "true" ]; then
-          echo "Installing with strict mode"
           yarn install --immutable --check-resolutions --refresh-lockfile
-          echo "Checking peerDeps and constraints"
-          yarn check:pkgs
-          echo "Running npm audit"
-          yarn npm audit --all 
         else
           YARN_ENABLE_HARDENED_MODE=0 yarn install --no-immutable
         fi
