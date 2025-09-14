@@ -10,10 +10,6 @@ export {
   assignVars,
   composeStyles,
   createContainer,
-  createGlobalTheme,
-  createGlobalThemeContract,
-  createTheme,
-  createThemeContract,
   createVar,
   fallbackVar,
   fontFace,
@@ -43,3 +39,4 @@ export type {
   ResolveComplex,
   PropDefinitionOutput
 } from "./rules/types.js";
+export { globalTheme, theme } from "./theme/index.js";

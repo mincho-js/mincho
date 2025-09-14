@@ -28,6 +28,10 @@ export function getVarName(variable: string): PureCSSVarKey {
   return variable as PureCSSVarKey;
 }
 
+export function camelToKebab(camelCase: string): string {
+  return camelCase.replace(/[A-Z]/g, "-$&").toLowerCase();
+}
+
 // == Tests ====================================================================
 // Ignore errors when compiling to CommonJS.
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
