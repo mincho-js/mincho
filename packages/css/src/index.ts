@@ -40,3 +40,21 @@ export type {
   PropDefinitionOutput
 } from "./rules/types.js";
 export { globalTheme, theme } from "./theme/index.js";
+export type {
+  Theme,
+  ThemeValue,
+  TokenDefinition,
+  TokenColorDefinition,
+  TokenColorValue,
+  TokenDimensionDefinition,
+  TokenDimensionValue,
+  TokenFontFamilyDefinition,
+  TokenFontFamilyValue,
+  TokenFontWeightDefinition,
+  TokenFontWeightValue,
+  TokenDurationDefinition,
+  TokenDurationValue,
+  TokenCubicBezierDefinition,
+  TokenNumberDefinition,
+  ResolveTheme
+} from "./theme/types.js";

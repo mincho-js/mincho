@@ -15,9 +15,123 @@ export type ThemeValue =
   | TokenPrimitiveValue[]
   | TokenCompositeValue
   | TokenDefinition;
+
 export interface TokenDefinition {
   $type: string;
   $value: TokenValue;
+  $description?: string;
+}
+
+export interface TokenColorDefinition {
+  $type: "color";
+  $value: string | TokenColorValue;
+  $description?: string;
+}
+export interface TokenColorValue {
+  /**
+   * A string that specifies the color space or color model
+   */
+  colorSpace: string;
+  /**
+   * An array representing the color components. The number of components depends on the color space.
+   */
+  components: ColorComponentValue[];
+  /**
+   * number that represents the alpha value of the color. This value is between 0 and 1, where 0 is fully transparent and 1 is fully opaque. If omitted, the alpha value of the color MUST be assumed to be 1 (fully opaque).
+   */
+  alpha?: number;
+  /**
+   * A string that represents a fallback value of the color. The fallback color MUST be formatted in 6 digit CSS hex color notation format to avoid conflicts with the provided alpha value.
+   */
+  hex?: string;
+}
+type ColorComponentValue = number | "none";
+
+export interface TokenDimensionDefinition {
+  $type: "dimension";
+  $value: TokenDimensionValue;
+  $description?: string;
+}
+export interface TokenDimensionValue {
+  /**
+   * An integer or floating-point value representing the numeric value.
+   */
+  value: number;
+  /**
+   * Unit of distance. Supported values: "px", "rem".
+   */
+  unit: string;
+}
+
+export interface TokenFontFamilyDefinition {
+  $type: "fontFamily";
+  $value: TokenFontFamilyValue;
+  $description?: string;
+}
+export type TokenFontFamilyValue = string | string[];
+
+export interface TokenFontWeightDefinition {
+  $type: "fontWeight";
+  $value: TokenFontWeightValue;
+  $description?: string;
+}
+export type TokenFontWeightValue =
+  | number
+  // 100
+  | "thin"
+  | "hairline"
+  // 200
+  | "extra-light"
+  | "ultra-light"
+  // 300
+  | "light"
+  // 400
+  | "normal"
+  | "regular"
+  | "book"
+  // 500
+  | "medium"
+  // 600
+  | "semi-bold"
+  | "demi-bold"
+  // 700
+  | "bold"
+  // 800
+  | "extra-bold"
+  | "ultra-bold"
+  // 900
+  | "black"
+  | "heavy"
+  // 950
+  | "extra-black"
+  | "ultra-black";
+
+export interface TokenDurationDefinition {
+  $type: "duration";
+  $value: TokenDurationValue;
+  $description?: string;
+}
+export interface TokenDurationValue {
+  /**
+   * An integer or floating-point value representing the numeric value.
+   */
+  value: number;
+  /**
+   * Unit of time. Supported values: "ms"(milliseconds), "s"(seconds).
+   */
+  unit: string;
+}
+
+export interface TokenCubicBezierDefinition {
+  $type: "cubicBezier";
+  $value: TokenCubicBezierValue;
+  $description?: string;
+}
+type TokenCubicBezierValue = [number, number, number, number];
+
+export interface TokenNumberDefinition {
+  $type: "number";
+  $value: number;
   $description?: string;
 }
 
@@ -29,15 +143,11 @@ export interface TokenCompositeValue {
 export type TokenLeafValue = TokenAtomicValue | TokenAtomicValue[];
 export type TokenAtomicValue =
   // | TokenReferencedValue // Referenced value may replaced via getter with `this`
-  TokenPrimitiveValue | TokenUnitValue;
+  TokenPrimitiveValue | TokenDimensionValue;
 
 export type TokenPrimitiveValue = string | number | boolean | undefined;
 
 // export type TokenReferencedValue = `${string}{${string}}${string}`;
-export interface TokenUnitValue {
-  value: number;
-  unit: string;
-}
 
 export type ResolveTheme<T extends Theme> = {
   [K in keyof T]: T[K] extends ThemeValue
@@ -60,7 +170,7 @@ export type ResolveThemeValue<T extends ThemeValue> = T extends TokenDefinition
 export type ResolveTokenValue<T extends TokenValue> =
   T extends TokenCompositeValue
     ? ResolveCompositeValue<T>
-    : T extends TokenUnitValue | TokenPrimitiveValue
+    : T extends TokenDimensionValue | TokenPrimitiveValue
       ? PureCSSVarFunction
       : T extends (infer U)[]
         ? U extends TokenAtomicValue
@@ -91,10 +201,10 @@ if (import.meta.vitest) {
   function createBoxShadowResolver() {
     return function (this: {
       color: string;
-      offsetX: TokenUnitValue;
-      offsetY: TokenUnitValue;
-      blur: TokenUnitValue;
-      spread: TokenUnitValue;
+      offsetX: TokenDimensionValue;
+      offsetY: TokenDimensionValue;
+      blur: TokenDimensionValue;
+      spread: TokenDimensionValue;
     }) {
       const { color, offsetX, offsetY, blur, spread } = this;
       const offsetXValue = `${offsetX.value}${offsetX.unit}`;
@@ -115,7 +225,7 @@ if (import.meta.vitest) {
       assertType<TokenPrimitiveValue>(undefined);
 
       // TokenUnitValue
-      assertType<TokenUnitValue>({ value: 12, unit: "px" });
+      assertType<TokenDimensionValue>({ value: 12, unit: "px" });
 
       // TokenReferencedValue
       // assertType<TokenReferencedValue>("{colors.primary}");

@@ -17,8 +17,12 @@ import type {
   TokenValue,
   TokenDefinition,
   TokenPrimitiveValue,
-  TokenUnitValue,
-  TokenCompositeValue
+  TokenDimensionValue,
+  TokenCompositeValue,
+  TokenFontFamilyValue,
+  TokenDurationValue,
+  TokenColorValue,
+  TokenFontWeightValue
 } from "./types.js";
 
 type WithOptionalLayer<T extends Theme> = T & {
@@ -125,7 +129,7 @@ function isPrimitive(value: unknown): value is TokenPrimitiveValue {
   );
 }
 
-function isTokenUnitValue(value: unknown): value is TokenUnitValue {
+function isTokenUnitValue(value: unknown): value is TokenDimensionValue {
   return (
     typeof value === "object" &&
     value != null &&
@@ -185,6 +189,104 @@ function buildVarPath(prefix: string, key: string): string {
 }
 
 // === Value Extraction ========================================================
+// === Token Type Value Extractors ============================================
+function extractFontFamilyValue(value: TokenFontFamilyValue): CSSVarValue {
+  if (Array.isArray(value)) {
+    return value.join(", ") as CSSVarValue;
+  }
+  return value as CSSVarValue;
+}
+
+function extractDurationValue(value: TokenDurationValue): CSSVarValue {
+  return `${value.value}${value.unit}` as CSSVarValue;
+}
+
+function extractCubicBezierValue(
+  value: [number, number, number, number]
+): CSSVarValue {
+  return `cubic-bezier(${value[0]}, ${value[1]}, ${value[2]}, ${value[3]})` as CSSVarValue;
+}
+
+function extractColorValue(value: string | TokenColorValue): CSSVarValue {
+  if (typeof value === "string") {
+    return value as CSSVarValue;
+  }
+
+  // Complex color object handling
+  // If hex fallback is provided, use it
+  if (value.hex) {
+    return value.hex as CSSVarValue;
+  }
+
+  // Otherwise, construct from color space and components
+  // This is a simplified version - full implementation would need proper color space handling
+  const components = value.components.join(", ");
+  const alpha = value.alpha !== undefined ? ` / ${value.alpha}` : "";
+  return `${value.colorSpace}(${components}${alpha})` as CSSVarValue;
+}
+
+function extractFontWeightValue(value: TokenFontWeightValue): CSSVarValue {
+  // Map keywords to numeric values
+  const weightMap: Record<string, number> = {
+    thin: 100,
+    hairline: 100,
+    "extra-light": 200,
+    "ultra-light": 200,
+    light: 300,
+    normal: 400,
+    regular: 400,
+    book: 400,
+    medium: 500,
+    "semi-bold": 600,
+    "demi-bold": 600,
+    bold: 700,
+    "extra-bold": 800,
+    "ultra-bold": 800,
+    black: 900,
+    heavy: 900,
+    "extra-black": 950,
+    "ultra-black": 950
+  };
+
+  if (typeof value === "number") {
+    return String(value) as CSSVarValue;
+  }
+
+  return String(weightMap[value] || value) as CSSVarValue;
+}
+
+function extractNumberValue(value: number): CSSVarValue {
+  return String(value) as CSSVarValue;
+}
+
+function extractTokenDefinitionValue(definition: TokenDefinition): CSSVarValue {
+  const { $type, $value } = definition;
+
+  switch ($type) {
+    case "fontFamily":
+      return extractFontFamilyValue($value as TokenFontFamilyValue);
+    case "duration":
+      return extractDurationValue($value as TokenDurationValue);
+    case "cubicBezier":
+      return extractCubicBezierValue(
+        $value as [number, number, number, number]
+      );
+    case "color":
+      return extractColorValue($value as string | TokenColorValue);
+    case "fontWeight":
+      return extractFontWeightValue($value as TokenFontWeightValue);
+    case "number":
+      return extractNumberValue($value as number);
+    case "dimension":
+      // TokenDimensionValue is already handled by existing logic
+      return extractDurationValue($value as TokenDurationValue); // Same structure
+    default:
+      // For unknown token types, try to extract as primitive
+      return extractCSSValue($value as TokenValue);
+  }
+}
+
+// === Value Extraction ========================================================
 function extractCSSValue(value: TokenValue): CSSVarValue {
   if (isPrimitive(value)) {
     return String(value) as CSSVarValue;
@@ -225,9 +327,21 @@ function processThemeValue(
   vars: AssignedVars,
   resolvedTokens: Record<string, unknown>
 ): void {
-  // Handle TokenDefinition - unwrap and process $value
+  // Handle TokenDefinition - extract value based on $type
   if (isTokenDefinition(value)) {
-    // The $value could be a nested Theme object or a ThemeValue
+    // Check if it's a specific token type that needs special handling
+    if (
+      (value.$type && typeof value.$value !== "object") ||
+      (typeof value.$value === "object" && !isNestedTheme(value.$value))
+    ) {
+      // Use the token-specific extractor
+      const cssVarName = pathToCSSVar(varPath);
+      vars[cssVarName] = extractTokenDefinitionValue(value);
+      resolvedTokens[key] = pathToVarReference(varPath);
+      return;
+    }
+
+    // Otherwise, handle as before for nested themes
     const innerValue = value.$value;
     if (isThemeValue(innerValue)) {
       processThemeValue(key, innerValue, varPath, vars, resolvedTokens);
@@ -460,6 +574,203 @@ if (import.meta.vitest) {
         primary: "var(--primary)",
         fontSize: "var(--font-size)"
       });
+    });
+
+    it("handles fontFamily tokens", () => {
+      const result = assignTokens({
+        fontPrimary: {
+          $type: "fontFamily",
+          $value: ["Helvetica", "Arial", "sans-serif"]
+        },
+        fontSecondary: {
+          $type: "fontFamily",
+          $value: "Georgia, serif"
+        }
+      });
+
+      expect(result.vars).toEqual({
+        "--font-primary": "Helvetica, Arial, sans-serif",
+        "--font-secondary": "Georgia, serif"
+      });
+
+      expect(result.resolvedTokens).toEqual({
+        fontPrimary: "var(--font-primary)",
+        fontSecondary: "var(--font-secondary)"
+      });
+    });
+
+    it("handles duration tokens", () => {
+      const result = assignTokens({
+        transitionFast: {
+          $type: "duration",
+          $value: { value: 200, unit: "ms" }
+        },
+        transitionSlow: {
+          $type: "duration",
+          $value: { value: 1, unit: "s" }
+        }
+      });
+
+      expect(result.vars).toEqual({
+        "--transition-fast": "200ms",
+        "--transition-slow": "1s"
+      });
+
+      expect(result.resolvedTokens).toEqual({
+        transitionFast: "var(--transition-fast)",
+        transitionSlow: "var(--transition-slow)"
+      });
+    });
+
+    it("handles cubicBezier tokens", () => {
+      const result = assignTokens({
+        easingDefault: {
+          $type: "cubicBezier",
+          $value: [0.5, 0, 1, 1]
+        },
+        easingBounce: {
+          $type: "cubicBezier",
+          $value: [0.68, -0.55, 0.265, 1.55]
+        }
+      });
+
+      expect(result.vars).toEqual({
+        "--easing-default": "cubic-bezier(0.5, 0, 1, 1)",
+        "--easing-bounce": "cubic-bezier(0.68, -0.55, 0.265, 1.55)"
+      });
+
+      expect(result.resolvedTokens).toEqual({
+        easingDefault: "var(--easing-default)",
+        easingBounce: "var(--easing-bounce)"
+      });
+    });
+
+    it("handles color tokens with string value", () => {
+      const result = assignTokens({
+        colorBrand: {
+          $type: "color",
+          $value: "#ff5500"
+        }
+      });
+
+      expect(result.vars).toEqual({
+        "--color-brand": "#ff5500"
+      });
+
+      expect(result.resolvedTokens).toEqual({
+        colorBrand: "var(--color-brand)"
+      });
+    });
+
+    it("handles fontWeight tokens", () => {
+      const result = assignTokens({
+        weightNormal: {
+          $type: "fontWeight",
+          $value: "normal"
+        },
+        weightBold: {
+          $type: "fontWeight",
+          $value: "bold"
+        },
+        weightSemiBold: {
+          $type: "fontWeight",
+          $value: "semi-bold"
+        },
+        weightNumeric: {
+          $type: "fontWeight",
+          $value: 300
+        }
+      });
+
+      expect(result.vars).toEqual({
+        "--weight-normal": "400",
+        "--weight-bold": "700",
+        "--weight-semi-bold": "600",
+        "--weight-numeric": "300"
+      });
+
+      expect(result.resolvedTokens).toEqual({
+        weightNormal: "var(--weight-normal)",
+        weightBold: "var(--weight-bold)",
+        weightSemiBold: "var(--weight-semi-bold)",
+        weightNumeric: "var(--weight-numeric)"
+      });
+    });
+
+    it("handles number tokens", () => {
+      const result = assignTokens({
+        lineHeightBase: {
+          $type: "number",
+          $value: 1.5
+        },
+        zIndexModal: {
+          $type: "number",
+          $value: 1000
+        }
+      });
+
+      expect(result.vars).toEqual({
+        "--line-height-base": "1.5",
+        "--z-index-modal": "1000"
+      });
+
+      expect(result.resolvedTokens).toEqual({
+        lineHeightBase: "var(--line-height-base)",
+        zIndexModal: "var(--z-index-modal)"
+      });
+    });
+
+    it("handles mixed token types in a theme", () => {
+      const result = assignTokens({
+        typography: {
+          fontFamily: {
+            $type: "fontFamily",
+            $value: ["Inter", "system-ui", "sans-serif"]
+          },
+          fontWeight: {
+            $type: "fontWeight",
+            $value: "medium"
+          },
+          lineHeight: {
+            $type: "number",
+            $value: 1.6
+          }
+        },
+        animation: {
+          duration: {
+            $type: "duration",
+            $value: { value: 300, unit: "ms" }
+          },
+          easing: {
+            $type: "cubicBezier",
+            $value: [0.4, 0, 0.2, 1]
+          }
+        }
+      });
+
+      expect(result.vars).toEqual({
+        "--typography-font-family": "Inter, system-ui, sans-serif",
+        "--typography-font-weight": "500",
+        "--typography-line-height": "1.6",
+        "--animation-duration": "300ms",
+        "--animation-easing": "cubic-bezier(0.4, 0, 0.2, 1)"
+      });
+
+      expect(result.resolvedTokens.typography.fontFamily).toBe(
+        "var(--typography-font-family)"
+      );
+      expect(result.resolvedTokens.typography.fontWeight).toBe(
+        "var(--typography-font-weight)"
+      );
+      expect(result.resolvedTokens.typography.lineHeight).toBe(
+        "var(--typography-line-height)"
+      );
+      expect(result.resolvedTokens.animation.duration).toBe(
+        "var(--animation-duration)"
+      );
+      expect(result.resolvedTokens.animation.easing).toBe(
+        "var(--animation-easing)"
+      );
     });
 
     it("handles TokenComposedValue with resolved getter", () => {
