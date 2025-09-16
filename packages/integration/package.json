@@ -52,11 +52,11 @@
   },
   "prettier": "prettier-config-custom",
   "dependencies": {
-    "@babel/core": "^7.28.4",
+    "@babel/core": "^7.28.5",
     "@babel/plugin-syntax-jsx": "^7.27.1",
     "@mincho-js/babel": "workspace:^",
     "@vanilla-extract/integration": "^8.0.4",
-    "esbuild": "^0.25.10"
+    "esbuild": "^0.25.11"
   },
   "devDependencies": {
     "@types/babel__core": "^7.20.5",

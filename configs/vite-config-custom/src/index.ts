@@ -11,6 +11,12 @@ import { externalizeDeps } from "vite-plugin-externalize-deps";
 import tsconfigPaths from "vite-tsconfig-paths";
 import { dtsForEsm, dtsForCjs } from "vite-plugin-dts-build";
 
+declare module "vite" {
+  interface UserConfig {
+    test?: ViteUserConfig["test"];
+  }
+}
+
 // == Main Configs ============================================================
 type TInputConfig = Parameters<typeof defineConfig>[0];
 type TOutputConfig = ReturnType<typeof mergeConfig>;
