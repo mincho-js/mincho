@@ -7,7 +7,8 @@
     "dbaeumer.vscode-eslint",
     "rvest.vs-code-prettier-eslint",
     "augustocdias.tasks-shell-input",
-    "vitest.explorer"
+    "vitest.explorer",
+    "TypeScriptTeam.native-preview"
   ],
   // List of extensions recommended by VS Code that should not be recommended for users of this workspace.
   "unwantedRecommendations": []
