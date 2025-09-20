@@ -10,7 +10,7 @@ import type {
 
 import { css } from "../css/index.js";
 import type { CSSRuleWith } from "../css/types.js";
-import { className, getDebugName, getVarName } from "../utils.js";
+import { identifierName, getDebugName, getVarName } from "../utils.js";
 import { createRuntimeFn } from "./createRuntimeFn.js";
 import type {
   ComplexPropDefinitions,
@@ -500,8 +500,8 @@ if (import.meta.vitest) {
       assert.hasAllKeys(result.classNames, ["base", "variants"]);
       assert.isFunction(result.props);
 
-      expect(result()).toMatch(className(debugId));
-      expect(result.classNames.base).toMatch(className(debugId));
+      expect(result()).toMatch(identifierName(debugId));
+      expect(result.classNames.base).toMatch(identifierName(debugId));
       expect(result.classNames.variants).toEqual({});
       expect(result.variants()).toEqual([]);
     });
@@ -514,8 +514,8 @@ if (import.meta.vitest) {
       assert.hasAllKeys(result.classNames, ["base", "variants"]);
       assert.isFunction(result.props);
 
-      expect(result()).toMatch(className(debugId));
-      expect(result.classNames.base).toMatch(className(debugId));
+      expect(result()).toMatch(identifierName(debugId));
+      expect(result.classNames.base).toMatch(identifierName(debugId));
       expect(result.classNames.variants).toEqual({});
       expect(result.variants()).toEqual([]);
     });
@@ -546,8 +546,8 @@ if (import.meta.vitest) {
       assert.hasAllKeys(result.classNames, ["base", "variants"]);
       assert.isFunction(result.props);
 
-      expect(result()).toMatch(className(debugId));
-      expect(result.classNames.base).toMatch(className(debugId));
+      expect(result()).toMatch(identifierName(debugId));
+      expect(result.classNames.base).toMatch(identifierName(debugId));
       assert.hasAllKeys(result.classNames.variants, [
         "color",
         "size",
@@ -558,10 +558,10 @@ if (import.meta.vitest) {
       // Each variant className check
       assert.hasAllKeys(result.classNames.variants.color, ["brand", "accent"]);
       expect(result.classNames.variants.color.brand).toMatch(
-        className(`${debugId}_color_brand`)
+        identifierName(`${debugId}_color_brand`)
       );
       expect(result.classNames.variants.color.accent).toMatch(
-        className(`${debugId}_color_accent`)
+        identifierName(`${debugId}_color_accent`)
       );
 
       assert.hasAllKeys(result.classNames.variants.size, [
@@ -570,74 +570,90 @@ if (import.meta.vitest) {
         "large"
       ]);
       expect(result.classNames.variants.size.small).toMatch(
-        className(`${debugId}_size_small`)
+        identifierName(`${debugId}_size_small`)
       );
       expect(result.classNames.variants.size.medium).toMatch(
-        className(`${debugId}_size_medium`)
+        identifierName(`${debugId}_size_medium`)
       );
       expect(result.classNames.variants.size.large).toMatch(
-        className(`${debugId}_size_large`)
+        identifierName(`${debugId}_size_large`)
       );
 
       assert.hasAllKeys(result.classNames.variants.outlined, ["true", "false"]);
       expect(result.classNames.variants.outlined.true).toMatch(
-        className(`${debugId}_outlined_true`)
+        identifierName(`${debugId}_outlined_true`)
       );
       expect(result.classNames.variants.outlined.false).toMatch(
-        className(`${debugId}_outlined_false`)
+        identifierName(`${debugId}_outlined_false`)
       );
 
       // Compose variant className check
-      expect(result()).toMatch(className(debugId));
+      expect(result()).toMatch(identifierName(debugId));
       expect(result({ color: "brand" })).toMatch(
-        className(debugId, `${debugId}_color_brand`)
+        identifierName(debugId, `${debugId}_color_brand`)
       );
       expect(result({ size: "small" })).toMatch(
-        className(debugId, `${debugId}_size_small`)
+        identifierName(debugId, `${debugId}_size_small`)
       );
       expect(result({ outlined: true })).toMatch(
-        className(debugId, `${debugId}_outlined_true`)
+        identifierName(debugId, `${debugId}_outlined_true`)
       );
       expect(result(["outlined"])).toMatch(
-        className(debugId, `${debugId}_outlined_true`)
+        identifierName(debugId, `${debugId}_outlined_true`)
       );
 
       expect(result({ color: "brand", size: "small" })).toMatch(
-        className(debugId, `${debugId}_color_brand`, `${debugId}_size_small`)
+        identifierName(
+          debugId,
+          `${debugId}_color_brand`,
+          `${debugId}_size_small`
+        )
       );
       expect(result({ size: "small", color: "brand" })).toMatch(
-        className(debugId, `${debugId}_size_small`, `${debugId}_color_brand`)
+        identifierName(
+          debugId,
+          `${debugId}_size_small`,
+          `${debugId}_color_brand`
+        )
       );
       expect(result(["outlined", { color: "brand" }])).toMatch(
-        className(debugId, `${debugId}_outlined_true`, `${debugId}_color_brand`)
+        identifierName(
+          debugId,
+          `${debugId}_outlined_true`,
+          `${debugId}_color_brand`
+        )
       );
       expect(result([{ color: "brand" }, "outlined"])).toMatch(
-        className(debugId, `${debugId}_color_brand`, `${debugId}_outlined_true`)
+        identifierName(
+          debugId,
+          `${debugId}_color_brand`,
+          `${debugId}_outlined_true`
+        )
       );
 
       expect(result([{ color: "brand" }, { color: "accent" }])).toMatch(
-        className(debugId, `${debugId}_color_accent`)
+        identifierName(debugId, `${debugId}_color_accent`)
       );
       expect(result(["outlined", { outlined: false }])).toMatch(
-        className(debugId, `${debugId}_outlined_false`)
+        identifierName(debugId, `${debugId}_outlined_false`)
       );
       expect(result(["outlined", { outlined: false }, "outlined"])).toMatch(
-        className(debugId, `${debugId}_outlined_true`)
+        identifierName(debugId, `${debugId}_outlined_true`)
       );
 
       // Without debugId
       const resultWithoutDebugId = rules(variants);
       expect(resultWithoutDebugId({ color: "brand" })).toMatch(
-        className(undefined, `color_brand`)
+        identifierName(undefined, `color_brand`)
       );
       expect(resultWithoutDebugId({ size: "small" })).toMatch(
-        className(undefined, `size_small`)
+        identifierName(undefined, `size_small`)
       );
       expect(resultWithoutDebugId({ outlined: true })).toMatch(
-        className(undefined, `outlined_true`)
+        identifierName(undefined, `outlined_true`)
       );
       expect(resultWithoutDebugId(["outlined"])).toMatch(
-        className(undefined, `outlined_true`)
+        identifierName(undefined, `outlined_true`)
       );
     });
 
@@ -658,46 +674,46 @@ if (import.meta.vitest) {
       assert.hasAllKeys(result.classNames, ["base", "variants"]);
       assert.isFunction(result.props);
 
-      expect(result()).toMatch(className(debugId));
-      expect(result.classNames.base).toMatch(className(debugId));
+      expect(result()).toMatch(identifierName(debugId));
+      expect(result.classNames.base).toMatch(identifierName(debugId));
       assert.hasAllKeys(result.classNames.variants, ["disabled", "rounded"]);
       expect(result.variants()).toEqual(["disabled", "rounded"]);
 
       // Each variant className check
       assert.hasAllKeys(result.classNames.variants.disabled, ["true"]);
       expect(result.classNames.variants.disabled.true).toMatch(
-        className(`${debugId}_disabled_true`)
+        identifierName(`${debugId}_disabled_true`)
       );
 
       assert.hasAllKeys(result.classNames.variants.rounded, ["true"]);
       expect(result.classNames.variants.rounded.true).toMatch(
-        className(`${debugId}_rounded_true`)
+        identifierName(`${debugId}_rounded_true`)
       );
 
       // Compose variant className check
-      expect(result()).toMatch(className(debugId));
+      expect(result()).toMatch(identifierName(debugId));
       expect(result({ disabled: true })).toMatch(
-        className(debugId, `${debugId}_disabled_true`)
+        identifierName(debugId, `${debugId}_disabled_true`)
       );
       expect(result(["disabled"])).toMatch(
-        className(debugId, `${debugId}_disabled_true`)
+        identifierName(debugId, `${debugId}_disabled_true`)
       );
       expect(result({ rounded: true })).toMatch(
-        className(debugId, `${debugId}_rounded_true`)
+        identifierName(debugId, `${debugId}_rounded_true`)
       );
       expect(result(["rounded"])).toMatch(
-        className(debugId, `${debugId}_rounded_true`)
+        identifierName(debugId, `${debugId}_rounded_true`)
       );
 
       expect(result(["disabled", "rounded"])).toMatch(
-        className(
+        identifierName(
           debugId,
           `${debugId}_disabled_true`,
           `${debugId}_rounded_true`
         )
       );
       expect(result(["rounded", "disabled"])).toMatch(
-        className(
+        identifierName(
           debugId,
           `${debugId}_rounded_true`,
           `${debugId}_disabled_true`
@@ -723,39 +739,43 @@ if (import.meta.vitest) {
       assert.hasAllKeys(result.classNames, ["base", "variants"]);
       assert.isFunction(result.props);
 
-      expect(result()).toMatch(className(debugId, `${debugId}_disabled_true`));
-      expect(result.classNames.base).toMatch(className(debugId));
+      expect(result()).toMatch(
+        identifierName(debugId, `${debugId}_disabled_true`)
+      );
+      expect(result.classNames.base).toMatch(identifierName(debugId));
       assert.hasAllKeys(result.classNames.variants, ["disabled", "rounded"]);
       expect(result.variants()).toEqual(["disabled", "rounded"]);
 
       // Each variant className check
       assert.hasAllKeys(result.classNames.variants.disabled, ["true"]);
       expect(result.classNames.variants.disabled.true).toMatch(
-        className(`${debugId}_disabled_true`)
+        identifierName(`${debugId}_disabled_true`)
       );
 
       assert.hasAllKeys(result.classNames.variants.rounded, ["true"]);
       expect(result.classNames.variants.rounded.true).toMatch(
-        className(`${debugId}_rounded_true`)
+        identifierName(`${debugId}_rounded_true`)
       );
 
       // Compose variant className check
-      expect(result()).toMatch(className(debugId, `${debugId}_disabled_true`));
+      expect(result()).toMatch(
+        identifierName(debugId, `${debugId}_disabled_true`)
+      );
       expect(result({ disabled: true })).toMatch(
-        className(debugId, `${debugId}_disabled_true`)
+        identifierName(debugId, `${debugId}_disabled_true`)
       );
       expect(result(["disabled"])).toMatch(
-        className(debugId, `${debugId}_disabled_true`)
+        identifierName(debugId, `${debugId}_disabled_true`)
       );
       expect(result({ rounded: true })).toMatch(
-        className(
+        identifierName(
           debugId,
           `${debugId}_disabled_true`,
           `${debugId}_rounded_true`
         )
       );
       expect(result(["rounded"])).toMatch(
-        className(
+        identifierName(
           debugId,
           `${debugId}_disabled_true`,
           `${debugId}_rounded_true`
@@ -763,14 +783,14 @@ if (import.meta.vitest) {
       );
 
       expect(result(["disabled", "rounded"])).toMatch(
-        className(
+        identifierName(
           debugId,
           `${debugId}_disabled_true`,
           `${debugId}_rounded_true`
         )
       );
       expect(result(["rounded", "disabled"])).toMatch(
-        className(
+        identifierName(
           debugId,
           // disabled: true already exist
           `${debugId}_disabled_true`,
@@ -825,8 +845,8 @@ if (import.meta.vitest) {
       assert.hasAllKeys(result.classNames, ["base", "variants"]);
       assert.isFunction(result.props);
 
-      expect(result()).toMatch(className(debugId));
-      expect(result.classNames.base).toMatch(className(debugId));
+      expect(result()).toMatch(identifierName(debugId));
+      expect(result.classNames.base).toMatch(identifierName(debugId));
       assert.hasAllKeys(result.classNames.variants, [
         "color",
         "size",
@@ -837,10 +857,10 @@ if (import.meta.vitest) {
       // Each variant className check
       assert.hasAllKeys(result.classNames.variants.color, ["brand", "accent"]);
       expect(result.classNames.variants.color.brand).toMatch(
-        className(`${debugId}_color_brand`)
+        identifierName(`${debugId}_color_brand`)
       );
       expect(result.classNames.variants.color.accent).toMatch(
-        className(`${debugId}_color_accent`)
+        identifierName(`${debugId}_color_accent`)
       );
 
       assert.hasAllKeys(result.classNames.variants.size, [
@@ -849,46 +869,54 @@ if (import.meta.vitest) {
         "large"
       ]);
       expect(result.classNames.variants.size.small).toMatch(
-        className(`${debugId}_size_small`)
+        identifierName(`${debugId}_size_small`)
       );
       expect(result.classNames.variants.size.medium).toMatch(
-        className(`${debugId}_size_medium`)
+        identifierName(`${debugId}_size_medium`)
       );
       expect(result.classNames.variants.size.large).toMatch(
-        className(`${debugId}_size_large`)
+        identifierName(`${debugId}_size_large`)
       );
 
       assert.hasAllKeys(result.classNames.variants.outlined, ["true", "false"]);
       expect(result.classNames.variants.outlined.true).toMatch(
-        className(`${debugId}_outlined_true`)
+        identifierName(`${debugId}_outlined_true`)
       );
       expect(result.classNames.variants.outlined.false).toMatch(
-        className(`${debugId}_outlined_false`)
+        identifierName(`${debugId}_outlined_false`)
       );
 
       // Compose variant className check
-      expect(result()).toMatch(className(debugId));
+      expect(result()).toMatch(identifierName(debugId));
       expect(result({ color: "brand" })).toMatch(
-        className(debugId, `${debugId}_color_brand`)
+        identifierName(debugId, `${debugId}_color_brand`)
       );
       expect(result({ size: "small" })).toMatch(
-        className(debugId, `${debugId}_size_small`)
+        identifierName(debugId, `${debugId}_size_small`)
       );
       expect(result({ outlined: true })).toMatch(
-        className(debugId, `${debugId}_outlined_true`)
+        identifierName(debugId, `${debugId}_outlined_true`)
       );
       expect(result(["outlined"])).toMatch(
-        className(debugId, `${debugId}_outlined_true`)
+        identifierName(debugId, `${debugId}_outlined_true`)
       );
 
       expect(result({ color: "brand", size: "small" })).toMatch(
-        className(debugId, `${debugId}_color_brand`, `${debugId}_size_small`)
+        identifierName(
+          debugId,
+          `${debugId}_color_brand`,
+          `${debugId}_size_small`
+        )
       );
       expect(result({ size: "small", color: "brand" })).toMatch(
-        className(debugId, `${debugId}_size_small`, `${debugId}_color_brand`)
+        identifierName(
+          debugId,
+          `${debugId}_size_small`,
+          `${debugId}_color_brand`
+        )
       );
       expect(result(["outlined", { color: "brand" }])).toMatch(
-        className(
+        identifierName(
           debugId,
           `${debugId}_outlined_true`,
           `${debugId}_color_brand`,
@@ -897,7 +925,7 @@ if (import.meta.vitest) {
         )
       );
       expect(result([{ color: "brand" }, "outlined"])).toMatch(
-        className(
+        identifierName(
           debugId,
           `${debugId}_color_brand`,
           `${debugId}_outlined_true`,
@@ -906,7 +934,7 @@ if (import.meta.vitest) {
         )
       );
       expect(result(["outlined", { color: "brand", size: "medium" }])).toMatch(
-        className(
+        identifierName(
           debugId,
           `${debugId}_outlined_true`,
           `${debugId}_color_brand`,
@@ -918,13 +946,13 @@ if (import.meta.vitest) {
       );
 
       expect(result([{ color: "brand" }, { color: "accent" }])).toMatch(
-        className(debugId, `${debugId}_color_accent`)
+        identifierName(debugId, `${debugId}_color_accent`)
       );
       expect(result(["outlined", { outlined: false }])).toMatch(
-        className(debugId, `${debugId}_outlined_false`)
+        identifierName(debugId, `${debugId}_outlined_false`)
       );
       expect(result(["outlined", { outlined: false }, "outlined"])).toMatch(
-        className(debugId, `${debugId}_outlined_true`)
+        identifierName(debugId, `${debugId}_outlined_true`)
       );
     });
 
@@ -963,7 +991,7 @@ if (import.meta.vitest) {
 
       // Test variant transformation
       expect(result({ color: "brand", size: "small" })).toMatch(
-        className(
+        identifierName(
           debugId,
           `${debugId}_color_brand`,
           `${debugId}_size_small`,
@@ -993,7 +1021,7 @@ if (import.meta.vitest) {
       expect(
         resultMultiple({ color: "brand", size: "small", outlined: true })
       ).toMatch(
-        className(
+        identifierName(
           debugId,
           `${debugId}_color_brand`,
           `${debugId}_size_small`,
@@ -1016,7 +1044,11 @@ if (import.meta.vitest) {
         debugId
       );
       expect(resultBoolean({ outlined: true })).toMatch(
-        className(debugId, `${debugId}_outlined_true`, `${debugId}_compound_0`)
+        identifierName(
+          debugId,
+          `${debugId}_outlined_true`,
+          `${debugId}_compound_0`
+        )
       );
 
       // Test empty conditions
@@ -1028,7 +1060,7 @@ if (import.meta.vitest) {
         debugId
       );
       expect(resultEmpty({ color: "brand" })).toMatch(
-        className(debugId, `${debugId}_color_brand`)
+        identifierName(debugId, `${debugId}_color_brand`)
       );
     });
 
@@ -1052,7 +1084,7 @@ if (import.meta.vitest) {
       ).forEach(([varName, propValue]) => {
         // Partial
         expect(propValue).toBe("red");
-        expect(varName).toMatch(className(`--${debugId}_color`));
+        expect(varName).toMatch(identifierName(`--${debugId}_color`));
       });
       Object.entries(
         result1.props({
@@ -1064,10 +1096,10 @@ if (import.meta.vitest) {
         expect(propValue).toBeOneOf(["red", "blue"]);
 
         if (propValue === "red") {
-          expect(varName).toMatch(className(`--${debugId}_color`));
+          expect(varName).toMatch(identifierName(`--${debugId}_color`));
         }
         if (propValue === "blue") {
-          expect(varName).toMatch(className(`--${debugId}_background`));
+          expect(varName).toMatch(identifierName(`--${debugId}_background`));
         }
       });
       Object.entries(
@@ -1099,10 +1131,10 @@ if (import.meta.vitest) {
         expect(propValue).toBeOneOf(["999px", "2rem"]);
 
         if (propValue === "999px") {
-          expect(varName).toMatch(className(`--${debugId}_rounded`));
+          expect(varName).toMatch(identifierName(`--${debugId}_rounded`));
         }
         if (propValue === "2rem") {
-          expect(varName).toMatch(className(`--${debugId}_size`));
+          expect(varName).toMatch(identifierName(`--${debugId}_size`));
         }
       });
 
@@ -1131,16 +1163,16 @@ if (import.meta.vitest) {
         expect(propValue).toBeOneOf(["red", "blue", "999px", "2rem"]);
 
         if (propValue === "red") {
-          expect(varName).toMatch(className(`--${debugId}_color`));
+          expect(varName).toMatch(identifierName(`--${debugId}_color`));
         }
         if (propValue === "blue") {
-          expect(varName).toMatch(className(`--${debugId}_background`));
+          expect(varName).toMatch(identifierName(`--${debugId}_background`));
         }
         if (propValue === "999px") {
-          expect(varName).toMatch(className(`--${debugId}_rounded`));
+          expect(varName).toMatch(identifierName(`--${debugId}_rounded`));
         }
         if (propValue === "2rem") {
-          expect(varName).toMatch(className(`--${debugId}_size`));
+          expect(varName).toMatch(identifierName(`--${debugId}_size`));
         }
       });
     });
@@ -1318,9 +1350,9 @@ if (import.meta.vitest) {
       // Check button pattern
       assert.hasAllKeys(result.button, ["props", "variants", "classNames"]);
       assert.hasAllKeys(result.button.classNames, ["base", "variants"]);
-      expect(result.button()).toMatch(className(`${debugId}_button`));
+      expect(result.button()).toMatch(identifierName(`${debugId}_button`));
       expect(result.button.classNames.base).toMatch(
-        className(`${debugId}_button`)
+        identifierName(`${debugId}_button`)
       );
       assert.hasAllKeys(result.button.classNames.variants, ["variant"]);
       assert.hasAllKeys(result.button.classNames.variants.variant, [
@@ -1331,9 +1363,9 @@ if (import.meta.vitest) {
       // Check input pattern
       assert.hasAllKeys(result.input, ["props", "variants", "classNames"]);
       assert.hasAllKeys(result.input.classNames, ["base", "variants"]);
-      expect(result.input()).toMatch(className(`${debugId}_input`));
+      expect(result.input()).toMatch(identifierName(`${debugId}_input`));
       expect(result.input.classNames.base).toMatch(
-        className(`${debugId}_input`)
+        identifierName(`${debugId}_input`)
       );
       assert.hasAllKeys(result.input.classNames.variants, ["state"]);
       assert.hasAllKeys(result.input.classNames.variants.state, [
@@ -1343,10 +1375,10 @@ if (import.meta.vitest) {
 
       // Test usage
       expect(result.button({ variant: "primary" })).toMatch(
-        className(`${debugId}_button`, `${debugId}_button_variant_primary`)
+        identifierName(`${debugId}_button`, `${debugId}_button_variant_primary`)
       );
       expect(result.input({ state: "error" })).toMatch(
-        className(`${debugId}_input`, `${debugId}_input_state_error`)
+        identifierName(`${debugId}_input`, `${debugId}_input_state_error`)
       );
     });
 
@@ -1379,7 +1411,7 @@ if (import.meta.vitest) {
 
       // Check light theme pattern
       assert.hasAllKeys(result.light, ["props", "variants", "classNames"]);
-      expect(result.light()).toMatch(className(`${debugId}_light`));
+      expect(result.light()).toMatch(identifierName(`${debugId}_light`));
       assert.hasAllKeys(result.light.classNames.variants, ["emphasis"]);
       assert.hasAllKeys(result.light.classNames.variants.emphasis, [
         "subtle",
@@ -1388,7 +1420,7 @@ if (import.meta.vitest) {
 
       // Check dark theme pattern
       assert.hasAllKeys(result.dark, ["props", "variants", "classNames"]);
-      expect(result.dark()).toMatch(className(`${debugId}_dark`));
+      expect(result.dark()).toMatch(identifierName(`${debugId}_dark`));
       assert.hasAllKeys(result.dark.classNames.variants, ["emphasis"]);
       assert.hasAllKeys(result.dark.classNames.variants.emphasis, [
         "subtle",
@@ -1397,10 +1429,10 @@ if (import.meta.vitest) {
 
       // Test usage
       expect(result.light({ emphasis: "strong" })).toMatch(
-        className(`${debugId}_light`, `${debugId}_light_emphasis_strong`)
+        identifierName(`${debugId}_light`, `${debugId}_light_emphasis_strong`)
       );
       expect(result.dark({ emphasis: "subtle" })).toMatch(
-        className(`${debugId}_dark`, `${debugId}_dark_emphasis_subtle`)
+        identifierName(`${debugId}_dark`, `${debugId}_dark_emphasis_subtle`)
       );
     });
 
@@ -1427,7 +1459,7 @@ if (import.meta.vitest) {
 
       // Test usage
       expect(result.md({ direction: "horizontal" })).toMatch(
-        className(`${debugId}_md`, `${debugId}_md_direction_horizontal`)
+        identifierName(`${debugId}_md`, `${debugId}_md_direction_horizontal`)
       );
     });
   });

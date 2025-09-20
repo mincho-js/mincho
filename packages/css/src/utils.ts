@@ -2,7 +2,7 @@ import { createVar } from "@vanilla-extract/css";
 import { setFileScope } from "@vanilla-extract/css/fileScope";
 import type { PureCSSVarKey } from "@mincho-js/transform-to-vanilla";
 
-export function className(...debugIds: Array<string | undefined>) {
+export function identifierName(...debugIds: Array<string | undefined>) {
   const hashRegex = "[a-zA-Z0-9]+";
   const classStr = debugIds
     .map((id) => (id === undefined ? hashRegex : `${id}__${hashRegex}`))
@@ -63,10 +63,10 @@ if (import.meta.vitest) {
 
     it("createVar", () => {
       expect(getVarName(createVar("my-var-name"))).toMatch(
-        className(`--my-var-name`)
+        identifierName(`--my-var-name`)
       );
       expect(getVarName(createVar("myCss-var-name23"))).toMatch(
-        className(`--myCss-var-name23`)
+        identifierName(`--myCss-var-name23`)
       );
     });
   });

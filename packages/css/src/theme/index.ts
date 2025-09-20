@@ -13,7 +13,6 @@ import type { Resolve } from "../types.js";
 import type {
   Theme,
   ResolveTheme,
-  ThemeValue,
   TokenValue,
   TokenDefinition,
   TokenPrimitiveValue,
@@ -25,6 +24,7 @@ import type {
   TokenFontWeightValue
 } from "./types.js";
 
+// == Public API ==============================================================
 type WithOptionalLayer<T extends Theme> = T & {
   "@layer"?: string;
 };
@@ -80,33 +80,9 @@ function extractLayerFromTokens<ThemeTokens extends Theme>(
   return { tokens };
 }
 
-// === Assign Variables ========================================================
-function assignTokensWithPrefix<ThemeTokens extends Theme>(
-  tokens: ThemeTokens,
-  prefix = ""
-): {
-  vars: AssignedVars;
-  resolvedTokens: ResolveTheme<ThemeTokens>;
-} {
-  const vars: AssignedVars = {};
-  const resolvedTokens = {} as ResolveTheme<ThemeTokens>;
-
-  for (const [key, value] of Object.entries(tokens)) {
-    const varPath = buildVarPath(prefix, key);
-
-    if (isThemeValue(value)) {
-      processThemeValue(key, value, varPath, vars, resolvedTokens);
-    } else if (isNestedTheme(value)) {
-      const { vars: nestedVars, resolvedTokens: nestedResolved } =
-        assignTokensWithPrefix(value as Theme, varPath);
-
-      // Merge nested vars directly (they already have correct prefixes)
-      Object.assign(vars, nestedVars);
-      (resolvedTokens as Record<string, unknown>)[key] = nestedResolved;
-    }
-  }
-
-  return { vars, resolvedTokens };
+// == Token Assignment Orchestration ===========================================
+interface AssignedVars {
+  [cssVarName: string]: CSSVarValue;
 }
 
 function assignTokens<ThemeTokens extends Theme>(
@@ -118,7 +94,234 @@ function assignTokens<ThemeTokens extends Theme>(
   return assignTokensWithPrefix(tokens, "");
 }
 
-// === Type Guards =============================================================
+/**
+ * Assigns CSS variables to theme tokens using a two-pass algorithm.
+ * Pass 1 assigns variables to all tokens, Pass 2 resolves semantic token references.
+ */
+function assignTokensWithPrefix<ThemeTokens extends Theme>(
+  tokens: ThemeTokens,
+  prefix = ""
+): {
+  vars: AssignedVars;
+  resolvedTokens: ResolveTheme<ThemeTokens>;
+} {
+  const vars: AssignedVars = {};
+  const resolvedTokens = {} as ResolveTheme<ThemeTokens>;
+
+  // Execute two-pass token resolution:
+  // 1. Assign CSS variables to all tokens
+  // 2. Resolve semantic token references
+  const context: TokenProcessingContext = {
+    prefix,
+    path: [],
+    parentPath: prefix
+  };
+  assignTokenVariables(tokens, vars, resolvedTokens, context);
+  resolveSemanticTokens(tokens, vars, resolvedTokens, context);
+
+  return { vars, resolvedTokens };
+}
+
+// == Two-Pass Token Resolution ===============================================
+/**
+ * Context object for token processing functions
+ */
+interface TokenProcessingContext {
+  prefix: string; // Variable name prefix
+  path: string[]; // Current path in object tree
+  parentPath: string; // Current variable path
+}
+
+/**
+ * Pass 1: Assigns CSS variables to all tokens and builds resolved structure.
+ * Processes regular tokens immediately, creates placeholders for semantic tokens.
+ */
+function assignTokenVariables(
+  themeNode: Record<string, unknown>,
+  vars: AssignedVars,
+  resolvedTokens: Record<string, unknown>,
+  context: TokenProcessingContext
+): void {
+  const descriptors = Object.getOwnPropertyDescriptors(themeNode);
+
+  for (const [key, descriptor] of Object.entries(descriptors)) {
+    const varPath = context.parentPath
+      ? `${context.parentPath}-${camelToKebab(key)}`
+      : camelToKebab(key);
+    const cssVar = pathToCSSVar(varPath);
+    const currentPath = [...context.path, key];
+
+    // Handle getters (referencing tokens)
+    if (typeof descriptor.get === "function") {
+      // Store placeholder CSS variable reference for now
+      setByPath(resolvedTokens, currentPath, pathToVarReference(varPath));
+      continue;
+    }
+
+    const value = descriptor.value;
+
+    // Handle TokenDefinition
+    if (isTokenDefinition(value)) {
+      // Check if $value is a structured value for the token type
+      const tokenType = value.$type;
+      const tokenValue = value.$value;
+
+      if (isStructuredTokenValue(tokenType, tokenValue)) {
+        // Process token definition as a single value
+        const cssValue = extractTokenDefinitionValue(value);
+        vars[cssVar] = cssValue;
+        setByPath(resolvedTokens, currentPath, pathToVarReference(varPath));
+      } else if (isNestedTheme(tokenValue)) {
+        // For nested objects in token definitions, recurse into them
+        setByPath(resolvedTokens, currentPath, {});
+        assignTokenVariables(
+          tokenValue as Record<string, unknown>,
+          vars,
+          resolvedTokens,
+          {
+            prefix: context.prefix,
+            path: currentPath,
+            parentPath: varPath
+          }
+        );
+      } else {
+        // Fallback for other types
+        const cssValue = extractTokenDefinitionValue(value);
+        vars[cssVar] = cssValue;
+        setByPath(resolvedTokens, currentPath, pathToVarReference(varPath));
+      }
+      continue;
+    }
+
+    // Handle arrays
+    if (Array.isArray(value)) {
+      const resolvedArray: PureCSSVarFunction[] = [];
+      value.forEach((item, index) => {
+        const indexedPath = `${varPath}-${index}`;
+        const indexedCssVar = pathToCSSVar(indexedPath);
+        vars[indexedCssVar] = extractCSSValue(item);
+        resolvedArray.push(pathToVarReference(indexedPath));
+      });
+      setByPath(resolvedTokens, currentPath, resolvedArray);
+      continue;
+    }
+
+    // Handle TokenCompositeValue
+    if (isTokenCompositeValue(value)) {
+      const resolvedComposite: Record<string, PureCSSVarFunction> = {};
+
+      // Process resolved property
+      vars[cssVar] = extractCSSValue(value.resolved);
+
+      // Create getter for resolved property
+      Object.defineProperty(resolvedComposite, "resolved", {
+        get() {
+          return pathToVarReference(varPath);
+        },
+        enumerable: true,
+        configurable: true
+      });
+
+      // Process other properties
+      for (const [propKey, propValue] of Object.entries(value)) {
+        if (propKey === "resolved") continue;
+
+        const propPath = `${varPath}-${camelToKebab(propKey)}`;
+        const propCssVar = pathToCSSVar(propPath);
+        vars[propCssVar] = extractCSSValue(propValue as TokenValue);
+        resolvedComposite[propKey] = pathToVarReference(propPath);
+      }
+
+      setByPath(resolvedTokens, currentPath, resolvedComposite);
+      continue;
+    }
+
+    // Handle nested objects
+    if (isNestedTheme(value)) {
+      setByPath(resolvedTokens, currentPath, {});
+      assignTokenVariables(value, vars, resolvedTokens, {
+        prefix: context.prefix,
+        path: currentPath,
+        parentPath: varPath
+      });
+      continue;
+    }
+
+    // Handle primitive values and TokenUnitValue
+    const cssValue = extractCSSValue(value as TokenValue);
+    vars[cssVar] = cssValue;
+    setByPath(resolvedTokens, currentPath, pathToVarReference(varPath));
+  }
+}
+
+/**
+ * Pass 2: Resolves semantic token references using completed structure.
+ * Evaluates getter functions with resolvedTokens as context to enable
+ * semantic tokens to reference other tokens via CSS variables.
+ */
+function resolveSemanticTokens(
+  themeNode: Record<string, unknown>,
+  vars: AssignedVars,
+  resolvedTokens: Record<string, unknown>,
+  context: TokenProcessingContext
+): void {
+  const descriptors = Object.getOwnPropertyDescriptors(themeNode);
+
+  for (const [key, descriptor] of Object.entries(descriptors)) {
+    const currentPath = [...context.path, key];
+    const varPath = context.parentPath
+      ? `${context.parentPath}-${camelToKebab(key)}`
+      : camelToKebab(key);
+
+    // Handle getters (semantic tokens)
+    if (typeof descriptor.get === "function") {
+      const cssVar = pathToCSSVar(varPath);
+
+      // Call getter with resolvedTokens as this context
+      // This allows semantic tokens to reference other tokens
+      const computedValue = descriptor.get.call(resolvedTokens);
+
+      // Store the computed reference (should be a var() reference)
+      vars[cssVar] = computedValue;
+
+      // Update resolvedTokens with the actual reference
+      setByPath(resolvedTokens, currentPath, computedValue);
+      continue;
+    }
+
+    const value = descriptor.value;
+
+    // Handle nested TokenDefinition with object $value
+    if (
+      isTokenDefinition(value) &&
+      isPlainObject(value.$value) &&
+      !Array.isArray(value.$value)
+    ) {
+      resolveSemanticTokens(
+        value.$value as Record<string, unknown>,
+        vars,
+        resolvedTokens,
+        {
+          prefix: context.prefix,
+          path: currentPath,
+          parentPath: varPath
+        }
+      );
+      continue;
+    }
+
+    // Recurse for nested objects (but not other types)
+    if (isNestedTheme(value)) {
+      resolveSemanticTokens(value, vars, resolvedTokens, {
+        prefix: context.prefix,
+        path: currentPath,
+        parentPath: varPath
+      });
+    }
+  }
+}
+
+// == Type Guards =============================================================
 function isPrimitive(value: unknown): value is TokenPrimitiveValue {
   const type = typeof value;
   return (
@@ -126,6 +329,41 @@ function isPrimitive(value: unknown): value is TokenPrimitiveValue {
     type === "number" ||
     type === "boolean" ||
     value === undefined
+  );
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return Object.prototype.toString.call(value) === "[object Object]";
+}
+
+function isNestedTheme(value: unknown): value is Theme {
+  if (!isPlainObject(value)) return false;
+  if (Array.isArray(value)) return false;
+  if (isTokenUnitValue(value)) return false;
+  if (isTokenCompositeValue(value)) return false;
+  if (isTokenDefinition(value)) return false;
+  return true;
+}
+
+/**
+ * Checks if a token type has a structured value that should be processed as a single unit
+ * rather than recursed into as a nested object.
+ */
+function isStructuredTokenValue(
+  tokenType: string,
+  tokenValue: unknown
+): boolean {
+  return (
+    ((tokenType === "dimension" || tokenType === "duration") &&
+      isPlainObject(tokenValue) &&
+      "value" in tokenValue &&
+      "unit" in tokenValue) ||
+    (tokenType === "cubicBezier" && Array.isArray(tokenValue)) ||
+    (tokenType === "fontFamily" &&
+      (typeof tokenValue === "string" || Array.isArray(tokenValue))) ||
+    tokenType === "fontWeight" ||
+    tokenType === "number" ||
+    (tokenType === "color" && typeof tokenValue === "string")
   );
 }
 
@@ -156,24 +394,6 @@ function isTokenDefinition(value: unknown): value is TokenDefinition {
   );
 }
 
-function isThemeValue(value: unknown): value is ThemeValue {
-  if (isPrimitive(value)) return true;
-  if (Array.isArray(value)) return true;
-  if (isTokenUnitValue(value)) return true;
-  if (isTokenCompositeValue(value)) return true;
-  if (isTokenDefinition(value)) return true;
-  return false;
-}
-
-function isNestedTheme(value: unknown): value is Theme {
-  if (typeof value !== "object" || value === null) return false;
-  if (Array.isArray(value)) return false;
-  if (isTokenUnitValue(value)) return false;
-  if (isTokenCompositeValue(value)) return false;
-  if (isTokenDefinition(value)) return false;
-  return true;
-}
-
 // === Path Utilities ==========================================================
 function pathToCSSVar(path: string): PureCSSVarKey {
   return `--${path}` as PureCSSVarKey;
@@ -183,13 +403,25 @@ function pathToVarReference(path: string): PureCSSVarFunction {
   return `var(--${path})` as PureCSSVarFunction;
 }
 
-function buildVarPath(prefix: string, key: string): string {
-  const kebabKey = camelToKebab(key);
-  return prefix ? `${prefix}-${kebabKey}` : kebabKey;
+function setByPath(
+  obj: Record<string, unknown>,
+  path: string[],
+  value: unknown
+): void {
+  let target: Record<string, unknown> = obj;
+  for (let i = 0; i < path.length - 1; i++) {
+    const key = path[i];
+    if (!isPlainObject(target[key])) {
+      target[key] = {};
+    }
+    target = target[key] as Record<string, unknown>;
+  }
+  if (path.length > 0) {
+    target[path[path.length - 1]] = value;
+  }
 }
 
-// === Value Extraction ========================================================
-// === Token Type Value Extractors ============================================
+// == Token Value Extractors ==================================================
 function extractFontFamilyValue(value: TokenFontFamilyValue): CSSVarValue {
   if (Array.isArray(value)) {
     return value.join(", ") as CSSVarValue;
@@ -220,9 +452,14 @@ function extractColorValue(value: string | TokenColorValue): CSSVarValue {
 
   // Otherwise, construct from color space and components
   // This is a simplified version - full implementation would need proper color space handling
-  const components = value.components.join(", ");
-  const alpha = value.alpha !== undefined ? ` / ${value.alpha}` : "";
-  return `${value.colorSpace}(${components}${alpha})` as CSSVarValue;
+  if (value.components && Array.isArray(value.components)) {
+    const components = value.components.join(", ");
+    const alpha = value.alpha !== undefined ? ` / ${value.alpha}` : "";
+    return `${value.colorSpace}(${components}${alpha})` as CSSVarValue;
+  }
+
+  // Fallback for invalid color object
+  return "#000000" as CSSVarValue;
 }
 
 function extractFontWeightValue(value: TokenFontWeightValue): CSSVarValue {
@@ -286,7 +523,6 @@ function extractTokenDefinitionValue(definition: TokenDefinition): CSSVarValue {
   }
 }
 
-// === Value Extraction ========================================================
 function extractCSSValue(value: TokenValue): CSSVarValue {
   if (isPrimitive(value)) {
     return String(value) as CSSVarValue;
@@ -315,103 +551,7 @@ function extractCSSValue(value: TokenValue): CSSVarValue {
   throw new Error(`Unexpected value type in extractCSSValue: ${typeof value}`);
 }
 
-// === Theme Value Processing ==================================================
-interface AssignedVars {
-  [tokenName: string]: CSSVarValue;
-}
-
-function processThemeValue(
-  key: string,
-  value: ThemeValue,
-  varPath: string,
-  vars: AssignedVars,
-  resolvedTokens: Record<string, unknown>
-): void {
-  // Handle TokenDefinition - extract value based on $type
-  if (isTokenDefinition(value)) {
-    // Check if it's a specific token type that needs special handling
-    if (
-      (value.$type && typeof value.$value !== "object") ||
-      (typeof value.$value === "object" && !isNestedTheme(value.$value))
-    ) {
-      // Use the token-specific extractor
-      const cssVarName = pathToCSSVar(varPath);
-      vars[cssVarName] = extractTokenDefinitionValue(value);
-      resolvedTokens[key] = pathToVarReference(varPath);
-      return;
-    }
-
-    // Otherwise, handle as before for nested themes
-    const innerValue = value.$value;
-    if (isThemeValue(innerValue)) {
-      processThemeValue(key, innerValue, varPath, vars, resolvedTokens);
-    } else if (isNestedTheme(innerValue)) {
-      // It's a nested theme, process it recursively
-      const { vars: nestedVars, resolvedTokens: nestedResolved } =
-        assignTokensWithPrefix(innerValue as Theme, varPath);
-
-      // Merge nested vars directly
-      Object.assign(vars, nestedVars);
-      resolvedTokens[key] = nestedResolved;
-    }
-    return;
-  }
-
-  // Handle arrays - create indexed variables
-  if (Array.isArray(value)) {
-    const resolvedArray: PureCSSVarFunction[] = [];
-
-    value.forEach((item, index) => {
-      const indexedPath = `${varPath}-${index}`;
-      const cssVarName = pathToCSSVar(indexedPath);
-      const varRef = pathToVarReference(indexedPath);
-
-      vars[cssVarName] = extractCSSValue(item);
-      resolvedArray.push(varRef);
-    });
-
-    resolvedTokens[key] = resolvedArray;
-    return;
-  }
-
-  // Handle TokenComposedValue - process resolved and all properties
-  if (isTokenCompositeValue(value)) {
-    const resolvedComposite: Record<string, PureCSSVarFunction> = {};
-
-    // Process 'resolved' property
-    const resolvedCssVar = pathToCSSVar(varPath);
-    vars[resolvedCssVar] = extractCSSValue(value.resolved);
-
-    // Create getter for resolved property to match original structure
-    Object.defineProperty(resolvedComposite, "resolved", {
-      get() {
-        return pathToVarReference(varPath);
-      },
-      enumerable: true,
-      configurable: true
-    });
-
-    // Process other properties
-    for (const [propKey, propValue] of Object.entries(value)) {
-      if (propKey === "resolved") continue;
-
-      const propPath = `${varPath}-${camelToKebab(propKey)}`;
-      const propCssVar = pathToCSSVar(propPath);
-      vars[propCssVar] = extractCSSValue(propValue as TokenValue);
-      resolvedComposite[propKey] = pathToVarReference(propPath);
-    }
-
-    resolvedTokens[key] = resolvedComposite;
-    return;
-  }
-
-  // Handle primitives and TokenUnitValue
-  const cssVarName = pathToCSSVar(varPath);
-  vars[cssVarName] = extractCSSValue(value as TokenValue);
-  resolvedTokens[key] = pathToVarReference(varPath);
-}
-
-// == Tests ====================================================================
+// == Tests ===================================================================
 // Ignore errors when compiling to CommonJS.
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore error TS1343: The 'import.meta' meta-property is only allowed when the '--module' option is 'es2020', 'es2022', 'esnext', 'system', 'node16', or 'nodenext'.
@@ -532,6 +672,49 @@ if (import.meta.vitest) {
       );
       expect(result.resolvedTokens.color.semantic.secondary).toBe(
         "var(--color-semantic-secondary)"
+      );
+    });
+
+    it("handles semantic token references with getters", () => {
+      const result = assignTokens(
+        composedValue({
+          color: {
+            base: {
+              red: "#ff0000",
+              blue: "#0000ff"
+            },
+            semantic: {
+              get primary(): string {
+                return this.color.base.blue;
+              },
+              get danger(): string {
+                return this.color.base.red;
+              }
+            }
+          }
+        })
+      );
+
+      // CSS variables should be created for both base and semantic tokens
+      expect(result.vars).toEqual({
+        "--color-base-red": "#ff0000",
+        "--color-base-blue": "#0000ff",
+        "--color-semantic-primary": "var(--color-base-blue)", // References base token!
+        "--color-semantic-danger": "var(--color-base-red)" // References base token!
+      });
+
+      // Resolved tokens should all use var() references
+      expect(result.resolvedTokens.color.base.red).toBe(
+        "var(--color-base-red)"
+      );
+      expect(result.resolvedTokens.color.base.blue).toBe(
+        "var(--color-base-blue)"
+      );
+      expect(result.resolvedTokens.color.semantic.primary).toBe(
+        "var(--color-base-blue)"
+      );
+      expect(result.resolvedTokens.color.semantic.danger).toBe(
+        "var(--color-base-red)"
       );
     });
 

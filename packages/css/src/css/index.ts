@@ -13,7 +13,7 @@ import type {
 import { setFileScope } from "@vanilla-extract/css/fileScope";
 import { style as vStyle, globalStyle as gStyle } from "@vanilla-extract/css";
 import type { GlobalStyleRule } from "@vanilla-extract/css";
-import { className, getDebugName } from "../utils.js";
+import { identifierName, getDebugName } from "../utils.js";
 import type { CSSRuleWith } from "./types.js";
 
 // == Global CSS ===============================================================
@@ -600,7 +600,7 @@ if (import.meta.vitest) {
       const result = css({ color: "red" }, debugId);
 
       assert.isString(result);
-      expect(result).toMatch(className(debugId));
+      expect(result).toMatch(identifierName(debugId));
     });
 
     it("composition", () => {
@@ -608,7 +608,7 @@ if (import.meta.vitest) {
       const result = css([base, { color: "red" }], debugId);
 
       assert.isString(result);
-      expect(result).toMatch(className(debugId, "base"));
+      expect(result).toMatch(identifierName(debugId, "base"));
     });
   });
 
@@ -640,8 +640,8 @@ if (import.meta.vitest) {
       );
 
       assert.hasAllKeys(result, ["primary", "secondary"]);
-      expect(result.primary).toMatch(className(`${debugId}_primary`));
-      expect(result.secondary).toMatch(className(`${debugId}_secondary`));
+      expect(result.primary).toMatch(identifierName(`${debugId}_primary`));
+      expect(result.secondary).toMatch(identifierName(`${debugId}_secondary`));
     });
 
     it("Mapping Variants", () => {
@@ -657,8 +657,8 @@ if (import.meta.vitest) {
       );
 
       assert.hasAllKeys(result, ["primary", "secondary"]);
-      expect(result.primary).toMatch(className(`${debugId}_primary`));
-      expect(result.secondary).toMatch(className(`${debugId}_secondary`));
+      expect(result.primary).toMatch(identifierName(`${debugId}_primary`));
+      expect(result.secondary).toMatch(identifierName(`${debugId}_secondary`));
     });
 
     it("Mapping Variants with composition", () => {
@@ -678,9 +678,11 @@ if (import.meta.vitest) {
       );
 
       assert.hasAllKeys(result, ["primary", "secondary"]);
-      expect(result.primary).toMatch(className(`${debugId}_primary`, "base"));
+      expect(result.primary).toMatch(
+        identifierName(`${debugId}_primary`, "base")
+      );
       expect(result.secondary).toMatch(
-        className(`${debugId}_secondary`, "base")
+        identifierName(`${debugId}_secondary`, "base")
       );
     });
 
@@ -701,7 +703,7 @@ if (import.meta.vitest) {
       );
 
       assert.hasAllKeys(result, ["primary"]);
-      expect(result.primary).toMatch(className(`${debugId}_primary`));
+      expect(result.primary).toMatch(identifierName(`${debugId}_primary`));
     });
 
     it("Complex composition with multiple base styles", () => {
@@ -717,10 +719,10 @@ if (import.meta.vitest) {
 
       assert.hasAllKeys(result, ["primary", "secondary"]);
       expect(result.primary).toMatch(
-        className(`${debugId}_primary`, "base1", "base2")
+        identifierName(`${debugId}_primary`, "base1", "base2")
       );
       expect(result.secondary).toMatch(
-        className(`${debugId}_secondary`, "base1")
+        identifierName(`${debugId}_secondary`, "base1")
       );
     });
 
@@ -760,9 +762,9 @@ if (import.meta.vitest) {
       );
 
       assert.hasAllKeys(result, ["primary", "secondary", "accent"]);
-      expect(result.primary).toMatch(className(`${debugId}_primary`));
-      expect(result.secondary).toMatch(className(`${debugId}_secondary`));
-      expect(result.accent).toMatch(className(`${debugId}_accent`));
+      expect(result.primary).toMatch(identifierName(`${debugId}_primary`));
+      expect(result.secondary).toMatch(identifierName(`${debugId}_secondary`));
+      expect(result.accent).toMatch(identifierName(`${debugId}_accent`));
     });
 
     it("Mapping with complex transformation", async () => {
@@ -828,9 +830,9 @@ if (import.meta.vitest) {
 
       // Test existing class name generation
       assert.hasAllKeys(result, ["primary", "secondary", "accent"]);
-      expect(result.primary).toMatch(className(`${debugId}_primary`));
-      expect(result.secondary).toMatch(className(`${debugId}_secondary`));
-      expect(result.accent).toMatch(className(`${debugId}_accent`));
+      expect(result.primary).toMatch(identifierName(`${debugId}_primary`));
+      expect(result.secondary).toMatch(identifierName(`${debugId}_secondary`));
+      expect(result.accent).toMatch(identifierName(`${debugId}_accent`));
 
       // Verify that each result is a valid CSS class name string
       expect(typeof result.primary).toBe("string");
@@ -894,7 +896,7 @@ if (import.meta.vitest) {
       const result = withRedBackground({ color: "blue" }, debugId);
 
       assert.isString(result);
-      expect(result).toMatch(className(debugId));
+      expect(result).toMatch(identifierName(debugId));
     });
 
     it("css.with().raw()", () => {
@@ -926,8 +928,8 @@ if (import.meta.vitest) {
       );
 
       assert.hasAllKeys(result, ["primary", "secondary"]);
-      expect(result.primary).toMatch(className(`${debugId}_primary`));
-      expect(result.secondary).toMatch(className(`${debugId}_secondary`));
+      expect(result.primary).toMatch(identifierName(`${debugId}_primary`));
+      expect(result.secondary).toMatch(identifierName(`${debugId}_secondary`));
     });
 
     it("css.with() with like mixin", () => {

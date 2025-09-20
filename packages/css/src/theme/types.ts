@@ -3,8 +3,8 @@ import type { Resolve } from "../types.js";
 
 /**
  * Based on W3C Design Tokens Community Group
- * https://www.w3.org/community/design-tokens/
- * https://www.designtokens.org/tr/drafts/format/
+ * @see https://www.w3.org/community/design-tokens/
+ * @see https://www.designtokens.org/tr/drafts/format/
  **/
 export interface Theme {
   [tokenName: string]: TokenValue | Theme;
@@ -14,7 +14,17 @@ export type ThemeValue =
   | TokenPrimitiveValue
   | TokenPrimitiveValue[]
   | TokenCompositeValue
-  | TokenDefinition;
+  | TokenAllDefinition;
+
+export type TokenAllDefinition =
+  | TokenDefinition
+  | TokenColorDefinition
+  | TokenDimensionDefinition
+  | TokenFontFamilyDefinition
+  | TokenFontWeightDefinition
+  | TokenDurationDefinition
+  | TokenCubicBezierDefinition
+  | TokenNumberDefinition;
 
 export interface TokenDefinition {
   $type: string;
@@ -270,11 +280,73 @@ if (import.meta.vitest) {
       });
     });
 
+    it("matches specialized token definition variants", () => {
+      const colorValue: TokenColorValue = {
+        colorSpace: "srgb",
+        components: [255, 0, 0],
+        alpha: 1,
+        hex: "#ff0000"
+      };
+      const colorDefinition = {
+        $type: "color",
+        $value: colorValue,
+        $description: "red"
+      } as const satisfies TokenColorDefinition;
+
+      const dimensionValue: TokenDimensionValue = { value: 4, unit: "px" };
+      const dimensionDefinition = {
+        $type: "dimension",
+        $value: dimensionValue
+      } as const satisfies TokenDimensionDefinition;
+
+      const fontFamilyDefinition = {
+        $type: "fontFamily",
+        $value: ["Inter", "sans-serif"]
+      } as const satisfies TokenFontFamilyDefinition;
+
+      const fontWeightDefinition = {
+        $type: "fontWeight",
+        $value: "semi-bold"
+      } as const satisfies TokenFontWeightDefinition;
+
+      const durationValue: TokenDurationValue = { value: 250, unit: "ms" };
+      const durationDefinition = {
+        $type: "duration",
+        $value: durationValue
+      } as const satisfies TokenDurationDefinition;
+
+      const cubicBezierDefinition = {
+        $type: "cubicBezier",
+        $value: [0.25, 0.1, 0.25, 1]
+      } as const satisfies TokenCubicBezierDefinition;
+
+      const numberDefinition = {
+        $type: "number",
+        $value: 1.618
+      } as const satisfies TokenNumberDefinition;
+
+      expectTypeOf(colorDefinition).toExtend<TokenAllDefinition>();
+      expectTypeOf(dimensionDefinition).toExtend<TokenAllDefinition>();
+      expectTypeOf(fontFamilyDefinition).toExtend<TokenAllDefinition>();
+      expectTypeOf(fontWeightDefinition).toExtend<TokenAllDefinition>();
+      expectTypeOf(durationDefinition).toExtend<TokenAllDefinition>();
+      expectTypeOf(cubicBezierDefinition).toExtend<TokenAllDefinition>();
+      expectTypeOf(numberDefinition).toExtend<TokenAllDefinition>();
+    });
+
     it("Theme Type", () => {
       const myTheme = compositeValue({
         color: {
           base: {
-            red: "#ff0000",
+            red: {
+              $type: "color",
+              $value: {
+                colorSpace: "srgb",
+                components: [255, 0, 0],
+                alpha: 1,
+                hex: "#ff0000"
+              }
+            },
             green: "#00ff00",
             blue: "#0000ff"
           },
