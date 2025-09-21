@@ -1,6 +1,6 @@
-import { generateIdentifier } from "@vanilla-extract/css";
+import { createVar, generateIdentifier } from "@vanilla-extract/css";
 import { registerClassName } from "@vanilla-extract/css/adapter";
-import { getFileScope } from "@vanilla-extract/css/fileScope";
+import { getFileScope, setFileScope } from "@vanilla-extract/css/fileScope";
 import type {
   GlobalCSSRule,
   CSSVarValue,
@@ -8,7 +8,7 @@ import type {
   PureCSSVarKey
 } from "@mincho-js/transform-to-vanilla";
 import { globalCss } from "../css/index.js";
-import { camelToKebab } from "../utils.js";
+import { camelToKebab, getVarName } from "../utils.js";
 import type { Resolve } from "../types.js";
 import type {
   Theme,
@@ -84,6 +84,9 @@ function extractLayerFromTokens<ThemeTokens extends Theme>(
 interface AssignedVars {
   [cssVarName: string]: CSSVarValue;
 }
+interface CSSVarMap {
+  [varPath: string]: PureCSSVarKey;
+}
 
 function assignTokens<ThemeTokens extends Theme>(
   tokens: ThemeTokens
@@ -114,7 +117,8 @@ function assignTokensWithPrefix<ThemeTokens extends Theme>(
   const context: TokenProcessingContext = {
     prefix,
     path: [],
-    parentPath: prefix
+    parentPath: prefix,
+    cssVarMap: {}
   };
   assignTokenVariables(tokens, vars, resolvedTokens, context);
   resolveSemanticTokens(tokens, vars, resolvedTokens, context);
@@ -130,6 +134,7 @@ interface TokenProcessingContext {
   prefix: string; // Variable name prefix
   path: string[]; // Current path in object tree
   parentPath: string; // Current variable path
+  cssVarMap: CSSVarMap; // Cache for CSS variable names
 }
 
 /**
@@ -148,13 +153,14 @@ function assignTokenVariables(
     const varPath = context.parentPath
       ? `${context.parentPath}-${camelToKebab(key)}`
       : camelToKebab(key);
-    const cssVar = pathToCSSVar(varPath);
+    const cssVar = getCSSVarByPath(varPath, context);
+    const varRef = getVarReference(varPath, context);
     const currentPath = [...context.path, key];
 
     // Handle getters (referencing tokens)
     if (typeof descriptor.get === "function") {
       // Store placeholder CSS variable reference for now
-      setByPath(resolvedTokens, currentPath, pathToVarReference(varPath));
+      setByPath(resolvedTokens, currentPath, varRef);
       continue;
     }
 
@@ -170,7 +176,7 @@ function assignTokenVariables(
         // Process token definition as a single value
         const cssValue = extractTokenDefinitionValue(value);
         vars[cssVar] = cssValue;
-        setByPath(resolvedTokens, currentPath, pathToVarReference(varPath));
+        setByPath(resolvedTokens, currentPath, varRef);
       } else if (isNestedTheme(tokenValue)) {
         // For nested objects in token definitions, recurse into them
         setByPath(resolvedTokens, currentPath, {});
@@ -181,14 +187,15 @@ function assignTokenVariables(
           {
             prefix: context.prefix,
             path: currentPath,
-            parentPath: varPath
+            parentPath: varPath,
+            cssVarMap: context.cssVarMap
           }
         );
       } else {
         // Fallback for other types
         const cssValue = extractTokenDefinitionValue(value);
         vars[cssVar] = cssValue;
-        setByPath(resolvedTokens, currentPath, pathToVarReference(varPath));
+        setByPath(resolvedTokens, currentPath, varRef);
       }
       continue;
     }
@@ -198,9 +205,9 @@ function assignTokenVariables(
       const resolvedArray: PureCSSVarFunction[] = [];
       value.forEach((item, index) => {
         const indexedPath = `${varPath}-${index}`;
-        const indexedCssVar = pathToCSSVar(indexedPath);
+        const indexedCssVar = getCSSVarByPath(indexedPath, context);
         vars[indexedCssVar] = extractCSSValue(item);
-        resolvedArray.push(pathToVarReference(indexedPath));
+        resolvedArray.push(getVarReference(indexedPath, context));
       });
       setByPath(resolvedTokens, currentPath, resolvedArray);
       continue;
@@ -216,7 +223,7 @@ function assignTokenVariables(
       // Create getter for resolved property
       Object.defineProperty(resolvedComposite, "resolved", {
         get() {
-          return pathToVarReference(varPath);
+          return varRef;
         },
         enumerable: true,
         configurable: true
@@ -227,9 +234,9 @@ function assignTokenVariables(
         if (propKey === "resolved") continue;
 
         const propPath = `${varPath}-${camelToKebab(propKey)}`;
-        const propCssVar = pathToCSSVar(propPath);
+        const propCssVar = getCSSVarByPath(propPath, context);
         vars[propCssVar] = extractCSSValue(propValue as TokenValue);
-        resolvedComposite[propKey] = pathToVarReference(propPath);
+        resolvedComposite[propKey] = getVarReference(propPath, context);
       }
 
       setByPath(resolvedTokens, currentPath, resolvedComposite);
@@ -242,7 +249,8 @@ function assignTokenVariables(
       assignTokenVariables(value, vars, resolvedTokens, {
         prefix: context.prefix,
         path: currentPath,
-        parentPath: varPath
+        parentPath: varPath,
+        cssVarMap: context.cssVarMap
       });
       continue;
     }
@@ -250,7 +258,7 @@ function assignTokenVariables(
     // Handle primitive values and TokenUnitValue
     const cssValue = extractCSSValue(value as TokenValue);
     vars[cssVar] = cssValue;
-    setByPath(resolvedTokens, currentPath, pathToVarReference(varPath));
+    setByPath(resolvedTokens, currentPath, varRef);
   }
 }
 
@@ -275,7 +283,7 @@ function resolveSemanticTokens(
 
     // Handle getters (semantic tokens)
     if (typeof descriptor.get === "function") {
-      const cssVar = pathToCSSVar(varPath);
+      const cssVar = getCSSVarByPath(varPath, context);
 
       // Call getter with resolvedTokens as this context
       // This allows semantic tokens to reference other tokens
@@ -304,7 +312,8 @@ function resolveSemanticTokens(
         {
           prefix: context.prefix,
           path: currentPath,
-          parentPath: varPath
+          parentPath: varPath,
+          cssVarMap: context.cssVarMap
         }
       );
       continue;
@@ -315,7 +324,8 @@ function resolveSemanticTokens(
       resolveSemanticTokens(value, vars, resolvedTokens, {
         prefix: context.prefix,
         path: currentPath,
-        parentPath: varPath
+        parentPath: varPath,
+        cssVarMap: context.cssVarMap
       });
     }
   }
@@ -395,12 +405,31 @@ function isTokenDefinition(value: unknown): value is TokenDefinition {
 }
 
 // === Path Utilities ==========================================================
-function pathToCSSVar(path: string): PureCSSVarKey {
-  return `--${path}` as PureCSSVarKey;
+/**
+ * Gets a cached CSS variable name for the given path.
+ * Creates and caches the CSS variable name if not already cached.
+ */
+function getCSSVarByPath(
+  varPath: string,
+  context: TokenProcessingContext
+): PureCSSVarKey {
+  if (!context.cssVarMap[varPath]) {
+    const varValue = createVar(varPath);
+    context.cssVarMap[varPath] = getVarName(varValue);
+  }
+  return context.cssVarMap[varPath];
 }
 
-function pathToVarReference(path: string): PureCSSVarFunction {
-  return `var(--${path})` as PureCSSVarFunction;
+/**
+ * Gets a CSS variable reference using the cached variable name.
+ * Ensures consistency between variable definitions and references.
+ */
+function getVarReference(
+  varPath: string,
+  context: TokenProcessingContext
+): PureCSSVarFunction {
+  const cssVar = getCSSVarByPath(varPath, context);
+  return `var(${cssVar})` as PureCSSVarFunction;
 }
 
 function setByPath(
@@ -560,10 +589,61 @@ if (import.meta.vitest) {
   // @ts-ignore error TS1343: The 'import.meta' meta-property is only allowed when the '--module' option is 'es2020', 'es2022', 'esnext', 'system', 'node16', or 'nodenext'.
   const { describe, it, expect, assertType } = import.meta.vitest;
 
+  setFileScope("test");
+
   function composedValue<ComposedValue>(
     value: ComposedValue & ThisType<ComposedValue>
   ): ComposedValue {
     return value;
+  }
+
+  // Test utility functions for handling hashed CSS variables
+  function stripHash(str: string): string {
+    // Remove hash suffix from CSS variable names and var() references
+    return str.replace(/__[a-zA-Z0-9]+/g, "");
+  }
+
+  function normalizeVars(vars: AssignedVars): AssignedVars {
+    const normalized: AssignedVars = {};
+    for (const [key, value] of Object.entries(vars)) {
+      normalized[stripHash(key)] = value;
+    }
+    return normalized;
+  }
+
+  function normalizeResolvedTokens<T>(tokens: T): T {
+    if (typeof tokens === "string") {
+      return stripHash(tokens) as T;
+    }
+    if (Array.isArray(tokens)) {
+      return tokens.map(normalizeResolvedTokens) as T;
+    }
+    if (tokens && typeof tokens === "object") {
+      const normalized: T = {} as T;
+      const source = tokens as Record<string, unknown>;
+      const target = normalized as Record<string, unknown>;
+      for (const [key, value] of Object.entries(source)) {
+        const descriptor = Object.getOwnPropertyDescriptor(source, key);
+        if (descriptor?.get) {
+          Object.defineProperty(target, key, {
+            get: () => normalizeResolvedTokens(source[key]),
+            enumerable: true,
+            configurable: true
+          });
+        } else {
+          target[key] = normalizeResolvedTokens(value);
+        }
+      }
+      return normalized;
+    }
+    return tokens;
+  }
+
+  // Validate that CSS variables have proper hash format
+  function validateHashFormat(vars: AssignedVars): void {
+    for (const key of Object.keys(vars)) {
+      expect(key).toMatch(/^--[a-zA-Z0-9-]+__[a-zA-Z0-9]+$/);
+    }
   }
 
   describe("assignTokens", () => {
@@ -575,14 +655,18 @@ if (import.meta.vitest) {
         nothing: undefined
       });
 
-      expect(result.vars).toEqual({
+      // Validate hash format is correct
+      validateHashFormat(result.vars);
+
+      // Compare normalized values (without hashes)
+      expect(normalizeVars(result.vars)).toEqual({
         "--color": "red",
         "--size": "16",
         "--enabled": "true",
         "--nothing": "undefined"
       });
 
-      expect(result.resolvedTokens).toEqual({
+      expect(normalizeResolvedTokens(result.resolvedTokens)).toEqual({
         color: "var(--color)",
         size: "var(--size)",
         enabled: "var(--enabled)",
@@ -597,13 +681,15 @@ if (import.meta.vitest) {
         lineHeight: 1.5
       });
 
-      expect(result.vars).toEqual({
+      validateHashFormat(result.vars);
+
+      expect(normalizeVars(result.vars)).toEqual({
         "--background-color": "white",
         "--font-size": "16px",
         "--line-height": "1.5"
       });
 
-      expect(result.resolvedTokens).toEqual({
+      expect(normalizeResolvedTokens(result.resolvedTokens)).toEqual({
         backgroundColor: "var(--background-color)",
         fontSize: "var(--font-size)",
         lineHeight: "var(--line-height)"
@@ -615,7 +701,9 @@ if (import.meta.vitest) {
         space: [2, 4, 8, 16, 32]
       });
 
-      expect(result.vars).toEqual({
+      validateHashFormat(result.vars);
+
+      expect(normalizeVars(result.vars)).toEqual({
         "--space-0": "2",
         "--space-1": "4",
         "--space-2": "8",
@@ -623,7 +711,7 @@ if (import.meta.vitest) {
         "--space-4": "32"
       });
 
-      expect(result.resolvedTokens).toEqual({
+      expect(normalizeResolvedTokens(result.resolvedTokens)).toEqual({
         space: [
           "var(--space-0)",
           "var(--space-1)",
@@ -649,7 +737,9 @@ if (import.meta.vitest) {
         }
       });
 
-      expect(result.vars).toEqual({
+      validateHashFormat(result.vars);
+
+      expect(normalizeVars(result.vars)).toEqual({
         "--color-base-red": "#ff0000",
         "--color-base-green": "#00ff00",
         "--color-base-blue": "#0000ff",
@@ -657,20 +747,15 @@ if (import.meta.vitest) {
         "--color-semantic-secondary": "#6c757d"
       });
 
+      const normalizedTokens = normalizeResolvedTokens(result.resolvedTokens);
       assertType<PureCSSVarFunction>(result.resolvedTokens.color.base.red);
-      expect(result.resolvedTokens.color.base.red).toBe(
-        "var(--color-base-red)"
-      );
-      expect(result.resolvedTokens.color.base.green).toBe(
-        "var(--color-base-green)"
-      );
-      expect(result.resolvedTokens.color.base.blue).toBe(
-        "var(--color-base-blue)"
-      );
-      expect(result.resolvedTokens.color.semantic.primary).toBe(
+      expect(normalizedTokens.color.base.red).toBe("var(--color-base-red)");
+      expect(normalizedTokens.color.base.green).toBe("var(--color-base-green)");
+      expect(normalizedTokens.color.base.blue).toBe("var(--color-base-blue)");
+      expect(normalizedTokens.color.semantic.primary).toBe(
         "var(--color-semantic-primary)"
       );
-      expect(result.resolvedTokens.color.semantic.secondary).toBe(
+      expect(normalizedTokens.color.semantic.secondary).toBe(
         "var(--color-semantic-secondary)"
       );
     });
@@ -695,25 +780,29 @@ if (import.meta.vitest) {
         })
       );
 
-      // CSS variables should be created for both base and semantic tokens
-      expect(result.vars).toEqual({
-        "--color-base-red": "#ff0000",
-        "--color-base-blue": "#0000ff",
-        "--color-semantic-primary": "var(--color-base-blue)", // References base token!
-        "--color-semantic-danger": "var(--color-base-red)" // References base token!
-      });
+      validateHashFormat(result.vars);
 
-      // Resolved tokens should all use var() references
-      expect(result.resolvedTokens.color.base.red).toBe(
+      // CSS variables should be created for both base and semantic tokens
+      // Note: Semantic tokens reference other tokens, so their values are var() references
+      const normalizedVars = normalizeVars(result.vars);
+      expect(normalizedVars["--color-base-red"]).toBe("#ff0000");
+      expect(normalizedVars["--color-base-blue"]).toBe("#0000ff");
+      // Semantic tokens contain var() references WITH hashes that need to be normalized
+      expect(stripHash(normalizedVars["--color-semantic-primary"])).toBe(
+        "var(--color-base-blue)"
+      );
+      expect(stripHash(normalizedVars["--color-semantic-danger"])).toBe(
         "var(--color-base-red)"
       );
-      expect(result.resolvedTokens.color.base.blue).toBe(
+
+      // Resolved tokens should all use var() references
+      const normalizedTokens = normalizeResolvedTokens(result.resolvedTokens);
+      expect(normalizedTokens.color.base.red).toBe("var(--color-base-red)");
+      expect(normalizedTokens.color.base.blue).toBe("var(--color-base-blue)");
+      expect(normalizedTokens.color.semantic.primary).toBe(
         "var(--color-base-blue)"
       );
-      expect(result.resolvedTokens.color.semantic.primary).toBe(
-        "var(--color-base-blue)"
-      );
-      expect(result.resolvedTokens.color.semantic.danger).toBe(
+      expect(normalizedTokens.color.semantic.danger).toBe(
         "var(--color-base-red)"
       );
     });
@@ -724,12 +813,13 @@ if (import.meta.vitest) {
         borderWidth: { value: 2, unit: "px" }
       });
 
-      expect(result.vars).toEqual({
+      validateHashFormat(result.vars);
+      expect(normalizeVars(result.vars)).toEqual({
         "--spacing": "1.5rem",
         "--border-width": "2px"
       });
 
-      expect(result.resolvedTokens).toEqual({
+      expect(normalizeResolvedTokens(result.resolvedTokens)).toEqual({
         spacing: "var(--spacing)",
         borderWidth: "var(--border-width)"
       });
@@ -748,12 +838,13 @@ if (import.meta.vitest) {
         }
       });
 
-      expect(result.vars).toEqual({
+      validateHashFormat(result.vars);
+      expect(normalizeVars(result.vars)).toEqual({
         "--primary": "#0000ff",
         "--font-size": "16px"
       });
 
-      expect(result.resolvedTokens).toEqual({
+      expect(normalizeResolvedTokens(result.resolvedTokens)).toEqual({
         primary: "var(--primary)",
         fontSize: "var(--font-size)"
       });
@@ -771,12 +862,13 @@ if (import.meta.vitest) {
         }
       });
 
-      expect(result.vars).toEqual({
+      validateHashFormat(result.vars);
+      expect(normalizeVars(result.vars)).toEqual({
         "--font-primary": "Helvetica, Arial, sans-serif",
         "--font-secondary": "Georgia, serif"
       });
 
-      expect(result.resolvedTokens).toEqual({
+      expect(normalizeResolvedTokens(result.resolvedTokens)).toEqual({
         fontPrimary: "var(--font-primary)",
         fontSecondary: "var(--font-secondary)"
       });
@@ -794,12 +886,13 @@ if (import.meta.vitest) {
         }
       });
 
-      expect(result.vars).toEqual({
+      validateHashFormat(result.vars);
+      expect(normalizeVars(result.vars)).toEqual({
         "--transition-fast": "200ms",
         "--transition-slow": "1s"
       });
 
-      expect(result.resolvedTokens).toEqual({
+      expect(normalizeResolvedTokens(result.resolvedTokens)).toEqual({
         transitionFast: "var(--transition-fast)",
         transitionSlow: "var(--transition-slow)"
       });
@@ -817,12 +910,13 @@ if (import.meta.vitest) {
         }
       });
 
-      expect(result.vars).toEqual({
+      validateHashFormat(result.vars);
+      expect(normalizeVars(result.vars)).toEqual({
         "--easing-default": "cubic-bezier(0.5, 0, 1, 1)",
         "--easing-bounce": "cubic-bezier(0.68, -0.55, 0.265, 1.55)"
       });
 
-      expect(result.resolvedTokens).toEqual({
+      expect(normalizeResolvedTokens(result.resolvedTokens)).toEqual({
         easingDefault: "var(--easing-default)",
         easingBounce: "var(--easing-bounce)"
       });
@@ -836,11 +930,12 @@ if (import.meta.vitest) {
         }
       });
 
-      expect(result.vars).toEqual({
+      validateHashFormat(result.vars);
+      expect(normalizeVars(result.vars)).toEqual({
         "--color-brand": "#ff5500"
       });
 
-      expect(result.resolvedTokens).toEqual({
+      expect(normalizeResolvedTokens(result.resolvedTokens)).toEqual({
         colorBrand: "var(--color-brand)"
       });
     });
@@ -865,14 +960,15 @@ if (import.meta.vitest) {
         }
       });
 
-      expect(result.vars).toEqual({
+      validateHashFormat(result.vars);
+      expect(normalizeVars(result.vars)).toEqual({
         "--weight-normal": "400",
         "--weight-bold": "700",
         "--weight-semi-bold": "600",
         "--weight-numeric": "300"
       });
 
-      expect(result.resolvedTokens).toEqual({
+      expect(normalizeResolvedTokens(result.resolvedTokens)).toEqual({
         weightNormal: "var(--weight-normal)",
         weightBold: "var(--weight-bold)",
         weightSemiBold: "var(--weight-semi-bold)",
@@ -892,12 +988,13 @@ if (import.meta.vitest) {
         }
       });
 
-      expect(result.vars).toEqual({
+      validateHashFormat(result.vars);
+      expect(normalizeVars(result.vars)).toEqual({
         "--line-height-base": "1.5",
         "--z-index-modal": "1000"
       });
 
-      expect(result.resolvedTokens).toEqual({
+      expect(normalizeResolvedTokens(result.resolvedTokens)).toEqual({
         lineHeightBase: "var(--line-height-base)",
         zIndexModal: "var(--z-index-modal)"
       });
@@ -931,7 +1028,8 @@ if (import.meta.vitest) {
         }
       });
 
-      expect(result.vars).toEqual({
+      validateHashFormat(result.vars);
+      expect(normalizeVars(result.vars)).toEqual({
         "--typography-font-family": "Inter, system-ui, sans-serif",
         "--typography-font-weight": "500",
         "--typography-line-height": "1.6",
@@ -939,21 +1037,18 @@ if (import.meta.vitest) {
         "--animation-easing": "cubic-bezier(0.4, 0, 0.2, 1)"
       });
 
-      expect(result.resolvedTokens.typography.fontFamily).toBe(
+      const normalized = normalizeResolvedTokens(result.resolvedTokens);
+      expect(normalized.typography.fontFamily).toBe(
         "var(--typography-font-family)"
       );
-      expect(result.resolvedTokens.typography.fontWeight).toBe(
+      expect(normalized.typography.fontWeight).toBe(
         "var(--typography-font-weight)"
       );
-      expect(result.resolvedTokens.typography.lineHeight).toBe(
+      expect(normalized.typography.lineHeight).toBe(
         "var(--typography-line-height)"
       );
-      expect(result.resolvedTokens.animation.duration).toBe(
-        "var(--animation-duration)"
-      );
-      expect(result.resolvedTokens.animation.easing).toBe(
-        "var(--animation-easing)"
-      );
+      expect(normalized.animation.duration).toBe("var(--animation-duration)");
+      expect(normalized.animation.easing).toBe("var(--animation-easing)");
     });
 
     it("handles TokenComposedValue with resolved getter", () => {
@@ -973,13 +1068,17 @@ if (import.meta.vitest) {
         }
       });
 
-      expect(result.vars["--shadow-light"]).toMatch(/^#00000080/);
-      expect(result.vars["--shadow-light-color"]).toBe("#00000080");
-      expect(result.vars["--shadow-light-offset-x"]).toBe("0.5rem");
-      expect(result.vars["--shadow-light-offset-y"]).toBe("0.5rem");
-      expect(result.vars["--shadow-light-blur"]).toBe("1.5rem");
+      validateHashFormat(result.vars);
+      const normalized = normalizeVars(result.vars);
 
-      const resolvedShadow = result.resolvedTokens.shadow.light;
+      expect(normalized["--shadow-light"]).toMatch(/^#00000080/);
+      expect(normalized["--shadow-light-color"]).toBe("#00000080");
+      expect(normalized["--shadow-light-offset-x"]).toBe("0.5rem");
+      expect(normalized["--shadow-light-offset-y"]).toBe("0.5rem");
+      expect(normalized["--shadow-light-blur"]).toBe("1.5rem");
+
+      const resolvedShadow = normalizeResolvedTokens(result.resolvedTokens)
+        .shadow.light;
       expect(resolvedShadow.resolved).toBe("var(--shadow-light)");
       expect(resolvedShadow.color).toBe("var(--shadow-light-color)");
       expect(resolvedShadow.offsetX).toBe("var(--shadow-light-offset-x)");
@@ -1009,16 +1108,19 @@ if (import.meta.vitest) {
         }
       });
 
-      expect(result.vars["--typography-heading-sizes-0"]).toBe("48");
-      expect(result.vars["--typography-heading-sizes-4"]).toBe("16");
-      expect(result.vars["--typography-heading-weight"]).toBe("700");
-      expect(result.vars["--typography-heading-family"]).toBe(
+      validateHashFormat(result.vars);
+      const normalized = normalizeVars(result.vars);
+
+      expect(normalized["--typography-heading-sizes-0"]).toBe("48");
+      expect(normalized["--typography-heading-sizes-4"]).toBe("16");
+      expect(normalized["--typography-heading-weight"]).toBe("700");
+      expect(normalized["--typography-heading-family"]).toBe(
         "Helvetica, sans-serif"
       );
-      expect(result.vars["--typography-body-size"]).toBe("14px");
-      expect(result.vars["--typography-body-line-height"]).toBe("1.5");
-      expect(result.vars["--colors-primary"]).toBe("#007bff");
-      expect(result.vars["--colors-secondary"]).toBe("#6c757d");
+      expect(normalized["--typography-body-size"]).toBe("14px");
+      expect(normalized["--typography-body-line-height"]).toBe("1.5");
+      expect(normalized["--colors-primary"]).toBe("#007bff");
+      expect(normalized["--colors-secondary"]).toBe("#6c757d");
     });
   });
 }
