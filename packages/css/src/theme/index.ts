@@ -8,7 +8,7 @@ import type {
   PureCSSVarKey
 } from "@mincho-js/transform-to-vanilla";
 import { globalCss } from "../css/index.js";
-import { camelToKebab, getVarName } from "../utils.js";
+import { identifierName, camelToKebab, getVarName } from "../utils.js";
 import type { Resolve } from "../types.js";
 import type {
   Theme,
@@ -29,10 +29,14 @@ type WithOptionalLayer<T extends Theme> = T & {
   "@layer"?: string;
 };
 
-export function globalTheme<ThemeTokens extends Theme>(
+type ResolveThemeOutput<T extends Theme> = Resolve<ResolveTheme<T>>;
+type ThemeTokensInput<ThemeTokens extends Theme> =
+  WithOptionalLayer<ThemeTokens> & ThisType<ResolveThemeOutput<ThemeTokens>>;
+
+export function globalTheme<const ThemeTokens extends Theme>(
   selector: string,
-  tokens: WithOptionalLayer<ThemeTokens>
-): Resolve<ResolveTheme<ThemeTokens>> {
+  tokens: ThemeTokensInput<ThemeTokens>
+): ResolveThemeOutput<ThemeTokens> {
   const { layerName, tokens: themeTokens } = extractLayerFromTokens(tokens);
   const { vars, resolvedTokens } = assignTokens(themeTokens);
 
@@ -53,10 +57,10 @@ export function globalTheme<ThemeTokens extends Theme>(
   return resolvedTokens;
 }
 
-export function theme<ThemeTokens extends Theme>(
-  tokens: WithOptionalLayer<ThemeTokens>,
+export function theme<const ThemeTokens extends Theme>(
+  tokens: ThemeTokensInput<ThemeTokens>,
   debugId?: string
-): [string, Resolve<ResolveTheme<ThemeTokens>>] {
+): [string, ResolveThemeOutput<ThemeTokens>] {
   const themeClassName = generateIdentifier(debugId);
   registerClassName(themeClassName, getFileScope());
 
@@ -373,7 +377,11 @@ function isStructuredTokenValue(
       (typeof tokenValue === "string" || Array.isArray(tokenValue))) ||
     tokenType === "fontWeight" ||
     tokenType === "number" ||
-    (tokenType === "color" && typeof tokenValue === "string")
+    (tokenType === "color" &&
+      (typeof tokenValue === "string" ||
+        (isPlainObject(tokenValue) &&
+          "colorSpace" in tokenValue &&
+          "components" in tokenValue)))
   );
 }
 
@@ -589,6 +597,7 @@ if (import.meta.vitest) {
   // @ts-ignore error TS1343: The 'import.meta' meta-property is only allowed when the '--module' option is 'es2020', 'es2022', 'esnext', 'system', 'node16', or 'nodenext'.
   const { describe, it, expect, assertType } = import.meta.vitest;
 
+  const debugId = "myCSS";
   setFileScope("test");
 
   function composedValue<ComposedValue>(
@@ -646,7 +655,7 @@ if (import.meta.vitest) {
     }
   }
 
-  describe("assignTokens", () => {
+  describe.concurrent("assignTokens", () => {
     it("handles primitive values", () => {
       const result = assignTokens({
         color: "red",
@@ -1121,6 +1130,81 @@ if (import.meta.vitest) {
       expect(normalized["--typography-body-line-height"]).toBe("1.5");
       expect(normalized["--colors-primary"]).toBe("#007bff");
       expect(normalized["--colors-secondary"]).toBe("#6c757d");
+    });
+  });
+
+  describe.concurrent("theme", () => {
+    it("handles complex color tokens and semantic references", () => {
+      const [className, themeVars] = theme(
+        {
+          color: {
+            base: {
+              red: {
+                $type: "color",
+                $value: {
+                  colorSpace: "srgb",
+                  components: [255, 0, 0]
+                }
+              },
+              green: "#00ff00",
+              blue: "#0000ff"
+            },
+            semantic: {
+              get primary(): string {
+                return this.color.base.blue;
+              },
+              get error(): string {
+                return this.color.base.red;
+              }
+            }
+          },
+          space: {
+            base: [2, 4, 8, 16, 32, 64],
+            semantic: {
+              get small(): string {
+                return this.space.base[1];
+              },
+              get medium(): string {
+                return this.space.base[3];
+              },
+              get large(): string {
+                return this.space.base[5];
+              }
+            }
+          }
+        },
+        debugId
+      );
+
+      expect(className).toMatch(identifierName(`${debugId}`));
+      expect(normalizeResolvedTokens(themeVars)).toEqual({
+        color: {
+          base: {
+            red: "var(--color-base-red)",
+            green: "var(--color-base-green)",
+            blue: "var(--color-base-blue)"
+          },
+          semantic: {
+            primary: "var(--color-base-blue)",
+            error: "var(--color-base-red)"
+          }
+        },
+        space: {
+          base: [
+            "var(--space-base-0)",
+            "var(--space-base-1)",
+            "var(--space-base-2)",
+            "var(--space-base-3)",
+            "var(--space-base-4)",
+            "var(--space-base-5)"
+          ],
+          semantic: {
+            small: "var(--space-base-1)",
+            medium: "var(--space-base-3)",
+            large: "var(--space-base-5)"
+          }
+        }
+      });
     });
   });
 }

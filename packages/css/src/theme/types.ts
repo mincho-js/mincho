@@ -1,23 +1,28 @@
-import type { PureCSSVarFunction } from "@mincho-js/transform-to-vanilla";
+/* eslint-disable @typescript-eslint/no-empty-object-type */
+import type {
+  PureCSSVarFunction,
+  NonNullableString
+} from "@mincho-js/transform-to-vanilla";
 import type { Resolve } from "../types.js";
+
+export interface Theme {
+  [tokenName: string]: TokenValue | Theme;
+}
+
+export type ThemeValue =
+  | { get(): TokenPrimitiveValue }
+  | TokenPrimitiveValue
+  | TokenPrimitiveValue[]
+  | TokenCompositeValue
+  | TokenAllDefinition;
 
 /**
  * Based on W3C Design Tokens Community Group
  * @see https://www.w3.org/community/design-tokens/
  * @see https://www.designtokens.org/tr/drafts/format/
  **/
-export interface Theme {
-  [tokenName: string]: TokenValue | Theme;
-}
-
-export type ThemeValue =
-  | TokenPrimitiveValue
-  | TokenPrimitiveValue[]
-  | TokenCompositeValue
-  | TokenAllDefinition;
-
 export type TokenAllDefinition =
-  | TokenDefinition
+  | TokenOtherDefinition
   | TokenColorDefinition
   | TokenDimensionDefinition
   | TokenFontFamilyDefinition
@@ -32,11 +37,16 @@ export interface TokenDefinition {
   $description?: string;
 }
 
-export interface TokenColorDefinition {
-  $type: "color";
-  $value: string | TokenColorValue;
+interface TokenDefinitionBase<TokenType, TokenValue> {
+  $type: TokenType;
+  $value: TokenValue;
   $description?: string;
 }
+export interface TokenOtherDefinition
+  extends TokenDefinitionBase<NonNullableString, TokenValue> {}
+
+export interface TokenColorDefinition
+  extends TokenDefinitionBase<"color", string | TokenColorValue> {}
 export interface TokenColorValue {
   /**
    * A string that specifies the color space or color model
@@ -57,11 +67,8 @@ export interface TokenColorValue {
 }
 type ColorComponentValue = number | "none";
 
-export interface TokenDimensionDefinition {
-  $type: "dimension";
-  $value: TokenDimensionValue;
-  $description?: string;
-}
+export interface TokenDimensionDefinition
+  extends TokenDefinitionBase<"dimension", TokenDimensionValue> {}
 export interface TokenDimensionValue {
   /**
    * An integer or floating-point value representing the numeric value.
@@ -73,18 +80,12 @@ export interface TokenDimensionValue {
   unit: string;
 }
 
-export interface TokenFontFamilyDefinition {
-  $type: "fontFamily";
-  $value: TokenFontFamilyValue;
-  $description?: string;
-}
+export interface TokenFontFamilyDefinition
+  extends TokenDefinitionBase<"fontFamily", TokenFontFamilyValue> {}
 export type TokenFontFamilyValue = string | string[];
 
-export interface TokenFontWeightDefinition {
-  $type: "fontWeight";
-  $value: TokenFontWeightValue;
-  $description?: string;
-}
+export interface TokenFontWeightDefinition
+  extends TokenDefinitionBase<"fontWeight", TokenFontWeightValue> {}
 export type TokenFontWeightValue =
   | number
   // 100
@@ -116,11 +117,8 @@ export type TokenFontWeightValue =
   | "extra-black"
   | "ultra-black";
 
-export interface TokenDurationDefinition {
-  $type: "duration";
-  $value: TokenDurationValue;
-  $description?: string;
-}
+export interface TokenDurationDefinition
+  extends TokenDefinitionBase<"duration", TokenDurationValue> {}
 export interface TokenDurationValue {
   /**
    * An integer or floating-point value representing the numeric value.
@@ -132,18 +130,12 @@ export interface TokenDurationValue {
   unit: string;
 }
 
-export interface TokenCubicBezierDefinition {
-  $type: "cubicBezier";
-  $value: TokenCubicBezierValue;
-  $description?: string;
-}
+export interface TokenCubicBezierDefinition
+  extends TokenDefinitionBase<"cubicBezier", TokenCubicBezierValue> {}
 type TokenCubicBezierValue = [number, number, number, number];
 
-export interface TokenNumberDefinition {
-  $type: "number";
-  $value: number;
-  $description?: string;
-}
+export interface TokenNumberDefinition
+  extends TokenDefinitionBase<"number", number> {}
 
 export type TokenValue = TokenLeafValue | TokenCompositeValue;
 export interface TokenCompositeValue {
@@ -160,7 +152,7 @@ export type TokenPrimitiveValue = string | number | boolean | undefined;
 // export type TokenReferencedValue = `${string}{${string}}${string}`;
 
 export type ResolveTheme<T extends Theme> = {
-  [K in keyof T]: T[K] extends ThemeValue
+  -readonly [K in keyof T]: T[K] extends ThemeValue
     ? ResolveThemeValue<T[K]>
     : T[K] extends Theme
       ? Resolve<ResolveTheme<T[K]>>
@@ -169,13 +161,15 @@ export type ResolveTheme<T extends Theme> = {
 
 export type ResolveThemeValue<T extends ThemeValue> = T extends TokenDefinition
   ? ResolveTokenValue<T["$value"]>
-  : T extends TokenPrimitiveValue
+  : T extends TokenAllDefinition
     ? PureCSSVarFunction
-    : T extends TokenPrimitiveValue[]
-      ? PureCSSVarFunction[]
-      : T extends TokenCompositeValue
-        ? ResolveCompositeValue<T>
-        : never;
+    : T extends TokenPrimitiveValue
+      ? PureCSSVarFunction
+      : T extends TokenPrimitiveValue[]
+        ? PureCSSVarFunction[]
+        : T extends TokenCompositeValue
+          ? ResolveCompositeValue<T>
+          : never;
 
 export type ResolveTokenValue<T extends TokenValue> =
   T extends TokenCompositeValue
@@ -351,8 +345,8 @@ if (import.meta.vitest) {
             blue: "#0000ff"
           },
           semantic: {
-            primary: "{color.base.blue}",
-            secondary: "{color.base.green}",
+            primary: "#0000ff",
+            secondary: "#00ff00",
             get error() {
               return this.color.base.red;
             }
