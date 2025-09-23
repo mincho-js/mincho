@@ -1,4 +1,8 @@
-import { createVar, generateIdentifier } from "@vanilla-extract/css";
+import {
+  createVar,
+  generateIdentifier,
+  fallbackVar
+} from "@vanilla-extract/css";
 import { registerClassName } from "@vanilla-extract/css/adapter";
 import { getFileScope, setFileScope } from "@vanilla-extract/css/fileScope";
 import type {
@@ -29,9 +33,14 @@ type WithOptionalLayer<T extends Theme> = T & {
   "@layer"?: string;
 };
 
+interface ThemeSubFunctions {
+  fallbackVar: typeof fallbackVar;
+}
+
 type ResolveThemeOutput<T extends Theme> = Resolve<ResolveTheme<T>>;
 type ThemeTokensInput<ThemeTokens extends Theme> =
-  WithOptionalLayer<ThemeTokens> & ThisType<ResolveThemeOutput<ThemeTokens>>;
+  WithOptionalLayer<ThemeTokens> &
+    ThisType<ResolveThemeOutput<ThemeTokens> & ThemeSubFunctions>;
 
 export function globalTheme<const ThemeTokens extends Theme>(
   selector: string,
@@ -114,6 +123,14 @@ function assignTokensWithPrefix<ThemeTokens extends Theme>(
 } {
   const vars: AssignedVars = {};
   const resolvedTokens = {} as ResolveTheme<ThemeTokens>;
+
+  // Add fallbackVar utility to the context for use in getters
+  Object.defineProperty(resolvedTokens, "fallbackVar", {
+    value: fallbackVar,
+    enumerable: false,
+    configurable: false,
+    writable: false
+  });
 
   // Execute two-pass token resolution:
   // 1. Assign CSS variables to all tokens
@@ -601,7 +618,7 @@ if (import.meta.vitest) {
   setFileScope("test");
 
   function composedValue<ComposedValue>(
-    value: ComposedValue & ThisType<ComposedValue>
+    value: ComposedValue & ThisType<ComposedValue & ThemeSubFunctions>
   ): ComposedValue {
     return value;
   }
@@ -813,6 +830,39 @@ if (import.meta.vitest) {
       );
       expect(normalizedTokens.color.semantic.danger).toBe(
         "var(--color-base-red)"
+      );
+    });
+
+    it("handles fallbackVar in semantic tokens", () => {
+      const result = assignTokens(
+        composedValue({
+          color: {
+            base: {
+              blue: "#0000ff",
+              green: "#00ff00"
+            },
+            semantic: {
+              get primary(): string {
+                return this.fallbackVar(this.color.base.blue, "#007bff");
+              },
+              get secondary(): string {
+                // Test fallback with an existing token
+                return this.fallbackVar(this.color.base.green, "#6c757d");
+              }
+            }
+          }
+        })
+      );
+
+      validateHashFormat(result.vars);
+
+      const normalizedVars = normalizeVars(result.vars);
+      // The semantic tokens should contain var() with fallback
+      expect(stripHash(normalizedVars["--color-semantic-primary"])).toBe(
+        "var(--color-base-blue, #007bff)"
+      );
+      expect(stripHash(normalizedVars["--color-semantic-secondary"])).toBe(
+        "var(--color-base-green, #6c757d)"
       );
     });
 
