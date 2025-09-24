@@ -35,6 +35,7 @@ type WithOptionalLayer<T extends Theme> = T & {
 
 interface ThemeSubFunctions {
   fallbackVar: typeof fallbackVar;
+  raw(varReference: unknown): string;
 }
 
 type ResolveThemeOutput<T extends Theme> = Resolve<ResolveTheme<T>>;
@@ -127,6 +128,14 @@ function assignTokensWithPrefix<ThemeTokens extends Theme>(
   // Add fallbackVar utility to the context for use in getters
   Object.defineProperty(resolvedTokens, "fallbackVar", {
     value: fallbackVar,
+    enumerable: false,
+    configurable: false,
+    writable: false
+  });
+
+  // Add raw utility to extract actual values instead of var() references
+  Object.defineProperty(resolvedTokens, "raw", {
+    value: createRawExtractor(vars),
     enumerable: false,
     configurable: false,
     writable: false
@@ -475,6 +484,25 @@ function setByPath(
   }
 }
 
+/**
+ * Creates a function that extracts raw CSS values from var() references.
+ * Used to "hardcode" values instead of using CSS variable references.
+ */
+function createRawExtractor(vars: AssignedVars) {
+  return function raw(varReference: unknown) {
+    if (typeof varReference === "string") {
+      // Use getVarName utility to extract the CSS variable name
+      const varName = getVarName(varReference);
+      // If it was a var() reference and we have the value, return it
+      if (varName !== varReference && varName in vars) {
+        return vars[varName];
+      }
+    }
+    // If not a var reference or lookup failed, return as-is
+    return varReference;
+  };
+}
+
 // == Token Value Extractors ==================================================
 function extractFontFamilyValue(value: TokenFontFamilyValue): CSSVarValue {
   if (Array.isArray(value)) {
@@ -579,7 +607,7 @@ function extractTokenDefinitionValue(definition: TokenDefinition): CSSVarValue {
 
 function extractCSSValue(value: TokenValue): CSSVarValue {
   if (isPrimitive(value)) {
-    return String(value) as CSSVarValue;
+    return value as CSSVarValue;
   }
 
   if (isTokenUnitValue(value)) {
@@ -687,9 +715,9 @@ if (import.meta.vitest) {
       // Compare normalized values (without hashes)
       expect(normalizeVars(result.vars)).toEqual({
         "--color": "red",
-        "--size": "16",
-        "--enabled": "true",
-        "--nothing": "undefined"
+        "--size": 16,
+        "--enabled": true,
+        "--nothing": undefined
       });
 
       expect(normalizeResolvedTokens(result.resolvedTokens)).toEqual({
@@ -712,7 +740,7 @@ if (import.meta.vitest) {
       expect(normalizeVars(result.vars)).toEqual({
         "--background-color": "white",
         "--font-size": "16px",
-        "--line-height": "1.5"
+        "--line-height": 1.5
       });
 
       expect(normalizeResolvedTokens(result.resolvedTokens)).toEqual({
@@ -730,11 +758,11 @@ if (import.meta.vitest) {
       validateHashFormat(result.vars);
 
       expect(normalizeVars(result.vars)).toEqual({
-        "--space-0": "2",
-        "--space-1": "4",
-        "--space-2": "8",
-        "--space-3": "16",
-        "--space-4": "32"
+        "--space-0": 2,
+        "--space-1": 4,
+        "--space-2": 8,
+        "--space-3": 16,
+        "--space-4": 32
       });
 
       expect(normalizeResolvedTokens(result.resolvedTokens)).toEqual({
@@ -864,6 +892,58 @@ if (import.meta.vitest) {
       expect(stripHash(normalizedVars["--color-semantic-secondary"])).toBe(
         "var(--color-base-green, #6c757d)"
       );
+    });
+
+    it("handles raw value extraction in semantic tokens", () => {
+      const result = assignTokens(
+        composedValue({
+          color: {
+            base: {
+              blue: "#0000ff",
+              red: "#ff0000"
+            },
+            semantic: {
+              get primary(): string {
+                // Use raw to get the actual value instead of var() reference
+                return this.raw(this.color.base.blue);
+              },
+              get danger(): string {
+                // Test raw with another token
+                return this.raw(this.color.base.red);
+              },
+              get custom(): string {
+                // Test raw with a non-var value
+                return this.raw("#00ff00");
+              }
+            }
+          },
+          space: {
+            base: [2, 4, 8, 16, 32, 64],
+            semantic: {
+              get small(): string {
+                return this.raw(this.space.base[1]);
+              },
+              get medium(): string {
+                return this.raw(this.space.base[3]);
+              },
+              get large(): string {
+                return this.raw(this.space.base[5]);
+              }
+            }
+          }
+        })
+      );
+
+      validateHashFormat(result.vars);
+
+      const normalizedVars = normalizeVars(result.vars);
+      // The semantic tokens should contain the raw values, not var() references
+      expect(normalizedVars["--color-semantic-primary"]).toBe("#0000ff");
+      expect(normalizedVars["--color-semantic-danger"]).toBe("#ff0000");
+      expect(normalizedVars["--color-semantic-custom"]).toBe("#00ff00");
+      expect(normalizedVars["--space-semantic-small"]).toBe(4);
+      expect(normalizedVars["--space-semantic-medium"]).toBe(16);
+      expect(normalizedVars["--space-semantic-large"]).toBe(64);
     });
 
     it("handles TokenUnitValue", () => {
@@ -1170,14 +1250,14 @@ if (import.meta.vitest) {
       validateHashFormat(result.vars);
       const normalized = normalizeVars(result.vars);
 
-      expect(normalized["--typography-heading-sizes-0"]).toBe("48");
-      expect(normalized["--typography-heading-sizes-4"]).toBe("16");
+      expect(normalized["--typography-heading-sizes-0"]).toBe(48);
+      expect(normalized["--typography-heading-sizes-4"]).toBe(16);
       expect(normalized["--typography-heading-weight"]).toBe("700");
       expect(normalized["--typography-heading-family"]).toBe(
         "Helvetica, sans-serif"
       );
       expect(normalized["--typography-body-size"]).toBe("14px");
-      expect(normalized["--typography-body-line-height"]).toBe("1.5");
+      expect(normalized["--typography-body-line-height"]).toBe(1.5);
       expect(normalized["--colors-primary"]).toBe("#007bff");
       expect(normalized["--colors-secondary"]).toBe("#6c757d");
     });
