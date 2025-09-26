@@ -36,6 +36,7 @@ type WithOptionalLayer<T extends Theme> = T & {
 interface ThemeSubFunctions {
   fallbackVar: typeof fallbackVar;
   raw(varReference: unknown): string;
+  alias(varReference: unknown): string;
 }
 
 type ResolveThemeOutput<T extends Theme> = Resolve<ResolveTheme<T>>;
@@ -125,7 +126,18 @@ function assignTokensWithPrefix<ThemeTokens extends Theme>(
   const vars: AssignedVars = {};
   const resolvedTokens = {} as ResolveTheme<ThemeTokens>;
 
-  // Add fallbackVar utility to the context for use in getters
+  // Execute two-pass token resolution:
+  // 1. Assign CSS variables to all tokens
+  // 2. Resolve semantic token references
+  const context: TokenProcessingContext = {
+    prefix,
+    path: [],
+    parentPath: prefix,
+    cssVarMap: {},
+    aliasMap: new Set()
+  };
+
+  // Add utilities to the context for use in getters
   Object.defineProperty(resolvedTokens, "fallbackVar", {
     value: fallbackVar,
     enumerable: false,
@@ -141,19 +153,26 @@ function assignTokensWithPrefix<ThemeTokens extends Theme>(
     writable: false
   });
 
-  // Execute two-pass token resolution:
-  // 1. Assign CSS variables to all tokens
-  // 2. Resolve semantic token references
-  const context: TokenProcessingContext = {
-    prefix,
-    path: [],
-    parentPath: prefix,
-    cssVarMap: {}
-  };
+  // Add alias utility to create object references instead of CSS variables
+  Object.defineProperty(resolvedTokens, "alias", {
+    value: createAliasFunction(context),
+    enumerable: false,
+    configurable: false,
+    writable: false
+  });
+
   assignTokenVariables(tokens, vars, resolvedTokens, context);
   resolveSemanticTokens(tokens, vars, resolvedTokens, context);
 
   return { vars, resolvedTokens };
+}
+
+/**
+ * Removes hash suffixes from CSS variable names and var() references
+ */
+function stripHash(str: string): string {
+  // Remove hash suffix from CSS variable names and var() references
+  return str.replace(/__[a-zA-Z0-9]+/g, "");
 }
 
 // == Two-Pass Token Resolution ===============================================
@@ -165,6 +184,7 @@ interface TokenProcessingContext {
   path: string[]; // Current path in object tree
   parentPath: string; // Current variable path
   cssVarMap: CSSVarMap; // Cache for CSS variable names
+  aliasMap: Set<string>; // Track paths that should be aliases (not create CSS vars)
 }
 
 /**
@@ -218,7 +238,8 @@ function assignTokenVariables(
             prefix: context.prefix,
             path: currentPath,
             parentPath: varPath,
-            cssVarMap: context.cssVarMap
+            cssVarMap: context.cssVarMap,
+            aliasMap: context.aliasMap
           }
         );
       } else {
@@ -280,7 +301,8 @@ function assignTokenVariables(
         prefix: context.prefix,
         path: currentPath,
         parentPath: varPath,
-        cssVarMap: context.cssVarMap
+        cssVarMap: context.cssVarMap,
+        aliasMap: context.aliasMap
       });
       continue;
     }
@@ -313,17 +335,28 @@ function resolveSemanticTokens(
 
     // Handle getters (semantic tokens)
     if (typeof descriptor.get === "function") {
-      const cssVar = getCSSVarByPath(varPath, context);
-
+      // Set the current path for alias() to access
+      currentProcessingPath = currentPath;
       // Call getter with resolvedTokens as this context
       // This allows semantic tokens to reference other tokens
       const computedValue = descriptor.get.call(resolvedTokens);
+      // Clear the current path after getter execution
+      currentProcessingPath = [];
 
-      // Store the computed reference (should be a var() reference)
-      vars[cssVar] = computedValue;
+      // Check if this path is marked as an alias
+      const currentPathStr = currentPath.join(".");
 
-      // Update resolvedTokens with the actual reference
-      setByPath(resolvedTokens, currentPath, computedValue);
+      if (context.aliasMap.has(currentPathStr)) {
+        // Don't create a CSS variable for aliases
+        // Just update resolvedTokens with the aliased reference (unhashed)
+        const unhashedValue = stripHash(computedValue);
+        setByPath(resolvedTokens, currentPath, unhashedValue);
+      } else {
+        // Normal flow: create CSS variable
+        const cssVar = getCSSVarByPath(varPath, context);
+        vars[cssVar] = computedValue;
+        setByPath(resolvedTokens, currentPath, computedValue);
+      }
       continue;
     }
 
@@ -343,7 +376,8 @@ function resolveSemanticTokens(
           prefix: context.prefix,
           path: currentPath,
           parentPath: varPath,
-          cssVarMap: context.cssVarMap
+          cssVarMap: context.cssVarMap,
+          aliasMap: context.aliasMap
         }
       );
       continue;
@@ -355,7 +389,8 @@ function resolveSemanticTokens(
         prefix: context.prefix,
         path: currentPath,
         parentPath: varPath,
-        cssVarMap: context.cssVarMap
+        cssVarMap: context.cssVarMap,
+        aliasMap: context.aliasMap
       });
     }
   }
@@ -500,6 +535,24 @@ function createRawExtractor(vars: AssignedVars) {
     }
     // If not a var reference or lookup failed, return as-is
     return varReference;
+  };
+}
+
+/**
+ * Creates a function that marks tokens as aliases.
+ * Aliased tokens don't create their own CSS variables but reference existing ones.
+ */
+// Store the current processing path for alias() to access
+let currentProcessingPath: string[] = [];
+
+function createAliasFunction(context: TokenProcessingContext) {
+  return function alias(varReference: unknown): string {
+    // Mark the current processing path as an alias
+    const currentPathStr = currentProcessingPath.join(".");
+
+    context.aliasMap.add(currentPathStr);
+    // Return the var reference unchanged
+    return String(varReference);
   };
 }
 
@@ -652,10 +705,6 @@ if (import.meta.vitest) {
   }
 
   // Test utility functions for handling hashed CSS variables
-  function stripHash(str: string): string {
-    // Remove hash suffix from CSS variable names and var() references
-    return str.replace(/__[a-zA-Z0-9]+/g, "");
-  }
 
   function normalizeVars(vars: AssignedVars): AssignedVars {
     const normalized: AssignedVars = {};
@@ -891,6 +940,62 @@ if (import.meta.vitest) {
       );
       expect(stripHash(normalizedVars["--color-semantic-secondary"])).toBe(
         "var(--color-base-green, #6c757d)"
+      );
+    });
+
+    it("handles alias references in semantic tokens", () => {
+      const result = assignTokens(
+        composedValue({
+          color: {
+            base: {
+              blue: "#0000ff",
+              red: "#ff0000"
+            },
+            semantic: {
+              get primary(): string {
+                // Use alias to reference without creating CSS var
+                return this.alias(this.color.base.blue);
+              },
+              get danger(): string {
+                // Another alias
+                return this.alias(this.color.base.red);
+              },
+              get secondary(): string {
+                // Normal reference (creates CSS var)
+                return this.color.base.blue;
+              }
+            }
+          }
+        })
+      );
+
+      validateHashFormat(result.vars);
+
+      const normalizedVars = normalizeVars(result.vars);
+      // Base tokens should have CSS variables
+      expect(normalizedVars["--color-base-blue"]).toBe("#0000ff");
+      expect(normalizedVars["--color-base-red"]).toBe("#ff0000");
+
+      // Aliased semantic tokens should NOT have CSS variables
+
+      expect(normalizedVars["--color-semantic-primary"]).toBeUndefined();
+      expect(normalizedVars["--color-semantic-danger"]).toBeUndefined();
+
+      // Non-aliased semantic token should have CSS variable
+      expect(stripHash(normalizedVars["--color-semantic-secondary"])).toBe(
+        "var(--color-base-blue)"
+      );
+
+      // Resolved tokens should all use var() references
+      const normalizedTokens = normalizeResolvedTokens(result.resolvedTokens);
+      expect(normalizedTokens.color.semantic.primary).toBe(
+        "var(--color-base-blue)"
+      );
+      expect(normalizedTokens.color.semantic.danger).toBe(
+        "var(--color-base-red)"
+      );
+      expect(normalizedTokens.color.semantic.secondary).toBe(
+        "var(--color-base-blue)"
       );
     });
 
