@@ -8,6 +8,7 @@ import {
   VariantGroups,
   VariantSelection
 } from "@mincho-js/css";
+import { NonNullableString } from "@mincho-js/csstype";
 import {
   ComponentType,
   ElementType,
@@ -30,12 +31,11 @@ export type StyledComponent<
   (props: PropsWithChildren<TProps & { as?: ElementType }>): JSX.Element;
 };
 
-type InstrinsicProps<TComponent> =
-  TComponent extends keyof JSX.IntrinsicElements
-    ? JSX.IntrinsicElements[TComponent]
-    : TComponent extends ComponentType<infer P>
-      ? P
-      : never;
+type IntrinsicProps<TComponent> = TComponent extends keyof JSX.IntrinsicElements
+  ? JSX.IntrinsicElements[TComponent]
+  : TComponent extends ComponentType<infer P>
+    ? P
+    : never;
 
 export function styled<
   TProps,
@@ -51,7 +51,7 @@ export function styled<
 >;
 
 export function styled<
-  TComponent extends string | keyof JSX.IntrinsicElements,
+  TComponent extends NonNullableString | keyof JSX.IntrinsicElements,
   Variants extends VariantGroups = VariantGroups,
   ToggleVariants extends VariantDefinitions | undefined = undefined,
   Props extends ComplexPropDefinitions<PropTarget> | undefined = undefined
@@ -59,7 +59,7 @@ export function styled<
   component: TComponent,
   options: PatternOptions<Variants, ToggleVariants, Props>
 ): StyledComponent<
-  InstrinsicProps<TComponent> &
+  IntrinsicProps<TComponent> &
     VariantSelection<ConditionalVariants<Variants, ToggleVariants>>,
   ConditionalVariants<Variants, ToggleVariants>
 >;
@@ -72,7 +72,7 @@ export function styled<
 >(
   _component:
     | ComponentType<TComponentOrProps>
-    | string
+    | NonNullableString
     | keyof JSX.IntrinsicElements,
   _options: PatternOptions<Variants, ToggleVariants, Props>
 ): StyledComponent<unknown, Variants> {
