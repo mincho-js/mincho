@@ -1,5 +1,13 @@
 # @mincho-js/transform-to-vanilla
 
+## 0.2.3
+
+### Patch Changes
+
+- [#248](https://github.com/mincho-js/mincho/pull/248) [`0b49f8a`](https://github.com/mincho-js/mincho/commit/0b49f8a4a617273bd300879ab930d2303e53192d) Thanks [@black7375](https://github.com/black7375)! - **type**
+
+  - add `selectors` property to CSSConditions
+
 ## 0.2.2
 
 ### Patch Changes
