@@ -1369,6 +1369,448 @@ if (import.meta.vitest) {
   });
 
   describe.concurrent("theme", () => {
+    it("generates unique className with debugId", () => {
+      const [className1] = theme({ color: "red" }, "theme1");
+      const [className2] = theme({ color: "blue" }, "theme2");
+
+      expect(className1).toMatch(identifierName("theme1"));
+      expect(className2).toMatch(identifierName("theme2"));
+      expect(className1).not.toBe(className2);
+    });
+
+    it("generates className without debugId", () => {
+      const [className] = theme({ color: "red" });
+
+      expect(className).toMatch(/^[a-zA-Z_][a-zA-Z0-9_]*$/);
+    });
+
+    it("handles @layer in theme tokens", () => {
+      const [className, themeVars] = theme(
+        {
+          "@layer": "tokens",
+          color: {
+            primary: "#007bff",
+            secondary: "#6c757d"
+          }
+        },
+        debugId
+      );
+
+      expect(className).toMatch(identifierName(`${debugId}`));
+      expect(normalizeResolvedTokens(themeVars)).toEqual({
+        color: {
+          primary: "var(--color-primary)",
+          secondary: "var(--color-secondary)"
+        }
+      });
+    });
+
+    it("handles primitive token values", () => {
+      const [className, themeVars] = theme({
+        color: "red",
+        size: 16,
+        enabled: true,
+        nothing: undefined
+      });
+
+      expect(className).toBeDefined();
+      expect(normalizeResolvedTokens(themeVars)).toEqual({
+        color: "var(--color)",
+        size: "var(--size)",
+        enabled: "var(--enabled)",
+        nothing: "var(--nothing)"
+      });
+    });
+
+    it("handles array tokens", () => {
+      const [className, themeVars] = theme({
+        space: [2, 4, 8, 16, 32],
+        colors: ["#ff0000", "#00ff00", "#0000ff"]
+      });
+
+      expect(className).toBeDefined();
+      expect(normalizeResolvedTokens(themeVars)).toEqual({
+        space: [
+          "var(--space-0)",
+          "var(--space-1)",
+          "var(--space-2)",
+          "var(--space-3)",
+          "var(--space-4)"
+        ],
+        colors: ["var(--colors-0)", "var(--colors-1)", "var(--colors-2)"]
+      });
+    });
+
+    it("handles nested theme objects", () => {
+      const [className, themeVars] = theme({
+        typography: {
+          heading: {
+            fontSize: "24px",
+            fontWeight: 700
+          },
+          body: {
+            fontSize: "16px",
+            fontWeight: 400
+          }
+        }
+      });
+
+      expect(className).toBeDefined();
+      const normalized = normalizeResolvedTokens(themeVars);
+      expect(normalized.typography.heading.fontSize).toBe(
+        "var(--typography-heading-font-size)"
+      );
+      expect(normalized.typography.heading.fontWeight).toBe(
+        "var(--typography-heading-font-weight)"
+      );
+      expect(normalized.typography.body.fontSize).toBe(
+        "var(--typography-body-font-size)"
+      );
+      expect(normalized.typography.body.fontWeight).toBe(
+        "var(--typography-body-font-weight)"
+      );
+    });
+
+    it("handles TokenDefinition with various types", () => {
+      const [className, themeVars] = theme({
+        color: {
+          $type: "color",
+          $value: "#ff5500"
+        },
+        font: {
+          $type: "fontFamily",
+          $value: ["Inter", "sans-serif"]
+        },
+        duration: {
+          $type: "duration",
+          $value: { value: 300, unit: "ms" }
+        },
+        easing: {
+          $type: "cubicBezier",
+          $value: [0.4, 0, 0.2, 1]
+        }
+      });
+
+      expect(className).toBeDefined();
+      expect(normalizeResolvedTokens(themeVars)).toEqual({
+        color: "var(--color)",
+        font: "var(--font)",
+        duration: "var(--duration)",
+        easing: "var(--easing)"
+      });
+    });
+
+    it("handles semantic tokens with fallbackVar", () => {
+      const [className, themeVars] = theme(
+        composedValue({
+          color: {
+            base: {
+              blue: "#0000ff"
+            },
+            semantic: {
+              get primary(): string {
+                return this.fallbackVar(this.color.base.blue, "#007bff");
+              }
+            }
+          }
+        }),
+        debugId
+      );
+
+      expect(className).toMatch(identifierName(`${debugId}`));
+      expect(normalizeResolvedTokens(themeVars)).toEqual({
+        color: {
+          base: {
+            blue: "var(--color-base-blue)"
+          },
+          semantic: {
+            primary: "var(--color-base-blue, #007bff)"
+          }
+        }
+      });
+    });
+
+    it("handles semantic tokens with alias", () => {
+      const [className, themeVars] = theme(
+        composedValue({
+          color: {
+            base: {
+              blue: "#0000ff",
+              red: "#ff0000"
+            },
+            semantic: {
+              get primary(): string {
+                return this.alias(this.color.base.blue);
+              },
+              get danger(): string {
+                return this.alias(this.color.base.red);
+              }
+            }
+          }
+        }),
+        debugId
+      );
+
+      expect(className).toMatch(identifierName(`${debugId}`));
+      const normalized = normalizeResolvedTokens(themeVars);
+      expect(normalized.color.semantic.primary).toBe("var(--color-base-blue)");
+      expect(normalized.color.semantic.danger).toBe("var(--color-base-red)");
+    });
+
+    it("handles semantic tokens with raw", () => {
+      const [className, themeVars] = theme(
+        composedValue({
+          color: {
+            base: {
+              blue: "#0000ff",
+              red: "#ff0000"
+            },
+            semantic: {
+              get primary(): string {
+                return this.raw(this.color.base.blue);
+              },
+              get danger(): string {
+                return this.raw(this.color.base.red);
+              }
+            }
+          }
+        }),
+        debugId
+      );
+
+      expect(className).toMatch(identifierName(`${debugId}`));
+      expect(normalizeResolvedTokens(themeVars)).toEqual({
+        color: {
+          base: {
+            blue: "var(--color-base-blue)",
+            red: "var(--color-base-red)"
+          },
+          semantic: {
+            primary: "#0000ff",
+            danger: "#ff0000"
+          }
+        }
+      });
+    });
+
+    it("handles TokenCompositeValue", () => {
+      const shadowValue = composedValue({
+        get resolved() {
+          return `${this.color} ${this.offsetX.value}${this.offsetX.unit} ${this.offsetY.value}${this.offsetY.unit}`;
+        },
+        color: "#00000080",
+        offsetX: { value: 0.5, unit: "rem" },
+        offsetY: { value: 0.5, unit: "rem" }
+      });
+
+      const [className, themeVars] = theme({
+        shadow: shadowValue
+      });
+
+      expect(className).toBeDefined();
+      const normalized = normalizeResolvedTokens(themeVars);
+      expect(normalized.shadow.resolved).toBe("var(--shadow)");
+      expect(normalized.shadow.color).toBe("var(--shadow-color)");
+      expect(normalized.shadow.offsetX).toBe("var(--shadow-offset-x)");
+      expect(normalized.shadow.offsetY).toBe("var(--shadow-offset-y)");
+    });
+
+    it("handles TokenUnitValue", () => {
+      const [className, themeVars] = theme({
+        spacing: { value: 1.5, unit: "rem" },
+        borderWidth: { value: 2, unit: "px" }
+      });
+
+      expect(className).toBeDefined();
+      expect(normalizeResolvedTokens(themeVars)).toEqual({
+        spacing: "var(--spacing)",
+        borderWidth: "var(--border-width)"
+      });
+    });
+
+    it("handles camelCase to kebab-case conversion", () => {
+      const [className, themeVars] = theme({
+        backgroundColor: "white",
+        fontSize: "16px",
+        lineHeight: 1.5
+      });
+
+      expect(className).toBeDefined();
+      expect(normalizeResolvedTokens(themeVars)).toEqual({
+        backgroundColor: "var(--background-color)",
+        fontSize: "var(--font-size)",
+        lineHeight: "var(--line-height)"
+      });
+    });
+
+    it("handles deeply nested structures", () => {
+      const [className, themeVars] = theme({
+        design: {
+          system: {
+            color: {
+              brand: {
+                primary: "#007bff",
+                secondary: "#6c757d"
+              }
+            }
+          }
+        }
+      });
+
+      expect(className).toBeDefined();
+      const normalized = normalizeResolvedTokens(themeVars);
+      expect(normalized.design.system.color.brand.primary).toBe(
+        "var(--design-system-color-brand-primary)"
+      );
+      expect(normalized.design.system.color.brand.secondary).toBe(
+        "var(--design-system-color-brand-secondary)"
+      );
+    });
+
+    it("handles mixed token types in single theme", () => {
+      const [className, themeVars] = theme({
+        primitives: {
+          color: "red",
+          size: 16
+        },
+        arrays: {
+          space: [2, 4, 8]
+        },
+        definitions: {
+          font: {
+            $type: "fontFamily",
+            $value: ["Inter", "sans-serif"]
+          }
+        },
+        units: {
+          spacing: { value: 1.5, unit: "rem" }
+        }
+      });
+
+      expect(className).toBeDefined();
+      const normalized = normalizeResolvedTokens(themeVars);
+      expect(normalized.primitives.color).toBe("var(--primitives-color)");
+      expect(normalized.primitives.size).toBe("var(--primitives-size)");
+      expect(normalized.arrays.space).toEqual([
+        "var(--arrays-space-0)",
+        "var(--arrays-space-1)",
+        "var(--arrays-space-2)"
+      ]);
+      expect(normalized.definitions.font).toBe("var(--definitions-font)");
+      expect(normalized.units.spacing).toBe("var(--units-spacing)");
+    });
+
+    it("handles complex semantic token references", () => {
+      const [className, themeVars] = theme(
+        composedValue({
+          color: {
+            base: {
+              red: "#ff0000",
+              blue: "#0000ff",
+              green: "#00ff00"
+            },
+            semantic: {
+              get primary(): string {
+                return this.color.base.blue;
+              },
+              get danger(): string {
+                return this.color.base.red;
+              },
+              get success(): string {
+                return this.color.base.green;
+              },
+              get info(): string {
+                return this.fallbackVar(this.color.semantic.primary, "#17a2b8");
+              }
+            }
+          }
+        }),
+        debugId
+      );
+
+      expect(className).toMatch(identifierName(`${debugId}`));
+      const normalized = normalizeResolvedTokens(themeVars);
+      expect(normalized.color.semantic.primary).toBe("var(--color-base-blue)");
+      expect(normalized.color.semantic.danger).toBe("var(--color-base-red)");
+      expect(normalized.color.semantic.success).toBe("var(--color-base-green)");
+      expect(normalized.color.semantic.info).toBe(
+        "var(--color-base-blue, #17a2b8)"
+      );
+    });
+
+    it("handles fontWeight token types", () => {
+      const [className, themeVars] = theme({
+        weight: {
+          normal: {
+            $type: "fontWeight",
+            $value: "normal"
+          },
+          bold: {
+            $type: "fontWeight",
+            $value: "bold"
+          },
+          semiBold: {
+            $type: "fontWeight",
+            $value: "semi-bold"
+          },
+          numeric: {
+            $type: "fontWeight",
+            $value: 300
+          }
+        }
+      });
+
+      expect(className).toBeDefined();
+      const normalized = normalizeResolvedTokens(themeVars);
+      expect(normalized.weight.normal).toBe("var(--weight-normal)");
+      expect(normalized.weight.bold).toBe("var(--weight-bold)");
+      expect(normalized.weight.semiBold).toBe("var(--weight-semi-bold)");
+      expect(normalized.weight.numeric).toBe("var(--weight-numeric)");
+    });
+
+    it("handles number token types", () => {
+      const [className, themeVars] = theme({
+        lineHeight: {
+          $type: "number",
+          $value: 1.5
+        },
+        zIndex: {
+          $type: "number",
+          $value: 1000
+        }
+      });
+
+      expect(className).toBeDefined();
+      expect(normalizeResolvedTokens(themeVars)).toEqual({
+        lineHeight: "var(--line-height)",
+        zIndex: "var(--z-index)"
+      });
+    });
+
+    it("handles color tokens with complex values", () => {
+      const [className, themeVars] = theme({
+        color: {
+          simple: {
+            $type: "color",
+            $value: "#ff5500"
+          },
+          complex: {
+            $type: "color",
+            $value: {
+              colorSpace: "srgb",
+              components: [255, 85, 0],
+              alpha: 0.8
+            }
+          }
+        }
+      });
+
+      expect(className).toBeDefined();
+      const normalized = normalizeResolvedTokens(themeVars);
+      expect(normalized.color.simple).toBe("var(--color-simple)");
+      expect(normalized.color.complex).toBe("var(--color-complex)");
+    });
+
     it("handles complex color tokens and semantic references", () => {
       const [className, themeVars] = theme(
         {
@@ -1440,6 +1882,31 @@ if (import.meta.vitest) {
           }
         }
       });
+    });
+
+    it("integrates with globalTheme correctly", () => {
+      const [className, themeVars] = theme(
+        {
+          color: {
+            primary: "#007bff"
+          }
+        },
+        "testTheme"
+      );
+
+      expect(className).toMatch(identifierName("testTheme"));
+      expect(normalizeResolvedTokens(themeVars)).toEqual({
+        color: {
+          primary: "var(--color-primary)"
+        }
+      });
+    });
+
+    it("handles empty theme object", () => {
+      const [className, themeVars] = theme({});
+
+      expect(className).toBeDefined();
+      expect(themeVars).toEqual({});
     });
   });
 }
