@@ -1,4 +1,4 @@
-import {
+import type {
   ComplexPropDefinitions,
   ConditionalVariants,
   PatternOptions,
@@ -7,9 +7,10 @@ import {
   VariantGroups,
   VariantObjectSelection,
   PropDefinitionOutput,
-  ResolveComplex
+  ResolveComplex,
+  CSSRule
 } from "@mincho-js/css";
-import {
+import type {
   ComponentProps,
   ComponentType,
   ElementType,
@@ -19,12 +20,12 @@ import {
   RefAttributes
 } from "react";
 
+import { tags, SupportedElements } from "./tags.js";
+
 export { $$styled } from "./runtime.js";
 
-type KeyofIntrinsicElements = keyof JSX.IntrinsicElements;
-
 // == Main =====================================================================
-export function styled<
+function styledImpl<
   Props,
   Component extends ForwardRefExoticComponent<Props>,
   RulesVariants extends VariantGroups | undefined = undefined,
@@ -41,7 +42,7 @@ export function styled<
   RulesProps
 >;
 
-export function styled<
+function styledImpl<
   Props,
   Component extends ComponentType<Props>,
   RulesVariants extends VariantGroups | undefined = undefined,
@@ -58,7 +59,7 @@ export function styled<
   RulesProps
 >;
 
-export function styled<
+function styledImpl<
   Props extends object,
   Component extends ElementType,
   RulesVariants extends VariantGroups | undefined = undefined,
@@ -75,8 +76,8 @@ export function styled<
   RulesProps
 >;
 
-export function styled<
-  Component extends KeyofIntrinsicElements,
+function styledImpl<
+  Component extends SupportedElements,
   RulesVariants extends VariantGroups | undefined = undefined,
   RulesToggleVariants extends VariantDefinitions | undefined = undefined,
   RulesProps extends ComplexPropDefinitions<PropTarget> | undefined = undefined
@@ -91,11 +92,11 @@ export function styled<
   RulesProps
 >;
 
-export function styled<
+function styledImpl<
   Component extends
     | ForwardRefExoticComponent<unknown>
     | ComponentType<unknown>
-    | KeyofIntrinsicElements
+    | SupportedElements
     | ComponentWithAs<object, ElementType>,
   RulesVariants extends VariantGroups | undefined = undefined,
   RulesToggleVariants extends VariantDefinitions | undefined = undefined,
@@ -115,23 +116,50 @@ export function styled<
   );
 }
 
-type IntrinsicProps<TComponent> = TComponent extends KeyofIntrinsicElements
+type TaggedStyled = {
+  [Tag in SupportedElements]: <
+    RulesVariants extends VariantGroups | undefined = undefined,
+    RulesToggleVariants extends VariantDefinitions | undefined = undefined,
+    RulesProps extends
+      | ComplexPropDefinitions<PropTarget>
+      | undefined = undefined
+  >(
+    options: PatternOptions<RulesVariants, RulesToggleVariants, RulesProps>
+  ) => StyledComponent<
+    IntrinsicProps<Tag>,
+    Tag,
+    RulesVariants,
+    RulesToggleVariants,
+    RulesProps
+  >;
+};
+
+/** NOTE: Make simple type for avoid too complex error
+ * error TS2590: Expression produces a union type that is too complex to represent.
+ */
+const taggedStyled: Record<string, unknown> = {};
+tags.forEach((tag) => {
+  taggedStyled[tag] = (options: CSSRule) => styledImpl(tag, options);
+});
+
+export const styled = Object.assign(styledImpl, taggedStyled as TaggedStyled);
+
+type IntrinsicProps<TComponent> = TComponent extends SupportedElements
   ? JSX.IntrinsicElements[TComponent]
   : never;
 
-type InferStyledComponentProps<Component> =
-  Component extends KeyofIntrinsicElements
-    ? IntrinsicProps<Component>
-    : Component extends ComponentType<infer ComponentTypeProps>
-      ? ComponentTypeProps
-      : Component extends ForwardRefExoticComponent<infer ForwardRefProps>
-        ? ForwardRefProps
-        : Component extends ComponentWithAs<infer WithAsProps, ElementType>
-          ? WithAsProps
-          : never;
+type InferStyledComponentProps<Component> = Component extends SupportedElements
+  ? IntrinsicProps<Component>
+  : Component extends ComponentType<infer ComponentTypeProps>
+    ? ComponentTypeProps
+    : Component extends ForwardRefExoticComponent<infer ForwardRefProps>
+      ? ForwardRefProps
+      : Component extends ComponentWithAs<infer WithAsProps, ElementType>
+        ? WithAsProps
+        : never;
 
 type InferStyledComponentElement<Component> =
-  Component extends KeyofIntrinsicElements
+  Component extends SupportedElements
     ? Component
     : Component extends ElementType
       ? Component

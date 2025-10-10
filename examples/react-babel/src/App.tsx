@@ -1,6 +1,6 @@
 import { styled } from "@mincho-js/react";
 
-const BaseComponent = styled("div", {
+const BaseComponent = styled.div({
   base: {
     fontWeight: "bold",
   },

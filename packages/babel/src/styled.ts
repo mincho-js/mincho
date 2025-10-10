@@ -1,6 +1,7 @@
-import { types as t, PluginObj } from "@babel/core";
-import type { PluginState, ProgramScope } from "@/types.js";
-import { registerImportMethod } from "@/utils.js";
+import { types as t } from "@babel/core";
+import type { NodePath, PluginObj } from "@babel/core";
+import type { PluginState, ProgramScope } from "./types.js";
+import { registerImportMethod } from "./utils.js";
 
 /**
  * The plugin for transforming styled components
@@ -25,27 +26,15 @@ export function styledComponentPlugin(): PluginObj<PluginState> {
 
           path.traverse({
             CallExpression(callPath) {
-              const callee = callPath.get("callee");
+              const normalizedArguments = normalizeStyledCall(callPath);
 
-              const isReactAdapter = callee.referencesImport(
-                "@mincho-js/react",
-                "styled"
-              );
-
-              if (!isReactAdapter) {
+              if (!normalizedArguments) {
                 return;
               }
+
+              const { tag, styles, rest } = normalizedArguments;
 
               const runtimeImport = "@mincho-js/react/runtime";
-
-              const args = callPath.node.arguments;
-
-              // Validate arguments
-              if (args.length < 2) {
-                return;
-              }
-
-              const [tag, styles, ...restArgs] = args;
 
               const styledIdentifier = registerImportMethod(
                 callPath,
@@ -79,7 +68,7 @@ export function styledComponentPlugin(): PluginObj<PluginState> {
               const callExpression = t.callExpression(styledIdentifier, [
                 t.cloneNode(tag),
                 recipeCallExpression,
-                ...restArgs
+                ...rest.map((argument) => t.cloneNode(argument))
               ]);
 
               // Add @__PURE__ annotation for tree-shaking
@@ -99,5 +88,83 @@ export function styledComponentPlugin(): PluginObj<PluginState> {
         }
       }
     }
+  };
+}
+
+function normalizeStyledCall(callPath: NodePath<t.CallExpression>): {
+  tag: t.Expression;
+  styles: t.Expression;
+  rest: Array<t.Expression | t.SpreadElement>;
+} | null {
+  const callee = callPath.get("callee");
+  const args = callPath.node.arguments;
+
+  const toValidRestArguments = (
+    input: typeof args
+  ): Array<t.Expression | t.SpreadElement> =>
+    input.filter(
+      (arg): arg is t.Expression | t.SpreadElement =>
+        t.isExpression(arg) || t.isSpreadElement(arg)
+    );
+
+  if (callee.isIdentifier()) {
+    if (!callee.referencesImport("@mincho-js/react", "styled")) {
+      return null;
+    }
+
+    const [tag, styles, ...restArgs] = args;
+
+    if (!tag || !styles || !t.isExpression(tag) || !t.isExpression(styles)) {
+      return null;
+    }
+
+    return {
+      tag,
+      styles,
+      rest: toValidRestArguments(restArgs)
+    };
+  }
+
+  if (!callee.isMemberExpression()) {
+    return null;
+  }
+
+  const object = callee.get("object");
+
+  if (
+    !object.isIdentifier() ||
+    !object.referencesImport("@mincho-js/react", "styled")
+  ) {
+    return null;
+  }
+
+  const [styles, ...restArgs] = args;
+
+  if (!styles || !t.isExpression(styles)) {
+    return null;
+  }
+
+  const property = callee.get("property");
+
+  let memberTag: t.Expression | null = null;
+
+  if (callee.node.computed) {
+    if (t.isExpression(property.node)) {
+      memberTag = property.node;
+    }
+  } else if (property.isIdentifier()) {
+    memberTag = t.stringLiteral(property.node.name);
+  } else if (property.isStringLiteral()) {
+    memberTag = t.stringLiteral(property.node.value);
+  }
+
+  if (!memberTag) {
+    return null;
+  }
+
+  return {
+    tag: memberTag,
+    styles,
+    rest: toValidRestArguments(restArgs)
   };
 }
