@@ -21,10 +21,12 @@ export {
 export {
   globalCss as globalStyle,
   css as style,
-  cssMultiple as styleVariants,
   selector
 } from "./css/index.js";
 export type { CSSRuleWith as StyleRuleWith } from "./css/types.js";
+
+// Import styleVariants from compat-impl (supports mapping callback)
+export { styleVariants } from "./css/compat-impl.js";
 
 export type {
   VariantStyle,

@@ -152,31 +152,14 @@ function cssWith<const T extends CSSRule>(
 
   function cssWithMultiple<
     StyleMap extends Record<string | number, RestrictedCSSRule>
-  >(styleMap: StyleMap, debugId?: string): Record<keyof StyleMap, string>;
-  function cssWithMultiple<
-    Data extends Record<string | number, RestrictedCSSRule>,
-    MapData extends (value: Data[keyof Data], key: keyof Data) => ComplexCSSRule
-  >(data: Data, mapData: MapData, debugId?: string): Record<keyof Data, string>;
-  function cssWithMultiple<
-    Data extends Record<string | number, RestrictedCSSRule>,
-    MapData extends (
-      value: unknown,
-      key: string | number | symbol
-    ) => ComplexCSSRule
-  >(
-    styleMapOrData: Data,
-    mapDataOrDebugId?: MapData | string,
-    debugId?: string
-  ): Record<string | number, string> {
-    if (isMapDataFunction(mapDataOrDebugId)) {
-      return cssMultiple(
-        styleMapOrData,
-        (value, key) => mapDataOrDebugId(cssFunction(value), key),
-        debugId
-      );
-    } else {
-      return cssMultiple(styleMapOrData, cssFunction, mapDataOrDebugId);
+  >(styleMap: StyleMap, debugId?: string): Record<keyof StyleMap, string> {
+    // Transform each value using cssFunction
+    type TransformedStyleMap = Record<keyof StyleMap, ComplexCSSRule>;
+    const transformedStyleMap: TransformedStyleMap = {} as TransformedStyleMap;
+    for (const key in styleMap) {
+      transformedStyleMap[key] = cssFunction(styleMap[key]);
     }
+    return cssMultiple(transformedStyleMap, debugId);
   }
 
   return Object.assign(cssWithImpl, {
@@ -191,43 +174,12 @@ function cssWith<const T extends CSSRule>(
 // https://github.com/vanilla-extract-css/vanilla-extract/blob/master/packages/css/src/style.ts
 export function cssMultiple<
   StyleMap extends Record<string | number, ComplexCSSRule>
->(styleMap: StyleMap, debugId?: string): Record<keyof StyleMap, string>;
-export function cssMultiple<
-  Data extends Record<string | number, unknown>,
-  MapData extends (value: Data[keyof Data], key: keyof Data) => ComplexCSSRule
->(data: Data, mapData: MapData, debugId?: string): Record<keyof Data, string>;
-export function cssMultiple<
-  StyleMap extends Record<string | number, ComplexCSSRule>,
-  Data extends Record<string | number, unknown>,
-  MapData extends (
-    value: unknown,
-    key: string | number | symbol
-  ) => ComplexCSSRule
->(
-  styleMapOrData: StyleMap | Data,
-  mapDataOrDebugId?: MapData | string,
-  debugId?: string
-): Record<string | number, string> {
-  if (isMapDataFunction(mapDataOrDebugId)) {
-    const data = styleMapOrData as Data;
-    const mapData = mapDataOrDebugId;
-    return processMultiple(data, mapData, debugId);
-  } else {
-    const styleMap = styleMapOrData as StyleMap;
-    const debugId = mapDataOrDebugId;
-    return processMultiple(styleMap, (style) => style, debugId);
-  }
+>(styleMap: StyleMap, debugId?: string): Record<keyof StyleMap, string> {
+  return processMultiple(styleMap, debugId) as Record<keyof StyleMap, string>;
 }
 
-function isMapDataFunction<
-  Data extends Record<string | number, unknown>,
-  MapData extends (value: Data[keyof Data], key: keyof Data) => ComplexCSSRule
->(mapDataOrDebugId?: MapData | string): mapDataOrDebugId is MapData {
-  return typeof mapDataOrDebugId === "function";
-}
-function processMultiple<T>(
-  items: Record<string | number, T>,
-  transformItem: (item: T, key: string | number) => ComplexCSSRule,
+function processMultiple(
+  items: Record<string | number, ComplexCSSRule>,
   debugId?: string
 ): Record<string | number, string> {
   const contexts: TransformContext[] = [];
@@ -237,7 +189,7 @@ function processMultiple<T>(
   for (const key in items) {
     const context = structuredClone(initTransformContext);
     const className = vStyle(
-      transform(transformItem(items[key], key), context),
+      transform(items[key], context),
       getDebugName(debugId, key)
     );
     contexts.push(context);
@@ -630,7 +582,7 @@ if (import.meta.vitest) {
   });
 
   describe.concurrent("css.multiple()", () => {
-    it("Variants", () => {
+    it("Static Variants", () => {
       const result = css.multiple(
         {
           primary: { background: "blue" },
@@ -644,49 +596,6 @@ if (import.meta.vitest) {
       expect(result.secondary).toMatch(identifierName(`${debugId}_secondary`));
     });
 
-    it("Mapping Variants", () => {
-      const result = css.multiple(
-        {
-          primary: "blue",
-          secondary: "aqua"
-        },
-        (paletteColor) => ({
-          background: paletteColor
-        }),
-        debugId
-      );
-
-      assert.hasAllKeys(result, ["primary", "secondary"]);
-      expect(result.primary).toMatch(identifierName(`${debugId}_primary`));
-      expect(result.secondary).toMatch(identifierName(`${debugId}_secondary`));
-    });
-
-    it("Mapping Variants with composition", () => {
-      const base = css({ padding: 12 }, "base");
-      const result = css.multiple(
-        {
-          primary: "blue",
-          secondary: "aqua"
-        },
-        (paletteColor) => [
-          base,
-          {
-            background: paletteColor
-          }
-        ],
-        debugId
-      );
-
-      assert.hasAllKeys(result, ["primary", "secondary"]);
-      expect(result.primary).toMatch(
-        identifierName(`${debugId}_primary`, "base")
-      );
-      expect(result.secondary).toMatch(
-        identifierName(`${debugId}_secondary`, "base")
-      );
-    });
-
-    // Additional comprehensive test cases for css.multiple()
     it("Empty variants", () => {
       const result = css.multiple({}, debugId);
 
@@ -704,153 +613,6 @@ if (import.meta.vitest) {
 
       assert.hasAllKeys(result, ["primary"]);
       expect(result.primary).toMatch(identifierName(`${debugId}_primary`));
-    });
-
-    it("Complex composition with multiple base styles", () => {
-      const base1 = css({ padding: 12 }, "base1");
-      const base2 = css({ margin: 8 }, "base2");
-      const result = css.multiple(
-        {
-          primary: [base1, base2, { background: "blue" }],
-          secondary: [base1, { background: "aqua" }]
-        },
-        debugId
-      );
-
-      assert.hasAllKeys(result, ["primary", "secondary"]);
-      expect(result.primary).toMatch(
-        identifierName(`${debugId}_primary`, "base1", "base2")
-      );
-      expect(result.secondary).toMatch(
-        identifierName(`${debugId}_secondary`, "base1")
-      );
-    });
-
-    it("String class composition", () => {
-      const baseClass = "existing-class";
-      const result = css.multiple(
-        {
-          primary: [baseClass, { background: "blue" }],
-          secondary: [baseClass, { background: "aqua" }]
-        },
-        debugId
-      );
-
-      assert.hasAllKeys(result, ["primary", "secondary"]);
-      // String classes get composed into the final class name
-      expect(result.primary).to.include(`${debugId}_primary`);
-      expect(result.primary).to.include("existing-class");
-      expect(result.secondary).to.include(`${debugId}_secondary`);
-      expect(result.secondary).to.include("existing-class");
-    });
-
-    it("Mapping with complex transformation", () => {
-      const colorPalette = {
-        primary: { color: "blue", shade: "dark" },
-        secondary: { color: "green", shade: "light" },
-        accent: { color: "red", shade: "medium" }
-      };
-
-      const result = css.multiple(
-        colorPalette,
-        ({ color, shade }) => ({
-          background: color,
-          opacity: shade === "dark" ? 0.8 : shade === "light" ? 0.4 : 0.6,
-          borderColor: color
-        }),
-        debugId
-      );
-
-      assert.hasAllKeys(result, ["primary", "secondary", "accent"]);
-      expect(result.primary).toMatch(identifierName(`${debugId}_primary`));
-      expect(result.secondary).toMatch(identifierName(`${debugId}_secondary`));
-      expect(result.accent).toMatch(identifierName(`${debugId}_accent`));
-    });
-
-    it("Mapping with complex transformation", async () => {
-      const colorPalette = {
-        primary: { color: "blue", shade: "dark" },
-        secondary: { color: "green", shade: "light" },
-        accent: { color: "red", shade: "medium" }
-      };
-
-      // Define mapping function
-      const mappingFunction = ({
-        color,
-        shade
-      }: {
-        color: string;
-        shade: string;
-      }) => ({
-        background: color,
-        opacity: shade === "dark" ? 0.8 : shade === "light" ? 0.4 : 0.6,
-        borderColor: color
-      });
-
-      // 1. Unit test for mapping function - verify each item is converted to correct style object
-      const primaryStyle = mappingFunction(colorPalette.primary);
-      const secondaryStyle = mappingFunction(colorPalette.secondary);
-      const accentStyle = mappingFunction(colorPalette.accent);
-
-      // Validate transformed style objects
-      expect(primaryStyle).toEqual({
-        background: "blue",
-        opacity: 0.8,
-        borderColor: "blue"
-      });
-
-      expect(secondaryStyle).toEqual({
-        background: "green",
-        opacity: 0.4,
-        borderColor: "green"
-      });
-
-      expect(accentStyle).toEqual({
-        background: "red",
-        opacity: 0.6,
-        borderColor: "red"
-      });
-
-      // 2. Verify internal behavior of css.multiple with transform function mocking
-      const transformSpy = vi.spyOn(
-        await import("@mincho-js/transform-to-vanilla"),
-        "transform"
-      );
-
-      const result = css.multiple(colorPalette, mappingFunction, debugId);
-
-      // Verify that transform function was called with correct style objects
-      expect(transformSpy).toHaveBeenCalledTimes(3);
-
-      // Validate style objects passed in each call
-      const transformCalls = transformSpy.mock.calls;
-      expect(transformCalls[0][0]).toEqual(primaryStyle); // primary
-      expect(transformCalls[1][0]).toEqual(secondaryStyle); // secondary
-      expect(transformCalls[2][0]).toEqual(accentStyle); // accent
-
-      // Test existing class name generation
-      assert.hasAllKeys(result, ["primary", "secondary", "accent"]);
-      expect(result.primary).toMatch(identifierName(`${debugId}_primary`));
-      expect(result.secondary).toMatch(identifierName(`${debugId}_secondary`));
-      expect(result.accent).toMatch(identifierName(`${debugId}_accent`));
-
-      // Verify that each result is a valid CSS class name string
-      expect(typeof result.primary).toBe("string");
-      expect(typeof result.secondary).toBe("string");
-      expect(typeof result.accent).toBe("string");
-
-      // Verify that class names are not empty
-      expect(result.primary.length).toBeGreaterThan(0);
-      expect(result.secondary.length).toBeGreaterThan(0);
-      expect(result.accent.length).toBeGreaterThan(0);
-
-      // Verify that different class names are generated for each case (no duplicates)
-      expect(result.primary).not.toBe(result.secondary);
-      expect(result.secondary).not.toBe(result.accent);
-      expect(result.primary).not.toBe(result.accent);
-
-      // Clean up spy
-      transformSpy.mockRestore();
     });
   });
 
@@ -962,6 +724,130 @@ if (import.meta.vitest) {
         height: 100,
         borderRadius: 100
       });
+    });
+
+    it("css.with() with like mixin for multiple", () => {
+      const myCss = css.with<{ paletteColor: string }>(({ paletteColor }) => ({
+        background: paletteColor
+      }));
+      const result = myCss.multiple(
+        {
+          primary: { paletteColor: "blue" },
+          secondary: { paletteColor: "aqua" }
+        },
+        debugId
+      );
+
+      assert.hasAllKeys(result, ["primary", "secondary"]);
+      expect(result.primary).toMatch(identifierName(`${debugId}_primary`));
+      expect(result.secondary).toMatch(identifierName(`${debugId}_secondary`));
+    });
+
+    it("css.with() with composition", () => {
+      const base = css({ padding: 12 }, "base");
+      const myCss = css.with<{ paletteColor: string }>(({ paletteColor }) => [
+        base,
+        {
+          background: paletteColor
+        }
+      ]);
+      const result = myCss.multiple(
+        {
+          primary: { paletteColor: "blue" },
+          secondary: { paletteColor: "aqua" }
+        },
+        debugId
+      );
+
+      assert.hasAllKeys(result, ["primary", "secondary"]);
+      expect(result.primary).toMatch(
+        identifierName(`${debugId}_primary`, "base")
+      );
+      expect(result.secondary).toMatch(
+        identifierName(`${debugId}_secondary`, "base")
+      );
+    });
+
+    it("css.with() with complex transformation", async () => {
+      const colorPalette = {
+        primary: { color: "blue", shade: "dark" },
+        secondary: { color: "green", shade: "light" },
+        accent: { color: "red", shade: "medium" }
+      };
+
+      // Define mapping function
+      const myCSS = css.with<{ color: string; shade: string }>(
+        ({ color, shade }) => ({
+          background: color,
+          opacity: shade === "dark" ? 0.8 : shade === "light" ? 0.4 : 0.6,
+          borderColor: color
+        })
+      );
+
+      // 1. Unit test for mapping function - verify each item is converted to correct style object
+      const primaryStyle = myCSS.raw(colorPalette.primary);
+      const secondaryStyle = myCSS.raw(colorPalette.secondary);
+      const accentStyle = myCSS.raw(colorPalette.accent);
+
+      // Validate transformed style objects
+      expect(primaryStyle).toEqual({
+        background: "blue",
+        opacity: 0.8,
+        borderColor: "blue"
+      });
+
+      expect(secondaryStyle).toEqual({
+        background: "green",
+        opacity: 0.4,
+        borderColor: "green"
+      });
+
+      expect(accentStyle).toEqual({
+        background: "red",
+        opacity: 0.6,
+        borderColor: "red"
+      });
+
+      // 2. Verify internal behavior of css.multiple with transform function mocking
+      const transformSpy = vi.spyOn(
+        await import("@mincho-js/transform-to-vanilla"),
+        "transform"
+      );
+
+      const result = myCSS.multiple(colorPalette, debugId);
+
+      // Verify that transform function was called with correct style objects
+      expect(transformSpy).toHaveBeenCalledTimes(3);
+
+      // Validate style objects passed in each call
+      const transformCalls = transformSpy.mock.calls;
+      expect(transformCalls[0][0]).toEqual(primaryStyle); // primary
+      expect(transformCalls[1][0]).toEqual(secondaryStyle); // secondary
+      expect(transformCalls[2][0]).toEqual(accentStyle); // accent
+
+      // Test existing class name generation
+      assert.hasAllKeys(result, ["primary", "secondary", "accent"]);
+      expect(result.primary).toMatch(identifierName(`${debugId}_primary`));
+      expect(result.secondary).toMatch(identifierName(`${debugId}_secondary`));
+      expect(result.accent).toMatch(identifierName(`${debugId}_accent`));
+
+      // Verify that each result is a valid CSS class name string
+      expect(typeof result.primary).toBe("string");
+      expect(typeof result.secondary).toBe("string");
+      expect(typeof result.accent).toBe("string");
+
+      // Verify that class names are not empty
+      expect(result.primary.length).toBeGreaterThan(0);
+      expect(result.secondary.length).toBeGreaterThan(0);
+      expect(result.accent.length).toBeGreaterThan(0);
+
+      // Verify that different class names are generated for each case (no duplicates)
+      expect(result.primary).not.toBe(result.secondary);
+      expect(result.secondary).not.toBe(result.accent);
+      expect(result.primary).not.toBe(result.accent);
+
+      // Clean up spy
+      transformSpy.mockRestore();
     });
   });
 }

@@ -204,16 +204,23 @@ export function rulesImpl<
   ) as CombinedVariants;
   // @ts-expect-error - Temporarily ignoring the error as the PatternResult type is not fully defined
   const variantClassNames: PatternResult<CombinedVariants>["variantClassNames"] =
-    mapValues(mergedVariants, (variantGroup, variantGroupName) =>
-      css.multiple(
-        variantGroup,
-        (styleRule) =>
+    mapValues(mergedVariants, (variantGroup, variantGroupName) => {
+      // TODO: Use css.with supported data mapping when available
+      // Transform variant values before passing to css.multiple
+      const transformedVariants: Record<string | number, ComplexCSSRule> = {};
+      for (const key in variantGroup) {
+        const styleRule = variantGroup[key];
+        transformedVariants[key] =
           typeof styleRule === "string"
             ? [styleRule]
-            : (styleRule satisfies ComplexCSSRule),
+            : (styleRule satisfies ComplexCSSRule);
+      }
+
+      return css.multiple(
+        transformedVariants,
         getDebugName(debugId, String(variantGroupName))
-      )
-    );
+      );
+    });
 
   const compounds: Array<[VariantObjectSelection<CombinedVariants>, string]> =
     [];
