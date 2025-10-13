@@ -26,7 +26,7 @@
     "@vanilla-extract/vite-plugin": "^5.1.1",
     "@vitejs/plugin-react-swc": "^4.1.0",
     "eslint": "^9.37.0",
-    "eslint-plugin-react-hooks": "^6.1.1",
+    "eslint-plugin-react-hooks": "^7.0.0",
     "eslint-plugin-react-refresh": "^0.4.23",
     "globals": "^16.4.0",
     "typescript": "^5.9.3",
