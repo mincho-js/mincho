@@ -3,7 +3,7 @@ import { setFileScope } from "@vanilla-extract/css/fileScope";
 import type { PureCSSVarKey } from "@mincho-js/transform-to-vanilla";
 
 export function identifierName(...debugIds: Array<string | undefined>) {
-  const hashRegex = "[a-zA-Z0-9]+";
+  const hashRegex = "[_a-zA-Z0-9]+";
   const classStr = debugIds
     .map((id) => (id === undefined ? hashRegex : `${id}__${hashRegex}`))
     .join(" ");

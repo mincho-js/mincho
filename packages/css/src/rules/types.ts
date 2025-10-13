@@ -176,11 +176,11 @@ export type ConditionalVariants<
     ? Variants
     : Resolve<Variants & ToggleVariantMap<Exclude<ToggleVariants, undefined>>>;
 
-export type PatternOptions<
+export interface PatternOptions<
   Variants extends VariantGroups | undefined,
   ToggleVariants extends VariantDefinitions | undefined,
   Props extends ComplexPropDefinitions<PropTarget> | undefined
-> = CSSRule & {
+> extends CSSRule {
   base?: RecipeStyleRule;
   props?: Props;
   toggles?: ToggleVariants;
@@ -191,12 +191,12 @@ export type PatternOptions<
   compoundVariants?: CompoundVariants<
     ConditionalVariants<Variants, ToggleVariants>
   >;
-};
+}
 
-export type RecipeClassNames<Variants extends VariantGroups> = {
+export interface RecipeClassNames<Variants extends VariantGroups> {
   base: string;
   variants: VariantsClassNames<Variants>;
-};
+}
 
 export type RuntimeFn<
   Variants extends VariantGroups,
