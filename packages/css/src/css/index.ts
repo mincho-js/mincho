@@ -153,6 +153,7 @@ function cssWith<const T extends CSSRule>(
   function cssWithMultiple<
     StyleMap extends Record<string | number, RestrictedCSSRule>
   >(styleMap: StyleMap, debugId?: string): Record<keyof StyleMap, string> {
+    // TODO: Use css.with supported data mapping when available
     // Transform each value using cssFunction
     type TransformedStyleMap = Record<keyof StyleMap, ComplexCSSRule>;
     const transformedStyleMap: TransformedStyleMap = {} as TransformedStyleMap;

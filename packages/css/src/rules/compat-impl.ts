@@ -232,10 +232,361 @@ function processCompoundStyle(
 if (import.meta.vitest) {
   // eslint-disable-next-line @typescript-eslint/ban-ts-comment
   // @ts-ignore error TS1343: The 'import.meta' meta-property is only allowed when the '--module' option is 'es2020', 'es2022', 'esnext', 'system', 'node16', or 'nodenext'.
-  const { describe, it, assert, expect } = import.meta.vitest;
+  const { describe, it, assert, expect, assertType } = import.meta.vitest;
 
   const debugId = "recipe";
   setFileScope("test-compat");
+
+  describe.concurrent("Compound Variants Type Test", () => {
+    function assertCompoundVariants<Variants extends VariantGroups>(
+      optionValue: CompatCompoundVariant<Variants>
+    ) {
+      assertType(optionValue);
+      return optionValue;
+    }
+
+    it("Valid CompoundVariant", () => {
+      assertCompoundVariants({
+        variants: {
+          color: "brand",
+          size: "small"
+        },
+        style: {
+          fontSize: "16px"
+        }
+      });
+    });
+
+    it("Invalid CompoundVariant with default key", () => {
+      assertCompoundVariants({
+        // @ts-expect-error: selected variant key is not invalid
+        // cspell:disable-next-line
+        variantss: {
+          // ↑↑ error occurred here
+          color: "brand",
+          size: "small"
+        },
+        style: {
+          fontSize: "16px"
+        }
+      });
+    });
+    it("Invalid CompoundVariant with style value", () => {
+      assertCompoundVariants({
+        variants: {
+          color: "brand",
+          size: "small"
+        },
+        style: {
+          // @ts-expect-error: fonTsize does not exist in `ComplexCSSRule` Type
+          fonTsize: "16px" // error occurred here
+        }
+      });
+    });
+  });
+
+  describe.concurrent("Types related to Recipe", () => {
+    function assertValidOptions<
+      Variants extends VariantGroups | undefined = undefined,
+      ToggleVariants extends VariantDefinitions | undefined = undefined,
+      Props extends ComplexPropDefinitions<PropTarget> | undefined = undefined
+    >(options: CompatPatternOptions<Variants, ToggleVariants, Props>) {
+      assertType<CompatPatternOptions<Variants, ToggleVariants, Props>>(
+        options
+      );
+      return options;
+    }
+
+    it("Base Style PatternOptions", () => {
+      // Flatten base style
+      assertValidOptions({
+        color: "red",
+        backgroundColor: "gray",
+        fontSize: 16
+      });
+
+      // Base style
+      assertValidOptions({
+        base: {
+          color: "red",
+          backgroundColor: "gray",
+          fontSize: 16
+        }
+      });
+
+      // Both
+      assertValidOptions({
+        color: "red",
+        base: { backgroundColor: "gray", fontSize: 16 }
+      });
+    });
+
+    it("Variant Style PatternOptions", () => {
+      // Toggle style
+      assertValidOptions({
+        toggles: {
+          disabled: { textDecoration: "line-through" },
+          rounded: { borderRadius: 999 }
+        }
+      });
+
+      // Variant style
+      assertValidOptions({
+        variants: {
+          color: {
+            brand: { color: "#FFFFA0" },
+            accent: { color: "#FFE4B5" }
+          },
+          size: {
+            small: { padding: 12 },
+            medium: { padding: 16 },
+            large: { padding: 24 }
+          },
+          outlined: {
+            true: { border: "1px solid black" },
+            false: { border: "1px solid transparent" }
+          }
+        }
+      });
+
+      // Both
+      assertValidOptions({
+        toggles: {
+          disabled: { textDecoration: "line-through" },
+          rounded: { borderRadius: 999 }
+        },
+        variants: {
+          color: {
+            brand: { color: "#FFFFA0" },
+            accent: { color: "#FFE4B5" }
+          },
+          size: {
+            small: { padding: 12 },
+            medium: { padding: 16 },
+            large: { padding: 24 }
+          },
+          outlined: {
+            true: { border: "1px solid black" },
+            false: { border: "1px solid transparent" }
+          }
+        }
+      });
+    });
+
+    const toggleVariants = {
+      disabled: { textDecoration: "line-through" },
+      rounded: { borderRadius: 999 }
+    } as const;
+    const variants = {
+      color: {
+        brand: { color: "#FFFFA0" },
+        accent: { color: "#FFE4B5" }
+      },
+      size: {
+        small: { padding: 12 },
+        medium: { padding: 16 },
+        large: { padding: 24 }
+      },
+      outlined: {
+        true: { border: "1px solid black" },
+        false: { border: "1px solid transparent" }
+      }
+    } as const;
+
+    it("Default Style PatternOptions", () => {
+      // Toggle style
+      assertValidOptions({
+        defaultVariants: { disabled: true },
+        toggles: toggleVariants
+      });
+      assertValidOptions({
+        defaultVariants: ["disabled", { rounded: true }],
+        toggles: toggleVariants
+      });
+
+      // Variant style
+      assertValidOptions({
+        defaultVariants: { color: "brand", outlined: true },
+        variants
+      });
+      assertValidOptions({
+        defaultVariants: ["outlined", { color: "brand" }],
+        variants
+      });
+
+      // Both
+      assertValidOptions({
+        defaultVariants: {
+          disabled: true,
+          color: "brand",
+          size: "medium",
+          outlined: true
+        },
+        toggles: toggleVariants,
+        variants
+      });
+      assertValidOptions({
+        defaultVariants: [
+          "disabled",
+          "outlined",
+          {
+            color: "brand",
+            size: "medium"
+          }
+        ],
+        toggles: toggleVariants,
+        variants
+      });
+    });
+
+    it("Compound Style PatternOptions", () => {
+      // Toggle style
+      assertValidOptions({
+        compoundVariants: [
+          {
+            variants: {
+              disabled: true,
+              rounded: true
+            },
+            style: {
+              color: "red"
+            }
+          }
+        ],
+        toggles: toggleVariants
+      });
+      assertValidOptions({
+        compoundVariants: [
+          {
+            variants: ["disabled", "rounded"],
+            style: {
+              color: "red"
+            }
+          }
+        ],
+        toggles: toggleVariants
+      });
+
+      // Variant style
+      assertValidOptions({
+        compoundVariants: [
+          {
+            variants: {
+              color: "brand",
+              outlined: true
+            },
+            style: {
+              color: "red"
+            }
+          }
+        ],
+        variants
+      });
+      assertValidOptions({
+        compoundVariants: [
+          {
+            variants: ["outlined", { color: "brand" }],
+            style: {
+              color: "red"
+            }
+          }
+        ],
+        variants
+      });
+
+      // Both
+      assertValidOptions({
+        compoundVariants: [
+          {
+            variants: {
+              disabled: true,
+              color: "brand",
+              size: "medium",
+              outlined: true
+            },
+            style: {
+              color: "red"
+            }
+          }
+        ],
+        toggles: toggleVariants,
+        variants
+      });
+      // Array compoundVariants
+      assertValidOptions({
+        compoundVariants: [
+          {
+            variants: [
+              "disabled",
+              "outlined",
+              {
+                color: "brand",
+                size: "medium"
+              }
+            ],
+            style: {
+              color: "red"
+            }
+          }
+        ],
+        toggles: toggleVariants,
+        variants
+      });
+    });
+
+    it("Props PatternOptions", () => {
+      // Property Array
+      assertValidOptions({
+        props: ["color", "background"]
+      });
+
+      // Property object
+      assertValidOptions({
+        props: {
+          size: { targets: ["padding", "margin"] }
+        }
+      });
+      assertValidOptions({
+        props: {
+          size: { base: "3px", targets: ["padding", "margin"] }
+        }
+      });
+
+      // Complex Props
+      assertValidOptions({
+        props: [
+          "color",
+          "background",
+          { size: { targets: ["padding", "margin"] } }
+        ]
+      });
+    });
+
+    it("Complex Style PatternOptions", () => {
+      assertValidOptions({
+        backgroundColor: "gray",
+        base: { color: "red", fontSize: 16 },
+
+        toggles: toggleVariants,
+        variants,
+
+        defaultVariants: {
+          size: "small"
+        },
+        compoundVariants: [
+          {
+            variants: {
+              color: "brand",
+              size: "small"
+            },
+            style: {
+              fontSize: "16px"
+            }
+          }
+        ]
+      });
+    });
+  });
 
   describe.concurrent("recipe() - Compat API", () => {
     it("base style", () => {

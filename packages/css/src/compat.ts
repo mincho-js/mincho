@@ -43,7 +43,10 @@ export type {
   ResolveComplex,
   PropDefinitionOutput
 } from "./rules/types.js";
-export { rules as recipe } from "./rules/index.js";
+
+// Import recipe from compat-impl (supports variants-style compoundVariants)
+export { recipe } from "./rules/compat-impl.js";
+export type { CompatPatternOptions } from "./rules/compat-impl.js";
 
 export type {
   CSSProperties,

@@ -136,11 +136,6 @@ export type PatternResult<
   propVars: PropVars<Props>;
 };
 
-export interface CompoundVariant<Variants extends VariantGroups> {
-  variants: VariantSelection<Variants>;
-  style: RecipeStyleRule;
-}
-
 export type Brand<K, T> = K & { __brand: T };
 export type VariantStringMap<Variants extends VariantGroups> = {
   [VariantKey in keyof Variants]: {
@@ -154,16 +149,12 @@ export type BrandValue<Variants extends VariantGroups> = {
   [VariantKey in keyof Variants]: VariantStringMap<Variants>[VariantKey][keyof Variants[VariantKey]];
 }[keyof Variants];
 
-export type CompoundVariantFn<Variants extends VariantGroups> = (
+export type CompoundVariant<Variants extends VariantGroups> = (
   variants: VariantStringMap<Variants>
 ) => Array<{
   condition: Array<BrandValue<Variants>>;
   style: RecipeStyleRule;
 }>;
-
-export type CompoundVariants<Variants extends VariantGroups> =
-  | Array<CompoundVariant<Variants>>
-  | CompoundVariantFn<Variants>;
 
 export type ConditionalVariants<
   Variants extends VariantGroups | undefined,
@@ -188,7 +179,7 @@ export interface PatternOptions<
   defaultVariants?: VariantSelection<
     ConditionalVariants<Variants, ToggleVariants>
   >;
-  compoundVariants?: CompoundVariants<
+  compoundVariants?: CompoundVariant<
     ConditionalVariants<Variants, ToggleVariants>
   >;
 }
@@ -275,54 +266,6 @@ if (import.meta.vitest) {
         // @ts-expect-error: selected variant value is not included in `size` key.
         size: "medium", // error occurred here
         color: "red"
-      });
-    });
-  });
-
-  describe.concurrent("Compound Variants Type Test", () => {
-    function assertCompoundVariants<Variants extends VariantGroups>(
-      optionValue: CompoundVariant<Variants>
-    ) {
-      assertType(optionValue);
-      return optionValue;
-    }
-
-    it("Valid CompoundVariant", () => {
-      assertCompoundVariants({
-        variants: {
-          color: "brand",
-          size: "small"
-        },
-        style: {
-          fontSize: "16px"
-        }
-      });
-    });
-
-    it("Invalid CompoundVariant with default key", () => {
-      assertCompoundVariants({
-        // @ts-expect-error: selected variant key is not invalid
-        // cspell:disable-next-line
-        variantss: {
-          // ↑↑ error occurred here
-          color: "brand",
-          size: "small"
-        },
-        style: {
-          fontSize: "16px"
-        }
-      });
-    });
-    it("Invalid CompoundVariant with style value", () => {
-      assertCompoundVariants({
-        variants: {
-          color: "brand",
-          size: "small"
-        },
-        style: {
-          // @ts-expect-error: fonTsize does not exist in `ComplexCSSRule` Type
-          fonTsize: "16px" // error occurred here
-        }
       });
     });
   });
@@ -569,23 +512,9 @@ if (import.meta.vitest) {
     it("Compound Style PatternOptions", () => {
       // Toggle style
       assertValidOptions({
-        compoundVariants: [
+        compoundVariants: ({ disabled, rounded }) => [
           {
-            variants: {
-              disabled: true,
-              rounded: true
-            },
-            style: {
-              color: "red"
-            }
-          }
-        ],
-        toggles: toggleVariants
-      });
-      assertValidOptions({
-        compoundVariants: [
-          {
-            variants: ["disabled", "rounded"],
+            condition: [disabled.true, rounded.true],
             style: {
               color: "red"
             }
@@ -596,12 +525,9 @@ if (import.meta.vitest) {
 
       // Variant style
       assertValidOptions({
-        compoundVariants: [
+        compoundVariants: ({ color, outlined }) => [
           {
-            variants: {
-              color: "brand",
-              outlined: true
-            },
+            condition: [color.brand, outlined.true],
             style: {
               color: "red"
             }
@@ -610,9 +536,9 @@ if (import.meta.vitest) {
         variants
       });
       assertValidOptions({
-        compoundVariants: [
+        compoundVariants: ({ outlined, color }) => [
           {
-            variants: ["outlined", { color: "brand" }],
+            condition: [outlined.true, color.brand],
             style: {
               color: "red"
             }
@@ -623,48 +549,12 @@ if (import.meta.vitest) {
 
       // Both
       assertValidOptions({
-        compoundVariants: [
+        compoundVariants: ({ disabled, color, size, outlined }) => [
           {
-            variants: {
-              disabled: true,
-              color: "brand",
-              size: "medium",
-              outlined: true
-            },
+            condition: [disabled.true, color.brand, size.medium, outlined.true],
             style: {
               color: "red"
             }
-          }
-        ],
-        toggles: toggleVariants,
-        variants
-      });
-      // Array compoundVariants
-      assertValidOptions({
-        compoundVariants: [
-          {
-            variants: [
-              "disabled",
-              "outlined",
-              {
-                color: "brand",
-                size: "medium"
-              }
-            ],
-            style: {
-              color: "red"
-            }
-          }
-        ],
-        toggles: toggleVariants,
-        variants
-      });
-      // Functional compoundVariants
-      assertValidOptions({
-        compoundVariants: ({ color, outlined, size }) => [
-          {
-            condition: [color.accent, outlined.false, size.large],
-            style: { color: "red" }
           }
         ],
         toggles: toggleVariants,
@@ -711,12 +601,9 @@ if (import.meta.vitest) {
         defaultVariants: {
           size: "small"
         },
-        compoundVariants: [
+        compoundVariants: ({ color, size }) => [
           {
-            variants: {
-              color: "brand",
-              size: "small"
-            },
+            condition: [color.brand, size.small],
             style: {
               fontSize: "16px"
             }

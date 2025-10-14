@@ -36,15 +36,15 @@ const Container = styled(BaseComponent, {
       },
     },
   },
-  compoundVariants: [
+  compoundVariants: ({ size, color }) => [
     {
-      variants: { size: "small", color: "blue" },
+      condition: [size.small, color.blue],
       style: {
         color: "green",
       },
     },
     {
-      variants: { size: "large", color: "blue" },
+      condition: [size.large, color.blue],
       style: {
         color: "yellow",
       },

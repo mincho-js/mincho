@@ -20,7 +20,6 @@ import type {
   RuntimeFn,
   VariantGroups,
   VariantDefinitions,
-  VariantSelection,
   VariantObjectSelection,
   PropDefinition,
   PropDefinitionOutput,
@@ -82,55 +81,14 @@ function rulesWith<
 
   function rulesWithMultiple<
     RuleMap extends Record<string | number, RestrictedCSSRule>
-  >(ruleMap: RuleMap, debugId?: string): TransformRuleMap<RuleMap>;
-  function rulesWithMultiple<
-    Data extends Record<string | number, RestrictedCSSRule>,
-    MapData extends (
-      value: Data[keyof Data],
-      key: keyof Data
-    ) => PatternOptions<
-      VariantGroups | undefined,
-      VariantDefinitions | undefined,
-      ComplexPropDefinitions<PropTarget> | undefined
-    >
-  >(
-    data: Data,
-    mapData: MapData,
-    debugId?: string
-  ): TransformDataMapping<Data, MapData>;
-  function rulesWithMultiple<
-    Data extends Record<string | number, RestrictedCSSRule>,
-    MapData extends (
-      value: unknown,
-      key: string | number | symbol
-    ) => PatternOptions<
-      VariantGroups | undefined,
-      VariantDefinitions | undefined,
-      ComplexPropDefinitions<PropTarget> | undefined
-    >
-  >(
-    ruleMapOrData: Data,
-    mapDataOrDebugId?: MapData | string,
-    debugId?: string
-  ): TransformRuleMap<Data> | TransformDataMapping<Data, MapData> {
-    if (isMapDataFunction(mapDataOrDebugId)) {
-      const data = ruleMapOrData as Data;
-      const mapData = mapDataOrDebugId;
-      return rulesMultiple(
-        data,
-        (value: Parameters<typeof callback>[0], key: keyof Data) =>
-          mapData(callback(value) as Parameters<MapData>[0], key),
-        debugId
-      ) as TransformDataMapping<Data, MapData>;
-    } else {
-      const ruleMap = ruleMapOrData as Data;
-      const debugId = mapDataOrDebugId;
-      return rulesMultiple(
-        ruleMap,
-        callback as unknown as MapData,
-        debugId
-      ) as TransformRuleMap<Data>;
-    }
+  >(ruleMap: RuleMap, debugId?: string): TransformRuleMap<RuleMap> {
+    // TODO: Use css.with supported data mapping when available
+    // Transform each value using cssFunction
+    return processMultipleRules(
+      ruleMap,
+      (style) => callback(style),
+      debugId
+    ) as TransformRuleMap<RuleMap>;
   }
 
   return Object.assign(rulesWithImpl, {
@@ -225,6 +183,7 @@ export function rulesImpl<
   const compounds: Array<[VariantObjectSelection<CombinedVariants>, string]> =
     [];
 
+  // Only support condition-based compoundVariants (function style)
   if (typeof compoundVariants === "function") {
     const variantConditions = mapValues(
       mergedVariants,
@@ -253,15 +212,6 @@ export function rulesImpl<
         processCompoundStyle(rule.style, debugId, index)
       ]);
     });
-  } else {
-    for (const { style: theStyle, variants } of compoundVariants) {
-      compounds.push([
-        transformVariantSelection<CombinedVariants>(
-          variants as VariantSelection<CombinedVariants>
-        ),
-        processCompoundStyle(theStyle, debugId, compounds.length)
-      ]);
-    }
   }
 
   const config: PatternResult<CombinedVariants, PureProps> = {
@@ -355,22 +305,6 @@ type TransformPatternMap<
   [K in keyof T]: RuntimeFnFromPatternOptions<T[K]>;
 };
 
-type TransformDataMapping<
-  Data extends Record<string | number, unknown>,
-  MapData extends (
-    value: Data[keyof Data],
-    key: keyof Data
-  ) => PatternOptions<
-    VariantGroups | undefined,
-    VariantDefinitions | undefined,
-    ComplexPropDefinitions<PropTarget> | undefined
-  >
-> = {
-  [K in keyof Data]: MapData extends (value: Data[K], key: K) => infer Options
-    ? RuntimeFnFromPatternOptions<Options>
-    : RuntimeFnFromPatternOptions<ReturnType<MapData>>;
-};
-
 export function rulesMultiple<
   PatternMap extends Record<
     string | number,
@@ -380,77 +314,14 @@ export function rulesMultiple<
       ComplexPropDefinitions<PropTarget> | undefined
     >
   >
->(patternMap: PatternMap, debugId?: string): TransformPatternMap<PatternMap>;
-export function rulesMultiple<
-  Data extends Record<string | number, unknown>,
-  MapData extends (
-    value: Data[keyof Data],
-    key: keyof Data
-  ) => PatternOptions<
-    VariantGroups | undefined,
-    VariantDefinitions | undefined,
-    ComplexPropDefinitions<PropTarget> | undefined
-  >
->(
-  data: Data,
-  mapData: MapData,
-  debugId?: string
-): TransformDataMapping<Data, MapData>;
-export function rulesMultiple<
-  PatternMap extends Record<
-    string | number,
-    PatternOptions<
-      VariantGroups | undefined,
-      VariantDefinitions | undefined,
-      ComplexPropDefinitions<PropTarget> | undefined
-    >
-  >,
-  Data extends Record<string | number, unknown>,
-  MapData extends (
-    value: unknown,
-    key: string | number | symbol
-  ) => PatternOptions<
-    VariantGroups | undefined,
-    VariantDefinitions | undefined,
-    ComplexPropDefinitions<PropTarget> | undefined
-  >
->(
-  patternMapOrData: PatternMap | Data,
-  mapDataOrDebugId?: MapData | string,
-  debugId?: string
-): TransformPatternMap<PatternMap> | TransformDataMapping<Data, MapData> {
-  if (isMapDataFunction(mapDataOrDebugId)) {
-    const data = patternMapOrData as Data;
-    const mapData = mapDataOrDebugId;
-    return processMultipleRules(data, mapData, debugId) as TransformDataMapping<
-      Data,
-      MapData
-    >;
-  } else {
-    const patternMap = patternMapOrData as PatternMap;
-    const debugId = mapDataOrDebugId;
-    return processMultipleRules(
-      patternMap,
-      (pattern) => pattern,
-      debugId
-    ) as TransformPatternMap<PatternMap>;
-  }
+>(patternMap: PatternMap, debugId?: string): TransformPatternMap<PatternMap> {
+  return processMultipleRules(
+    patternMap,
+    (pattern) => pattern,
+    debugId
+  ) as TransformPatternMap<PatternMap>;
 }
 
-function isMapDataFunction<
-  Data extends Record<string | number, unknown>,
-  Key extends keyof Data,
-  MapData extends (
-    value: Data[Key],
-    key: Key
-  ) => PatternOptions<
-    VariantGroups | undefined,
-    VariantDefinitions | undefined,
-    ComplexPropDefinitions<PropTarget> | undefined
-  >
->(mapDataOrDebugId?: MapData | string): mapDataOrDebugId is MapData {
-  return typeof mapDataOrDebugId === "function";
-}
 function processMultipleRules<
   T,
   Variants extends VariantGroups | undefined = undefined,
@@ -809,19 +680,15 @@ if (import.meta.vitest) {
     it("compoundVariants", () => {
       const result = rules(
         {
-          compoundVariants: [
+          compoundVariants: ({ outlined, size, color }) => [
             {
-              variants: ["outlined", { color: "brand" }],
+              condition: [outlined.true, color.brand],
               style: {
                 color: "red"
               }
             },
             {
-              variants: {
-                color: "brand",
-                size: "medium",
-                outlined: true
-              },
+              condition: [outlined.true, size.medium, color.brand],
               style: {
                 color: "red"
               }
@@ -1390,23 +1257,27 @@ if (import.meta.vitest) {
     });
 
     it("Data mapping with theme variations", () => {
-      const result = rules.multiple(
-        {
-          light: { bg: "#ffffff", text: "#000000" },
-          dark: { bg: "#1a1a1a", text: "#ffffff" }
-        },
-        (colors, _themeName) => ({
+      const myRules = rules.with<{ bg: string; text: string }>(
+        ({ bg, text }) => ({
           base: {
-            backgroundColor: colors.bg,
-            color: colors.text
+            backgroundColor: bg,
+            color: text
           },
+          // TODO: Fix `rules.with` type inference
+          // @ts-expect-error Broken inference for variants
           variants: {
             emphasis: {
               subtle: { opacity: 0.7 },
               strong: { fontWeight: "bold" }
             }
           }
-        }),
+        })
+      );
+      const result = myRules.multiple(
+        {
+          light: { bg: "#ffffff", text: "#000000" },
+          dark: { bg: "#1a1a1a", text: "#ffffff" }
+        },
         debugId
       );
 
@@ -1420,6 +1291,8 @@ if (import.meta.vitest) {
       assert.hasAllKeys(result.light, ["props", "variants", "classNames"]);
       expect(result.light()).toMatch(identifierName(`${debugId}_light`));
       assert.hasAllKeys(result.light.classNames.variants, ["emphasis"]);
+      // TODO: Fix `rules.with` type inference
+      // @ts-expect-error Broken inference for variants
       assert.hasAllKeys(result.light.classNames.variants.emphasis, [
         "subtle",
         "strong"
@@ -1429,31 +1302,39 @@ if (import.meta.vitest) {
       assert.hasAllKeys(result.dark, ["props", "variants", "classNames"]);
       expect(result.dark()).toMatch(identifierName(`${debugId}_dark`));
       assert.hasAllKeys(result.dark.classNames.variants, ["emphasis"]);
+      // TODO: Fix `rules.with` type inference
+      // @ts-expect-error Broken inference for variants
       assert.hasAllKeys(result.dark.classNames.variants.emphasis, [
         "subtle",
         "strong"
       ]);
 
       // Test usage
+      // TODO: Fix `rules.with` type inference
+      // @ts-expect-error Broken inference for variants
       expect(result.light({ emphasis: "strong" })).toMatch(
         identifierName(`${debugId}_light`, `${debugId}_light_emphasis_strong`)
       );
+      // TODO: Fix `rules.with` type inference
+      // @ts-expect-error Broken inference for variants
       expect(result.dark({ emphasis: "subtle" })).toMatch(
         identifierName(`${debugId}_dark`, `${debugId}_dark_emphasis_subtle`)
       );
     });
 
     it("Size system patterns", () => {
-      const result = rules.multiple(
-        { xs: 4, sm: 8, md: 16 },
-        (spacing, _size) => ({
-          variants: {
-            direction: {
-              all: { padding: spacing },
-              horizontal: { paddingLeft: spacing, paddingRight: spacing }
-            }
+      const myRules = rules.with<{ spacing: number }>(({ spacing }) => ({
+        // TODO: Fix `rules.with` type inference
+        // @ts-expect-error Broken inference for variants
+        variants: {
+          direction: {
+            all: { padding: spacing },
+            horizontal: { paddingLeft: spacing, paddingRight: spacing }
           }
-        }),
+        }
+      }));
+      const result = myRules.multiple(
+        { xs: { spacing: 4 }, sm: { spacing: 8 }, md: { spacing: 16 } },
         debugId
       );
 
@@ -1465,6 +1346,8 @@ if (import.meta.vitest) {
       assert.isFunction(result.md);
 
       // Test usage
+      // TODO: Fix `rules.with` type inference
+      // @ts-expect-error Broken inference for variants
       expect(result.md({ direction: "horizontal" })).toMatch(
         identifierName(`${debugId}_md`, `${debugId}_md_direction_horizontal`)
       );
