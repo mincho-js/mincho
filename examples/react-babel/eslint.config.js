@@ -1,29 +1,58 @@
-import { defineConfig } from "eslint/config";
-import js from '@eslint/js'
+import { resolve } from "node:path";
+import { cwd } from "node:process";
 import globals from 'globals'
-import reactHooks from 'eslint-plugin-react-hooks'
-import reactRefresh from 'eslint-plugin-react-refresh'
+import { defineConfig } from "eslint/config";
+import eslint from '@eslint/js'
 import tseslint from 'typescript-eslint'
+import tsParser from "@typescript-eslint/parser";
+import reactRefreshPlugin from 'eslint-plugin-react-refresh'
+import reactHooksPlugin from 'eslint-plugin-react-hooks'
+
+const PACKAGE_ROOT = resolve(cwd());
 
 export default defineConfig(
-  { ignores: ['dist'] },
+   eslint.configs.recommended,
+   ...tseslint.configs.recommended,
+  reactHooksPlugin.configs.flat.recommended,
   {
-    extends: [js.configs.recommended, ...tseslint.configs.recommended],
+    languageOptions: {
+      parserOptions: {
+        tsconfigRootDir: PACKAGE_ROOT,
+        projectService: true,
+      },
+    },
+  },
+  {
     files: ['**/*.{ts,tsx}'],
     languageOptions: {
-      ecmaVersion: 2020,
-      globals: globals.browser,
+      parser: tsParser,
+      parserOptions: {
+        project: ["tsconfig.json"],
+        tsconfigRootDir: cwd(),
+        projectService: true,
+
+        ecmaVersion: "latest",
+        sourceType: "module",
+        globals: { ...globals.browser, ...globals.es2020 },
+      }
     },
     plugins: {
-      'react-hooks': reactHooks,
-      'react-refresh': reactRefresh,
+      'react-hooks': reactHooksPlugin,
+      'react-refresh': reactRefreshPlugin,
     },
     rules: {
-      ...reactHooks.configs.recommended.rules,
+      ...reactHooksPlugin.configs.recommended.rules,
       'react-refresh/only-export-components': [
         'warn',
         { allowConstantExport: true },
       ],
     },
+  },
+  {
+    files: ["*.js", "*.cjs", "*.mjs"],
+    extends: [tseslint.configs.disableTypeChecked],
+  },
+  {
+    ignores: ["dist/**"],
   },
 )

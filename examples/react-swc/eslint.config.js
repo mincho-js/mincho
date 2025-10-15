@@ -40,6 +40,7 @@ export default defineConfig(
       "react-hooks": reactHooksPlugin,
     },
     rules: {
+      ...reactHooksPlugin.configs.recommended.rules,
       "react-refresh/only-export-components": [
         "warn",
         { allowConstantExport: true },
