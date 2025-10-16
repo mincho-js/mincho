@@ -167,14 +167,6 @@ function assignTokensWithPrefix<ThemeTokens extends Theme>(
   return { vars, resolvedTokens };
 }
 
-/**
- * Removes hash suffixes from CSS variable names and var() references
- */
-function stripHash(str: string): string {
-  // Remove hash suffix from CSS variable names and var() references
-  return str.replace(/__[a-zA-Z0-9]+/g, "");
-}
-
 // == Two-Pass Token Resolution ===============================================
 /**
  * Context object for token processing functions
@@ -348,9 +340,8 @@ function resolveSemanticTokens(
 
       if (context.aliasMap.has(currentPathStr)) {
         // Don't create a CSS variable for aliases
-        // Just update resolvedTokens with the aliased reference (unhashed)
-        const unhashedValue = stripHash(computedValue);
-        setByPath(resolvedTokens, currentPath, unhashedValue);
+        // Just update resolvedTokens with the aliased reference
+        setByPath(resolvedTokens, currentPath, computedValue);
       } else {
         // Normal flow: create CSS variable
         const cssVar = getCSSVarByPath(varPath, context);
@@ -705,7 +696,13 @@ if (import.meta.vitest) {
   }
 
   // Test utility functions for handling hashed CSS variables
-
+  /**
+   * Removes hash suffixes from CSS variable names and var() references
+   */
+  function stripHash(str: string): string {
+    // Remove hash suffix from CSS variable names and var() references
+    return str.replace(/__[a-zA-Z0-9]+/g, "");
+  }
   function normalizeVars(vars: AssignedVars): AssignedVars {
     const normalized: AssignedVars = {};
     for (const [key, value] of Object.entries(vars)) {
@@ -743,10 +740,37 @@ if (import.meta.vitest) {
   }
 
   // Validate that CSS variables have proper hash format
-  function validateHashFormat(vars: AssignedVars): void {
+  const VAR_HASH_REGEX = /^--[a-zA-Z0-9-]+__[a-zA-Z0-9]+$/;
+  function validateHashFormatForVar(vars: AssignedVars): void {
     for (const key of Object.keys(vars)) {
-      expect(key).toMatch(/^--[a-zA-Z0-9-]+__[a-zA-Z0-9]+$/);
+      expect(key).toMatch(VAR_HASH_REGEX);
     }
+  }
+
+  function validateHashFormatForResolved(resolved: object): void {
+    const flattedTokens = flattenAndFilterResolvedTokens(resolved);
+    for (const key of Object.keys(flattedTokens)) {
+      const varName = getVarName(flattedTokens[key]);
+      expect(varName).toMatch(VAR_HASH_REGEX);
+    }
+  }
+
+  function flattenAndFilterResolvedTokens(
+    tokens: object,
+    prefix: string = "",
+    result: Record<string, string> = {}
+  ) {
+    for (const [key, value] of Object.entries(tokens)) {
+      const newKey = prefix ? `${prefix}-${key}` : key;
+
+      if (typeof value === "object" && value !== null) {
+        flattenAndFilterResolvedTokens(value, newKey, result);
+      } else if (typeof value === "string" && value.startsWith("var(--")) {
+        result[newKey] = value;
+      }
+    }
+
+    return result;
   }
 
   describe.concurrent("assignTokens", () => {
@@ -759,7 +783,8 @@ if (import.meta.vitest) {
       });
 
       // Validate hash format is correct
-      validateHashFormat(result.vars);
+      validateHashFormatForVar(result.vars);
+      validateHashFormatForResolved(result.resolvedTokens);
 
       // Compare normalized values (without hashes)
       expect(normalizeVars(result.vars)).toEqual({
@@ -784,7 +809,8 @@ if (import.meta.vitest) {
         lineHeight: 1.5
       });
 
-      validateHashFormat(result.vars);
+      validateHashFormatForVar(result.vars);
+      validateHashFormatForResolved(result.resolvedTokens);
 
       expect(normalizeVars(result.vars)).toEqual({
         "--background-color": "white",
@@ -804,7 +830,8 @@ if (import.meta.vitest) {
         space: [2, 4, 8, 16, 32]
       });
 
-      validateHashFormat(result.vars);
+      validateHashFormatForVar(result.vars);
+      validateHashFormatForResolved(result.resolvedTokens);
 
       expect(normalizeVars(result.vars)).toEqual({
         "--space-0": 2,
@@ -840,7 +867,8 @@ if (import.meta.vitest) {
         }
       });
 
-      validateHashFormat(result.vars);
+      validateHashFormatForVar(result.vars);
+      validateHashFormatForResolved(result.resolvedTokens);
 
       expect(normalizeVars(result.vars)).toEqual({
         "--color-base-red": "#ff0000",
@@ -883,7 +911,8 @@ if (import.meta.vitest) {
         })
       );
 
-      validateHashFormat(result.vars);
+      validateHashFormatForVar(result.vars);
+      validateHashFormatForResolved(result.resolvedTokens);
 
       // CSS variables should be created for both base and semantic tokens
       // Note: Semantic tokens reference other tokens, so their values are var() references
@@ -931,7 +960,8 @@ if (import.meta.vitest) {
         })
       );
 
-      validateHashFormat(result.vars);
+      validateHashFormatForVar(result.vars);
+      validateHashFormatForResolved(result.resolvedTokens);
 
       const normalizedVars = normalizeVars(result.vars);
       // The semantic tokens should contain var() with fallback
@@ -969,7 +999,8 @@ if (import.meta.vitest) {
         })
       );
 
-      validateHashFormat(result.vars);
+      validateHashFormatForVar(result.vars);
+      validateHashFormatForResolved(result.resolvedTokens);
 
       const normalizedVars = normalizeVars(result.vars);
       // Base tokens should have CSS variables
@@ -1039,7 +1070,8 @@ if (import.meta.vitest) {
         })
       );
 
-      validateHashFormat(result.vars);
+      validateHashFormatForVar(result.vars);
+      validateHashFormatForResolved(result.resolvedTokens);
 
       const normalizedVars = normalizeVars(result.vars);
       // The semantic tokens should contain the raw values, not var() references
@@ -1057,7 +1089,9 @@ if (import.meta.vitest) {
         borderWidth: { value: 2, unit: "px" }
       });
 
-      validateHashFormat(result.vars);
+      validateHashFormatForVar(result.vars);
+      validateHashFormatForResolved(result.resolvedTokens);
+
       expect(normalizeVars(result.vars)).toEqual({
         "--spacing": "1.5rem",
         "--border-width": "2px"
@@ -1082,7 +1116,9 @@ if (import.meta.vitest) {
         }
       });
 
-      validateHashFormat(result.vars);
+      validateHashFormatForVar(result.vars);
+      validateHashFormatForResolved(result.resolvedTokens);
+
       expect(normalizeVars(result.vars)).toEqual({
         "--primary": "#0000ff",
         "--font-size": "16px"
@@ -1106,7 +1142,9 @@ if (import.meta.vitest) {
         }
       });
 
-      validateHashFormat(result.vars);
+      validateHashFormatForVar(result.vars);
+      validateHashFormatForResolved(result.resolvedTokens);
+
       expect(normalizeVars(result.vars)).toEqual({
         "--font-primary": "Helvetica, Arial, sans-serif",
         "--font-secondary": "Georgia, serif"
@@ -1130,7 +1168,9 @@ if (import.meta.vitest) {
         }
       });
 
-      validateHashFormat(result.vars);
+      validateHashFormatForVar(result.vars);
+      validateHashFormatForResolved(result.resolvedTokens);
+
       expect(normalizeVars(result.vars)).toEqual({
         "--transition-fast": "200ms",
         "--transition-slow": "1s"
@@ -1154,7 +1194,9 @@ if (import.meta.vitest) {
         }
       });
 
-      validateHashFormat(result.vars);
+      validateHashFormatForVar(result.vars);
+      validateHashFormatForResolved(result.resolvedTokens);
+
       expect(normalizeVars(result.vars)).toEqual({
         "--easing-default": "cubic-bezier(0.5, 0, 1, 1)",
         "--easing-bounce": "cubic-bezier(0.68, -0.55, 0.265, 1.55)"
@@ -1174,7 +1216,9 @@ if (import.meta.vitest) {
         }
       });
 
-      validateHashFormat(result.vars);
+      validateHashFormatForVar(result.vars);
+      validateHashFormatForResolved(result.resolvedTokens);
+
       expect(normalizeVars(result.vars)).toEqual({
         "--color-brand": "#ff5500"
       });
@@ -1204,7 +1248,9 @@ if (import.meta.vitest) {
         }
       });
 
-      validateHashFormat(result.vars);
+      validateHashFormatForVar(result.vars);
+      validateHashFormatForResolved(result.resolvedTokens);
+
       expect(normalizeVars(result.vars)).toEqual({
         "--weight-normal": "400",
         "--weight-bold": "700",
@@ -1232,7 +1278,9 @@ if (import.meta.vitest) {
         }
       });
 
-      validateHashFormat(result.vars);
+      validateHashFormatForVar(result.vars);
+      validateHashFormatForResolved(result.resolvedTokens);
+
       expect(normalizeVars(result.vars)).toEqual({
         "--line-height-base": "1.5",
         "--z-index-modal": "1000"
@@ -1272,7 +1320,9 @@ if (import.meta.vitest) {
         }
       });
 
-      validateHashFormat(result.vars);
+      validateHashFormatForVar(result.vars);
+      validateHashFormatForResolved(result.resolvedTokens);
+
       expect(normalizeVars(result.vars)).toEqual({
         "--typography-font-family": "Inter, system-ui, sans-serif",
         "--typography-font-weight": "500",
@@ -1312,9 +1362,10 @@ if (import.meta.vitest) {
         }
       });
 
-      validateHashFormat(result.vars);
-      const normalized = normalizeVars(result.vars);
+      validateHashFormatForVar(result.vars);
+      validateHashFormatForResolved(result.resolvedTokens);
 
+      const normalized = normalizeVars(result.vars);
       expect(normalized["--shadow-light"]).toMatch(/^#00000080/);
       expect(normalized["--shadow-light-color"]).toBe("#00000080");
       expect(normalized["--shadow-light-offset-x"]).toBe("0.5rem");
@@ -1352,9 +1403,10 @@ if (import.meta.vitest) {
         }
       });
 
-      validateHashFormat(result.vars);
-      const normalized = normalizeVars(result.vars);
+      validateHashFormatForVar(result.vars);
+      validateHashFormatForResolved(result.resolvedTokens);
 
+      const normalized = normalizeVars(result.vars);
       expect(normalized["--typography-heading-sizes-0"]).toBe(48);
       expect(normalized["--typography-heading-sizes-4"]).toBe(16);
       expect(normalized["--typography-heading-weight"]).toBe("700");
@@ -1370,12 +1422,15 @@ if (import.meta.vitest) {
 
   describe.concurrent("theme", () => {
     it("generates unique className with debugId", () => {
-      const [className1] = theme({ color: "red" }, "theme1");
-      const [className2] = theme({ color: "blue" }, "theme2");
+      const [className1, themeVars1] = theme({ color: "red" }, "theme1");
+      const [className2, themeVars2] = theme({ color: "blue" }, "theme2");
 
       expect(className1).toMatch(identifierName("theme1"));
       expect(className2).toMatch(identifierName("theme2"));
       expect(className1).not.toBe(className2);
+
+      validateHashFormatForResolved(themeVars1);
+      validateHashFormatForResolved(themeVars2);
     });
 
     it("generates className without debugId", () => {
@@ -1397,6 +1452,8 @@ if (import.meta.vitest) {
       );
 
       expect(className).toMatch(identifierName(`${debugId}`));
+
+      validateHashFormatForResolved(themeVars);
       expect(normalizeResolvedTokens(themeVars)).toEqual({
         color: {
           primary: "var(--color-primary)",
@@ -1414,6 +1471,8 @@ if (import.meta.vitest) {
       });
 
       expect(className).toBeDefined();
+
+      validateHashFormatForResolved(themeVars);
       expect(normalizeResolvedTokens(themeVars)).toEqual({
         color: "var(--color)",
         size: "var(--size)",
@@ -1456,6 +1515,8 @@ if (import.meta.vitest) {
       });
 
       expect(className).toBeDefined();
+
+      validateHashFormatForResolved(themeVars);
       const normalized = normalizeResolvedTokens(themeVars);
       expect(normalized.typography.heading.fontSize).toBe(
         "var(--typography-heading-font-size)"
@@ -1492,6 +1553,8 @@ if (import.meta.vitest) {
       });
 
       expect(className).toBeDefined();
+
+      validateHashFormatForResolved(themeVars);
       expect(normalizeResolvedTokens(themeVars)).toEqual({
         color: "var(--color)",
         font: "var(--font)",
@@ -1518,6 +1581,8 @@ if (import.meta.vitest) {
       );
 
       expect(className).toMatch(identifierName(`${debugId}`));
+
+      validateHashFormatForResolved(themeVars);
       expect(normalizeResolvedTokens(themeVars)).toEqual({
         color: {
           base: {
@@ -1552,6 +1617,8 @@ if (import.meta.vitest) {
       );
 
       expect(className).toMatch(identifierName(`${debugId}`));
+
+      validateHashFormatForResolved(themeVars);
       const normalized = normalizeResolvedTokens(themeVars);
       expect(normalized.color.semantic.primary).toBe("var(--color-base-blue)");
       expect(normalized.color.semantic.danger).toBe("var(--color-base-red)");
@@ -1579,6 +1646,8 @@ if (import.meta.vitest) {
       );
 
       expect(className).toMatch(identifierName(`${debugId}`));
+
+      validateHashFormatForResolved(themeVars);
       expect(normalizeResolvedTokens(themeVars)).toEqual({
         color: {
           base: {
@@ -1608,6 +1677,8 @@ if (import.meta.vitest) {
       });
 
       expect(className).toBeDefined();
+
+      validateHashFormatForResolved(themeVars);
       const normalized = normalizeResolvedTokens(themeVars);
       expect(normalized.shadow.resolved).toBe("var(--shadow)");
       expect(normalized.shadow.color).toBe("var(--shadow-color)");
@@ -1622,6 +1693,8 @@ if (import.meta.vitest) {
       });
 
       expect(className).toBeDefined();
+
+      validateHashFormatForResolved(themeVars);
       expect(normalizeResolvedTokens(themeVars)).toEqual({
         spacing: "var(--spacing)",
         borderWidth: "var(--border-width)"
@@ -1636,6 +1709,8 @@ if (import.meta.vitest) {
       });
 
       expect(className).toBeDefined();
+
+      validateHashFormatForResolved(themeVars);
       expect(normalizeResolvedTokens(themeVars)).toEqual({
         backgroundColor: "var(--background-color)",
         fontSize: "var(--font-size)",
@@ -1658,6 +1733,8 @@ if (import.meta.vitest) {
       });
 
       expect(className).toBeDefined();
+
+      validateHashFormatForResolved(themeVars);
       const normalized = normalizeResolvedTokens(themeVars);
       expect(normalized.design.system.color.brand.primary).toBe(
         "var(--design-system-color-brand-primary)"
@@ -1688,6 +1765,8 @@ if (import.meta.vitest) {
       });
 
       expect(className).toBeDefined();
+
+      validateHashFormatForResolved(themeVars);
       const normalized = normalizeResolvedTokens(themeVars);
       expect(normalized.primitives.color).toBe("var(--primitives-color)");
       expect(normalized.primitives.size).toBe("var(--primitives-size)");
@@ -1729,6 +1808,8 @@ if (import.meta.vitest) {
       );
 
       expect(className).toMatch(identifierName(`${debugId}`));
+
+      validateHashFormatForResolved(themeVars);
       const normalized = normalizeResolvedTokens(themeVars);
       expect(normalized.color.semantic.primary).toBe("var(--color-base-blue)");
       expect(normalized.color.semantic.danger).toBe("var(--color-base-red)");
@@ -1761,6 +1842,8 @@ if (import.meta.vitest) {
       });
 
       expect(className).toBeDefined();
+
+      validateHashFormatForResolved(themeVars);
       const normalized = normalizeResolvedTokens(themeVars);
       expect(normalized.weight.normal).toBe("var(--weight-normal)");
       expect(normalized.weight.bold).toBe("var(--weight-bold)");
@@ -1781,6 +1864,8 @@ if (import.meta.vitest) {
       });
 
       expect(className).toBeDefined();
+
+      validateHashFormatForResolved(themeVars);
       expect(normalizeResolvedTokens(themeVars)).toEqual({
         lineHeight: "var(--line-height)",
         zIndex: "var(--z-index)"
@@ -1806,6 +1891,8 @@ if (import.meta.vitest) {
       });
 
       expect(className).toBeDefined();
+
+      validateHashFormatForResolved(themeVars);
       const normalized = normalizeResolvedTokens(themeVars);
       expect(normalized.color.simple).toBe("var(--color-simple)");
       expect(normalized.color.complex).toBe("var(--color-complex)");
@@ -1854,6 +1941,8 @@ if (import.meta.vitest) {
       );
 
       expect(className).toMatch(identifierName(`${debugId}`));
+
+      validateHashFormatForResolved(themeVars);
       expect(normalizeResolvedTokens(themeVars)).toEqual({
         color: {
           base: {
@@ -1895,6 +1984,8 @@ if (import.meta.vitest) {
       );
 
       expect(className).toMatch(identifierName("testTheme"));
+
+      validateHashFormatForResolved(themeVars);
       expect(normalizeResolvedTokens(themeVars)).toEqual({
         color: {
           primary: "var(--color-primary)"
