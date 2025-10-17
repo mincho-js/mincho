@@ -104,7 +104,7 @@ interface CSSVarMap {
 }
 
 function assignTokens<ThemeTokens extends Theme>(
-  tokens: ThemeTokens
+  tokens: ThemeTokensInput<ThemeTokens>
 ): {
   vars: AssignedVars;
   resolvedTokens: ResolveTheme<ThemeTokens>;
@@ -259,9 +259,7 @@ function assignTokenVariables(
     // Handle TokenCompositeValue
     if (isTokenCompositeValue(value)) {
       const resolvedComposite: Record<string, PureCSSVarFunction> = {};
-
-      // Process resolved property
-      vars[cssVar] = extractCSSValue(value.resolved);
+      const compositeDescriptors = Object.getOwnPropertyDescriptors(value);
 
       // Create getter for resolved property
       Object.defineProperty(resolvedComposite, "resolved", {
@@ -273,12 +271,20 @@ function assignTokenVariables(
       });
 
       // Process other properties
-      for (const [propKey, propValue] of Object.entries(value)) {
+      for (const [propKey, propDescriptor] of Object.entries(
+        compositeDescriptors
+      )) {
         if (propKey === "resolved") continue;
 
         const propPath = `${varPath}-${camelToKebab(propKey)}`;
         const propCssVar = getCSSVarByPath(propPath, context);
-        vars[propCssVar] = extractCSSValue(propValue as TokenValue);
+        if (typeof propDescriptor.get === "function") {
+          // Store placeholder reference; value will be resolved in pass 2
+          resolvedComposite[propKey] = getVarReference(propPath, context);
+          continue;
+        }
+
+        vars[propCssVar] = extractCSSValue(propDescriptor.value as TokenValue);
         resolvedComposite[propKey] = getVarReference(propPath, context);
       }
 
@@ -352,6 +358,39 @@ function resolveSemanticTokens(
     }
 
     const value = descriptor.value;
+
+    // Handle TokenCompositeValue resolved property computation
+    if (isTokenCompositeValue(value)) {
+      const compositeDescriptors = Object.getOwnPropertyDescriptors(value);
+      const resolvedDescriptor = compositeDescriptors.resolved;
+
+      if (resolvedDescriptor?.get) {
+        const resolvedPath = [...currentPath, "resolved"];
+        const evaluationContext = Object.create(resolvedTokens);
+
+        for (const [propKey, propDescriptor] of Object.entries(
+          compositeDescriptors
+        )) {
+          if (propKey === "resolved") continue;
+          Object.defineProperty(evaluationContext, propKey, propDescriptor);
+        }
+
+        currentProcessingPath = resolvedPath;
+        const computedValue = resolvedDescriptor.get.call(evaluationContext);
+        currentProcessingPath = [];
+
+        const resolvedPathKey = resolvedPath.join(".");
+
+        if (context.aliasMap.has(resolvedPathKey)) {
+          setByPath(resolvedTokens, resolvedPath, computedValue);
+        } else {
+          const cssVar = getCSSVarByPath(varPath, context);
+          vars[cssVar] = extractCSSValue(computedValue as TokenValue);
+        }
+      }
+
+      continue;
+    }
 
     // Handle nested TokenDefinition with object $value
     if (
@@ -689,9 +728,9 @@ if (import.meta.vitest) {
   const debugId = "myCSS";
   setFileScope("test");
 
-  function composedValue<ComposedValue>(
-    value: ComposedValue & ThisType<ComposedValue & ThemeSubFunctions>
-  ): ComposedValue {
+  function compositeValue<CompositeValue>(
+    value: CompositeValue & ThisType<CompositeValue & ThemeSubFunctions>
+  ): CompositeValue {
     return value;
   }
 
@@ -893,7 +932,7 @@ if (import.meta.vitest) {
 
     it("handles semantic token references with getters", () => {
       const result = assignTokens(
-        composedValue({
+        compositeValue({
           color: {
             base: {
               red: "#ff0000",
@@ -941,7 +980,7 @@ if (import.meta.vitest) {
 
     it("handles fallbackVar in semantic tokens", () => {
       const result = assignTokens(
-        composedValue({
+        compositeValue({
           color: {
             base: {
               blue: "#0000ff",
@@ -975,7 +1014,7 @@ if (import.meta.vitest) {
 
     it("handles alias references in semantic tokens", () => {
       const result = assignTokens(
-        composedValue({
+        compositeValue({
           color: {
             base: {
               blue: "#0000ff",
@@ -1032,7 +1071,7 @@ if (import.meta.vitest) {
 
     it("handles raw value extraction in semantic tokens", () => {
       const result = assignTokens(
-        composedValue({
+        compositeValue({
           color: {
             base: {
               blue: "#0000ff",
@@ -1346,19 +1385,17 @@ if (import.meta.vitest) {
     });
 
     it("handles TokenComposedValue with resolved getter", () => {
-      const shadowValue = composedValue({
-        get resolved() {
-          return `${this.color} ${this.offsetX.value}${this.offsetX.unit} ${this.offsetY.value}${this.offsetY.unit} ${this.blur.value}${this.blur.unit}`;
-        },
-        color: "#00000080",
-        offsetX: { value: 0.5, unit: "rem" },
-        offsetY: { value: 0.5, unit: "rem" },
-        blur: { value: 1.5, unit: "rem" }
-      });
-
       const result = assignTokens({
         shadow: {
-          light: shadowValue
+          light: {
+            get resolved(): string {
+              return `${this.shadow.light.color} ${this.shadow.light.offsetX} ${this.shadow.light.offsetY} ${this.shadow.light.blur}`;
+            },
+            color: "#00000080",
+            offsetX: { value: 0.5, unit: "rem" },
+            offsetY: { value: 0.5, unit: "rem" },
+            blur: { value: 1.5, unit: "rem" }
+          }
         }
       });
 
@@ -1366,7 +1403,9 @@ if (import.meta.vitest) {
       validateHashFormatForResolved(result.resolvedTokens);
 
       const normalized = normalizeVars(result.vars);
-      expect(normalized["--shadow-light"]).toMatch(/^#00000080/);
+      expect(stripHash(normalized["--shadow-light"])).toBe(
+        "var(--shadow-light-color) var(--shadow-light-offset-x) var(--shadow-light-offset-y) var(--shadow-light-blur)"
+      );
       expect(normalized["--shadow-light-color"]).toBe("#00000080");
       expect(normalized["--shadow-light-offset-x"]).toBe("0.5rem");
       expect(normalized["--shadow-light-offset-y"]).toBe("0.5rem");
@@ -1565,7 +1604,7 @@ if (import.meta.vitest) {
 
     it("handles semantic tokens with fallbackVar", () => {
       const [className, themeVars] = theme(
-        composedValue({
+        compositeValue({
           color: {
             base: {
               blue: "#0000ff"
@@ -1597,7 +1636,7 @@ if (import.meta.vitest) {
 
     it("handles semantic tokens with alias", () => {
       const [className, themeVars] = theme(
-        composedValue({
+        compositeValue({
           color: {
             base: {
               blue: "#0000ff",
@@ -1626,7 +1665,7 @@ if (import.meta.vitest) {
 
     it("handles semantic tokens with raw", () => {
       const [className, themeVars] = theme(
-        composedValue({
+        compositeValue({
           color: {
             base: {
               blue: "#0000ff",
@@ -1663,7 +1702,7 @@ if (import.meta.vitest) {
     });
 
     it("handles TokenCompositeValue", () => {
-      const shadowValue = composedValue({
+      const shadowValue = compositeValue({
         get resolved() {
           return `${this.color} ${this.offsetX.value}${this.offsetX.unit} ${this.offsetY.value}${this.offsetY.unit}`;
         },
@@ -1781,7 +1820,7 @@ if (import.meta.vitest) {
 
     it("handles complex semantic token references", () => {
       const [className, themeVars] = theme(
-        composedValue({
+        compositeValue({
           color: {
             base: {
               red: "#ff0000",
@@ -1935,6 +1974,17 @@ if (import.meta.vitest) {
                 return this.space.base[5];
               }
             }
+          },
+          shadow: {
+            light: {
+              get resolved(): string {
+                return `${this.shadow.light.color} ${this.shadow.light.offsetX} ${this.shadow.light.offsetY} ${this.shadow.light.blur}`;
+              },
+              color: "#00000080",
+              offsetX: { value: 0.5, unit: "rem" },
+              offsetY: { value: 0.5, unit: "rem" },
+              blur: { value: 1.5, unit: "rem" }
+            }
           }
         },
         debugId
@@ -1968,6 +2018,15 @@ if (import.meta.vitest) {
             small: "var(--space-base-1)",
             medium: "var(--space-base-3)",
             large: "var(--space-base-5)"
+          }
+        },
+        shadow: {
+          light: {
+            resolved: "var(--shadow-light)",
+            color: "var(--shadow-light-color)",
+            offsetX: "var(--shadow-light-offset-x)",
+            offsetY: "var(--shadow-light-offset-y)",
+            blur: "var(--shadow-light-blur)"
           }
         }
       });
