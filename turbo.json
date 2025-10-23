@@ -14,6 +14,7 @@
         "vite.config.ts"
       ],
       "outputs": [
+        ".cache/typescript/*",
         "dist/**"
       ]
     },
@@ -79,7 +80,7 @@
     }
   },
   "globalDependencies": [
-    "package.json", "yarn.lock", "**/tsconfig.json"
+    "package.json", "yarn.lock", "**/tsconfig.json", "**/tsconfig.*.json"
   ],
   "cacheDir": ".cache/turbo"
 }

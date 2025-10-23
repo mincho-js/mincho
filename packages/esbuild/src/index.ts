@@ -1,7 +1,7 @@
+import { dirname, join } from "node:path";
 import { processVanillaFile } from "@vanilla-extract/integration";
 import { vanillaExtractPlugin } from "@vanilla-extract/esbuild-plugin";
 import { Plugin as EsbuildPlugin } from "esbuild";
-import { dirname, join } from "path";
 import { babelTransform, compile } from "@mincho-js/integration";
 
 interface MinchoEsbuildPluginOptions {

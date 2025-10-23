@@ -1,4 +1,5 @@
 // @ts-check
+/// <reference types="node" />
 
 import { cwd } from "node:process";
 import globals from "globals";

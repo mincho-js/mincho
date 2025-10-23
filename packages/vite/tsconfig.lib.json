@@ -5,7 +5,8 @@
     "baseUrl": "./",
     "tsBuildInfoFile": "./.cache/typescript/tsbuildinfo-esm",
     "outDir": "./dist/esm",
-    "declarationDir": "./dist/esm"
+    "declarationDir": "./dist/esm",
+    "types": ["node"]
   },
   "include": [
     "src/**/*.ts",

@@ -13,6 +13,7 @@ const PACKAGE_ROOT = resolve(cwd());
 export default defineConfig(
   eslint.configs.recommended,
   ...tseslint.configs.recommendedTypeChecked,
+  reactHooksPlugin.configs.flat.recommended,
   {
     languageOptions: {
       parserOptions: {
@@ -43,10 +44,7 @@ export default defineConfig(
         "warn",
         { allowConstantExport: true },
       ],
-    },
-    extends: [
-      "react-hooks/recommended"
-    ]
+    }
   },
   {
     files: ["*.js", "*.cjs", "*.mjs"],
