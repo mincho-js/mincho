@@ -1,5 +1,8 @@
 {
   "files": [],
+  "compilerOptions": {
+    "composite": true
+  },
   "references": [
     {
       "path": "../../configs/vite-config-custom"
@@ -7,10 +10,10 @@
     {
       "path": "../transform-to-vanilla"
     },
-    { 
+    {
       "path": "./tsconfig.node.json"
     },
-    { 
+    {
       "path": "./tsconfig.lib.json"
     }
   ]
