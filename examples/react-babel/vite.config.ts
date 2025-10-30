@@ -11,18 +11,4 @@ export default defineConfig({
     // Add React plugin without custom Babel config
     react(),
   ],
-  esbuild: {
-    jsxInject: `import React from "react"`,
-  },
-  build: {
-    rollupOptions: {
-      external: [],
-      output: {
-        manualChunks: undefined,
-      },
-    },
-  },
-  resolve: {
-    preserveSymlinks: true,
-  },
 });

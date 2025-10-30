@@ -1,6 +1,7 @@
 {
   "extends": "tsconfig-custom/tsconfig.base.json",
   "compilerOptions": {
+    "composite": true,
     "rootDir": "./src",
     "baseUrl": "./",
     "paths": {                                           /* Specify a set of entries that re-map imports to additional lookup locations. */
