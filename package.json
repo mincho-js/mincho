@@ -68,7 +68,7 @@
     "tsconfig-custom": "workspace:^",
     "turbo": "^2.5.8",
     "typescript": "^5.9.3",
-    "vite": "^7.1.12",
+    "vite": "^7.2.0",
     "vite-node": "^3.2.4",
     "vitest": "^4.0.2",
     "yarn-constraints-rules": "^0.1.0"
