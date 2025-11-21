@@ -58,3 +58,9 @@ export type {
   TokenNumberDefinition,
   ResolveTheme
 } from "./theme/types.js";
+export { cx } from "./classname/index.js";
+export type {
+  ClassValue,
+  ClassArray,
+  ClassDictionary
+} from "./classname/index.js";

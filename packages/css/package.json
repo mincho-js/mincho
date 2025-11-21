@@ -84,7 +84,8 @@
   "prettier": "prettier-config-custom",
   "dependencies": {
     "@fastify/deepmerge": "^3.1.0",
-    "@mincho-js/transform-to-vanilla": "workspace:^"
+    "@mincho-js/transform-to-vanilla": "workspace:^",
+    "clsx": "^2.1.1"
   },
   "devDependencies": {
     "@vanilla-extract/css": "^1.17.4",
