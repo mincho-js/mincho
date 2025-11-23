@@ -1,4 +1,5 @@
 import { clsx } from "clsx";
+import type { ClassMultipleInput, ClassMultipleResult } from "./types.js";
 
 /**
  * Conditionally join class names into a single string
@@ -26,7 +27,23 @@ import { clsx } from "clsx";
  * cx('foo', [1 && 'bar', { baz: false }], ['hello', ['world']], 'cya');
  * // => 'foo bar hello world cya'
  */
-export const cx = clsx;
+export const cx = Object.assign(clsx, {
+  multiple: cxMultiple
+});
+
+function cxMultiple<T extends ClassMultipleInput>(
+  map: T
+): ClassMultipleResult<T> {
+  const result = {} as ClassMultipleResult<T>;
+
+  for (const key in map) {
+    if (Object.prototype.hasOwnProperty.call(map, key)) {
+      result[key] = clsx(map[key]);
+    }
+  }
+
+  return result;
+}
 
 // == Tests ====================================================================
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
@@ -98,6 +115,12 @@ if (import.meta.vitest) {
       expect(cx("foo", 42, "bar")).toBe("foo 42 bar");
     });
 
+    it.skip("handles bigint inputs", () => {
+      // NOTE: CLSX currently does not support BigInt, so these tests are skipped
+      expect(cx(BigInt(123))).toBe("123");
+      expect(cx("foo", BigInt(42), "bar")).toBe("foo 42 bar");
+    });
+
     it("filters falsy values correctly", () => {
       expect(cx(null)).toBe("");
       expect(cx(undefined)).toBe("");
@@ -125,6 +148,57 @@ if (import.meta.vitest) {
       assertType<string>(cx("foo", { bar: true }, ["baz"]));
       assertType<string>(cx(null, undefined, false));
       assertType<string>(cx(123));
+    });
+  });
+
+  describe.concurrent("cx.multiple()", () => {
+    it("processes a map of class values", () => {
+      const result = cx.multiple({
+        primary: ["bg-blue-500", "text-white"],
+        secondary: ["bg-gray-500", "text-black"]
+      });
+
+      expect(result.primary).toBe("bg-blue-500 text-white");
+      expect(result.secondary).toBe("bg-gray-500 text-black");
+    });
+
+    it("handles mixed input types in map", () => {
+      const isHidden = false;
+      const result = cx.multiple({
+        strings: "foo bar",
+        array: ["baz", "qux"],
+        object: { enabled: true, disabled: false },
+        conditional: ["base", isHidden && "hidden"]
+      });
+
+      expect(result.strings).toBe("foo bar");
+      expect(result.array).toBe("baz qux");
+      expect(result.object).toBe("enabled");
+      expect(result.conditional).toBe("base");
+    });
+
+    it("handles empty map", () => {
+      const result = cx.multiple({});
+      expect(result).toEqual({});
+    });
+
+    it("preserves keys with empty values", () => {
+      const result = cx.multiple({
+        empty: [],
+        falsy: null
+      });
+
+      expect(result.empty).toBe("");
+      expect(result.falsy).toBe("");
+    });
+
+    it("cx.multiple returns correct type", () => {
+      const result = cx.multiple({
+        a: "foo",
+        b: ["bar"]
+      });
+
+      assertType<{ a: string; b: string }>(result);
     });
   });
 }

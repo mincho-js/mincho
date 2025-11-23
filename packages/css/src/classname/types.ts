@@ -24,3 +24,9 @@ export type ClassDictionary = Record<string, unknown>;
  * Array of class values (supports nesting)
  */
 export type ClassArray = ClassValue[];
+
+export type ClassMultipleInput = Record<string, ClassValue>;
+
+export type ClassMultipleResult<T extends ClassMultipleInput> = {
+  [K in keyof T]: string;
+};
