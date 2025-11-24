@@ -28,6 +28,7 @@
     "vue"
   ],
   "cSpell.words": [
+    "Classable",
     "codegen",
     "elif",
     "fontface",
@@ -39,8 +40,10 @@
     "pkgs",
     "Pretendard",
     "Resizer",
+    "Stringable",
     "unicase",
     "unitless",
-    "urange"
+    "urange",
+    "Valueable"
   ]
 }

@@ -59,8 +59,4 @@ export type {
   ResolveTheme
 } from "./theme/types.js";
 export { cx } from "./classname/index.js";
-export type {
-  ClassValue,
-  ClassArray,
-  ClassDictionary
-} from "./classname/index.js";
+export type { ClassValue } from "./classname/index.js";
