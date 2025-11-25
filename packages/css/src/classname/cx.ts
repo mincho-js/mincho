@@ -1,6 +1,11 @@
 import { clsx } from "clsx";
-import type { ClassMultipleInput, ClassMultipleResult } from "./types.js";
+import type {
+  ClassValue,
+  ClassMultipleInput,
+  ClassMultipleResult
+} from "./types.js";
 
+const cxImpl: (...inputs: ClassValue[]) => string = clsx;
 /**
  * Conditionally join class names into a single string
  *
@@ -27,8 +32,9 @@ import type { ClassMultipleInput, ClassMultipleResult } from "./types.js";
  * cx('foo', [1 && 'bar', { baz: false }], ['hello', ['world']], 'cya');
  * // => 'foo bar hello world cya'
  */
-export const cx = Object.assign(clsx, {
-  multiple: cxMultiple
+export const cx = Object.assign(cxImpl, {
+  multiple: cxMultiple,
+  with: cxWith
 });
 
 function cxMultiple<T extends ClassMultipleInput>(
@@ -37,12 +43,35 @@ function cxMultiple<T extends ClassMultipleInput>(
   const result = {} as ClassMultipleResult<T>;
 
   for (const key in map) {
-    if (Object.prototype.hasOwnProperty.call(map, key)) {
-      result[key] = clsx(map[key]);
-    }
+    result[key] = cxImpl(map[key]);
   }
 
   return result;
+}
+
+function cxWith<const T extends ClassValue>(
+  callback?: (params: T) => ClassValue
+) {
+  const cxFunction = callback ?? ((className: T) => className);
+
+  function cxWithImpl(...className: T[]) {
+    const result = className.map((cn) => cxFunction(cn));
+    return cxImpl(...result);
+  }
+
+  function cxWithMultiple<ClassNameMap extends ClassMultipleInput<T>>(
+    classNameMap: ClassNameMap
+  ): ClassMultipleResult<ClassNameMap> {
+    type TransformedClassNameMap = Record<keyof ClassNameMap, ClassValue>;
+    const transformedClassNameMap: TransformedClassNameMap =
+      {} as TransformedClassNameMap;
+    for (const key in classNameMap) {
+      transformedClassNameMap[key] = cxFunction(classNameMap[key]);
+    }
+    return cxMultiple(transformedClassNameMap);
+  }
+
+  return Object.assign(cxWithImpl, { multiple: cxWithMultiple });
 }
 
 // == Tests ====================================================================
@@ -124,10 +153,11 @@ if (import.meta.vitest) {
     it("filters falsy values correctly", () => {
       expect(cx(null)).toBe("");
       expect(cx(undefined)).toBe("");
+      expect(cx(true)).toBe("");
       expect(cx(false)).toBe("");
       expect(cx(0)).toBe("");
       expect(cx("")).toBe("");
-      expect(cx(null, undefined, false, 0, "")).toBe("");
+      expect(cx(null, undefined, true, false, 0, "")).toBe("");
     });
 
     it("preserves whitespace in class names", () => {
@@ -196,6 +226,106 @@ if (import.meta.vitest) {
       const result = cx.multiple({
         a: "foo",
         b: ["bar"]
+      });
+
+      assertType<{ a: string; b: string }>(result);
+    });
+  });
+
+  describe.concurrent("cx.with()", () => {
+    it("creates a typed constraint without transformer", () => {
+      type LayoutDisplay = "flex" | "grid" | "block";
+      type LayoutSpacing = `p-${number}` | `m-${number}`;
+      const layout = cx.with<LayoutDisplay | LayoutSpacing>();
+
+      expect(layout("flex", "p-4")).toBe("flex p-4");
+      expect(layout("grid")).toBe("grid");
+    });
+
+    it("creates a typed full constraint without transformer", () => {
+      type LayoutDisplay = "flex" | "grid" | "block";
+      type LayoutSpacing = `p-${number}` | `m-${number}`;
+      const layout = cx.with<ClassValue<LayoutDisplay | LayoutSpacing>>();
+
+      expect(layout("flex", "p-4", { block: true })).toBe("flex p-4 block");
+      expect(layout("grid", { block: false, "m-1": true })).toBe("grid m-1");
+    });
+
+    it("creates a typed constraint with transformer", () => {
+      const responsive = cx.with<{ base: string; md?: string; lg?: string }>(
+        ({ base, md, lg }) => [base, md && `md:${md}`, lg && `lg:${lg}`]
+      );
+
+      expect(
+        responsive({ base: "text-sm", md: "text-base", lg: "text-lg" })
+      ).toBe("text-sm md:text-base lg:text-lg");
+      expect(responsive({ base: "text-sm" })).toBe("text-sm");
+    });
+
+    it("filters out non-string and empty values without transformer", () => {
+      const test = cx.with<{
+        required: string;
+        optional?: string;
+        flag?: boolean;
+      }>();
+
+      expect(test({ required: "foo", optional: undefined, flag: true })).toBe(
+        "required flag"
+      );
+      expect(test({ required: "foo", optional: "" })).toBe("required");
+    });
+
+    it("transformer receives all params", () => {
+      const test = cx.with<{ a: string; b: boolean }>(({ a, b }) => [
+        a,
+        b && "active"
+      ]);
+
+      expect(test({ a: "base", b: true })).toBe("base active");
+      expect(test({ a: "base", b: false })).toBe("base");
+    });
+
+    it("cx.with().multiple() processes a map with typed constraint", () => {
+      type LayoutDisplay = "flex" | "grid" | "block";
+      type LayoutSpacing = `p-${number}` | `m-${number}`;
+      const layout = cx.with<LayoutDisplay | LayoutSpacing>();
+
+      const result = layout.multiple({
+        card: "flex",
+        container: "grid"
+      });
+
+      expect(result.card).toBe("flex");
+      expect(result.container).toBe("grid");
+    });
+
+    it("cx.with().multiple() with transformer", () => {
+      const responsive = cx.with<{ base: string; md?: string; lg?: string }>(
+        ({ base, md, lg }) => [base, md && `md:${md}`, lg && `lg:${lg}`]
+      );
+
+      const result = responsive.multiple({
+        heading: { base: "text-xl", md: "text-2xl", lg: "text-3xl" },
+        body: { base: "text-sm", md: "text-base" },
+        caption: { base: "text-xs" }
+      });
+
+      expect(result.heading).toBe("text-xl md:text-2xl lg:text-3xl");
+      expect(result.body).toBe("text-sm md:text-base");
+      expect(result.caption).toBe("text-xs");
+    });
+
+    it("cx.with().multiple() handles empty map", () => {
+      const layout = cx.with<"flex" | "grid">();
+      const result = layout.multiple({});
+      expect(result).toEqual({});
+    });
+
+    it("cx.with().multiple() returns correct type", () => {
+      const layout = cx.with<"flex" | "grid">();
+      const result = layout.multiple({
+        a: "flex",
+        b: "grid"
       });
 
       assertType<{ a: string; b: string }>(result);
