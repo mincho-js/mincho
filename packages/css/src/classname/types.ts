@@ -348,10 +348,12 @@ if (import.meta.vitest) {
       assertType<Result>({ root: "compiled-class", label: "another-class" });
 
       // @ts-expect-error: number is not assignable to string
-      assertType<Result>({ root: 123, label: "class" });
+      const _invalidNumber: Result = { root: 123, label: "class" };
+      void _invalidNumber;
 
       // @ts-expect-error: missing required key 'label'
-      assertType<Result>({ root: "class" });
+      const _missingKey: Result = { root: "class" };
+      void _missingKey;
     });
 
     it("preserves exact keys from input type", () => {
@@ -368,13 +370,14 @@ if (import.meta.vitest) {
         footer: "footer-class"
       });
 
-      assertType<Result>({
+      const _extraKey: Result = {
         container: "a",
         header: "b",
         footer: "c",
         // @ts-expect-error: 'extra' does not exist in type Result
         extra: "d"
-      });
+      };
+      void _extraKey;
     });
 
     it("works with dynamic string keys", () => {

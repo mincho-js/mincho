@@ -10,7 +10,7 @@
   ],
   "scripts": {
     "postinstall": "yarn workspace vite-config-custom build",
-    "task": "yarn turbo run --cache-dir .cache/turbo",
+    "task": "yarn run -T turbo run --cache-dir .cache/turbo",
     "clean": "yarn g:clean && yarn task clean",
     "build": "yarn task build",
     "build:full": "PACKAGE_PUBLISH=true yarn task build",
