@@ -4,9 +4,11 @@
   "private": true,
   "packageManager": "yarn@4.10.3",
   "workspaces": [
+    "apps/*",
     "configs/*",
     "packages/*",
-    "examples/*"
+    "examples/*",
+    "site"
   ],
   "scripts": {
     "postinstall": "yarn workspace vite-config-custom build",
