@@ -11,6 +11,7 @@ inputs:
     default: |
       .cache
       **/.cache
+      configs/vite-config-custom/dist
 
 runs:
   using: composite
