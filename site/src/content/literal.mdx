@@ -1,0 +1,1070 @@
+# Literal CSS
+
+Mincho.js provides a natural way to write CSS in TypeScript. The `css()` function transforms intuitive syntax into Vanilla Extract compatible styles at build time.
+
+## Overview
+
+The Literal CSS layer is the foundation of Mincho.js styling. It provides:
+
+- Type-safe CSS with full autocompletion
+- Preprocessor-like features without the complexity
+- Zero runtime overhead through build-time extraction
+
+```ts
+import { css } from '@mincho-js/css'
+
+const button = css({
+  padding: 16,
+  backgroundColor: 'blue',
+  color: 'white',
+  _hover: {
+    backgroundColor: 'darkblue'
+  }
+})
+```
+
+## Unitless Properties
+
+Numbers are automatically converted to `px` for applicable CSS properties. Properties that are inherently unitless (like `opacity`, `flexGrow`, `zIndex`) remain as numbers.
+
+```ts
+css({
+  // Converted to pixels
+  padding: 10,        // → padding: 10px
+  marginTop: 25,      // → margin-top: 25px
+  borderRadius: 8,    // → border-radius: 8px
+
+  // Remain unitless
+  flexGrow: 1,        // → flex-grow: 1
+  opacity: 0.5,       // → opacity: 0.5
+  zIndex: 100,        // → z-index: 100
+  lineHeight: 1.5     // → line-height: 1.5
+})
+```
+
+## Vendor Prefixes
+
+Vendor prefixes can be written using camelCase with the vendor name capitalized.
+
+```ts
+css({
+  WebkitTapHighlightColor: 'rgba(0, 0, 0, 0)',
+  MozAppearance: 'none',
+  msOverflowStyle: 'none'
+})
+```
+
+```css
+/* Generated CSS */
+-webkit-tap-highlight-color: rgba(0, 0, 0, 0);
+-moz-appearance: none;
+-ms-overflow-style: none;
+```
+
+## Fallback Styles
+
+Use arrays to provide fallback values for CSS properties. Earlier values act as fallbacks for browsers that don't support later values.
+
+```ts
+css({
+  overflow: ['auto', 'overlay'],
+  display: ['block', 'flex', 'grid']
+})
+```
+
+```css
+/* Generated CSS */
+overflow: auto;
+overflow: overlay;
+
+display: block;
+display: flex;
+display: grid;
+```
+
+## Merge Values
+
+Inspired by [Less's merge feature](https://lesscss.org/features/#merge-feature), Mincho.js allows composing long values using arrays.
+
+### Comma Merge (`$` suffix)
+
+Use `$` suffix to join array values with commas.
+
+```ts
+css({
+  boxShadow$: ['inset 0 0 10px #555', '0 0 20px black'],
+  fontFamily$: ['Pretendard', 'sans-serif']
+})
+```
+
+```css
+/* Generated CSS */
+box-shadow: inset 0 0 10px #555, 0 0 20px black;
+font-family: Pretendard, sans-serif;
+```
+
+### Space Merge (`_` suffix)
+
+Use `_` suffix to join array values with spaces.
+
+```ts
+css({
+  transform_: ['scale(2)', 'rotate(15deg)'],
+  backgroundPosition_: ['center', 'top']
+})
+```
+
+```css
+/* Generated CSS */
+transform: scale(2) rotate(15deg);
+background-position: center top;
+```
+
+### With Fallback Styles
+
+Combine merge with fallback styles using nested arrays.
+
+```ts
+css({
+  transform_: [
+    'scale(2)',
+    // Fallback: first for modern browsers, second for older
+    ['rotate(0.5rad)', 'rotate(28.64deg)']
+  ]
+})
+```
+
+```css
+/* Generated CSS */
+transform: scale(2) rotate(0.5rad);
+transform: scale(2) rotate(28.64deg);
+```
+
+## Simply Important
+
+Inspired by [Tailwind's important modifier](https://tailwindcss.com/docs/configuration#important-modifier), add `!` at the end of a value to make it `!important`.
+
+```ts
+css({
+  color: 'red!',
+  display: 'flex !'  // Space before ! also works
+})
+```
+
+```css
+/* Generated CSS */
+color: red !important;
+display: flex !important;
+```
+
+Works with fallback styles too:
+
+```ts
+css({
+  overflow: ['auto !', 'overlay']
+})
+```
+
+## CSS Variables
+
+Inspired by [Sass variables](https://sass-lang.com/documentation/variables/), use `$` prefix to define and reference CSS custom properties.
+
+### Defining Variables
+
+Variables are automatically converted from camelCase to kebab-case with `--` prefix.
+
+```ts
+css({
+  $primaryColor: 'blue',
+  $spacing: '16px',
+  '--my-css-variable': 'green'  // Pure CSS syntax also works
+})
+```
+
+```css
+/* Generated CSS */
+--primary-color: blue;
+--spacing: 16px;
+--my-css-variable: green;
+```
+
+### Referencing Variables
+
+```ts
+css({
+  $primaryColor: 'blue',
+  color: '$primaryColor',
+  padding: '$spacing'
+})
+```
+
+```css
+/* Generated CSS */
+--primary-color: blue;
+color: var(--primary-color);
+padding: var(--spacing);
+```
+
+### With Fallback Values
+
+Use parentheses to provide fallback values.
+
+```ts
+css({
+  color: '$primaryColor(red)',
+  background: '$theme(white)'
+})
+```
+
+```css
+/* Generated CSS */
+color: var(--primary-color, red);
+background: var(--theme, white);
+```
+
+### Nested Fallbacks
+
+```ts
+css({
+  color: '$color1($color2($color3(black)))'
+})
+```
+
+```css
+/* Generated CSS */
+color: var(--color1, var(--color2, var(--color3, black)));
+```
+
+### Inside Other Values
+
+Variables work inside calc() and other CSS functions.
+
+```ts
+css({
+  $baseSize: '16px',
+  width: 'calc($baseSize * 2)',
+  height: 'calc($baseSize + 10px)'
+})
+```
+
+```css
+/* Generated CSS */
+--base-size: 16px;
+width: calc(var(--base-size) * 2);
+height: calc(var(--base-size) + 10px);
+```
+
+### Using vars Property
+
+The `vars` property from Vanilla Extract is also supported.
+
+```ts
+css({
+  vars: {
+    $myCssVariable: 'blue',
+    '--my-css-variable': 'green'
+  }
+})
+```
+
+## Simple Pseudo Selectors
+
+Inspired by [Panda CSS conditions](https://panda-css.com/), use `_` prefix for pseudo-classes and `__` for pseudo-elements.
+
+### Pseudo-classes (`_` prefix)
+
+```ts
+css({
+  color: 'black',
+  _hover: {
+    color: 'blue'
+  },
+  _focus: {
+    outline: '2px solid blue'
+  },
+  _firstOfType: {
+    fontWeight: 'bold'
+  },
+  _disabled: {
+    opacity: 0.5
+  }
+})
+```
+
+Generates:
+
+```ts
+// Vanilla Extract output
+{
+  color: 'black',
+  selectors: {
+    '&:hover': { color: 'blue' },
+    '&:focus': { outline: '2px solid blue' },
+    '&:first-of-type': { fontWeight: 'bold' },
+    '&:disabled': { opacity: 0.5 }
+  }
+}
+```
+
+### Pseudo-elements (`__` prefix)
+
+```ts
+css({
+  __before: {
+    content: '""',
+    display: 'block'
+  },
+  __after: {
+    content: '""',
+    clear: 'both'
+  },
+  __MozSelection: {
+    background: 'blue'
+  }
+})
+```
+
+Generates:
+
+```ts
+// Vanilla Extract output
+{
+  selectors: {
+    '&::before': { content: '""', display: 'block' },
+    '&::after': { content: '""', clear: 'both' },
+    '&::-moz-selection': { background: 'blue' }
+  }
+}
+```
+
+### CamelCase Conversion
+
+CamelCase pseudo selectors are automatically converted to kebab-case.
+
+```ts
+css({
+  _firstOfType: { },   // → &:first-of-type
+  _lastChild: { },     // → &:last-child
+  __firstLetter: { },  // → &::first-letter
+  __firstLine: { }     // → &::first-line
+})
+```
+
+## Simply Toplevel Selectors
+
+Pseudo selectors and attribute selectors can be used directly at the top level without `&`.
+
+```ts
+css({
+  ':hover:active': {
+    color: 'red'
+  },
+  '[disabled]': {
+    color: 'green'
+  },
+  '[href^="https://"][href$=".org"]': {
+    color: 'blue'
+  }
+})
+```
+
+Generates:
+
+```ts
+// Vanilla Extract output
+{
+  selectors: {
+    '&:hover:active': { color: 'red' },
+    '&[disabled]': { color: 'green' },
+    '&[href^="https://"][href$=".org"]': { color: 'blue' }
+  }
+}
+```
+
+## Complex Selectors
+
+For more complex selectors, use the `&` placeholder directly at the top level.
+
+```ts
+css({
+  '&:hover:not(:active)': {
+    border: '2px solid aquamarine'
+  },
+  'nav li > &': {
+    textDecoration: 'underline'
+  },
+  '&[data-active="true"]': {
+    backgroundColor: 'blue'
+  }
+})
+```
+
+### Backward Compatibility
+
+The `selectors` property from Vanilla Extract is still supported.
+
+```ts
+css({
+  selectors: {
+    '&:hover:not(:active)': {
+      border: '2px solid aquamarine'
+    },
+    'a:nth-of-type(2) &': {
+      opacity: 1
+    }
+  }
+})
+```
+
+## Nested Selectors
+
+Selectors can be deeply nested. The `&` placeholder is properly resolved at each level.
+
+```ts
+css({
+  'nav li > &': {
+    color: 'red',
+    _hover: {
+      color: 'green'
+    },
+    '&:hover:not(:active)': {
+      color: 'blue'
+    },
+    ':root[dir=rtl] &': {
+      color: 'black'
+    }
+  }
+})
+```
+
+Generates:
+
+```ts
+// Vanilla Extract output
+{
+  selectors: {
+    'nav li > &': { color: 'red' },
+    'nav li > &:hover': { color: 'green' },
+    'nav li > &:hover:not(:active)': { color: 'blue' },
+    ':root[dir=rtl] nav li > &': { color: 'black' }
+  }
+}
+```
+
+### Deep Nesting
+
+```ts
+css({
+  _hover: {
+    _active: {
+      color: 'red',
+      '& li': {
+        color: 'green'
+      },
+      'li > &': {
+        color: 'blue'
+      }
+    }
+  }
+})
+```
+
+Generates:
+
+```ts
+// Vanilla Extract output
+{
+  selectors: {
+    '&:hover:active': { color: 'red' },
+    '&:hover:active li': { color: 'green' },
+    'li > &:hover:active': { color: 'blue' }
+  }
+}
+```
+
+### With Comma-separated Selectors
+
+```ts
+css({
+  'nav li > &, .myClass li > &': {
+    color: 'red',
+    _hover: {
+      color: 'green'
+    }
+  }
+})
+```
+
+Generates:
+
+```ts
+// Vanilla Extract output
+{
+  selectors: {
+    'nav li > &, .myClass li > &': { color: 'red' },
+    'nav li > &:hover, .myClass li > &:hover': { color: 'green' }
+  }
+}
+```
+
+## Property Reference
+
+Inspired by [Stylus property lookup](https://stylus-lang.com/docs/variables.html#property-lookup), use `@` to reference other property values within the same rule.
+
+```ts
+css({
+  width: '50px',
+  height: '@width',
+  margin: 'calc(@width / 2)',
+  paddingInline: 'calc(@width + @height)',
+  paddingBlock: '@margin'
+})
+```
+
+Generates:
+
+```ts
+// Vanilla Extract output
+{
+  width: '50px',
+  height: '50px',
+  margin: 'calc(50px / 2)',
+  paddingInline: 'calc(50px + 50px)',
+  paddingBlock: 'calc(50px / 2)'
+}
+```
+
+### With Merge Values
+
+```ts
+css({
+  padding: '10px',
+  background: 'black',
+  boxShadow$: ['inset 0 0 @padding #555', '0 0 20px @background']
+})
+```
+
+Generates:
+
+```ts
+// Vanilla Extract output
+{
+  padding: '10px',
+  background: 'black',
+  boxShadow: 'inset 0 0 10px #555, 0 0 20px black'
+}
+```
+
+### In Nested Context
+
+Property references work within nested selectors, referencing values from the current scope.
+
+```ts
+css({
+  padding: '10px',
+  _hover: {
+    margin: '@padding',
+    padding: '20px'
+  }
+})
+```
+
+Generates:
+
+```ts
+// Vanilla Extract output
+{
+  padding: '10px',
+  selectors: {
+    '&:hover': {
+      margin: '20px',  // References the overridden padding
+      padding: '20px'
+    }
+  }
+}
+```
+
+## Nested Properties
+
+Group related CSS properties using uppercase keys.
+
+```ts
+css({
+  padding: {
+    BlockEnd: 3,
+    Right: '20px'
+  },
+  background: {
+    Color: 'red',
+    Image: 'none'
+  }
+})
+```
+
+Generates:
+
+```ts
+// Vanilla Extract output
+{
+  paddingBlockEnd: 3,
+  paddingRight: '20px',
+  backgroundColor: 'red',
+  backgroundImage: 'none'
+}
+```
+
+### With Fallback Styles
+
+```ts
+css({
+  background: {
+    Color: [
+      '#b32323',
+      'color(display-p3 .643308 .192455 .167712)',
+      'lab(40% 56.6 39)'
+    ]
+  }
+})
+```
+
+### Property Reference in Nested Properties
+
+```ts
+css({
+  '@media': {
+    'screen and (min-width: 768px)': {
+      margin: 10,
+      _hover: {
+        padding: {
+          BlockEnd: 3,
+          Right: '20px',
+          Left: '@margin',
+          InlineStart: ['@Left', '@Right']
+        }
+      }
+    }
+  }
+})
+```
+
+## Property Conditions
+
+Use the `base` keyword to set a default value, with conditions for different states.
+
+```ts
+css({
+  background: {
+    base: 'red',
+    _hover: 'green',
+    '[disabled]': 'blue',
+    'nav li > &': 'black',
+    '@media (prefers-color-scheme: dark)': 'white',
+    '@media': {
+      'screen and (min-width: 768px)': 'grey'
+    }
+  }
+})
+```
+
+Generates:
+
+```ts
+// Vanilla Extract output
+{
+  background: 'red',
+  selectors: {
+    '&:hover': { background: 'green' },
+    '&[disabled]': { background: 'blue' },
+    'nav li > &': { background: 'black' }
+  },
+  '@media': {
+    '(prefers-color-scheme: dark)': { background: 'white' },
+    'screen and (min-width: 768px)': { background: 'grey' }
+  }
+}
+```
+
+### With Nested Properties
+
+```ts
+css({
+  background: {
+    Color: {
+      base: 'transparent',
+      _hover: 'Highlight',
+      _active: '@_hover',  // Reference another condition
+      '@media (prefers-reduced-motion)': 'MenuText'
+    }
+  }
+})
+```
+
+### Complex Example
+
+```ts
+css({
+  background: {
+    _hover: {
+      base: [
+        '#706a43',
+        'color-mix(in hsl, hsl(120deg 10% 20%) 25%, hsl(30deg 30% 40%))'
+      ],
+      Color: [
+        '#b32323',
+        'color(display-p3 .643308 .192455 .167712)'
+      ]
+    },
+    'nav > &': {
+      Color: {
+        base: ['#6a805d', 'color(a98-rgb .44091 .49971 .37408)'],
+        __after: ['#00c4ff', 'hwb(194 0% 0%)']
+      }
+    }
+  }
+})
+```
+
+## At-Rules
+
+### Top-level At-Rules
+
+Write at-rules directly at the top level.
+
+```ts
+css({
+  '@media print': {
+    padding: 5
+  },
+  '@supports (display: grid)': {
+    display: 'grid'
+  }
+})
+```
+
+### Nested At-Rules
+
+Group multiple conditions under the same at-rule.
+
+```ts
+css({
+  '@media': {
+    'screen and (min-width: 768px)': {
+      padding: 10
+    },
+    '(prefers-reduced-motion)': {
+      transitionProperty: 'color'
+    }
+  }
+})
+```
+
+### Deep Nesting
+
+At-rules can be nested within each other. Conditions are merged with `and`.
+
+```ts
+css({
+  '@media (prefers-color-scheme: dark)': {
+    color: 'red',
+    '@media (min-width: 768px)': {
+      color: 'green',
+      '@media': {
+        print: 'blue'
+      }
+    }
+  }
+})
+```
+
+Generates:
+
+```ts
+// Vanilla Extract output
+{
+  '@media': {
+    '(prefers-color-scheme: dark)': { color: 'red' },
+    '(prefers-color-scheme: dark) and (min-width: 768px)': { color: 'green' },
+    '(prefers-color-scheme: dark) and (min-width: 768px) and print': { color: 'blue' }
+  }
+}
+```
+
+### Layer Nesting
+
+`@layer` conditions are merged with `.` instead of `and`.
+
+```ts
+css({
+  '@layer framework': {
+    '@layer': {
+      layout: {
+        color: 'black'
+      },
+      utilities: {
+        color: 'white'
+      }
+    }
+  }
+})
+```
+
+Generates:
+
+```ts
+// Vanilla Extract output
+{
+  '@layer': {
+    'framework.layout': { color: 'black' },
+    'framework.utilities': { color: 'white' }
+  }
+}
+```
+
+## Nested Selectors with At-Rules
+
+Selectors and at-rules can be combined in any order.
+
+```ts
+css({
+  '@media (prefers-color-scheme: dark)': {
+    'nav li > &': {
+      _hover: {
+        background: 'red'
+      }
+    }
+  }
+})
+```
+
+Generates:
+
+```ts
+// Vanilla Extract output
+{
+  '@media': {
+    '(prefers-color-scheme: dark)': {
+      selectors: {
+        'nav li > &:hover': { background: 'red' }
+      }
+    }
+  }
+}
+```
+
+### Selectors First, Then At-Rules
+
+```ts
+css({
+  'nav li > &': {
+    background: 'red',
+    '@media (prefers-color-scheme: dark)': {
+      background: 'blue',
+      _hover: {
+        background: 'white'
+      }
+    }
+  }
+})
+```
+
+Generates:
+
+```ts
+// Vanilla Extract output
+{
+  selectors: {
+    'nav li > &': { background: 'red' }
+  },
+  '@media': {
+    '(prefers-color-scheme: dark)': {
+      selectors: {
+        'nav li > &': { background: 'blue' },
+        'nav li > &:hover': { background: 'white' }
+      }
+    }
+  }
+}
+```
+
+### Multiple At-Rules with Selectors
+
+```ts
+css({
+  '@media (prefers-color-scheme: dark)': {
+    '@media (min-width: 768px)': {
+      '@supports (display: grid)': {
+        color: 'black'
+      }
+    }
+  }
+})
+```
+
+Generates:
+
+```ts
+// Vanilla Extract output
+{
+  '@supports': {
+    '(display: grid)': {
+      '@media': {
+        '(prefers-color-scheme: dark) and (min-width: 768px)': {
+          color: 'black'
+        }
+      }
+    }
+  }
+}
+```
+
+## Anonymous At-Rules
+
+### Inline Keyframes
+
+Define keyframes inline within `animationName`.
+
+```ts
+css({
+  animationName: {
+    from: { opacity: 0 },
+    '50%': { opacity: 0.3 },
+    to: { opacity: 1 }
+  },
+  animationDuration: '1s'
+})
+```
+
+### Inline Font Face
+
+Define font faces inline within `fontFamily`.
+
+```ts
+css({
+  fontFamily: {
+    fontWeight: 900,
+    src$: [
+      "local('Pretendard Regular')",
+      "url(./fonts/Pretendard-Regular.woff2) format('woff2')",
+      "url(./fonts/Pretendard-Regular.woff) format('woff')"
+    ]
+  }
+})
+```
+
+### Multiple Font Faces
+
+```ts
+css({
+  fontFamily$: [
+    {
+      fontFamily: 'CustomFont',
+      fontWeight: 400,
+      src: "url('/fonts/custom-regular.woff2')"
+    },
+    {
+      fontFamily: 'CustomFont',
+      fontWeight: 700,
+      src: "url('/fonts/custom-bold.woff2')"
+    }
+  ]
+})
+```
+
+## CSS Composition
+
+Combine multiple styles using arrays.
+
+```ts
+const base = css({ padding: 12 })
+
+const primary = css([
+  base,
+  { background: 'blue', color: 'white' }
+])
+
+const secondary = css([
+  base,
+  { background: 'gray', color: 'black' }
+])
+```
+
+### With Functions
+
+```ts
+css([
+  'existingClassName',
+  () => 'dynamicClassName',
+  (size = 10) => ({ padding: size, margin: size })
+])
+```
+
+## Global Styles
+
+Use `globalCss()` for global styles.
+
+```ts
+import { globalCss } from '@mincho-js/css'
+
+globalCss({
+  '*': {
+    boxSizing: 'border-box',
+    margin: 0,
+    padding: 0
+  },
+  body: {
+    fontFamily: 'system-ui, sans-serif',
+    lineHeight: 1.5
+  },
+  'a': {
+    color: '$primaryColor',
+    _hover: {
+      textDecoration: 'underline'
+    }
+  }
+})
+```
+
+## Variant Reference
+
+For advanced use with the `rules()` function, you can use `%` to reference variants.
+
+```ts
+css({
+  '&:hover:not(:active) %someVariant': {
+    border: '2px solid red'
+  }
+})
+```
+
+This is primarily used internally by the `rules()` function. See [Rules](/docs/rules) for more details.
+
+## Backward Compatibility
+
+Mincho.js maintains full backward compatibility with Vanilla Extract syntax.
+
+```ts
+css({
+  // Vanilla Extract style vars
+  vars: {
+    '--custom-color': 'blue'
+  },
+
+  // Both syntaxes work
+  color: 'var(--custom-color)',
+  backgroundColor: '$customColor',
+
+  // Both selector syntaxes work
+  ':hover': { color: 'red' },
+  _hover: { color: 'red' },
+
+  // selectors property still works
+  selectors: {
+    '&:hover:not(:active)': { }
+  }
+})
+```
+
+## Next Steps
+
+- Learn about [Rules](/docs/rules) for component variants
+- Explore [Theme](/docs/theme) for design tokens
