@@ -14,7 +14,7 @@ export default async function RootLayout({ children }) {
   return (
     <html lang="en" suppressHydrationWarning>
       <Head />
-      <body>
+      <body suppressHydrationWarning>
         <Layout
           navbar={
             <Navbar
