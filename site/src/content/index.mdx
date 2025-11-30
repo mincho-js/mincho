@@ -1,0 +1,26 @@
+# Introduction
+
+Welcome to **Mincho.js** documentation.
+
+Mincho.js is a CSS-in-JS framework providing "Natural CSS in TypeScript". Built on Vanilla Extract, it aims to integrate visual hierarchy (like Tailwind) and semantic hierarchy (like Stitches) into a 5-layer design system.
+
+## Features
+
+- **Type-safe CSS** - Full TypeScript support with autocompletion
+- **Zero runtime** - All styles are extracted at build time
+- **Intuitive syntax** - Natural CSS writing experience
+
+## Quick Example
+
+```tsx
+import { css } from '@mincho-js/css'
+
+const button = css({
+  padding: 16,
+  backgroundColor: 'blue',
+  color: 'white',
+  _hover: {
+    backgroundColor: 'darkblue'
+  }
+})
+```

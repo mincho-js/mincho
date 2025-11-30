@@ -1,0 +1,52 @@
+# Getting Started
+
+## Installation
+
+```bash
+npm install @mincho-js/css
+```
+
+## Setup
+
+Mincho.js requires a build tool plugin. Choose one based on your setup:
+
+### Vite
+
+```bash
+npm install @mincho-js/vite
+```
+
+```ts
+// vite.config.ts
+import { defineConfig } from 'vite'
+import { mincho } from '@mincho-js/vite'
+
+export default defineConfig({
+  plugins: [mincho()]
+})
+```
+
+## Usage
+
+Create a `.css.ts` file:
+
+```ts
+// styles.css.ts
+import { css } from '@mincho-js/css'
+
+export const container = css({
+  maxWidth: 1200,
+  margin: '0 auto',
+  padding: { Inline: 20 }
+})
+```
+
+Import and use in your component:
+
+```tsx
+import { container } from './styles.css'
+
+function App() {
+  return <div className={container}>Hello Mincho!</div>
+}
+```
