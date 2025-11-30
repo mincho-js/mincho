@@ -6,7 +6,8 @@
   "workspaces": [
     "configs/*",
     "packages/*",
-    "examples/*"
+    "examples/*",
+    "site"
   ],
   "scripts": {
     "postinstall": "yarn workspace vite-config-custom build",
