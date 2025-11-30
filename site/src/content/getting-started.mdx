@@ -2,51 +2,136 @@
 
 ## Installation
 
+Install the core package and your bundler integration:
+
 ```bash
-npm install @mincho-js/css
+npm install @mincho-js/css @mincho-js/vite @vanilla-extract/css
 ```
 
-## Setup
+## Bundler Integration
 
-Mincho.js requires a build tool plugin. Choose one based on your setup:
+Mincho.js requires a build tool plugin for static CSS extraction. Configure your bundler:
 
 ### Vite
-
-```bash
-npm install @mincho-js/vite
-```
 
 ```ts
 // vite.config.ts
 import { defineConfig } from 'vite'
-import { mincho } from '@mincho-js/vite'
+import { minchoVitePlugin } from '@mincho-js/vite'
 
 export default defineConfig({
-  plugins: [mincho()]
+  plugins: [minchoVitePlugin()]
 })
 ```
 
-## Usage
+## Create a Style
 
-Create a `.css.ts` file:
+Create a `.css.ts` file and define your styles using the `css()` function:
 
 ```ts
-// styles.css.ts
+// button.css.ts
 import { css } from '@mincho-js/css'
 
-export const container = css({
-  maxWidth: 1200,
-  margin: '0 auto',
-  padding: { Inline: 20 }
+export const button = css({
+  padding: 16,
+  backgroundColor: 'blue',
+  color: 'white',
+  borderRadius: 8,
+  border: 'none',
+  cursor: 'pointer'
 })
 ```
 
-Import and use in your component:
+The `css()` function returns a scoped class name that you can apply to any element.
 
-```tsx
-import { container } from './styles.css'
-
-function App() {
-  return <div className={container}>Hello Mincho!</div>
+```css
+/* Generated CSS */
+.button_button__abc123 {
+  padding: 16px;
+  background-color: blue;
+  color: white;
+  border-radius: 8px;
+  border: none;
+  cursor: pointer;
 }
 ```
+
+## Apply the Style
+
+Import and use the generated class name in your component:
+
+```tsx
+// Button.tsx
+import { button } from './button.css'
+
+export function Button() {
+  return <button className={button}>Click me</button>
+}
+```
+
+## Key Features
+
+Mincho.js provides several syntax enhancements over vanilla CSS-in-JS:
+
+### Unitless Properties
+
+Numbers are automatically converted to `px` (except unitless CSS properties):
+
+```ts
+css({
+  padding: 16,        // → 16px
+  marginTop: 24,      // → 24px
+  opacity: 0.5,       // → 0.5 (unitless)
+  flexGrow: 1         // → 1 (unitless)
+})
+```
+
+### Pseudo Selectors
+
+Use `_` prefix for pseudo-classes and `__` for pseudo-elements:
+
+```ts
+css({
+  color: 'black',
+  _hover: {
+    color: 'blue'
+  },
+  _firstOfType: {
+    fontWeight: 'bold'
+  },
+  __before: {
+    content: '""'
+  }
+})
+```
+
+### CSS Variables
+
+Define and reference CSS variables with `$` prefix:
+
+```ts
+css({
+  $primaryColor: 'blue',
+  color: '$primaryColor',
+  backgroundColor: '$secondaryColor(white)' // with fallback
+})
+```
+
+### Nested Properties
+
+Group related properties using uppercase keys:
+
+```ts
+css({
+  padding: {
+    Block: 16,
+    Inline: 24
+  }
+  // → padding-block: 16px; padding-inline: 24px;
+})
+```
+
+## Next Steps
+
+- Learn about [Rules](/docs/rules) for component variants and dynamic styling
+- Explore [Theme](/docs/theme) for design tokens
