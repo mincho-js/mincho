@@ -41,17 +41,13 @@ export type ClassNames = string | Array<ClassNames>;
 // == CSS Properties ==========================================================
 // -- Main --------------------------------------------------------------------
 export interface CSSPropertiesWithConditions
-  extends CSSPropertiesWithVars,
-    WithConditions<CSSPropertiesWithVars> {}
+  extends CSSPropertiesWithVars, WithConditions<CSSPropertiesWithVars> {}
 
 export interface CSSPropertiesWithVars
-  extends CSSComplexProperties,
-    VarProperty,
-    TopLevelVar {}
+  extends CSSComplexProperties, VarProperty, TopLevelVar {}
 
 export interface CSSComplexProperties
-  extends CSSProperties,
-    CSSMergeProperties {}
+  extends CSSProperties, CSSMergeProperties {}
 
 // -- Properties --------------------------------------------------------------
 export type CSSProperties = {
@@ -94,10 +90,12 @@ type NestedProperty<Property extends KeyofNestedPropertiesMap> = {
   >;
 };
 
-export interface PropertyBasedCondition<PropertyValue>
-  extends CSSPropertyConditions<NestedPropertyValue<PropertyValue>> {}
-interface CSSPropertyConditions<PropertyValue>
-  extends CSSConditions<PropertyValue> {
+export interface PropertyBasedCondition<
+  PropertyValue
+> extends CSSPropertyConditions<NestedPropertyValue<PropertyValue>> {}
+interface CSSPropertyConditions<
+  PropertyValue
+> extends CSSConditions<PropertyValue> {
   base?: PropertyValue;
 }
 
@@ -145,18 +143,19 @@ type CommaMergeProperties = {
   >;
 };
 export interface CSSMergeProperties
-  extends SpaceMergeProperties,
-    CommaMergeProperties {}
+  extends SpaceMergeProperties, CommaMergeProperties {}
 
 // == CSS Conditions ==========================================================
 // -- Main --------------------------------------------------------------------
 export type WithConditions<StyleType> = StyleType & NestedConditions<StyleType>;
 
-interface NestedConditions<StyleType>
-  extends CSSConditions<StyleType & NestedConditions<StyleType>> {}
+interface NestedConditions<StyleType> extends CSSConditions<
+  StyleType & NestedConditions<StyleType>
+> {}
 
 interface CSSConditions<StyleType>
-  extends AtRules<StyleType>,
+  extends
+    AtRules<StyleType>,
     SelectorProperty<StyleType>,
     ToplevelSelectors<StyleType> {}
 
@@ -171,7 +170,8 @@ interface SelectorProperty<StyleType> {
 }
 
 export interface ToplevelSelectors<StyleType>
-  extends ComplexSelectors<StyleType>,
+  extends
+    ComplexSelectors<StyleType>,
     SimplyNestedSelectors<StyleType>,
     PseudoSelectorMap<StyleType> {}
 interface ComplexSelectors<StyleType> {
@@ -192,8 +192,7 @@ type PseudoSelectorMap<StyleType> = {
 // -- At Rules ----------------------------------------------------------------
 export type AtRulesKeywords = "media" | "supports" | "container" | "layer";
 interface AtRules<StyleType>
-  extends NestedAtRules<StyleType>,
-    TopLevelAtRules<StyleType> {}
+  extends NestedAtRules<StyleType>, TopLevelAtRules<StyleType> {}
 
 type NestedAtRules<StyleType> = {
   [key in AtRulesKeywords as `@${key}`]?: {
@@ -207,8 +206,7 @@ type TopLevelAtRules<StyleType> = {
 
 // == Anonymous At-Rules ======================================================
 interface WithAnonymousCSSProperties
-  extends Omit<ResolvedProperties, AnonymousPropertyKey>,
-    AnonymousProperty {}
+  extends Omit<ResolvedProperties, AnonymousPropertyKey>, AnonymousProperty {}
 export interface AnonymousProperty {
   /**
    * The **`animation-name`** CSS property specifies the names of one or more `@keyframes` at-rules that describe the animation to apply to an element. Multiple `@keyframe` at-rules are specified as a comma-separated list of names. If the specified name does not match any `@keyframe` at-rule, no properties are animated.
@@ -245,8 +243,9 @@ export interface AnonymousProperty {
 }
 export type AnonymousPropertyKey = keyof AnonymousProperty;
 
-export interface ResolvedProperties
-  extends Properties<number | NonNullableString> {}
+export interface ResolvedProperties extends Properties<
+  number | NonNullableString
+> {}
 
 type CSSKeyframeFromTo =
   | "from"

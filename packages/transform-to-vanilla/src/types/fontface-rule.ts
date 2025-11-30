@@ -3,8 +3,7 @@ import type { Arr } from "./utils.js";
 
 export type FontFaceRule = Omit<GlobalFontFaceRule, "fontFamily">;
 export interface GlobalFontFaceRule
-  extends Fallback<FontFaceBaseRule>,
-    FontFaceMergeRule {}
+  extends Fallback<FontFaceBaseRule>, FontFaceMergeRule {}
 
 type RequiredFontFaceRule = Required<FontFaceBaseRule>;
 interface FontFaceBaseRule {

@@ -120,9 +120,8 @@ type TaggedStyled = {
   [Tag in SupportedElements]: <
     RulesVariants extends VariantGroups | undefined = undefined,
     RulesToggleVariants extends VariantDefinitions | undefined = undefined,
-    RulesProps extends
-      | ComplexPropDefinitions<PropTarget>
-      | undefined = undefined
+    RulesProps extends ComplexPropDefinitions<PropTarget> | undefined =
+      undefined
   >(
     options: PatternOptions<RulesVariants, RulesToggleVariants, RulesProps>
   ) => StyledComponent<

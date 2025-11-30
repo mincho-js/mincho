@@ -42,11 +42,15 @@ interface TokenDefinitionBase<TokenType, TokenValue> {
   $value: TokenValue;
   $description?: string;
 }
-export interface TokenOtherDefinition
-  extends TokenDefinitionBase<NonNullableString, TokenValue> {}
+export interface TokenOtherDefinition extends TokenDefinitionBase<
+  NonNullableString,
+  TokenValue
+> {}
 
-export interface TokenColorDefinition
-  extends TokenDefinitionBase<"color", string | TokenColorValue> {}
+export interface TokenColorDefinition extends TokenDefinitionBase<
+  "color",
+  string | TokenColorValue
+> {}
 export interface TokenColorValue {
   /**
    * A string that specifies the color space or color model
@@ -67,8 +71,10 @@ export interface TokenColorValue {
 }
 type ColorComponentValue = number | "none";
 
-export interface TokenDimensionDefinition
-  extends TokenDefinitionBase<"dimension", TokenDimensionValue> {}
+export interface TokenDimensionDefinition extends TokenDefinitionBase<
+  "dimension",
+  TokenDimensionValue
+> {}
 export interface TokenDimensionValue {
   /**
    * An integer or floating-point value representing the numeric value.
@@ -80,12 +86,16 @@ export interface TokenDimensionValue {
   unit: string;
 }
 
-export interface TokenFontFamilyDefinition
-  extends TokenDefinitionBase<"fontFamily", TokenFontFamilyValue> {}
+export interface TokenFontFamilyDefinition extends TokenDefinitionBase<
+  "fontFamily",
+  TokenFontFamilyValue
+> {}
 export type TokenFontFamilyValue = string | string[];
 
-export interface TokenFontWeightDefinition
-  extends TokenDefinitionBase<"fontWeight", TokenFontWeightValue> {}
+export interface TokenFontWeightDefinition extends TokenDefinitionBase<
+  "fontWeight",
+  TokenFontWeightValue
+> {}
 export type TokenFontWeightValue =
   | number
   // 100
@@ -117,8 +127,10 @@ export type TokenFontWeightValue =
   | "extra-black"
   | "ultra-black";
 
-export interface TokenDurationDefinition
-  extends TokenDefinitionBase<"duration", TokenDurationValue> {}
+export interface TokenDurationDefinition extends TokenDefinitionBase<
+  "duration",
+  TokenDurationValue
+> {}
 export interface TokenDurationValue {
   /**
    * An integer or floating-point value representing the numeric value.
@@ -130,12 +142,16 @@ export interface TokenDurationValue {
   unit: string;
 }
 
-export interface TokenCubicBezierDefinition
-  extends TokenDefinitionBase<"cubicBezier", TokenCubicBezierValue> {}
+export interface TokenCubicBezierDefinition extends TokenDefinitionBase<
+  "cubicBezier",
+  TokenCubicBezierValue
+> {}
 type TokenCubicBezierValue = [number, number, number, number];
 
-export interface TokenNumberDefinition
-  extends TokenDefinitionBase<"number", number> {}
+export interface TokenNumberDefinition extends TokenDefinitionBase<
+  "number",
+  number
+> {}
 
 export type TokenValue = TokenLeafValue | TokenCompositeValue;
 export interface TokenCompositeValue {
