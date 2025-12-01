@@ -30,7 +30,6 @@ export function eslintConfig(userConfigs = []) {
     {
       languageOptions: {
         parserOptions: {
-          project: ["tsconfig.json"],
           tsconfigRootDir: cwd(),
           projectService: true,
 

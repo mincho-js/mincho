@@ -9,6 +9,9 @@ import reactRefreshPlugin from "eslint-plugin-react-refresh";
 import reactHooksPlugin from "eslint-plugin-react-hooks";
 
 const PACKAGE_ROOT = resolve(cwd());
+const reactHooksPluginCompat = /** @type {import("eslint").ESLint.Plugin} */ (
+  reactHooksPlugin
+);
 
 export default defineConfig(
   eslint.configs.recommended,
@@ -37,7 +40,7 @@ export default defineConfig(
     },
     plugins: {
       "react-refresh": reactRefreshPlugin,
-      "react-hooks": reactHooksPlugin,
+      "react-hooks": reactHooksPluginCompat,
     },
     rules: {
       ...reactHooksPlugin.configs.recommended.rules,
@@ -45,7 +48,7 @@ export default defineConfig(
         "warn",
         { allowConstantExport: true },
       ],
-    }
+    },
   },
   {
     files: ["*.js", "*.cjs", "*.mjs"],

@@ -1,4 +1,5 @@
 import { resolve, join } from "node:path";
+import { existsSync } from "node:fs";
 import { cwd, env } from "node:process";
 
 import { initConfigBuilder, ViteEnv, PluginBuilder } from "vite-config-builder";
@@ -161,7 +162,12 @@ function initCommonBuilder(viteConfigEnv: ConfigEnv) {
     });
   }
 
-  const plugins = new PluginBuilder([tsconfigPaths()]);
+  const tsconfigPath = resolve(cwd(), "tsconfig.lib.json");
+  const plugins = new PluginBuilder([
+    tsconfigPaths({
+      projects: existsSync(tsconfigPath) ? [tsconfigPath] : undefined
+    })
+  ]);
 
   return {
     configs,
