@@ -1,6 +1,15 @@
 import { describe, it, expect } from "vitest";
 import { minchoTransform } from "../mincho-transform.js";
 
+function assertHasSources(
+  map: unknown
+): asserts map is { sources: unknown[] | readonly unknown[] } {
+  expect(map).toBeDefined();
+  expect(typeof map).toBe("object");
+  expect(map).not.toBeNull();
+  expect("sources" in (map as Record<string, unknown>)).toBe(true);
+}
+
 describe("minchoTransform", () => {
   it("should transform styled() calls", () => {
     const code = `
@@ -76,7 +85,7 @@ describe("minchoTransform", () => {
       import { style } from "@mincho-js/css";
       const red = style({ color: "red" });
     `;
-    
+
     const code2 = `
       import { style } from "@mincho-js/css";
       const blue = style({ color: "blue" });
@@ -95,8 +104,13 @@ describe("minchoTransform", () => {
     });
 
     // Different code should generate different CSS file hashes
-    if (result1.cssExtractions.length > 0 && result2.cssExtractions.length > 0) {
-      expect(result1.cssExtractions[0].id).not.toBe(result2.cssExtractions[0].id);
+    if (
+      result1.cssExtractions.length > 0 &&
+      result2.cssExtractions.length > 0
+    ) {
+      expect(result1.cssExtractions[0].id).not.toBe(
+        result2.cssExtractions[0].id
+      );
     }
   });
 
@@ -125,8 +139,7 @@ describe("minchoTransform", () => {
       extractCSS: false
     });
 
-    expect(result.map).toBeDefined();
+    assertHasSources(result.map);
     expect(result.map.sources).toBeDefined();
   });
 });
-

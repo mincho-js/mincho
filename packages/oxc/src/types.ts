@@ -20,7 +20,7 @@ export interface MinchoOxcBaseOptions {
  */
 export interface MinchoTransformResult {
   code: string;
-  map: any;
+  map: unknown;
   cssExtractions: Array<{
     id: string;
     content: string;
@@ -42,10 +42,10 @@ export interface MinchoTransformOptions {
  * Visitor callbacks for AST traversal
  */
 export interface MinchoVisitors {
-  onStyledCall?: (node: any, start: number, end: number) => void;
-  onStyleCall?: (node: any, start: number, end: number) => void;
-  onCSSCall?: (node: any, start: number, end: number) => void;
-  onGlobalStyleCall?: (node: any, start: number, end: number) => void;
+  onStyledCall?: (node: unknown, start: number, end: number) => void;
+  onStyleCall?: (node: unknown, start: number, end: number) => void;
+  onCSSCall?: (node: unknown, start: number, end: number) => void;
+  onGlobalStyleCall?: (node: unknown, start: number, end: number) => void;
 }
 
 /**
@@ -56,7 +56,3 @@ export interface CSSExtraction {
   content: string;
   dependencies: string[];
 }
-
-
-
-

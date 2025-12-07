@@ -30,7 +30,7 @@ export function minchoTransform(
   try {
     // Parse to validate syntax
     void parseSync(filename, code, {
-      sourceType: "module",
+      sourceType: "module"
     });
 
     // Check if there's a styled import
@@ -44,7 +44,7 @@ export function minchoTransform(
         code,
         map: null,
         cssExtractions,
-        dependencies,
+        dependencies
       };
     }
 
@@ -54,18 +54,18 @@ export function minchoTransform(
     let importMatch;
     while ((importMatch = styledImportRegex.exec(code)) !== null) {
       s.remove(importMatch.index, importMatch.index + importMatch[0].length);
-      }
+    }
 
     // Find all styled() calls
     const styledMatches = findFunctionCalls(code, "styled");
 
     for (const { start, end } of styledMatches) {
       const original = code.slice(start, end);
-        const argsStart = original.indexOf("(") + 1;
+      const argsStart = original.indexOf("(") + 1;
       const firstComma = findFirstCommaOutsideParens(original, argsStart);
 
-        if (firstComma !== -1) {
-          const tagPart = original.slice(argsStart, firstComma).trim();
+      if (firstComma !== -1) {
+        const tagPart = original.slice(argsStart, firstComma).trim();
         const restPart = original.slice(firstComma + 1);
         const stylesEnd = findMatchingBrace(restPart, 0);
 
@@ -97,7 +97,7 @@ export const ${rulesVarName} = rules(${stylesPart});
             cssExtractions.push({
               id: cssFileName,
               content: cssFileContent,
-              dependencies: [],
+              dependencies: []
             });
 
             // Transform to import from extracted CSS file
@@ -113,51 +113,49 @@ export const ${rulesVarName} = rules(${stylesPart});
             const transformed = `/* @__PURE__ */ $$styled(${tagPart}, rules(${stylesPart})${
               additionalArgs ? `, ${additionalArgs}` : ""
             })`;
-          s.overwrite(start, end, transformed);
-          imports.add("$$styled");
-          imports.add("rules");
+            s.overwrite(start, end, transformed);
+            imports.add("$$styled");
+            imports.add("rules");
+          }
         }
-      }
       }
     }
 
     // Add necessary imports
-  let importsToAdd = "";
-  if (imports.size > 0) {
-    const importStatements: string[] = [];
+    let importsToAdd = "";
+    if (imports.size > 0) {
+      const importStatements: string[] = [];
 
-    if (imports.has("$$styled")) {
+      if (imports.has("$$styled")) {
         importStatements.push(
           `import { $$styled } from "@mincho-js/react/runtime";`
         );
-    }
+      }
 
       if (extractCSS && cssExtractions.length > 0) {
         // Import extracted rules from CSS files
         for (const { id } of cssExtractions) {
           const hash = id.replace("extracted_", "").replace(".css.ts", "");
           const rulesVarName = `__mincho_rules_${hash}`;
-          importStatements.push(
-            `import { ${rulesVarName} } from "./${id}";`
-          );
+          importStatements.push(`import { ${rulesVarName} } from "./${id}";`);
         }
       } else if (imports.has("rules")) {
         // No extraction: import rules directly
-      importStatements.push(`import { rules } from "@mincho-js/css";`);
+        importStatements.push(`import { rules } from "@mincho-js/css";`);
+      }
+
+      importsToAdd += importStatements.join("\n") + "\n";
     }
 
-    importsToAdd += importStatements.join("\n") + "\n";
-  }
+    if (importsToAdd) {
+      s.prepend(importsToAdd);
+    }
 
-  if (importsToAdd) {
-    s.prepend(importsToAdd);
-  }
-
-  return {
-    code: s.toString(),
+    return {
+      code: s.toString(),
       map: null,
-    cssExtractions,
-      dependencies,
+      cssExtractions,
+      dependencies
     };
   } catch (error) {
     console.error("[mincho-transform] Parse error:", error);
@@ -165,8 +163,8 @@ export const ${rulesVarName} = rules(${stylesPart});
       code,
       map: null,
       cssExtractions: [],
-      dependencies: [],
-  };
+      dependencies: []
+    };
   }
 }
 
@@ -192,7 +190,7 @@ function findFunctionCalls(
   }
 
   return results;
-  }
+}
 
 /**
  * Find matching closing parenthesis, handling strings and nested parens
@@ -211,7 +209,7 @@ function findMatchingClosingParen(code: string, openIndex: number): number {
     // Skip escaped quotes
     if (prevChar === "\\" && (char === '"' || char === "'" || char === "`")) {
       continue;
-  }
+    }
 
     // Handle regular strings
     if ((char === '"' || char === "'") && !inTemplate) {
@@ -222,9 +220,9 @@ function findMatchingClosingParen(code: string, openIndex: number): number {
       } else {
         inString = true;
         stringChar = char;
-    }
+      }
       continue;
-  }
+    }
 
     // Handle template literals
     if (char === "`" && !inString) {
@@ -232,7 +230,7 @@ function findMatchingClosingParen(code: string, openIndex: number): number {
         templateDepth--;
         if (templateDepth === 0) {
           inTemplate = false;
-    }
+        }
       } else {
         inTemplate = true;
         templateDepth = 1;
@@ -248,8 +246,8 @@ function findMatchingClosingParen(code: string, openIndex: number): number {
       depth--;
       if (depth === 0) {
         return i;
+      }
     }
-  }
   }
 
   return -1;
@@ -258,10 +256,7 @@ function findMatchingClosingParen(code: string, openIndex: number): number {
 /**
  * Find first comma outside of parentheses and strings
  */
-function findFirstCommaOutsideParens(
-  code: string,
-  startIndex: number
-): number {
+function findFirstCommaOutsideParens(code: string, startIndex: number): number {
   let depth = 0;
   let inString = false;
   let stringChar = "";
@@ -283,7 +278,7 @@ function findFirstCommaOutsideParens(
     if (inString && char === stringChar) {
       inString = false;
       continue;
-}
+    }
 
     if (inString) continue;
 

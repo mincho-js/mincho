@@ -2,7 +2,9 @@
   "extends": "tsconfig-custom/tsconfig.node.json",
   "compilerOptions": {
     "rootDir": "./codegen",
-    "baseUrl": "./",
+    "paths": {
+      "*": ["./*"]
+    },
     "tsBuildInfoFile": "./.cache/typescript/tsbuildinfo-codegen",
     "outDir": "./.cache/codegen/",
     "types": ["node"]

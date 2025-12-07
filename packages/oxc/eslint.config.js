@@ -1,8 +1,3 @@
-import eslintConfigBase from "eslint-config-custom/eslint.config.base.js";
-import eslintConfigTypescript from "eslint-config-custom/eslint.config.typescript.js";
+import { eslintConfig } from "eslint-config-custom/typescript";
 
-export default [...eslintConfigBase, ...eslintConfigTypescript];
-
-
-
-
+export default eslintConfig();

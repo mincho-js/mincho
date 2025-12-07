@@ -19,7 +19,7 @@ declare module "oxc-transform" {
 
   export interface TransformResult {
     code: string;
-    map?: any;
+    map?: unknown;
   }
 
   export function transform(
@@ -53,8 +53,8 @@ declare module "oxc-parser" {
 
   export interface Program {
     type: "Program";
-    body: any[];
-    [key: string]: any;
+    body: unknown[];
+    [key: string]: unknown;
   }
 
   export function parseSync(
@@ -69,7 +69,3 @@ declare module "oxc-parser" {
     options?: ParseOptions
   ): Promise<ParseResult>;
 }
-
-
-
-

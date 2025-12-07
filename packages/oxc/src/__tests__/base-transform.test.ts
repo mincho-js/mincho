@@ -115,7 +115,3 @@ describe("oxcBaseTransform", () => {
     expect(result.code).toContain("greeting");
   });
 });
-
-
-
-
