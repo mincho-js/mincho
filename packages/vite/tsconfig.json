@@ -11,12 +11,15 @@
       "path": "../integration"
     },
     {
+      "path": "../oxc"
+    },
+    {
       "path": "../transform-to-vanilla"
     },
-    { 
+    {
       "path": "./tsconfig.node.json"
     },
-    { 
+    {
       "path": "./tsconfig.lib.json"
     }
   ]

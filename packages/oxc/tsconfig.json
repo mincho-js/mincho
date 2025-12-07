@@ -8,7 +8,13 @@
   "exclude": ["node_modules", "dist", "**/*.test.ts"],
   "references": [
     {
-      "path": "../css"
+      "path": "../../configs/vite-config-custom"
+    },
+    {
+      "path": "./tsconfig.node.json"
+    },
+    {
+      "path": "./tsconfig.lib.json"
     }
   ]
 }
