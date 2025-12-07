@@ -4,6 +4,8 @@
     "composite": true,
     "declaration": true,
     "tsBuildInfoFile": ".cache/typescript/tsbuildinfo",
-    "types": ["node"]
+    "types": ["node"],
+    "outDir": "./dist/esm",
+    "declarationDir": "./dist/esm"
   }
 }
