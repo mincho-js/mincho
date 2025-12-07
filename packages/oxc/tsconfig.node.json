@@ -1,4 +1,12 @@
 {
   "extends": "tsconfig-custom/tsconfig.node.json",
+  "compilerOptions": {
+    "composite": true,
+    "noEmit": false,
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "tsBuildInfoFile": "./.cache/typescript/tsbuildinfo-node",
+    "outDir": "./.cache/tsbuild-node"
+  },
   "include": ["vite.config.ts"]
 }

@@ -36,11 +36,9 @@ export default defineConfig(
       globals: { ...globals.browser, ...globals.es2020 },
     },
     plugins: {
-      "react-refresh": reactRefreshPlugin,
-      "react-hooks": reactHooksPlugin,
+      "react-refresh": reactRefreshPlugin
     },
     rules: {
-      ...reactHooksPlugin.configs.recommended.rules,
       "react-refresh/only-export-components": [
         "warn",
         { allowConstantExport: true },
