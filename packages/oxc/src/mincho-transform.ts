@@ -26,6 +26,7 @@ export function minchoTransform(
   const dependencies: string[] = [];
   const imports = new Set<string>();
   let hasStyledImport = false;
+  let hasStyleImport = false;
 
   try {
     // Parse to validate syntax
@@ -39,10 +40,20 @@ export function minchoTransform(
         code
       );
 
-    if (!hasStyledImport) {
+    // Check if there's a style import
+    hasStyleImport =
+      /import\s+\{[^}]*\bstyle\b[^}]*\}\s+from\s+["']@mincho-js\/css["']/.test(
+        code
+      );
+
+    if (!hasStyledImport && !(extractCSS && hasStyleImport)) {
       return {
         code,
-        map: null,
+        map: s.generateMap({
+          source: filename,
+          includeContent: true,
+          hires: true
+        }),
         cssExtractions,
         dependencies
       };
@@ -54,6 +65,41 @@ export function minchoTransform(
     let importMatch;
     while ((importMatch = styledImportRegex.exec(code)) !== null) {
       s.remove(importMatch.index, importMatch.index + importMatch[0].length);
+    }
+
+    // When extracting CSS, remove style import (it will be replaced by extracted CSS files)
+    if (extractCSS && hasStyleImport) {
+      const styleImportRegex =
+        /import\s+\{([^}]*)\}\s+from\s+["']@mincho-js\/css["'];?\s*/g;
+      let styleMatch;
+
+      while ((styleMatch = styleImportRegex.exec(code)) !== null) {
+        const fullImport = styleMatch[0];
+        const start = styleMatch.index;
+        const end = start + fullImport.length;
+        const specifiers = styleMatch[1]
+          .split(",")
+          .map((part) => part.trim())
+          .filter(Boolean);
+
+        const remaining = specifiers.filter(
+          (specifier) => !/\bstyle\b/.test(specifier)
+        );
+
+        if (remaining.length === specifiers.length) {
+          // No style specifier found; skip
+          continue;
+        }
+
+        if (remaining.length === 0) {
+          s.remove(start, end);
+        } else {
+          const newImport = `import { ${remaining.join(
+            ", "
+          )} } from "@mincho-js/css";`;
+          s.overwrite(start, end, newImport);
+        }
+      }
     }
 
     // Find all styled() calls
@@ -121,6 +167,47 @@ export const ${rulesVarName} = rules(${stylesPart});
       }
     }
 
+    // Find all style() calls (only when extracting CSS)
+    if (extractCSS && hasStyleImport) {
+      const styleMatches = findFunctionCalls(code, "style");
+
+      for (const { start, end } of styleMatches) {
+        const beforeCall = code.slice(Math.max(0, start - 50), start);
+        if (/\/\*\s*mincho-ignore\s*\*\//.test(beforeCall)) {
+          continue;
+        }
+
+        const original = code.slice(start, end);
+        const argsStart = original.indexOf("(") + 1;
+        const argsEnd = original.lastIndexOf(")");
+        if (argsStart <= 0 || argsEnd <= argsStart) continue;
+
+        const stylesPart = original.slice(argsStart, argsEnd).trim();
+
+        const hash = createHash("sha256")
+          .update(filename + stylesPart + start)
+          .digest("hex")
+          .substring(0, 8);
+
+        const cssFileName = `extracted_${hash}.css.ts`;
+        const styleVarName = `__mincho_style_${hash}`;
+
+        const cssFileContent = `import { style } from "@mincho-js/css";
+
+export const ${styleVarName} = style(${stylesPart});
+`;
+
+        cssExtractions.push({
+          id: cssFileName,
+          content: cssFileContent,
+          dependencies: []
+        });
+
+        s.overwrite(start, end, styleVarName);
+        imports.add(styleVarName);
+      }
+    }
+
     // Add necessary imports
     let importsToAdd = "";
     if (imports.size > 0) {
@@ -137,7 +224,13 @@ export const ${rulesVarName} = rules(${stylesPart});
         for (const { id } of cssExtractions) {
           const hash = id.replace("extracted_", "").replace(".css.ts", "");
           const rulesVarName = `__mincho_rules_${hash}`;
-          importStatements.push(`import { ${rulesVarName} } from "./${id}";`);
+          const styleVarName = `__mincho_style_${hash}`;
+
+          if (imports.has(rulesVarName)) {
+            importStatements.push(`import { ${rulesVarName} } from "./${id}";`);
+          } else if (imports.has(styleVarName)) {
+            importStatements.push(`import { ${styleVarName} } from "./${id}";`);
+          }
         }
       } else if (imports.has("rules")) {
         // No extraction: import rules directly
@@ -153,7 +246,11 @@ export const ${rulesVarName} = rules(${stylesPart});
 
     return {
       code: s.toString(),
-      map: null,
+      map: s.generateMap({
+        source: filename,
+        includeContent: true,
+        hires: true
+      }),
       cssExtractions,
       dependencies
     };
