@@ -11,6 +11,9 @@
       "path": "../../configs/vite-config-custom"
     },
     {
+      "path": "./tsconfig.eslint.json"
+    },
+    {
       "path": "./tsconfig.node.json"
     },
     {
