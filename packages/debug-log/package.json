@@ -20,23 +20,21 @@
     "url": "https://github.com/mincho-js/mincho/issues"
   },
   "homepage": "https://github.com/mincho-js/mincho/tree/main/packages/debug-log#readme",
+  "types": "./dist/esm/index.d.ts",
   "typings": "./dist/esm/index.d.ts",
   "main": "./dist/cjs/index.cjs",
   "module": "./dist/esm/index.mjs",
   "exports": {
     ".": {
-      "import": {
-        "types": "./dist/esm/index.d.ts",
-        "default": "./dist/esm/index.mjs"
-      },
-      "require": {
-        "types": "./dist/cjs/index.d.ts",
-        "default": "./dist/cjs/index.cjs"
-      }
+      "types": "./dist/esm/index.d.ts",
+      "import": "./dist/esm/index.mjs",
+      "require": "./dist/cjs/index.cjs",
+      "default": "./dist/esm/index.mjs"
     },
     "./package.json": "./package.json",
     "./importMeta": {
-      "types": "./importMeta.d.ts"
+      "types": "./importMeta.d.ts",
+      "default": "./importMeta.d.ts"
     }
   },
   "publishConfig": {
