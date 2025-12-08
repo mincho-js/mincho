@@ -3,7 +3,8 @@
   "compilerOptions": {
     "allowJs": true,
     "rootDir": ".",
-    "outDir": "./.cache/eslint"
+    "outDir": "./.cache/tsc-eslint",
+    "tsBuildInfoFile": "./.cache/tsc-eslint/tsconfig.eslint.tsbuildinfo"
   },
   "include": [
     "eslint.config.js",
