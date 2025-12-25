@@ -4,8 +4,10 @@ import type {
   CSSPropertiesWithVars
 } from "@mincho-js/transform-to-vanilla";
 
+type CSSPropertiesKeys = keyof CSSProperties;
+
 type DefineRulesCssProperties = {
-  [Property in keyof CSSProperties]?:
+  [Property in CSSPropertiesKeys]?:
     | ReadonlyArray<CSSProperties[Property]>
     | Record<string, CSSProperties[Property] | CSSPropertiesWithVars>
     | true
@@ -13,26 +15,27 @@ type DefineRulesCssProperties = {
 };
 type DefineRulesCustomProperties = Partial<
   Record<
-    Exclude<NonNullableString, keyof CSSProperties>,
+    Exclude<NonNullableString, CSSPropertiesKeys>,
     Record<string, CSSPropertiesWithVars>
   >
 >;
-type DefineRulesProperties =
+export type DefineRulesProperties =
   | DefineRulesCssProperties
   | DefineRulesCustomProperties;
 
 type ShortcutValue<
   Properties extends DefineRulesProperties,
-  Shortcuts,
+  Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts>,
   ShortcutsKey extends keyof Shortcuts
 > =
   | keyof Properties
   | Exclude<keyof Shortcuts, ShortcutsKey>
-  | ReadonlyArray<keyof Properties | Exclude<keyof Shortcuts, ShortcutsKey>>;
+  | ReadonlyArray<keyof Properties | Exclude<keyof Shortcuts, ShortcutsKey>>
+  | DefineRulesCssInput<Properties, Shortcuts>;
 
-type DefineRulesShortcuts<
+export type DefineRulesShortcuts<
   Properties extends DefineRulesProperties,
-  Shortcuts
+  Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts>
 > = {
   [ShortcutsKey in keyof Shortcuts]: ShortcutValue<
     Properties,
@@ -41,13 +44,97 @@ type DefineRulesShortcuts<
   >;
 };
 
-interface DefineRulesInput<
+export interface DefineRulesCtx<
   Properties extends DefineRulesProperties,
   Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts>
 > {
   properties?: Properties;
   shortcuts?: Shortcuts;
 }
+
+type PropertiesInput<Properties extends DefineRulesProperties> = {
+  [Key in keyof Properties]?: ResolvePropertiesValue<Key, Properties[Key]>;
+};
+
+type ResolvePropertiesValue<Key, Value> =
+  Value extends ReadonlyArray<infer Item>
+    ? Item
+    : true extends Value
+      ? Key extends CSSPropertiesKeys
+        ? CSSProperties[Key]
+        : never
+      : false extends Value
+        ? never
+        : Value extends Record<infer StyleObjectKey, unknown>
+          ? StyleObjectKey
+          : never;
+
+type ShortcutsInput<
+  Properties extends Record<string, unknown>,
+  Shortcuts extends Record<string, unknown>
+> = {
+  [Key in keyof Shortcuts]?: ResolveShortcutValue<
+    Properties,
+    Shortcuts,
+    Shortcuts[Key]
+  >;
+};
+
+type ResolveShortcutValue<
+  Properties extends Record<string, unknown>,
+  Shortcuts extends Record<string, unknown>,
+  Value
+> = Value extends readonly unknown[]
+  ? ResolveShortcutArrayRef<Properties, Shortcuts, Value>
+  : Value extends Record<string, unknown>
+    ? boolean
+    : ResolveShortcutRef<Properties, Shortcuts, Value>;
+
+type ResolveShortcutArrayRef<
+  Properties extends Record<string, unknown>,
+  Shortcuts extends Record<string, unknown>,
+  Targets extends readonly unknown[]
+> = Targets extends readonly [infer H, ...infer R]
+  ? ResolveShortcutRef<Properties, Shortcuts, H> &
+      ResolveShortcutArrayRef<Properties, Shortcuts, R>
+  : unknown;
+
+type ResolveShortcutRef<
+  Properties extends Record<string, unknown>,
+  Shortcuts extends Record<string, unknown>,
+  Ref
+> = [Ref] extends [keyof Properties]
+  ? Properties[Ref]
+  : [Ref] extends [keyof Shortcuts]
+    ? ShortcutsInput<Properties, Shortcuts>[Ref]
+    : never;
+
+export type DefineRulesCssInput<
+  Properties extends DefineRulesProperties,
+  Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts>
+> = PropertiesInput<Properties> &
+  ShortcutsInput<PropertiesInput<Properties>, Shortcuts>;
+
+export type DefineRulesInlineCssInput<
+  Properties extends DefineRulesProperties,
+  Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts>,
+  CssInput = DefineRulesCssInput<Properties, Shortcuts>
+> = keyof {
+  [Key in keyof CssInput as boolean extends CssInput[Key]
+    ? Key
+    : never]: CssInput[Key];
+};
+
+export type DefineRulesComplexCssInput<
+  Properties extends DefineRulesProperties,
+  Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts>
+> =
+  | DefineRulesCssInput<Properties, Shortcuts>
+  | DefineRulesInlineCssInput<Properties, Shortcuts>
+  | Array<
+      | DefineRulesCssInput<Properties, Shortcuts>
+      | DefineRulesInlineCssInput<Properties, Shortcuts>
+    >;
 
 // == Tests ====================================================================
 // Ignore errors when compiling to CommonJS.
@@ -59,16 +146,22 @@ if (import.meta.vitest) {
   const { describe, it, assertType } = import.meta.vitest;
 
   describe.concurrent("DefineRules Type Test", () => {
-    function defineRules<
+    function resolveDefineRules<
       const Properties extends DefineRulesProperties,
       const Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts>
-    >(rules: DefineRulesInput<Properties, Shortcuts>) {
-      return rules;
+    >(rules: DefineRulesCtx<Properties, Shortcuts>) {
+      return {
+        rules,
+        _props: rules as unknown as DefineRulesComplexCssInput<
+          Properties,
+          Shortcuts
+        >
+      };
     }
 
     describe.concurrent("DefineRulesProperties Type", () => {
       it("Array values for CSS properties", () => {
-        const rules = defineRules({
+        const { rules, _props } = resolveDefineRules({
           properties: {
             display: ["none", "inline", "block"],
             paddingLeft: [0, 2, 4, 8, 16, 32, 64]
@@ -80,10 +173,21 @@ if (import.meta.vitest) {
             readonly paddingLeft: readonly [0, 2, 4, 8, 16, 32, 64];
           };
         }>(rules);
+
+        assertType<typeof _props>({
+          display: "inline",
+          paddingLeft: 4
+        });
+        assertType<typeof _props>({
+          // @ts-expect-error: invalid value
+          display: "flex",
+          // @ts-expect-error: invalid value
+          paddingLeft: 5
+        });
       });
 
       it("Object values for CSS properties", () => {
-        const rules = defineRules({
+        const { rules, _props } = resolveDefineRules({
           properties: {
             color: {
               "indigo-800": "rgb(55, 48, 163)",
@@ -99,11 +203,19 @@ if (import.meta.vitest) {
             };
           };
         }>(rules);
+
+        assertType<typeof _props>({
+          color: "indigo-800"
+        });
+        assertType<typeof _props>({
+          // @ts-expect-error: invalid value
+          color: "blue-500"
+        });
       });
 
       it("Object values with CSSPropertiesWithVars", () => {
         const alpha = "--alpha";
-        const rules = defineRules({
+        const { rules, _props } = resolveDefineRules({
           properties: {
             background: {
               red: {
@@ -123,10 +235,18 @@ if (import.meta.vitest) {
             };
           };
         }>(rules);
+
+        assertType<typeof _props>({
+          background: "red"
+        });
+        assertType<typeof _props>({
+          // @ts-expect-error: invalid value
+          background: "blue"
+        });
       });
 
       it("Boolean values for entire properties", () => {
-        const rules = defineRules({
+        const { rules, _props } = resolveDefineRules({
           properties: {
             border: false,
             margin: true
@@ -138,11 +258,19 @@ if (import.meta.vitest) {
             margin: true;
           };
         }>(rules);
+
+        assertType<typeof _props>({
+          margin: "inherit"
+        });
+        // @ts-expect-error: `border` is false, so it should not accept any value.
+        assertType<typeof _props>({
+          border: "1px solid black"
+        });
       });
 
       it("Custom properties with CSSPropertiesWithVars", () => {
         const alpha = "--alpha";
-        const rules = defineRules({
+        const { rules, _props } = resolveDefineRules({
           properties: {
             backgroundOpacity: {
               full: { vars: { [alpha]: "1" } },
@@ -158,12 +286,20 @@ if (import.meta.vitest) {
             };
           };
         }>(rules);
+
+        assertType<typeof _props>({
+          backgroundOpacity: "full"
+        });
+        assertType<typeof _props>({
+          // @ts-expect-error: invalid value
+          backgroundOpacity: "quarter"
+        });
       });
     });
 
     describe.concurrent("DefineRulesShortcuts Type", () => {
       it("Single property shortcut", () => {
-        const rules = defineRules({
+        const { rules, _props } = resolveDefineRules({
           properties: {
             paddingLeft: [0, 4, 8],
             paddingRight: [0, 4, 8]
@@ -183,13 +319,24 @@ if (import.meta.vitest) {
             pr: "paddingRight";
           };
         }>(rules);
+
+        assertType<typeof _props>({
+          pl: 4,
+          pr: 8
+        });
+        assertType<typeof _props>({
+          // @ts-expect-error: invalid value
+          pl: 5,
+          // @ts-expect-error: invalid value
+          pr: 9
+        });
       });
 
       it("Array shortcut referencing properties", () => {
-        const rules = defineRules({
+        const { rules, _props } = resolveDefineRules({
           properties: {
             paddingLeft: [0, 4, 8],
-            paddingRight: [0, 4, 8]
+            paddingRight: [0, 4, 8, 12]
           },
           shortcuts: {
             px: ["paddingLeft", "paddingRight"]
@@ -198,19 +345,31 @@ if (import.meta.vitest) {
         assertType<{
           properties?: {
             paddingLeft: readonly [0, 4, 8];
-            paddingRight: readonly [0, 4, 8];
+            paddingRight: readonly [0, 4, 8, 12];
           };
           shortcuts?: {
             px: readonly ["paddingLeft", "paddingRight"];
           };
         }>(rules);
+
+        assertType<typeof _props>({
+          px: 4
+        });
+        assertType<typeof _props>({
+          // @ts-expect-error: invalid value
+          px: 5
+        });
+        assertType<typeof _props>({
+          // @ts-expect-error: invalid value
+          px: 12
+        });
       });
 
       it("Shortcut referencing other shortcuts", () => {
-        const rules = defineRules({
+        const { rules, _props } = resolveDefineRules({
           properties: {
             paddingLeft: [0, 4, 8],
-            paddingRight: [0, 4, 8]
+            paddingRight: [0, 4, 8, 12]
           },
           shortcuts: {
             pl: "paddingLeft",
@@ -221,7 +380,7 @@ if (import.meta.vitest) {
         assertType<{
           properties?: {
             paddingLeft: readonly [0, 4, 8];
-            paddingRight: readonly [0, 4, 8];
+            paddingRight: readonly [0, 4, 8, 12];
           };
           shortcuts?: {
             pl: "paddingLeft";
@@ -229,10 +388,22 @@ if (import.meta.vitest) {
             px: readonly ["pl", "pr"];
           };
         }>(rules);
+
+        assertType<typeof _props>({
+          px: 4
+        });
+        assertType<typeof _props>({
+          // @ts-expect-error: invalid value
+          px: 5
+        });
+        assertType<typeof _props>({
+          // @ts-expect-error: invalid value
+          px: 12
+        });
       });
 
       it("Mixed shortcuts with properties and other shortcuts", () => {
-        const rules = defineRules({
+        const { rules } = resolveDefineRules({
           properties: {
             paddingTop: [0, 4, 8],
             paddingBottom: [0, 4, 8],
@@ -267,11 +438,35 @@ if (import.meta.vitest) {
           };
         }>(rules);
       });
+
+      it("Fixed object shortcut", () => {
+        const { rules, _props } = resolveDefineRules({
+          properties: {
+            display: ["none", "inline", "block"]
+          },
+          shortcuts: {
+            inline: { display: "inline" }
+          }
+        });
+        assertType<{
+          properties?: {
+            display: readonly ["none", "inline", "block"];
+          };
+          shortcuts?: {
+            inline: { readonly display: "inline" };
+          };
+        }>(rules);
+
+        assertType<typeof _props>({
+          inline: true
+        });
+        assertType<typeof _props>(["inline"]);
+      });
     });
 
     describe.concurrent("Invalid Type Cases", () => {
       it("Invalid shortcut reference should error", () => {
-        defineRules({
+        resolveDefineRules({
           properties: {
             paddingLeft: [0, 4, 8]
           },
@@ -283,7 +478,7 @@ if (import.meta.vitest) {
       });
 
       it("Shortcut cannot reference itself", () => {
-        defineRules({
+        resolveDefineRules({
           properties: {
             paddingLeft: [0, 4, 8]
           },
@@ -295,7 +490,7 @@ if (import.meta.vitest) {
       });
 
       it("Array shortcut with invalid reference should error", () => {
-        defineRules({
+        resolveDefineRules({
           properties: {
             paddingLeft: [0, 4, 8],
             paddingRight: [0, 4, 8]
@@ -311,7 +506,7 @@ if (import.meta.vitest) {
     describe.concurrent("Complex DefineRules", () => {
       it("Full featured defineRules", () => {
         const alpha = "--alpha";
-        const rules = defineRules({
+        const { rules } = resolveDefineRules({
           properties: {
             // Array values
             display: ["none", "inline", "block", "flex", "grid"],
@@ -350,13 +545,19 @@ if (import.meta.vitest) {
             border: false
           },
           shortcuts: {
+            // Single property shortcuts
             pl: "paddingLeft",
             pr: "paddingRight",
             pt: "paddingTop",
             pb: "paddingBottom",
+
+            // Multiple property shortcuts
             px: ["pl", "pr"],
             py: ["pt", "pb"],
-            p: ["px", "py"]
+            p: ["px", "py"],
+
+            // Fixed object shortcut
+            inline: { display: "inline" }
           }
         });
 
@@ -397,6 +598,7 @@ if (import.meta.vitest) {
             px: readonly ["pl", "pr"];
             py: readonly ["pt", "pb"];
             p: readonly ["px", "py"];
+            inline: { readonly display: "inline" };
           };
         }>(rules);
       });
