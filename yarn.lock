@@ -8852,11 +8852,11 @@ __metadata:
   dependencies:
     "@types/node": "npm:^24.10.1"
     "@types/react": "npm:^19.2.7"
-    next: "npm:^15.0.0"
-    nextra: "npm:^4.0.0"
-    nextra-theme-docs: "npm:^4.0.0"
-    react: "npm:^19.0.0"
-    react-dom: "npm:^19.0.0"
+    next: "npm:^15.5.7"
+    nextra: "npm:^4.6.1"
+    nextra-theme-docs: "npm:^4.6.1"
+    react: "npm:^19.2.1"
+    react-dom: "npm:^19.2.1"
     typescript: "npm:^5.9.3"
   languageName: unknown
   linkType: soft
@@ -9151,7 +9151,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"next@npm:^15.0.0":
+"next@npm:^15.5.7":
   version: 15.5.9
   resolution: "next@npm:15.5.9"
   dependencies:
@@ -9210,7 +9210,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"nextra-theme-docs@npm:^4.0.0":
+"nextra-theme-docs@npm:^4.6.1":
   version: 4.6.1
   resolution: "nextra-theme-docs@npm:4.6.1"
   dependencies:
@@ -9230,7 +9230,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"nextra@npm:^4.0.0":
+"nextra@npm:^4.6.1":
   version: 4.6.1
   resolution: "nextra@npm:4.6.1"
   dependencies:
@@ -9945,7 +9945,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"react-dom@npm:^19.0.0, react-dom@npm:^19.2.3":
+"react-dom@npm:^19.2.1, react-dom@npm:^19.2.3":
   version: 19.2.3
   resolution: "react-dom@npm:19.2.3"
   dependencies:
@@ -10006,7 +10006,7 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"react@npm:^19.0.0, react@npm:^19.2.3":
+"react@npm:^19.2.1, react@npm:^19.2.3":
   version: 19.2.3
   resolution: "react@npm:19.2.3"
   checksum: 10/d16b7f35c0d35a56f63d9d1693819762e4abc479c57dd6310298920bed3820fcec7e17a99d44983416d8f5049143ea45b8005d3ab8324bae8973224400502b08
