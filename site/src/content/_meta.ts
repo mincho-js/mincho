@@ -1,5 +1,6 @@
 export default {
   index: "Introduction",
   "getting-started": "Getting Started",
-  literal: "Literal CSS"
+  literal: "Literal CSS",
+  rules: "Rules"
 };
