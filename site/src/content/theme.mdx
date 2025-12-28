@@ -1,0 +1,659 @@
+# Theme
+
+Mincho.js provides a powerful theming system for managing design tokens. The `theme()` and `globalTheme()` functions automatically generate CSS custom properties from your token definitions.
+
+## Overview
+
+The Theme layer enables:
+
+- Centralized design token management
+- Type-safe token references
+- Automatic CSS variable generation
+- Semantic token aliases
+- Multiple theme support
+
+```ts
+import { theme } from '@mincho-js/css'
+
+const [themeClass, vars] = theme({
+  color: {
+    primary: '#007bff',
+    secondary: '#6c757d'
+  },
+  spacing: [4, 8, 16, 24, 32]
+})
+```
+
+## Basic Usage
+
+### theme()
+
+The `theme()` function returns a tuple containing a className and resolved token references.
+
+```ts
+import { theme } from '@mincho-js/css'
+
+const [themeClass, vars] = theme({
+  color: {
+    primary: '#007bff',
+    background: '#ffffff'
+  }
+})
+
+// themeClass: Generated className to apply the theme
+// vars.color.primary: "var(--color-primary)"
+// vars.color.background: "var(--color-background)"
+```
+
+Apply the theme by adding the className to a container element:
+
+```tsx
+<div className={themeClass}>
+  {/* Themed content */}
+</div>
+```
+
+### globalTheme()
+
+Use `globalTheme()` to apply tokens to a specific selector globally.
+
+```ts
+import { globalTheme } from '@mincho-js/css'
+
+const vars = globalTheme(':root', {
+  color: {
+    primary: '#007bff',
+    background: '#ffffff'
+  }
+})
+
+// vars.color.primary: "var(--color-primary)"
+```
+
+This generates:
+
+```css
+:root {
+  --color-primary: #007bff;
+  --color-background: #ffffff;
+}
+```
+
+## Token Types
+
+### Primitive Values
+
+Strings, numbers, and booleans are directly converted to CSS variables.
+
+```ts
+const [, vars] = theme({
+  color: 'red',
+  size: 16,
+  enabled: true
+})
+
+// Generated:
+// --color: red;
+// --size: 16;
+// --enabled: true;
+```
+
+### Arrays
+
+Arrays create indexed CSS variables.
+
+```ts
+const [, vars] = theme({
+  spacing: [4, 8, 16, 24, 32],
+  colors: ['#ff0000', '#00ff00', '#0000ff']
+})
+
+// Generated:
+// --spacing-0: 4;
+// --spacing-1: 8;
+// --spacing-2: 16;
+// --spacing-3: 24;
+// --spacing-4: 32;
+
+// vars.spacing[0]: "var(--spacing-0)"
+// vars.spacing[2]: "var(--spacing-2)"
+```
+
+### Nested Objects
+
+Objects create hierarchically namespaced CSS variables.
+
+```ts
+const [, vars] = theme({
+  color: {
+    base: {
+      red: '#ff0000',
+      green: '#00ff00',
+      blue: '#0000ff'
+    },
+    brand: {
+      primary: '#007bff',
+      secondary: '#6c757d'
+    }
+  }
+})
+
+// Generated:
+// --color-base-red: #ff0000;
+// --color-base-green: #00ff00;
+// --color-base-blue: #0000ff;
+// --color-brand-primary: #007bff;
+// --color-brand-secondary: #6c757d;
+
+// vars.color.base.red: "var(--color-base-red)"
+```
+
+### Unit Values
+
+Objects with `value` and `unit` are formatted as CSS values.
+
+```ts
+const [, vars] = theme({
+  spacing: { value: 1.5, unit: 'rem' },
+  borderWidth: { value: 2, unit: 'px' }
+})
+
+// Generated:
+// --spacing: 1.5rem;
+// --border-width: 2px;
+```
+
+## Token Definitions
+
+For more explicit token typing, use the DTCG (Design Tokens Community Group) format with `$type` and `$value`.
+
+### Color
+
+```ts
+const [, vars] = theme({
+  brandColor: {
+    $type: 'color',
+    $value: '#ff5500',
+    $description: 'Primary brand color'
+  }
+})
+
+// Generated:
+// --brand-color: #ff5500;
+```
+
+### Font Family
+
+```ts
+const [, vars] = theme({
+  fontPrimary: {
+    $type: 'fontFamily',
+    $value: ['Inter', 'system-ui', 'sans-serif']
+  },
+  fontSecondary: {
+    $type: 'fontFamily',
+    $value: 'Georgia, serif'
+  }
+})
+
+// Generated:
+// --font-primary: Inter, system-ui, sans-serif;
+// --font-secondary: Georgia, serif;
+```
+
+### Duration
+
+```ts
+const [, vars] = theme({
+  transitionFast: {
+    $type: 'duration',
+    $value: { value: 200, unit: 'ms' }
+  },
+  transitionSlow: {
+    $type: 'duration',
+    $value: { value: 1, unit: 's' }
+  }
+})
+
+// Generated:
+// --transition-fast: 200ms;
+// --transition-slow: 1s;
+```
+
+### Cubic Bezier
+
+```ts
+const [, vars] = theme({
+  easingDefault: {
+    $type: 'cubicBezier',
+    $value: [0.4, 0, 0.2, 1]
+  },
+  easingBounce: {
+    $type: 'cubicBezier',
+    $value: [0.68, -0.55, 0.265, 1.55]
+  }
+})
+
+// Generated:
+// --easing-default: cubic-bezier(0.4, 0, 0.2, 1);
+// --easing-bounce: cubic-bezier(0.68, -0.55, 0.265, 1.55);
+```
+
+### Font Weight
+
+Font weight keywords are automatically converted to numeric values.
+
+```ts
+const [, vars] = theme({
+  weightNormal: {
+    $type: 'fontWeight',
+    $value: 'normal'  // → 400
+  },
+  weightBold: {
+    $type: 'fontWeight',
+    $value: 'bold'    // → 700
+  },
+  weightSemiBold: {
+    $type: 'fontWeight',
+    $value: 'semi-bold'  // → 600
+  },
+  weightNumeric: {
+    $type: 'fontWeight',
+    $value: 300
+  }
+})
+
+// Generated:
+// --weight-normal: 400;
+// --weight-bold: 700;
+// --weight-semi-bold: 600;
+// --weight-numeric: 300;
+```
+
+### Number
+
+```ts
+const [, vars] = theme({
+  lineHeightBase: {
+    $type: 'number',
+    $value: 1.5
+  },
+  zIndexModal: {
+    $type: 'number',
+    $value: 1000
+  }
+})
+
+// Generated:
+// --line-height-base: 1.5;
+// --z-index-modal: 1000;
+```
+
+### Dimension
+
+```ts
+const [, vars] = theme({
+  fontSize: {
+    $type: 'dimension',
+    $value: { value: 16, unit: 'px' }
+  }
+})
+
+// Generated:
+// --font-size: 16px;
+```
+
+## Semantic Tokens
+
+Use JavaScript getters to create semantic tokens that reference other tokens.
+
+### Basic Reference
+
+```ts
+const [, vars] = theme({
+  color: {
+    base: {
+      blue: '#0000ff',
+      red: '#ff0000'
+    },
+    semantic: {
+      get primary() {
+        return this.color.base.blue
+      },
+      get danger() {
+        return this.color.base.red
+      }
+    }
+  }
+})
+
+// Generated:
+// --color-base-blue: #0000ff;
+// --color-base-red: #ff0000;
+// --color-semantic-primary: var(--color-base-blue);
+// --color-semantic-danger: var(--color-base-red);
+```
+
+The semantic tokens reference the base tokens using `var()`, enabling theme overrides at runtime.
+
+### Fallback Values
+
+Use `this.fallbackVar()` to provide fallback values for CSS variables.
+
+```ts
+const [, vars] = theme({
+  color: {
+    base: {
+      blue: '#0000ff'
+    },
+    semantic: {
+      get primary() {
+        return this.fallbackVar(this.color.base.blue, '#007bff')
+      }
+    }
+  }
+})
+
+// Generated:
+// --color-semantic-primary: var(--color-base-blue, #007bff);
+```
+
+### Alias (No CSS Variable)
+
+Use `this.alias()` when you want to reference another token without creating a new CSS variable.
+
+```ts
+const [, vars] = theme({
+  color: {
+    base: {
+      blue: '#0000ff',
+      red: '#ff0000'
+    },
+    semantic: {
+      // Creates CSS variable (--color-semantic-secondary)
+      get secondary() {
+        return this.color.base.blue
+      },
+      // Does NOT create CSS variable, just references
+      get primary() {
+        return this.alias(this.color.base.blue)
+      },
+      get danger() {
+        return this.alias(this.color.base.red)
+      }
+    }
+  }
+})
+
+// Generated (note: no --color-semantic-primary or --color-semantic-danger):
+// --color-base-blue: #0000ff;
+// --color-base-red: #ff0000;
+// --color-semantic-secondary: var(--color-base-blue);
+
+// vars.color.semantic.primary: "var(--color-base-blue)"
+// vars.color.semantic.danger: "var(--color-base-red)"
+```
+
+This is useful when you want semantic names in your code but don't need additional CSS variables.
+
+### Raw Values
+
+Use `this.raw()` to get the actual value instead of a CSS variable reference.
+
+```ts
+const [, vars] = theme({
+  color: {
+    base: {
+      blue: '#0000ff',
+      red: '#ff0000'
+    },
+    semantic: {
+      get primary() {
+        return this.raw(this.color.base.blue)
+      },
+      get danger() {
+        return this.raw(this.color.base.red)
+      }
+    }
+  }
+})
+
+// Generated:
+// --color-base-blue: #0000ff;
+// --color-base-red: #ff0000;
+// --color-semantic-primary: #0000ff;  // Actual value, not var()
+// --color-semantic-danger: #ff0000;   // Actual value, not var()
+```
+
+This is useful when you need the hardcoded value instead of a variable reference.
+
+## Composite Values
+
+Create composite tokens with a `resolved` getter that combines multiple properties.
+
+```ts
+const [, vars] = theme({
+  shadow: {
+    light: {
+      get resolved() {
+        return `${this.shadow.light.color} ${this.shadow.light.offsetX} ${this.shadow.light.offsetY} ${this.shadow.light.blur}`
+      },
+      color: '#00000080',
+      offsetX: { value: 0.5, unit: 'rem' },
+      offsetY: { value: 0.5, unit: 'rem' },
+      blur: { value: 1.5, unit: 'rem' }
+    }
+  }
+})
+
+// Generated:
+// --shadow-light: var(--shadow-light-color) var(--shadow-light-offset-x) var(--shadow-light-offset-y) var(--shadow-light-blur);
+// --shadow-light-color: #00000080;
+// --shadow-light-offset-x: 0.5rem;
+// --shadow-light-offset-y: 0.5rem;
+// --shadow-light-blur: 1.5rem;
+
+// vars.shadow.light.resolved: "var(--shadow-light)"
+// vars.shadow.light.color: "var(--shadow-light-color)"
+```
+
+## CSS Layers
+
+Place theme variables in a CSS layer using `@layer`.
+
+```ts
+const [themeClass, vars] = theme({
+  '@layer': 'tokens',
+  color: {
+    primary: '#007bff',
+    secondary: '#6c757d'
+  }
+})
+```
+
+This generates:
+
+```css
+@layer tokens {
+  .themeClass {
+    --color-primary: #007bff;
+    --color-secondary: #6c757d;
+  }
+}
+```
+
+## Debug Identifier
+
+Add a debug identifier as the second argument for easier debugging.
+
+```ts
+const [themeClass, vars] = theme(
+  {
+    color: { primary: '#007bff' }
+  },
+  'myTheme'
+)
+
+// themeClass will include "myTheme" in development
+```
+
+## Multiple Themes
+
+Create multiple themes by defining different token values.
+
+```ts
+const [lightTheme, lightVars] = theme({
+  color: {
+    background: '#ffffff',
+    text: '#000000',
+    primary: '#007bff'
+  }
+}, 'light')
+
+const [darkTheme, darkVars] = theme({
+  color: {
+    background: '#1a1a1a',
+    text: '#ffffff',
+    primary: '#4dabff'
+  }
+}, 'dark')
+
+// Use lightVars or darkVars in your styles
+// Apply lightTheme or darkTheme className to switch themes
+```
+
+In your components:
+
+```tsx
+import { css } from '@mincho-js/css'
+
+// Use one vars object - values will change based on applied theme
+const button = css({
+  backgroundColor: lightVars.color.primary,
+  color: lightVars.color.text
+})
+
+// Toggle themes
+<div className={isDark ? darkTheme : lightTheme}>
+  <button className={button}>Click me</button>
+</div>
+```
+
+## Using with css()
+
+Use theme variables in your `css()` calls.
+
+```ts
+import { css, theme } from '@mincho-js/css'
+
+const [, vars] = theme({
+  color: {
+    primary: '#007bff',
+    text: '#333333'
+  },
+  spacing: [4, 8, 16, 24, 32]
+})
+
+const button = css({
+  backgroundColor: vars.color.primary,
+  color: vars.color.text,
+  padding: vars.spacing[2],  // 16px
+  _hover: {
+    opacity: 0.9
+  }
+})
+```
+
+## Complete Example
+
+```ts
+import { css, theme, globalTheme } from '@mincho-js/css'
+
+// Define global theme on :root
+const tokens = globalTheme(':root', {
+  color: {
+    base: {
+      gray: {
+        50: '#f9fafb',
+        100: '#f3f4f6',
+        900: '#111827'
+      },
+      blue: {
+        500: '#3b82f6',
+        600: '#2563eb'
+      }
+    },
+    semantic: {
+      get background() {
+        return this.color.base.gray[50]
+      },
+      get text() {
+        return this.color.base.gray[900]
+      },
+      get primary() {
+        return this.color.base.blue[500]
+      },
+      get primaryHover() {
+        return this.color.base.blue[600]
+      }
+    }
+  },
+  spacing: [0, 4, 8, 12, 16, 24, 32, 48, 64],
+  typography: {
+    fontFamily: {
+      $type: 'fontFamily',
+      $value: ['Inter', 'system-ui', 'sans-serif']
+    },
+    fontSize: {
+      sm: { value: 14, unit: 'px' },
+      base: { value: 16, unit: 'px' },
+      lg: { value: 18, unit: 'px' }
+    }
+  },
+  animation: {
+    duration: {
+      $type: 'duration',
+      $value: { value: 200, unit: 'ms' }
+    },
+    easing: {
+      $type: 'cubicBezier',
+      $value: [0.4, 0, 0.2, 1]
+    }
+  }
+})
+
+// Use tokens in styles
+const button = css({
+  fontFamily: tokens.typography.fontFamily,
+  fontSize: tokens.typography.fontSize.base,
+  backgroundColor: tokens.color.semantic.primary,
+  color: tokens.color.base.gray[50],
+  padding: `${tokens.spacing[2]} ${tokens.spacing[4]}`,
+  transition: `background-color ${tokens.animation.duration} ${tokens.animation.easing}`,
+  _hover: {
+    backgroundColor: tokens.color.semantic.primaryHover
+  }
+})
+```
+
+## CamelCase to kebab-case
+
+Token names are automatically converted from camelCase to kebab-case for CSS variable names.
+
+```ts
+const [, vars] = theme({
+  backgroundColor: 'white',
+  fontSize: '16px',
+  lineHeight: 1.5
+})
+
+// Generated:
+// --background-color: white;
+// --font-size: 16px;
+// --line-height: 1.5;
+```
+
+## Next Steps
+
+- Learn about [Rules](/docs/rules) for component variants
+- Explore [Literal CSS](/docs/literal) for styling fundamentals
