@@ -1038,6 +1038,98 @@ css({
 
 This is primarily used internally by the `rules()` function. See [Rules](/docs/rules) for more details.
 
+## CSS Methods
+
+The `css` function includes additional methods for common patterns.
+
+### css.raw()
+
+Returns the style object as-is without generating a class name. Useful for merging styles or debugging.
+
+```ts
+const baseStyles = css.raw({
+  color: 'blue',
+  backgroundColor: '#EEEEEE'
+})
+
+// Use in composition
+const button = css([baseStyles, { padding: 16 }])
+```
+
+### css.multiple()
+
+Creates multiple class names from a style map. Similar to Vanilla Extract's `styleVariants`.
+
+```ts
+const backgrounds = css.multiple({
+  primary: { background: 'blue' },
+  secondary: { background: 'aqua' },
+  danger: { background: 'red' }
+})
+
+// backgrounds.primary: className
+// backgrounds.secondary: className
+// backgrounds.danger: className
+```
+
+### css.with()
+
+Creates a constrained CSS function with type restrictions or transformation logic.
+
+#### Type Restrictions
+
+Restrict which properties and values are allowed:
+
+```ts
+const myCss = css.with<{
+  color: true;              // Required, any value
+  background: 'blue' | 'grey';  // Required, specific values only
+  padding?: true;           // Optional, any value
+  position: false;          // Forbidden
+}>()
+
+myCss({
+  color: 'red',
+  background: 'blue'
+})
+```
+
+#### Mixin Pattern
+
+Transform input parameters into styles:
+
+```ts
+const boxMixin = css.with<{ size: number; radius?: number }>(
+  ({ size, radius = 0 }) => ({
+    width: size,
+    height: size,
+    borderRadius: radius
+  })
+)
+
+const smallBox = boxMixin({ size: 50 })
+const roundedBox = boxMixin({ size: 100, radius: 8 })
+```
+
+#### Chaining with Other Methods
+
+The returned function also has `raw()` and `multiple()` methods:
+
+```ts
+const coloredBox = css.with<{ color: string }>(
+  ({ color }) => ({ backgroundColor: color })
+)
+
+// Use raw() to get the style object
+const rawStyles = coloredBox.raw({ color: 'blue' })
+
+// Use multiple() to create variants
+const colorVariants = coloredBox.multiple({
+  primary: { color: 'blue' },
+  secondary: { color: 'green' }
+})
+```
+
 ## Backward Compatibility
 
 Mincho.js maintains full backward compatibility with Vanilla Extract syntax.
