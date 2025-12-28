@@ -653,6 +653,16 @@ const [, vars] = theme({
 // --line-height: 1.5;
 ```
 
+## Theme Methods (Coming Soon)
+
+For API consistency with `css` and `rules`, the following methods are planned for `theme`:
+
+- **theme.raw()** - Return theme object without generating CSS
+- **theme.with()** - Create a theme contract with type constraints (similar to Vanilla Extract's `createThemeContract`)
+- **theme.multiple()** - Create multiple theme variations at once
+
+These methods are currently under development. See [Literal CSS](/docs/literal#css-methods) and [Rules](/docs/rules#multiple-rules) for examples of how these methods work with other APIs.
+
 ## Next Steps
 
 - Learn about [Rules](/docs/rules) for component variants
