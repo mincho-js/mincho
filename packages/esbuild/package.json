@@ -53,9 +53,9 @@
   "prettier": "prettier-config-custom",
   "dependencies": {
     "@mincho-js/integration": "workspace:^",
-    "@vanilla-extract/esbuild-plugin": "^2.3.18",
-    "@vanilla-extract/integration": "^8.0.4",
-    "esbuild": "^0.25.11"
+    "@vanilla-extract/esbuild-plugin": "^2.3.21",
+    "@vanilla-extract/integration": "^8.0.7",
+    "esbuild": "^0.27.2"
   },
   "devDependencies": {
     "eslint-config-custom": "workspace:^",
