@@ -2,7 +2,10 @@
   "extends": "tsconfig-custom/tsconfig.base.json",
   "compilerOptions": {
     "rootDir": "./src",
-    "baseUrl": "./",
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"]
+    },
     "tsBuildInfoFile": "./.cache/typescript/tsbuildinfo-esm",
     "outDir": "./dist/esm",
     "declarationDir": "./dist/esm",
