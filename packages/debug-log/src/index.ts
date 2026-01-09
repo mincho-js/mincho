@@ -1,8 +1,7 @@
 import chalk from "chalk";
 import boxen from "boxen";
 import colorize from "@pinojs/json-colorizer";
-import diff from "deep-diff";
-import prettifyDeepDiff from "@mincho-js/pretify-deep-diff";
+import { diff as diffObjects } from "jest-diff";
 
 // == Console ==================================================================
 // consola fancy is not works in test
@@ -112,31 +111,31 @@ export function jsonExpect<T, K = T>(
   obj1?: JSONCompatible<T> | JSONCompatible<K>,
   obj2?: JSONCompatible<K>
 ) {
+  const printDiff = (
+    expected: JSONCompatible<T> | JSONCompatible<K> | undefined,
+    received: JSONCompatible<T> | JSONCompatible<K> | undefined
+  ) => {
+    const difference = diffObjects(expected, received, {
+      expand: false,
+      contextLines: 1
+    });
+
+    if (difference === null) {
+      jsonPrint("Same Contents", expected as JSONCompatible<T>);
+      return;
+    }
+
+    jsonPrint("Expected", expected as JSONCompatible<T>);
+    jsonPrint("Real", received as JSONCompatible<K>);
+    consola.log(difference);
+  };
+
   if (obj2 === undefined) {
     debugLog();
-    const changes = diff(nameOrObj, obj1);
-
-    if (changes === undefined) {
-      // We will forced assert, because don't want to overhead
-      jsonPrint("Same Contents", nameOrObj as JSONCompatible<T>);
-    } else {
-      jsonPrint("Expected", nameOrObj as JSONCompatible<T>);
-      jsonPrint("Real", obj1 as JSONCompatible<K>);
-
-      console.log(prettifyDeepDiff(changes ?? []));
-    }
+    printDiff(nameOrObj as JSONCompatible<T>, obj1 as JSONCompatible<K>);
   } else {
     debugLog(nameOrObj as string);
-    const changes = diff(obj1, obj2);
-
-    if (changes === undefined) {
-      jsonPrint("Same Contents", obj1 as JSONCompatible<T>);
-    } else {
-      jsonPrint("Expected", obj1 as JSONCompatible<T>);
-      jsonPrint("Real", obj2 as JSONCompatible<K>);
-
-      console.log(prettifyDeepDiff(changes ?? []));
-    }
+    printDiff(obj1 as JSONCompatible<T>, obj2 as JSONCompatible<K>);
   }
 }
 

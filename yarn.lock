@@ -1210,13 +1210,11 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@mincho-js/debug-log@workspace:packages/debug-log"
   dependencies:
-    "@mincho-js/pretify-deep-diff": "npm:^1.0.5"
     "@pinojs/json-colorizer": "npm:^4.0.0"
-    "@types/deep-diff": "npm:^1.0.5"
     boxen: "npm:^8.0.1"
     chalk: "npm:^5.6.2"
-    deep-diff: "npm:^1.0.2"
     eslint-config-custom: "workspace:^"
+    jest-diff: "npm:^29.7.0"
     prettier-config-custom: "workspace:^"
     tsconfig-custom: "workspace:^"
     vite-config-custom: "workspace:^"
@@ -1272,16 +1270,6 @@ __metadata:
     vite-config-custom: "workspace:^"
   languageName: unknown
   linkType: soft
-
-"@mincho-js/pretify-deep-diff@npm:^1.0.5":
-  version: 1.0.5
-  resolution: "@mincho-js/pretify-deep-diff@npm:1.0.5"
-  dependencies:
-    "@mincho-js/pretify-deep-diff": "npm:^1.0.5"
-    deep-diff: "npm:^1.0.2"
-  checksum: 10/139f999912720ff0bc4a120aadbcdadff1a263e8d90e78cea9e26c95dbb742363182d3d78688a9f35420b3a657428b8e15c9bfd93cceda8a668b8f357af56ced
-  languageName: node
-  linkType: hard
 
 "@mincho-js/react@workspace:^, @mincho-js/react@workspace:packages/react":
   version: 0.0.0-use.local
@@ -2311,13 +2299,6 @@ __metadata:
   version: 3.0.2
   resolution: "@types/cssesc@npm:3.0.2"
   checksum: 10/309ec6d8b93b06dc0b07e54c635e97fddf7e3e586edabdee5d5505249c29612e73d43529714b6cb2efdeee1ad213664125eb8e0742bc1bfaa8477605779e584a
-  languageName: node
-  linkType: hard
-
-"@types/deep-diff@npm:^1.0.5":
-  version: 1.0.5
-  resolution: "@types/deep-diff@npm:1.0.5"
-  checksum: 10/84504a725a3e79fc5410184d4d94fd8fae05b673e03fc4250998ea48c1f5c862dfedb9a227200b495b5979ed90288b291d739b65cea5792de9e47caff6630cc2
   languageName: node
   linkType: hard
 
@@ -3514,13 +3495,6 @@ __metadata:
   languageName: node
   linkType: hard
 
-"deep-diff@npm:^1.0.2":
-  version: 1.0.2
-  resolution: "deep-diff@npm:1.0.2"
-  checksum: 10/3e496111b5506e7399e8a5441b713b033ade3b9d60faff96a4c47189e460a889de50dab99afdb1dcddebf701a0b6a6bb7743f5090b7a620da12e3391c940f8f3
-  languageName: node
-  linkType: hard
-
 "deep-is@npm:^0.1.3":
   version: 0.1.4
   resolution: "deep-is@npm:0.1.4"
@@ -3553,6 +3527,13 @@ __metadata:
   version: 27.5.1
   resolution: "diff-sequences@npm:27.5.1"
   checksum: 10/34d852a13eb82735c39944a050613f952038614ce324256e1c3544948fa090f1ca7f329a4f1f57c31fe7ac982c17068d8915b633e300f040b97708c81ceb26cd
+  languageName: node
+  linkType: hard
+
+"diff-sequences@npm:^29.6.3":
+  version: 29.6.3
+  resolution: "diff-sequences@npm:29.6.3"
+  checksum: 10/179daf9d2f9af5c57ad66d97cb902a538bcf8ed64963fa7aa0c329b3de3665ce2eb6ffdc2f69f29d445fa4af2517e5e55e5b6e00c00a9ae4f43645f97f7078cb
   languageName: node
   linkType: hard
 
@@ -4880,6 +4861,25 @@ __metadata:
   version: 2.1.0
   resolution: "javascript-stringify@npm:2.1.0"
   checksum: 10/721236ccec826c77167fec024b9ea1da7462690cf857bebfcc67a6fb346392d45cdce278e25e86b312ddeecdab1678a0f9fcc7f2c6e2883fbaaac3c735a237fd
+  languageName: node
+  linkType: hard
+
+"jest-diff@npm:^29.7.0":
+  version: 29.7.0
+  resolution: "jest-diff@npm:29.7.0"
+  dependencies:
+    chalk: "npm:^4.0.0"
+    diff-sequences: "npm:^29.6.3"
+    jest-get-type: "npm:^29.6.3"
+    pretty-format: "npm:^29.7.0"
+  checksum: 10/6f3a7eb9cd9de5ea9e5aa94aed535631fa6f80221832952839b3cb59dd419b91c20b73887deb0b62230d06d02d6b6cf34ebb810b88d904bb4fe1e2e4f0905c98
+  languageName: node
+  linkType: hard
+
+"jest-get-type@npm:^29.6.3":
+  version: 29.6.3
+  resolution: "jest-get-type@npm:29.6.3"
+  checksum: 10/88ac9102d4679d768accae29f1e75f592b760b44277df288ad76ce5bf038c3f5ce3719dea8aa0f035dac30e9eb034b848ce716b9183ad7cc222d029f03e92205
   languageName: node
   linkType: hard
 
