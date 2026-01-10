@@ -103,6 +103,11 @@ jobs:
         uses: ./.github/actions/cache-dir
         with:
           key: build-and-test
+          paths: |
+            .cache
+            **/.cache
+            dist
+            **/dist
 
       - name: Test
         run: yarn test

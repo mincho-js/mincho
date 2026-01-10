@@ -1,11 +1,5 @@
 {
-  "extends": "tsconfig-custom/tsconfig.base.json",
-  "compilerOptions": {
-    "outDir": "dist",
-    "rootDir": "src"
-  },
-  "include": ["src/**/*.ts"],
-  "exclude": ["node_modules", "dist"],
+  "files": [],
   "references": [
     {
       "path": "../../configs/vite-config-custom"

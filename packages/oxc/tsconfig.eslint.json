@@ -1,10 +1,11 @@
 {
-  "extends": "./tsconfig.json",
+  "extends": "tsconfig-custom/tsconfig.base.json",
   "compilerOptions": {
     "allowJs": true,
     "rootDir": ".",
     "outDir": "./.cache/tsc-eslint",
-    "tsBuildInfoFile": "./.cache/tsc-eslint/tsconfig.eslint.tsbuildinfo"
+    "tsBuildInfoFile": "./.cache/tsc-eslint/tsconfig.eslint.tsbuildinfo",
+    "types": ["node"]
   },
   "include": [
     "eslint.config.js",

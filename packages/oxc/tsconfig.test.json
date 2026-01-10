@@ -1,9 +1,11 @@
 {
-  "extends": "./tsconfig.json",
+  "extends": "tsconfig-custom/tsconfig.base.json",
   "compilerOptions": {
     "composite": true,
-    "noEmit": true,
-    "tsBuildInfoFile": "./.cache/typescript/tsbuildinfo-test"
+    "tsBuildInfoFile": "./.cache/typescript/tsbuildinfo-test",
+    "outDir": "./.cache/tsbuild-test",
+    "declarationDir": "./.cache/tsbuild-test",
+    "types": ["node"]
   },
   "include": [
     "src/**/*.ts",
