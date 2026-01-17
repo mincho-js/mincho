@@ -7,10 +7,13 @@
     {
       "path": "../babel"
     },
-    { 
+    {
+      "path": "../oxc"
+    },
+    {
       "path": "./tsconfig.node.json"
     },
-    { 
+    {
       "path": "./tsconfig.lib.json"
     }
   ]

@@ -50,7 +50,11 @@ function NodeBuilder(viteConfigEnv: ConfigEnv) {
 
   const runtimeEnv = getRuntimeEnv();
   if (ViteEnv.isProd()) {
-    if (runtimeEnv === "LOCAL" || runtimeEnv === "PUBLISH") {
+    if (
+      runtimeEnv === "LOCAL" ||
+      runtimeEnv === "PUBLISH" ||
+      runtimeEnv === "ACTIONS"
+    ) {
       plugins.add(
         // This is currently a proprietary implementation. You might also like to see
         // https://github.com/qmhc/vite-plugin-dts/issues/267

@@ -20,6 +20,7 @@
     "url": "https://github.com/mincho-js/mincho/issues"
   },
   "homepage": "https://github.com/mincho-js/mincho/tree/main/packages/debug-log#readme",
+  "types": "./dist/esm/index.d.ts",
   "typings": "./dist/esm/index.d.ts",
   "main": "./dist/cjs/index.cjs",
   "module": "./dist/esm/index.mjs",
@@ -36,7 +37,8 @@
     },
     "./package.json": "./package.json",
     "./importMeta": {
-      "types": "./importMeta.d.ts"
+      "types": "./importMeta.d.ts",
+      "default": "./importMeta.d.ts"
     }
   },
   "publishConfig": {
@@ -61,17 +63,15 @@
   },
   "prettier": "prettier-config-custom",
   "devDependencies": {
-    "@types/deep-diff": "^1.0.5",
     "eslint-config-custom": "workspace:^",
     "prettier-config-custom": "workspace:^",
     "tsconfig-custom": "workspace:^",
     "vite-config-custom": "workspace:^"
   },
   "dependencies": {
-    "@mincho-js/pretify-deep-diff": "^1.0.5",
     "@pinojs/json-colorizer": "^4.0.0",
     "boxen": "^8.0.1",
     "chalk": "^5.6.2",
-    "deep-diff": "^1.0.2"
+    "jest-diff": "^29.7.0"
   }
 }

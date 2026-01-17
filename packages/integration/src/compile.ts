@@ -1,8 +1,8 @@
-import { basename, dirname, join } from "node:path";
-import * as fs from "node:fs";
 import { addFileScope, getPackageInfo } from "@vanilla-extract/integration";
 import defaultEsbuild, { PluginBuild } from "esbuild";
 import { transformSync } from "@babel/core";
+import { basename, dirname, join } from "node:path";
+import * as fs from "node:fs";
 import { minchoStyledComponentPlugin } from "@mincho-js/babel";
 
 interface CompileOptions {
@@ -30,6 +30,7 @@ export async function compile({
   if (resolverCache.has(originalPath)) {
     source = resolverCache.get(originalPath)!;
   } else {
+    // All .css.ts files need file scope, including extracted ones
     source = addFileScope({
       source: contents,
       filePath: originalPath,
@@ -49,7 +50,14 @@ export async function compile({
     },
     metafile: true,
     bundle: true,
-    external: ["@vanilla-extract", "@mincho-js/css", ...externals],
+    external: [
+      "@vanilla-extract",
+      "@vanilla-extract/css",
+      "@vanilla-extract/css/adapter",
+      "@vanilla-extract/css/fileScope",
+      "@mincho-js/css",
+      ...externals
+    ],
     platform: "node",
     write: false,
     absWorkingDir: cwd,
@@ -59,6 +67,8 @@ export async function compile({
         setup(build) {
           build.onLoad({ filter: /\.(t|j)sx?$/ }, async (args) => {
             const contents = await fs.promises.readFile(args.path, "utf-8");
+
+            // All files need addFileScope
             let source = addFileScope({
               source: contents,
               filePath: args.path,

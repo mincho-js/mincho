@@ -27,11 +27,11 @@
     "noUncheckedSideEffectImports": true,
 
     /* Path Aliases for Workspace Packages */
-    "baseUrl": "../../",
     "paths": {
-      "@mincho-js/react": ["packages/react/src"],
-      "@mincho-js/css": ["packages/css/src"],
-      "@mincho-js/vite": ["packages/vite/src"]
+      "*": ["../../*"],
+      "@mincho-js/react": ["../../packages/react/src"],
+      "@mincho-js/css": ["../../packages/css/src"],
+      "@mincho-js/vite": ["../../packages/vite/src"]
     },
 
     "tsBuildInfoFile": "./.cache/typescript/tsbuildinfo-app"

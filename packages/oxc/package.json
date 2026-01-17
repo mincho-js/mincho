@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "@mincho-js/oxc",
+  "description": "OXC integration for Mincho.js",
+  "version": "0.1.0",
+  "sideEffects": false,
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mincho-js/mincho.git",
+    "directory": "packages/oxc"
+  },
+  "keywords": [
+    "oxc",
+    "mincho",
+    "css-in-js",
+    "transform"
+  ],
+  "bugs": {
+    "url": "https://github.com/mincho-js/mincho/issues"
+  },
+  "homepage": "https://github.com/mincho-js/mincho/tree/main/packages/oxc#readme",
+  "typings": "./dist/esm/index.d.ts",
+  "types": "./dist/esm/index.d.ts",
+  "main": "./dist/cjs/index.cjs",
+  "module": "./dist/esm/index.mjs",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/esm/index.d.ts",
+        "default": "./dist/esm/index.mjs"
+      },
+      "require": {
+        "types": "./dist/cjs/index.d.cts",
+        "default": "./dist/cjs/index.cjs"
+      }
+    },
+    "./mincho-transform": {
+      "import": {
+        "types": "./dist/esm/mincho-transform.d.ts",
+        "default": "./dist/esm/mincho-transform.mjs"
+      },
+      "require": {
+        "types": "./dist/cjs/mincho-transform.d.cts",
+        "default": "./dist/cjs/mincho-transform.cjs"
+      }
+    }
+  },
+  "publishConfig": {
+    "directory": "_release/package"
+  },
+  "files": [
+    "dist",
+    "src",
+    "**/package.json"
+  ],
+  "scripts": {
+    "clean": "yarn g:clean",
+    "build": "yarn g:build",
+    "build:watch": "yarn g:build-watch",
+    "test": "yarn g:test",
+    "test:watch": "yarn g:test-watch",
+    "coverage": "yarn g:coverage",
+    "lint": "yarn g:lint",
+    "fix": "yarn g:fix",
+    "check": "yarn g:check"
+  },
+  "prettier": "prettier-config-custom",
+  "dependencies": {
+    "@emotion/hash": "^0.9.2",
+    "magic-string": "^0.30.0",
+    "oxc-parser": "latest",
+    "oxc-transform": "latest",
+    "unplugin-oxc": "latest"
+  },
+  "devDependencies": {
+    "@types/node": "^24.7.0",
+    "eslint-config-custom": "workspace:^",
+    "prettier-config-custom": "workspace:^",
+    "tsconfig-custom": "workspace:^",
+    "vite-config-custom": "workspace:^"
+  }
+}

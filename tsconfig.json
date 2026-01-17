@@ -6,6 +6,15 @@
       "path": "configs/vite-config-custom"
     },
     {
+      "path": "examples/react-babel"
+    },
+    {
+      "path": "examples/react-oxc"
+    },
+    {
+      "path": "examples/react-swc"
+    },
+    {
       "path": "packages/babel"
     },
     {
@@ -24,6 +33,9 @@
       "path": "packages/integration"
     },
     {
+      "path": "packages/oxc"
+    },
+    {
       "path": "packages/react"
     },
     {
@@ -31,12 +43,6 @@
     },
     {
       "path": "packages/vite"
-    },
-    {
-      "path": "examples/react-babel"
-    },
-    {
-      "path": "examples/react-swc"
     },
     {
       "path": "./tsconfig.node.json"

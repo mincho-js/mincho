@@ -43,9 +43,10 @@ node_modules/
 jspm_packages/
 
 # Package Redirect - Sync with package.json "workspaces"
-configs/*/**/package.json
-packages/*/**/package.json
-examples/*/**/package.json
+# Keep root workspace manifests tracked while ignoring fixture manifests
+configs/*/*/**/package.json
+packages/*/*/**/package.json
+examples/*/*/**/package.json
 
 # Snowpack dependency directory (https://snowpack.dev/)
 web_modules/

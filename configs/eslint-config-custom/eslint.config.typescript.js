@@ -3,25 +3,24 @@
 
 import { cwd } from "node:process";
 import globals from "globals";
-import { defineConfig } from "eslint/config";
 import eslint from "@eslint/js";
 import tseslint from "typescript-eslint";
 import baseConfig from "./eslint.config.base.js";
 
+/** @typedef {import("typescript-eslint").FlatConfig.Config} FlatConfig */
 /** @typedef {import("typescript-eslint").InfiniteDepthConfigWithExtends} TSConfig */
-/** @typedef {import("eslint").Linter.Config} Config */
-/** @typedef {Config[]} ConfigArray */
+/** @typedef {ReturnType<typeof tseslint.config>} ConfigArray */
 
 /**
  * @export
- * @type {(userConfigs?: TSConfig) => ConfigArray}
+ * @type {(userConfigs?: TSConfig | TSConfig[]) => ConfigArray}
  */
 export function eslintConfig(userConfigs = []) {
-  const normalizedUserConfigs = /** @type {ConfigArray} */ (
-    Array.isArray(userConfigs) ? userConfigs : [userConfigs ?? {}]
-  );
+  const normalizedUserConfigs = Array.isArray(userConfigs)
+    ? userConfigs
+    : [userConfigs ?? {}];
 
-  return defineConfig(
+  return tseslint.config(
     // == Typescript =============================================================
     eslint.configs.recommended,
     ...tseslint.configs.recommended,
@@ -64,7 +63,7 @@ export function eslintConfig(userConfigs = []) {
       extends: [tseslint.configs.disableTypeChecked]
     },
 
-    ...baseConfig,
+    .../** @type {TSConfig[]} */ (baseConfig),
 
     ...normalizedUserConfigs
   );

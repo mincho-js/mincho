@@ -1,0 +1,19 @@
+{
+  "extends": "tsconfig-custom/tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "tsBuildInfoFile": "./.cache/typescript/tsbuildinfo-test",
+    "outDir": "./.cache/tsbuild-test",
+    "declarationDir": "./.cache/tsbuild-test",
+    "types": ["node"]
+  },
+  "include": [
+    "src/**/*.ts",
+    "src/**/__tests__/**/*.ts"
+  ],
+  "exclude": [
+    "dist",
+    "node_modules"
+  ]
+}
+
