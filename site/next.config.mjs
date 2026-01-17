@@ -1,9 +1,15 @@
-import nextra from 'nextra'
+import nextra from "nextra";
 
 const withNextra = nextra({
-  contentDirBasePath: '/docs'
-})
+  contentDirBasePath: "/docs"
+});
 
 export default withNextra({
-  reactStrictMode: true
-})
+  reactStrictMode: true,
+  output: "export",
+  basePath: "/mincho",
+  trailingSlash: true,
+  images: {
+    unoptimized: true
+  }
+});
