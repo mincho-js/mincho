@@ -3,5 +3,6 @@ export default {
   "getting-started": "Getting Started",
   literal: "Literal CSS",
   rules: "Rules",
-  theme: "Theme"
+  theme: "Theme",
+  styled: "Styled Components"
 };
