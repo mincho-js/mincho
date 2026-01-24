@@ -1,0 +1,339 @@
+# Class Name Utilities
+
+Mincho provides utility functions for building and managing CSS class names in a consistent and type-safe manner.
+
+## Installation
+
+```bash
+npm install @mincho-js/css
+```
+
+## Overview
+
+The class name utilities help you:
+
+- **Conditionally join class names** with `cx()`
+- **Create typed class name constraints** with `cx.with()`
+- **Generate multiple class name utilities** with `cx.multiple()`
+
+## cx()
+
+The `cx()` function conditionally joins class names into a single string. It's inspired by [clsx](https://github.com/lukeed/clsx) and provides the same ergonomics.
+
+```typescript
+import { cx } from '@mincho-js/css';
+
+// Strings (variadic)
+cx('foo', true && 'bar', 'baz');
+// => 'foo bar baz'
+
+// Objects
+cx({ foo: true, bar: false, baz: isTrue() });
+// => 'foo baz'
+
+// Arrays
+cx(['foo', 0, false, 'bar']);
+// => 'foo bar'
+
+// Kitchen sink (with nesting)
+cx('foo', [1 && 'bar', { baz: false, bat: null }, ['hello', ['world']]], 'cya');
+// => 'foo bar hello world cya'
+```
+
+### String Inputs
+
+Pass strings directly as arguments:
+
+```typescript
+cx('foo', 'bar', 'baz');
+// => 'foo bar baz'
+```
+
+### Conditional Strings
+
+Use boolean expressions for conditional class names:
+
+```typescript
+const isActive = true;
+const isHidden = false;
+
+cx('base', isActive && 'active', isHidden && 'hidden');
+// => 'base active'
+```
+
+### Object Inputs
+
+Use objects where keys are class names and values are conditions:
+
+```typescript
+cx({
+  'btn': true,
+  'btn-primary': isPrimary,
+  'btn-disabled': isDisabled,
+});
+// => 'btn btn-primary' (when isPrimary is true, isDisabled is false)
+```
+
+### Array Inputs
+
+Arrays are flattened and processed recursively:
+
+```typescript
+cx(['foo', 'bar']);
+// => 'foo bar'
+
+// Nested arrays
+cx(['foo', ['bar', ['baz']]]);
+// => 'foo bar baz'
+```
+
+### Mixed Inputs
+
+Combine all input types:
+
+```typescript
+cx(
+  'base',
+  isActive && 'active',
+  { 'highlighted': isHighlighted },
+  ['extra', 'classes']
+);
+```
+
+## cx.multiple()
+
+Create multiple class name strings from a map of values:
+
+```typescript
+import { cx } from '@mincho-js/css';
+
+const textStyles = cx.multiple({
+  primary: ['text-blue-500', 'font-bold'],
+  secondary: ['text-gray-500', 'font-normal'],
+  danger: ['text-red-500', 'font-semibold']
+});
+
+// Usage
+textStyles.primary;
+// => 'text-blue-500 font-bold'
+
+textStyles.secondary;
+// => 'text-gray-500 font-normal'
+```
+
+### With Conditional Logic
+
+You can use the same conditional patterns inside the map:
+
+```typescript
+const isActive = true;
+const hasError = false;
+
+const buttonStates = cx.multiple({
+  primary: {
+    'bg-blue-500': true,
+    'text-white': true,
+    'opacity-50': !isActive
+  },
+  secondary: [
+    'bg-gray-500',
+    isActive && 'hover:bg-gray-600',
+    hasError && 'border-red-500'
+  ],
+  danger: [
+    'bg-red-500',
+    { 'font-bold': isActive, 'italic': hasError },
+    !hasError && 'shadow-md'
+  ]
+});
+
+buttonStates.primary;
+// => 'bg-blue-500 text-white'
+
+buttonStates.secondary;
+// => 'bg-gray-500 hover:bg-gray-600'
+```
+
+## cx.with()
+
+Create a typed class name utility with constraints on allowed values:
+
+```typescript
+import { cx } from '@mincho-js/css';
+
+// Define allowed class names
+type LayoutDisplay = 'flex' | 'grid' | 'block';
+type LayoutSpacing = `p-${number}` | `m-${number}`;
+
+const layout = cx.with<LayoutDisplay | LayoutSpacing>();
+
+layout('flex', 'p-4');
+// => 'flex p-4'
+
+// TypeScript error: Type '"inline"' is not assignable
+// layout('inline'); // Error!
+```
+
+### With Transformer Function
+
+Transform parameters into class names:
+
+```typescript
+const responsive = cx.with<{ base: string; md?: string; lg?: string }>(
+  ({ base, md, lg }) => [
+    base,
+    md && `md:${md}`,
+    lg && `lg:${lg}`
+  ]
+);
+
+responsive({ base: 'text-sm', md: 'text-base', lg: 'text-lg' });
+// => 'text-sm md:text-base lg:text-lg'
+
+responsive({ base: 'text-sm' });
+// => 'text-sm'
+```
+
+### cx.with().multiple()
+
+Combine `cx.with()` with `multiple()` for typed class name maps:
+
+```typescript
+const responsive = cx.with<{ base: string; md?: string; lg?: string }>(
+  ({ base, md, lg }) => [base, md && `md:${md}`, lg && `lg:${lg}`]
+);
+
+const result = responsive.multiple({
+  heading: { base: 'text-xl', md: 'text-2xl', lg: 'text-3xl' },
+  body: { base: 'text-sm', md: 'text-base' },
+  caption: { base: 'text-xs' }
+});
+
+result.heading;
+// => 'text-xl md:text-2xl lg:text-3xl'
+
+result.body;
+// => 'text-sm md:text-base'
+
+result.caption;
+// => 'text-xs'
+```
+
+---
+
+## cva() (Coming Soon)
+
+The `cva()` function for variant-based class management is planned for future implementation.
+
+```typescript
+// Future API (not yet available)
+import { cva } from '@mincho-js/css';
+
+const button = cva({
+  base: 'rounded border font-semibold',
+  variants: {
+    intent: {
+      primary: 'border-transparent bg-blue-500 text-white',
+      secondary: 'border-gray-400 bg-white text-gray-800',
+    },
+    size: {
+      small: 'px-2 py-1 text-sm',
+      medium: 'px-4 py-2 text-base',
+    },
+  },
+  compoundVariants: ({ intent, size }) => [
+    {
+      condition: [intent.primary, size.medium],
+      class: 'uppercase',
+    },
+  ],
+  defaultVariants: {
+    intent: 'primary',
+    size: 'medium',
+  },
+});
+
+button();
+// => 'font-semibold border rounded bg-blue-500 text-white...'
+
+button({ intent: 'secondary', size: 'small' });
+// => 'font-semibold border rounded bg-white text-gray-800...'
+```
+
+### cva.raw() (Coming Soon)
+
+Returns the cva configuration object as-is for composition:
+
+```typescript
+// Future API
+const buttonConfig = cva.raw({
+  base: 'rounded border font-semibold',
+  variants: {
+    intent: {
+      primary: 'bg-blue-500 text-white',
+      secondary: 'bg-gray-500 text-white'
+    }
+  }
+});
+// buttonConfig is a plain object, not a function
+```
+
+### cva.multiple() (Coming Soon)
+
+Create multiple variant utilities from a map:
+
+```typescript
+// Future API
+const buttons = cva.multiple({
+  primary: {
+    base: 'rounded border',
+    variants: {
+      size: {
+        small: 'px-2 py-1 text-sm',
+        large: 'px-4 py-2 text-lg'
+      }
+    }
+  },
+  secondary: {
+    base: 'rounded border-2',
+    variants: {
+      size: {
+        small: 'px-2 py-1 text-sm',
+        large: 'px-4 py-2 text-lg'
+      }
+    }
+  }
+});
+
+buttons.primary({ size: 'small' });
+buttons.secondary({ size: 'large' });
+```
+
+### cva.with() (Coming Soon)
+
+Create parameterized variant utilities:
+
+```typescript
+// Future API
+const myButton = cva.with<{ bg: string; text: string }>(
+  ({ bg, text }) => ({
+    base: 'rounded border',
+    variants: {
+      size: {
+        small: 'px-2 py-1 text-sm',
+        large: 'px-4 py-2 text-lg'
+      }
+    },
+    compoundVariants: ({ size }) => [
+      {
+        condition: [size.small],
+        class: `bg-${bg} text-${text}`
+      }
+    ]
+  })
+);
+
+const button = myButton({ bg: 'blue-500', text: 'white' });
+button({ size: 'small' });
+// => 'rounded border px-2 py-1 text-sm bg-blue-500 text-white'
+```

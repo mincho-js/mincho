@@ -4,5 +4,6 @@ export default {
   literal: "Literal CSS",
   rules: "Rules",
   theme: "Theme",
-  styled: "Styled Components"
+  styled: "Styled Components",
+  classname: "Class Name Utilities"
 };
