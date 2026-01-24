@@ -5,5 +5,6 @@ export default {
   rules: "Rules",
   theme: "Theme",
   styled: "Styled Components",
-  classname: "Class Name Utilities"
+  classname: "Class Name Utilities",
+  "define-rules": "Define Rules"
 };

@@ -1,0 +1,330 @@
+# Define Rules
+
+`defineRules()` is a high-order definition API that creates constrained versions of `cx`, `cva`, `css`, and `rules` functions with property constraints, shortcuts, and conditions.
+
+## Overview
+
+This API enables:
+
+- **Property constraints**: Limit which CSS properties and values can be used
+- **Shortcuts**: Create Tailwind-like shorthand utilities
+- **Conditions**: Define responsive and state-based style conditions
+- **Theme integration**: Connect with design tokens from `theme()`
+- **Class name merging**: Intelligent merging like tailwind-merge
+
+---
+
+## Coming Soon
+
+This entire API is currently in the RFC (Request for Comments) stage and not yet implemented. The following sections describe the planned API design.
+
+---
+
+## Property Constraints (Coming Soon)
+
+Constrain the CSS properties and values that can be used:
+
+```typescript
+// Future API (not yet available)
+const { cx, cva, css, rules } = defineRules({
+  properties: {
+    // Allow only values in arrays
+    display: ['none', 'inline', 'flex'],
+    paddingLeft: [0, 2, 4, 8, 16, 32, 64],
+    paddingRight: [0, 2, 4, 8, 16, 32, 64],
+
+    // Allow only values in objects
+    color: { 'indigo-800': 'rgb(55, 48, 163)' },
+
+    // Entire properties
+    background: true,  // All values allowed
+    border: false      // Property disabled
+  }
+});
+
+// Usage
+css({
+  display: 'inline',     // Only these values allowed
+  paddingLeft: 8,        // Only these values allowed
+  color: 'indigo-800',   // Only these values allowed
+  background: 'red'      // All values allowed
+});
+```
+
+## Shortcuts (Coming Soon)
+
+Create Tailwind/UnoCSS-like shorthand utilities:
+
+```typescript
+// Future API
+const { cx, css, rules } = defineRules({
+  properties: {
+    display: ['none', 'inline', 'flex'],
+    paddingLeft: [0, 2, 4, 8, 16, 32, 64],
+    paddingRight: [0, 2, 4, 8, 16, 32, 64],
+    justifyContent: true,
+    alignItems: true
+  },
+  shortcuts: {
+    // Define only property
+    pl: 'paddingLeft',
+    pr: 'paddingRight',
+
+    // Define multiple properties
+    px: ['pl', 'pr'],
+
+    // Define with functional value
+    align(value: string) {
+      const [justify, items] = value.split('-');
+      return {
+        display: 'flex',
+        justifyContent: justify,
+        alignItems: items || justify
+      };
+    },
+
+    // Define with fixed value
+    inline: { display: 'inline' }
+  }
+});
+
+// Usage
+css(['inline', { px: 8 }]);
+// => { display: 'inline', paddingLeft: 8, paddingRight: 8 }
+
+css({ align: 'center' });
+// => { display: 'flex', justifyContent: 'center', alignItems: 'center' }
+```
+
+## Conditions (Coming Soon)
+
+Define responsive and state-based style conditions:
+
+```typescript
+// Future API
+const { css } = defineRules({
+  conditions: {
+    mobile: {},
+    tablet: '@media screen and (min-width: 768px)',
+    desktop: '@media screen and (min-width: 1024px)',
+  },
+  defaultCondition: 'mobile'
+});
+
+// Usage
+css({
+  _mobile: { fontSize: 12 },
+  _tablet: { fontSize: 16 },
+  _desktop: { fontSize: 20 },
+
+  // Or property-level conditions
+  fontSize: {
+    _mobile: 12,
+    _tablet: 16,
+    _desktop: 20
+  }
+});
+```
+
+**Compiled CSS:**
+
+```css
+.fontSize-12_mobile__[HASH] { font-size: 12px; }
+
+@media screen and (min-width: 768px) {
+  .fontSize-16_tablet__[HASH] { font-size: 16px; }
+}
+
+@media screen and (min-width: 1024px) {
+  .fontSize-20_desktop__[HASH] { font-size: 20px; }
+}
+```
+
+## Selector Conditions (Coming Soon)
+
+Override selectors for pseudo-states:
+
+```typescript
+// Future API
+const { css } = defineRules({
+  conditions: {
+    hover: { selector: '&:is(:hover, [data-hover])': {} },
+    focus: { selector: '&:is(:focus, [data-focus])': {} },
+    checked: { selector: '&:is(:checked, [data-checked], [aria-checked=true])': {} }
+  }
+});
+```
+
+## Compound Conditions (Coming Soon)
+
+Create conditions from multiple existing conditions:
+
+```typescript
+// Future API
+const { css } = defineRules({
+  conditions: {
+    mobile: { '@media': '(pointer: coarse)' },
+    desktop: { '@media': '(pointer: fine)' },
+    hover: { selector: '&:hover' },
+    reducedMotion: { '@media': '(prefers-reduced-motion: reduce)' }
+  },
+  compoundConditions: [
+    {
+      when: ['desktop', 'hover', 'reducedMotion'],
+      condition: { selector: '&:not([data-hover-disable])' }
+    }
+  ]
+});
+```
+
+## Class Name Merge (Coming Soon)
+
+Intelligent class name merging like tailwind-merge:
+
+```typescript
+// Future API
+const { cx, css, rules } = defineRules({
+  properties: {
+    margin: [0, 4, 8],
+    paddingLeft: [8, 16],
+    paddingRight: [8, 16]
+  },
+  shortcuts: {
+    px: ['paddingLeft', 'paddingRight']
+  }
+});
+
+const className = cx(
+  'margin-8',
+  { 'margin-0': true }  // margin-0 wins over margin-8
+);
+```
+
+## Theme Specification (Coming Soon)
+
+Connect design tokens from `theme()`:
+
+```typescript
+// Future API
+const [themeClass, themeVars] = theme({
+  colors: {
+    text: { default: '#0f172a', muted: '#475569' },
+    surface: { canvas: '#ffffff', brand: '#2563eb' }
+  },
+  space: [0, 4, 8, 12, 16, 20]
+});
+
+const tokens = defineRules.themeSpec([
+  {
+    condition: [themeVars.colors],
+    properties: ['color', 'backgroundColor', 'borderColor']
+  },
+  {
+    condition: [themeVars.space],
+    properties: ['gap', 'paddingInlineStart', 'paddingInlineEnd']
+  }
+]);
+
+const { css } = defineRules({
+  properties: {
+    display: ['inline-flex', 'flex'],
+    ...tokens
+  }
+});
+```
+
+## Theme Context (Coming Soon)
+
+Thread theme vars through all helpers:
+
+```typescript
+// Future API
+const { css, rules, cx } = defineRules({
+  theme: themeVars,
+  conditions: { /* ... */ },
+  properties: { /* ... */ }
+});
+
+const card = css((theme) => ({
+  color: theme.colors.text.base,
+  backgroundColor: theme.colors.surface.canvas,
+  borderRadius: theme.radii.sm
+}));
+
+const button = rules((theme) => ({
+  base: {
+    borderRadius: theme.radii.sm
+  },
+  variants: {
+    intent: {
+      primary: {
+        color: theme.colors.text.inverse,
+        backgroundColor: theme.colors.surface.brand
+      }
+    }
+  }
+}));
+```
+
+## Shortcuts Spec (Coming Soon)
+
+Package shortcuts for reuse across projects:
+
+```typescript
+// Future API
+const spacingShortcuts = defineRules.shortcutSpec<SpacingProps>({
+  pl: 'paddingInlineStart',
+  pr: 'paddingInlineEnd',
+  px: ['pl', 'pr'],
+  gutter(value: number) {
+    return {
+      gap: value,
+      paddingInlineStart: value,
+      paddingInlineEnd: value
+    };
+  }
+});
+
+const { css } = defineRules({
+  properties: { /* ... */ },
+  shortcuts: {
+    ...spacingShortcuts,
+    inline: { display: 'inline-flex', alignItems: 'center' }
+  }
+});
+```
+
+## Class Name Register (Coming Soon)
+
+Register presets for cross-package CSS extraction:
+
+```typescript
+// Package A: @design-system/core
+export const presets = defineRules({ /* ... */ });
+
+// Package B: @design-system/components
+import { presets } from '@design-system/core';
+export const componentStyle = presets.css({ /* ... */ });
+
+// Application
+import { presets } from '@design-system/core';
+presets.registerClassNames();  // Avoid duplicate class names
+```
+
+---
+
+## Future Possibilities
+
+### Presets
+
+Once `defineRules()` is implemented, presets for common frameworks will be developed:
+
+- Tailwind CSS preset
+- DaisyUI preset
+- Custom design system presets
+
+### Advanced Features
+
+- Elm UI-style layout error prevention
+- AdorableCSS-style Figma mental model matching
+- UnoCSS icons preset integration
