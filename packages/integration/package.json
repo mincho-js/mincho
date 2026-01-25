@@ -52,8 +52,8 @@
   },
   "prettier": "prettier-config-custom",
   "dependencies": {
-    "@babel/core": "^7.28.5",
-    "@babel/plugin-syntax-jsx": "^7.27.1",
+    "@babel/core": "^7.28.6",
+    "@babel/plugin-syntax-jsx": "^7.28.6",
     "@mincho-js/babel": "workspace:^",
     "@vanilla-extract/integration": "^8.0.7",
     "esbuild": "^0.27.2"
