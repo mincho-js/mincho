@@ -60,3 +60,9 @@ export type {
 } from "./theme/types.js";
 export { cx } from "./classname/index.js";
 export type { ClassValue } from "./classname/index.js";
+export { defineRules } from "./defineRules/index.js";
+export type {
+  DefineRulesCtx,
+  DefineRulesCssInput,
+  DefineRulesComplexCssInput
+} from "./defineRules/types.js";
