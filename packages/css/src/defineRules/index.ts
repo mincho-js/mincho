@@ -125,6 +125,17 @@ function applyProperty<
 ) {
   const propDef = ctx.properties?.[prop as keyof Properties];
 
+  if (typeof propDef === "function") {
+    const result = propDef(value);
+    if (isPlainObject(result)) {
+      Object.assign(out, result);
+      return;
+    } else {
+      (out as Record<string, unknown>)[prop] = result;
+      return;
+    }
+  }
+
   // just assign => last one wins
   if (isPlainObject(propDef) === false) {
     (out as Record<string, unknown>)[prop] = value;
@@ -178,13 +189,12 @@ function applyShortcut<
     return;
   }
 
-  // TODO: fn shortcut support
-  // if (typeof def === "function") {
-  //   // fn shortcut
-  //   const produced = def(value);
-  //   applyInput(ctx, out, produced, nextStack);
-  //   return;
-  // }
+  if (typeof def === "function") {
+    // fn shortcut
+    const produced = def(value);
+    applyInput(ctx, out, produced, nextStack);
+    return;
+  }
 
   if (isPlainObject(def)) {
     // fixed style shortcut
@@ -293,6 +303,42 @@ if (import.meta.vitest) {
         });
 
         expect(css.raw({ margin: 8 })).toEqual({ margin: 8 });
+      });
+
+      it("Function values for CSS properties", () => {
+        const { css } = defineRules({
+          properties: {
+            color(arg: "primary" | "secondary") {
+              if (arg === "primary") {
+                return "blue";
+              } else {
+                return "gray";
+              }
+            },
+            otherColor(arg: "primary" | "secondary") {
+              if (arg === "primary") {
+                return { color: "red" } as const;
+              } else {
+                return { color: "green" } as const;
+              }
+            }
+          }
+        });
+
+        expect(
+          css.raw({
+            color: "primary"
+          })
+        ).toEqual({
+          color: "blue"
+        });
+        expect(
+          css.raw({
+            otherColor: "secondary"
+          })
+        ).toEqual({
+          color: "green"
+        });
       });
 
       it("Last one wins for properties", () => {
@@ -460,6 +506,31 @@ if (import.meta.vitest) {
         });
         expect(css.raw([{ display: "none" }, "inline"])).toEqual({
           display: "inline"
+        });
+      });
+
+      it("Function shortcut", () => {
+        const { css } = defineRules({
+          properties: {
+            display: ["none", "inline", "block"],
+            paddingLeft: [0, 4, 8],
+            paddingRight: [0, 4, 8]
+          },
+          shortcuts: {
+            px: ["paddingLeft", "paddingRight"],
+            center(arg: "none" | "inline" | "block") {
+              return {
+                display: arg,
+                px: 4
+              } as const;
+            }
+          }
+        });
+
+        expect(css.raw({ center: "inline" })).toEqual({
+          display: "inline",
+          paddingLeft: 4,
+          paddingRight: 4
         });
       });
     });

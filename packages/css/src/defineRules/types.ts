@@ -6,17 +6,29 @@ import type {
 
 type CSSPropertiesKeys = keyof CSSProperties;
 
+type DefineRulesResolver<
+  Out = CSSPropertiesWithVars | undefined,
+  Arg = unknown
+> = {
+  bivarianceHack(arg: Arg): Out;
+}["bivarianceHack"];
+
 type DefineRulesCssProperties = {
-  [Property in CSSPropertiesKeys]?:
-    | ReadonlyArray<CSSProperties[Property]>
-    | Record<string, CSSProperties[Property] | CSSPropertiesWithVars>
-    | true
-    | false;
+  [Property in CSSPropertiesKeys]?: DefineRulesCssPropertiesValue<
+    CSSProperties[Property]
+  >;
 };
+type DefineRulesCssPropertiesValue<Value> =
+  | ReadonlyArray<Value>
+  | Record<string, Value | CSSPropertiesWithVars>
+  | DefineRulesResolver<Value>
+  | true
+  | false;
+
 type DefineRulesCustomProperties = Partial<
   Record<
     Exclude<NonNullableString, CSSPropertiesKeys>,
-    Record<string, CSSPropertiesWithVars>
+    Record<string, CSSPropertiesWithVars> | DefineRulesResolver
   >
 >;
 export type DefineRulesProperties =
@@ -31,7 +43,8 @@ type ShortcutValue<
   | keyof Properties
   | Exclude<keyof Shortcuts, ShortcutsKey>
   | ReadonlyArray<keyof Properties | Exclude<keyof Shortcuts, ShortcutsKey>>
-  | DefineRulesCssInput<Properties, Shortcuts>;
+  | DefineRulesCssInput<Properties, Shortcuts>
+  | DefineRulesResolver<DefineRulesCssInput<Properties, Shortcuts>>;
 
 export type DefineRulesShortcuts<
   Properties extends DefineRulesProperties,
@@ -59,15 +72,17 @@ type PropertiesInput<Properties extends DefineRulesProperties> = {
 type ResolvePropertiesValue<Key, Value> =
   Value extends ReadonlyArray<infer Item>
     ? Item
-    : true extends Value
-      ? Key extends CSSPropertiesKeys
-        ? CSSProperties[Key]
-        : never
-      : false extends Value
-        ? never
-        : Value extends Record<infer StyleObjectKey, unknown>
-          ? StyleObjectKey
-          : never;
+    : Value extends (arg: infer Arg) => unknown
+      ? Arg
+      : true extends Value
+        ? Key extends CSSPropertiesKeys
+          ? CSSProperties[Key]
+          : never
+        : false extends Value
+          ? never
+          : Value extends Record<infer StyleObjectKey, unknown>
+            ? StyleObjectKey
+            : never;
 
 type ShortcutsInput<
   Properties extends Record<string, unknown>,
@@ -86,9 +101,11 @@ type ResolveShortcutValue<
   Value
 > = Value extends readonly unknown[]
   ? ResolveShortcutArrayRef<Properties, Shortcuts, Value>
-  : Value extends Record<string, unknown>
-    ? boolean
-    : ResolveShortcutRef<Properties, Shortcuts, Value>;
+  : Value extends (arg: infer Arg) => unknown
+    ? Arg
+    : Value extends Record<string, unknown>
+      ? boolean
+      : ResolveShortcutRef<Properties, Shortcuts, Value>;
 
 type ResolveShortcutArrayRef<
   Properties extends Record<string, unknown>,
@@ -295,6 +312,68 @@ if (import.meta.vitest) {
           backgroundOpacity: "quarter"
         });
       });
+
+      it("Function values return CSS properties", () => {
+        const { rules, _props } = resolveDefineRules({
+          properties: {
+            color(arg: "primary" | "secondary") {
+              if (arg === "primary") {
+                return { color: "blue" } as const;
+              } else {
+                return { color: "gray" } as const;
+              }
+            }
+          }
+        });
+        assertType<{
+          properties?: {
+            color: (arg: "primary" | "secondary") =>
+              | {
+                  color: string;
+                }
+              | undefined;
+          };
+        }>(rules);
+
+        assertType<typeof _props>({
+          color: "primary"
+        });
+      });
+
+      it("Function values return Style objects", () => {
+        const { rules, _props } = resolveDefineRules({
+          properties: {
+            color(arg: "primary" | "secondary") {
+              if (arg === "primary") {
+                return "blue";
+              } else {
+                return "gray";
+              }
+            },
+            otherColor(arg: "primary" | "secondary") {
+              if (arg === "primary") {
+                return { color: "red" } as const;
+              } else {
+                return { color: "green" } as const;
+              }
+            }
+          }
+        });
+        assertType<{
+          properties?: {
+            color: (arg: "primary" | "secondary") => "blue" | "gray";
+            otherColor: (arg: "primary" | "secondary") =>
+              | {
+                  color: string;
+                }
+              | undefined;
+          };
+        }>(rules);
+
+        assertType<typeof _props>({
+          color: "primary"
+        });
+      });
     });
 
     describe.concurrent("DefineRulesShortcuts Type", () => {
@@ -461,6 +540,49 @@ if (import.meta.vitest) {
           inline: true
         });
         assertType<typeof _props>(["inline"]);
+      });
+
+      it("Function shortcut", () => {
+        const { rules, _props } = resolveDefineRules({
+          properties: {
+            display: ["none", "inline", "block"],
+            paddingLeft: [0, 4, 8],
+            paddingRight: [0, 4, 8]
+          },
+          shortcuts: {
+            px: ["paddingLeft", "paddingRight"],
+            center(arg: "none" | "inline" | "block") {
+              return {
+                display: arg,
+                px: 4
+              } as const;
+            }
+          }
+        });
+        assertType<{
+          properties?: {
+            display: readonly ["none", "inline", "block"];
+            paddingLeft: readonly [0, 4, 8];
+            paddingRight: readonly [0, 4, 8];
+          };
+          shortcuts?: {
+            px: readonly ["paddingLeft", "paddingRight"];
+            center: (arg: "none" | "inline" | "block") =>
+              | {
+                  display: "none" | "inline" | "block";
+                  px: number;
+                }
+              | undefined;
+          };
+        }>(rules);
+
+        assertType<typeof _props>({
+          center: "inline"
+        });
+        assertType<typeof _props>({
+          // @ts-expect-error: invalid value
+          center: "flex"
+        });
       });
     });
 

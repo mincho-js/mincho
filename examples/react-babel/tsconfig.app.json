@@ -2,11 +2,7 @@
   "compilerOptions": {
     "target": "ES2020",
     "useDefineForClassFields": true,
-    "lib": [
-      "ES2020",
-      "DOM",
-      "DOM.Iterable"
-    ],
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
     "module": "ESNext",
     "skipLibCheck": true,
 
@@ -18,6 +14,7 @@
     "moduleDetection": "force",
     "noEmit": true,
     "jsx": "react-jsx",
+    "types": ["vitest/importMeta", "vite/client"],
 
     /* Linting */
     "strict": true,
@@ -36,7 +33,5 @@
 
     "tsBuildInfoFile": "./.cache/typescript/tsbuildinfo-app"
   },
-  "include": [
-    "src"
-  ]
+  "include": ["src"]
 }

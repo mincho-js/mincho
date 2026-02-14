@@ -2,4 +2,4 @@
 "@mincho-js/css": minor
 ---
 
-- `defineRules`: Properties and shorcuts
+- `defineRules`: Properties and shortcuts
