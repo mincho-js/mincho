@@ -20,7 +20,7 @@ import type {
   RefAttributes
 } from "react";
 
-import { tags, SupportedElements } from "./tags.js";
+import { tags, type SupportedElements } from "./tags.js";
 
 export { $$styled } from "./runtime.js";
 

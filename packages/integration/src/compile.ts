@@ -1,7 +1,7 @@
 import { basename, dirname, join } from "node:path";
 import * as fs from "node:fs";
 import { addFileScope, getPackageInfo } from "@vanilla-extract/integration";
-import defaultEsbuild, { PluginBuild } from "esbuild";
+import defaultEsbuild, { type PluginBuild } from "esbuild";
 import { transformSync } from "@babel/core";
 import { minchoStyledComponentPlugin } from "@mincho-js/babel";
 

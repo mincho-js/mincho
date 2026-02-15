@@ -1,6 +1,6 @@
-import { TransformOptions, transformFileAsync } from "@babel/core";
+import { type TransformOptions, transformFileAsync } from "@babel/core";
 import {
-  PluginOptions,
+  type PluginOptions,
   minchoBabelPlugin,
   minchoStyledComponentPlugin
 } from "@mincho-js/babel";

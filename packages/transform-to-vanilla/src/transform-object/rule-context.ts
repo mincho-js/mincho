@@ -1,9 +1,9 @@
 import { setFileScope } from "@vanilla-extract/css/fileScope";
-import { isRuleKey, atRuleKeyMerge } from "@/transform-keys/at-rules.js";
+import { isRuleKey, atRuleKeyMerge } from "../transform-keys/at-rules.js";
 import { initTransformContext } from "./index.js";
-import { mergeObject } from "@/utils/object.js";
+import { mergeObject } from "../utils/object.js";
 import type { StyleResult, AtRulesPrefix, TransformContext } from "./index.js";
-import type { VanillaStyleRuleValue } from "@/types/style-rule.js";
+import type { VanillaStyleRuleValue } from "../types/style-rule.js";
 
 const AT_RULE_ORDER: AtRulesPrefix[] = [
   "@layer",

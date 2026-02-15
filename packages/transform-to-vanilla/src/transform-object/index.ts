@@ -1,48 +1,54 @@
-import {
-  isSimplePseudoSelectorKey,
-  replacePseudoSelectors
-} from "@/transform-keys/simple-pseudo-selectors.js";
-import {
-  isSelectorsKey,
-  isComplexKey,
-  isSimpleSelectorKey,
-  nestedSelectorKey
-} from "@/transform-keys/complex-selectors.js";
-import {
-  isVarsKey,
-  isCSSVarKey,
-  isPureCSSVarKey,
-  replaceCSSVarKey
-} from "@/transform-keys/css-var.js";
-import { replaceCSSVar } from "@/transform-values/css-var.js";
-import {
-  isRuleKey,
-  atRuleKeyInfo,
-  anonymousKeyInfo,
-  atRuleKeyMerge
-} from "@/transform-keys/at-rules.js";
-import { removeMergeSymbol, mergeKeyInfo } from "@/transform-keys/merge-key.js";
-import { mergeToComma, mergeToSpace } from "@/transform-values/merge-values.js";
-import { simplyImportant } from "@/transform-values/simply-important.js";
-import { replacePropertyReference } from "@/transform-values/property-reference.js";
-import { isUppercase } from "@/utils/string.js";
-import { isEmptyObject, mergeObject } from "@/utils/object.js";
 import { keyframes, fontFace } from "@vanilla-extract/css";
 import { setFileScope } from "@vanilla-extract/css/fileScope";
+import type { Properties } from "@mincho-js/csstype";
 import {
   createNestedObject,
   createPathSetter,
   processNestedResult
 } from "./rule-context.js";
 import type { StyleRule } from "@vanilla-extract/css";
+import {
+  isSimplePseudoSelectorKey,
+  replacePseudoSelectors
+} from "../transform-keys/simple-pseudo-selectors.js";
+import {
+  isSelectorsKey,
+  isComplexKey,
+  isSimpleSelectorKey,
+  nestedSelectorKey
+} from "../transform-keys/complex-selectors.js";
+import {
+  isVarsKey,
+  isCSSVarKey,
+  isPureCSSVarKey,
+  replaceCSSVarKey
+} from "../transform-keys/css-var.js";
+import { replaceCSSVar } from "../transform-values/css-var.js";
+import {
+  isRuleKey,
+  atRuleKeyInfo,
+  anonymousKeyInfo,
+  atRuleKeyMerge
+} from "../transform-keys/at-rules.js";
+import {
+  removeMergeSymbol,
+  mergeKeyInfo
+} from "../transform-keys/merge-key.js";
+import {
+  mergeToComma,
+  mergeToSpace
+} from "../transform-values/merge-values.js";
+import { simplyImportant } from "../transform-values/simply-important.js";
+import { replacePropertyReference } from "../transform-values/property-reference.js";
+import { isUppercase } from "../utils/string.js";
+import { isEmptyObject, mergeObject } from "../utils/object.js";
 import type {
   CSSRule,
   CSSRuleKey,
   CSSRuleValue,
   VanillaStyleRuleValue,
   AtRulesKeywords
-} from "@/types/style-rule.js";
-import type { Properties } from "@mincho-js/csstype";
+} from "../types/style-rule.js";
 
 // == Interface ================================================================
 export type StyleResult = {

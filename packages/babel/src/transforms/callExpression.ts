@@ -1,10 +1,10 @@
-import type { ProgramScope } from "@/types.js";
+import { NodePath, types as t } from "@babel/core";
+import type { ProgramScope } from "../types.js";
 import {
   extractionAPIs,
   getNearestIdentifier,
   registerImportMethod
-} from "@/utils.js";
-import { NodePath, types as t } from "@babel/core";
+} from "../utils.js";
 
 /**
  * Transforms a call expression to import the CSS

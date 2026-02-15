@@ -2,7 +2,7 @@ import {
   initTransformContext,
   type TransformContext,
   type StyleResult
-} from "@/transform-object/index.js";
+} from "./index.js";
 
 // == Interface ================================================================
 const VARIANT_REFERENCE_REGEX = /\B%[\w\-_]+/g;

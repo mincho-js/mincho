@@ -1,6 +1,6 @@
-import type { ProgramScope } from "@/types.js";
 import { NodePath, types as t } from "@babel/core";
 import hash from "@emotion/hash";
+import type { ProgramScope } from "../types.js";
 
 /**
  * Process the program before Babel applies transformations

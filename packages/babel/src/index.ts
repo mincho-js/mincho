@@ -1,9 +1,9 @@
-import { PluginObj, transformSync } from "@babel/core";
-import { transformCallExpression } from "@/transforms/callExpression.js";
-import postprocess from "@/transforms/postprocess.js";
-import preprocess from "@/transforms/preprocess.js";
-import { PluginOptions, PluginState } from "@/types.js";
-import { styledComponentPlugin } from "@/styled.js";
+import { type PluginObj, transformSync } from "@babel/core";
+import { transformCallExpression } from "./transforms/callExpression.js";
+import postprocess from "./transforms/postprocess.js";
+import preprocess from "./transforms/preprocess.js";
+import type { PluginOptions, PluginState } from "./types.js";
+import { styledComponentPlugin } from "./styled.js";
 
 export function minchoBabelPlugin(): PluginObj<PluginState> {
   return {
@@ -18,8 +18,8 @@ export function minchoBabelPlugin(): PluginObj<PluginState> {
   };
 }
 
-export { styledComponentPlugin as minchoStyledComponentPlugin } from "@/styled.js";
-export type { PluginOptions } from "@/types.js";
+export { styledComponentPlugin as minchoStyledComponentPlugin } from "./styled.js";
+export type { PluginOptions } from "./types.js";
 
 // == Tests ====================================================================
 // Ignore errors when compiling to CommonJS.

@@ -1,4 +1,4 @@
-import {
+import type {
   ComplexPropDefinitions,
   PropTarget,
   RuntimeFn,
@@ -6,10 +6,10 @@ import {
   VariantObjectSelection
 } from "@mincho-js/css";
 import {
-  ComponentProps,
-  ComponentType,
+  type ComponentProps,
+  type ComponentType,
+  type ElementType,
   createElement,
-  ElementType,
   forwardRef,
   useMemo
 } from "react";

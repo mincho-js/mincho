@@ -183,7 +183,7 @@ if (import.meta.vitest) {
       } satisfies Record<string, StyleRule>);
 
       const { replaceVariantReference } =
-        await import("@/transform-object/variant-reference.js");
+        await import("./transform-object/variant-reference.js");
       context.variantMap = {
         "%someVariant": ".myClass"
       };
@@ -267,7 +267,7 @@ if (import.meta.vitest) {
       } satisfies Record<string, StyleRule>);
 
       const { replaceVariantReference } =
-        await import("@/transform-object/variant-reference.js");
+        await import("./transform-object/variant-reference.js");
       context.variantMap = {
         "%someVariant": ".myClass"
       };
