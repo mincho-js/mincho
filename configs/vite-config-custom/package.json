@@ -27,7 +27,7 @@
     "vite-config-builder": "^0.1.1",
     "vite-plugin-dts-build": "^0.2.2",
     "vite-plugin-externalize-deps": "^0.10.0",
-    "vite-tsconfig-paths": "^6.0.4"
+    "vite-tsconfig-paths": "^6.0.5"
   },
   "dependencies": {
     "typescript": "^5.9.3",
