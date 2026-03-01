@@ -1,6 +1,6 @@
 # Define Rules
 
-`defineRules()` is a high-order definition API that creates constrained versions of `cx`, `cva`, `css`, and `rules` functions with property constraints, shortcuts, and conditions.
+`defineRules()` is a high-order definition API that creates constrained style functions with property constraints and shortcuts.
 
 ## Overview
 
@@ -8,93 +8,343 @@ This API enables:
 
 - **Property constraints**: Limit which CSS properties and values can be used
 - **Shortcuts**: Create Tailwind-like shorthand utilities
-- **Conditions**: Define responsive and state-based style conditions
-- **Theme integration**: Connect with design tokens from `theme()`
-- **Class name merging**: Intelligent merging like tailwind-merge
-
----
-
-## Coming Soon
-
-This entire API is currently in the RFC (Request for Comments) stage and not yet implemented. The following sections describe the planned API design.
-
----
-
-## Property Constraints (Coming Soon)
-
-Constrain the CSS properties and values that can be used:
+- **Type safety**: Full TypeScript inference for constrained values
 
 ```typescript
-// Future API (not yet available)
-const { cx, cva, css, rules } = defineRules({
-  properties: {
-    // Allow only values in arrays
-    display: ['none', 'inline', 'flex'],
-    paddingLeft: [0, 2, 4, 8, 16, 32, 64],
-    paddingRight: [0, 2, 4, 8, 16, 32, 64],
+import { defineRules } from '@mincho-js/css';
 
-    // Allow only values in objects
-    color: { 'indigo-800': 'rgb(55, 48, 163)' },
-
-    // Entire properties
-    background: true,  // All values allowed
-    border: false      // Property disabled
-  }
-});
-
-// Usage
-css({
-  display: 'inline',     // Only these values allowed
-  paddingLeft: 8,        // Only these values allowed
-  color: 'indigo-800',   // Only these values allowed
-  background: 'red'      // All values allowed
-});
-```
-
-## Shortcuts (Coming Soon)
-
-Create Tailwind/UnoCSS-like shorthand utilities:
-
-```typescript
-// Future API
-const { cx, css, rules } = defineRules({
+const { css } = defineRules({
   properties: {
     display: ['none', 'inline', 'flex'],
-    paddingLeft: [0, 2, 4, 8, 16, 32, 64],
-    paddingRight: [0, 2, 4, 8, 16, 32, 64],
-    justifyContent: true,
-    alignItems: true
+    paddingLeft: [0, 4, 8, 16, 32],
+    paddingRight: [0, 4, 8, 16, 32],
   },
   shortcuts: {
-    // Define only property
     pl: 'paddingLeft',
     pr: 'paddingRight',
-
-    // Define multiple properties
     px: ['pl', 'pr'],
-
-    // Define with functional value
-    align(value: string) {
-      const [justify, items] = value.split('-');
-      return {
-        display: 'flex',
-        justifyContent: justify,
-        alignItems: items || justify
-      };
-    },
-
-    // Define with fixed value
     inline: { display: 'inline' }
   }
 });
 
-// Usage
-css(['inline', { px: 8 }]);
-// => { display: 'inline', paddingLeft: 8, paddingRight: 8 }
+css.raw({ px: 8, display: 'flex' });
+// => { paddingLeft: 8, paddingRight: 8, display: 'flex' }
 
-css({ align: 'center' });
-// => { display: 'flex', justifyContent: 'center', alignItems: 'center' }
+css.raw('inline');
+// => { display: 'inline' }
 ```
+
+---
+
+## Property Constraints
+
+Constrain the CSS properties and values that can be used:
+
+### Array Values
+
+Limit a property to specific values:
+
+```typescript
+const { css } = defineRules({
+  properties: {
+    display: ['none', 'inline', 'block'],
+    paddingLeft: [0, 2, 4, 8, 16, 32, 64]
+  }
+});
+
+css.raw({
+  display: 'inline',   // ✅ Allowed
+  paddingLeft: 4        // ✅ Allowed
+});
+
+css.raw({
+  display: 'flex',      // ❌ Type error: not in allowed values
+  paddingLeft: 5        // ❌ Type error: not in allowed values
+});
+```
+
+### Object Values
+
+Map token names to CSS values:
+
+```typescript
+const { css } = defineRules({
+  properties: {
+    color: {
+      'indigo-800': 'rgb(55, 48, 163)',
+      'red-500': 'rgb(239, 68, 68)'
+    }
+  }
+});
+
+css.raw({ color: 'indigo-800' });
+// => { color: 'rgb(55, 48, 163)' }
+```
+
+Object values can also map to complex style objects with CSS variables:
+
+```typescript
+const alpha = '--alpha';
+const { css } = defineRules({
+  properties: {
+    background: {
+      red: {
+        vars: { [alpha]: '1' },
+        background: `rgba(255, 0, 0, var(${alpha}))`
+      }
+    }
+  }
+});
+
+css.raw({ background: 'red' });
+// => { vars: { '--alpha': '1' }, background: 'rgba(255, 0, 0, var(--alpha))' }
+```
+
+### Boolean Values
+
+Enable or disable entire properties:
+
+```typescript
+const { css } = defineRules({
+  properties: {
+    margin: true,   // All CSS margin values allowed
+    border: false   // Property disabled entirely
+  }
+});
+
+css.raw({ margin: 8 });        // ✅ Any value works
+css.raw({ border: '1px' });    // ❌ Type error: property is disabled
+```
+
+### Function Values
+
+Use functions for dynamic property resolution:
+
+```typescript
+const { css } = defineRules({
+  properties: {
+    color(arg: 'primary' | 'secondary') {
+      if (arg === 'primary') return 'blue';
+      return 'gray';
+    }
+  }
+});
+
+css.raw({ color: 'primary' });
+// => { color: 'blue' }
+```
+
+Functions can also return style objects to set multiple properties:
+
+```typescript
+const { css } = defineRules({
+  properties: {
+    otherColor(arg: 'primary' | 'secondary') {
+      if (arg === 'primary') return { color: 'red' } as const;
+      return { color: 'green' } as const;
+    }
+  }
+});
+
+css.raw({ otherColor: 'secondary' });
+// => { color: 'green' }
+```
+
+### Custom Properties
+
+Define non-standard properties that map to style objects:
+
+```typescript
+const alpha = '--alpha';
+const { css } = defineRules({
+  properties: {
+    backgroundOpacity: {
+      full: { vars: { [alpha]: '1' } },
+      half: { vars: { [alpha]: '0.5' } }
+    }
+  }
+});
+
+css.raw({ backgroundOpacity: 'half' });
+// => { vars: { '--alpha': '0.5' } }
+```
+
+---
+
+## Shortcuts
+
+Create Tailwind/UnoCSS-like shorthand utilities.
+
+### Single Property Shortcut
+
+Alias one property to another name:
+
+```typescript
+const { css } = defineRules({
+  properties: {
+    paddingLeft: [0, 4, 8],
+    paddingRight: [0, 4, 8]
+  },
+  shortcuts: {
+    pl: 'paddingLeft',
+    pr: 'paddingRight'
+  }
+});
+
+css.raw({ pl: 4, pr: 8 });
+// => { paddingLeft: 4, paddingRight: 8 }
+```
+
+### Multi-Property Shortcut
+
+Map one shortcut to multiple properties:
+
+```typescript
+const { css } = defineRules({
+  properties: {
+    paddingLeft: [0, 4, 8],
+    paddingRight: [0, 4, 8]
+  },
+  shortcuts: {
+    px: ['paddingLeft', 'paddingRight']
+  }
+});
+
+css.raw({ px: 4 });
+// => { paddingLeft: 4, paddingRight: 4 }
+```
+
+### Nested Shortcut References
+
+Shortcuts can reference other shortcuts, enabling layered abstractions:
+
+```typescript
+const { css } = defineRules({
+  properties: {
+    paddingTop: [0, 4, 8],
+    paddingBottom: [0, 4, 8],
+    paddingLeft: [0, 4, 8],
+    paddingRight: [0, 4, 8]
+  },
+  shortcuts: {
+    pt: 'paddingTop',
+    pb: 'paddingBottom',
+    pl: 'paddingLeft',
+    pr: 'paddingRight',
+    py: ['pt', 'pb'],
+    px: ['pl', 'pr'],
+    p: ['py', 'px']      // References px and py
+  }
+});
+
+css.raw({ p: 4 });
+// => { paddingTop: 4, paddingBottom: 4, paddingLeft: 4, paddingRight: 4 }
+
+// More specific shortcuts override less specific ones (last wins)
+css.raw({ p: 4, px: 8, pl: 0 });
+// => { paddingTop: 4, paddingBottom: 4, paddingLeft: 0, paddingRight: 8 }
+```
+
+### Fixed Object Shortcut
+
+Define shortcuts as fixed style objects. These can be used as string tokens, boolean flags, or array items:
+
+```typescript
+const { css } = defineRules({
+  properties: {
+    display: ['none', 'inline', 'block']
+  },
+  shortcuts: {
+    inline: { display: 'inline' }
+  }
+});
+
+// All equivalent:
+css.raw('inline');
+css.raw({ inline: true });
+css.raw(['inline']);
+// => { display: 'inline' }
+
+// Composable with other styles
+css.raw(['inline', { display: 'none' }]);
+// => { display: 'none' }  (last wins)
+```
+
+### Function Shortcut
+
+Use functions for complex shortcut logic. Function shortcuts can reference other shortcuts and properties:
+
+```typescript
+const { css } = defineRules({
+  properties: {
+    display: ['none', 'inline', 'block'],
+    paddingLeft: [0, 4, 8],
+    paddingRight: [0, 4, 8]
+  },
+  shortcuts: {
+    px: ['paddingLeft', 'paddingRight'],
+    center(arg: 'none' | 'inline' | 'block') {
+      return {
+        display: arg,
+        px: 4             // Can reference other shortcuts
+      } as const;
+    }
+  }
+});
+
+css.raw({ center: 'inline' });
+// => { display: 'inline', paddingLeft: 4, paddingRight: 4 }
+```
+
+### Circular Reference Detection
+
+Circular shortcut references are detected at runtime and throw an error:
+
+```typescript
+const { css } = defineRules({
+  properties: { paddingLeft: [0, 4, 8] },
+  shortcuts: {
+    a: 'b',   // a -> b -> a: circular!
+    b: 'a'
+  }
+});
+
+css.raw({ a: 4 });
+// Error: Circular shortcut reference: a -> b -> a
+```
+
+---
+
+## Input Formats
+
+`css.raw()` accepts multiple input formats:
+
+```typescript
+const { css } = defineRules({
+  properties: {
+    display: ['none', 'inline', 'flex'],
+    paddingLeft: [0, 4, 8]
+  },
+  shortcuts: {
+    pl: 'paddingLeft',
+    inline: { display: 'inline' }
+  }
+});
+
+// Object input
+css.raw({ display: 'flex', pl: 4 });
+
+// String input (fixed shortcuts only)
+css.raw('inline');
+
+// Array input (compose multiple styles)
+css.raw(['inline', { pl: 8 }]);
+
+// Nested arrays
+css.raw([{ display: 'flex' }, [{ pl: 4 }]]);
+```
+
+---
 
 ## Conditions (Coming Soon)
 
@@ -317,7 +567,7 @@ presets.registerClassNames();  // Avoid duplicate class names
 
 ### Presets
 
-Once `defineRules()` is implemented, presets for common frameworks will be developed:
+Presets for common frameworks will be developed:
 
 - Tailwind CSS preset
 - DaisyUI preset
