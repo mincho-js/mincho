@@ -40,6 +40,9 @@
     },
     {
       "path": "./tsconfig.node.json"
+    },
+    {
+      "path": "site"
     }
   ]
 }

@@ -227,3 +227,7 @@ Temporary Items
 
 # Built Visual Studio Code Extensions
 *.vsix
+
+# Temporary planning files (to be removed later)
+CLAUDE.md
+reference/*

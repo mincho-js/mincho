@@ -1,0 +1,544 @@
+# Rules
+
+The `rules()` function provides dynamic styling capabilities through variants, toggles, and props. It combines the pattern-matching power of [Stitches variants](https://stitches.dev/docs/variants) with the static extraction of Vanilla Extract.
+
+## Overview
+
+While `css()` creates static styles, `rules()` creates a function that returns different class names based on the provided options:
+
+```ts
+import { rules } from '@mincho-js/css'
+
+const button = rules({
+  padding: 12,
+  backgroundColor: 'blue',
+  color: 'white',
+
+  variants: {
+    size: {
+      small: { padding: 8 },
+      large: { padding: 16 }
+    }
+  }
+})
+
+// Usage
+button()                    // base styles
+button({ size: 'small' })   // base + small variant
+button({ size: 'large' })   // base + large variant
+```
+
+## Basic Usage
+
+Define styles using an object, similar to `css()`. The `rules()` function returns a callable that generates class names.
+
+```ts
+const myRule = rules({
+  color: 'blue',
+  backgroundColor: 'white',
+  borderRadius: 6
+})
+```
+
+```css
+/* Generated CSS */
+.[FILE_NAME]_myRule__[HASH] {
+  color: blue;
+  background-color: white;
+  border-radius: 6px;
+}
+```
+
+Use it in your component:
+
+```tsx
+function MyComponent() {
+  return <div className={myRule()}>Content</div>
+}
+```
+
+### Base Field
+
+For compatibility with Vanilla Extract recipes, you can use the `base` field:
+
+```ts
+const myRule = rules({
+  base: {
+    color: 'blue',
+    backgroundColor: 'white'
+  }
+})
+```
+
+When both flatten styles and `base` are used together, `base` takes higher priority:
+
+```ts
+const myRule = rules({
+  color: 'red',        // overridden
+  base: {
+    color: 'blue'      // this wins
+  }
+})
+```
+
+## Variants
+
+Define multiple style variations that can be selected at runtime. Each variant group contains named options.
+
+```ts
+const button = rules({
+  padding: 12,
+  borderRadius: 6,
+
+  variants: {
+    color: {
+      brand: {
+        color: '#FFFFA0',
+        backgroundColor: 'blueviolet'
+      },
+      accent: {
+        color: '#FFE4B5',
+        backgroundColor: 'slateblue'
+      }
+    },
+    size: {
+      small: { padding: 8, fontSize: 12 },
+      medium: { padding: 12, fontSize: 14 },
+      large: { padding: 16, fontSize: 16 }
+    }
+  }
+})
+```
+
+```css
+/* Generated CSS */
+.[FILE_NAME]_button__[HASH] {
+  padding: 12px;
+  border-radius: 6px;
+}
+
+.[FILE_NAME]_button_color_brand__[HASH] {
+  color: #FFFFA0;
+  background-color: blueviolet;
+}
+.[FILE_NAME]_button_color_accent__[HASH] {
+  color: #FFE4B5;
+  background-color: slateblue;
+}
+
+.[FILE_NAME]_button_size_small__[HASH] { ... }
+.[FILE_NAME]_button_size_medium__[HASH] { ... }
+.[FILE_NAME]_button_size_large__[HASH] { ... }
+```
+
+Select variants by passing an object:
+
+```ts
+button({ color: 'brand', size: 'large' })
+```
+
+### Boolean Variants
+
+For boolean-like variants, use `true` and `false` as keys:
+
+```ts
+const button = rules({
+  variants: {
+    outlined: {
+      true: { border: '1px solid black' },
+      false: { border: '1px solid transparent' }
+    }
+  }
+})
+
+button({ outlined: true })
+button({ outlined: false })
+```
+
+## Toggle Variants
+
+Toggle variants simplify boolean-only variants. Use the `toggles` field for cleaner syntax:
+
+```ts
+// Instead of this:
+const button = rules({
+  variants: {
+    rounded: {
+      true: { borderRadius: 999 }
+    }
+  }
+})
+
+// Use this:
+const button = rules({
+  toggles: {
+    rounded: { borderRadius: 999 },
+    disabled: { opacity: 0.5, pointerEvents: 'none' }
+  }
+})
+```
+
+Toggle variants can be activated using an array syntax:
+
+```ts
+// Object syntax
+button({ rounded: true, disabled: true })
+
+// Array syntax (cleaner for toggles)
+button(['rounded', 'disabled'])
+
+// Mixed syntax
+button(['rounded', { size: 'large' }])
+```
+
+## Default Variants
+
+Set default values for variants using `defaultVariants`:
+
+```ts
+const button = rules({
+  variants: {
+    color: {
+      brand: { backgroundColor: 'blueviolet' },
+      accent: { backgroundColor: 'slateblue' }
+    },
+    size: {
+      small: { padding: 8 },
+      medium: { padding: 12 },
+      large: { padding: 16 }
+    }
+  },
+  defaultVariants: {
+    color: 'brand',
+    size: 'medium'
+  }
+})
+
+button()  // Applies brand color and medium size
+button({ size: 'large' })  // Applies brand color (default) and large size
+```
+
+For toggle variants, use an array:
+
+```ts
+const button = rules({
+  toggles: {
+    rounded: { borderRadius: 999 },
+    disabled: { opacity: 0.5 }
+  },
+  defaultVariants: ['rounded']  // rounded is true by default
+})
+```
+
+## Compound Variants
+
+Apply additional styles when specific variant combinations are matched:
+
+```ts
+const button = rules({
+  variants: {
+    color: {
+      brand: { color: '#FFFFA0' },
+      accent: { color: '#FFE4B5' }
+    },
+    size: {
+      small: { padding: 8 },
+      medium: { padding: 12 },
+      large: { padding: 16 }
+    },
+    outlined: {
+      true: { border: '1px solid' },
+      false: { border: 'none' }
+    }
+  },
+
+  compoundVariants: ({ color, size, outlined }) => [
+    {
+      condition: [color.brand, size.small],
+      style: { fontSize: 14 }
+    },
+    {
+      condition: [outlined.true, color.accent],
+      style: { borderColor: 'slateblue' }
+    }
+  ]
+})
+```
+
+The `compoundVariants` function receives variant condition objects and returns an array of compound rules. Each rule specifies:
+- `condition`: Array of variant conditions to match
+- `style`: Additional styles to apply when all conditions match
+
+```ts
+// This will apply the compound style for [color.brand, size.small]
+button({ color: 'brand', size: 'small' })
+```
+
+## Props
+
+Props allow truly dynamic values using CSS Variables. Unlike variants which are predefined, props can accept any value at runtime.
+
+### Simple Props
+
+Use an array of property names to create CSS Variable bindings:
+
+```ts
+const box = rules({
+  props: ['color', 'backgroundColor']
+})
+```
+
+```css
+/* Generated CSS */
+.[FILE_NAME]_box__[HASH] {
+  color: var(--[FILE_NAME]_box_color__[HASH]);
+  background-color: var(--[FILE_NAME]_box_backgroundColor__[HASH]);
+}
+```
+
+Use `result.props()` to generate inline style variables:
+
+```tsx
+import { box } from './styles.css'
+
+function Box({ textColor, bgColor }) {
+  return (
+    <div
+      className={box()}
+      style={box.props({ color: textColor, backgroundColor: bgColor })}
+    >
+      Content
+    </div>
+  )
+}
+```
+
+### Props with Targets
+
+Map a single prop to multiple CSS properties:
+
+```ts
+const box = rules({
+  props: {
+    size: { targets: ['padding', 'margin'] },
+    radius: { targets: ['borderRadius'] }
+  }
+})
+```
+
+```css
+/* Generated CSS */
+.[FILE_NAME]_box__[HASH] {
+  padding: var(--[FILE_NAME]_box_size__[HASH]);
+  margin: var(--[FILE_NAME]_box_size__[HASH]);
+  border-radius: var(--[FILE_NAME]_box_radius__[HASH]);
+}
+```
+
+### Props with Default Values
+
+Set fallback values using `base`:
+
+```ts
+const box = rules({
+  props: {
+    size: { base: '1rem', targets: ['padding', 'margin'] },
+    radius: { base: 0, targets: ['borderRadius'] }
+  }
+})
+```
+
+```css
+/* Generated CSS */
+.[FILE_NAME]_box__[HASH] {
+  padding: var(--[FILE_NAME]_box_size__[HASH], 1rem);
+  margin: var(--[FILE_NAME]_box_size__[HASH], 1rem);
+  border-radius: var(--[FILE_NAME]_box_radius__[HASH], 0);
+}
+```
+
+### Mixed Props
+
+Combine simple and complex prop definitions:
+
+```ts
+const box = rules({
+  props: [
+    'color',
+    'backgroundColor',
+    {
+      size: { base: '1rem', targets: ['padding', 'margin'] }
+    }
+  ]
+})
+```
+
+## Multiple Rules
+
+Create multiple related rules at once using `rules.multiple()`:
+
+```ts
+const components = rules.multiple({
+  button: {
+    padding: 12,
+    variants: {
+      variant: {
+        primary: { backgroundColor: 'blue' },
+        secondary: { backgroundColor: 'gray' }
+      }
+    }
+  },
+  input: {
+    padding: 8,
+    variants: {
+      state: {
+        error: { borderColor: 'red' },
+        success: { borderColor: 'green' }
+      }
+    }
+  }
+})
+
+// Usage
+components.button({ variant: 'primary' })
+components.input({ state: 'error' })
+```
+
+## Type Constraints
+
+Use `rules.with()` to create rules with constrained input types:
+
+```ts
+const themeRule = rules.with<{ bg: string; text: string }>(
+  ({ bg, text }) => ({
+    backgroundColor: bg,
+    color: text,
+    variants: {
+      emphasis: {
+        subtle: { opacity: 0.7 },
+        strong: { fontWeight: 'bold' }
+      }
+    }
+  })
+)
+
+// Create themed variants
+const themes = themeRule.multiple({
+  light: { bg: '#ffffff', text: '#000000' },
+  dark: { bg: '#1a1a1a', text: '#ffffff' }
+})
+
+themes.light({ emphasis: 'strong' })
+themes.dark({ emphasis: 'subtle' })
+```
+
+## Raw Rules
+
+Use `rules.raw()` to get the rule object without processing:
+
+```ts
+const buttonOptions = rules.raw({
+  base: { padding: 12 },
+  variants: {
+    size: {
+      small: { padding: 8 },
+      large: { padding: 16 }
+    }
+  }
+})
+
+// Use later with rules()
+const button = rules(buttonOptions)
+```
+
+## Accessing Metadata
+
+The returned function provides metadata access:
+
+```ts
+const button = rules({
+  variants: {
+    color: { brand: {...}, accent: {...} },
+    size: { small: {...}, large: {...} }
+  }
+})
+
+// Get variant names
+button.variants()  // ['color', 'size']
+
+// Access class names directly
+button.classNames.base           // base class name
+button.classNames.variants.color.brand  // brand variant class name
+```
+
+## With css()
+
+Rules can be composed with `css()`:
+
+```ts
+const baseStyle = css({ color: 'red' })
+
+const myRule = rules({
+  backgroundColor: 'blue',
+  toggles: {
+    rounded: { borderRadius: 999 }
+  }
+})
+
+// Compose in css()
+const combined = css([baseStyle, myRule])  // Auto-evaluates myRule()
+```
+
+## Limitations
+
+Because rules are statically extracted at build time, some patterns are not supported:
+
+### No Conditional Props
+
+```ts
+// This won't work
+const box = rules((props) => ({
+  display: 'flex',
+  ...(props.vertical
+    ? { flexDirection: 'column' }
+    : { flexDirection: 'row' })
+}))
+```
+
+Use variants instead:
+
+```ts
+const box = rules({
+  display: 'flex',
+  variants: {
+    direction: {
+      vertical: { flexDirection: 'column' },
+      horizontal: { flexDirection: 'row' }
+    }
+  }
+})
+```
+
+### Runtime-Generated Styles
+
+For truly dynamic values, use props:
+
+```ts
+// styles.css.ts
+export const bubble = rules({
+  props: ['x', 'y']
+})
+
+// Component.tsx
+function Bubble() {
+  const x = Math.random() * 100
+  const y = Math.random() * 100
+
+  return (
+    <div
+      className={bubble()}
+      style={bubble.props({ x: `${x}%`, y: `${y}%` })}
+    />
+  )
+}
+```

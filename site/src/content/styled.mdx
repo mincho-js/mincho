@@ -1,0 +1,413 @@
+# Styled Components
+
+The `styled` API from `@mincho-js/react` is a component-based styling solution that enables developers to create type-safe, variant-driven React components with build-time CSS extraction.
+
+## Installation
+
+```bash
+npm install @mincho-js/react @mincho-js/css
+```
+
+You also need to configure the Babel plugin for build-time transformation:
+
+```bash
+npm install -D @mincho-js/babel
+```
+
+## Overview
+
+The `styled` function creates React components with associated styles that are extracted at build time. This provides:
+
+- **Zero runtime overhead**: CSS is extracted during build, not injected at runtime
+- **Type-safe variants**: Full TypeScript inference for variant props
+- **Familiar API**: Similar to styled-components but with build-time extraction
+
+```tsx
+import { styled } from '@mincho-js/react';
+
+const Button = styled('button', {
+  base: {
+    padding: '10px 20px',
+    borderRadius: '4px',
+    fontWeight: 'bold',
+  },
+});
+
+// Usage
+<Button>Click me</Button>
+```
+
+## Basic Usage
+
+The `styled` function takes an element tag or component and a style configuration object:
+
+```tsx
+import { styled } from '@mincho-js/react';
+
+const Button = styled('button', {
+  base: {
+    padding: '10px 20px',
+    borderRadius: '4px',
+    fontWeight: 'bold',
+    border: 'none',
+    cursor: 'pointer',
+  },
+});
+```
+
+**Compiled CSS:**
+
+```css
+.Button__base__abc123 {
+  padding: 10px 20px;
+  border-radius: 4px;
+  font-weight: bold;
+  border: none;
+  cursor: pointer;
+}
+```
+
+## Alternative Syntax: styled.tagname
+
+Mincho supports both function call and property accessor syntax for creating styled components:
+
+```tsx
+import { styled } from '@mincho-js/react';
+
+// Function call syntax (primary approach)
+const Button = styled('button', {
+  base: {
+    padding: '10px 20px',
+    borderRadius: '4px',
+  },
+});
+
+// Property accessor syntax (styled-components-like)
+const Button = styled.button({
+  base: {
+    padding: '10px 20px',
+    borderRadius: '4px',
+  },
+});
+```
+
+Both syntaxes are **functionally equivalent** and compile to the same output.
+
+**When to use each syntax:**
+
+- **Function call** (`styled("button", ...)`): More explicit, better for dynamic tag names
+- **Property accessor** (`styled.button(...)`): More concise, familiar to styled-components users
+
+## Variants System
+
+Variants provide semantic alternatives for component styling:
+
+```tsx
+const Button = styled('button', {
+  base: {
+    padding: '10px 20px',
+    borderRadius: '4px',
+  },
+  variants: {
+    color: {
+      primary: { backgroundColor: 'blue', color: 'white' },
+      secondary: { backgroundColor: 'gray', color: 'black' },
+    },
+    size: {
+      small: { padding: '5px 10px', fontSize: '12px' },
+      large: { padding: '15px 30px', fontSize: '18px' },
+    },
+  },
+  defaultVariants: {
+    color: 'primary',
+    size: 'small',
+  },
+});
+
+// Usage with full TypeScript support
+<Button color="primary" size="large">
+  Submit
+</Button>
+```
+
+**Compiled CSS:**
+
+```css
+.Button__base__abc123 { /* base styles */ }
+.Button__color_primary__def456 { background-color: blue; color: white; }
+.Button__color_secondary__ghi789 { background-color: gray; color: black; }
+.Button__size_small__jkl012 { padding: 5px 10px; font-size: 12px; }
+.Button__size_large__mno345 { padding: 15px 30px; font-size: 18px; }
+```
+
+## Toggle Variants
+
+Boolean variants for on/off states:
+
+```tsx
+const Card = styled("div", {
+  base: {
+    padding: "20px",
+    backgroundColor: "white",
+  },
+  toggles: {
+    elevated: { boxShadow: "0 4px 6px rgba(0,0,0,0.1)" },
+    bordered: { border: "1px solid #ccc" },
+  }
+});
+
+// Usage
+<Card elevated bordered>Content</Card>
+
+// Or with explicit boolean
+<Card elevated={true} bordered={false}>Content</Card>
+```
+
+## Compound Variants
+
+Styles applied when multiple variants match:
+
+```tsx
+const Button = styled('button', {
+  base: { /* ... */ },
+  variants: {
+    color: {
+      primary: { backgroundColor: 'blue' },
+      danger: { backgroundColor: 'red' },
+    },
+    size: {
+      small: { padding: '5px 10px' },
+      large: { padding: '15px 30px' },
+    },
+  },
+  compoundVariants: [
+    {
+      variants: { color: 'danger', size: 'large' },
+      style: {
+        fontSize: '20px',
+        fontWeight: 'bold',
+        textTransform: 'uppercase',
+      },
+    },
+  ],
+});
+
+// The large danger button gets special styling
+<Button color="danger" size="large">
+  Delete All
+</Button>
+```
+
+## Component Composition
+
+Extend existing styled components:
+
+```tsx
+const BaseComponent = styled('div', {
+  base: {
+    fontWeight: 'bold',
+  },
+});
+
+const Container = styled(BaseComponent, {
+  base: {
+    backgroundColor: 'red',
+    padding: '20px',
+  },
+  variants: {
+    rounded: {
+      true: { borderRadius: '8px' },
+    },
+  },
+});
+
+// Container inherits BaseComponent's bold font weight
+<Container rounded>Styled Container</Container>
+```
+
+## Polymorphic Components
+
+Change the underlying element with the `as` prop:
+
+```tsx
+const Text = styled("span", {
+  base: {
+    fontFamily: "sans-serif",
+  },
+  variants: {
+    size: {
+      small: { fontSize: "12px" },
+      large: { fontSize: "18px" },
+    }
+  }
+});
+
+// Render as different elements
+<Text size="large">Default span</Text>
+<Text as="p" size="large">As paragraph</Text>
+<Text as="h1" size="large">As heading</Text>
+```
+
+TypeScript correctly infers the element type based on the `as` prop:
+
+```tsx
+<Text
+  as="a"
+  href="https://example.com"  // TypeScript knows this is valid for <a>
+  size="large"
+>
+  Link
+</Text>
+```
+
+## Dynamic Props
+
+Map React props to CSS custom properties for runtime values:
+
+```tsx
+const Box = styled('div', {
+  base: {
+    padding: '20px',
+  },
+  props: ['backgroundColor', 'color'],
+});
+
+// Runtime color customization
+<Box backgroundColor="purple" color="white">
+  Custom Colors
+</Box>
+```
+
+**Compiled CSS with CSS custom properties:**
+
+```css
+.Box__base__abc123 {
+  padding: 20px;
+  background-color: var(--backgroundColor__xyz);
+  color: var(--color__xyz);
+}
+```
+
+## Build-Time Transformation
+
+The Babel plugin transforms `styled` calls during build:
+
+```tsx
+// Input
+import { styled } from '@mincho-js/react';
+
+const Button = styled('button', {
+  base: { color: 'red' },
+});
+
+// Output (after Babel transformation)
+import { $$styled } from '@mincho-js/react/runtime';
+import { rules } from '@mincho-js/css';
+
+const Button = /* @__PURE__ */ $$styled(
+  'button',
+  rules({
+    base: { color: 'red' },
+  })
+);
+```
+
+The `@__PURE__` annotation enables tree-shaking for unused components.
+
+## Recipe Patterns
+
+Recipes are reusable style objects that can be used independently or composed into styled components:
+
+```tsx
+import { styled } from '@mincho-js/react';
+import { rules } from '@mincho-js/css';
+
+// Define a reusable recipe
+const buttonRecipe = rules({
+  base: {
+    padding: '10px 20px',
+    borderRadius: '4px',
+    fontWeight: 'bold',
+  },
+  variants: {
+    color: {
+      primary: { backgroundColor: 'blue', color: 'white' },
+      secondary: { backgroundColor: 'gray', color: 'black' },
+    },
+  },
+  defaultVariants: {
+    color: 'primary',
+  },
+});
+
+// Use in styled components
+const Button = styled('button', buttonRecipe);
+
+// Or use directly as className
+function DirectUsage() {
+  return (
+    <button className={buttonRecipe({ color: 'primary' })}>
+      Click me
+    </button>
+  );
+}
+```
+
+## CSS Nesting
+
+Styled components support CSS nesting for pseudo-selectors and child elements:
+
+```tsx
+const Button = styled('button', {
+  base: {
+    padding: '10px',
+    '&:hover': {
+      backgroundColor: 'blue',
+    },
+    '& > span': {
+      fontWeight: 'bold',
+    },
+  },
+});
+```
+
+## Media Queries
+
+Responsive styles with media queries:
+
+```tsx
+const Box = styled('div', {
+  base: {
+    padding: '10px',
+    '@media': {
+      'screen and (min-width: 768px)': {
+        padding: '20px',
+      },
+    },
+  },
+});
+```
+
+---
+
+## CSS Prop (Coming Soon)
+
+The `css` prop for ad-hoc styling is planned but not yet implemented:
+
+```tsx
+// Future API (not yet available)
+/** @jsxImportSource @mincho-js/react */
+
+function MyComponent() {
+  return (
+    <div css={{ padding: '20px', color: 'blue' }}>
+      Styled content
+    </div>
+  );
+}
+```
+
+This feature will enable:
+- Ad-hoc styling directly on JSX elements
+- Zero-runtime CSS extraction (like Emotion but build-time)
+- Array composition for multiple style objects
