@@ -20,14 +20,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Setup
+        uses: ./.github/actions/node-setup
         with:
-          node-version: "20"
-      - name: Enable Corepack
-        run: corepack enable
-      - name: Install dependencies
-        run: yarn install --immutable
+          strict: false
       - name: Build site
         run: yarn workspace mincho-docs build
       - name: Upload artifact
