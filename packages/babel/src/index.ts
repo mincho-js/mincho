@@ -45,7 +45,7 @@ if (import.meta.vitest) {
     return { result: options.result, code: result.code };
   }
 
-  describe.concurrent("minchoBabelPlugin", () => {
+  describe("minchoBabelPlugin", () => {
     it("export default style", () => {
       const { result, code } = babelTransform(`
         import { style } from "@mincho-js/css";

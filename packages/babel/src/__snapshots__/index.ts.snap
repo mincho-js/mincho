@@ -1,191 +1,8 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`minchoBabelPlugin > hoists array member 1`] = `
+exports[`minchoBabelPlugin > already exported 1`] = `
 [
-  "extracted_w4qxwb.css.ts",
-  "import { style } from "@mincho-js/css";
-export var _$mincho$$unknown = style({
-  color: "red"
-});
-var _$mincho$$unknown2 = _$mincho$$unknown;",
-]
-`;
-
-exports[`minchoBabelPlugin > hoists array member 2`] = `
-"import { _$mincho$$unknown as _$mincho$$unknown2 } from "extracted_w4qxwb.css.ts";
-import { style } from "@mincho-js/css";
-export default _$mincho$$unknown2;"
-`;
-
-exports[`minchoBabelPlugin > hoists array member 3`] = `
-[
-  "extracted_u92xlr.css.ts",
-  "import { style } from '@mincho-js/css';
-export var _$mincho$$App = style({
-  color: 'red'
-});
-var _$mincho$$App2 = _$mincho$$App;",
-]
-`;
-
-exports[`minchoBabelPlugin > hoists array member 4`] = `
-"import { _$mincho$$App as _$mincho$$App2 } from "extracted_u92xlr.css.ts";
-import { style } from '@mincho-js/css';
-function App() {
-  return <div class={_$mincho$$App2}>Hello</div>;
-}
-console.log(red);"
-`;
-
-exports[`minchoBabelPlugin > hoists array member 5`] = `
-[
-  "extracted_1czbiel.css.ts",
-  "import { style } from '@mincho-js/css';
-export var _$mincho$$str = style({
-  color: "red"
-});
-var _$mincho$$str2 = _$mincho$$str;",
-]
-`;
-
-exports[`minchoBabelPlugin > hoists array member 6`] = `
-"import { _$mincho$$str as _$mincho$$str2 } from "extracted_1czbiel.css.ts";
-import { style } from '@mincho-js/css';
-const str = \`abc \${_$mincho$$str2}\`;
-console.log(str);"
-`;
-
-exports[`minchoBabelPlugin > hoists array member 7`] = `
-[
-  "extracted_1ejonqt.css.ts",
-  "import { style } from '@mincho-js/css';
-export var _$mincho$$key = style({
-  color: "red"
-});
-var _$mincho$$key2 = _$mincho$$key;",
-]
-`;
-
-exports[`minchoBabelPlugin > hoists array member 8`] = `
-"import { _$mincho$$key as _$mincho$$key2 } from "extracted_1ejonqt.css.ts";
-import { style } from '@mincho-js/css';
-const obj = {
-  nested: {
-    key: _$mincho$$key2
-  }
-};
-console.log(obj);"
-`;
-
-exports[`minchoBabelPlugin > hoists array member 9`] = `
-[
-  "extracted_vj95yp.css.ts",
-  "import { style } from '@mincho-js/css';
-export var _$mincho$$arr = style({
-  color: "red"
-});
-var _$mincho$$arr2 = _$mincho$$arr;
-export var _$mincho$$arr3 = style({
-  color: "blue"
-});
-var _$mincho$$arr4 = _$mincho$$arr3;",
-]
-`;
-
-exports[`minchoBabelPlugin > hoists array member 10`] = `
-"import { _$mincho$$arr as _$mincho$$arr2, _$mincho$$arr3 as _$mincho$$arr4 } from "extracted_vj95yp.css.ts";
-import { style } from '@mincho-js/css';
-const arr = [1, 2, _$mincho$$arr2, 4, _$mincho$$arr4];
-console.log(arr);"
-`;
-
-exports[`minchoBabelPlugin > inside block scope 1`] = `
-[
-  "extracted_scbqxm.css.ts",
-  "import { style } from '@mincho-js/css';
-export var _$mincho$$red = style({
-  color: "red"
-});
-var _$mincho$$red2 = _$mincho$$red;",
-]
-`;
-
-exports[`minchoBabelPlugin > inside block scope 2`] = `
-"import { _$mincho$$red as _$mincho$$red2 } from "extracted_scbqxm.css.ts";
-import { style } from '@mincho-js/css';
-const red = _$mincho$$red2;
-console.log(red);"
-`;
-
-exports[`minchoBabelPlugin > inside block scope 3`] = `
-[
-  "extracted_10rbtgw.css.ts",
-  "import { mincho$ } from '@mincho-js/css';
-export var _$mincho$$red = mincho$(() => {
-  return 2 + 2;
-});
-var _$mincho$$red2 = _$mincho$$red;",
-]
-`;
-
-exports[`minchoBabelPlugin > inside block scope 4`] = `
-"import { _$mincho$$red as _$mincho$$red2 } from "extracted_10rbtgw.css.ts";
-import { mincho$ } from '@mincho-js/css';
-const red = _$mincho$$red2;
-console.log(red);"
-`;
-
-exports[`minchoBabelPlugin > inside block scope 5`] = `
-[
-  "extracted_qqccj2.css.ts",
-  "import { style } from '@mincho-js/css';
-export var _$mincho$$red = style({
-  color: 'red'
-});
-var _$mincho$$red2 = _$mincho$$red;
-export var _$mincho$$blue = style({
-  color: 'blue'
-});
-var _$mincho$$blue2 = _$mincho$$blue;
-export var _$mincho$$green = style({
-  color: 'green'
-});
-var _$mincho$$green2 = _$mincho$$green;",
-]
-`;
-
-exports[`minchoBabelPlugin > inside block scope 6`] = `
-"import { _$mincho$$red as _$mincho$$red2, _$mincho$$blue as _$mincho$$blue2, _$mincho$$green as _$mincho$$green2 } from "extracted_qqccj2.css.ts";
-import { style } from '@mincho-js/css';
-const red = _$mincho$$red2,
-  blue = _$mincho$$blue2,
-  green = _$mincho$$green2;
-console.log(red, blue, green);"
-`;
-
-exports[`minchoBabelPlugin > inside block scope 7`] = `
-[
-  "extracted_1ps44e0.css.ts",
-  "import { style } from '@mincho-js/css';
-const redColor = 'red';
-export var _$mincho$$red = style({
-  color: redColor
-});
-var _$mincho$$red2 = _$mincho$$red;",
-]
-`;
-
-exports[`minchoBabelPlugin > inside block scope 8`] = `
-"import { _$mincho$$red as _$mincho$$red2 } from "extracted_1ps44e0.css.ts";
-import { style } from '@mincho-js/css';
-const redColor = 'red';
-const red = _$mincho$$red2;
-console.log(red);"
-`;
-
-exports[`minchoBabelPlugin > inside block scope 9`] = `
-[
-  "extracted_tt1y80.css.ts",
+  "extracted_1etlg14.css.ts",
   "import { style } from '@mincho-js/css';
 export var _$mincho$$red = style({
   color: 'red'
@@ -194,33 +11,14 @@ var _$mincho$$red2 = _$mincho$$red;",
 ]
 `;
 
-exports[`minchoBabelPlugin > inside block scope 10`] = `
-"import { _$mincho$$red as _$mincho$$red2 } from "extracted_tt1y80.css.ts";
+exports[`minchoBabelPlugin > already exported 2`] = `
+"import { _$mincho$$red as _$mincho$$red2 } from "extracted_1etlg14.css.ts";
 import { style } from '@mincho-js/css';
-{
-  const red = _$mincho$$red2;
-  console.log(red);
-}"
+export const red = _$mincho$$red2;
+console.log(red);"
 `;
 
-exports[`minchoBabelPlugin > mincho-ignore on parent node 1`] = `
-[
-  "extracted_dk6d8j.css.ts",
-  "import { globalStyle } from '@mincho-js/css';
-export var _$mincho$$unknown = globalStyle('html, body', {
-  color: 'red'
-});
-var _$mincho$$unknown2 = _$mincho$$unknown;",
-]
-`;
-
-exports[`minchoBabelPlugin > mincho-ignore on parent node 2`] = `
-"import { _$mincho$$unknown as _$mincho$$unknown2 } from "extracted_dk6d8j.css.ts";
-import { globalStyle } from '@mincho-js/css';
-_$mincho$$unknown2;"
-`;
-
-exports[`minchoBabelPlugin > mincho-ignore on parent node 3`] = `
+exports[`minchoBabelPlugin > arrow function bindings 1`] = `
 [
   "extracted_3jiior.css.ts",
   "import { style } from '@mincho-js/css';
@@ -236,7 +34,7 @@ var _$mincho$$red2 = _$mincho$$red;",
 ]
 `;
 
-exports[`minchoBabelPlugin > mincho-ignore on parent node 4`] = `
+exports[`minchoBabelPlugin > arrow function bindings 2`] = `
 "import { _$mincho$$red as _$mincho$$red2 } from "extracted_3jiior.css.ts";
 import { style } from '@mincho-js/css';
 const utility = {
@@ -248,7 +46,7 @@ const red = _$mincho$$red2;
 console.log(red);"
 `;
 
-exports[`minchoBabelPlugin > mincho-ignore on parent node 5`] = `
+exports[`minchoBabelPlugin > arrow function bindings 3`] = `
 [
   "extracted_9iej5n.css.ts",
   "import { style } from '@mincho-js/css';
@@ -262,7 +60,7 @@ var _$mincho$$red2 = _$mincho$$red;",
 ]
 `;
 
-exports[`minchoBabelPlugin > mincho-ignore on parent node 6`] = `
+exports[`minchoBabelPlugin > arrow function bindings 4`] = `
 "import { _$mincho$$red as _$mincho$$red2 } from "extracted_9iej5n.css.ts";
 import { style } from '@mincho-js/css';
 const getStyles = color => ({
@@ -272,7 +70,81 @@ const red = _$mincho$$red2;
 console.log(red);"
 `;
 
-exports[`minchoBabelPlugin > mincho-ignore on parent node 7`] = `
+exports[`minchoBabelPlugin > binding ordering 1`] = `
+[
+  "extracted_ha0lh4.css.ts",
+  "import { style } from '@mincho-js/css';
+const color = 'red';
+export var _$mincho$$red = style({
+  color
+});
+var _$mincho$$red2 = _$mincho$$red;",
+]
+`;
+
+exports[`minchoBabelPlugin > binding ordering 2`] = `
+"import { _$mincho$$red as _$mincho$$red2 } from "extracted_ha0lh4.css.ts";
+import { style } from '@mincho-js/css';
+const color = 'red';
+const red = _$mincho$$red2;
+const longClass = \`abc \${red}\`;
+console.log(longClass);"
+`;
+
+exports[`minchoBabelPlugin > export default style 1`] = `
+[
+  "extracted_w4qxwb.css.ts",
+  "import { style } from "@mincho-js/css";
+export var _$mincho$$unknown = style({
+  color: "red"
+});
+var _$mincho$$unknown2 = _$mincho$$unknown;",
+]
+`;
+
+exports[`minchoBabelPlugin > export default style 2`] = `
+"import { _$mincho$$unknown as _$mincho$$unknown2 } from "extracted_w4qxwb.css.ts";
+import { style } from "@mincho-js/css";
+export default _$mincho$$unknown2;"
+`;
+
+exports[`minchoBabelPlugin > extracts $mincho function 1`] = `
+[
+  "extracted_10rbtgw.css.ts",
+  "import { mincho$ } from '@mincho-js/css';
+export var _$mincho$$red = mincho$(() => {
+  return 2 + 2;
+});
+var _$mincho$$red2 = _$mincho$$red;",
+]
+`;
+
+exports[`minchoBabelPlugin > extracts $mincho function 2`] = `
+"import { _$mincho$$red as _$mincho$$red2 } from "extracted_10rbtgw.css.ts";
+import { mincho$ } from '@mincho-js/css';
+const red = _$mincho$$red2;
+console.log(red);"
+`;
+
+exports[`minchoBabelPlugin > extracts style function 1`] = `
+[
+  "extracted_scbqxm.css.ts",
+  "import { style } from '@mincho-js/css';
+export var _$mincho$$red = style({
+  color: "red"
+});
+var _$mincho$$red2 = _$mincho$$red;",
+]
+`;
+
+exports[`minchoBabelPlugin > extracts style function 2`] = `
+"import { _$mincho$$red as _$mincho$$red2 } from "extracted_scbqxm.css.ts";
+import { style } from '@mincho-js/css';
+const red = _$mincho$$red2;
+console.log(red);"
+`;
+
+exports[`minchoBabelPlugin > function declaration bindings 1`] = `
 [
   "extracted_vn4szn.css.ts",
   "import { style } from '@mincho-js/css';
@@ -286,7 +158,7 @@ var _$mincho$$red2 = _$mincho$$red;",
 ]
 `;
 
-exports[`minchoBabelPlugin > mincho-ignore on parent node 8`] = `
+exports[`minchoBabelPlugin > function declaration bindings 2`] = `
 "import { _$mincho$$red as _$mincho$$red2 } from "extracted_vn4szn.css.ts";
 import { style } from '@mincho-js/css';
 function getColor() {
@@ -296,7 +168,7 @@ const red = _$mincho$$red2;
 console.log(red);"
 `;
 
-exports[`minchoBabelPlugin > mincho-ignore on parent node 9`] = `
+exports[`minchoBabelPlugin > function declaration bindings 3`] = `
 [
   "extracted_10et0ti.css.ts",
   "import { style } from '@mincho-js/css';
@@ -317,7 +189,7 @@ var _$mincho$$red2 = _$mincho$$red;",
 ]
 `;
 
-exports[`minchoBabelPlugin > mincho-ignore on parent node 10`] = `
+exports[`minchoBabelPlugin > function declaration bindings 4`] = `
 "import { _$mincho$$red as _$mincho$$red2 } from "extracted_10et0ti.css.ts";
 import { style } from '@mincho-js/css';
 function getStyles(color) {
@@ -329,64 +201,24 @@ const red = _$mincho$$red2;
 console.log(red);"
 `;
 
-exports[`minchoBabelPlugin > mincho-ignore on parent node 11`] = `
+exports[`minchoBabelPlugin > global styles 1`] = `
 [
-  "extracted_x37u6f.css.ts",
-  "import { style } from '@mincho-js/css';
-export var _$mincho$$red = style({
-  color: "red"
-});
-var /* mincho-ignore */_$mincho$$red2 = _$mincho$$red;",
-]
-`;
-
-exports[`minchoBabelPlugin > mincho-ignore on parent node 12`] = `
-"import { _$mincho$$red as _$mincho$$red2 } from "extracted_x37u6f.css.ts";
-import { style } from '@mincho-js/css';
-const red = /* mincho-ignore */_$mincho$$red2;
-console.log(red);"
-`;
-
-exports[`minchoBabelPlugin > mincho-ignore on parent node 13`] = `
-[
-  "extracted_1ria1l2.css.ts",
+  "extracted_dk6d8j.css.ts",
   "import { globalStyle } from '@mincho-js/css';
-
-/* mincho-ignore */
-export var _$mincho$$unknown = globalStyle("html", {
+export var _$mincho$$unknown = globalStyle('html, body', {
   color: 'red'
 });
 var _$mincho$$unknown2 = _$mincho$$unknown;",
 ]
 `;
 
-exports[`minchoBabelPlugin > mincho-ignore on parent node 14`] = `
-"import { _$mincho$$unknown as _$mincho$$unknown2 } from "extracted_1ria1l2.css.ts";
+exports[`minchoBabelPlugin > global styles 2`] = `
+"import { _$mincho$$unknown as _$mincho$$unknown2 } from "extracted_dk6d8j.css.ts";
 import { globalStyle } from '@mincho-js/css';
-
-/* mincho-ignore */
 _$mincho$$unknown2;"
 `;
 
-exports[`minchoBabelPlugin > nested bindings 1`] = `
-[
-  "extracted_1etlg14.css.ts",
-  "import { style } from '@mincho-js/css';
-export var _$mincho$$red = style({
-  color: 'red'
-});
-var _$mincho$$red2 = _$mincho$$red;",
-]
-`;
-
-exports[`minchoBabelPlugin > nested bindings 2`] = `
-"import { _$mincho$$red as _$mincho$$red2 } from "extracted_1etlg14.css.ts";
-import { style } from '@mincho-js/css';
-export const red = _$mincho$$red2;
-console.log(red);"
-`;
-
-exports[`minchoBabelPlugin > nested bindings 3`] = `
+exports[`minchoBabelPlugin > hoisting same variable name in different scope 1`] = `
 [
   "extracted_tdajrt.css.ts",
   "import { style } from '@mincho-js/css';
@@ -401,7 +233,7 @@ var _$mincho$$red4 = _$mincho$$red3;",
 ]
 `;
 
-exports[`minchoBabelPlugin > nested bindings 4`] = `
+exports[`minchoBabelPlugin > hoisting same variable name in different scope 2`] = `
 "import { _$mincho$$red as _$mincho$$red2, _$mincho$$red3 as _$mincho$$red4 } from "extracted_tdajrt.css.ts";
 import { style } from '@mincho-js/css';
 const red = _$mincho$$red2;
@@ -412,53 +244,196 @@ function SomeComponent() {
 }"
 `;
 
-exports[`minchoBabelPlugin > nested bindings 5`] = `
+exports[`minchoBabelPlugin > hoists array member 1`] = `
 [
-  "extracted_141089g.css.ts",
+  "extracted_vj95yp.css.ts",
   "import { style } from '@mincho-js/css';
-const color = 'red';
-export var _$mincho$$foreground = style({
-  color
+export var _$mincho$$arr = style({
+  color: "red"
 });
-var _$mincho$$foreground2 = _$mincho$$foreground;
-export var _$mincho$$background = style({
-  background: color
+var _$mincho$$arr2 = _$mincho$$arr;
+export var _$mincho$$arr3 = style({
+  color: "blue"
 });
-var _$mincho$$background2 = _$mincho$$background;",
+var _$mincho$$arr4 = _$mincho$$arr3;",
 ]
 `;
 
-exports[`minchoBabelPlugin > nested bindings 6`] = `
-"import { _$mincho$$foreground as _$mincho$$foreground2, _$mincho$$background as _$mincho$$background2 } from "extracted_141089g.css.ts";
+exports[`minchoBabelPlugin > hoists array member 2`] = `
+"import { _$mincho$$arr as _$mincho$$arr2, _$mincho$$arr3 as _$mincho$$arr4 } from "extracted_vj95yp.css.ts";
 import { style } from '@mincho-js/css';
-const color = 'red';
-const foreground = _$mincho$$foreground2;
-const background = _$mincho$$background2;
-console.log(foreground, background);"
+const arr = [1, 2, _$mincho$$arr2, 4, _$mincho$$arr4];
+console.log(arr);"
 `;
 
-exports[`minchoBabelPlugin > nested bindings 7`] = `
+exports[`minchoBabelPlugin > hoists inline expression 1`] = `
 [
-  "extracted_ha0lh4.css.ts",
+  "extracted_1czbiel.css.ts",
   "import { style } from '@mincho-js/css';
-const color = 'red';
+export var _$mincho$$str = style({
+  color: "red"
+});
+var _$mincho$$str2 = _$mincho$$str;",
+]
+`;
+
+exports[`minchoBabelPlugin > hoists inline expression 2`] = `
+"import { _$mincho$$str as _$mincho$$str2 } from "extracted_1czbiel.css.ts";
+import { style } from '@mincho-js/css';
+const str = \`abc \${_$mincho$$str2}\`;
+console.log(str);"
+`;
+
+exports[`minchoBabelPlugin > hoists object property 1`] = `
+[
+  "extracted_1ejonqt.css.ts",
+  "import { style } from '@mincho-js/css';
+export var _$mincho$$key = style({
+  color: "red"
+});
+var _$mincho$$key2 = _$mincho$$key;",
+]
+`;
+
+exports[`minchoBabelPlugin > hoists object property 2`] = `
+"import { _$mincho$$key as _$mincho$$key2 } from "extracted_1ejonqt.css.ts";
+import { style } from '@mincho-js/css';
+const obj = {
+  nested: {
+    key: _$mincho$$key2
+  }
+};
+console.log(obj);"
+`;
+
+exports[`minchoBabelPlugin > inside block scope 1`] = `
+[
+  "extracted_tt1y80.css.ts",
+  "import { style } from '@mincho-js/css';
 export var _$mincho$$red = style({
-  color
+  color: 'red'
 });
 var _$mincho$$red2 = _$mincho$$red;",
 ]
 `;
 
-exports[`minchoBabelPlugin > nested bindings 8`] = `
-"import { _$mincho$$red as _$mincho$$red2 } from "extracted_ha0lh4.css.ts";
+exports[`minchoBabelPlugin > inside block scope 2`] = `
+"import { _$mincho$$red as _$mincho$$red2 } from "extracted_tt1y80.css.ts";
 import { style } from '@mincho-js/css';
-const color = 'red';
-const red = _$mincho$$red2;
-const longClass = \`abc \${red}\`;
-console.log(longClass);"
+{
+  const red = _$mincho$$red2;
+  console.log(red);
+}"
 `;
 
-exports[`minchoBabelPlugin > nested bindings 9`] = `
+exports[`minchoBabelPlugin > inside jsx expression 1`] = `
+[
+  "extracted_u92xlr.css.ts",
+  "import { style } from '@mincho-js/css';
+export var _$mincho$$App = style({
+  color: 'red'
+});
+var _$mincho$$App2 = _$mincho$$App;",
+]
+`;
+
+exports[`minchoBabelPlugin > inside jsx expression 2`] = `
+"import { _$mincho$$App as _$mincho$$App2 } from "extracted_u92xlr.css.ts";
+import { style } from '@mincho-js/css';
+function App() {
+  return <div class={_$mincho$$App2}>Hello</div>;
+}
+console.log(red);"
+`;
+
+exports[`minchoBabelPlugin > mincho-ignore doesn't extract expression 1`] = `
+[
+  "extracted_x37u6f.css.ts",
+  "import { style } from '@mincho-js/css';
+export var _$mincho$$red = style({
+  color: "red"
+});
+var /* mincho-ignore */_$mincho$$red2 = _$mincho$$red;",
+]
+`;
+
+exports[`minchoBabelPlugin > mincho-ignore doesn't extract expression 2`] = `
+"import { _$mincho$$red as _$mincho$$red2 } from "extracted_x37u6f.css.ts";
+import { style } from '@mincho-js/css';
+const red = /* mincho-ignore */_$mincho$$red2;
+console.log(red);"
+`;
+
+exports[`minchoBabelPlugin > mincho-ignore on parent node 1`] = `
+[
+  "extracted_1ria1l2.css.ts",
+  "import { globalStyle } from '@mincho-js/css';
+
+/* mincho-ignore */
+export var _$mincho$$unknown = globalStyle("html", {
+  color: 'red'
+});
+var _$mincho$$unknown2 = _$mincho$$unknown;",
+]
+`;
+
+exports[`minchoBabelPlugin > mincho-ignore on parent node 2`] = `
+"import { _$mincho$$unknown as _$mincho$$unknown2 } from "extracted_1ria1l2.css.ts";
+import { globalStyle } from '@mincho-js/css';
+
+/* mincho-ignore */
+_$mincho$$unknown2;"
+`;
+
+exports[`minchoBabelPlugin > move bindings along with extracted style 1`] = `
+[
+  "extracted_1ps44e0.css.ts",
+  "import { style } from '@mincho-js/css';
+const redColor = 'red';
+export var _$mincho$$red = style({
+  color: redColor
+});
+var _$mincho$$red2 = _$mincho$$red;",
+]
+`;
+
+exports[`minchoBabelPlugin > move bindings along with extracted style 2`] = `
+"import { _$mincho$$red as _$mincho$$red2 } from "extracted_1ps44e0.css.ts";
+import { style } from '@mincho-js/css';
+const redColor = 'red';
+const red = _$mincho$$red2;
+console.log(red);"
+`;
+
+exports[`minchoBabelPlugin > multiple variable declarators in one declaration 1`] = `
+[
+  "extracted_qqccj2.css.ts",
+  "import { style } from '@mincho-js/css';
+export var _$mincho$$red = style({
+  color: 'red'
+});
+var _$mincho$$red2 = _$mincho$$red;
+export var _$mincho$$blue = style({
+  color: 'blue'
+});
+var _$mincho$$blue2 = _$mincho$$blue;
+export var _$mincho$$green = style({
+  color: 'green'
+});
+var _$mincho$$green2 = _$mincho$$green;",
+]
+`;
+
+exports[`minchoBabelPlugin > multiple variable declarators in one declaration 2`] = `
+"import { _$mincho$$red as _$mincho$$red2, _$mincho$$blue as _$mincho$$blue2, _$mincho$$green as _$mincho$$green2 } from "extracted_qqccj2.css.ts";
+import { style } from '@mincho-js/css';
+const red = _$mincho$$red2,
+  blue = _$mincho$$blue2,
+  green = _$mincho$$green2;
+console.log(red, blue, green);"
+`;
+
+exports[`minchoBabelPlugin > nested bindings 1`] = `
 [
   "extracted_1xp9y13.css.ts",
   "import { style } from '@mincho-js/css';
@@ -474,7 +449,7 @@ var _$mincho$$red2 = _$mincho$$red;",
 ]
 `;
 
-exports[`minchoBabelPlugin > nested bindings 10`] = `
+exports[`minchoBabelPlugin > nested bindings 2`] = `
 "import { _$mincho$$red as _$mincho$$red2 } from "extracted_1xp9y13.css.ts";
 import { style } from '@mincho-js/css';
 const theme = {
@@ -484,4 +459,29 @@ const themeColor = theme.color;
 const color = themeColor;
 const red = _$mincho$$red2;
 console.log(red);"
+`;
+
+exports[`minchoBabelPlugin > same binding in multiple declarations 1`] = `
+[
+  "extracted_141089g.css.ts",
+  "import { style } from '@mincho-js/css';
+const color = 'red';
+export var _$mincho$$foreground = style({
+  color
+});
+var _$mincho$$foreground2 = _$mincho$$foreground;
+export var _$mincho$$background = style({
+  background: color
+});
+var _$mincho$$background2 = _$mincho$$background;",
+]
+`;
+
+exports[`minchoBabelPlugin > same binding in multiple declarations 2`] = `
+"import { _$mincho$$foreground as _$mincho$$foreground2, _$mincho$$background as _$mincho$$background2 } from "extracted_141089g.css.ts";
+import { style } from '@mincho-js/css';
+const color = 'red';
+const foreground = _$mincho$$foreground2;
+const background = _$mincho$$background2;
+console.log(foreground, background);"
 `;

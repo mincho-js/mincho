@@ -397,6 +397,8 @@ function transformArrayValue<T>(
       : resolvedAnonymous;
 
   if (Array.isArray(transformed)) {
+    // TODO: Handle type error wth csstype
+    // @ts-expect-error: error TS2322: Type '(NonNullableString | undefined)[]' is not assignable to type 'VanillaStyleRuleValue'.
     context.result[transformedKey] = transformed.map((value) =>
       // @ts-expect-error: error ts2590: expression produces a union type that is too complex to represent
       transformCommonValue(value, context)
