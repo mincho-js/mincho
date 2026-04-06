@@ -6,7 +6,7 @@ import type {
 
 type CSSPropertiesKeys = keyof CSSProperties;
 
-type DefineRulesResolver<
+type DefineRulesValueResolver<
   Out = CSSPropertiesWithVars | undefined,
   Arg = unknown
 > = {
@@ -21,14 +21,14 @@ type DefineRulesCssProperties = {
 type DefineRulesCssPropertiesValue<Value> =
   | ReadonlyArray<Value>
   | Record<string, Value | CSSPropertiesWithVars>
-  | DefineRulesResolver<Value>
+  | DefineRulesValueResolver<Value>
   | true
   | false;
 
 type DefineRulesCustomProperties = Partial<
   Record<
     Exclude<NonNullableString, CSSPropertiesKeys>,
-    Record<string, CSSPropertiesWithVars> | DefineRulesResolver
+    Record<string, CSSPropertiesWithVars> | DefineRulesValueResolver
   >
 >;
 export type DefineRulesProperties =
@@ -44,7 +44,7 @@ type ShortcutValue<
   | Exclude<keyof Shortcuts, ShortcutsKey>
   | ReadonlyArray<keyof Properties | Exclude<keyof Shortcuts, ShortcutsKey>>
   | DefineRulesCssInput<Properties, Shortcuts>
-  | DefineRulesResolver<DefineRulesCssInput<Properties, Shortcuts>>;
+  | DefineRulesValueResolver<DefineRulesCssInput<Properties, Shortcuts>>;
 
 export type DefineRulesShortcuts<
   Properties extends DefineRulesProperties,
@@ -61,6 +61,7 @@ export interface DefineRulesCtx<
   Properties extends DefineRulesProperties,
   Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts>
 > {
+  debugId?: string;
   properties?: Properties;
   shortcuts?: Shortcuts;
 }
@@ -163,13 +164,13 @@ if (import.meta.vitest) {
   const { describe, it, assertType } = import.meta.vitest;
 
   describe.concurrent("DefineRules Type Test", () => {
-    function resolveDefineRules<
+    function createDefineRulesTypeCase<
       const Properties extends DefineRulesProperties,
       const Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts>
-    >(rules: DefineRulesCtx<Properties, Shortcuts>) {
+    >(defineRulesCtx: DefineRulesCtx<Properties, Shortcuts>) {
       return {
-        rules,
-        _props: rules as unknown as DefineRulesComplexCssInput<
+        defineRulesCtx,
+        cssInput: defineRulesCtx as unknown as DefineRulesComplexCssInput<
           Properties,
           Shortcuts
         >
@@ -178,24 +179,25 @@ if (import.meta.vitest) {
 
     describe.concurrent("DefineRulesProperties Type", () => {
       it("Array values for CSS properties", () => {
-        const { rules, _props } = resolveDefineRules({
-          properties: {
-            display: ["none", "inline", "block"],
-            paddingLeft: [0, 2, 4, 8, 16, 32, 64]
-          }
-        });
+        const { defineRulesCtx, cssInput: _cssInput } =
+          createDefineRulesTypeCase({
+            properties: {
+              display: ["none", "inline", "block"],
+              paddingLeft: [0, 2, 4, 8, 16, 32, 64]
+            }
+          });
         assertType<{
           properties?: {
             readonly display: readonly ["none", "inline", "block"];
             readonly paddingLeft: readonly [0, 2, 4, 8, 16, 32, 64];
           };
-        }>(rules);
+        }>(defineRulesCtx);
 
-        assertType<typeof _props>({
+        assertType<typeof _cssInput>({
           display: "inline",
           paddingLeft: 4
         });
-        assertType<typeof _props>({
+        assertType<typeof _cssInput>({
           // @ts-expect-error: invalid value
           display: "flex",
           // @ts-expect-error: invalid value
@@ -204,14 +206,15 @@ if (import.meta.vitest) {
       });
 
       it("Object values for CSS properties", () => {
-        const { rules, _props } = resolveDefineRules({
-          properties: {
-            color: {
-              "indigo-800": "rgb(55, 48, 163)",
-              "red-500": "rgb(239, 68, 68)"
+        const { defineRulesCtx, cssInput: _cssInput } =
+          createDefineRulesTypeCase({
+            properties: {
+              color: {
+                "indigo-800": "rgb(55, 48, 163)",
+                "red-500": "rgb(239, 68, 68)"
+              }
             }
-          }
-        });
+          });
         assertType<{
           properties?: {
             color: {
@@ -219,12 +222,12 @@ if (import.meta.vitest) {
               "red-500": string;
             };
           };
-        }>(rules);
+        }>(defineRulesCtx);
 
-        assertType<typeof _props>({
+        assertType<typeof _cssInput>({
           color: "indigo-800"
         });
-        assertType<typeof _props>({
+        assertType<typeof _cssInput>({
           // @ts-expect-error: invalid value
           color: "blue-500"
         });
@@ -232,16 +235,17 @@ if (import.meta.vitest) {
 
       it("Object values with CSSPropertiesWithVars", () => {
         const alpha = "--alpha";
-        const { rules, _props } = resolveDefineRules({
-          properties: {
-            background: {
-              red: {
-                vars: { [alpha]: "1" },
-                background: `rgba(255, 0, 0, var(${alpha}))`
+        const { defineRulesCtx, cssInput: _cssInput } =
+          createDefineRulesTypeCase({
+            properties: {
+              background: {
+                red: {
+                  vars: { [alpha]: "1" },
+                  background: `rgba(255, 0, 0, var(${alpha}))`
+                }
               }
             }
-          }
-        });
+          });
         assertType<{
           properties?: {
             background: {
@@ -251,50 +255,52 @@ if (import.meta.vitest) {
               };
             };
           };
-        }>(rules);
+        }>(defineRulesCtx);
 
-        assertType<typeof _props>({
+        assertType<typeof _cssInput>({
           background: "red"
         });
-        assertType<typeof _props>({
+        assertType<typeof _cssInput>({
           // @ts-expect-error: invalid value
           background: "blue"
         });
       });
 
       it("Boolean values for entire properties", () => {
-        const { rules, _props } = resolveDefineRules({
-          properties: {
-            border: false,
-            margin: true
-          }
-        });
+        const { defineRulesCtx, cssInput: _cssInput } =
+          createDefineRulesTypeCase({
+            properties: {
+              border: false,
+              margin: true
+            }
+          });
         assertType<{
           properties?: {
             border: false;
             margin: true;
           };
-        }>(rules);
+        }>(defineRulesCtx);
 
-        assertType<typeof _props>({
+        assertType<typeof _cssInput>({
           margin: "inherit"
         });
         // @ts-expect-error: `border` is false, so it should not accept any value.
-        assertType<typeof _props>({
+        assertType<typeof _cssInput>({
           border: "1px solid black"
         });
       });
 
       it("Custom properties with CSSPropertiesWithVars", () => {
         const alpha = "--alpha";
-        const { rules, _props } = resolveDefineRules({
-          properties: {
-            backgroundOpacity: {
-              full: { vars: { [alpha]: "1" } },
-              half: { vars: { [alpha]: "0.5" } }
+        const { defineRulesCtx, cssInput: _cssInput } =
+          createDefineRulesTypeCase({
+            properties: {
+              backgroundOpacity: {
+                full: { vars: { [alpha]: "1" } },
+                half: { vars: { [alpha]: "0.5" } }
+              }
             }
-          }
-        });
+          });
         assertType<{
           properties?: {
             backgroundOpacity: {
@@ -302,29 +308,30 @@ if (import.meta.vitest) {
               half: { vars: { "--alpha": string } };
             };
           };
-        }>(rules);
+        }>(defineRulesCtx);
 
-        assertType<typeof _props>({
+        assertType<typeof _cssInput>({
           backgroundOpacity: "full"
         });
-        assertType<typeof _props>({
+        assertType<typeof _cssInput>({
           // @ts-expect-error: invalid value
           backgroundOpacity: "quarter"
         });
       });
 
       it("Function values return CSS properties", () => {
-        const { rules, _props } = resolveDefineRules({
-          properties: {
-            color(arg: "primary" | "secondary") {
-              if (arg === "primary") {
-                return { color: "blue" } as const;
-              } else {
-                return { color: "gray" } as const;
+        const { defineRulesCtx, cssInput: _cssInput } =
+          createDefineRulesTypeCase({
+            properties: {
+              color(arg: "primary" | "secondary") {
+                if (arg === "primary") {
+                  return { color: "blue" } as const;
+                } else {
+                  return { color: "gray" } as const;
+                }
               }
             }
-          }
-        });
+          });
         assertType<{
           properties?: {
             color: (arg: "primary" | "secondary") =>
@@ -333,32 +340,33 @@ if (import.meta.vitest) {
                 }
               | undefined;
           };
-        }>(rules);
+        }>(defineRulesCtx);
 
-        assertType<typeof _props>({
+        assertType<typeof _cssInput>({
           color: "primary"
         });
       });
 
       it("Function values return Style objects", () => {
-        const { rules, _props } = resolveDefineRules({
-          properties: {
-            color(arg: "primary" | "secondary") {
-              if (arg === "primary") {
-                return "blue";
-              } else {
-                return "gray";
-              }
-            },
-            otherColor(arg: "primary" | "secondary") {
-              if (arg === "primary") {
-                return { color: "red" } as const;
-              } else {
-                return { color: "green" } as const;
+        const { defineRulesCtx, cssInput: _cssInput } =
+          createDefineRulesTypeCase({
+            properties: {
+              color(arg: "primary" | "secondary") {
+                if (arg === "primary") {
+                  return "blue";
+                } else {
+                  return "gray";
+                }
+              },
+              otherColor(arg: "primary" | "secondary") {
+                if (arg === "primary") {
+                  return { color: "red" } as const;
+                } else {
+                  return { color: "green" } as const;
+                }
               }
             }
-          }
-        });
+          });
         assertType<{
           properties?: {
             color: (arg: "primary" | "secondary") => "blue" | "gray";
@@ -368,9 +376,9 @@ if (import.meta.vitest) {
                 }
               | undefined;
           };
-        }>(rules);
+        }>(defineRulesCtx);
 
-        assertType<typeof _props>({
+        assertType<typeof _cssInput>({
           color: "primary"
         });
       });
@@ -378,16 +386,17 @@ if (import.meta.vitest) {
 
     describe.concurrent("DefineRulesShortcuts Type", () => {
       it("Single property shortcut", () => {
-        const { rules, _props } = resolveDefineRules({
-          properties: {
-            paddingLeft: [0, 4, 8],
-            paddingRight: [0, 4, 8]
-          },
-          shortcuts: {
-            pl: "paddingLeft",
-            pr: "paddingRight"
-          }
-        });
+        const { defineRulesCtx, cssInput: _cssInput } =
+          createDefineRulesTypeCase({
+            properties: {
+              paddingLeft: [0, 4, 8],
+              paddingRight: [0, 4, 8]
+            },
+            shortcuts: {
+              pl: "paddingLeft",
+              pr: "paddingRight"
+            }
+          });
         assertType<{
           properties?: {
             paddingLeft: readonly [0, 4, 8];
@@ -397,13 +406,13 @@ if (import.meta.vitest) {
             pl: "paddingLeft";
             pr: "paddingRight";
           };
-        }>(rules);
+        }>(defineRulesCtx);
 
-        assertType<typeof _props>({
+        assertType<typeof _cssInput>({
           pl: 4,
           pr: 8
         });
-        assertType<typeof _props>({
+        assertType<typeof _cssInput>({
           // @ts-expect-error: invalid value
           pl: 5,
           // @ts-expect-error: invalid value
@@ -412,15 +421,16 @@ if (import.meta.vitest) {
       });
 
       it("Array shortcut referencing properties", () => {
-        const { rules, _props } = resolveDefineRules({
-          properties: {
-            paddingLeft: [0, 4, 8],
-            paddingRight: [0, 4, 8, 12]
-          },
-          shortcuts: {
-            px: ["paddingLeft", "paddingRight"]
-          }
-        });
+        const { defineRulesCtx, cssInput: _cssInput } =
+          createDefineRulesTypeCase({
+            properties: {
+              paddingLeft: [0, 4, 8],
+              paddingRight: [0, 4, 8, 12]
+            },
+            shortcuts: {
+              px: ["paddingLeft", "paddingRight"]
+            }
+          });
         assertType<{
           properties?: {
             paddingLeft: readonly [0, 4, 8];
@@ -429,33 +439,34 @@ if (import.meta.vitest) {
           shortcuts?: {
             px: readonly ["paddingLeft", "paddingRight"];
           };
-        }>(rules);
+        }>(defineRulesCtx);
 
-        assertType<typeof _props>({
+        assertType<typeof _cssInput>({
           px: 4
         });
-        assertType<typeof _props>({
+        assertType<typeof _cssInput>({
           // @ts-expect-error: invalid value
           px: 5
         });
-        assertType<typeof _props>({
+        assertType<typeof _cssInput>({
           // @ts-expect-error: invalid value
           px: 12
         });
       });
 
       it("Shortcut referencing other shortcuts", () => {
-        const { rules, _props } = resolveDefineRules({
-          properties: {
-            paddingLeft: [0, 4, 8],
-            paddingRight: [0, 4, 8, 12]
-          },
-          shortcuts: {
-            pl: "paddingLeft",
-            pr: "paddingRight",
-            px: ["pl", "pr"]
-          }
-        });
+        const { defineRulesCtx, cssInput: _cssInput } =
+          createDefineRulesTypeCase({
+            properties: {
+              paddingLeft: [0, 4, 8],
+              paddingRight: [0, 4, 8, 12]
+            },
+            shortcuts: {
+              pl: "paddingLeft",
+              pr: "paddingRight",
+              px: ["pl", "pr"]
+            }
+          });
         assertType<{
           properties?: {
             paddingLeft: readonly [0, 4, 8];
@@ -466,23 +477,23 @@ if (import.meta.vitest) {
             pr: "paddingRight";
             px: readonly ["pl", "pr"];
           };
-        }>(rules);
+        }>(defineRulesCtx);
 
-        assertType<typeof _props>({
+        assertType<typeof _cssInput>({
           px: 4
         });
-        assertType<typeof _props>({
+        assertType<typeof _cssInput>({
           // @ts-expect-error: invalid value
           px: 5
         });
-        assertType<typeof _props>({
+        assertType<typeof _cssInput>({
           // @ts-expect-error: invalid value
           px: 12
         });
       });
 
       it("Mixed shortcuts with properties and other shortcuts", () => {
-        const { rules } = resolveDefineRules({
+        const { defineRulesCtx } = createDefineRulesTypeCase({
           properties: {
             paddingTop: [0, 4, 8],
             paddingBottom: [0, 4, 8],
@@ -515,18 +526,19 @@ if (import.meta.vitest) {
             px: readonly ["pl", "pr"];
             p: readonly ["py", "px"];
           };
-        }>(rules);
+        }>(defineRulesCtx);
       });
 
       it("Fixed object shortcut", () => {
-        const { rules, _props } = resolveDefineRules({
-          properties: {
-            display: ["none", "inline", "block"]
-          },
-          shortcuts: {
-            inline: { display: "inline" }
-          }
-        });
+        const { defineRulesCtx, cssInput: _cssInput } =
+          createDefineRulesTypeCase({
+            properties: {
+              display: ["none", "inline", "block"]
+            },
+            shortcuts: {
+              inline: { display: "inline" }
+            }
+          });
         assertType<{
           properties?: {
             display: readonly ["none", "inline", "block"];
@@ -534,31 +546,32 @@ if (import.meta.vitest) {
           shortcuts?: {
             inline: { readonly display: "inline" };
           };
-        }>(rules);
+        }>(defineRulesCtx);
 
-        assertType<typeof _props>({
+        assertType<typeof _cssInput>({
           inline: true
         });
-        assertType<typeof _props>(["inline"]);
+        assertType<typeof _cssInput>(["inline"]);
       });
 
       it("Function shortcut", () => {
-        const { rules, _props } = resolveDefineRules({
-          properties: {
-            display: ["none", "inline", "block"],
-            paddingLeft: [0, 4, 8],
-            paddingRight: [0, 4, 8]
-          },
-          shortcuts: {
-            px: ["paddingLeft", "paddingRight"],
-            center(arg: "none" | "inline" | "block") {
-              return {
-                display: arg,
-                px: 4
-              } as const;
+        const { defineRulesCtx, cssInput: _cssInput } =
+          createDefineRulesTypeCase({
+            properties: {
+              display: ["none", "inline", "block"],
+              paddingLeft: [0, 4, 8],
+              paddingRight: [0, 4, 8]
+            },
+            shortcuts: {
+              px: ["paddingLeft", "paddingRight"],
+              center(arg: "none" | "inline" | "block") {
+                return {
+                  display: arg,
+                  px: 4
+                } as const;
+              }
             }
-          }
-        });
+          });
         assertType<{
           properties?: {
             display: readonly ["none", "inline", "block"];
@@ -574,12 +587,12 @@ if (import.meta.vitest) {
                 }
               | undefined;
           };
-        }>(rules);
+        }>(defineRulesCtx);
 
-        assertType<typeof _props>({
+        assertType<typeof _cssInput>({
           center: "inline"
         });
-        assertType<typeof _props>({
+        assertType<typeof _cssInput>({
           // @ts-expect-error: invalid value
           center: "flex"
         });
@@ -588,7 +601,7 @@ if (import.meta.vitest) {
 
     describe.concurrent("Invalid Type Cases", () => {
       it("Invalid shortcut reference should error", () => {
-        resolveDefineRules({
+        createDefineRulesTypeCase({
           properties: {
             paddingLeft: [0, 4, 8]
           },
@@ -600,7 +613,7 @@ if (import.meta.vitest) {
       });
 
       it("Shortcut cannot reference itself", () => {
-        resolveDefineRules({
+        createDefineRulesTypeCase({
           properties: {
             paddingLeft: [0, 4, 8]
           },
@@ -612,7 +625,7 @@ if (import.meta.vitest) {
       });
 
       it("Array shortcut with invalid reference should error", () => {
-        resolveDefineRules({
+        createDefineRulesTypeCase({
           properties: {
             paddingLeft: [0, 4, 8],
             paddingRight: [0, 4, 8]
@@ -628,7 +641,7 @@ if (import.meta.vitest) {
     describe.concurrent("Complex DefineRules", () => {
       it("Full featured defineRules", () => {
         const alpha = "--alpha";
-        const { rules } = resolveDefineRules({
+        const { defineRulesCtx } = createDefineRulesTypeCase({
           properties: {
             // Array values
             display: ["none", "inline", "block", "flex", "grid"],
@@ -722,7 +735,7 @@ if (import.meta.vitest) {
             p: readonly ["px", "py"];
             inline: { readonly display: "inline" };
           };
-        }>(rules);
+        }>(defineRulesCtx);
       });
     });
   });

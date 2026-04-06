@@ -26,7 +26,7 @@ export default defineConfig(
     },
   },
   {
-    files: ["*.{ts,tsx}"],
+    files: ["**/*.{ts,tsx}"],
     languageOptions: {
       parser: tsParser,
       parserOptions: {
