@@ -9,11 +9,7 @@ type CanonicalNode =
   | ["boolean", boolean]
   | ["number", string]
   | ["string", string]
-  | ["bigint", string]
-  | ["date", string]
   | ["array", CanonicalNode[]]
-  | ["set", CanonicalNode[]]
-  | ["map", Array<[CanonicalNode, CanonicalNode]>]
   | ["object", Array<[string, CanonicalNode]>];
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -23,13 +19,6 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 
   const proto = Object.getPrototypeOf(value);
   return proto === Object.prototype || proto === null;
-}
-
-function sortByStableString<T>(items: readonly T[]): T[] {
-  return [...items]
-    .map((item) => ({ item, key: JSON.stringify(item) }))
-    .sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
-    .map(({ item }) => item);
 }
 
 function canonicalize(
@@ -56,9 +45,6 @@ function canonicalize(
       }
       return ["number", String(value)];
 
-    case "bigint":
-      return ["bigint", value.toString()];
-
     case "undefined":
       return ["undefined"];
 
@@ -67,10 +53,6 @@ function canonicalize(
 
     default:
       throw new TypeError(`Not supported type: ${typeof value}`);
-  }
-
-  if (value instanceof Date) {
-    return ["date", value.toISOString()];
   }
 
   if (stack.has(value)) {
@@ -85,23 +67,6 @@ function canonicalize(
       return ["array", value.map((item) => canonicalize(item, stack))];
     }
 
-    if (value instanceof Set) {
-      const items = [...value].map((item) => canonicalize(item, stack));
-      return ["set", sortByStableString(items)];
-    }
-
-    if (value instanceof Map) {
-      const entries = [...value.entries()].map(
-        ([k, v]) =>
-          [canonicalize(k, stack), canonicalize(v, stack)] as [
-            CanonicalNode,
-            CanonicalNode
-          ]
-      );
-
-      return ["map", sortByStableString(entries)];
-    }
-
     if (isPlainObject(value)) {
       const entries = Object.keys(value)
         .sort()
@@ -113,9 +78,7 @@ function canonicalize(
       return ["object", entries];
     }
 
-    throw new TypeError(
-      "Only plain objects, Arrays, Sets, Maps, and Dates are supported."
-    );
+    throw new TypeError("Only plain objects and Arrays are supported.");
   } finally {
     stack.delete(value);
   }
@@ -296,54 +259,18 @@ if (import.meta.vitest) {
       expect(cache.size).toBe(2);
     });
 
-    it("should ignore set element order", () => {
+    it("should reject Sets, Maps, and Dates", () => {
       const cache = createCanonicalStyleCache(debugId);
 
-      const s1 = new Set<unknown>([{ b: 2, a: 1 }, ["x", "y"]]);
-      const s2 = new Set<unknown>([["x", "y"], { a: 1, b: 2 }]);
-
-      expectClassName(cache.add("tags", s1));
-      expectClassName(cache.add("tags", s2));
-      expect(cache.size).toBe(1);
-    });
-
-    it("should ignore map entry order", () => {
-      const cache = createCanonicalStyleCache(debugId);
-
-      const m1 = new Map<unknown, unknown>([
-        ["k1", 1],
-        [
-          { b: 2, a: 1 },
-          { y: 2, x: 1 }
-        ]
-      ]);
-
-      const m2 = new Map<unknown, unknown>([
-        [
-          { a: 1, b: 2 },
-          { x: 1, y: 2 }
-        ],
-        ["k1", 1]
-      ]);
-
-      expectClassName(cache.add("map", m1));
-      expectClassName(cache.add("map", m2));
-      expect(cache.size).toBe(1);
-    });
-
-    it("should treat dates with the same timestamp as equal values", () => {
-      const cache = createCanonicalStyleCache(debugId);
-
-      expectClassName(
-        cache.add("createdAt", new Date("2024-01-01T00:00:00.000Z"))
+      expect(() => cache.has("tags", new Set(["a", "b"]))).toThrow(
+        /Only plain objects and Arrays are supported/
       );
-      expect(cache.has("createdAt", new Date("2024-01-01T00:00:00.000Z"))).toBe(
-        true
+      expect(() => cache.has("map", new Map([["k1", 1]]))).toThrow(
+        /Only plain objects and Arrays are supported/
       );
-      expectClassName(
-        cache.add("createdAt", new Date("2024-01-01T00:00:00.000Z"))
-      );
-      expect(cache.size).toBe(1);
+      expect(() =>
+        cache.has("createdAt", new Date("2024-01-01T00:00:00.000Z"))
+      ).toThrow(/Only plain objects and Arrays are supported/);
     });
 
     it("should treat NaN as equal and distinguish -0 from 0", () => {
@@ -498,13 +425,14 @@ if (import.meta.vitest) {
       expect(cache.size).toBe(1);
     });
 
-    it("should reject functions and symbols", () => {
+    it("should reject functions, symbols, and bigints", () => {
       const cache = createCanonicalStyleCache(debugId);
 
       expect(() => cache.has("fn", () => undefined)).toThrow(
         /Not supported type/
       );
       expect(() => cache.has("sym", Symbol("x"))).toThrow(/Not supported type/);
+      expect(() => cache.has("bigint", 1n)).toThrow(/Not supported type/);
     });
 
     it("should reject class instances", () => {
@@ -515,7 +443,7 @@ if (import.meta.vitest) {
       }
 
       expect(() => cache.has("user", new User("alice"))).toThrow(
-        /Only plain objects, Arrays, Sets, Maps, and Dates are supported/
+        /Only plain objects and Arrays are supported/
       );
     });
 
