@@ -1,5 +1,6 @@
 import type { CSSRule } from "@mincho-js/transform-to-vanilla";
 import { setFileScope } from "@vanilla-extract/css/fileScope";
+import hash from "@emotion/hash";
 import { css } from "../css/index.js";
 import { identifierName } from "../utils.js";
 
@@ -88,13 +89,18 @@ function pairCacheKey(key: unknown, value: unknown): string {
   return JSON.stringify(["pair", canonicalize(key), canonicalize(value)]);
 }
 
+function hashedCacheKey(parts: readonly CanonicalNode[]): string {
+  const input = JSON.stringify(parts);
+  return hash(input);
+}
+
 function fragmentCacheKey(
   key: unknown,
   value: unknown,
   fragment: unknown
 ): string {
-  return JSON.stringify([
-    "fragment",
+  return hashedCacheKey([
+    ["string", "fragment"],
     canonicalize(key),
     canonicalize(value),
     canonicalize(fragment)

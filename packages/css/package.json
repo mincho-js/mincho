@@ -83,6 +83,7 @@
   },
   "prettier": "prettier-config-custom",
   "dependencies": {
+    "@emotion/hash": "^0.9.2",
     "@fastify/deepmerge": "^3.2.1",
     "@mincho-js/transform-to-vanilla": "workspace:^",
     "clsx": "^2.1.1"

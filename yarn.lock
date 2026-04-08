@@ -2246,6 +2246,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@mincho-js/css@workspace:packages/css"
   dependencies:
+    "@emotion/hash": "npm:^0.9.2"
     "@fastify/deepmerge": "npm:^3.2.1"
     "@mincho-js/transform-to-vanilla": "workspace:^"
     "@vanilla-extract/css": "npm:^1.20.1"
