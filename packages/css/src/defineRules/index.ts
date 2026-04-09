@@ -40,7 +40,7 @@ export function defineRules<
       );
       output.push(className);
     }
-    return output.join(" ");
+    return output.sort().join(" ");
   }
 
   const css = Object.assign(cssImpl, { raw: cssRaw });
@@ -232,6 +232,10 @@ function applyEntry<
   value: unknown,
   shortcutStack: string[]
 ) {
+  if (value == null) {
+    return;
+  }
+
   if (hasOwn(ctx.shortcuts, key)) {
     applyShortcut(ctx, fragmentsOut, key, value, shortcutStack);
     return;
@@ -254,6 +258,11 @@ function applyProperty<
 
   if (typeof propertyDefinition === "function") {
     const result = propertyDefinition(value);
+
+    if (result == null) {
+      return;
+    }
+
     if (isPlainObject(result)) {
       pushResolvedFragment(
         fragmentsOut,
@@ -527,6 +536,47 @@ if (import.meta.vitest) {
         });
       });
 
+      it("Nullish values are treated as no-op", () => {
+        const { css: cssProperty } = defineRules({
+          properties: {
+            color: true
+          }
+        });
+        const undefinedColor: { color?: "red" } = {};
+        const nullColor: { color?: "red" } = {};
+        Object.assign(undefinedColor, { color: undefined });
+        Object.assign(nullColor, { color: null });
+
+        expect(cssProperty.raw([{ color: "red" }, undefinedColor])).toEqual({
+          color: "red"
+        });
+        expect(cssProperty.raw([{ color: "red" }, nullColor])).toEqual({
+          color: "red"
+        });
+
+        const { css: cssResolver } = defineRules({
+          properties: {
+            optionalColor(arg: "primary" | "none") {
+              if (arg === "primary") {
+                return { color: "blue" } as const;
+              }
+              return undefined;
+            }
+          }
+        });
+
+        expect(cssResolver.raw({ optionalColor: "none" })).toEqual({});
+        expect(
+          cssResolver.raw([
+            { optionalColor: "primary" },
+            { optionalColor: "none" }
+          ])
+        ).toEqual({ color: "blue" });
+        expect(
+          cssResolver([{ optionalColor: "primary" }, { optionalColor: "none" }])
+        ).toBe(cssResolver({ optionalColor: "primary" }));
+      });
+
       it("css() canonicalize className", () => {
         const { css } = defineRules({
           debugId,
@@ -538,12 +588,14 @@ if (import.meta.vitest) {
         const colorRed = css({ color: "red" });
         const backgroundBlue = css({ background: "blue" });
         const combined = css({ color: "red", background: "blue" });
+        const reversedCombined = css({ background: "blue", color: "red" });
 
         expect(colorRed).toMatch(identifierName(debugId));
 
         expect(colorRed).toBe(css({ color: "red" }));
         expect(backgroundBlue).toBe(css({ background: "blue" }));
         expect(combined).toBe(css({ color: "red", background: "blue" }));
+        expect(reversedCombined).toBe(combined);
       });
 
       it("css() dedupes equivalent whole fragments when object key order differs", () => {
