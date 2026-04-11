@@ -57,11 +57,14 @@ export type DefineRulesShortcuts<
   >;
 };
 
+export type DefineRulesPresetMap = Record<string, string>;
+
 export interface DefineRulesCtx<
   Properties extends DefineRulesProperties,
   Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts>
 > {
   debugId?: string;
+  presets?: DefineRulesPresetMap;
   properties?: Properties;
   shortcuts?: Shortcuts;
 }

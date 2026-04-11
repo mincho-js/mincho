@@ -108,10 +108,11 @@ function fragmentCacheKey(
 }
 
 export function createCanonicalStyleCache(debugId?: string) {
-  let classNameCache: Record<string, string> = {};
+  let classNameCache: Record<string, string> = Object.create(null);
+  const fragmentCacheKeys = new Set<string>();
 
   function hasCacheKey(cacheKey: string): boolean {
-    return cacheKey in classNameCache;
+    return Object.prototype.hasOwnProperty.call(classNameCache, cacheKey);
   }
 
   function getCachedClassName(cacheKey: string): string | undefined {
@@ -164,11 +165,37 @@ export function createCanonicalStyleCache(debugId?: string) {
     value: unknown,
     fragment: CSSRule
   ): string {
-    return cacheClassName(fragmentCacheKey(key, value, fragment), fragment);
+    const cacheKey = fragmentCacheKey(key, value, fragment);
+    fragmentCacheKeys.add(cacheKey);
+    return cacheClassName(cacheKey, fragment);
+  }
+
+  function importSnapshot(entries: Record<string, string>): void {
+    for (const [cacheKey, className] of Object.entries(entries)) {
+      fragmentCacheKeys.add(cacheKey);
+
+      if (!hasCacheKey(cacheKey)) {
+        classNameCache[cacheKey] = className;
+      }
+    }
+  }
+
+  function exportSnapshot(): Record<string, string> {
+    const snapshot: Record<string, string> = {};
+
+    for (const cacheKey of fragmentCacheKeys) {
+      const className = classNameCache[cacheKey];
+      if (className != null) {
+        snapshot[cacheKey] = className;
+      }
+    }
+
+    return snapshot;
   }
 
   function clear(): void {
-    classNameCache = {};
+    classNameCache = Object.create(null);
+    fragmentCacheKeys.clear();
   }
 
   return {
@@ -178,6 +205,8 @@ export function createCanonicalStyleCache(debugId?: string) {
     hasFragment,
     getFragment,
     addFragment,
+    importSnapshot,
+    exportSnapshot,
     clear,
     get size() {
       return Object.keys(classNameCache).length;
@@ -413,6 +442,58 @@ if (import.meta.vitest) {
       expect(cache.getFragment("background", "red", secondFragment)).toBe(
         undefined
       );
+    });
+
+    it("should import and export tracked fragment snapshots", () => {
+      const cache = createCanonicalStyleCache(debugId);
+      const seededFragment = {
+        vars: { "--b": "2", "--a": "1" },
+        background: "rgb(0, 0, 255)"
+      } as const;
+      const reorderedFragment = {
+        background: "rgb(0, 0, 255)",
+        vars: { "--a": "1", "--b": "2" }
+      } as const;
+      const seededClassName = "seeded-background";
+      const seededSnapshot = {
+        [fragmentCacheKey("background", { b: 2, a: 1 }, seededFragment)]:
+          seededClassName
+      };
+
+      cache.importSnapshot(seededSnapshot);
+
+      expect(
+        cache.hasFragment("background", { a: 1, b: 2 }, reorderedFragment)
+      ).toBe(true);
+      expect(
+        cache.getFragment("background", { a: 1, b: 2 }, reorderedFragment)
+      ).toBe(seededClassName);
+
+      cache.add("display", "block");
+
+      expect(cache.exportSnapshot()).toEqual(seededSnapshot);
+      expect(cache.size).toBe(2);
+    });
+
+    it("should reuse seeded fragment entries without overwriting imported class names", () => {
+      const cache = createCanonicalStyleCache(debugId);
+      const seededFragment = {
+        color: "red",
+        vars: { "--shade": "500" }
+      } as const;
+      const seededClassName = "seeded-color";
+
+      cache.importSnapshot({
+        [fragmentCacheKey("color", "brand", seededFragment)]: seededClassName
+      });
+
+      expect(cache.addFragment("color", "brand", seededFragment)).toBe(
+        seededClassName
+      );
+      expect(cache.exportSnapshot()).toEqual({
+        [fragmentCacheKey("color", "brand", seededFragment)]: seededClassName
+      });
+      expect(cache.size).toBe(1);
     });
 
     it("should treat null prototype objects as plain objects", () => {
