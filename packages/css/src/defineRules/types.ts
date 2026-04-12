@@ -173,7 +173,7 @@ if (import.meta.vitest) {
     >(defineRulesCtx: DefineRulesCtx<Properties, Shortcuts>) {
       return {
         defineRulesCtx,
-        cssInput: defineRulesCtx as unknown as DefineRulesComplexCssInput<
+        _cssInput: defineRulesCtx as unknown as DefineRulesComplexCssInput<
           Properties,
           Shortcuts
         >
@@ -182,13 +182,12 @@ if (import.meta.vitest) {
 
     describe.concurrent("DefineRulesProperties Type", () => {
       it("Array values for CSS properties", () => {
-        const { defineRulesCtx, cssInput: _cssInput } =
-          createDefineRulesTypeCase({
-            properties: {
-              display: ["none", "inline", "block"],
-              paddingLeft: [0, 2, 4, 8, 16, 32, 64]
-            }
-          });
+        const { defineRulesCtx, _cssInput } = createDefineRulesTypeCase({
+          properties: {
+            display: ["none", "inline", "block"],
+            paddingLeft: [0, 2, 4, 8, 16, 32, 64]
+          }
+        });
         assertType<{
           properties?: {
             readonly display: readonly ["none", "inline", "block"];
@@ -209,15 +208,14 @@ if (import.meta.vitest) {
       });
 
       it("Object values for CSS properties", () => {
-        const { defineRulesCtx, cssInput: _cssInput } =
-          createDefineRulesTypeCase({
-            properties: {
-              color: {
-                "indigo-800": "rgb(55, 48, 163)",
-                "red-500": "rgb(239, 68, 68)"
-              }
+        const { defineRulesCtx, _cssInput } = createDefineRulesTypeCase({
+          properties: {
+            color: {
+              "indigo-800": "rgb(55, 48, 163)",
+              "red-500": "rgb(239, 68, 68)"
             }
-          });
+          }
+        });
         assertType<{
           properties?: {
             color: {
@@ -238,17 +236,16 @@ if (import.meta.vitest) {
 
       it("Object values with CSSPropertiesWithVars", () => {
         const alpha = "--alpha";
-        const { defineRulesCtx, cssInput: _cssInput } =
-          createDefineRulesTypeCase({
-            properties: {
-              background: {
-                red: {
-                  vars: { [alpha]: "1" },
-                  background: `rgba(255, 0, 0, var(${alpha}))`
-                }
+        const { defineRulesCtx, _cssInput } = createDefineRulesTypeCase({
+          properties: {
+            background: {
+              red: {
+                vars: { [alpha]: "1" },
+                background: `rgba(255, 0, 0, var(${alpha}))`
               }
             }
-          });
+          }
+        });
         assertType<{
           properties?: {
             background: {
@@ -270,13 +267,12 @@ if (import.meta.vitest) {
       });
 
       it("Boolean values for entire properties", () => {
-        const { defineRulesCtx, cssInput: _cssInput } =
-          createDefineRulesTypeCase({
-            properties: {
-              border: false,
-              margin: true
-            }
-          });
+        const { defineRulesCtx, _cssInput } = createDefineRulesTypeCase({
+          properties: {
+            border: false,
+            margin: true
+          }
+        });
         assertType<{
           properties?: {
             border: false;
@@ -295,15 +291,14 @@ if (import.meta.vitest) {
 
       it("Custom properties with CSSPropertiesWithVars", () => {
         const alpha = "--alpha";
-        const { defineRulesCtx, cssInput: _cssInput } =
-          createDefineRulesTypeCase({
-            properties: {
-              backgroundOpacity: {
-                full: { vars: { [alpha]: "1" } },
-                half: { vars: { [alpha]: "0.5" } }
-              }
+        const { defineRulesCtx, _cssInput } = createDefineRulesTypeCase({
+          properties: {
+            backgroundOpacity: {
+              full: { vars: { [alpha]: "1" } },
+              half: { vars: { [alpha]: "0.5" } }
             }
-          });
+          }
+        });
         assertType<{
           properties?: {
             backgroundOpacity: {
@@ -323,18 +318,17 @@ if (import.meta.vitest) {
       });
 
       it("Function values return CSS properties", () => {
-        const { defineRulesCtx, cssInput: _cssInput } =
-          createDefineRulesTypeCase({
-            properties: {
-              color(arg: "primary" | "secondary") {
-                if (arg === "primary") {
-                  return { color: "blue" } as const;
-                } else {
-                  return { color: "gray" } as const;
-                }
+        const { defineRulesCtx, _cssInput } = createDefineRulesTypeCase({
+          properties: {
+            color(arg: "primary" | "secondary") {
+              if (arg === "primary") {
+                return { color: "blue" } as const;
+              } else {
+                return { color: "gray" } as const;
               }
             }
-          });
+          }
+        });
         assertType<{
           properties?: {
             color: (arg: "primary" | "secondary") =>
@@ -351,25 +345,24 @@ if (import.meta.vitest) {
       });
 
       it("Function values return Style objects", () => {
-        const { defineRulesCtx, cssInput: _cssInput } =
-          createDefineRulesTypeCase({
-            properties: {
-              color(arg: "primary" | "secondary") {
-                if (arg === "primary") {
-                  return "blue";
-                } else {
-                  return "gray";
-                }
-              },
-              otherColor(arg: "primary" | "secondary") {
-                if (arg === "primary") {
-                  return { color: "red" } as const;
-                } else {
-                  return { color: "green" } as const;
-                }
+        const { defineRulesCtx, _cssInput } = createDefineRulesTypeCase({
+          properties: {
+            color(arg: "primary" | "secondary") {
+              if (arg === "primary") {
+                return "blue";
+              } else {
+                return "gray";
+              }
+            },
+            otherColor(arg: "primary" | "secondary") {
+              if (arg === "primary") {
+                return { color: "red" } as const;
+              } else {
+                return { color: "green" } as const;
               }
             }
-          });
+          }
+        });
         assertType<{
           properties?: {
             color: (arg: "primary" | "secondary") => "blue" | "gray";
@@ -387,19 +380,51 @@ if (import.meta.vitest) {
       });
     });
 
+    describe.concurrent("DefineRulesPresetMap Type", () => {
+      it("Accepts raw preset records", () => {
+        const { defineRulesCtx } = createDefineRulesTypeCase({
+          presets: {
+            colorRed: "color_red",
+            displayFlex: "display_flex"
+          },
+          properties: {
+            color: true
+          }
+        });
+
+        assertType<DefineRulesPresetMap | undefined>(defineRulesCtx.presets);
+      });
+
+      it("Rejects preset owner objects", () => {
+        const owner = {
+          css: (_args: unknown) => "className",
+          preset: {
+            colorRed: "color_red"
+          }
+        };
+
+        createDefineRulesTypeCase({
+          properties: {
+            color: true
+          },
+          // @ts-expect-error: presets accepts raw string records only.
+          presets: owner
+        });
+      });
+    });
+
     describe.concurrent("DefineRulesShortcuts Type", () => {
       it("Single property shortcut", () => {
-        const { defineRulesCtx, cssInput: _cssInput } =
-          createDefineRulesTypeCase({
-            properties: {
-              paddingLeft: [0, 4, 8],
-              paddingRight: [0, 4, 8]
-            },
-            shortcuts: {
-              pl: "paddingLeft",
-              pr: "paddingRight"
-            }
-          });
+        const { defineRulesCtx, _cssInput } = createDefineRulesTypeCase({
+          properties: {
+            paddingLeft: [0, 4, 8],
+            paddingRight: [0, 4, 8]
+          },
+          shortcuts: {
+            pl: "paddingLeft",
+            pr: "paddingRight"
+          }
+        });
         assertType<{
           properties?: {
             paddingLeft: readonly [0, 4, 8];
@@ -424,16 +449,15 @@ if (import.meta.vitest) {
       });
 
       it("Array shortcut referencing properties", () => {
-        const { defineRulesCtx, cssInput: _cssInput } =
-          createDefineRulesTypeCase({
-            properties: {
-              paddingLeft: [0, 4, 8],
-              paddingRight: [0, 4, 8, 12]
-            },
-            shortcuts: {
-              px: ["paddingLeft", "paddingRight"]
-            }
-          });
+        const { defineRulesCtx, _cssInput } = createDefineRulesTypeCase({
+          properties: {
+            paddingLeft: [0, 4, 8],
+            paddingRight: [0, 4, 8, 12]
+          },
+          shortcuts: {
+            px: ["paddingLeft", "paddingRight"]
+          }
+        });
         assertType<{
           properties?: {
             paddingLeft: readonly [0, 4, 8];
@@ -458,18 +482,17 @@ if (import.meta.vitest) {
       });
 
       it("Shortcut referencing other shortcuts", () => {
-        const { defineRulesCtx, cssInput: _cssInput } =
-          createDefineRulesTypeCase({
-            properties: {
-              paddingLeft: [0, 4, 8],
-              paddingRight: [0, 4, 8, 12]
-            },
-            shortcuts: {
-              pl: "paddingLeft",
-              pr: "paddingRight",
-              px: ["pl", "pr"]
-            }
-          });
+        const { defineRulesCtx, _cssInput } = createDefineRulesTypeCase({
+          properties: {
+            paddingLeft: [0, 4, 8],
+            paddingRight: [0, 4, 8, 12]
+          },
+          shortcuts: {
+            pl: "paddingLeft",
+            pr: "paddingRight",
+            px: ["pl", "pr"]
+          }
+        });
         assertType<{
           properties?: {
             paddingLeft: readonly [0, 4, 8];
@@ -533,15 +556,14 @@ if (import.meta.vitest) {
       });
 
       it("Fixed object shortcut", () => {
-        const { defineRulesCtx, cssInput: _cssInput } =
-          createDefineRulesTypeCase({
-            properties: {
-              display: ["none", "inline", "block"]
-            },
-            shortcuts: {
-              inline: { display: "inline" }
-            }
-          });
+        const { defineRulesCtx, _cssInput } = createDefineRulesTypeCase({
+          properties: {
+            display: ["none", "inline", "block"]
+          },
+          shortcuts: {
+            inline: { display: "inline" }
+          }
+        });
         assertType<{
           properties?: {
             display: readonly ["none", "inline", "block"];
@@ -558,23 +580,22 @@ if (import.meta.vitest) {
       });
 
       it("Function shortcut", () => {
-        const { defineRulesCtx, cssInput: _cssInput } =
-          createDefineRulesTypeCase({
-            properties: {
-              display: ["none", "inline", "block"],
-              paddingLeft: [0, 4, 8],
-              paddingRight: [0, 4, 8]
-            },
-            shortcuts: {
-              px: ["paddingLeft", "paddingRight"],
-              center(arg: "none" | "inline" | "block") {
-                return {
-                  display: arg,
-                  px: 4
-                } as const;
-              }
+        const { defineRulesCtx, _cssInput } = createDefineRulesTypeCase({
+          properties: {
+            display: ["none", "inline", "block"],
+            paddingLeft: [0, 4, 8],
+            paddingRight: [0, 4, 8]
+          },
+          shortcuts: {
+            px: ["paddingLeft", "paddingRight"],
+            center(arg: "none" | "inline" | "block") {
+              return {
+                display: arg,
+                px: 4
+              } as const;
             }
-          });
+          }
+        });
         assertType<{
           properties?: {
             display: readonly ["none", "inline", "block"];

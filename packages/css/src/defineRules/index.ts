@@ -1,10 +1,10 @@
-import type { CSSProperties } from "@mincho-js/transform-to-vanilla";
 import { setFileScope } from "@vanilla-extract/css/fileScope";
-import { createCanonicalStyleCache } from "./utils.js";
 import { identifierName } from "../utils.js";
+import { createDefineRulesRuntime } from "./runtime.js";
+import type { DefineRulesRuntimeResult } from "./runtime.js";
 import type {
-  DefineRulesComplexCssInput,
   DefineRulesCtx,
+  DefineRulesPresetMap,
   DefineRulesProperties,
   DefineRulesShortcuts
 } from "./types.js";
@@ -13,405 +13,12 @@ import type {
 export function defineRules<
   const Properties extends DefineRulesProperties,
   const Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts>
->(config: DefineRulesCtx<Properties, Shortcuts>) {
-  type CssInput = DefineRulesComplexCssInput<Properties, Shortcuts>;
-  const styleCache = createCanonicalStyleCache(config.debugId);
-
-  function resolveToFragments(args: CssInput): ResolvedStyleFragment[] {
-    const fragments: ResolvedStyleFragment[] = [];
-    applyInput(config, fragments, args, []);
-    return fragments;
-  }
-
-  function cssRaw(args: CssInput): CSSProperties {
-    return flattenResolvedFragments(resolveToFragments(args));
-  }
-
-  function cssImpl(args: CssInput): string {
-    const fragments = resolveToFragments(args);
-    const emittedFragments = collectEmittedFragments(fragments);
-    const output: string[] = [];
-
-    for (const fragment of emittedFragments) {
-      const className = styleCache.addFragment(
-        fragment.inputIdentity.property,
-        fragment.inputIdentity.value,
-        fragment.style
-      );
-      output.push(className);
-    }
-    return output.sort().join(" ");
-  }
-
-  const css = Object.assign(cssImpl, { raw: cssRaw });
-  return { css };
-}
-
-// == Define Rules Impl ========================================================
-interface InputIdentity {
-  property: string;
-  value: unknown;
-}
-
-interface ResolvedStyleFragment {
-  source: {
-    key: string;
-    shortcutStack: string[];
-  };
-  inputIdentity: InputIdentity;
-  outputKeys: string[];
-  style: CSSProperties;
-}
-
-function collectEmittedFragments(
-  fragments: readonly ResolvedStyleFragment[]
-): ResolvedStyleFragment[] {
-  const occupiedKeys = new Set<string>();
-  const emittedFragments: ResolvedStyleFragment[] = [];
-
-  for (let index = fragments.length - 1; index >= 0; index -= 1) {
-    const fragment = fragments[index];
-    if (fragment == null) continue;
-
-    const emittedFragment = omitOccupiedKeys(fragment, occupiedKeys);
-    if (emittedFragment == null) {
-      continue;
-    }
-
-    emittedFragments.push(emittedFragment);
-
-    for (const key of emittedFragment.outputKeys) {
-      occupiedKeys.add(key);
-    }
-  }
-
-  return emittedFragments.reverse();
-}
-
-function omitOccupiedKeys(
-  fragment: ResolvedStyleFragment,
-  occupiedKeys: ReadonlySet<string>
-): ResolvedStyleFragment | undefined {
-  const remainingOutputKeys = fragment.outputKeys.filter(
-    (key) => !occupiedKeys.has(key)
-  );
-
-  if (remainingOutputKeys.length === 0) {
-    return undefined;
-  }
-
-  if (remainingOutputKeys.length === fragment.outputKeys.length) {
-    return fragment;
-  }
-
-  const nextStyle: Record<string, unknown> = {};
-
-  for (const key of remainingOutputKeys) {
-    nextStyle[key] = (fragment.style as Record<string, unknown>)[key];
-  }
-
-  return {
-    ...fragment,
-    outputKeys: remainingOutputKeys,
-    style: nextStyle as CSSProperties
-  };
-}
-
-function flattenResolvedFragments(
-  fragments: readonly ResolvedStyleFragment[]
-): CSSProperties {
-  const mergedStyle: CSSProperties = {};
-
-  for (const fragment of fragments) {
-    Object.assign(mergedStyle, fragment.style);
-  }
-
-  return mergedStyle;
-}
-
-function pushResolvedFragment(
-  fragmentsOut: ResolvedStyleFragment[],
-  inputIdentity: InputIdentity,
-  shortcutStack: readonly string[],
-  style: CSSProperties
-) {
-  const outputKeys = Object.keys(style);
-  if (outputKeys.length === 0) return;
-
-  fragmentsOut.push({
-    source: {
-      key: inputIdentity.property,
-      shortcutStack: [...shortcutStack]
-    },
-    inputIdentity,
-    outputKeys,
-    style
-  });
-}
-
-function applyInput<
-  Properties extends DefineRulesProperties,
-  Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts>
 >(
-  ctx: DefineRulesCtx<Properties, Shortcuts>,
-  fragmentsOut: ResolvedStyleFragment[],
-  input: unknown,
-  shortcutStack: string[]
-) {
-  if (input == null || input === false) return;
-
-  if (typeof input === "string") {
-    applyInlineShortcut(ctx, fragmentsOut, input, shortcutStack);
-    return;
-  }
-
-  if (Array.isArray(input)) {
-    applyArray(ctx, fragmentsOut, input, shortcutStack);
-    return;
-  }
-
-  if (isPlainObject(input)) {
-    applyObject(ctx, fragmentsOut, input, shortcutStack);
-    return;
-  }
-
-  throw new Error(`Unsupported css() argument: ${String(input)}`);
-}
-
-function applyInlineShortcut<
-  Properties extends DefineRulesProperties,
-  Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts>
->(
-  ctx: DefineRulesCtx<Properties, Shortcuts>,
-  fragmentsOut: ResolvedStyleFragment[],
-  shortcutName: string,
-  shortcutStack: string[]
-) {
-  if (hasOwn(ctx.shortcuts, shortcutName)) {
-    applyShortcut(ctx, fragmentsOut, shortcutName, undefined, shortcutStack);
-    return;
-  }
-  throw new Error(`Unknown fixed style: "${shortcutName}"`);
-}
-
-function applyArray<
-  Properties extends DefineRulesProperties,
-  Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts>
->(
-  ctx: DefineRulesCtx<Properties, Shortcuts>,
-  fragmentsOut: ResolvedStyleFragment[],
-  arr: readonly unknown[],
-  shortcutStack: string[]
-) {
-  for (const item of arr) {
-    applyInput(ctx, fragmentsOut, item, shortcutStack);
-  }
-}
-
-function applyObject<
-  Properties extends DefineRulesProperties,
-  Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts>
->(
-  ctx: DefineRulesCtx<Properties, Shortcuts>,
-  fragmentsOut: ResolvedStyleFragment[],
-  obj: Record<string, unknown>,
-  shortcutStack: string[]
-) {
-  for (const [k, v] of Object.entries(obj)) {
-    applyEntry(ctx, fragmentsOut, k, v, shortcutStack);
-  }
-}
-
-function applyEntry<
-  Properties extends DefineRulesProperties,
-  Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts>
->(
-  ctx: DefineRulesCtx<Properties, Shortcuts>,
-  fragmentsOut: ResolvedStyleFragment[],
-  key: string,
-  value: unknown,
-  shortcutStack: string[]
-) {
-  if (value == null) {
-    return;
-  }
-
-  if (hasOwn(ctx.shortcuts, key)) {
-    applyShortcut(ctx, fragmentsOut, key, value, shortcutStack);
-    return;
-  }
-
-  applyProperty(ctx, fragmentsOut, key, value, shortcutStack);
-}
-
-function applyProperty<
-  Properties extends DefineRulesProperties,
-  Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts>
->(
-  ctx: DefineRulesCtx<Properties, Shortcuts>,
-  fragmentsOut: ResolvedStyleFragment[],
-  prop: string,
-  value: unknown,
-  shortcutStack: string[]
-) {
-  const propertyDefinition = ctx.properties?.[prop as keyof Properties];
-
-  if (typeof propertyDefinition === "function") {
-    const result = propertyDefinition(value);
-
-    if (result == null) {
-      return;
-    }
-
-    if (isPlainObject(result)) {
-      pushResolvedFragment(
-        fragmentsOut,
-        { property: prop, value },
-        shortcutStack,
-        result as CSSProperties
-      );
-      return;
-    } else {
-      pushResolvedFragment(
-        fragmentsOut,
-        { property: prop, value },
-        shortcutStack,
-        {
-          [prop]: result
-        } as CSSProperties
-      );
-      return;
-    }
-  }
-
-  // just assign => last one wins
-  if (isPlainObject(propertyDefinition) === false) {
-    pushResolvedFragment(
-      fragmentsOut,
-      { property: prop, value },
-      shortcutStack,
-      {
-        [prop]: value
-      } as CSSProperties
-    );
-    return;
-  }
-
-  const mappedValue = propertyDefinition[value as string];
-
-  // Style object value => assign all
-  if (isPlainObject(mappedValue)) {
-    pushResolvedFragment(
-      fragmentsOut,
-      { property: prop, value },
-      shortcutStack,
-      mappedValue as CSSProperties
-    );
-    return;
-  }
-
-  // Mapped value => assign mapped value
-  pushResolvedFragment(fragmentsOut, { property: prop, value }, shortcutStack, {
-    [prop]: mappedValue ?? value
-  } as CSSProperties);
-}
-
-function applyShortcutReference<
-  Properties extends DefineRulesProperties,
-  Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts>
->(
-  ctx: DefineRulesCtx<Properties, Shortcuts>,
-  fragmentsOut: ResolvedStyleFragment[],
-  targetName: string,
-  value: unknown,
-  shortcutStack: string[]
-) {
-  if (hasOwn(ctx.shortcuts, targetName)) {
-    applyShortcut(ctx, fragmentsOut, targetName, value, shortcutStack);
-    return;
-  }
-
-  applyProperty(ctx, fragmentsOut, targetName, value, shortcutStack);
-}
-
-function applyShortcut<
-  Properties extends DefineRulesProperties,
-  Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts>
->(
-  ctx: DefineRulesCtx<Properties, Shortcuts>,
-  fragmentsOut: ResolvedStyleFragment[],
-  name: string,
-  value: unknown,
-  shortcutStack: string[]
-) {
-  if (shortcutStack.includes(name)) {
-    throw new Error(
-      `Circular shortcut reference: ${[...shortcutStack, name].join(" -> ")}`
-    );
-  }
-
-  const shortcutDefinition = ctx.shortcuts?.[name as keyof Shortcuts];
-  if (shortcutDefinition == null) return;
-
-  const nextShortcutStack = shortcutStack.concat(name);
-
-  if (typeof shortcutDefinition === "string") {
-    // single alias: pl -> paddingLeft
-    applyShortcutReference(
-      ctx,
-      fragmentsOut,
-      shortcutDefinition,
-      value,
-      nextShortcutStack
-    );
-    return;
-  }
-
-  if (Array.isArray(shortcutDefinition)) {
-    // multi alias: px -> [pl, pr]
-    for (const alias of shortcutDefinition) {
-      applyShortcutReference(
-        ctx,
-        fragmentsOut,
-        alias,
-        value,
-        nextShortcutStack
-      );
-    }
-    return;
-  }
-
-  if (typeof shortcutDefinition === "function") {
-    // fn shortcut
-    const produced = shortcutDefinition(value);
-    applyInput(ctx, fragmentsOut, produced, nextShortcutStack);
-    return;
-  }
-
-  if (isPlainObject(shortcutDefinition)) {
-    // fixed style shortcut
-    // - "inline" shortcut flag (no value) => apply
-    // - { inline: true } => apply
-    // - { inline: false } => do not apply
-    if (value === undefined || value === true) {
-      applyInput(ctx, fragmentsOut, shortcutDefinition, nextShortcutStack);
-      return;
-    }
-    if (!value) return;
-    applyInput(ctx, fragmentsOut, shortcutDefinition, nextShortcutStack);
-    return;
-  }
-
-  throw new Error(`Unsupported shortcut definition for "${name}"`);
-}
-
-// == Utils ====================================================================
-function isPlainObject(v: unknown): v is Record<string, unknown> {
-  return v != null && typeof v === "object" && !Array.isArray(v);
-}
-
-function hasOwn(obj: object | undefined, key: PropertyKey): boolean {
-  return obj != null && Object.prototype.hasOwnProperty.call(obj, key);
+  config: DefineRulesCtx<Properties, Shortcuts>
+): DefineRulesRuntimeResult<Properties, Shortcuts> {
+  const result: DefineRulesRuntimeResult<Properties, Shortcuts> =
+    createDefineRulesRuntime<Properties, Shortcuts>(config);
+  return result;
 }
 
 // == Tests ====================================================================
@@ -421,12 +28,331 @@ function hasOwn(obj: object | undefined, key: PropertyKey): boolean {
 if (import.meta.vitest) {
   // eslint-disable-next-line @typescript-eslint/ban-ts-comment
   // @ts-ignore error TS1343: The 'import.meta' meta-property is only allowed when the '--module' option is 'es2020', 'es2022', 'esnext', 'system', 'node16', or 'nodenext'.
-  const { describe, it, expect } = import.meta.vitest;
+  const { describe, it, expect, assertType } = import.meta.vitest;
 
   const debugId = "myCSS";
   setFileScope("test");
 
+  const createDefineRulesAuthoringShapeOwner = (debugId: string) =>
+    defineRules({
+      debugId,
+      properties: {
+        color: true,
+        display: ["none", "flex"]
+      }
+    });
+
+  type DefineRulesAuthoringShapeOwner = ReturnType<
+    typeof createDefineRulesAuthoringShapeOwner
+  >;
+  type DefineRulesAuthoringShapeInput = Parameters<
+    DefineRulesAuthoringShapeOwner["css"]
+  >[0];
+
+  function expectDefineRulesAuthoringShapeBindings(
+    bindings: Pick<DefineRulesAuthoringShapeOwner, "css" | "preset">
+  ) {
+    assertType<DefineRulesAuthoringShapeOwner["css"]>(bindings.css);
+    assertType<DefineRulesPresetMap>(bindings.preset);
+    assertType<DefineRulesAuthoringShapeInput>({
+      color: "rebeccapurple",
+      display: "flex"
+    });
+
+    expect(bindings.preset).toEqual({});
+    expect(bindings.css.raw({ display: "flex" })).toEqual({
+      display: "flex"
+    });
+
+    const className = bindings.css({ display: "flex" });
+
+    expect(Object.values(bindings.preset)).toEqual([className]);
+  }
+
   describe("defineRules", () => {
+    describe.concurrent("DefineRules authoring/export shape matrix", () => {
+      it("1. owner-object form: export const presetOwner = defineRules({...})", () => {
+        const presetOwner =
+          createDefineRulesAuthoringShapeOwner("ownerObjectShape");
+
+        assertType<DefineRulesAuthoringShapeOwner>(presetOwner);
+        expectDefineRulesAuthoringShapeBindings(presetOwner);
+      });
+
+      it("2. direct destructuring form: export const { css, preset } = defineRules({...})", () => {
+        const { css, preset } = createDefineRulesAuthoringShapeOwner(
+          "directDestructuringShape"
+        );
+
+        assertType<DefineRulesAuthoringShapeOwner["css"]>(css);
+        assertType<DefineRulesPresetMap>(preset);
+        expectDefineRulesAuthoringShapeBindings({ css, preset });
+      });
+
+      it("3. aliased destructuring form: export const { css: sharedCss, preset: sharedPreset } = defineRules({...})", () => {
+        const { css: sharedCss, preset: sharedPreset } =
+          createDefineRulesAuthoringShapeOwner("aliasedDestructuringShape");
+
+        assertType<DefineRulesAuthoringShapeOwner["css"]>(sharedCss);
+        assertType<DefineRulesPresetMap>(sharedPreset);
+        expectDefineRulesAuthoringShapeBindings({
+          css: sharedCss,
+          preset: sharedPreset
+        });
+      });
+
+      it("4. owner-object member exports form: const presetOwner = defineRules({...}); export const css = presetOwner.css; export const preset = presetOwner.preset;", () => {
+        const presetOwner = createDefineRulesAuthoringShapeOwner(
+          "ownerMemberExportsShape"
+        );
+        const css = presetOwner.css;
+        const preset = presetOwner.preset;
+
+        assertType<DefineRulesAuthoringShapeOwner["css"]>(css);
+        assertType<DefineRulesPresetMap>(preset);
+        expect(preset).toBe(presetOwner.preset);
+        expectDefineRulesAuthoringShapeBindings({ css, preset });
+      });
+
+      it("5. exported owner-object destructuring form: export const presetOwner = defineRules({...}); export const { css, preset } = presetOwner;", () => {
+        const presetOwner = createDefineRulesAuthoringShapeOwner(
+          "exportedOwnerDestructuringShape"
+        );
+        const { css, preset } = presetOwner;
+
+        assertType<DefineRulesAuthoringShapeOwner["css"]>(css);
+        assertType<DefineRulesPresetMap>(preset);
+        expect(preset).toBe(presetOwner.preset);
+        expectDefineRulesAuthoringShapeBindings({ css, preset });
+      });
+
+      it("6. local destructuring export-list form: const { css, preset } = defineRules({...}); export { css, preset };", () => {
+        const { css, preset } = createDefineRulesAuthoringShapeOwner(
+          "localDestructuringExportListShape"
+        );
+
+        assertType<DefineRulesAuthoringShapeOwner["css"]>(css);
+        assertType<DefineRulesPresetMap>(preset);
+        expectDefineRulesAuthoringShapeBindings({ css, preset });
+      });
+    });
+
+    describe.concurrent("DefineRules Presets", () => {
+      it("exposes a live preset object", () => {
+        const { css, preset } = defineRules({
+          debugId: "presetIdentity",
+          properties: {
+            background: true
+          }
+        });
+
+        expect(preset).toEqual({});
+
+        const className = css({ background: "blue" });
+        const repeatedClassName = css({ background: "blue" });
+
+        expect(
+          Object.keys(preset).every(
+            (key) => key.startsWith("fragment_") === false
+          )
+        ).toBe(true);
+        expect(repeatedClassName).toBe(className);
+        expect(Object.values(preset)).toContain(className);
+        expect(
+          Object.values(preset).filter((entry) => entry === className)
+        ).toHaveLength(1);
+      });
+
+      it("exposes an empty preset object without static calls", () => {
+        const { preset } = defineRules({
+          debugId: "emptyPresetIdentity",
+          properties: {
+            background: true
+          }
+        });
+
+        expect(preset).toEqual({});
+        expect(Object.keys(preset)).toHaveLength(0);
+      });
+
+      it("Keeps preset handles live for transitive raw record composition", () => {
+        const provider = defineRules({
+          debugId: "provider",
+          properties: {
+            color: true
+          }
+        });
+        const providerColor = provider.css({ color: "red" });
+
+        const composed = defineRules({
+          debugId: "composed",
+          presets: {
+            ...provider.preset
+          },
+          properties: {
+            color: true,
+            background: true
+          }
+        });
+        const composedBackground = composed.css({ background: "blue" });
+
+        const transitive = defineRules({
+          debugId: "transitive",
+          presets: {
+            ...composed.preset
+          },
+          properties: {
+            color: true,
+            background: true,
+            display: true
+          }
+        });
+        const transitiveDisplay = transitive.css({ display: "block" });
+
+        expect(Object.values(provider.preset)).toEqual([providerColor]);
+        expect(Object.values(composed.preset)).toEqual(
+          expect.arrayContaining([providerColor, composedBackground])
+        );
+        expect(Object.values(composed.preset)).toHaveLength(2);
+        expect(Object.values(transitive.preset)).toEqual(
+          expect.arrayContaining([
+            providerColor,
+            composedBackground,
+            transitiveDisplay
+          ])
+        );
+        expect(Object.values(transitive.preset)).toHaveLength(3);
+        expect(composed.preset).not.toBe(provider.preset);
+        expect(transitive.preset).not.toBe(composed.preset);
+      });
+
+      it("Rejects malformed preset input", () => {
+        const createMalformedPresetCase = (presets: unknown) => () =>
+          defineRules({
+            presets: presets as DefineRulesPresetMap,
+            properties: {
+              color: true
+            }
+          });
+
+        const ownerPresetInput: unknown = {
+          css: true,
+          preset: {
+            colorRed: "color_red"
+          }
+        };
+        const legacySerializedPresetEnvelope: unknown = {
+          schema: "mincho.defineRulesPreset",
+          version: 2,
+          classNameByCache: {
+            colorRed: "color_red"
+          }
+        };
+
+        expect(createMalformedPresetCase(ownerPresetInput)).toThrow(
+          "Unsupported defineRules preset input"
+        );
+
+        expect(
+          createMalformedPresetCase(legacySerializedPresetEnvelope)
+        ).toThrow("Unsupported defineRules preset input");
+
+        expect(createMalformedPresetCase([])).toThrow(
+          "Unsupported defineRules preset input"
+        );
+      });
+
+      it("Reuses seeded preset class names without overwriting imported entries", () => {
+        const provider = defineRules({
+          debugId: "provider",
+          properties: {
+            background: true
+          }
+        });
+        const providerBackground = provider.css({ background: "blue" });
+        const importedPreset = {
+          ...provider.preset
+        };
+
+        const consumer = defineRules({
+          debugId: "consumer",
+          presets: importedPreset,
+          properties: {
+            background: true
+          }
+        });
+        const presetHandle = consumer.preset;
+
+        expect(presetHandle).toEqual(importedPreset);
+
+        const reusedBackground = consumer.css({ background: "blue" });
+
+        expect(reusedBackground).toBe(providerBackground);
+        expect(reusedBackground).not.toMatch(identifierName("consumer"));
+        expect(presetHandle).toEqual(importedPreset);
+        expect(Object.values(presetHandle)).toEqual([providerBackground]);
+        expect(
+          Object.values(presetHandle).filter(
+            (className) => className === reusedBackground
+          )
+        ).toHaveLength(1);
+        expect(presetHandle).toBe(consumer.preset);
+        expect(importedPreset).toEqual(provider.preset);
+      });
+
+      it("Keeps seeded preset handles isolated across defineRules instances", () => {
+        const provider = defineRules({
+          debugId: "provider",
+          properties: {
+            color: true
+          }
+        });
+        const providerColor = provider.css({ color: "red" });
+        const sharedPreset = {
+          ...provider.preset
+        };
+
+        const consumerA = defineRules({
+          debugId: "consumerA",
+          presets: sharedPreset,
+          properties: {
+            color: true,
+            background: true
+          }
+        });
+        const consumerB = defineRules({
+          debugId: "consumerB",
+          presets: sharedPreset,
+          properties: {
+            color: true,
+            background: true
+          }
+        });
+
+        expect(consumerA.css({ color: "red" })).toBe(providerColor);
+        expect(consumerB.css({ color: "red" })).toBe(providerColor);
+
+        const consumerABackground = consumerA.css({ background: "blue" });
+
+        expect(Object.values(consumerA.preset)).toEqual(
+          expect.arrayContaining([providerColor, consumerABackground])
+        );
+        expect(Object.values(consumerA.preset)).toHaveLength(2);
+        expect(Object.values(consumerB.preset)).toEqual([providerColor]);
+
+        const consumerBBackground = consumerB.css({ background: "blue" });
+
+        expect(consumerABackground).not.toBe(consumerBBackground);
+        expect(Object.values(consumerB.preset)).toEqual(
+          expect.arrayContaining([providerColor, consumerBBackground])
+        );
+        expect(Object.values(consumerB.preset)).not.toContain(
+          consumerABackground
+        );
+        expect(sharedPreset).toEqual(provider.preset);
+      });
+    });
+
     describe.concurrent("DefineRules Properties", () => {
       it("Array values for CSS properties", () => {
         const { css } = defineRules({
@@ -575,6 +501,55 @@ if (import.meta.vitest) {
         expect(
           cssResolver([{ optionalColor: "primary" }, { optionalColor: "none" }])
         ).toBe(cssResolver({ optionalColor: "primary" }));
+      });
+
+      it("createDefineRulesRuntime supports function-valued properties locally", () => {
+        const { css } = createDefineRulesRuntime({
+          properties: {
+            color(value: "brand" | "neutral") {
+              if (value === "brand") {
+                return "blue";
+              }
+
+              return "gray";
+            },
+            tone(value: "brand" | "neutral") {
+              return {
+                color: value === "brand" ? "blue" : "gray"
+              } as const;
+            },
+            display: ["none", "flex"],
+            paddingLeft: [0, 4, 8],
+            paddingRight: [0, 4, 8]
+          },
+          shortcuts: {
+            px: ["paddingLeft", "paddingRight"],
+            center(value: "none" | "flex") {
+              return {
+                display: value,
+                px: 4
+              } as const;
+            }
+          }
+        });
+
+        expect(css.raw({ color: "brand" })).toEqual({
+          color: "blue"
+        });
+        expect(css.raw({ color: "neutral" })).toEqual({
+          color: "gray"
+        });
+        expect(css.raw({ tone: "neutral" })).toEqual({
+          color: "gray"
+        });
+        expect(css.raw({ center: "flex" })).toEqual({
+          display: "flex",
+          paddingLeft: 4,
+          paddingRight: 4
+        });
+        expect(css({ center: "flex" })).toBe(
+          css({ display: "flex", paddingLeft: 4, paddingRight: 4 })
+        );
       });
 
       it("css() canonicalize className", () => {
@@ -897,6 +872,7 @@ if (import.meta.vitest) {
       });
 
       it("Circular shortcuts", () => {
+        // @ts-expect-error Type of property 'a' circularly references itself in mapped type 'ShortcutsInput<PropertiesInput<{ readonly paddingLeft: readonly [0, 4, 8]; }>, { readonly a: "b"; readonly b: readonly ["a"]; }>'.
         const { css } = defineRules({
           properties: {
             paddingLeft: [0, 4, 8]
@@ -907,7 +883,6 @@ if (import.meta.vitest) {
           }
         });
 
-        // @ts-expect-error Type of property 'a' circularly references itself in mapped type 'ShortcutsInput<PropertiesInput<{ readonly paddingLeft: readonly [0, 4, 8]; }>, { readonly a: "b"; readonly b: readonly ["a"]; }>'.
         expect(() => css.raw({ a: 4 })).toThrow(
           "Circular shortcut reference: a -> b -> a"
         );
