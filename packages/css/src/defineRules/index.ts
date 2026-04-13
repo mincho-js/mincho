@@ -1,4 +1,6 @@
+import { addFunctionSerializer } from "@vanilla-extract/css/functionSerializer";
 import { setFileScope } from "@vanilla-extract/css/fileScope";
+import type { Serializable } from "../rules/types.js";
 import { identifierName } from "../utils.js";
 import { createDefineRulesRuntime } from "./runtime.js";
 import type { DefineRulesRuntimeResult } from "./runtime.js";
@@ -9,6 +11,12 @@ import type {
   DefineRulesShortcuts
 } from "./types.js";
 
+const DEFINE_RULES_SERIALIZED_CSS_FUNCTION_CONFIG_DIAGNOSTIC =
+  "defineRules serialized css does not support function-valued properties or shortcuts";
+const DEFINE_RULES_RUNTIME_IMPORT_PATH =
+  "@mincho-js/css/defineRules/createDefineRulesCssRuntime";
+const DEFINE_RULES_RUNTIME_IMPORT_NAME = "createDefineRulesCssRuntime";
+
 // == Define Rules =============================================================
 export function defineRules<
   const Properties extends DefineRulesProperties,
@@ -18,7 +26,58 @@ export function defineRules<
 ): DefineRulesRuntimeResult<Properties, Shortcuts> {
   const result: DefineRulesRuntimeResult<Properties, Shortcuts> =
     createDefineRulesRuntime<Properties, Shortcuts>(config);
-  return result;
+  const serializedConfig = { ...config, presets: result.preset };
+  const hasFunctionValuedConfig = hasFunctionValuedDefineRulesConfig(config);
+
+  return {
+    ...result,
+    css: addFunctionSerializer(
+      result.css,
+      createDefineRulesSerializerRecipe(
+        serializedConfig as Serializable,
+        hasFunctionValuedConfig
+      )
+    ) as DefineRulesRuntimeResult<Properties, Shortcuts>["css"]
+  };
+}
+
+function createDefineRulesSerializerRecipe(
+  serializedConfig: Serializable,
+  hasFunctionValuedConfig: boolean
+): Parameters<typeof addFunctionSerializer>[1] {
+  if (hasFunctionValuedConfig) {
+    return {
+      importPath: DEFINE_RULES_RUNTIME_IMPORT_PATH,
+      importName: DEFINE_RULES_RUNTIME_IMPORT_NAME,
+      get args(): ReadonlyArray<Serializable> {
+        throw new Error(DEFINE_RULES_SERIALIZED_CSS_FUNCTION_CONFIG_DIAGNOSTIC);
+      }
+    };
+  }
+
+  return {
+    importPath: DEFINE_RULES_RUNTIME_IMPORT_PATH,
+    importName: DEFINE_RULES_RUNTIME_IMPORT_NAME,
+    args: [serializedConfig]
+  };
+}
+
+function hasFunctionValuedDefineRulesConfig(config: {
+  properties?: object;
+  shortcuts?: object;
+}): boolean {
+  return (
+    hasFunctionValuedEntries(config.properties) ||
+    hasFunctionValuedEntries(config.shortcuts)
+  );
+}
+
+function hasFunctionValuedEntries(entries: object | undefined): boolean {
+  if (entries == null) {
+    return false;
+  }
+
+  return Object.values(entries).some((entry) => typeof entry === "function");
 }
 
 // == Tests ====================================================================
@@ -173,6 +232,118 @@ if (import.meta.vitest) {
 
         expect(preset).toEqual({});
         expect(Object.keys(preset)).toHaveLength(0);
+      });
+
+      it("exposes a live preset object through the serializer recipe", () => {
+        type DefineRulesRecipe = {
+          args?: unknown[];
+          importName?: string;
+          importPath?: string;
+        };
+
+        type DefineRulesRecipeConfig = {
+          presets?: unknown;
+        };
+
+        const { css, preset } = defineRules({
+          debugId: "serializerPresetIdentity",
+          properties: {
+            background: true
+          }
+        });
+        const recipe = (
+          css as unknown as {
+            __recipe__?: DefineRulesRecipe;
+          }
+        ).__recipe__;
+        const recipeConfig = recipe?.args?.[0];
+
+        expect(recipe?.importPath).toBe(DEFINE_RULES_RUNTIME_IMPORT_PATH);
+        expect(recipe?.importName).toBe(DEFINE_RULES_RUNTIME_IMPORT_NAME);
+        expect(recipeConfig).toEqual(expect.any(Object));
+        expect((recipeConfig as DefineRulesRecipeConfig).presets).toBe(preset);
+
+        const className = css({ background: "blue" });
+        const repeatedClassName = css({ background: "blue" });
+
+        expect(
+          Object.keys(preset).every(
+            (key) => key.startsWith("fragment_") === false
+          )
+        ).toBe(true);
+        expect(repeatedClassName).toBe(className);
+        expect(Object.values(preset)).toContain(className);
+        expect(
+          Object.values(preset).filter((entry) => entry === className)
+        ).toHaveLength(1);
+      });
+
+      it("serializes an empty preset object without static calls", () => {
+        type DefineRulesRecipe = {
+          args?: unknown[];
+        };
+
+        const { css, preset } = defineRules({
+          debugId: "emptySerializerPresetIdentity",
+          properties: {
+            background: true
+          }
+        });
+        const recipe = (
+          css as unknown as {
+            __recipe__?: DefineRulesRecipe;
+          }
+        ).__recipe__;
+        const recipeConfig = recipe?.args?.[0];
+
+        expect(recipeConfig).toEqual(expect.any(Object));
+        expect((recipeConfig as { presets?: unknown }).presets).toBe(preset);
+        expect(Object.keys(preset)).toHaveLength(0);
+      });
+
+      it("defineRules serializer rejects function-valued config with diagnostic", () => {
+        type DefineRulesRecipe = {
+          args?: unknown[];
+        };
+
+        const createRecipeArgsReader = (config: unknown) => {
+          const { css } = Reflect.apply(
+            defineRules as unknown as (...args: unknown[]) => unknown,
+            undefined,
+            [config]
+          ) as {
+            css: {
+              __recipe__?: DefineRulesRecipe;
+            };
+          };
+          const recipe = css.__recipe__;
+
+          return () => recipe?.args;
+        };
+
+        expect(
+          createRecipeArgsReader({
+            properties: {
+              color(value: string) {
+                return value;
+              }
+            }
+          })
+        ).toThrow(DEFINE_RULES_SERIALIZED_CSS_FUNCTION_CONFIG_DIAGNOSTIC);
+        expect(
+          createRecipeArgsReader({
+            properties: {
+              color: true
+            },
+            shortcuts: {
+              tone(value: "red" | "blue") {
+                return {
+                  color: value
+                } as const;
+              }
+            }
+          })
+        ).toThrow(DEFINE_RULES_SERIALIZED_CSS_FUNCTION_CONFIG_DIAGNOSTIC);
       });
 
       it("Keeps preset handles live for transitive raw record composition", () => {
