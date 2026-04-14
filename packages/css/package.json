@@ -52,6 +52,16 @@
         "default": "./dist/cjs/compat.cjs"
       }
     },
+    "./defineRules/createDefineRulesCssRuntime": {
+      "import": {
+        "types": "./dist/esm/defineRules/createDefineRulesCssRuntime.d.ts",
+        "default": "./dist/esm/defineRules/createDefineRulesCssRuntime.mjs"
+      },
+      "require": {
+        "types": "./dist/cjs/defineRules/createDefineRulesCssRuntime.d.cts",
+        "default": "./dist/cjs/defineRules/createDefineRulesCssRuntime.cjs"
+      }
+    },
     "./rules/createRuntimeFn": {
       "import": {
         "types": "./dist/esm/rules/createRuntimeFn.d.ts",

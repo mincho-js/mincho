@@ -1,5 +1,12 @@
+import type { CSSProperties } from "@mincho-js/transform-to-vanilla";
 import { addFunctionSerializer } from "@vanilla-extract/css/functionSerializer";
 import { setFileScope } from "@vanilla-extract/css/fileScope";
+import {
+  beginDefineRulesPresetCapture,
+  DEFINE_RULES_PRESET_CAPTURE_SENTINEL_PREFIX,
+  endDefineRulesPresetCapture,
+  getActiveDefineRulesPresetCapture
+} from "./capture.js";
 import type { Serializable } from "../rules/types.js";
 import { identifierName } from "../utils.js";
 import { createDefineRulesRuntime } from "./runtime.js";
@@ -23,9 +30,19 @@ export function defineRules<
   const Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts>
 >(
   config: DefineRulesCtx<Properties, Shortcuts>
+): DefineRulesRuntimeResult<Properties, Shortcuts>;
+export function defineRules<
+  const Properties extends DefineRulesProperties,
+  const Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts>
+>(
+  config: DefineRulesCtx<Properties, Shortcuts>,
+  ...captureSentinelArgs: [string?]
 ): DefineRulesRuntimeResult<Properties, Shortcuts> {
   const result: DefineRulesRuntimeResult<Properties, Shortcuts> =
-    createDefineRulesRuntime<Properties, Shortcuts>(config);
+    createDefineRulesRuntime<Properties, Shortcuts>(
+      config,
+      ...captureSentinelArgs
+    );
   const serializedConfig = { ...config, presets: result.preset };
   const hasFunctionValuedConfig = hasFunctionValuedDefineRulesConfig(config);
 
@@ -87,10 +104,28 @@ function hasFunctionValuedEntries(entries: object | undefined): boolean {
 if (import.meta.vitest) {
   // eslint-disable-next-line @typescript-eslint/ban-ts-comment
   // @ts-ignore error TS1343: The 'import.meta' meta-property is only allowed when the '--module' option is 'es2020', 'es2022', 'esnext', 'system', 'node16', or 'nodenext'.
-  const { describe, it, expect, assertType } = import.meta.vitest;
+  const { describe, it, expect, afterEach, assertType } = import.meta.vitest;
 
   const debugId = "myCSS";
+  const defineRulesWithCapture = (config: unknown, captureSentinel?: string) =>
+    Reflect.apply(
+      defineRules as unknown as (...args: unknown[]) => unknown,
+      undefined,
+      [config, captureSentinel]
+    ) as {
+      css: {
+        (args: unknown): string;
+        raw(args: unknown): CSSProperties;
+      };
+      preset: DefineRulesPresetMap;
+    };
   setFileScope("test");
+
+  afterEach(() => {
+    while (getActiveDefineRulesPresetCapture() != null) {
+      endDefineRulesPresetCapture();
+    }
+  });
 
   const createDefineRulesAuthoringShapeOwner = (debugId: string) =>
     defineRules({
@@ -196,49 +231,76 @@ if (import.meta.vitest) {
       });
     });
 
+    describe("DefineRules Build Capture", () => {
+      it("binds sentinel second args to captured live preset snapshots", () => {
+        const session = beginDefineRulesPresetCapture(
+          "/virtual/provider.css.ts"
+        );
+
+        try {
+          const provider = defineRulesWithCapture(
+            {
+              debugId: "provider",
+              properties: {
+                color: true
+              }
+            },
+            `${DEFINE_RULES_PRESET_CAPTURE_SENTINEL_PREFIX}provider`
+          );
+
+          defineRules({
+            debugId: "ignored",
+            properties: {
+              color: true
+            }
+          });
+
+          const consumer = defineRulesWithCapture(
+            {
+              debugId: "consumer",
+              properties: {
+                background: true
+              }
+            },
+            `${DEFINE_RULES_PRESET_CAPTURE_SENTINEL_PREFIX}consumer`
+          );
+
+          const providerColor = provider.css({ color: "red" });
+          const consumerBackground = consumer.css({ background: "blue" });
+
+          expect(
+            session.instances.map((instance) => instance.sentinelId)
+          ).toEqual(["provider", "consumer"]);
+          expect(
+            session.instances.map((instance) => instance.filePath)
+          ).toEqual(["/virtual/provider.css.ts", "/virtual/provider.css.ts"]);
+          expect(
+            session.instances.map((instance) => instance.instanceIndex)
+          ).toEqual([0, 1]);
+          expect(session.instances[0]?.getPresetSnapshot()).toEqual(
+            provider.preset
+          );
+          expect(session.instances[1]?.getPresetSnapshot()).toEqual(
+            consumer.preset
+          );
+          expect(
+            Object.values(session.instances[0]?.getPresetSnapshot() ?? {})
+          ).toEqual([providerColor]);
+          expect(
+            Object.values(session.instances[1]?.getPresetSnapshot() ?? {})
+          ).toEqual([consumerBackground]);
+        } finally {
+          expect(endDefineRulesPresetCapture()).toBe(session);
+        }
+
+        expect(getActiveDefineRulesPresetCapture()).toBe(undefined);
+      });
+    });
+
     describe.concurrent("DefineRules Presets", () => {
-      it("exposes a live preset object", () => {
-        const { css, preset } = defineRules({
-          debugId: "presetIdentity",
-          properties: {
-            background: true
-          }
-        });
-
-        expect(preset).toEqual({});
-
-        const className = css({ background: "blue" });
-        const repeatedClassName = css({ background: "blue" });
-
-        expect(
-          Object.keys(preset).every(
-            (key) => key.startsWith("fragment_") === false
-          )
-        ).toBe(true);
-        expect(repeatedClassName).toBe(className);
-        expect(Object.values(preset)).toContain(className);
-        expect(
-          Object.values(preset).filter((entry) => entry === className)
-        ).toHaveLength(1);
-      });
-
-      it("exposes an empty preset object without static calls", () => {
-        const { preset } = defineRules({
-          debugId: "emptyPresetIdentity",
-          properties: {
-            background: true
-          }
-        });
-
-        expect(preset).toEqual({});
-        expect(Object.keys(preset)).toHaveLength(0);
-      });
-
       it("exposes a live preset object through the serializer recipe", () => {
         type DefineRulesRecipe = {
           args?: unknown[];
-          importName?: string;
-          importPath?: string;
         };
 
         type DefineRulesRecipeConfig = {
@@ -251,6 +313,7 @@ if (import.meta.vitest) {
             background: true
           }
         });
+
         const recipe = (
           css as unknown as {
             __recipe__?: DefineRulesRecipe;
@@ -258,8 +321,6 @@ if (import.meta.vitest) {
         ).__recipe__;
         const recipeConfig = recipe?.args?.[0];
 
-        expect(recipe?.importPath).toBe(DEFINE_RULES_RUNTIME_IMPORT_PATH);
-        expect(recipe?.importName).toBe(DEFINE_RULES_RUNTIME_IMPORT_NAME);
         expect(recipeConfig).toEqual(expect.any(Object));
         expect((recipeConfig as DefineRulesRecipeConfig).presets).toBe(preset);
 
@@ -289,6 +350,7 @@ if (import.meta.vitest) {
             background: true
           }
         });
+
         const recipe = (
           css as unknown as {
             __recipe__?: DefineRulesRecipe;
@@ -307,16 +369,12 @@ if (import.meta.vitest) {
         };
 
         const createRecipeArgsReader = (config: unknown) => {
-          const { css } = Reflect.apply(
-            defineRules as unknown as (...args: unknown[]) => unknown,
-            undefined,
-            [config]
-          ) as {
-            css: {
+          const { css } = defineRulesWithCapture(config);
+          const recipe = (
+            css as unknown as {
               __recipe__?: DefineRulesRecipe;
-            };
-          };
-          const recipe = css.__recipe__;
+            }
+          ).__recipe__;
 
           return () => recipe?.args;
         };

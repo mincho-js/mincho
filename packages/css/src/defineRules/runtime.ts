@@ -1,4 +1,5 @@
 import type { CSSProperties } from "@mincho-js/transform-to-vanilla";
+import { registerDefineRulesPresetCaptureInstance } from "./capture.js";
 import { createCanonicalStyleCache } from "./utils.js";
 import type {
   DefineRulesComplexCssInput,
@@ -25,12 +26,19 @@ export function createDefineRulesRuntime<
   const Properties extends DefineRulesProperties,
   const Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts>
 >(
-  config: DefineRulesCtx<Properties, Shortcuts>
+  config: DefineRulesCtx<Properties, Shortcuts>,
+  ...captureSentinelArgs: [string?]
 ): DefineRulesRuntimeResult<Properties, Shortcuts> {
   type CssInput = DefineRulesComplexCssInput<Properties, Shortcuts>;
+  const [captureSentinel] = captureSentinelArgs;
+  // v1 build injection/capture supports only top-level local defineRules(...) callsites.
   const preset = normalizePresetMap(config.presets);
   const styleCache = createCanonicalStyleCache(config.debugId);
   styleCache.importSnapshot(preset);
+
+  registerDefineRulesPresetCaptureInstance(captureSentinel, () => ({
+    ...preset
+  }));
 
   function resolveToFragments(args: CssInput): ResolvedStyleFragment[] {
     const fragments: ResolvedStyleFragment[] = [];

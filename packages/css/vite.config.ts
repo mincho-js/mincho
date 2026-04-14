@@ -12,6 +12,12 @@ export default (viteConfigEnv: ConfigEnv) => {
         entry: {
           index: join(packageDir, "src", "index.ts"),
           compat: join(packageDir, "src", "compat.ts"),
+          "defineRules/createDefineRulesCssRuntime": join(
+            packageDir,
+            "src",
+            "defineRules",
+            "createDefineRulesCssRuntime.ts"
+          ),
           "rules/createRuntimeFn": join(
             packageDir,
             "src",
