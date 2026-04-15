@@ -116,9 +116,19 @@ function NodeBuilder(viteConfigEnv: ConfigEnv) {
         entry: {
           index: entryFile
         },
-        formats: ["es", "cjs"],
         fileName: (format, entryName) =>
           `${format === "es" ? "esm" : "cjs"}/${entryName}.${format === "es" ? "mjs" : "cjs"}`
+      },
+      rollupOptions: {
+        output: [
+          {
+            format: "es"
+          },
+          {
+            format: "cjs",
+            interop: "compat"
+          }
+        ]
       },
       target: ["es2020"],
       minify: false

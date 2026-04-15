@@ -25,11 +25,6 @@ export default (viteConfigEnv: ConfigEnv) => {
             "createRuntimeFn.ts"
           )
         }
-      },
-      rollupOptions: {
-        output: {
-          manualChunks: undefined
-        }
       }
     }
   });
