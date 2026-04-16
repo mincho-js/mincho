@@ -1,2 +1,5 @@
 import { eslintConfig } from "eslint-config-custom/typescript";
-export default eslintConfig();
+
+export default eslintConfig({
+  ignores: ["src/__fixtures__/**"]
+});

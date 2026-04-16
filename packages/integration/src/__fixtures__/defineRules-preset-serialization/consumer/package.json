@@ -1,0 +1,8 @@
+{
+  "name": "@mincho-js-proof/consumer",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./dist/index.js"
+  }
+}

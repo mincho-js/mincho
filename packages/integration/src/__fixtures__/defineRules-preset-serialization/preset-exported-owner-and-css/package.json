@@ -1,0 +1,8 @@
+{
+  "name": "@mincho-js-proof/preset-exported-owner-and-css",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./dist/index.js"
+  }
+}

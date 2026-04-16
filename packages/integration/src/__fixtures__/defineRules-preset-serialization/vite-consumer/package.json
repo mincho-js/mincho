@@ -1,0 +1,5 @@
+{
+  "name": "@mincho-js-proof/vite-consumer",
+  "private": true,
+  "type": "module"
+}
