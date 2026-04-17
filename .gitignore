@@ -97,6 +97,16 @@ out
 dist
 dist-ssr
 
+# Stable test fixtures that intentionally model package boundaries and emitted
+# package assets for defineRules preset serialization tests.
+!packages/integration/src/__fixtures__/defineRules-preset-serialization/**/package.json
+!packages/integration/src/__fixtures__/defineRules-preset-serialization/**/dist/
+!packages/integration/src/__fixtures__/defineRules-preset-serialization/**/dist/**
+!packages/integration/src/__fixtures__/defineRules-preset-serialization/**/node_modules/
+packages/integration/src/__fixtures__/defineRules-preset-serialization/**/node_modules/*
+!packages/integration/src/__fixtures__/defineRules-preset-serialization/**/node_modules/@mincho-js-proof/
+!packages/integration/src/__fixtures__/defineRules-preset-serialization/**/node_modules/@mincho-js-proof/**
+
 # Gatsby files
 .cache/
 # Comment in the public line in if your project uses Gatsby and not Next.js
