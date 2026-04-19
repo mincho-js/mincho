@@ -4,14 +4,14 @@
     {
       "path": "../../configs/vite-config-custom"
     },
-    { 
-      "path": "./tsconfig.node.json"
-    },
-    { 
+    {
       "path": "./tsconfig.codegen.json"
     },
-    { 
+    {
       "path": "./tsconfig.lib.json"
+    },
+    {
+      "path": "./tsconfig.node.json"
     }
   ]
 }

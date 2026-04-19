@@ -2,16 +2,16 @@
   "files": [],
   "references": [
     {
+      "path": "../integration"
+    },
+    {
       "path": "../../configs/vite-config-custom"
     },
     {
-      "path": "../integration"
-    },
-    { 
-      "path": "./tsconfig.node.json"
-    },
-    { 
       "path": "./tsconfig.lib.json"
+    },
+    {
+      "path": "./tsconfig.node.json"
     }
   ]
 }

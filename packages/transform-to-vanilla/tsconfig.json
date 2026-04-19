@@ -2,16 +2,16 @@
   "files": [],
   "references": [
     {
+      "path": "../css-additional-types"
+    },
+    {
       "path": "../../configs/vite-config-custom"
     },
     {
-      "path": "../css-additional-types"
-    },
-    { 
-      "path": "./tsconfig.node.json"
-    },
-    { 
       "path": "./tsconfig.lib.json"
+    },
+    {
+      "path": "./tsconfig.node.json"
     }
   ]
 }

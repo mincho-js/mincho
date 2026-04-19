@@ -46,6 +46,7 @@
     "build": "yarn g:build",
     "build:watch": "yarn g:build-watch",
     "coverage": "yarn g:coverage",
+    "test": "yarn g:test",
     "lint": "yarn g:lint",
     "fix": "yarn g:fix",
     "check": "yarn g:check"
@@ -59,7 +60,10 @@
     "esbuild": "^0.27.7"
   },
   "devDependencies": {
+    "@mincho-js/css": "workspace:^",
+    "@mincho-js/debug-log": "workspace:^",
     "@types/babel__core": "^7.20.5",
+    "@vanilla-extract/css": "^1.20.1",
     "eslint-config-custom": "workspace:^",
     "prettier-config-custom": "workspace:^",
     "tsconfig-custom": "workspace:^",

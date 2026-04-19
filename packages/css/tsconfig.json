@@ -2,16 +2,16 @@
   "files": [],
   "references": [
     {
+      "path": "../transform-to-vanilla"
+    },
+    {
       "path": "../../configs/vite-config-custom"
     },
     {
-      "path": "../transform-to-vanilla"
-    },
-    { 
-      "path": "./tsconfig.node.json"
-    },
-    { 
       "path": "./tsconfig.lib.json"
+    },
+    {
+      "path": "./tsconfig.node.json"
     }
   ]
 }

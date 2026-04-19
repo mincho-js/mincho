@@ -39,10 +39,10 @@
       "path": "examples/react-swc"
     },
     {
-      "path": "./tsconfig.node.json"
+      "path": "site"
     },
     {
-      "path": "site"
+      "path": "./tsconfig.node.json"
     }
   ]
 }

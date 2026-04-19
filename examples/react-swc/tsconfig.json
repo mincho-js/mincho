@@ -4,11 +4,11 @@
     {
       "path": "../../packages/css"
     },
-    { 
-      "path": "./tsconfig.node.json"
-    },
-    { 
+    {
       "path": "./tsconfig.app.json"
+    },
+    {
+      "path": "./tsconfig.node.json"
     }
   ]
 }

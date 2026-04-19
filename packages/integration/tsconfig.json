@@ -2,16 +2,22 @@
   "files": [],
   "references": [
     {
+      "path": "../babel"
+    },
+    {
+      "path": "../css"
+    },
+    {
+      "path": "../debug-log"
+    },
+    {
       "path": "../../configs/vite-config-custom"
     },
     {
-      "path": "../babel"
-    },
-    { 
-      "path": "./tsconfig.node.json"
-    },
-    { 
       "path": "./tsconfig.lib.json"
+    },
+    {
+      "path": "./tsconfig.node.json"
     }
   ]
 }

@@ -2,9 +2,6 @@
   "files": [],
   "references": [
     {
-      "path": "../../configs/vite-config-custom"
-    },
-    {
       "path": "../css"
     },
     {
@@ -13,11 +10,14 @@
     {
       "path": "../transform-to-vanilla"
     },
-    { 
-      "path": "./tsconfig.node.json"
+    {
+      "path": "../../configs/vite-config-custom"
     },
-    { 
+    {
       "path": "./tsconfig.lib.json"
+    },
+    {
+      "path": "./tsconfig.node.json"
     }
   ]
 }
