@@ -46,6 +46,7 @@
     "build": "yarn g:build",
     "build:watch": "yarn g:build-watch",
     "coverage": "yarn g:coverage",
+    "test": "yarn g:test",
     "lint": "yarn g:lint",
     "fix": "yarn g:fix",
     "check": "yarn g:check"
