@@ -1,4 +1,8 @@
+import "@examples/shared-component/style.css";
+import { SharedExampleCard } from "@examples/shared-component";
 import { styled } from "@mincho-js/react";
+
+import { sharedCardHostClassName } from "./App.css.ts";
 
 const BaseComponent = styled.div({
   base: {
@@ -58,9 +62,14 @@ const Container = styled(BaseComponent, {
 
 function App() {
   return (
-    <Container size="large" color="blue">
-      Hello World
-    </Container>
+    <>
+      <Container size="large" color="blue">
+        Hello World
+      </Container>
+      <div className={sharedCardHostClassName}>
+        <SharedExampleCard />
+      </div>
+    </>
   );
 }
 

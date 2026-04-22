@@ -5,6 +5,9 @@ import { vanillaExtractPlugin as vanillaExtractBuildPlugin } from "@vanilla-extr
 
 // https://vitejs.dev/config/
 export default defineConfig({
+  build: {
+    cssMinify: false,
+  },
   optimizeDeps: {
     esbuildOptions: {
       plugins: [vanillaExtractBuildPlugin({ runtime: true })]

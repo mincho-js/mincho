@@ -1,6 +1,5 @@
 {
   "compilerOptions": {
-    "rootDir": "src",
     "target": "ES2020",
     "useDefineForClassFields": true,
     "lib": [
@@ -19,12 +18,21 @@
     "moduleDetection": "force",
     "noEmit": true,
     "jsx": "react-jsx",
+    "types": ["vitest/importMeta", "vite/client"],
     
     /* Linting */
     "strict": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
+
+    /* Path Aliases for Workspace Packages */
+    "baseUrl": "../../",
+    "paths": {
+      "@examples/shared-component": ["examples/shared-component/src"],
+      "@mincho-js/css": ["packages/css/src"]
+    },
+
     "tsBuildInfoFile": "./.cache/typescript/tsbuildinfo-app"
   },
   "include": [

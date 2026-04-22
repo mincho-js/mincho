@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "@examples/shared-component",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "sideEffects": true,
+  "typings": "./dist/esm/index.d.ts",
+  "main": "./dist/cjs/index.cjs",
+  "module": "./dist/esm/index.mjs",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/esm/index.d.ts",
+        "default": "./dist/esm/index.mjs"
+      },
+      "require": {
+        "types": "./dist/esm/index.d.ts",
+        "default": "./dist/cjs/index.cjs"
+      }
+    },
+    "./style.css": {
+      "default": "./dist/style.css"
+    }
+  },
+  "files": [
+    "dist/"
+  ],
+  "scripts": {
+    "clean": "yarn g:clean",
+    "build": "yarn g:build",
+    "build:watch": "yarn g:build-watch",
+    "lint": "yarn g:lint",
+    "fix": "yarn g:fix",
+    "check": "yarn g:check"
+  },
+  "prettier": "prettier-config-custom",
+  "dependencies": {
+    "@mincho-js/css": "workspace:^",
+    "react": "^19.2.6"
+  },
+  "devDependencies": {
+    "@mincho-js/vite": "workspace:^",
+    "@types/react": "^19.2.14",
+    "@vanilla-extract/css": "^1.20.1",
+    "eslint-config-custom": "workspace:^",
+    "prettier-config-custom": "workspace:^",
+    "tsconfig-custom": "workspace:^",
+    "vite-config-custom": "workspace:^"
+  }
+}

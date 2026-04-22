@@ -1629,6 +1629,22 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@examples/shared-component@workspace:^, @examples/shared-component@workspace:examples/shared-component":
+  version: 0.0.0-use.local
+  resolution: "@examples/shared-component@workspace:examples/shared-component"
+  dependencies:
+    "@mincho-js/css": "workspace:^"
+    "@mincho-js/vite": "workspace:^"
+    "@types/react": "npm:^19.2.14"
+    "@vanilla-extract/css": "npm:^1.20.1"
+    eslint-config-custom: "workspace:^"
+    prettier-config-custom: "workspace:^"
+    react: "npm:^19.2.6"
+    tsconfig-custom: "workspace:^"
+    vite-config-custom: "workspace:^"
+  languageName: unknown
+  linkType: soft
+
 "@fastify/deepmerge@npm:^2.0.2":
   version: 2.0.2
   resolution: "@fastify/deepmerge@npm:2.0.2"
@@ -10576,6 +10592,7 @@ __metadata:
     "@babel/preset-typescript": "npm:^7.28.5"
     "@emotion/hash": "npm:^0.9.2"
     "@eslint/js": "npm:^9.39.4"
+    "@examples/shared-component": "workspace:^"
     "@mincho-js/css": "workspace:^"
     "@mincho-js/integration": "workspace:^"
     "@mincho-js/react": "workspace:^"
@@ -10661,6 +10678,7 @@ __metadata:
   resolution: "react-swc@workspace:examples/react-swc"
   dependencies:
     "@eslint/js": "npm:^9.39.4"
+    "@examples/shared-component": "workspace:^"
     "@mincho-js/css": "workspace:^"
     "@types/react": "npm:^19.2.14"
     "@types/react-dom": "npm:^19.2.3"

@@ -1,4 +1,5 @@
-import { globalCss, keyframes, css } from "@mincho-js/css"
+import { css } from "@examples/shared-component";
+import { css as localCss, globalCss, keyframes } from "@mincho-js/css";
 
 globalCss("#root", {
   maxWidth: "1280px",
@@ -7,7 +8,7 @@ globalCss("#root", {
   textAlign: "center",
 });
 
-export const react = css({
+export const react = localCss({
 });
 const logoSpin = keyframes({
   "from": {
@@ -18,7 +19,7 @@ const logoSpin = keyframes({
   },
 });
 
-export const logo = css({
+export const logo = localCss({
   height: "6em",
   padding: "1.5em",
   willChange: "filter",
@@ -40,11 +41,14 @@ export const logo = css({
   },
 });
 
-export const card = css({
+export const card = localCss({
   padding: "2em",
 });
 
-export const readTheDocs = css({
-  color: "#888",
+export const sharedCardConsumer = css({
+  display: "block",
 });
 
+export const readTheDocs = localCss({
+  color: "#888",
+});

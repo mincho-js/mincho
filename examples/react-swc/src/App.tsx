@@ -1,7 +1,9 @@
+import "@examples/shared-component/style.css";
+import { SharedExampleCard } from "@examples/shared-component";
 import { useState } from "react";
 import reactLogo from "./assets/react.svg";
 import viteLogo from "/vite.svg";
-import { logo, react, card, readTheDocs } from "./App.css";
+import { card, logo, react, readTheDocs, sharedCardConsumer } from "./App.css";
 
 function App() {
   const [count, setCount] = useState(0);
@@ -24,6 +26,9 @@ function App() {
         <p>
           Edit <code>src/App.tsx</code> and save to test HMR
         </p>
+      </div>
+      <div className={`${card} ${sharedCardConsumer}`}>
+        <SharedExampleCard />
       </div>
       <p className={readTheDocs}>
         Click on the Vite and React logos to learn more

@@ -2,6 +2,9 @@
   "files": [],
   "references": [
     {
+      "path": "../shared-component"
+    },
+    {
       "path": "../../packages/css"
     },
     {
@@ -13,10 +16,10 @@
     {
       "path": "../../packages/vite"
     },
-    { 
+    {
       "path": "./tsconfig.app.json"
     },
-    { 
+    {
       "path": "./tsconfig.node.json"
     }
   ]

@@ -1,0 +1,21 @@
+{
+  "extends": "tsconfig-custom/tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "./src",
+    "baseUrl": "./",
+    "tsBuildInfoFile": "./.cache/typescript/tsbuildinfo-esm",
+    "outDir": "./dist/esm",
+    "declarationDir": "./dist/esm",
+    "jsx": "react-jsx",
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true
+  },
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx"
+  ],
+  "exclude": [
+    "dist",
+    "_release"
+  ]
+}

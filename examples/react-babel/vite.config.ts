@@ -15,6 +15,7 @@ export default defineConfig({
     jsxInject: `import React from "react"`,
   },
   build: {
+    cssMinify: false,
     rollupOptions: {
       external: [],
       output: {
