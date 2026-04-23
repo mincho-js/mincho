@@ -363,6 +363,24 @@ if (import.meta.vitest) {
         expect(Object.keys(preset)).toHaveLength(0);
       });
 
+      it("keeps serialized runtime preset handles live for later static css calls", async () => {
+        const { createDefineRulesCssRuntime } =
+          await import("./createDefineRulesCssRuntime.js");
+        const preset: DefineRulesPresetMap = {};
+        const css = createDefineRulesCssRuntime({
+          debugId: "serializedRuntimePresetHandle",
+          properties: {
+            background: true
+          },
+          presets: preset
+        });
+
+        const className = css({ background: "blue" });
+
+        expect(Object.values(preset)).toEqual([className]);
+        expect(css({ background: "blue" })).toBe(className);
+      });
+
       it("defineRules serializer rejects function-valued config with diagnostic", () => {
         type DefineRulesRecipe = {
           args?: unknown[];

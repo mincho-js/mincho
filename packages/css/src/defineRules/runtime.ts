@@ -22,17 +22,24 @@ export interface DefineRulesRuntimeResult<
   preset: DefineRulesPresetMap;
 }
 
+export interface DefineRulesRuntimeOptions {
+  preservePresetReference?: boolean;
+}
+
 export function createDefineRulesRuntime<
   const Properties extends DefineRulesProperties,
   const Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts>
 >(
   config: DefineRulesCtx<Properties, Shortcuts>,
-  ...captureSentinelArgs: [string?]
+  ...captureSentinelArgs: [string?, DefineRulesRuntimeOptions?]
 ): DefineRulesRuntimeResult<Properties, Shortcuts> {
   type CssInput = DefineRulesComplexCssInput<Properties, Shortcuts>;
-  const [captureSentinel] = captureSentinelArgs;
+  const [captureSentinel, options] = captureSentinelArgs;
   // v1 build injection/capture supports only top-level local defineRules(...) callsites.
-  const preset = normalizePresetMap(config.presets);
+  const preset = normalizePresetMap(
+    config.presets,
+    options?.preservePresetReference === true
+  );
   const styleCache = createCanonicalStyleCache(config.debugId);
   styleCache.importSnapshot(preset);
 
@@ -446,13 +453,16 @@ function applyShortcut<
   throw new Error(`Unsupported shortcut definition for "${name}"`);
 }
 
-function normalizePresetMap(presetInput: unknown): DefineRulesPresetMap {
+function normalizePresetMap(
+  presetInput: unknown,
+  preserveReference: boolean
+): DefineRulesPresetMap {
   if (presetInput == null) {
     return {};
   }
 
   if (isDefineRulesPresetMap(presetInput)) {
-    return { ...presetInput };
+    return preserveReference ? presetInput : { ...presetInput };
   }
 
   throw new Error("Unsupported defineRules preset input");

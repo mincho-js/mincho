@@ -11,5 +11,7 @@ export const createDefineRulesCssRuntime = <
 >(
   config: DefineRulesCtx<Properties, Shortcuts>
 ) => {
-  return createDefineRulesRuntime(config).css;
+  return createDefineRulesRuntime(config, undefined, {
+    preservePresetReference: true
+  }).css;
 };
