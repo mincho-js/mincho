@@ -62,6 +62,16 @@
         "default": "./dist/cjs/defineRules/createDefineRulesCssRuntime.cjs"
       }
     },
+    "./defineRules/registry": {
+      "import": {
+        "types": "./dist/esm/defineRules/registry.d.ts",
+        "default": "./dist/esm/defineRules/registry.mjs"
+      },
+      "require": {
+        "types": "./dist/cjs/defineRules/registry.d.cts",
+        "default": "./dist/cjs/defineRules/registry.cjs"
+      }
+    },
     "./rules/createRuntimeFn": {
       "import": {
         "types": "./dist/esm/rules/createRuntimeFn.d.ts",
