@@ -11,9 +11,15 @@ type SharedCssInput = Pick<
 
 type SharedCss = (args: SharedCssInput) => string;
 
+type SharedPreset = {
+  schema: "mincho.defineRulesPreset";
+  version: 3;
+  classNameByCache: DefineRulesPresetMap;
+};
+
 type SharedPresetOwner = {
   css: SharedCss;
-  preset: DefineRulesPresetMap;
+  preset: SharedPreset;
 };
 
 export const { css, preset }: SharedPresetOwner = defineRules({

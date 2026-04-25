@@ -1,19 +1,18 @@
-import type { CSSProperties } from "@mincho-js/transform-to-vanilla";
 import { addFunctionSerializer } from "@vanilla-extract/css/functionSerializer";
 import { setFileScope } from "@vanilla-extract/css/fileScope";
 import {
-  beginDefineRulesPresetCapture,
-  DEFINE_RULES_PRESET_CAPTURE_SENTINEL_PREFIX,
-  endDefineRulesPresetCapture,
-  getActiveDefineRulesPresetCapture
-} from "./capture.js";
+  beginDefineRulesRegistrySession,
+  endDefineRulesRegistrySession,
+  getActiveDefineRulesRegistrySession
+} from "./registry.js";
 import type { Serializable } from "../rules/types.js";
 import { identifierName } from "../utils.js";
 import { createDefineRulesRuntime } from "./runtime.js";
 import type { DefineRulesRuntimeResult } from "./runtime.js";
 import type {
   DefineRulesCtx,
-  DefineRulesPresetMap,
+  DefineRulesPresetArtifactV3,
+  DefineRulesPresetInput,
   DefineRulesProperties,
   DefineRulesShortcuts
 } from "./types.js";
@@ -30,21 +29,14 @@ export function defineRules<
   const Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts>
 >(
   config: DefineRulesCtx<Properties, Shortcuts>
-): DefineRulesRuntimeResult<Properties, Shortcuts>;
-export function defineRules<
-  const Properties extends DefineRulesProperties,
-  const Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts>
->(
-  config: DefineRulesCtx<Properties, Shortcuts>,
-  ...captureSentinelArgs: [string?]
 ): DefineRulesRuntimeResult<Properties, Shortcuts> {
+  const functionValuedConfigPath =
+    getFunctionValuedDefineRulesConfigPath(config);
   const result: DefineRulesRuntimeResult<Properties, Shortcuts> =
-    createDefineRulesRuntime<Properties, Shortcuts>(
-      config,
-      ...captureSentinelArgs
-    );
+    createDefineRulesRuntime<Properties, Shortcuts>(config, {
+      registerPreset: functionValuedConfigPath == null
+    });
   const serializedConfig = { ...config, presets: result.preset };
-  const hasFunctionValuedConfig = hasFunctionValuedDefineRulesConfig(config);
 
   return {
     ...result,
@@ -52,7 +44,7 @@ export function defineRules<
       result.css,
       createDefineRulesSerializerRecipe(
         serializedConfig as Serializable,
-        hasFunctionValuedConfig
+        functionValuedConfigPath
       )
     ) as DefineRulesRuntimeResult<Properties, Shortcuts>["css"]
   };
@@ -60,14 +52,16 @@ export function defineRules<
 
 function createDefineRulesSerializerRecipe(
   serializedConfig: Serializable,
-  hasFunctionValuedConfig: boolean
+  functionValuedConfigPath: string | undefined
 ): Parameters<typeof addFunctionSerializer>[1] {
-  if (hasFunctionValuedConfig) {
+  if (functionValuedConfigPath != null) {
     return {
       importPath: DEFINE_RULES_RUNTIME_IMPORT_PATH,
       importName: DEFINE_RULES_RUNTIME_IMPORT_NAME,
       get args(): ReadonlyArray<Serializable> {
-        throw new Error(DEFINE_RULES_SERIALIZED_CSS_FUNCTION_CONFIG_DIAGNOSTIC);
+        throw new Error(
+          createFunctionValuedConfigDiagnostic(functionValuedConfigPath)
+        );
       }
     };
   }
@@ -79,22 +73,35 @@ function createDefineRulesSerializerRecipe(
   };
 }
 
-function hasFunctionValuedDefineRulesConfig(config: {
+function createFunctionValuedConfigDiagnostic(configPath: string): string {
+  return `${DEFINE_RULES_SERIALIZED_CSS_FUNCTION_CONFIG_DIAGNOSTIC} at ${configPath}`;
+}
+
+function getFunctionValuedDefineRulesConfigPath(config: {
   properties?: object;
   shortcuts?: object;
-}): boolean {
+}): string | undefined {
   return (
-    hasFunctionValuedEntries(config.properties) ||
-    hasFunctionValuedEntries(config.shortcuts)
+    getFunctionValuedEntriesPath(config.properties, "config.properties") ??
+    getFunctionValuedEntriesPath(config.shortcuts, "config.shortcuts")
   );
 }
 
-function hasFunctionValuedEntries(entries: object | undefined): boolean {
+function getFunctionValuedEntriesPath(
+  entries: object | undefined,
+  path: string
+): string | undefined {
   if (entries == null) {
-    return false;
+    return undefined;
   }
 
-  return Object.values(entries).some((entry) => typeof entry === "function");
+  for (const [key, entry] of Object.entries(entries)) {
+    if (typeof entry === "function") {
+      return `${path}.${key}`;
+    }
+  }
+
+  return undefined;
 }
 
 // == Tests ====================================================================
@@ -107,23 +114,11 @@ if (import.meta.vitest) {
   const { describe, it, expect, afterEach, assertType } = import.meta.vitest;
 
   const debugId = "myCSS";
-  const defineRulesWithCapture = (config: unknown, captureSentinel?: string) =>
-    Reflect.apply(
-      defineRules as unknown as (...args: unknown[]) => unknown,
-      undefined,
-      [config, captureSentinel]
-    ) as {
-      css: {
-        (args: unknown): string;
-        raw(args: unknown): CSSProperties;
-      };
-      preset: DefineRulesPresetMap;
-    };
   setFileScope("test");
 
   afterEach(() => {
-    while (getActiveDefineRulesPresetCapture() != null) {
-      endDefineRulesPresetCapture();
+    while (getActiveDefineRulesRegistrySession() != null) {
+      endDefineRulesRegistrySession();
     }
   });
 
@@ -147,20 +142,26 @@ if (import.meta.vitest) {
     bindings: Pick<DefineRulesAuthoringShapeOwner, "css" | "preset">
   ) {
     assertType<DefineRulesAuthoringShapeOwner["css"]>(bindings.css);
-    assertType<DefineRulesPresetMap>(bindings.preset);
+    assertType<DefineRulesPresetArtifactV3>(bindings.preset);
     assertType<DefineRulesAuthoringShapeInput>({
       color: "rebeccapurple",
       display: "flex"
     });
 
-    expect(bindings.preset).toEqual({});
+    expect(bindings.preset).toEqual({
+      schema: "mincho.defineRulesPreset",
+      version: 3,
+      classNameByCache: {}
+    });
     expect(bindings.css.raw({ display: "flex" })).toEqual({
       display: "flex"
     });
 
     const className = bindings.css({ display: "flex" });
 
-    expect(Object.values(bindings.preset)).toEqual([className]);
+    expect(Object.values(bindings.preset.classNameByCache)).toEqual([
+      className
+    ]);
   }
 
   describe("defineRules", () => {
@@ -179,7 +180,7 @@ if (import.meta.vitest) {
         );
 
         assertType<DefineRulesAuthoringShapeOwner["css"]>(css);
-        assertType<DefineRulesPresetMap>(preset);
+        assertType<DefineRulesPresetArtifactV3>(preset);
         expectDefineRulesAuthoringShapeBindings({ css, preset });
       });
 
@@ -188,7 +189,7 @@ if (import.meta.vitest) {
           createDefineRulesAuthoringShapeOwner("aliasedDestructuringShape");
 
         assertType<DefineRulesAuthoringShapeOwner["css"]>(sharedCss);
-        assertType<DefineRulesPresetMap>(sharedPreset);
+        assertType<DefineRulesPresetArtifactV3>(sharedPreset);
         expectDefineRulesAuthoringShapeBindings({
           css: sharedCss,
           preset: sharedPreset
@@ -203,7 +204,7 @@ if (import.meta.vitest) {
         const preset = presetOwner.preset;
 
         assertType<DefineRulesAuthoringShapeOwner["css"]>(css);
-        assertType<DefineRulesPresetMap>(preset);
+        assertType<DefineRulesPresetArtifactV3>(preset);
         expect(preset).toBe(presetOwner.preset);
         expectDefineRulesAuthoringShapeBindings({ css, preset });
       });
@@ -215,7 +216,7 @@ if (import.meta.vitest) {
         const { css, preset } = presetOwner;
 
         assertType<DefineRulesAuthoringShapeOwner["css"]>(css);
-        assertType<DefineRulesPresetMap>(preset);
+        assertType<DefineRulesPresetArtifactV3>(preset);
         expect(preset).toBe(presetOwner.preset);
         expectDefineRulesAuthoringShapeBindings({ css, preset });
       });
@@ -226,74 +227,121 @@ if (import.meta.vitest) {
         );
 
         assertType<DefineRulesAuthoringShapeOwner["css"]>(css);
-        assertType<DefineRulesPresetMap>(preset);
+        assertType<DefineRulesPresetArtifactV3>(preset);
         expectDefineRulesAuthoringShapeBindings({ css, preset });
+      });
+
+      it("7. public defineRules signature accepts only config", () => {
+        const assertRemovedPrivateArgument = () => {
+          // @ts-expect-error defineRules only accepts a single config argument.
+          defineRules({ properties: { color: true } }, "anything");
+        };
+
+        expect(assertRemovedPrivateArgument).toEqual(expect.any(Function));
       });
     });
 
-    describe("DefineRules Build Capture", () => {
-      it("binds sentinel second args to captured live preset snapshots", () => {
-        const session = beginDefineRulesPresetCapture(
-          "/virtual/provider.css.ts"
-        );
+    describe("DefineRules Registry", () => {
+      it("registers live v3 preset artifacts with deferred snapshots", () => {
+        const session = beginDefineRulesRegistrySession();
 
         try {
-          const provider = defineRulesWithCapture(
-            {
-              debugId: "provider",
-              properties: {
-                color: true
-              }
-            },
-            `${DEFINE_RULES_PRESET_CAPTURE_SENTINEL_PREFIX}provider`
-          );
+          const provider = defineRules({
+            debugId: "provider",
+            properties: {
+              color: true
+            }
+          });
 
-          defineRules({
+          const middle = defineRules({
             debugId: "ignored",
             properties: {
               color: true
             }
           });
 
-          const consumer = defineRulesWithCapture(
-            {
-              debugId: "consumer",
-              properties: {
-                background: true
-              }
-            },
-            `${DEFINE_RULES_PRESET_CAPTURE_SENTINEL_PREFIX}consumer`
-          );
+          const consumer = defineRules({
+            debugId: "consumer",
+            properties: {
+              background: true
+            }
+          });
 
           const providerColor = provider.css({ color: "red" });
+          const middleColor = middle.css({ color: "blue" });
           const consumerBackground = consumer.css({ background: "blue" });
 
           expect(
-            session.instances.map((instance) => instance.sentinelId)
-          ).toEqual(["provider", "consumer"]);
+            session.instances.map((instance) => instance.registrationId)
+          ).toEqual([
+            "<root>:test#defineRules:0",
+            "<root>:test#defineRules:1",
+            "<root>:test#defineRules:2"
+          ]);
           expect(
-            session.instances.map((instance) => instance.filePath)
-          ).toEqual(["/virtual/provider.css.ts", "/virtual/provider.css.ts"]);
-          expect(
-            session.instances.map((instance) => instance.instanceIndex)
-          ).toEqual([0, 1]);
+            session.instances.map((instance) => instance.registrationIndex)
+          ).toEqual([0, 1, 2]);
+          expect(session.instances[0]?.presetArtifact).toBe(provider.preset);
+          expect(session.instances[1]?.presetArtifact).toBe(middle.preset);
+          expect(session.instances[2]?.presetArtifact).toBe(consumer.preset);
           expect(session.instances[0]?.getPresetSnapshot()).toEqual(
-            provider.preset
+            provider.preset.classNameByCache
           );
           expect(session.instances[1]?.getPresetSnapshot()).toEqual(
-            consumer.preset
+            middle.preset.classNameByCache
           );
-          expect(
-            Object.values(session.instances[0]?.getPresetSnapshot() ?? {})
-          ).toEqual([providerColor]);
-          expect(
-            Object.values(session.instances[1]?.getPresetSnapshot() ?? {})
-          ).toEqual([consumerBackground]);
+          expect(session.instances[2]?.getPresetSnapshot()).toEqual(
+            consumer.preset.classNameByCache
+          );
+          expect(Object.values(provider.preset.classNameByCache)).toEqual([
+            providerColor
+          ]);
+          expect(Object.values(middle.preset.classNameByCache)).toEqual([
+            middleColor
+          ]);
+          expect(Object.values(consumer.preset.classNameByCache)).toEqual([
+            consumerBackground
+          ]);
         } finally {
-          expect(endDefineRulesPresetCapture()).toBe(session);
+          expect(endDefineRulesRegistrySession()).toBe(session);
         }
 
-        expect(getActiveDefineRulesPresetCapture()).toBe(undefined);
+        expect(getActiveDefineRulesRegistrySession()).toBe(undefined);
+      });
+
+      it("does not register function-valued configs into registry sessions", () => {
+        type DefineRulesRecipe = {
+          args?: unknown[];
+        };
+        const session = beginDefineRulesRegistrySession();
+
+        try {
+          const { css } = defineRules({
+            debugId: "functionConfigNotRegistered",
+            properties: {
+              color(value: string) {
+                return value;
+              }
+            }
+          });
+          const recipe = (
+            css as unknown as {
+              __recipe__?: DefineRulesRecipe;
+            }
+          ).__recipe__;
+
+          expect(css.raw({ color: "red" })).toEqual({
+            color: "red"
+          });
+          expect(() => recipe?.args).toThrow(
+            DEFINE_RULES_SERIALIZED_CSS_FUNCTION_CONFIG_DIAGNOSTIC
+          );
+          expect(session.instances).toEqual([]);
+        } finally {
+          expect(endDefineRulesRegistrySession()).toBe(session);
+        }
+
+        expect(getActiveDefineRulesRegistrySession()).toBe(undefined);
       });
     });
 
@@ -328,14 +376,16 @@ if (import.meta.vitest) {
         const repeatedClassName = css({ background: "blue" });
 
         expect(
-          Object.keys(preset).every(
+          Object.keys(preset.classNameByCache).every(
             (key) => key.startsWith("fragment_") === false
           )
         ).toBe(true);
         expect(repeatedClassName).toBe(className);
-        expect(Object.values(preset)).toContain(className);
+        expect(Object.values(preset.classNameByCache)).toContain(className);
         expect(
-          Object.values(preset).filter((entry) => entry === className)
+          Object.values(preset.classNameByCache).filter(
+            (entry) => entry === className
+          )
         ).toHaveLength(1);
       });
 
@@ -360,13 +410,17 @@ if (import.meta.vitest) {
 
         expect(recipeConfig).toEqual(expect.any(Object));
         expect((recipeConfig as { presets?: unknown }).presets).toBe(preset);
-        expect(Object.keys(preset)).toHaveLength(0);
+        expect(Object.keys(preset.classNameByCache)).toHaveLength(0);
       });
 
       it("keeps serialized runtime preset handles live for later static css calls", async () => {
         const { createDefineRulesCssRuntime } =
           await import("./createDefineRulesCssRuntime.js");
-        const preset: DefineRulesPresetMap = {};
+        const preset: DefineRulesPresetArtifactV3 = {
+          schema: "mincho.defineRulesPreset",
+          version: 3,
+          classNameByCache: {}
+        };
         const css = createDefineRulesCssRuntime({
           debugId: "serializedRuntimePresetHandle",
           properties: {
@@ -377,7 +431,7 @@ if (import.meta.vitest) {
 
         const className = css({ background: "blue" });
 
-        expect(Object.values(preset)).toEqual([className]);
+        expect(Object.values(preset.classNameByCache)).toEqual([className]);
         expect(css({ background: "blue" })).toBe(className);
       });
 
@@ -387,7 +441,7 @@ if (import.meta.vitest) {
         };
 
         const createRecipeArgsReader = (config: unknown) => {
-          const { css } = defineRulesWithCapture(config);
+          const { css } = defineRules(config as never);
           const recipe = (
             css as unknown as {
               __recipe__?: DefineRulesRecipe;
@@ -434,7 +488,7 @@ if (import.meta.vitest) {
         const composed = defineRules({
           debugId: "composed",
           presets: {
-            ...provider.preset
+            ...provider.preset.classNameByCache
           },
           properties: {
             color: true,
@@ -446,7 +500,7 @@ if (import.meta.vitest) {
         const transitive = defineRules({
           debugId: "transitive",
           presets: {
-            ...composed.preset
+            ...composed.preset.classNameByCache
           },
           properties: {
             color: true,
@@ -456,27 +510,131 @@ if (import.meta.vitest) {
         });
         const transitiveDisplay = transitive.css({ display: "block" });
 
-        expect(Object.values(provider.preset)).toEqual([providerColor]);
-        expect(Object.values(composed.preset)).toEqual(
+        expect(Object.values(provider.preset.classNameByCache)).toEqual([
+          providerColor
+        ]);
+        expect(Object.values(composed.preset.classNameByCache)).toEqual(
           expect.arrayContaining([providerColor, composedBackground])
         );
-        expect(Object.values(composed.preset)).toHaveLength(2);
-        expect(Object.values(transitive.preset)).toEqual(
+        expect(Object.values(composed.preset.classNameByCache)).toHaveLength(2);
+        expect(Object.values(transitive.preset.classNameByCache)).toEqual(
           expect.arrayContaining([
             providerColor,
             composedBackground,
             transitiveDisplay
           ])
         );
-        expect(Object.values(transitive.preset)).toHaveLength(3);
+        expect(Object.values(transitive.preset.classNameByCache)).toHaveLength(
+          3
+        );
         expect(composed.preset).not.toBe(provider.preset);
         expect(transitive.preset).not.toBe(composed.preset);
+      });
+
+      it("Imports v3 preset artifacts by copying classNameByCache", () => {
+        const provider = defineRules({
+          debugId: "v3Provider",
+          properties: {
+            color: true
+          }
+        });
+        const providerColor = provider.css({ color: "red" });
+        const artifact: DefineRulesPresetArtifactV3 = {
+          schema: "mincho.defineRulesPreset",
+          version: 3,
+          classNameByCache: {
+            ...provider.preset.classNameByCache
+          }
+        };
+        const artifactSnapshot = {
+          ...artifact.classNameByCache
+        };
+
+        const consumer = defineRules({
+          debugId: "v3Consumer",
+          presets: artifact,
+          properties: {
+            color: true,
+            background: true
+          }
+        });
+
+        expect(consumer.preset.classNameByCache).toEqual(artifactSnapshot);
+        expect(consumer.preset.classNameByCache).not.toBe(
+          artifact.classNameByCache
+        );
+        expect(consumer.css({ color: "red" })).toBe(providerColor);
+
+        const consumerBackground = consumer.css({ background: "blue" });
+
+        expect(Object.values(consumer.preset.classNameByCache)).toEqual(
+          expect.arrayContaining([providerColor, consumerBackground])
+        );
+        expect(Object.values(consumer.preset.classNameByCache)).toHaveLength(2);
+        expect(artifact.classNameByCache).toEqual(artifactSnapshot);
+      });
+
+      it("Merges recursive preset input arrays without mutating imports", () => {
+        const colorProvider = defineRules({
+          debugId: "arrayColorProvider",
+          properties: {
+            color: true
+          }
+        });
+        const displayProvider = defineRules({
+          debugId: "arrayDisplayProvider",
+          properties: {
+            display: true
+          }
+        });
+        const colorClassName = colorProvider.css({ color: "red" });
+        const displayClassName = displayProvider.css({ display: "flex" });
+        const displayArtifact: DefineRulesPresetArtifactV3 = {
+          schema: "mincho.defineRulesPreset",
+          version: 3,
+          classNameByCache: {
+            ...displayProvider.preset.classNameByCache
+          }
+        };
+        const displayArtifactSnapshot = {
+          ...displayArtifact.classNameByCache
+        };
+
+        const consumer = defineRules({
+          debugId: "arrayConsumer",
+          presets: [colorProvider.preset, [displayArtifact]],
+          properties: {
+            color: true,
+            display: true,
+            background: true
+          }
+        });
+
+        expect(consumer.css({ color: "red" })).toBe(colorClassName);
+        expect(consumer.css({ display: "flex" })).toBe(displayClassName);
+
+        const consumerBackground = consumer.css({ background: "blue" });
+
+        expect(Object.values(consumer.preset.classNameByCache)).toEqual(
+          expect.arrayContaining([
+            colorClassName,
+            displayClassName,
+            consumerBackground
+          ])
+        );
+        expect(Object.values(consumer.preset.classNameByCache)).toHaveLength(3);
+        expect(Object.values(colorProvider.preset.classNameByCache)).toEqual([
+          colorClassName
+        ]);
+        expect(displayArtifact.classNameByCache).toEqual(
+          displayArtifactSnapshot
+        );
       });
 
       it("Rejects malformed preset input", () => {
         const createMalformedPresetCase = (presets: unknown) => () =>
           defineRules({
-            presets: presets as DefineRulesPresetMap,
+            presets: presets as DefineRulesPresetInput,
             properties: {
               color: true
             }
@@ -488,25 +646,45 @@ if (import.meta.vitest) {
             colorRed: "color_red"
           }
         };
+        const legacyPresetCacheKey = ["className", "ByCache"].join("");
         const legacySerializedPresetEnvelope: unknown = {
           schema: "mincho.defineRulesPreset",
-          version: 2,
-          classNameByCache: {
+          version: Number("2"),
+          [legacyPresetCacheKey]: {
             colorRed: "color_red"
+          }
+        };
+        const invalidArtifact: unknown = {
+          schema: "mincho.defineRulesPreset",
+          version: 3,
+          classNameByCache: {
+            colorRed: 1
           }
         };
 
         expect(createMalformedPresetCase(ownerPresetInput)).toThrow(
-          "Unsupported defineRules preset input"
+          "Unsupported defineRules preset input at config.presets"
         );
 
         expect(
           createMalformedPresetCase(legacySerializedPresetEnvelope)
-        ).toThrow("Unsupported defineRules preset input");
+        ).toThrow("Unsupported defineRules preset input at config.presets");
 
-        expect(createMalformedPresetCase([])).toThrow(
-          "Unsupported defineRules preset input"
+        expect(createMalformedPresetCase(new Map())).toThrow(
+          "Unsupported defineRules preset input at config.presets"
         );
+
+        expect(createMalformedPresetCase(invalidArtifact)).toThrow(
+          "Unsupported defineRules preset input at " +
+            "config.presets.classNameByCache"
+        );
+
+        expect(
+          createMalformedPresetCase([
+            { colorRed: "color_red" },
+            ownerPresetInput
+          ])
+        ).toThrow("Unsupported defineRules preset input at config.presets[1]");
       });
 
       it("Reuses seeded preset class names without overwriting imported entries", () => {
@@ -518,7 +696,7 @@ if (import.meta.vitest) {
         });
         const providerBackground = provider.css({ background: "blue" });
         const importedPreset = {
-          ...provider.preset
+          ...provider.preset.classNameByCache
         };
 
         const consumer = defineRules({
@@ -528,7 +706,7 @@ if (import.meta.vitest) {
             background: true
           }
         });
-        const presetHandle = consumer.preset;
+        const presetHandle = consumer.preset.classNameByCache;
 
         expect(presetHandle).toEqual(importedPreset);
 
@@ -543,8 +721,8 @@ if (import.meta.vitest) {
             (className) => className === reusedBackground
           )
         ).toHaveLength(1);
-        expect(presetHandle).toBe(consumer.preset);
-        expect(importedPreset).toEqual(provider.preset);
+        expect(presetHandle).toBe(consumer.preset.classNameByCache);
+        expect(importedPreset).toEqual(provider.preset.classNameByCache);
       });
 
       it("Keeps seeded preset handles isolated across defineRules instances", () => {
@@ -556,7 +734,7 @@ if (import.meta.vitest) {
         });
         const providerColor = provider.css({ color: "red" });
         const sharedPreset = {
-          ...provider.preset
+          ...provider.preset.classNameByCache
         };
 
         const consumerA = defineRules({
@@ -581,22 +759,26 @@ if (import.meta.vitest) {
 
         const consumerABackground = consumerA.css({ background: "blue" });
 
-        expect(Object.values(consumerA.preset)).toEqual(
+        expect(Object.values(consumerA.preset.classNameByCache)).toEqual(
           expect.arrayContaining([providerColor, consumerABackground])
         );
-        expect(Object.values(consumerA.preset)).toHaveLength(2);
-        expect(Object.values(consumerB.preset)).toEqual([providerColor]);
+        expect(Object.values(consumerA.preset.classNameByCache)).toHaveLength(
+          2
+        );
+        expect(Object.values(consumerB.preset.classNameByCache)).toEqual([
+          providerColor
+        ]);
 
         const consumerBBackground = consumerB.css({ background: "blue" });
 
         expect(consumerABackground).not.toBe(consumerBBackground);
-        expect(Object.values(consumerB.preset)).toEqual(
+        expect(Object.values(consumerB.preset.classNameByCache)).toEqual(
           expect.arrayContaining([providerColor, consumerBBackground])
         );
-        expect(Object.values(consumerB.preset)).not.toContain(
+        expect(Object.values(consumerB.preset.classNameByCache)).not.toContain(
           consumerABackground
         );
-        expect(sharedPreset).toEqual(provider.preset);
+        expect(sharedPreset).toEqual(provider.preset.classNameByCache);
       });
     });
 

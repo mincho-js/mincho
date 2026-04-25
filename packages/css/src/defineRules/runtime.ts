@@ -1,9 +1,12 @@
 import type { CSSProperties } from "@mincho-js/transform-to-vanilla";
-import { registerDefineRulesPresetCaptureInstance } from "./capture.js";
+import { registerDefineRulesRegistryInstance } from "./registry.js";
 import { createCanonicalStyleCache } from "./utils.js";
 import type {
   DefineRulesComplexCssInput,
   DefineRulesCtx,
+  DefineRulesPresetArtifactV3,
+  DefineRulesPresetClassNameByCache,
+  DefineRulesPresetInput,
   DefineRulesPresetMap,
   DefineRulesProperties,
   DefineRulesShortcuts
@@ -19,11 +22,12 @@ export interface DefineRulesRuntimeResult<
   Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts>
 > {
   css: DefineRulesRuntimeCss<DefineRulesComplexCssInput<Properties, Shortcuts>>;
-  preset: DefineRulesPresetMap;
+  preset: DefineRulesPresetArtifactV3;
 }
 
 export interface DefineRulesRuntimeOptions {
   preservePresetReference?: boolean;
+  registerPreset?: boolean;
 }
 
 export function createDefineRulesRuntime<
@@ -31,21 +35,25 @@ export function createDefineRulesRuntime<
   const Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts>
 >(
   config: DefineRulesCtx<Properties, Shortcuts>,
-  ...captureSentinelArgs: [string?, DefineRulesRuntimeOptions?]
+  options: DefineRulesRuntimeOptions = {}
 ): DefineRulesRuntimeResult<Properties, Shortcuts> {
   type CssInput = DefineRulesComplexCssInput<Properties, Shortcuts>;
-  const [captureSentinel, options] = captureSentinelArgs;
-  // v1 build injection/capture supports only top-level local defineRules(...) callsites.
-  const preset = normalizePresetMap(
+  const presetArtifact = createDefineRulesPresetArtifact(
     config.presets,
     options?.preservePresetReference === true
   );
   const styleCache = createCanonicalStyleCache(config.debugId);
-  styleCache.importSnapshot(preset);
+  styleCache.importSnapshot(presetArtifact.classNameByCache);
 
-  registerDefineRulesPresetCaptureInstance(captureSentinel, () => ({
-    ...preset
-  }));
+  if (options.registerPreset !== false) {
+    registerDefineRulesRegistryInstance({
+      config,
+      presetArtifact,
+      getPresetSnapshot: () => ({
+        ...presetArtifact.classNameByCache
+      })
+    });
+  }
 
   function resolveToFragments(args: CssInput): ResolvedStyleFragment[] {
     const fragments: ResolvedStyleFragment[] = [];
@@ -83,7 +91,10 @@ export function createDefineRulesRuntime<
     }
 
     if (didAddFragment) {
-      Object.assign(preset, styleCache.exportSnapshot());
+      Object.assign(
+        presetArtifact.classNameByCache,
+        styleCache.exportSnapshot()
+      );
     }
 
     return output.sort().join(" ");
@@ -92,7 +103,7 @@ export function createDefineRulesRuntime<
   const css = Object.assign(cssImpl, {
     raw: cssRaw
   }) as DefineRulesRuntimeCss<CssInput>;
-  return { css, preset };
+  return { css, preset: presetArtifact };
 }
 
 // == Define Rules Impl ========================================================
@@ -453,32 +464,111 @@ function applyShortcut<
   throw new Error(`Unsupported shortcut definition for "${name}"`);
 }
 
+function createDefineRulesPresetArtifact(
+  presetInput: DefineRulesPresetInput | undefined,
+  preserveReference: boolean
+): DefineRulesPresetArtifactV3 {
+  if (preserveReference && isDefineRulesPresetArtifactV3(presetInput)) {
+    return presetInput;
+  }
+
+  return {
+    schema: "mincho.defineRulesPreset",
+    version: 3,
+    classNameByCache: normalizePresetMap(presetInput, preserveReference)
+  };
+}
+
 function normalizePresetMap(
-  presetInput: unknown,
+  presetInput: DefineRulesPresetInput | undefined,
   preserveReference: boolean
 ): DefineRulesPresetMap {
   if (presetInput == null) {
     return {};
   }
 
-  if (isDefineRulesPresetMap(presetInput)) {
+  return normalizePresetInput(presetInput, preserveReference, "config.presets");
+}
+
+function normalizePresetInput(
+  presetInput: unknown,
+  preserveReference: boolean,
+  path: string
+): DefineRulesPresetMap {
+  if (Array.isArray(presetInput)) {
+    const mergedPreset: DefineRulesPresetMap = {};
+
+    for (const [index, item] of presetInput.entries()) {
+      Object.assign(
+        mergedPreset,
+        normalizePresetInput(item, false, `${path}[${index}]`)
+      );
+    }
+
+    return mergedPreset;
+  }
+
+  if (isDefineRulesPresetArtifactV3(presetInput)) {
+    return preserveReference
+      ? presetInput.classNameByCache
+      : { ...presetInput.classNameByCache };
+  }
+
+  if (isDefineRulesPresetArtifactEnvelope(presetInput)) {
+    if (presetInput.version === 3) {
+      throwUnsupportedPresetInput(`${path}.classNameByCache`);
+    }
+
+    throwUnsupportedPresetInput(path);
+  }
+
+  if (isDefineRulesPresetClassNameByCache(presetInput)) {
     return preserveReference ? presetInput : { ...presetInput };
   }
 
-  throw new Error("Unsupported defineRules preset input");
+  throwUnsupportedPresetInput(path);
 }
 
-function isDefineRulesPresetMap(value: unknown): value is DefineRulesPresetMap {
+function isDefineRulesPresetArtifactV3(
+  value: unknown
+): value is DefineRulesPresetArtifactV3 {
+  return (
+    isDefineRulesPresetArtifactEnvelope(value) &&
+    value.version === 3 &&
+    isDefineRulesPresetClassNameByCache(value.classNameByCache)
+  );
+}
+
+function isDefineRulesPresetArtifactEnvelope(value: unknown): value is {
+  schema: "mincho.defineRulesPreset";
+  version?: unknown;
+  classNameByCache?: unknown;
+} {
+  return (
+    isPlainRecordObject(value) && value.schema === "mincho.defineRulesPreset"
+  );
+}
+
+function isDefineRulesPresetClassNameByCache(
+  value: unknown
+): value is DefineRulesPresetClassNameByCache {
+  return (
+    isPlainRecordObject(value) &&
+    Object.values(value).every((entry) => typeof entry === "string")
+  );
+}
+
+function isPlainRecordObject(value: unknown): value is Record<string, unknown> {
   if (value == null || typeof value !== "object" || Array.isArray(value)) {
     return false;
   }
 
   const proto = Object.getPrototypeOf(value);
-  if (proto !== Object.prototype && proto !== null) {
-    return false;
-  }
+  return proto === Object.prototype || proto === null;
+}
 
-  return Object.values(value).every((entry) => typeof entry === "string");
+function throwUnsupportedPresetInput(path: string): never {
+  throw new Error(`Unsupported defineRules preset input at ${path}`);
 }
 
 // == Utils ====================================================================

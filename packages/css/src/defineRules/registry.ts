@@ -7,6 +7,7 @@ import {
 } from "@vanilla-extract/css/fileScope";
 import type {
   DefineRulesCtx,
+  DefineRulesPresetArtifactV3,
   DefineRulesPresetMap,
   DefineRulesProperties,
   DefineRulesShortcuts
@@ -22,7 +23,7 @@ export interface DefineRulesRegistryInstance {
   fileScope: NormalizedDefineRulesRegistryFileScope;
   registrationIndex: number;
   config: unknown;
-  presetArtifact: DefineRulesPresetMap;
+  presetArtifact: DefineRulesPresetArtifactV3;
   getPresetSnapshot(): DefineRulesPresetMap;
 }
 
@@ -111,7 +112,7 @@ export function registerDefineRulesRegistryInstance<
   const Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts>
 >(metadata: {
   config: DefineRulesCtx<Properties, Shortcuts>;
-  presetArtifact: DefineRulesPresetMap;
+  presetArtifact: DefineRulesPresetArtifactV3;
   getPresetSnapshot(): DefineRulesPresetMap;
 }): DefineRulesRegistryInstance | undefined {
   const session = getActiveDefineRulesRegistrySession();
@@ -157,7 +158,11 @@ if (import.meta.vitest) {
   const { describe, it, expect, afterEach } = import.meta.vitest;
 
   const createRegistryMetadata = (preset: DefineRulesPresetMap = {}) => {
-    const presetArtifact: DefineRulesPresetMap = preset;
+    const presetArtifact: DefineRulesPresetArtifactV3 = {
+      schema: "mincho.defineRulesPreset",
+      version: 3,
+      classNameByCache: preset
+    };
 
     return {
       config: {

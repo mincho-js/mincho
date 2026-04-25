@@ -57,14 +57,27 @@ export type DefineRulesShortcuts<
   >;
 };
 
-export type DefineRulesPresetMap = Record<string, string>;
+export type DefineRulesPresetClassNameByCache = Record<string, string>;
+
+export type DefineRulesPresetArtifactV3 = {
+  schema: "mincho.defineRulesPreset";
+  version: 3;
+  classNameByCache: DefineRulesPresetClassNameByCache;
+};
+
+export type DefineRulesPresetInput =
+  | DefineRulesPresetArtifactV3
+  | DefineRulesPresetClassNameByCache
+  | readonly DefineRulesPresetInput[];
+
+export type DefineRulesPresetMap = DefineRulesPresetClassNameByCache;
 
 export interface DefineRulesCtx<
   Properties extends DefineRulesProperties,
   Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts>
 > {
   debugId?: string;
-  presets?: DefineRulesPresetMap;
+  presets?: DefineRulesPresetInput;
   properties?: Properties;
   shortcuts?: Shortcuts;
 }
@@ -380,7 +393,7 @@ if (import.meta.vitest) {
       });
     });
 
-    describe.concurrent("DefineRulesPresetMap Type", () => {
+    describe.concurrent("DefineRulesPresetInput Type", () => {
       it("Accepts raw preset records", () => {
         const { defineRulesCtx } = createDefineRulesTypeCase({
           presets: {
@@ -392,7 +405,26 @@ if (import.meta.vitest) {
           }
         });
 
-        assertType<DefineRulesPresetMap | undefined>(defineRulesCtx.presets);
+        assertType<DefineRulesPresetInput | undefined>(defineRulesCtx.presets);
+      });
+
+      it("Accepts v3 preset artifacts and recursive arrays", () => {
+        const rawPreset: DefineRulesPresetClassNameByCache = {
+          colorRed: "color_red"
+        };
+        const artifact: DefineRulesPresetArtifactV3 = {
+          schema: "mincho.defineRulesPreset",
+          version: 3,
+          classNameByCache: rawPreset
+        };
+        const { defineRulesCtx } = createDefineRulesTypeCase({
+          presets: [artifact, rawPreset, [artifact]],
+          properties: {
+            color: true
+          }
+        });
+
+        assertType<DefineRulesPresetInput | undefined>(defineRulesCtx.presets);
       });
 
       it("Rejects preset owner objects", () => {
@@ -407,7 +439,7 @@ if (import.meta.vitest) {
           properties: {
             color: true
           },
-          // @ts-expect-error: presets accepts raw string records only.
+          // @ts-expect-error: presets accepts raw records, v3 artifacts, or arrays only.
           presets: owner
         });
       });
