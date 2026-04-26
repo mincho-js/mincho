@@ -22,7 +22,8 @@ export default defineConfig(
       "node_modules/**",
       "coverage/**",
       "vite.config.ts.timestamp*.mjs",
-      ".cache"
+      ".cache/**",
+      "**/.cache/**"
     ]
   }
 );

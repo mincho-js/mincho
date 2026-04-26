@@ -795,9 +795,9 @@ if (import.meta.vitest) {
         export { css, fillBlue as fillBlueClass };
       `;
 
-      expect(extractExportedVariableInitFromBuildSource(source, "fillBlue")).toBe(
-        '"blue_class"'
-      );
+      expect(
+        extractExportedVariableInitFromBuildSource(source, "fillBlue")
+      ).toBe('"blue_class"');
     });
 
     it("builds a real esbuild fixture with defineRules preset backfill", async () => {
