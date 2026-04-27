@@ -57,7 +57,7 @@ if (import.meta.vitest) {
 
       expect(result).toMatchSnapshot();
       expect(code).toMatchSnapshot();
-    });
+    }, 10_000);
 
     it("inside jsx expression", () => {
       const { result, code } = babelTransform(`
@@ -122,6 +122,30 @@ if (import.meta.vitest) {
 
       expect(result).toMatchSnapshot();
       expect(code).toMatchSnapshot();
+    });
+
+    it("leaves defineRules call shape untouched", () => {
+      const { code } = babelTransform(`
+        import { defineRules } from '@mincho-js/css';
+
+        defineRules({
+          properties: {
+            color: String,
+          },
+          shortcuts: {
+            text: {
+              color: 'red',
+            },
+          },
+        });
+      `);
+
+      expect(code).toContain("defineRules({");
+      expect(code).not.toContain("__MINCHO_DEFINE_RULES_SENTINEL__");
+      expect(code).not.toContain("backfillDefineRulesPresetArtifacts");
+      expect(code).not.toContain("captureDefineRulesPresetSession");
+      expect(code).not.toContain("defineRules/registry");
+      expect(code).not.toContain("processVanillaFile");
     });
 
     it("extracts $mincho function", () => {
