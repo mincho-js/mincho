@@ -8,14 +8,32 @@ These fixtures lock the build-time contract for sharing `defineRules` preset out
 - `node_modules/@mincho-js-proof/*` directories model consumers importing that published provider through normal package resolution.
 - The generated `dist/` files and fake `node_modules` packages are intentionally committed so tests can detect drift in the serialized JS shape, sidecar CSS contract, and package-boundary resolution without depending on a separate publish step.
 
+## Registry contract
+
+The registry fixtures describe what actually executes while the extracted CSS module is evaluated. The base eval-executed cases cover direct and destructured owner exports, helper-wrapped calls, IIFEs, and const-config values. Each one must serialize when the evaluation path invokes it.
+
+Serialized preset artifacts use the v3 shape:
+
+```ts
+{
+  schema: "mincho.defineRulesPreset",
+  version: 3,
+  classNameByCache: {
+    "<cache-key>": "<class-name>"
+  }
+}
+```
+
+`classNameByCache` must be populated from executed `css(...)` calls.
+
 ## Regeneration and verification contract
 
-There is no separate generator script for this fixture set. When a fixture source changes, update the corresponding tracked `dist/` or fake package files in the same change and keep the diff limited to the expected serialized JS/CSS output.
+There is no separate generator script for this fixture set. When a fixture source changes, update the matching tracked `dist/` or fake package files in the same change and keep the diff limited to the expected serialized JS/CSS output.
 
 Verify the contract with:
 
 ```bash
-yarn vitest run "packages/integration/src/defineRulesPreset.ts"
+yarn vitest run "packages/integration/src/defineRulesPreset.ts" -t "registry fixture matrix"
 yarn vitest run "packages/vite/src/index.ts" -t "defineRules|preset|fixture|build artifact|real Vite"
 yarn vitest run "packages/esbuild/src/index.ts" -t "defineRules|preset|fixture|extracted-css|real esbuild"
 ```
@@ -23,17 +41,7 @@ yarn vitest run "packages/esbuild/src/index.ts" -t "defineRules|preset|fixture|e
 Expected fixture diffs are limited to:
 
 - class-name changes caused by intentional preset/style changes;
-- serialized `presets` object changes that match the source fixture's static `css(...)` calls;
+- serialized v3 `classNameByCache` artifact changes that match the source fixture's executed `css(...)` calls;
 - sidecar CSS changes required for provider exports consumed through package imports.
 
-Unexpected fixture diffs include removed sidecar imports, missing fake package metadata, leaked `__MINCHO_DEFINE_RULES_SENTINEL__:` values, or runtime `css({ ... })` calls left where a static class literal should be emitted.
-
-## Unsupported callsite matrix
-
-The unsupported fixtures are intentional fail-fast boundaries, not missing happy paths:
-
-- `unsupported-helper-wrapped` (`negative-helper-wrapped/`): `defineRules(...)` hidden behind a helper function.
-- `unsupported-non-top-level` (`negative-non-top-level/`): `defineRules(...)` nested in another expression or callback.
-- `unsupported-non-object-literal` (`negative-non-object-literal/`): `defineRules(config)` where the config is not an object literal at the callsite.
-
-These forms currently throw the locked preset-backfill mismatch error instead of being silently serialized. PRs that touch this fixture matrix should state whether each unsupported form remains fail-fast or is deliberately promoted into the supported matrix.
+Unexpected fixture diffs include removed sidecar imports, missing fake package metadata, legacy capture markers, or runtime `css({ ... })` calls left where a static class literal should be emitted.

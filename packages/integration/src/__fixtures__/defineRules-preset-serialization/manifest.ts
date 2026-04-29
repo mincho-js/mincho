@@ -22,6 +22,85 @@ export const DEFINE_RULES_PRESET_SERIALIZATION_PATHS = {
   viteConsumerRoot: "vite-consumer"
 } as const;
 
+interface DefineRulesPresetSerializationRegistryMatrixCase {
+  caseId: string;
+  expectedEvaluation: "serialized" | "not-serialized" | "invalid";
+  expectedRegistryInstances: number;
+  expectedSourceSnippets: readonly string[];
+  relativePath: string;
+}
+
+export const DEFINE_RULES_PRESET_SERIALIZATION_REGISTRY_MATRIX_CASES: readonly DefineRulesPresetSerializationRegistryMatrixCase[] = [
+  {
+    caseId: "registry-direct-exported-owner",
+    expectedEvaluation: "serialized",
+    expectedRegistryInstances: 1,
+    expectedSourceSnippets: [
+      "const presetOwner = defineRules({",
+      "export const shared = css({"
+    ],
+    relativePath: "support-matrix-local-owner-exported-members/src/index.css.ts"
+  },
+  {
+    caseId: "registry-exported-destructured",
+    expectedEvaluation: "serialized",
+    expectedRegistryInstances: 1,
+    expectedSourceSnippets: [
+      "export const { css, preset } = defineRules({",
+      "export const shared = css({"
+    ],
+    relativePath: "support-matrix-exported-destructured/src/index.css.ts"
+  },
+  {
+    caseId: "registry-helper-wrapped-executed",
+    expectedEvaluation: "serialized",
+    expectedRegistryInstances: 1,
+    expectedSourceSnippets: [
+      "function createPresetOwner() {",
+      "return defineRules({",
+      "const presetOwner = createPresetOwner();"
+    ],
+    relativePath: "negative-helper-wrapped/src/index.css.ts"
+  },
+  {
+    caseId: "registry-iife-executed",
+    expectedEvaluation: "serialized",
+    expectedRegistryInstances: 1,
+    expectedSourceSnippets: [
+      "const presetOwner = (() => {",
+      "return defineRules({",
+      "export const { css, preset } = presetOwner;"
+    ],
+    relativePath: "negative-non-top-level/src/index.css.ts"
+  },
+  {
+    caseId: "registry-const-config-executed",
+    expectedEvaluation: "serialized",
+    expectedRegistryInstances: 1,
+    expectedSourceSnippets: [
+      "const config = {",
+      "export const { css, preset } = defineRules(config);",
+      "export const shared = css({"
+    ],
+    relativePath: "negative-non-object-literal/src/index.css.ts"
+  }
+];
+
+export const DEFINE_RULES_PRESET_SERIALIZATION_REGISTRY_SUPPORTED_CASES =
+  DEFINE_RULES_PRESET_SERIALIZATION_REGISTRY_MATRIX_CASES.filter(
+    (fixtureCase) => fixtureCase.expectedEvaluation === "serialized"
+  );
+
+export const DEFINE_RULES_PRESET_SERIALIZATION_REGISTRY_NON_SERIALIZED_CASES =
+  DEFINE_RULES_PRESET_SERIALIZATION_REGISTRY_MATRIX_CASES.filter(
+    (fixtureCase) => fixtureCase.expectedEvaluation === "not-serialized"
+  );
+
+export const DEFINE_RULES_PRESET_SERIALIZATION_REGISTRY_INVALID_CASES =
+  DEFINE_RULES_PRESET_SERIALIZATION_REGISTRY_MATRIX_CASES.filter(
+    (fixtureCase) => fixtureCase.expectedEvaluation === "invalid"
+  );
+
 export const DEFINE_RULES_PRESET_SERIALIZATION_SUPPORTED_MATRIX_CASES = [
   {
     caseId: "shape-1-exported-owner",
