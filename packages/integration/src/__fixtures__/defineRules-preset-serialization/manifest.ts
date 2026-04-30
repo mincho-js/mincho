@@ -22,24 +22,16 @@ export const DEFINE_RULES_PRESET_SERIALIZATION_PATHS = {
   viteConsumerRoot: "vite-consumer"
 } as const;
 
-interface DefineRulesPresetSerializationRegistryMatrixCase {
-  caseId: string;
-  expectedEvaluation: "serialized" | "not-serialized" | "invalid";
-  expectedRegistryInstances: number;
-  expectedSourceSnippets: readonly string[];
-  relativePath: string;
-}
-
-export const DEFINE_RULES_PRESET_SERIALIZATION_REGISTRY_MATRIX_CASES: readonly DefineRulesPresetSerializationRegistryMatrixCase[] = [
+export const DEFINE_RULES_PRESET_SERIALIZATION_REGISTRY_MATRIX_CASES = [
   {
     caseId: "registry-direct-exported-owner",
     expectedEvaluation: "serialized",
     expectedRegistryInstances: 1,
     expectedSourceSnippets: [
       "const presetOwner = defineRules({",
-      "export const shared = css({"
+      "export const shared = presetOwner.css({"
     ],
-    relativePath: "support-matrix-local-owner-exported-members/src/index.css.ts"
+    relativePath: "registry-direct-exported-owner/src/index.css.ts"
   },
   {
     caseId: "registry-exported-destructured",
@@ -49,7 +41,7 @@ export const DEFINE_RULES_PRESET_SERIALIZATION_REGISTRY_MATRIX_CASES: readonly D
       "export const { css, preset } = defineRules({",
       "export const shared = css({"
     ],
-    relativePath: "support-matrix-exported-destructured/src/index.css.ts"
+    relativePath: "registry-exported-destructured/src/index.css.ts"
   },
   {
     caseId: "registry-helper-wrapped-executed",
@@ -60,7 +52,7 @@ export const DEFINE_RULES_PRESET_SERIALIZATION_REGISTRY_MATRIX_CASES: readonly D
       "return defineRules({",
       "const presetOwner = createPresetOwner();"
     ],
-    relativePath: "negative-helper-wrapped/src/index.css.ts"
+    relativePath: "registry-helper-wrapped-executed/src/index.css.ts"
   },
   {
     caseId: "registry-iife-executed",
@@ -71,7 +63,51 @@ export const DEFINE_RULES_PRESET_SERIALIZATION_REGISTRY_MATRIX_CASES: readonly D
       "return defineRules({",
       "export const { css, preset } = presetOwner;"
     ],
-    relativePath: "negative-non-top-level/src/index.css.ts"
+    relativePath: "registry-iife-executed/src/index.css.ts"
+  },
+  {
+    caseId: "registry-nested-function-executed",
+    expectedEvaluation: "serialized",
+    expectedRegistryInstances: 1,
+    expectedSourceSnippets: [
+      "function createNestedPresetOwner() {",
+      "return defineRules({",
+      "const presetOwner = createPresetOwner();"
+    ],
+    relativePath: "registry-nested-function-executed/src/index.css.ts"
+  },
+  {
+    caseId: "registry-helper-invoked-twice",
+    expectedEvaluation: "serialized",
+    expectedRegistryInstances: 2,
+    expectedSourceSnippets: [
+      "function createPresetOwner(debugId: string) {",
+      "const firstPresetOwner = createPresetOwner(\"first\");",
+      "const secondPresetOwner = createPresetOwner(\"second\");"
+    ],
+    relativePath: "registry-helper-invoked-twice/src/index.css.ts"
+  },
+  {
+    caseId: "registry-multiple-instances",
+    expectedEvaluation: "serialized",
+    expectedRegistryInstances: 2,
+    expectedSourceSnippets: [
+      "const primaryPresetOwner = defineRules({",
+      "const secondaryPresetOwner = defineRules({",
+      "export const secondaryShared = secondaryPresetOwner.css({"
+    ],
+    relativePath: "registry-multiple-instances/src/index.css.ts"
+  },
+  {
+    caseId: "registry-imported-helper-executed",
+    expectedEvaluation: "serialized",
+    expectedRegistryInstances: 1,
+    expectedSourceSnippets: [
+      "import { createPresetOwner } from \"./helper\";",
+      "const presetOwner = createPresetOwner();",
+      "export const shared = css({"
+    ],
+    relativePath: "registry-imported-helper-executed/src/index.css.ts"
   },
   {
     caseId: "registry-const-config-executed",
@@ -82,9 +118,30 @@ export const DEFINE_RULES_PRESET_SERIALIZATION_REGISTRY_MATRIX_CASES: readonly D
       "export const { css, preset } = defineRules(config);",
       "export const shared = css({"
     ],
-    relativePath: "negative-non-object-literal/src/index.css.ts"
+    relativePath: "registry-const-config-executed/src/index.css.ts"
+  },
+  {
+    caseId: "registry-exported-factory-not-executed",
+    expectedEvaluation: "not-serialized",
+    expectedRegistryInstances: 0,
+    expectedSourceSnippets: [
+      "export function createPresetOwner() {",
+      "return defineRules({",
+      "export const factoryStatus = \"not-executed\";"
+    ],
+    relativePath: "registry-exported-factory-not-executed/src/index.css.ts"
+  },
+  {
+    caseId: "registry-function-config-invalid",
+    expectedEvaluation: "not-serialized",
+    expectedRegistryInstances: 0,
+    expectedSourceSnippets: [
+      "color(value: string) {",
+      "export const raw = invalidPresetOwner.css.raw({"
+    ],
+    relativePath: "registry-function-config-invalid/src/index.css.ts"
   }
-];
+] as const;
 
 export const DEFINE_RULES_PRESET_SERIALIZATION_REGISTRY_SUPPORTED_CASES =
   DEFINE_RULES_PRESET_SERIALIZATION_REGISTRY_MATRIX_CASES.filter(
@@ -96,19 +153,14 @@ export const DEFINE_RULES_PRESET_SERIALIZATION_REGISTRY_NON_SERIALIZED_CASES =
     (fixtureCase) => fixtureCase.expectedEvaluation === "not-serialized"
   );
 
-export const DEFINE_RULES_PRESET_SERIALIZATION_REGISTRY_INVALID_CASES =
-  DEFINE_RULES_PRESET_SERIALIZATION_REGISTRY_MATRIX_CASES.filter(
-    (fixtureCase) => fixtureCase.expectedEvaluation === "invalid"
-  );
-
 export const DEFINE_RULES_PRESET_SERIALIZATION_SUPPORTED_MATRIX_CASES = [
   {
-    caseId: "shape-1-exported-owner",
+    caseId: "shape-1-local-owner-exported-members",
     expectedSourceSnippets: [
-      "export const presetOwner = defineRules({",
+      "const presetOwner = defineRules({",
       "export const shared = presetOwner.css({"
     ],
-    relativePath: "support-matrix-exported-owner/src/index.css.ts"
+    relativePath: "registry-direct-exported-owner/src/index.css.ts"
   },
   {
     caseId: "shape-2-exported-destructured-css-and-preset",
@@ -116,40 +168,31 @@ export const DEFINE_RULES_PRESET_SERIALIZATION_SUPPORTED_MATRIX_CASES = [
       "export const { css, preset } = defineRules({",
       "export const shared = css({"
     ],
-    relativePath: "support-matrix-exported-destructured/src/index.css.ts"
+    relativePath: "registry-exported-destructured/src/index.css.ts"
   },
   {
-    caseId: "shape-3-exported-aliased-destructured-css-and-preset",
+    caseId: "shape-3-exported-owner-and-css",
     expectedSourceSnippets: [
-      "export const { css: sharedCss, preset: sharedPreset } = defineRules({",
-      "export const shared = sharedCss({"
+      "export const preset = defineRules({",
+      "export const { css } = preset;"
     ],
-    relativePath: "support-matrix-exported-aliased-destructured/src/index.css.ts"
+    relativePath: "preset-exported-owner-and-css/src/index.css.ts"
   },
   {
-    caseId: "shape-4-local-owner-exported-members",
+    caseId: "shape-4-exported-destructured-css-only",
     expectedSourceSnippets: [
-      "const presetOwner = defineRules({",
-      "export const css = presetOwner.css;",
-      "export const preset = presetOwner.preset;"
+      "export const { css } = defineRules({",
+      "export const shared = css({"
     ],
-    relativePath: "support-matrix-local-owner-exported-members/src/index.css.ts"
+    relativePath: "preset-direct-css-only/src/index.css.ts"
   },
   {
-    caseId: "shape-5-exported-owner-exported-destructured",
+    caseId: "shape-5-exported-aliased-css-only",
     expectedSourceSnippets: [
-      "export const presetOwner = defineRules({",
-      "export const { css, preset } = presetOwner;"
+      "export const { css: atomicCss } = defineRules({",
+      "export const shared = atomicCss({"
     ],
-    relativePath: "support-matrix-exported-owner-exported-destructured/src/index.css.ts"
-  },
-  {
-    caseId: "shape-6-local-destructured-export-list",
-    expectedSourceSnippets: [
-      "const { css, preset } = defineRules({",
-      "export { css, preset };"
-    ],
-    relativePath: "support-matrix-local-destructured-export-list/src/index.css.ts"
+    relativePath: "preset-aliased-css-only/src/index.css.ts"
   }
 ] as const;
 
@@ -159,20 +202,20 @@ export const DEFINE_RULES_PRESET_SERIALIZATION_UNSUPPORTED_MATRIX_CASES = [
     expectedSourceSnippets: [
       "function createPresetOwner() {",
       "return defineRules({",
-      "export const presetOwner = createPresetOwner();"
+      "const presetOwner = createPresetOwner();"
     ],
     requireObjectLiteralConfig: true,
-    relativePath: "negative-helper-wrapped/src/index.css.ts"
+    relativePath: "registry-helper-wrapped-executed/src/index.css.ts"
   },
   {
     caseId: "unsupported-non-top-level",
     expectedSourceSnippets: [
-      "export const presetOwner = (() => {",
+      "const presetOwner = (() => {",
       "return defineRules({",
       "export const { css, preset } = presetOwner;"
     ],
     requireObjectLiteralConfig: true,
-    relativePath: "negative-non-top-level/src/index.css.ts"
+    relativePath: "registry-iife-executed/src/index.css.ts"
   },
   {
     caseId: "unsupported-non-object-literal",
@@ -181,6 +224,6 @@ export const DEFINE_RULES_PRESET_SERIALIZATION_UNSUPPORTED_MATRIX_CASES = [
       "export const { css, preset } = defineRules(config);"
     ],
     requireObjectLiteralConfig: false,
-    relativePath: "negative-non-object-literal/src/index.css.ts"
+    relativePath: "registry-const-config-executed/src/index.css.ts"
   }
 ] as const;

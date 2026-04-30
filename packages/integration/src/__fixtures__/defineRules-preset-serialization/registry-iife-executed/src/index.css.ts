@@ -1,6 +1,6 @@
 import { defineRules } from "@mincho-js/css";
 
-export const presetOwner = (() => {
+const presetOwner = (() => {
   return defineRules({
     properties: {
       color: true,

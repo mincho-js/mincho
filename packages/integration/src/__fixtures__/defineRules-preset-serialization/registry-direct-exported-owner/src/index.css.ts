@@ -1,15 +1,16 @@
 import { defineRules } from "@mincho-js/css";
 
-const { css, preset } = defineRules({
+const presetOwner = defineRules({
   properties: {
     color: true,
     display: true
   }
 });
 
-export { css, preset };
+export const css = presetOwner.css;
+export const preset = presetOwner.preset;
 
-export const shared = css({
+export const shared = presetOwner.css({
   color: "rebeccapurple",
   display: "flex"
 });

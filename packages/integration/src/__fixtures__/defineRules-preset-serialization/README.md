@@ -10,7 +10,11 @@ These fixtures lock the build-time contract for sharing `defineRules` preset out
 
 ## Registry contract
 
-The registry fixtures describe what actually executes while the extracted CSS module is evaluated. The base eval-executed cases cover direct and destructured owner exports, helper-wrapped calls, IIFEs, and const-config values. Each one must serialize when the evaluation path invokes it.
+The registry fixtures describe what actually executes while the extracted CSS module is evaluated. The eval-executed cases cover helper-wrapped calls, IIFEs, nested functions, imported helpers, const-config values, and multiple live `defineRules(...)` instances. Each one must serialize when the evaluation path invokes it.
+
+`registry-exported-factory-not-executed` is the exported factory boundary. A factory that would call `defineRules(...)` does not serialize a preset artifact until the factory runs during `.css.ts` evaluation.
+
+`registry-function-config-invalid` is the function-valued config boundary. Function-valued `properties` or `shortcuts` can't be represented in the preset artifact, so public `defineRules(...)` calls with function-valued config are not registered and do not serialize a preset artifact. Their local `css.raw(...)` usage still executes normally.
 
 Serialized preset artifacts use the v3 shape:
 
@@ -24,7 +28,7 @@ Serialized preset artifacts use the v3 shape:
 }
 ```
 
-`classNameByCache` must be populated from executed `css(...)` calls.
+`classNameByCache` must be populated from executed `css(...)` calls. Empty artifacts only belong to cases where no `defineRules(...)` instance ran during evaluation.
 
 ## Regeneration and verification contract
 

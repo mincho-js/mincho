@@ -317,7 +317,13 @@ if (import.meta.vitest) {
     "registry-exported-destructured",
     "registry-helper-wrapped-executed",
     "registry-iife-executed",
-    "registry-const-config-executed"
+    "registry-nested-function-executed",
+    "registry-helper-invoked-twice",
+    "registry-multiple-instances",
+    "registry-imported-helper-executed",
+    "registry-const-config-executed",
+    "registry-exported-factory-not-executed",
+    "registry-function-config-invalid"
   ];
 
   function getDefineRulesPresetSerializationManifestUrl(): string {
