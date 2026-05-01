@@ -10626,7 +10626,7 @@ function isPlainObject(v) {
 function hasOwn(obj, key) {
   return obj != null && Object.prototype.hasOwnProperty.call(obj, key);
 }
-const runtimePreset = defineRules({ debugId: "provider-module", properties: { color: true, display: true }, presets: [{ schema: "mincho.defineRulesPreset", version: 2, classNameByCache: {} }] });
+const runtimePreset = defineRules({ debugId: "provider-module", properties: { color: true, display: true }, presets: [{ schema: "mincho.defineRulesPreset", version: 3, classNameByCache: {} }] });
 const { css } = runtimePreset;
 var shared = "qm85120 qm85121";
 export {
