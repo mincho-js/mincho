@@ -142,8 +142,7 @@ export function registerDefineRulesRegistryInstance<
   };
 
   session.nextRegistrationIndex += 1;
-  session.nextRegistrationIndexByFileScope[fileScopeId] =
-    registrationIndex + 1;
+  session.nextRegistrationIndexByFileScope[fileScopeId] = registrationIndex + 1;
   session.instances.push(instance);
   return instance;
 }
