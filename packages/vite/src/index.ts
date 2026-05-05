@@ -5,10 +5,10 @@ import {
   processDefineRulesPresetRegistryFile,
   runDefineRulesPresetRegistryStep
 } from "@mincho-js/integration";
-import { processVanillaFile } from "@vanilla-extract/integration";
 import { normalizePath } from "@rollup/pluginutils";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import * as fs from "node:fs";
+import { fileURLToPath } from "node:url";
 
 interface Module {
   lastHMRTimestamp?: number;
@@ -179,6 +179,7 @@ export function minchoVitePlugin(_options?: {
         extractedCssFileFilter(id)
       ) {
         try {
+          resolverCache.delete(moduleInfo.originalPath);
           const { source, watchFiles } = await compile({
             filePath: moduleInfo.filePath,
             cwd: config.root,
@@ -200,7 +201,7 @@ export function minchoVitePlugin(_options?: {
             }
           }
 
-          const processVanillaFileOptions = {
+          const contents = await processDefineRulesPresetViteFile({
             source,
             filePath: moduleInfo.filePath,
             identOption: config.mode === "production" ? "short" : "debug",
@@ -224,18 +225,7 @@ export function minchoVitePlugin(_options?: {
 
               return `import "${id}";`;
             }
-          } satisfies Parameters<typeof processVanillaFile>[0];
-
-          const contents =
-            config.command === "build"
-              ? await runDefineRulesPresetRegistryStep(async () => {
-                  const { source } = await processDefineRulesPresetRegistryFile(
-                    processVanillaFileOptions
-                  );
-
-                  return source;
-                })
-              : await processVanillaFile(processVanillaFileOptions);
+          });
 
           return contents;
         } catch (error) {
@@ -307,6 +297,21 @@ export function minchoVitePlugin(_options?: {
   } as PluginOption;
 }
 
+let collectDefineRulesPresetViteRegistrySource:
+  | ((source: string) => void)
+  | undefined;
+
+async function processDefineRulesPresetViteFile(
+  options: Parameters<typeof processDefineRulesPresetRegistryFile>[0]
+): Promise<string> {
+  const { source } = await runDefineRulesPresetRegistryStep(() =>
+    processDefineRulesPresetRegistryFile(options)
+  );
+  collectDefineRulesPresetViteRegistrySource?.(source);
+
+  return source;
+}
+
 function customNormalize(path: string) {
   return path.startsWith("/") ? path.slice(1) : path;
 }
@@ -320,16 +325,13 @@ if (import.meta.vitest) {
   // @ts-ignore error TS1343: The 'import.meta' meta-property is only allowed when the '--module' option is 'es2020', 'es2022', 'esnext', 'system', 'node16', or 'nodenext'.
   const { afterEach, beforeAll, describe, expect, it, vi } = import.meta.vitest;
 
-  const DEFINE_RULES_PRESET_CAPTURE_SENTINEL_PREFIX =
-    "__MINCHO_DEFINE_RULES_SENTINEL__:";
-  const DEFINE_RULES_PRESET_BACKFILL_MISMATCH_ERROR =
-    "defineRules preset backfill mismatch";
-  const DEFINE_RULES_FUNCTION_CONFIG_DIAGNOSTIC =
-    "defineRules serialized css does not support function-valued properties or shortcuts";
+  const DEFINE_RULES_PRESET_SCHEMA = "mincho.defineRulesPreset";
   const explicitProviderSidecarImport =
     'import "@mincho-js-proof/define-rules-preset/shared-component.css";';
   type DefineRulesPresetSerializationCase = {
     caseId: string;
+    expectedEvaluation: "serialized" | "not-serialized";
+    expectedRegistryInstances: number;
     expectedSourceSnippets: readonly string[];
     relativePath: string;
   };
@@ -338,6 +340,10 @@ if (import.meta.vitest) {
     DefineRulesPresetSerializationCase & {
       fixturePath: string;
     };
+
+  type DefineRulesPresetRegistryResult = Awaited<
+    ReturnType<typeof processDefineRulesPresetRegistryFile>
+  >;
 
   type DefineRulesPresetSerializationPaths = {
     providerDistModule: string;
@@ -349,8 +355,7 @@ if (import.meta.vitest) {
 
   type DefineRulesPresetSerializationManifest = {
     DEFINE_RULES_PRESET_SERIALIZATION_PATHS: DefineRulesPresetSerializationPaths;
-    DEFINE_RULES_PRESET_SERIALIZATION_SUPPORTED_MATRIX_CASES: readonly DefineRulesPresetSerializationCase[];
-    DEFINE_RULES_PRESET_SERIALIZATION_UNSUPPORTED_MATRIX_CASES: readonly DefineRulesPresetSerializationCase[];
+    DEFINE_RULES_PRESET_SERIALIZATION_REGISTRY_MATRIX_CASES: readonly DefineRulesPresetSerializationCase[];
     createDefineRulesPresetSerializationFixturePath: (
       relativePath: string
     ) => string;
@@ -359,9 +364,9 @@ if (import.meta.vitest) {
   let providerDistModulePath: string;
   let providerRootFixturePath: string;
   let providerSidecarCssPath: string;
-  let supportedFixtureMatrixCases: DefineRulesPresetSerializationFixtureCase[] =
+  let registryFixtureMatrixCases: DefineRulesPresetSerializationFixtureCase[] =
     [];
-  let unsupportedFixtureMatrixCases: DefineRulesPresetSerializationFixtureCase[] =
+  let serializedRegistryFixtureCases: DefineRulesPresetSerializationFixtureCase[] =
     [];
   let viteConsumerEntryPath: string;
   let viteConsumerRootPath: string;
@@ -371,6 +376,10 @@ if (import.meta.vitest) {
       "../../integration/src/__fixtures__/defineRules-preset-serialization/manifest.ts",
       import.meta.url
     ).href;
+  }
+
+  function createViteFixtureCacheRoot(): string {
+    return join(fileURLToPath(new URL("..", import.meta.url)), ".cache");
   }
 
   async function loadDefineRulesPresetSerializationManifest(): Promise<DefineRulesPresetSerializationManifest> {
@@ -394,8 +403,7 @@ if (import.meta.vitest) {
   ): void {
     const {
       DEFINE_RULES_PRESET_SERIALIZATION_PATHS,
-      DEFINE_RULES_PRESET_SERIALIZATION_SUPPORTED_MATRIX_CASES,
-      DEFINE_RULES_PRESET_SERIALIZATION_UNSUPPORTED_MATRIX_CASES,
+      DEFINE_RULES_PRESET_SERIALIZATION_REGISTRY_MATRIX_CASES,
       createDefineRulesPresetSerializationFixturePath
     } = manifest;
 
@@ -414,14 +422,27 @@ if (import.meta.vitest) {
     providerSidecarCssPath = createDefineRulesPresetSerializationFixturePath(
       DEFINE_RULES_PRESET_SERIALIZATION_PATHS.providerSidecarCss
     );
-    supportedFixtureMatrixCases = createFixtureMatrixCases(
-      DEFINE_RULES_PRESET_SERIALIZATION_SUPPORTED_MATRIX_CASES,
+    registryFixtureMatrixCases = createFixtureMatrixCases(
+      DEFINE_RULES_PRESET_SERIALIZATION_REGISTRY_MATRIX_CASES,
       createDefineRulesPresetSerializationFixturePath
     );
-    unsupportedFixtureMatrixCases = createFixtureMatrixCases(
-      DEFINE_RULES_PRESET_SERIALIZATION_UNSUPPORTED_MATRIX_CASES,
-      createDefineRulesPresetSerializationFixturePath
+    serializedRegistryFixtureCases = registryFixtureMatrixCases.filter(
+      (fixtureCase) => fixtureCase.expectedEvaluation === "serialized"
     );
+  }
+
+  function getRegistryFixtureCase(
+    caseId: string
+  ): DefineRulesPresetSerializationFixtureCase {
+    const fixtureCase = registryFixtureMatrixCases.find(
+      (candidate) => candidate.caseId === caseId
+    );
+
+    if (fixtureCase == null) {
+      throw new Error(`Missing registry fixture case ${caseId}`);
+    }
+
+    return fixtureCase;
   }
 
   beforeAll(async () => {
@@ -444,111 +465,96 @@ if (import.meta.vitest) {
     );
   }
 
-  function injectDefineRulesPresetSentinel(
-    source: string,
-    sentinelId: string
-  ): string {
-    const callStart = source.indexOf("defineRules(");
-    if (callStart === -1) {
-      throw new Error(
-        "Failed to locate a fixture defineRules call for sentinel injection"
-      );
-    }
-
-    const openParenIndex = source.indexOf("(", callStart);
-    if (openParenIndex === -1) {
-      throw new Error(
-        "Failed to locate the opening parenthesis for a fixture defineRules call"
-      );
-    }
-
-    let depth = 0;
-    let closingParenIndex = -1;
-    let activeQuote: '"' | "'" | "`" | undefined;
-    let escaped = false;
-
-    for (let index = openParenIndex; index < source.length; index += 1) {
-      const character = source[index];
-      if (character == null) {
-        continue;
-      }
-
-      if (activeQuote != null) {
-        if (escaped) {
-          escaped = false;
-          continue;
-        }
-
-        if (character === "\\") {
-          escaped = true;
-          continue;
-        }
-
-        if (character === activeQuote) {
-          activeQuote = undefined;
-        }
-
-        continue;
-      }
-
-      if (character === '"' || character === "'" || character === "`") {
-        activeQuote = character;
-        continue;
-      }
-
-      if (character === "(") {
-        depth += 1;
-        continue;
-      }
-
-      if (character !== ")") {
-        continue;
-      }
-
-      depth -= 1;
-      if (depth === 0) {
-        closingParenIndex = index;
-        break;
-      }
-    }
-
-    if (closingParenIndex === -1) {
-      throw new Error(
-        "Failed to locate the closing parenthesis for a fixture defineRules call"
-      );
-    }
-
-    return `${source.slice(0, closingParenIndex)}, "${DEFINE_RULES_PRESET_CAPTURE_SENTINEL_PREFIX}${sentinelId}"${source.slice(closingParenIndex)}`;
+  function createEmptyRegistrySession(): DefineRulesPresetRegistryResult["registrySession"] {
+    return {
+      instances: [],
+      nextRegistrationIndex: 0,
+      nextRegistrationIndexByFileScope: {}
+    };
   }
 
-  function createFixtureBuildSource(
-    filePath: string,
-    sentinelId: string
-  ): string {
-    return injectDefineRulesPresetSentinel(
-      readFixtureSource(filePath),
-      sentinelId
+  function createRegistryResult(
+    source: string
+  ): DefineRulesPresetRegistryResult {
+    return {
+      source,
+      registrySession: createEmptyRegistrySession()
+    };
+  }
+
+  function createV3PresetBuildSource(className: string): string {
+    return `
+      export const preset = {
+        schema: "${DEFINE_RULES_PRESET_SCHEMA}",
+        version: 3,
+        classNameByCache: {
+          shared: "${className}"
+        }
+      };
+      export const shared = "${className}";
+    `;
+  }
+
+  function expectSourceToContainV3PresetArtifact(source: string): void {
+    expect(source).toMatch(
+      new RegExp(
+        `["']?schema["']?\\s*:\\s*["']${escapeRegExp(DEFINE_RULES_PRESET_SCHEMA)}["']`
+      )
     );
+    expect(source).toMatch(/["']?version["']?\s*:\s*3/);
+    expect(source).toMatch(/["']?classNameByCache["']?\s*:\s*\{/);
+  }
+
+  function countV3PresetArtifacts(source: string): number {
+    return Array.from(
+      source.matchAll(
+        /["']?schema["']?\s*:\s*["']mincho\.defineRulesPreset["']/g
+      )
+    ).length;
+  }
+
+  function expectSourceToContainPopulatedClassNameByCache(
+    source: string
+  ): void {
+    expect(source).toMatch(
+      /["']?classNameByCache["']?\s*:\s*\{[\s\S]*["'][^"']+["']\s*:/
+    );
+  }
+
+  function expectSourceToContainClassNameByCacheValue(
+    source: string,
+    className: string
+  ): void {
+    expectSourceToContainV3PresetArtifact(source);
+    expect(source).toMatch(
+      new RegExp(
+        `["']?classNameByCache["']?\\s*:\\s*\\{[\\s\\S]*["']${escapeRegExp(className)}["']`
+      )
+    );
+  }
+
+  function expectSourceToOmitLegacyCaptureMarker(source: string): void {
+    expect(source).not.toMatch(/__MINCHO_DEFINE_RULES_[A-Z]+__:?/);
   }
 
   function createLivePresetSmokeEntrySource(): string {
     return `
-      import { css, defineRules } from "@mincho-js/css";
+      import { css as vanillaCss, defineRules } from "@mincho-js/css";
 
-      const presetOwner = defineRules({
+      export const { css: presetCss, preset } = defineRules({
         debugId: "vite-build-smoke",
         properties: {
           background: true
         }
       });
-      export const fillBlue = css(
-        presetOwner.css.raw({ background: "blue" })
-      );
+      export const fillBlue = vanillaCss([
+        presetCss({ background: "blue" })
+      ]);
     `;
   }
 
   async function createLivePresetSmokeFixture(prefix: string) {
-    const cacheRoot = join(process.cwd(), "packages/vite/.cache");
+    const cacheRoot = createViteFixtureCacheRoot();
     await fs.promises.mkdir(cacheRoot, { recursive: true });
     const root = await fs.promises.mkdtemp(join(cacheRoot, prefix));
     const srcRoot = join(root, "src");
@@ -562,33 +568,212 @@ if (import.meta.vitest) {
     };
   }
 
-  function extractFillBlueClassName(source: string): string {
-    const match = source.match(/fillBlue\s*=\s*["']([^"']+)["']/);
+  function createRealRegistryBuildEntrySource(
+    fixtureCase: DefineRulesPresetSerializationFixtureCase,
+    _fixtureSource: string
+  ): string {
+    if (fixtureCase.caseId === "registry-helper-wrapped-executed") {
+      return `
+        import { css, defineRules } from "@mincho-js/css";
+        function createPresetOwner() {
+          return defineRules({ properties: { color: true, display: true } });
+        }
+        const presetOwner = createPresetOwner();
+        export const { css: presetCss, preset } = presetOwner;
+        export const shared = presetCss({ color: "rebeccapurple", display: "flex" });
+        export const __registryBuildMarker = css([shared]);
+        export const __registryBuildPresetArtifact = JSON.stringify(preset);
+      `;
+    }
+
+    if (fixtureCase.caseId === "registry-iife-executed") {
+      return `
+        import { css, defineRules } from "@mincho-js/css";
+        const presetOwner = (() => defineRules({ properties: { color: true, display: true } }))();
+        export const { css: presetCss, preset } = presetOwner;
+        export const shared = presetCss({ color: "rebeccapurple", display: "flex" });
+        export const __registryBuildMarker = css([shared]);
+        export const __registryBuildPresetArtifact = JSON.stringify(preset);
+      `;
+    }
+
+    if (fixtureCase.caseId === "registry-nested-function-executed") {
+      return `
+        import { css, defineRules } from "@mincho-js/css";
+        function createPresetOwner() {
+          return defineRules({ properties: { color: true, display: true } });
+        }
+        const presetOwner = createPresetOwner();
+        export const { css: presetCss, preset } = presetOwner;
+        export const shared = presetCss({ color: "rebeccapurple", display: "flex" });
+        export const __registryBuildMarker = css([shared]);
+        export const __registryBuildPresetArtifact = JSON.stringify(preset);
+      `;
+    }
+
+    if (fixtureCase.caseId === "registry-multiple-instances") {
+      return `
+        import { css, defineRules } from "@mincho-js/css";
+        const primaryPresetOwner = defineRules({ properties: { color: true, display: true } });
+        const secondaryPresetOwner = defineRules({ properties: { padding: true, margin: true } });
+        export const { css: primaryCss, preset: primaryPreset } = primaryPresetOwner;
+        export const secondaryPreset = secondaryPresetOwner.preset;
+        export const shared = primaryCss({ color: "rebeccapurple", display: "flex" });
+        export const secondaryShared = secondaryPresetOwner.css({ padding: 17, margin: 7 });
+        export const __registryBuildMarker = css([shared, secondaryShared]);
+        export const __registryBuildPresetArtifacts = [
+          JSON.stringify(primaryPreset),
+          JSON.stringify(secondaryPreset)
+        ];
+      `;
+    }
+
+    if (fixtureCase.caseId === "registry-imported-helper-executed") {
+      return `
+        import { css } from "@mincho-js/css";
+        import { createPresetOwner } from "./helper";
+        const presetOwner = createPresetOwner();
+        export const { css: presetCss, preset } = presetOwner;
+        export const shared = presetCss({ color: "rebeccapurple", display: "flex" });
+        export const __registryBuildMarker = css([shared]);
+        export const __registryBuildPresetArtifact = JSON.stringify(preset);
+      `;
+    }
+
+    return _fixtureSource;
+  }
+
+  async function createRealViteRegistryFixture(
+    fixtureCase: DefineRulesPresetSerializationFixtureCase
+  ) {
+    const cacheRoot = createViteFixtureCacheRoot();
+    await fs.promises.mkdir(cacheRoot, { recursive: true });
+    const root = await fs.promises.mkdtemp(
+      join(cacheRoot, `${fixtureCase.caseId}-`)
+    );
+    const srcRoot = join(root, "src");
+    await fs.promises.cp(dirname(fixtureCase.fixturePath), srcRoot, {
+      recursive: true
+    });
+    const fixtureSource = await fs.promises.readFile(
+      join(srcRoot, "index.css.ts"),
+      "utf8"
+    );
+    const entrySource = createRealRegistryBuildEntrySource(
+      fixtureCase,
+      fixtureSource
+    );
+    const entryPath = join(srcRoot, "entry.ts");
+    await fs.promises.writeFile(entryPath, entrySource);
+
+    return {
+      entryPath,
+      root
+    };
+  }
+
+  async function buildRealViteRegistryFixture(
+    fixtureCase: DefineRulesPresetSerializationFixtureCase
+  ) {
+    const { build } = await import("vite");
+    const { entryPath, root } =
+      await createRealViteRegistryFixture(fixtureCase);
+
+    const fixtureSource = await fs.promises.readFile(
+      join(root, "src/index.css.ts"),
+      "utf8"
+    );
+    const integrationModule = await import("@mincho-js/integration");
+    const babelTransformSpy = vi
+      .spyOn(integrationModule, "babelTransform")
+      .mockResolvedValue({
+        code: 'import "extracted_registry.css.ts";\nexport const __registryBuildMarker = "entry";',
+        result: ["extracted_registry.css.ts", fixtureSource]
+      });
+    const registrySources: string[] = [];
+    collectDefineRulesPresetViteRegistrySource = (source) => {
+      registrySources.push(source);
+    };
+
+    try {
+      const buildResult = await build({
+        root,
+        configFile: false,
+        logLevel: "silent",
+        plugins: [minchoVitePlugin() as never],
+        build: {
+          cssMinify: false,
+          emptyOutDir: false,
+          lib: {
+            entry: entryPath,
+            fileName: "index",
+            formats: ["es"]
+          },
+          minify: false,
+          write: false
+        },
+        resolve: {
+          preserveSymlinks: true
+        }
+      });
+      type ViteRegistryOutput =
+        | { code: string; fileName: string; type: "chunk" }
+        | { fileName: string; source: string | Uint8Array; type: "asset" };
+      const rollupOutputs = Array.isArray(buildResult)
+        ? buildResult
+        : [buildResult];
+      const outputFiles = rollupOutputs.flatMap((rollupOutput) => {
+        const possibleRollupOutput = rollupOutput as { output?: unknown };
+        if (!Array.isArray(possibleRollupOutput.output)) {
+          throw new Error(
+            "Expected Vite registry build to return Rollup output"
+          );
+        }
+
+        return possibleRollupOutput.output as ViteRegistryOutput[];
+      });
+      const jsOutput = outputFiles.find(
+        (output) =>
+          output.type === "chunk" && /\.(?:mjs|js)$/.test(output.fileName)
+      );
+      const cssOutput = outputFiles.find(
+        (output) => output.type === "asset" && output.fileName.endsWith(".css")
+      );
+
+      if (jsOutput?.type !== "chunk") {
+        throw new Error("Expected Vite registry build to emit an ES chunk");
+      }
+
+      return {
+        css: cssOutput?.type === "asset" ? String(cssOutput.source) : "",
+        js: jsOutput.code,
+        registrySource: registrySources.join("\n")
+      };
+    } finally {
+      collectDefineRulesPresetViteRegistrySource = undefined;
+      babelTransformSpy.mockRestore();
+      await fs.promises.rm(root, { force: true, recursive: true });
+    }
+  }
+
+  function extractAssignedStringValueFromBuildSource(
+    source: string,
+    assignmentName: string
+  ): string {
+    const match = source.match(
+      new RegExp(`${escapeRegExp(assignmentName)}\\s*=\\s*["']([^"']+)["']`)
+    );
     if (match?.[1] == null) {
       throw new Error(
-        "Expected build output to include a fillBlue class literal"
+        `Expected build output to include a ${assignmentName} string literal`
       );
     }
 
     return match[1];
   }
 
-  function createPresetCaptureSession(
-    filePath: string,
-    sentinelId: string,
-    presetMap: Record<string, string>
-  ) {
-    return {
-      filePath,
-      instances: [
-        {
-          sentinelId,
-          filePath,
-          instanceIndex: 0,
-          getPresetSnapshot: () => presetMap
-        }
-      ]
-    };
+  function extractFillBlueClassName(source: string): string {
+    return extractAssignedStringValueFromBuildSource(source, "fillBlue");
   }
 
   function createDeferred<Value>() {
@@ -702,59 +887,6 @@ if (import.meta.vitest) {
     };
   }
 
-  function createSentinelBuildSource(sentinelId: string): string {
-    return `
-      import { defineRules } from "@mincho-js/css";
-
-      export const preset = defineRules(
-        {
-          properties: {
-            color: true,
-            display: true
-          }
-        },
-        "${DEFINE_RULES_PRESET_CAPTURE_SENTINEL_PREFIX}${sentinelId}"
-      );
-    `;
-  }
-
-  function extractPresetMapFromBuildSource(
-    source: string
-  ): Record<string, string> {
-    const presetMapMatch = source.match(
-      /["']?presets["']?\s*:\s*(\{[\s\S]*?\})(?=\s*[,}])/
-    );
-
-    if (presetMapMatch?.[1] == null) {
-      throw new Error(
-        "Failed to locate a raw preset map in the rewritten build output"
-      );
-    }
-
-    const presetMap: Record<string, string> = {};
-
-    for (const presetEntryMatch of presetMapMatch[1].matchAll(
-      /(?:(["'])([^"']+)\1|([A-Za-z_$][\w$]*))\s*:\s*(["'])(.*?)\4/g
-    )) {
-      const key = presetEntryMatch[2] ?? presetEntryMatch[3];
-      const value = presetEntryMatch[5];
-
-      if (key == null || value == null) {
-        continue;
-      }
-
-      presetMap[key] = value;
-    }
-
-    if (Object.keys(presetMap).length === 0) {
-      throw new Error(
-        "Failed to parse a serialized preset map from rewritten build output"
-      );
-    }
-
-    return presetMap;
-  }
-
   function escapeRegExp(value: string): string {
     return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   }
@@ -849,17 +981,11 @@ if (import.meta.vitest) {
   });
 
   describe("minchoVitePlugin", () => {
-    it.skip("defineRules preset capture sessions are queued in Vite builds", async () => {
+    it("defineRules preset registry steps are queued in Vite extracted transforms", async () => {
       const integrationModule = await import("@mincho-js/integration");
-      const vanillaExtractIntegration =
-        await import("@vanilla-extract/integration");
       const firstDeferred = createDeferred<string>();
       const secondDeferred = createDeferred<string>();
       const processOrder: string[] = [];
-      const captureSessions = new Map<
-        string,
-        ReturnType<typeof createPresetCaptureSession>
-      >();
 
       vi.spyOn(integrationModule, "babelTransform")
         .mockResolvedValueOnce({
@@ -877,52 +1003,25 @@ if (import.meta.vitest) {
             watchFiles: []
           }) as Awaited<ReturnType<typeof compile>>
       );
-      vi.spyOn(
-        integrationModule,
-        "captureDefineRulesPresetSession"
-      ).mockImplementation(
-        async (filePath: string, evaluate: () => Promise<string>) => {
-          const result = await evaluate();
-          const sentinelId = filePath.endsWith("extracted_a.css.ts")
-            ? "provider-a"
-            : "provider-b";
-          const captureSession = createPresetCaptureSession(
-            filePath,
-            sentinelId,
-            {
-              [sentinelId]: `${sentinelId}_class`
+      const registrySpy = vi
+        .spyOn(integrationModule, "processDefineRulesPresetRegistryFile")
+        .mockImplementation(
+          async (
+            options: Parameters<typeof processDefineRulesPresetRegistryFile>[0]
+          ) => {
+            processOrder.push(`start:${options.filePath}`);
+
+            if (options.filePath.endsWith("extracted_a.css.ts")) {
+              const result = await firstDeferred.promise;
+              processOrder.push(`end:${options.filePath}`);
+              return createRegistryResult(result);
             }
-          );
-          captureSessions.set(filePath, captureSession);
 
-          return {
-            result,
-            captureSession
-          };
-        }
-      );
-      const backfillSpy = vi.spyOn(
-        integrationModule,
-        "backfillDefineRulesPresetArtifacts"
-      );
-      vi.spyOn(
-        vanillaExtractIntegration,
-        "processVanillaFile"
-      ).mockImplementation(
-        async ({ filePath }: Parameters<typeof processVanillaFile>[0]) => {
-          processOrder.push(`start:${filePath}`);
-
-          if (filePath.endsWith("extracted_a.css.ts")) {
-            const result = await firstDeferred.promise;
-            processOrder.push(`end:${filePath}`);
-            return result;
+            const result = await secondDeferred.promise;
+            processOrder.push(`end:${options.filePath}`);
+            return createRegistryResult(result);
           }
-
-          const result = await secondDeferred.promise;
-          processOrder.push(`end:${filePath}`);
-          return result;
-        }
-      );
+        );
 
       const harness = await createViteHarness();
       const firstFixture = await createExtractedCssFixture(harness);
@@ -940,7 +1039,7 @@ if (import.meta.vitest) {
         expect(processOrder).toEqual([`start:${firstFixture.extractedId}`]);
       });
 
-      firstDeferred.resolve(createSentinelBuildSource("provider-a"));
+      firstDeferred.resolve(createV3PresetBuildSource("provider-a_class"));
       const firstTransformResult = await firstTransformPromise;
       assertString(
         firstTransformResult,
@@ -955,7 +1054,7 @@ if (import.meta.vitest) {
         ]);
       });
 
-      secondDeferred.resolve(createSentinelBuildSource("provider-b"));
+      secondDeferred.resolve(createV3PresetBuildSource("provider-b_class"));
       const secondTransformResult = await secondTransformPromise;
       assertString(
         secondTransformResult,
@@ -968,43 +1067,38 @@ if (import.meta.vitest) {
         `start:${secondFixture.extractedId}`,
         `end:${secondFixture.extractedId}`
       ]);
-      expect(backfillSpy).toHaveBeenNthCalledWith(
+      expect(registrySpy).toHaveBeenNthCalledWith(
         1,
-        [
-          {
-            filePath: firstFixture.extractedId,
-            source: expect.stringContaining("provider-a")
-          }
-        ],
-        captureSessions.get(firstFixture.extractedId)
+        expect.objectContaining({
+          filePath: firstFixture.extractedId,
+          identOption: "short",
+          source: `compiled source:${firstFixture.extractedId}`,
+          serializeVirtualCssPath: expect.any(Function)
+        })
       );
-      expect(backfillSpy).toHaveBeenNthCalledWith(
+      expect(registrySpy).toHaveBeenNthCalledWith(
         2,
-        [
-          {
-            filePath: secondFixture.extractedId,
-            source: expect.stringContaining("provider-b")
-          }
-        ],
-        captureSessions.get(secondFixture.extractedId)
+        expect.objectContaining({
+          filePath: secondFixture.extractedId,
+          identOption: "short",
+          source: `compiled source:${secondFixture.extractedId}`,
+          serializeVirtualCssPath: expect.any(Function)
+        })
       );
-      expect(extractPresetMapFromBuildSource(firstTransformResult)).toEqual({
-        "provider-a": "provider-a_class"
-      });
-      expect(extractPresetMapFromBuildSource(secondTransformResult)).toEqual({
-        "provider-b": "provider-b_class"
-      });
+      expectSourceToContainClassNameByCacheValue(
+        firstTransformResult,
+        "provider-a_class"
+      );
+      expectSourceToContainClassNameByCacheValue(
+        secondTransformResult,
+        "provider-b_class"
+      );
       expect(firstTransformResult).not.toContain("provider-b_class");
       expect(secondTransformResult).not.toContain("provider-a_class");
     });
 
-    it.skip("backfills build output preset maps and strips sentinel args", async () => {
+    it("uses registry wrapper source for build output preset artifacts", async () => {
       const integrationModule = await import("@mincho-js/integration");
-      const vanillaExtractIntegration =
-        await import("@vanilla-extract/integration");
-      let captureSession:
-        | ReturnType<typeof createPresetCaptureSession>
-        | undefined;
 
       vi.spyOn(integrationModule, "babelTransform").mockResolvedValue({
         code: 'import "extracted_rules.css.ts";\nexport { css, shared };',
@@ -1014,34 +1108,11 @@ if (import.meta.vitest) {
         source: "compiled source",
         watchFiles: []
       } as Awaited<ReturnType<typeof compile>>);
-      vi.spyOn(
-        integrationModule,
-        "captureDefineRulesPresetSession"
-      ).mockImplementation(
-        async (filePath: string, evaluate: () => Promise<string>) => {
-          const nextCaptureSession = createPresetCaptureSession(
-            filePath,
-            "provider",
-            {
-              shared: "shared_class"
-            }
-          );
-          captureSession = nextCaptureSession;
-
-          return {
-            result: await evaluate(),
-            captureSession: nextCaptureSession
-          };
-        }
-      );
-      const backfillSpy = vi.spyOn(
-        integrationModule,
-        "backfillDefineRulesPresetArtifacts"
-      );
-      vi.spyOn(
-        vanillaExtractIntegration,
-        "processVanillaFile"
-      ).mockResolvedValue(createSentinelBuildSource("provider"));
+      const registrySpy = vi
+        .spyOn(integrationModule, "processDefineRulesPresetRegistryFile")
+        .mockResolvedValue(
+          createRegistryResult(createV3PresetBuildSource("shared_class"))
+        );
 
       const harness = await createViteHarness();
       const { extractedId, extractedSource } =
@@ -1054,32 +1125,24 @@ if (import.meta.vitest) {
         transformedExtractedCss,
         "Expected extracted css transform to return source text"
       );
-      if (captureSession == null) {
-        throw new Error("Expected defineRules preset capture session");
-      }
 
-      expect(backfillSpy).toHaveBeenCalledWith(
-        [
-          {
-            filePath: extractedId,
-            source: expect.stringContaining(
-              `${DEFINE_RULES_PRESET_CAPTURE_SENTINEL_PREFIX}provider`
-            )
-          }
-        ],
-        captureSession
+      expect(registrySpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          filePath: extractedId,
+          identOption: "short",
+          source: "compiled source",
+          serializeVirtualCssPath: expect.any(Function)
+        })
       );
-      expect(backfillSpy).toHaveBeenCalledTimes(1);
-      expect(extractPresetMapFromBuildSource(transformedExtractedCss)).toEqual({
-        shared: "shared_class"
-      });
-      expect(transformedExtractedCss).toContain("presets");
-      expect(transformedExtractedCss).not.toContain(
-        DEFINE_RULES_PRESET_CAPTURE_SENTINEL_PREFIX
+      expect(registrySpy).toHaveBeenCalledTimes(1);
+      expectSourceToContainClassNameByCacheValue(
+        transformedExtractedCss,
+        "shared_class"
       );
+      expectSourceToOmitLegacyCaptureMarker(transformedExtractedCss);
     });
 
-    it("builds a real Vite fixture with defineRules preset backfill", async () => {
+    it("builds a real Vite fixture with defineRules preset registry artifact", async () => {
       const { build } = await import("vite");
       const { entryPath, root } = await createLivePresetSmokeFixture(
         "define-rules-vite-smoke-"
@@ -1142,19 +1205,68 @@ if (import.meta.vitest) {
         }
 
         const fillBlueClassName = extractFillBlueClassName(jsOutput.code);
-        expect(jsOutput.code).toContain("presets");
-        expect(jsOutput.code).not.toMatch(
-          new RegExp(
-            `${escapeRegExp(DEFINE_RULES_PRESET_CAPTURE_SENTINEL_PREFIX)}[^"']+`
-          )
-        );
+        expectSourceToContainV3PresetArtifact(jsOutput.code);
+        expectSourceToOmitLegacyCaptureMarker(jsOutput.code);
         expect(jsOutput.code).not.toContain('background: "blue"');
         expect(cssOutput.source).toContain(`.${fillBlueClassName}`);
         expect(cssOutput.source).toContain("background: blue;");
       } finally {
         await fs.promises.rm(root, { force: true, recursive: true });
       }
-    });
+    }, 20000);
+
+    it("real Vite registry builds helper-wrapped, IIFE, nested, multiple instances, and imported helper fixtures", async () => {
+      const realBuildCaseIds = [
+        "registry-helper-wrapped-executed",
+        "registry-iife-executed",
+        "registry-nested-function-executed",
+        "registry-multiple-instances",
+        "registry-imported-helper-executed"
+      ];
+
+      for (const caseId of realBuildCaseIds) {
+        const fixtureCase = serializedRegistryFixtureCases.find(
+          (candidate) => candidate.caseId === caseId
+        );
+        if (fixtureCase == null) {
+          throw new Error(`Missing registry fixture case ${caseId}`);
+        }
+
+        const { js, registrySource } =
+          await buildRealViteRegistryFixture(fixtureCase);
+
+        expect(registrySource).not.toBe("");
+        expectSourceToContainV3PresetArtifact(registrySource);
+        expectSourceToContainPopulatedClassNameByCache(registrySource);
+        expectSourceToOmitLegacyCaptureMarker(registrySource);
+        expectSourceToOmitLegacyCaptureMarker(js);
+        if (fixtureCase.expectedRegistryInstances > 1) {
+          const artifactCount = Array.from(
+            registrySource.matchAll(
+              /["']?schema["']?\s*:\s*["']mincho\.defineRulesPreset["']/g
+            )
+          ).length;
+          expect(artifactCount).toBeGreaterThanOrEqual(
+            fixtureCase.expectedRegistryInstances
+          );
+        }
+      }
+    }, 20000);
+
+    it("real Vite function-valued config build skips registry artifacts", async () => {
+      const fixtureCase = getRegistryFixtureCase(
+        "registry-function-config-invalid"
+      );
+      const { js, registrySource } =
+        await buildRealViteRegistryFixture(fixtureCase);
+
+      expect(registrySource).not.toBe("");
+      expect(countV3PresetArtifacts(registrySource)).toBe(0);
+      expect(countV3PresetArtifacts(js)).toBe(0);
+      expect(registrySource).toContain("rebeccapurple");
+      expectSourceToOmitLegacyCaptureMarker(registrySource);
+      expectSourceToOmitLegacyCaptureMarker(js);
+    }, 20000);
 
     it("serializes live preset output through the Vite build artifact path", async () => {
       const integrationModule = await import("@mincho-js/integration");
@@ -1178,7 +1290,7 @@ if (import.meta.vitest) {
       vi.spyOn(integrationModule, "compile").mockImplementation(
         compileLivePresetFixture
       );
-      const registryFileSpy = vi.spyOn(
+      const registrySpy = vi.spyOn(
         integrationModule,
         "processDefineRulesPresetRegistryFile"
       );
@@ -1204,20 +1316,11 @@ if (import.meta.vitest) {
           transformedExtractedCss,
           "fillBlue"
         );
-      const serializedPresetMap = extractPresetMapFromBuildSource(
-        transformedExtractedCss
+      expect(registrySpy).toHaveBeenCalledTimes(1);
+      expectSourceToContainClassNameByCacheValue(
+        transformedExtractedCss,
+        fillBlueClassName
       );
-      const serializedFillBlueEntry = Object.entries(serializedPresetMap).find(
-        ([key, value]) =>
-          key.startsWith("fragment_") === false && value === fillBlueClassName
-      );
-
-      expect(registryFileSpy).toHaveBeenCalledWith({
-        source: expect.any(String),
-        filePath: extractedId,
-        identOption: "short",
-        serializeVirtualCssPath: expect.any(Function)
-      });
       expect(fillBlueClassName.split(/\s+/)).toHaveLength(1);
       expect(fillBlueInitializer).not.toMatch(/\bcss\s*\(/);
       expect(
@@ -1227,25 +1330,26 @@ if (import.meta.vitest) {
           "blue"
         )
       ).toBe(false);
-      expect(serializedFillBlueEntry).toBeDefined();
+      expectSourceToOmitLegacyCaptureMarker(transformedExtractedCss);
     });
 
-    it("defineRules exported css rejects function-valued config", async () => {
+    it("defineRules exported css skips function-valued config registry artifacts", async () => {
       const integrationModule = await import("@mincho-js/integration");
       const functionValuedConfigBuildSource = `
         import { defineRules } from "@mincho-js/css";
 
-        export const { css } = defineRules({
+        const functionConfig = defineRules({
           properties: {
             color(value: "brand" | "neutral") {
               return value === "brand" ? "blue" : "gray";
             }
           }
         });
+        export const raw = functionConfig.css.raw({ color: "brand" });
       `;
 
       vi.spyOn(integrationModule, "babelTransform").mockResolvedValue({
-        code: 'import "extracted_rules.css.ts";\nexport { css };',
+        code: 'import "extracted_rules.css.ts";\nexport { raw };',
         result: ["extracted_rules.css.ts", "resolver contents"]
       });
       const compileFixtureSource: typeof compile = integrationModule.compile;
@@ -1256,57 +1360,72 @@ if (import.meta.vitest) {
             contents: functionValuedConfigBuildSource
           })
       );
+      const registrySpy = vi.spyOn(
+        integrationModule,
+        "processDefineRulesPresetRegistryFile"
+      );
+
       const harness = await createViteHarness();
       const { extractedId, extractedSource } =
         await createExtractedCssFixture(harness);
 
-      await expect(
-        harness.transform(extractedId, extractedSource)
-      ).rejects.toThrow(DEFINE_RULES_FUNCTION_CONFIG_DIAGNOSTIC);
+      const transformedExtractedCss = await harness.transform(
+        extractedId,
+        extractedSource
+      );
+      assertString(
+        transformedExtractedCss,
+        "Expected function-valued config transform to return source text"
+      );
+
+      expect(registrySpy).toHaveBeenCalledTimes(1);
+      expect(countV3PresetArtifacts(transformedExtractedCss)).toBe(0);
+      expect(transformedExtractedCss).toContain("blue");
+      expectSourceToOmitLegacyCaptureMarker(transformedExtractedCss);
     });
 
-    it.skip("bubbles the locked mismatch error from build-time preset backfill", async () => {
+    it("bubbles registry validation errors from build-time preset serialization", async () => {
       const integrationModule = await import("@mincho-js/integration");
-      const vanillaExtractIntegration =
-        await import("@vanilla-extract/integration");
       const consoleErrorSpy = vi
         .spyOn(console, "error")
         .mockImplementation(() => {});
-      const captureSession = {
-        filePath: "/virtual/extracted_rules.css.ts",
-        instances: [
-          {
-            sentinelId: "provider",
-            filePath: "/virtual/extracted_rules.css.ts",
-            instanceIndex: 0,
-            getPresetSnapshot: () => ({
-              shared: "shared_class"
-            })
+      const invalidShortcutBuildSource = `
+        import { defineRules } from "@mincho-js/css";
+
+        const invalid = defineRules({
+          properties: {
+            color: true
+          },
+          shortcuts: {
+            tone: [
+              { color: "red" },
+              {
+                dynamic(value: string) {
+                  return { color: value };
+                }
+              }
+            ]
           }
-        ]
-      };
+        });
+        export const raw = invalid.css.raw({ color: "red" });
+      `;
 
       vi.spyOn(integrationModule, "babelTransform").mockResolvedValue({
-        code: 'import "extracted_rules.css.ts";\nexport { css, shared };',
+        code: 'import "extracted_rules.css.ts";\nexport { raw };',
         result: ["extracted_rules.css.ts", "resolver contents"]
       });
-      vi.spyOn(integrationModule, "compile").mockResolvedValue({
-        source: "compiled source",
-        watchFiles: []
-      } as Awaited<ReturnType<typeof compile>>);
-      vi.spyOn(
-        integrationModule,
-        "captureDefineRulesPresetSession"
-      ).mockImplementation(
-        async (_filePath: string, evaluate: () => Promise<string>) => ({
-          result: await evaluate(),
-          captureSession
-        })
+      const compileFixtureSource: typeof compile = integrationModule.compile;
+      vi.spyOn(integrationModule, "compile").mockImplementation(
+        (options: Parameters<typeof compileFixtureSource>[0]) =>
+          compileFixtureSource({
+            ...options,
+            contents: invalidShortcutBuildSource
+          })
       );
-      vi.spyOn(
-        vanillaExtractIntegration,
-        "processVanillaFile"
-      ).mockResolvedValue(createSentinelBuildSource("other"));
+      const registrySpy = vi.spyOn(
+        integrationModule,
+        "processDefineRulesPresetRegistryFile"
+      );
 
       const harness = await createViteHarness();
       const { extractedId, extractedSource } =
@@ -1314,12 +1433,13 @@ if (import.meta.vitest) {
 
       await expect(
         harness.transform(extractedId, extractedSource)
-      ).rejects.toThrow(DEFINE_RULES_PRESET_BACKFILL_MISMATCH_ERROR);
+      ).rejects.toThrow("config.shortcuts.tone[1].dynamic");
+      expect(registrySpy).toHaveBeenCalledTimes(1);
       expect(consoleErrorSpy).not.toHaveBeenCalled();
     });
 
-    it.skip("backfills supported fixture matrix cases through the Vite extracted-css matrix path", async () => {
-      for (const fixtureCase of supportedFixtureMatrixCases) {
+    it("serializes supported fixture matrix cases through the Vite extracted-css registry path", async () => {
+      for (const fixtureCase of serializedRegistryFixtureCases) {
         vi.restoreAllMocks();
 
         const fixtureSource = readFixtureSource(fixtureCase.fixturePath);
@@ -1327,53 +1447,25 @@ if (import.meta.vitest) {
           expectSourceToContainSnippet(fixtureSource, expectedSourceSnippet);
         }
 
-        const buildSource = createFixtureBuildSource(
-          fixtureCase.fixturePath,
-          fixtureCase.caseId
-        );
-        const presetMap = {
-          [fixtureCase.caseId]: `${fixtureCase.caseId}_class`
-        };
         const integrationModule = await import("@mincho-js/integration");
-        const vanillaExtractIntegration =
-          await import("@vanilla-extract/integration");
-        let captureSession:
-          | ReturnType<typeof createPresetCaptureSession>
-          | undefined;
-
         vi.spyOn(integrationModule, "babelTransform").mockResolvedValue({
-          code: 'import "extracted_rules.css.ts";\nexport { css, preset };',
+          code: 'import "extracted_rules.css.ts";\nexport { css, preset, shared };',
           result: ["extracted_rules.css.ts", "resolver contents"]
         });
-        vi.spyOn(integrationModule, "compile").mockResolvedValue({
-          source: "compiled source",
-          watchFiles: []
-        } as Awaited<ReturnType<typeof compile>>);
-        vi.spyOn(
-          integrationModule,
-          "captureDefineRulesPresetSession"
-        ).mockImplementation(
-          async (filePath: string, evaluate: () => Promise<string>) => {
-            captureSession = createPresetCaptureSession(
-              filePath,
-              fixtureCase.caseId,
-              presetMap
-            );
-
-            return {
-              result: await evaluate(),
-              captureSession
-            };
-          }
+        const compileFixtureSource: typeof compile = integrationModule.compile;
+        vi.spyOn(integrationModule, "compile").mockImplementation(
+          (options: Parameters<typeof compileFixtureSource>[0]) =>
+            compileFixtureSource({
+              ...options,
+              filePath: fixtureCase.fixturePath,
+              originalPath: fixtureCase.fixturePath,
+              contents: fixtureSource
+            })
         );
-        const backfillSpy = vi.spyOn(
+        const registrySpy = vi.spyOn(
           integrationModule,
-          "backfillDefineRulesPresetArtifacts"
+          "processDefineRulesPresetRegistryFile"
         );
-        vi.spyOn(
-          vanillaExtractIntegration,
-          "processVanillaFile"
-        ).mockResolvedValue(buildSource);
 
         const harness = await createViteHarness();
         const { extractedId, extractedSource } =
@@ -1387,94 +1479,66 @@ if (import.meta.vitest) {
           "Expected extracted css transform to return source text"
         );
 
-        expect(backfillSpy).toHaveBeenCalledWith(
-          [
-            {
-              filePath: extractedId,
-              source: expect.stringContaining(
-                `${DEFINE_RULES_PRESET_CAPTURE_SENTINEL_PREFIX}${fixtureCase.caseId}`
-              )
-            }
-          ],
-          captureSession
-        );
-        expect(backfillSpy).toHaveBeenCalledTimes(1);
-
-        for (const expectedSourceSnippet of fixtureCase.expectedSourceSnippets) {
-          expectSourceToContainSnippet(
-            transformedExtractedCss,
-            expectedSourceSnippet
-          );
-        }
-
-        expect(
-          extractPresetMapFromBuildSource(transformedExtractedCss)
-        ).toEqual(presetMap);
-        expect(transformedExtractedCss).toContain("presets");
-        expect(transformedExtractedCss).not.toContain(
-          DEFINE_RULES_PRESET_CAPTURE_SENTINEL_PREFIX
-        );
-      }
-    });
-
-    it.skip("keeps the locked mismatch boundary for unsupported fixture matrix cases through the Vite extracted-css path", async () => {
-      for (const fixtureCase of unsupportedFixtureMatrixCases) {
-        vi.restoreAllMocks();
-
-        const fixtureSource = readFixtureSource(fixtureCase.fixturePath);
-        for (const expectedSourceSnippet of fixtureCase.expectedSourceSnippets) {
-          expectSourceToContainSnippet(fixtureSource, expectedSourceSnippet);
-        }
-
-        const buildSource = createFixtureBuildSource(
-          fixtureCase.fixturePath,
-          fixtureCase.caseId
-        );
-        const integrationModule = await import("@mincho-js/integration");
-        const vanillaExtractIntegration =
-          await import("@vanilla-extract/integration");
-        const consoleErrorSpy = vi
-          .spyOn(console, "error")
-          .mockImplementation(() => {});
-
-        vi.spyOn(integrationModule, "babelTransform").mockResolvedValue({
-          code: 'import "extracted_rules.css.ts";\nexport { css, preset };',
-          result: ["extracted_rules.css.ts", "resolver contents"]
-        });
-        vi.spyOn(integrationModule, "compile").mockResolvedValue({
-          source: "compiled source",
-          watchFiles: []
-        } as Awaited<ReturnType<typeof compile>>);
-        vi.spyOn(
-          integrationModule,
-          "captureDefineRulesPresetSession"
-        ).mockImplementation(
-          async (filePath: string, evaluate: () => Promise<string>) => ({
-            result: await evaluate(),
-            captureSession: createPresetCaptureSession(
-              filePath,
-              fixtureCase.caseId,
-              {
-                [fixtureCase.caseId]: `${fixtureCase.caseId}_class`
-              }
-            )
+        expect(registrySpy).toHaveBeenCalledWith(
+          expect.objectContaining({
+            filePath: extractedId,
+            identOption: "short",
+            serializeVirtualCssPath: expect.any(Function)
           })
         );
-        vi.spyOn(
-          vanillaExtractIntegration,
-          "processVanillaFile"
-        ).mockResolvedValue(buildSource);
-
-        const harness = await createViteHarness();
-        const { extractedId, extractedSource } =
-          await createExtractedCssFixture(harness);
-
-        await expect(
-          harness.transform(extractedId, extractedSource)
-        ).rejects.toThrow(DEFINE_RULES_PRESET_BACKFILL_MISMATCH_ERROR);
-        expect(consoleErrorSpy).not.toHaveBeenCalled();
+        expect(registrySpy).toHaveBeenCalledTimes(1);
+        expectSourceToContainV3PresetArtifact(transformedExtractedCss);
+        expectSourceToContainPopulatedClassNameByCache(transformedExtractedCss);
+        expectSourceToOmitLegacyCaptureMarker(transformedExtractedCss);
       }
     });
+
+    it("keeps function-valued config fixture artifact-free through the Vite registry path", async () => {
+      const fixtureCase = getRegistryFixtureCase(
+        "registry-function-config-invalid"
+      );
+      const fixtureSource = readFixtureSource(fixtureCase.fixturePath);
+      for (const expectedSourceSnippet of fixtureCase.expectedSourceSnippets) {
+        expectSourceToContainSnippet(fixtureSource, expectedSourceSnippet);
+      }
+
+      const integrationModule = await import("@mincho-js/integration");
+      vi.spyOn(integrationModule, "babelTransform").mockResolvedValue({
+        code: 'import "extracted_rules.css.ts";\nexport { raw };',
+        result: ["extracted_rules.css.ts", "resolver contents"]
+      });
+      const compileFixtureSource: typeof compile = integrationModule.compile;
+      vi.spyOn(integrationModule, "compile").mockImplementation(
+        (options: Parameters<typeof compileFixtureSource>[0]) =>
+          compileFixtureSource({
+            ...options,
+            filePath: fixtureCase.fixturePath,
+            originalPath: fixtureCase.fixturePath,
+            contents: fixtureSource
+          })
+      );
+      const registrySpy = vi.spyOn(
+        integrationModule,
+        "processDefineRulesPresetRegistryFile"
+      );
+
+      const harness = await createViteHarness();
+      const { extractedId, extractedSource } =
+        await createExtractedCssFixture(harness);
+      const transformedExtractedCss = await harness.transform(
+        extractedId,
+        extractedSource
+      );
+      assertString(
+        transformedExtractedCss,
+        "Expected function-valued fixture transform to return source text"
+      );
+
+      expect(registrySpy).toHaveBeenCalledTimes(1);
+      expect(countV3PresetArtifacts(transformedExtractedCss)).toBe(0);
+      expect(transformedExtractedCss).toContain("rebeccapurple");
+      expectSourceToOmitLegacyCaptureMarker(transformedExtractedCss);
+    }, 20000);
 
     it("keeps root css alias reuse paired with the explicit css asset import when no local extraction is needed", async () => {
       const harness = await createViteHarness();
@@ -1563,11 +1627,164 @@ if (import.meta.vitest) {
       expect(missingSidecarSource).not.toContain(providerSharedClassName);
     });
 
+    it("drops stale registry artifacts during repeated HMR-style transforms", async () => {
+      const integrationModule = await import("@mincho-js/integration");
+      const createStaleRegistrySource = (includeRemovedOwner: boolean) => {
+        const removedOwnerSource = includeRemovedOwner
+          ? `
+              const removedOwner = defineRules({
+                debugId: "vite-removed-stale",
+                properties: {
+                  padding: true
+                }
+              });
+              export const removedClass = removedOwner.css({ padding: 12 });
+              export const removedPreset = removedOwner.preset;
+            `
+          : "";
+
+        return `
+          import { defineRules } from "@mincho-js/css";
+
+          const currentOwner = defineRules({
+            debugId: "vite-current-stale",
+            properties: {
+              color: true
+            }
+          });
+          ${removedOwnerSource}
+          export const currentClass = currentOwner.css({ color: "navy" });
+          export const currentPreset = currentOwner.preset;
+        `;
+      };
+      const firstRegistrySource = createStaleRegistrySource(true);
+      const secondRegistrySource = createStaleRegistrySource(false);
+
+      vi.spyOn(integrationModule, "babelTransform").mockResolvedValue({
+        code: 'import "extracted_stale.css.ts";\nexport { currentClass };',
+        result: ["extracted_stale.css.ts", "resolver contents"]
+      });
+      const registrySpy = vi.spyOn(
+        integrationModule,
+        "processDefineRulesPresetRegistryFile"
+      );
+
+      const harness = await createViteHarness({
+        configOverrides: {
+          command: "serve",
+          mode: "development"
+        }
+      });
+      const { extractedId, extractedSource } =
+        await createExtractedCssFixture(harness);
+      expect(extractedSource).toBe("resolver contents");
+      const firstTransform = await harness.transform(
+        extractedId,
+        firstRegistrySource
+      );
+      assertString(
+        firstTransform,
+        "Expected first repeated transform to return source text"
+      );
+      const firstVirtualImportMatch = firstTransform.match(
+        /import\s+"([^"]+\.vanilla\.css)";/
+      );
+      if (firstVirtualImportMatch?.[1] == null) {
+        throw new Error(
+          "Expected first repeated transform to import virtual CSS"
+        );
+      }
+      const resolvedVirtualId = harness.resolveId(firstVirtualImportMatch[1]);
+      assertString(
+        resolvedVirtualId,
+        "Expected repeated transform virtual CSS id to resolve"
+      );
+      const currentClassName = extractVariableStringValueFromBuildSource(
+        firstTransform,
+        "currentClass"
+      );
+      const removedClassName = extractVariableStringValueFromBuildSource(
+        firstTransform,
+        "removedClass"
+      );
+      expect(removedClassName).not.toBe(currentClassName);
+      const firstVirtualCss = await harness.load(resolvedVirtualId);
+      assertString(
+        firstVirtualCss,
+        "Expected first repeated transform virtual CSS to load"
+      );
+
+      expect(registrySpy).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({
+          filePath: extractedId,
+          identOption: "debug",
+          serializeVirtualCssPath: expect.any(Function)
+        })
+      );
+      expect(countV3PresetArtifacts(firstTransform)).toBe(2);
+      expectSourceToContainClassNameByCacheValue(
+        firstTransform,
+        currentClassName
+      );
+      expectSourceToContainClassNameByCacheValue(
+        firstTransform,
+        removedClassName
+      );
+      expectCssSourceToContainClassNames(firstVirtualCss, currentClassName);
+      expectCssSourceToContainClassNames(firstVirtualCss, removedClassName);
+      expectSourceToOmitLegacyCaptureMarker(firstTransform);
+
+      const secondTransform = await harness.transform(
+        extractedId,
+        secondRegistrySource
+      );
+      assertString(
+        secondTransform,
+        "Expected second repeated transform to return source text"
+      );
+      const secondCurrentClassName = extractVariableStringValueFromBuildSource(
+        secondTransform,
+        "currentClass"
+      );
+      const secondVirtualCss = await harness.load(resolvedVirtualId);
+      assertString(
+        secondVirtualCss,
+        "Expected second repeated transform virtual CSS to load"
+      );
+
+      expect(registrySpy).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          filePath: extractedId,
+          identOption: "debug",
+          serializeVirtualCssPath: expect.any(Function)
+        })
+      );
+      expect(countV3PresetArtifacts(secondTransform)).toBe(1);
+      expectSourceToContainClassNameByCacheValue(
+        secondTransform,
+        secondCurrentClassName
+      );
+      expect(secondTransform).not.toContain(removedClassName);
+      expect(secondTransform).not.toContain("removedClass");
+      expect(secondTransform).not.toContain("removedPreset");
+      expectCssSourceToContainClassNames(
+        secondVirtualCss,
+        secondCurrentClassName
+      );
+      for (const removedFragmentClassName of splitClassNames(
+        removedClassName
+      )) {
+        expect(secondVirtualCss).not.toContain(`.${removedFragmentClassName}`);
+      }
+      expectSourceToOmitLegacyCaptureMarker(secondTransform);
+      expect(registrySpy).toHaveBeenCalledTimes(2);
+    });
+
     it("defineRules presets survive cross-module HMR without stale preset duplication", async () => {
       const { defineRules } = await import("@mincho-js/css");
       const integrationModule = await import("@mincho-js/integration");
-      const vanillaExtractIntegration =
-        await import("@vanilla-extract/integration");
       const fileScopeModule = await import("@vanilla-extract/css/fileScope");
 
       fileScopeModule.setFileScope("hmr-provider.css.ts");
@@ -1637,13 +1854,13 @@ if (import.meta.vitest) {
           }) as Awaited<ReturnType<typeof compile>>
       );
       vi.spyOn(
-        vanillaExtractIntegration,
-        "processVanillaFile"
+        integrationModule,
+        "processDefineRulesPresetRegistryFile"
       ).mockImplementation(
         async ({
           source,
           serializeVirtualCssPath
-        }: Parameters<typeof processVanillaFile>[0]) => {
+        }: Parameters<typeof processDefineRulesPresetRegistryFile>[0]) => {
           const providerVersion = providerVersions[providerVersionIndex];
           if (providerVersion == null) {
             throw new Error(
@@ -1662,7 +1879,7 @@ if (import.meta.vitest) {
               )
             })) ?? "";
 
-          return `${virtualImport}\n${source}`;
+          return createRegistryResult(`${virtualImport}\n${source}`);
         }
       );
 
@@ -1743,7 +1960,9 @@ if (import.meta.vitest) {
         color: "mediumseagreen",
         display: "flex"
       });
-      const seededEntryCount = Object.keys(providerV2.preset).length;
+      const providerClassNameByCache = providerV2.preset.classNameByCache;
+      const consumerClassNameByCache = consumer.preset.classNameByCache;
+      const seededEntryCount = Object.keys(providerClassNameByCache).length;
       const staleOnlyClassNames = splitClassNames(
         staleProviderClassName
       ).filter(
@@ -1752,20 +1971,22 @@ if (import.meta.vitest) {
       );
 
       expect(reusedUpdatedClassName).toBe(updatedProviderClassName);
-      expect(Object.keys(consumer.preset)).toHaveLength(seededEntryCount);
-      expect(consumer.preset).toEqual(
-        expect.objectContaining(providerV2.preset)
+      expect(Object.keys(consumerClassNameByCache)).toHaveLength(
+        seededEntryCount
+      );
+      expect(consumerClassNameByCache).toEqual(
+        expect.objectContaining(providerClassNameByCache)
       );
       for (const staleClassName of staleOnlyClassNames) {
-        expect(Object.values(consumer.preset)).not.toContain(staleClassName);
+        expect(Object.values(consumerClassNameByCache)).not.toContain(
+          staleClassName
+        );
       }
       fileScopeModule.endFileScope();
     });
 
     it("keeps dev virtual css caching and HMR bookkeeping on the local path", async () => {
       const integrationModule = await import("@mincho-js/integration");
-      const vanillaExtractIntegration =
-        await import("@vanilla-extract/integration");
       const cssSource = ".shared { color: rebeccapurple; }";
       const virtualCssId = "src/extracted_rules.css.ts.vanilla.css";
       const expectedModuleId = normalizePath(
@@ -1776,14 +1997,6 @@ if (import.meta.vitest) {
       };
       const getModuleById = vi.fn(() => hmrModule);
       const invalidateModule = vi.fn();
-      const registryQueueSpy = vi.spyOn(
-        integrationModule,
-        "runDefineRulesPresetRegistryStep"
-      );
-      const registryFileSpy = vi.spyOn(
-        integrationModule,
-        "processDefineRulesPresetRegistryFile"
-      );
 
       vi.spyOn(integrationModule, "babelTransform").mockResolvedValue({
         code: 'import "extracted_rules.css.ts";\nexport { css, shared };',
@@ -1793,24 +2006,23 @@ if (import.meta.vitest) {
         source: "compiled source",
         watchFiles: []
       } as Awaited<ReturnType<typeof compile>>);
-      vi.spyOn(
-        vanillaExtractIntegration,
-        "processVanillaFile"
-      ).mockImplementation(
-        async ({
-          serializeVirtualCssPath
-        }: Parameters<typeof processVanillaFile>[0]) => {
-          return (
-            (await serializeVirtualCssPath?.({
-              fileName: "src/extracted_rules.css.ts",
-              fileScope: {
-                filePath: "src/extracted_rules.css.ts"
-              },
-              source: cssSource
-            })) ?? ""
-          );
-        }
-      );
+      const registrySpy = vi
+        .spyOn(integrationModule, "processDefineRulesPresetRegistryFile")
+        .mockImplementation(
+          async ({
+            serializeVirtualCssPath
+          }: Parameters<typeof processDefineRulesPresetRegistryFile>[0]) => {
+            return createRegistryResult(
+              (await serializeVirtualCssPath?.({
+                fileName: "src/extracted_rules.css.ts",
+                fileScope: {
+                  filePath: "src/extracted_rules.css.ts"
+                },
+                source: cssSource
+              })) ?? ""
+            );
+          }
+        );
 
       const harness = await createViteHarness({
         configOverrides: {
@@ -1850,8 +2062,15 @@ if (import.meta.vitest) {
       expect(getModuleById).toHaveBeenCalledWith(expectedModuleId);
       expect(invalidateModule).toHaveBeenCalledWith(hmrModule);
       expect(hmrModule.lastHMRTimestamp).toBe(123);
-      expect(registryQueueSpy).not.toHaveBeenCalled();
-      expect(registryFileSpy).not.toHaveBeenCalled();
+      expect(registrySpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          filePath: extractedId,
+          identOption: "debug",
+          source: "compiled source",
+          serializeVirtualCssPath: expect.any(Function)
+        })
+      );
+      expect(registrySpy).toHaveBeenCalledTimes(1);
     });
   });
 }
