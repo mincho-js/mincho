@@ -1,6 +1,5 @@
 import * as fs from "node:fs";
 import { dirname, join } from "node:path";
-import { processVanillaFile } from "@vanilla-extract/integration";
 import { vanillaExtractPlugin } from "@vanilla-extract/esbuild-plugin";
 import { type Plugin as EsbuildPlugin } from "esbuild";
 import {
@@ -15,10 +14,6 @@ const integrationHelpers = {
   compile,
   processDefineRulesPresetRegistryFile,
   runDefineRulesPresetRegistryStep
-};
-
-const vanillaExtractIntegrationHelpers = {
-  processVanillaFile
 };
 
 interface MinchoEsbuildPluginOptions {
@@ -163,14 +158,11 @@ if (import.meta.vitest) {
   // @ts-ignore error TS1343: The 'import.meta' meta-property is only allowed when the '--module' option is 'es2020', 'es2022', 'esnext', 'system', 'node16', or 'nodenext'.
   const { afterEach, beforeAll, describe, expect, it, vi } = import.meta.vitest;
 
-  const DEFINE_RULES_PRESET_CAPTURE_SENTINEL_PREFIX =
-    "__MINCHO_DEFINE_RULES_SENTINEL__:";
-  const DEFINE_RULES_PRESET_BACKFILL_MISMATCH_ERROR =
-    "defineRules preset backfill mismatch";
-  const DEFINE_RULES_FUNCTION_CONFIG_DIAGNOSTIC =
-    "defineRules serialized css does not support function-valued properties or shortcuts";
+  const DEFINE_RULES_PRESET_SCHEMA = "mincho.defineRulesPreset";
   type DefineRulesPresetSerializationCase = {
     caseId: string;
+    expectedEvaluation: "serialized" | "not-serialized";
+    expectedRegistryInstances: number;
     expectedSourceSnippets: readonly string[];
     relativePath: string;
   };
@@ -180,25 +172,26 @@ if (import.meta.vitest) {
       fixturePath: string;
     };
 
+  type DefineRulesPresetRegistryResult = Awaited<
+    ReturnType<typeof processDefineRulesPresetRegistryFile>
+  >;
+
   type DefineRulesPresetSerializationPaths = {
     consumer: string;
-    multipleInstances: string;
   };
 
   type DefineRulesPresetSerializationManifest = {
     DEFINE_RULES_PRESET_SERIALIZATION_PATHS: DefineRulesPresetSerializationPaths;
-    DEFINE_RULES_PRESET_SERIALIZATION_SUPPORTED_MATRIX_CASES: readonly DefineRulesPresetSerializationCase[];
-    DEFINE_RULES_PRESET_SERIALIZATION_UNSUPPORTED_MATRIX_CASES: readonly DefineRulesPresetSerializationCase[];
+    DEFINE_RULES_PRESET_SERIALIZATION_REGISTRY_MATRIX_CASES: readonly DefineRulesPresetSerializationCase[];
     createDefineRulesPresetSerializationFixturePath: (
       relativePath: string
     ) => string;
   };
 
   let consumerFixturePath: string;
-  let multipleInstancesFixturePath: string;
-  let supportedFixtureMatrixCases: DefineRulesPresetSerializationFixtureCase[] =
+  let registryFixtureMatrixCases: DefineRulesPresetSerializationFixtureCase[] =
     [];
-  let unsupportedFixtureMatrixCases: DefineRulesPresetSerializationFixtureCase[] =
+  let serializedRegistryFixtureCases: DefineRulesPresetSerializationFixtureCase[] =
     [];
 
   function getDefineRulesPresetSerializationManifestUrl(): string {
@@ -229,26 +222,34 @@ if (import.meta.vitest) {
   ): void {
     const {
       DEFINE_RULES_PRESET_SERIALIZATION_PATHS,
-      DEFINE_RULES_PRESET_SERIALIZATION_SUPPORTED_MATRIX_CASES,
-      DEFINE_RULES_PRESET_SERIALIZATION_UNSUPPORTED_MATRIX_CASES,
+      DEFINE_RULES_PRESET_SERIALIZATION_REGISTRY_MATRIX_CASES,
       createDefineRulesPresetSerializationFixturePath
     } = manifest;
 
-    multipleInstancesFixturePath =
-      createDefineRulesPresetSerializationFixturePath(
-        DEFINE_RULES_PRESET_SERIALIZATION_PATHS.multipleInstances
-      );
     consumerFixturePath = createDefineRulesPresetSerializationFixturePath(
       DEFINE_RULES_PRESET_SERIALIZATION_PATHS.consumer
     );
-    supportedFixtureMatrixCases = createFixtureMatrixCases(
-      DEFINE_RULES_PRESET_SERIALIZATION_SUPPORTED_MATRIX_CASES,
+    registryFixtureMatrixCases = createFixtureMatrixCases(
+      DEFINE_RULES_PRESET_SERIALIZATION_REGISTRY_MATRIX_CASES,
       createDefineRulesPresetSerializationFixturePath
     );
-    unsupportedFixtureMatrixCases = createFixtureMatrixCases(
-      DEFINE_RULES_PRESET_SERIALIZATION_UNSUPPORTED_MATRIX_CASES,
-      createDefineRulesPresetSerializationFixturePath
+    serializedRegistryFixtureCases = registryFixtureMatrixCases.filter(
+      (fixtureCase) => fixtureCase.expectedEvaluation === "serialized"
     );
+  }
+
+  function getRegistryFixtureCase(
+    caseId: string
+  ): DefineRulesPresetSerializationFixtureCase {
+    const fixtureCase = registryFixtureMatrixCases.find(
+      (candidate) => candidate.caseId === caseId
+    );
+
+    if (fixtureCase == null) {
+      throw new Error(`Missing registry fixture case ${caseId}`);
+    }
+
+    return fixtureCase;
   }
 
   beforeAll(async () => {
@@ -273,26 +274,50 @@ if (import.meta.vitest) {
     };
   }
 
+  type ScriptLoadResult = {
+    pluginData: {
+      mainFilePath: string;
+    };
+  };
+
+  type ResolvedExtractedCssResult = {
+    namespace: string;
+    path: string;
+    pluginData: {
+      path: string;
+      mainFilePath: string;
+    };
+  };
+
+  type ExtractedCssLoadResult = {
+    contents: string;
+    loader: string;
+    resolveDir: string;
+  };
+
   type LoadCallback = (args: MockLoadArgs) => Promise<unknown>;
   type ResolveCallback = (args: MockResolveArgs) => Promise<unknown>;
   type TestEsbuildApi = Parameters<typeof compile>[0]["esbuild"];
 
   function createBuildHarness({
     absWorkingDir = "/workspace",
-    esbuild
+    esbuild,
+    minify = false
   }: {
     absWorkingDir?: string;
     esbuild?: TestEsbuildApi;
+    minify?: boolean;
   } = {}) {
     let extractedCssResolveCallback: ResolveCallback | undefined;
     let extractedCssLoadCallback: LoadCallback | undefined;
     let scriptLoadCallback: LoadCallback | undefined;
+    let endCallback: (() => void) | undefined;
 
     const build = {
       esbuild: esbuild ?? {},
       initialOptions: {
         absWorkingDir,
-        minify: false
+        minify
       },
       onResolve(_options: { filter: RegExp }, callback: ResolveCallback): void {
         extractedCssResolveCallback = callback;
@@ -308,12 +333,17 @@ if (import.meta.vitest) {
 
         scriptLoadCallback = callback;
       },
-      onEnd(): void {}
+      onEnd(callback: () => void): void {
+        endCallback = callback;
+      }
     } as unknown as Parameters<EsbuildPlugin["setup"]>[0];
 
     minchoEsbuildPlugin().setup(build);
 
     return {
+      endBuild() {
+        endCallback?.();
+      },
       async loadScript(args: MockLoadArgs) {
         if (scriptLoadCallback == null) {
           throw new Error("Missing script onLoad callback");
@@ -338,89 +368,6 @@ if (import.meta.vitest) {
     };
   }
 
-  function createSentinelBuildSource(sentinelId: string): string {
-    return `
-      import { defineRules } from "@mincho-js/css";
-
-      export const preset = defineRules(
-        {
-          properties: {
-            color: true,
-            display: true
-          }
-        },
-        "${DEFINE_RULES_PRESET_CAPTURE_SENTINEL_PREFIX}${sentinelId}"
-      );
-    `;
-  }
-
-  function createBackfilledBuildSource(): string {
-    return `
-      import { defineRules } from "@mincho-js/css";
-
-      export const preset = defineRules({
-        presets: {
-          "shared": "shared_class"
-        },
-        properties: {
-          color: true,
-          display: true
-        }
-      });
-    `;
-  }
-
-  function createLivePresetBuildSource(): string {
-    return `
-      import { defineRules } from "@mincho-js/css";
-
-      export const { css } = defineRules({ properties: { background: true } });
-      export const fillBlue = css({ background: "blue" });
-    `;
-  }
-
-  function createLivePresetSmokeEntrySource(): string {
-    return `
-      import { css, defineRules } from "@mincho-js/css";
-
-      const presetOwner = defineRules({
-        debugId: "esbuild-build-smoke",
-        properties: {
-          background: true
-        }
-      });
-      export const fillBlue = css(
-        presetOwner.css.raw({ background: "blue" })
-      );
-    `;
-  }
-
-  async function createLivePresetSmokeFixture(prefix: string) {
-    const cacheRoot = join(process.cwd(), "packages/esbuild/.cache");
-    await fs.promises.mkdir(cacheRoot, { recursive: true });
-    const root = await fs.promises.mkdtemp(join(cacheRoot, prefix));
-    const srcRoot = join(root, "src");
-    const entryPath = join(srcRoot, "entry.ts");
-    await fs.promises.mkdir(srcRoot, { recursive: true });
-    await fs.promises.writeFile(entryPath, createLivePresetSmokeEntrySource());
-
-    return {
-      entryPath,
-      root
-    };
-  }
-
-  function extractFillBlueClassName(source: string): string {
-    const match = source.match(/fillBlue\s*=\s*["']([^"']+)["']/);
-    if (match?.[1] == null) {
-      throw new Error(
-        "Expected build output to include a fillBlue class literal"
-      );
-    }
-
-    return match[1];
-  }
-
   function readFixtureSource(filePath: string): string {
     return fs.readFileSync(filePath, "utf8");
   }
@@ -435,251 +382,309 @@ if (import.meta.vitest) {
     );
   }
 
-  function injectDefineRulesPresetSentinels(
-    source: string,
-    sentinelIds: readonly string[]
-  ): string {
-    let nextSource = source;
-    let searchIndex = 0;
-
-    for (const sentinelId of sentinelIds) {
-      const callStart = nextSource.indexOf("defineRules(", searchIndex);
-      if (callStart === -1) {
-        throw new Error(
-          "Failed to locate a fixture defineRules call for sentinel injection"
-        );
-      }
-
-      const openParenIndex = nextSource.indexOf("(", callStart);
-      if (openParenIndex === -1) {
-        throw new Error("Failed to locate a fixture defineRules config object");
-      }
-
-      let depth = 0;
-      let closingParenIndex = -1;
-      let activeQuote: '"' | "'" | "`" | undefined;
-      let escaped = false;
-      for (let index = openParenIndex; index < nextSource.length; index += 1) {
-        const character = nextSource[index];
-        if (character == null) {
-          continue;
-        }
-
-        if (activeQuote != null) {
-          if (escaped) {
-            escaped = false;
-            continue;
-          }
-
-          if (character === "\\") {
-            escaped = true;
-            continue;
-          }
-
-          if (character === activeQuote) {
-            activeQuote = undefined;
-          }
-
-          continue;
-        }
-
-        if (character === '"' || character === "'" || character === "`") {
-          activeQuote = character;
-          continue;
-        }
-
-        if (character === "(") {
-          depth += 1;
-          continue;
-        }
-
-        if (character !== ")") {
-          continue;
-        }
-
-        depth -= 1;
-        if (depth === 0) {
-          closingParenIndex = index;
-          break;
-        }
-      }
-
-      if (closingParenIndex === -1) {
-        throw new Error(
-          "Failed to locate the closing parenthesis for a fixture defineRules call"
-        );
-      }
-
-      nextSource = `${nextSource.slice(0, closingParenIndex)}, "${DEFINE_RULES_PRESET_CAPTURE_SENTINEL_PREFIX}${sentinelId}"${nextSource.slice(closingParenIndex)}`;
-      searchIndex =
-        closingParenIndex +
-        DEFINE_RULES_PRESET_CAPTURE_SENTINEL_PREFIX.length +
-        sentinelId.length +
-        6;
-    }
-
-    return nextSource;
-  }
-
-  function createFixtureBuildSource(
-    filePath: string,
-    ...sentinelIds: string[]
-  ): string {
-    return injectDefineRulesPresetSentinels(
-      readFixtureSource(filePath),
-      sentinelIds
-    );
-  }
-
-  function createPresetCaptureSession(
-    filePath: string,
-    sentinelId: string,
-    presetMap: Record<string, string>
-  ) {
+  function createEmptyRegistrySession(): DefineRulesPresetRegistryResult["registrySession"] {
     return {
-      filePath,
-      instances: [
-        {
-          sentinelId,
-          filePath,
-          instanceIndex: 0,
-          getPresetSnapshot: () => presetMap
-        }
-      ]
+      instances: [],
+      nextRegistrationIndex: 0,
+      nextRegistrationIndexByFileScope: {}
     };
   }
 
-  function findMatchingObjectBrace(
-    source: string,
-    openBraceIndex: number
-  ): number {
-    if (source[openBraceIndex] !== "{") {
-      throw new Error("Expected an object literal opening brace");
-    }
-
-    let depth = 0;
-    let activeQuote: '"' | "'" | "`" | undefined;
-    let escaped = false;
-
-    for (let index = openBraceIndex; index < source.length; index += 1) {
-      const character = source[index];
-      if (character == null) {
-        continue;
-      }
-
-      if (activeQuote != null) {
-        if (escaped) {
-          escaped = false;
-          continue;
-        }
-
-        if (character === "\\") {
-          escaped = true;
-          continue;
-        }
-
-        if (character === activeQuote) {
-          activeQuote = undefined;
-        }
-
-        continue;
-      }
-
-      if (character === '"' || character === "'" || character === "`") {
-        activeQuote = character;
-        continue;
-      }
-
-      if (character === "{") {
-        depth += 1;
-        continue;
-      }
-
-      if (character !== "}") {
-        continue;
-      }
-
-      depth -= 1;
-      if (depth === 0) {
-        return index;
-      }
-    }
-
-    throw new Error("Failed to locate the closing brace for an object literal");
-  }
-
-  function extractObjectLiteralPropertyValuesFromBuildSource(
-    source: string,
-    propertyName: string
-  ): string[] {
-    const propertyPattern = new RegExp(
-      `(?:^|[,\\{])\\s*(?:"${propertyName}"|'${propertyName}'|${propertyName})\\s*:`,
-      "g"
-    );
-    const objectLiterals: string[] = [];
-
-    while (propertyPattern.exec(source) != null) {
-      const openBraceIndex = source.indexOf("{", propertyPattern.lastIndex);
-      if (openBraceIndex === -1) {
-        throw new Error(
-          `Failed to locate object literal value for ${propertyName}`
-        );
-      }
-
-      if (
-        source.slice(propertyPattern.lastIndex, openBraceIndex).trim() !== ""
-      ) {
-        continue;
-      }
-
-      const closeBraceIndex = findMatchingObjectBrace(source, openBraceIndex);
-      objectLiterals.push(source.slice(openBraceIndex, closeBraceIndex + 1));
-      propertyPattern.lastIndex = closeBraceIndex + 1;
-    }
-
-    return objectLiterals;
-  }
-
-  function parseStringMapLiteral(
-    objectLiteral: string
-  ): Record<string, string> {
-    try {
-      return JSON.parse(objectLiteral) as Record<string, string>;
-    } catch {
-      const presetMap: Record<string, string> = {};
-
-      for (const entryMatch of objectLiteral.matchAll(
-        /(?:"([^"]+)"|'([^']+)'|([A-Za-z_$][\w$-]*))\s*:\s*(?:"([^"]*)"|'([^']*)')/g
-      )) {
-        const key = entryMatch[1] ?? entryMatch[2] ?? entryMatch[3];
-        const value = entryMatch[4] ?? entryMatch[5];
-        if (key != null && value != null) {
-          presetMap[key] = value;
-        }
-      }
-
-      if (
-        Object.keys(presetMap).length === 0 &&
-        objectLiteral.trim() !== "{}"
-      ) {
-        throw new Error("Failed to parse serialized preset map entries");
-      }
-
-      return presetMap;
-    }
-  }
-
-  function extractPresetMapsFromBuildSource(
+  function createRegistryResult(
     source: string
-  ): Array<Record<string, string>> {
-    return extractObjectLiteralPropertyValuesFromBuildSource(
+  ): DefineRulesPresetRegistryResult {
+    return {
       source,
-      "presets"
-    ).map(parseStringMapLiteral);
+      registrySession: createEmptyRegistrySession()
+    };
+  }
+
+  function createV3PresetBuildSource(className: string): string {
+    return `
+      export const preset = {
+        schema: "${DEFINE_RULES_PRESET_SCHEMA}",
+        version: 3,
+        classNameByCache: {
+          shared: "${className}"
+        }
+      };
+      export const shared = "${className}";
+    `;
+  }
+
+  function expectSourceToContainV3PresetArtifact(source: string): void {
+    expect(source).toMatch(
+      new RegExp(
+        `["']?schema["']?\\s*:\\s*["']${escapeRegExp(DEFINE_RULES_PRESET_SCHEMA)}["']`
+      )
+    );
+    expect(source).toMatch(/["']?version["']?\s*:\s*3/);
+    expect(source).toMatch(/["']?classNameByCache["']?\s*:\s*\{/);
+  }
+
+  function countV3PresetArtifacts(source: string): number {
+    return Array.from(
+      source.matchAll(
+        /["']?schema["']?\s*:\s*["']mincho\.defineRulesPreset["']/g
+      )
+    ).length;
+  }
+
+  function expectSourceToContainPopulatedClassNameByCache(
+    source: string
+  ): void {
+    expect(source).toMatch(
+      /["']?classNameByCache["']?\s*:\s*\{[\s\S]*["'][^"']+["']/
+    );
+  }
+
+  function expectSourceToContainClassNameByCacheValue(
+    source: string,
+    className: string
+  ): void {
+    expectSourceToContainV3PresetArtifact(source);
+    expect(source).toMatch(
+      new RegExp(
+        `["']?classNameByCache["']?\\s*:\\s*\\{[\\s\\S]*["']${escapeRegExp(className)}["']`
+      )
+    );
+  }
+
+  function expectSourceToOmitLegacyCaptureMarker(source: string): void {
+    expect(source).not.toMatch(/__MINCHO_DEFINE_RULES_[A-Z]+__:?/);
+  }
+
+  function createLivePresetBuildSource(): string {
+    return `
+      import { defineRules } from "@mincho-js/css";
+
+      export const { css, preset } = defineRules({ properties: { background: true } });
+      export const fillBlue = css({ background: "blue" });
+    `;
+  }
+
+  function createLivePresetSmokeEntrySource(): string {
+    return `
+      import { css as vanillaCss, defineRules } from "@mincho-js/css";
+
+      export const { css: presetCss, preset } = defineRules({
+        debugId: "esbuild-build-smoke",
+        properties: {
+          background: true
+        }
+      });
+      export const fillBlue = vanillaCss([
+        presetCss({ background: "blue" })
+      ]);
+    `;
+  }
+
+  function getEsbuildTestCacheRoot(): string {
+    const cwd = process.cwd();
+    const packagePathSuffix = join("packages", "esbuild");
+
+    return cwd.endsWith(packagePathSuffix)
+      ? join(cwd, ".cache")
+      : join(cwd, packagePathSuffix, ".cache");
+  }
+
+  async function createLivePresetSmokeFixture(prefix: string) {
+    const cacheRoot = getEsbuildTestCacheRoot();
+    await fs.promises.mkdir(cacheRoot, { recursive: true });
+    const root = await fs.promises.mkdtemp(join(cacheRoot, prefix));
+    const srcRoot = join(root, "src");
+    const entryPath = join(srcRoot, "entry.ts");
+    await fs.promises.mkdir(srcRoot, { recursive: true });
+    await fs.promises.writeFile(entryPath, createLivePresetSmokeEntrySource());
+
+    return {
+      entryPath,
+      root
+    };
+  }
+
+  function createRealRegistryBuildEntrySource(
+    fixtureCase: DefineRulesPresetSerializationFixtureCase,
+    _fixtureSource: string
+  ): string {
+    if (fixtureCase.caseId === "registry-helper-wrapped-executed") {
+      return `
+        import { css, defineRules } from "@mincho-js/css";
+        function createPresetOwner() {
+          return defineRules({ properties: { color: true, display: true } });
+        }
+        const presetOwner = createPresetOwner();
+        export const { css: presetCss, preset } = presetOwner;
+        export const shared = presetCss({ color: "rebeccapurple", display: "flex" });
+        export const __registryBuildMarker = css([shared]);
+        export const __registryBuildPresetArtifact = JSON.stringify(preset);
+      `;
+    }
+
+    if (fixtureCase.caseId === "registry-iife-executed") {
+      return `
+        import { css, defineRules } from "@mincho-js/css";
+        const presetOwner = (() => defineRules({ properties: { color: true, display: true } }))();
+        export const { css: presetCss, preset } = presetOwner;
+        export const shared = presetCss({ color: "rebeccapurple", display: "flex" });
+        export const __registryBuildMarker = css([shared]);
+        export const __registryBuildPresetArtifact = JSON.stringify(preset);
+      `;
+    }
+
+    if (fixtureCase.caseId === "registry-nested-function-executed") {
+      return `
+        import { css, defineRules } from "@mincho-js/css";
+        function createPresetOwner() {
+          return defineRules({ properties: { color: true, display: true } });
+        }
+        const presetOwner = createPresetOwner();
+        export const { css: presetCss, preset } = presetOwner;
+        export const shared = presetCss({ color: "rebeccapurple", display: "flex" });
+        export const __registryBuildMarker = css([shared]);
+        export const __registryBuildPresetArtifact = JSON.stringify(preset);
+      `;
+    }
+
+    if (fixtureCase.caseId === "registry-multiple-instances") {
+      return `
+        import { css, defineRules } from "@mincho-js/css";
+        const primaryPresetOwner = defineRules({ properties: { color: true, display: true } });
+        const secondaryPresetOwner = defineRules({ properties: { padding: true, margin: true } });
+        export const { css: primaryCss, preset: primaryPreset } = primaryPresetOwner;
+        export const secondaryPreset = secondaryPresetOwner.preset;
+        export const shared = primaryCss({ color: "rebeccapurple", display: "flex" });
+        export const secondaryShared = secondaryPresetOwner.css({ padding: 17, margin: 7 });
+        export const __registryBuildMarker = css([shared, secondaryShared]);
+        export const __registryBuildPresetArtifacts = [
+          JSON.stringify(primaryPreset),
+          JSON.stringify(secondaryPreset)
+        ];
+      `;
+    }
+
+    if (fixtureCase.caseId === "registry-imported-helper-executed") {
+      return `
+        import { css } from "@mincho-js/css";
+        import { createPresetOwner } from "./helper";
+        const presetOwner = createPresetOwner();
+        export const { css: presetCss, preset } = presetOwner;
+        export const shared = presetCss({ color: "rebeccapurple", display: "flex" });
+        export const __registryBuildMarker = css([shared]);
+        export const __registryBuildPresetArtifact = JSON.stringify(preset);
+      `;
+    }
+
+    return _fixtureSource;
+  }
+
+  async function createRealEsbuildRegistryFixture(
+    fixtureCase: DefineRulesPresetSerializationFixtureCase
+  ) {
+    const cacheRoot = getEsbuildTestCacheRoot();
+    await fs.promises.mkdir(cacheRoot, { recursive: true });
+    const root = await fs.promises.mkdtemp(
+      join(cacheRoot, `${fixtureCase.caseId}-`)
+    );
+    const srcRoot = join(root, "src");
+    await fs.promises.cp(dirname(fixtureCase.fixturePath), srcRoot, {
+      recursive: true
+    });
+    const fixtureSource = await fs.promises.readFile(
+      join(srcRoot, "index.css.ts"),
+      "utf8"
+    );
+    const entrySource = createRealRegistryBuildEntrySource(
+      fixtureCase,
+      fixtureSource
+    );
+    const entryPath = join(srcRoot, "entry.ts");
+    await fs.promises.writeFile(entryPath, entrySource);
+
+    return {
+      entryPath,
+      root
+    };
+  }
+
+  async function buildRealEsbuildRegistryFixture(
+    fixtureCase: DefineRulesPresetSerializationFixtureCase
+  ) {
+    const realEsbuild = await import("esbuild");
+    const { entryPath, root } =
+      await createRealEsbuildRegistryFixture(fixtureCase);
+
+    const fixtureSource = await fs.promises.readFile(
+      join(root, "src/index.css.ts"),
+      "utf8"
+    );
+    const babelTransformSpy = vi
+      .spyOn(integrationHelpers, "babelTransform")
+      .mockResolvedValue({
+        code: 'import "extracted_registry.css.ts";\nexport const __registryBuildMarker = "entry";',
+        result: ["extracted_registry.css.ts", fixtureSource]
+      });
+    const registrySources: string[] = [];
+    const processRegistryFile =
+      integrationHelpers.processDefineRulesPresetRegistryFile;
+    integrationHelpers.processDefineRulesPresetRegistryFile = async (
+      options
+    ) => {
+      const result = await processRegistryFile(options);
+      registrySources.push(result.source);
+      return result;
+    };
+
+    try {
+      const result = await realEsbuild.build({
+        absWorkingDir: root,
+        bundle: true,
+        entryPoints: [entryPath],
+        external: ["@mincho-js/css"],
+        format: "esm",
+        logLevel: "silent",
+        minify: false,
+        outdir: join(root, "dist"),
+        plugins: minchoEsbuildPlugins(),
+        write: false
+      });
+      const jsOutput = result.outputFiles.find((outputFile) =>
+        outputFile.path.endsWith(".js")
+      );
+      const cssOutput = result.outputFiles.find((outputFile) =>
+        outputFile.path.endsWith(".css")
+      );
+
+      if (jsOutput == null) {
+        throw new Error("Expected esbuild registry build to emit a JS file");
+      }
+
+      return {
+        css: cssOutput?.text ?? "",
+        js: jsOutput.text,
+        registrySource: registrySources.join("\n")
+      };
+    } finally {
+      integrationHelpers.processDefineRulesPresetRegistryFile =
+        processRegistryFile;
+      babelTransformSpy.mockRestore();
+      await fs.promises.rm(root, { force: true, recursive: true });
+    }
   }
 
   function escapeRegExp(value: string): string {
     return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+
+  function extractFillBlueClassName(source: string): string {
+    const match = source.match(/fillBlue\s*=\s*["']([^"']+)["']/);
+    if (match?.[1] == null) {
+      throw new Error(
+        "Expected build output to include a fillBlue class literal"
+      );
+    }
+
+    return match[1];
   }
 
   function extractExportedVariableInitFromBuildSource(
@@ -734,6 +739,19 @@ if (import.meta.vitest) {
     return stringLiteralMatch[1] ?? stringLiteralMatch[2]!;
   }
 
+  function splitClassNames(className: string): string[] {
+    return className.split(/\s+/).filter(Boolean);
+  }
+
+  function expectCssSourceToContainClassNames(
+    source: string,
+    className: string
+  ): void {
+    for (const fragmentClassName of splitClassNames(className)) {
+      expect(source).toContain(`.${fragmentClassName}`);
+    }
+  }
+
   function hasCssCallWithStringProperty(
     source: string,
     propertyName: string,
@@ -759,6 +777,31 @@ if (import.meta.vitest) {
     };
   }
 
+  async function loadExtractedCssFromEntry(
+    harness: ReturnType<typeof createBuildHarness>,
+    entryPath = "/workspace/src/app.ts",
+    extractedPath = "extracted_rules.css.ts"
+  ) {
+    const scriptLoadResult = (await harness.loadScript({
+      path: entryPath
+    })) as ScriptLoadResult;
+    const resolveResult = (await harness.resolveExtractedCss({
+      path: extractedPath,
+      importer: entryPath,
+      pluginData: scriptLoadResult.pluginData
+    })) as ResolvedExtractedCssResult;
+    const loadResult = (await harness.loadExtractedCss({
+      path: resolveResult.path,
+      pluginData: resolveResult.pluginData
+    })) as ExtractedCssLoadResult;
+
+    return {
+      loadResult,
+      resolveResult,
+      scriptLoadResult
+    };
+  }
+
   afterEach(() => {
     vi.restoreAllMocks();
   });
@@ -775,7 +818,7 @@ if (import.meta.vitest) {
       ).toBe('"blue_class"');
     });
 
-    it("builds a real esbuild fixture with defineRules preset backfill", async () => {
+    it("builds a real esbuild fixture and emits defineRules preset registry artifact", async () => {
       const realEsbuild = await import("esbuild");
       const { entryPath, root } = await createLivePresetSmokeFixture(
         "define-rules-esbuild-smoke-"
@@ -808,24 +851,97 @@ if (import.meta.vitest) {
         }
 
         const fillBlueClassName = extractFillBlueClassName(jsOutput.text);
-        expect(jsOutput.text).not.toMatch(
-          new RegExp(
-            `${escapeRegExp(DEFINE_RULES_PRESET_CAPTURE_SENTINEL_PREFIX)}[^"']+`
-          )
-        );
+        expectSourceToOmitLegacyCaptureMarker(jsOutput.text);
         expect(jsOutput.text).not.toContain('background: "blue"');
-        expect(cssOutput.text).toContain(`.${fillBlueClassName}`);
+        expectCssSourceToContainClassNames(cssOutput.text, fillBlueClassName);
         expect(cssOutput.text).toContain("background: blue;");
+
+        vi.spyOn(integrationHelpers, "babelTransform").mockResolvedValue({
+          code: 'import "extracted_rules.css.ts";\nexport { css, preset, fillBlue };',
+          result: ["extracted_rules.css.ts", createLivePresetBuildSource()]
+        });
+        const harness = createBuildHarness({
+          absWorkingDir: process.cwd(),
+          esbuild: realEsbuild
+        });
+        const { loadResult } = await loadExtractedCssFromEntry(
+          harness,
+          join(process.cwd(), "packages/esbuild/src/registry-entry.ts")
+        );
+        const registryClassName = extractExportedStringValueFromBuildSource(
+          loadResult.contents,
+          "fillBlue"
+        );
+
+        expectSourceToContainClassNameByCacheValue(
+          loadResult.contents,
+          registryClassName
+        );
+        expectSourceToContainPopulatedClassNameByCache(loadResult.contents);
+        expectSourceToOmitLegacyCaptureMarker(loadResult.contents);
       } finally {
         await fs.promises.rm(root, { force: true, recursive: true });
       }
     });
 
-    it("serializes live preset output with the class literal emitted for static css calls", async () => {
+    it("real esbuild registry builds helper-wrapped, IIFE, nested, multiple instances, and imported helper fixtures", async () => {
+      const realBuildCaseIds = [
+        "registry-helper-wrapped-executed",
+        "registry-iife-executed",
+        "registry-nested-function-executed",
+        "registry-multiple-instances",
+        "registry-imported-helper-executed"
+      ];
+
+      for (const caseId of realBuildCaseIds) {
+        const fixtureCase = serializedRegistryFixtureCases.find(
+          (candidate) => candidate.caseId === caseId
+        );
+        if (fixtureCase == null) {
+          throw new Error(`Missing registry fixture case ${caseId}`);
+        }
+
+        const { js, registrySource } =
+          await buildRealEsbuildRegistryFixture(fixtureCase);
+
+        expect(registrySource).not.toBe("");
+        expectSourceToContainV3PresetArtifact(registrySource);
+        expectSourceToContainPopulatedClassNameByCache(registrySource);
+        expectSourceToOmitLegacyCaptureMarker(registrySource);
+        expectSourceToOmitLegacyCaptureMarker(js);
+        if (fixtureCase.expectedRegistryInstances > 1) {
+          const artifactCount = Array.from(
+            registrySource.matchAll(
+              /["']?schema["']?\s*:\s*["']mincho\.defineRulesPreset["']/g
+            )
+          ).length;
+          expect(artifactCount).toBeGreaterThanOrEqual(
+            fixtureCase.expectedRegistryInstances
+          );
+        }
+      }
+    });
+
+    it("real esbuild function-valued config build skips registry artifacts", async () => {
+      const fixtureCase = getRegistryFixtureCase(
+        "registry-function-config-invalid"
+      );
+      const { js, registrySource } =
+        await buildRealEsbuildRegistryFixture(fixtureCase);
+
+      expect(registrySource).not.toBe("");
+      expect(countV3PresetArtifacts(registrySource)).toBe(0);
+      expect(countV3PresetArtifacts(js)).toBe(0);
+      expect(registrySource).toContain("rebeccapurple");
+      expectSourceToOmitLegacyCaptureMarker(registrySource);
+      expectSourceToOmitLegacyCaptureMarker(js);
+    });
+
+    it("serializes live preset output through the esbuild registry path", async () => {
       const livePresetFixtureSource = createLivePresetBuildSource();
       expectSourceToContainSnippet(
         livePresetFixtureSource,
-        "export const { css } = defineRules({ properties: { background: true } });"
+        "export const { css, preset } = defineRules({ properties: { background: true } });"
       );
       expectSourceToContainSnippet(
         livePresetFixtureSource,
@@ -839,14 +955,76 @@ if (import.meta.vitest) {
       );
 
       vi.spyOn(integrationHelpers, "babelTransform").mockResolvedValue({
-        code: 'import "extracted_rules.css.ts";\nexport { css, fillBlue };',
+        code: 'import "extracted_rules.css.ts";\nexport { css, preset, fillBlue };',
         result: ["extracted_rules.css.ts", livePresetFixtureSource]
       });
-      const registryQueueSpy = vi.spyOn(
+      const registrySpy = vi.spyOn(
         integrationHelpers,
-        "runDefineRulesPresetRegistryStep"
+        "processDefineRulesPresetRegistryFile"
       );
-      const registryFileSpy = vi.spyOn(
+
+      const harness = createBuildHarness({
+        absWorkingDir: process.cwd(),
+        esbuild: realEsbuild
+      });
+      const { loadResult, resolveResult } = await loadExtractedCssFromEntry(
+        harness,
+        entryPath
+      );
+      const fillBlueInit = extractExportedVariableInitFromBuildSource(
+        loadResult.contents,
+        "fillBlue"
+      );
+      const fillBlueClassName = extractExportedStringValueFromBuildSource(
+        loadResult.contents,
+        "fillBlue"
+      );
+
+      expect(registrySpy).toHaveBeenCalledWith({
+        source: expect.any(String),
+        filePath: resolveResult.path,
+        outputCss: undefined,
+        identOption: "debug"
+      });
+      expect(registrySpy).toHaveBeenCalledTimes(1);
+      expect(loadResult.loader).toBe("js");
+      expect(loadResult.resolveDir).toBe(dirname(resolveResult.path));
+      expect(fillBlueInit).toMatch(/^(?:"[^"]+"|'[^']+')$/);
+      expect(fillBlueClassName.split(/\s+/)).toHaveLength(1);
+      expect(
+        hasCssCallWithStringProperty(loadResult.contents, "background", "blue")
+      ).toBe(false);
+      expectSourceToContainClassNameByCacheValue(
+        loadResult.contents,
+        fillBlueClassName
+      );
+      expectSourceToOmitLegacyCaptureMarker(loadResult.contents);
+    });
+
+    it("defineRules exported css skips function-valued registry artifacts", async () => {
+      const functionValuedConfigBuildSource = `
+        import { defineRules } from "@mincho-js/css";
+
+        const functionConfig = defineRules({
+          properties: {
+            color(value: "brand" | "neutral") {
+              return value === "brand" ? "blue" : "gray";
+            }
+          }
+        });
+        export const raw = functionConfig.css.raw({ color: "brand" });
+      `;
+      const realEsbuild = await import("esbuild");
+      const entryPath = join(
+        process.cwd(),
+        "packages/esbuild/src/function-valued-config-entry.ts"
+      );
+
+      vi.spyOn(integrationHelpers, "babelTransform").mockResolvedValue({
+        code: 'import "extracted_rules.css.ts";\nexport { raw };',
+        result: ["extracted_rules.css.ts", functionValuedConfigBuildSource]
+      });
+      const registrySpy = vi.spyOn(
         integrationHelpers,
         "processDefineRulesPresetRegistryFile"
       );
@@ -857,142 +1035,26 @@ if (import.meta.vitest) {
       });
       const scriptLoadResult = (await harness.loadScript({
         path: entryPath
-      })) as {
-        pluginData: {
-          mainFilePath: string;
-        };
-      };
+      })) as ScriptLoadResult;
       const resolveResult = (await harness.resolveExtractedCss({
         path: "extracted_rules.css.ts",
         importer: entryPath,
         pluginData: scriptLoadResult.pluginData
-      })) as {
-        path: string;
-        pluginData: {
-          path: string;
-          mainFilePath: string;
-        };
-      };
+      })) as ResolvedExtractedCssResult;
+
       const loadResult = (await harness.loadExtractedCss({
         path: resolveResult.path,
         pluginData: resolveResult.pluginData
-      })) as {
-        contents: string;
-        loader: string;
-        resolveDir: string;
-      };
-      const fillBlueInit = extractExportedVariableInitFromBuildSource(
-        loadResult.contents,
-        "fillBlue"
-      );
-      const fillBlueClassName = extractExportedStringValueFromBuildSource(
-        loadResult.contents,
-        "fillBlue"
-      );
-      const serializedPresetMaps = extractPresetMapsFromBuildSource(
-        loadResult.contents
-      );
-      const [serializedPresetMap] = serializedPresetMaps;
+      })) as ExtractedCssLoadResult;
 
-      expect(registryQueueSpy).toHaveBeenCalledTimes(1);
-      expect(registryFileSpy).toHaveBeenCalledWith({
-        source: expect.any(String),
-        filePath: resolveResult.path,
-        outputCss: undefined,
-        identOption: "debug"
-      });
+      expect(registrySpy).toHaveBeenCalledTimes(1);
       expect(loadResult.loader).toBe("js");
-      expect(loadResult.resolveDir).toBe(dirname(resolveResult.path));
-      expect(fillBlueInit).toMatch(/^(?:"[^"]+"|'[^']+')$/);
-      expect(fillBlueClassName.split(/\s+/)).toHaveLength(1);
-      expect(
-        hasCssCallWithStringProperty(loadResult.contents, "background", "blue")
-      ).toBe(false);
-      expect(serializedPresetMaps).toHaveLength(1);
-      if (serializedPresetMap == null) {
-        throw new Error("Expected serialized css to include a preset map");
-      }
-
-      expect(
-        Object.keys(serializedPresetMap).every(
-          (key) => key.startsWith("fragment_") === false
-        )
-      ).toBe(true);
-      expect(Object.values(serializedPresetMap)).toContain(fillBlueClassName);
-      expect(loadResult.contents).toContain("presets");
-      expect(loadResult.contents).not.toContain(
-        DEFINE_RULES_PRESET_CAPTURE_SENTINEL_PREFIX
-      );
+      expect(countV3PresetArtifacts(loadResult.contents)).toBe(0);
+      expect(loadResult.contents).toContain("blue");
+      expectSourceToOmitLegacyCaptureMarker(loadResult.contents);
     });
 
-    it("defineRules exported css rejects function-valued config", async () => {
-      const functionValuedConfigBuildSource = `
-        import { defineRules } from "@mincho-js/css";
-
-        export const { css } = defineRules({
-          properties: {
-            color(value: "brand" | "neutral") {
-              return value === "brand" ? "blue" : "gray";
-            }
-          }
-        });
-      `;
-      const realEsbuild = await import("esbuild");
-      const entryPath = join(
-        process.cwd(),
-        "packages/esbuild/src/function-valued-config-entry.ts"
-      );
-
-      vi.spyOn(integrationHelpers, "babelTransform").mockResolvedValue({
-        code: 'import "extracted_rules.css.ts";\nexport { css };',
-        result: ["extracted_rules.css.ts", functionValuedConfigBuildSource]
-      });
-      const harness = createBuildHarness({
-        absWorkingDir: process.cwd(),
-        esbuild: realEsbuild
-      });
-      const scriptLoadResult = (await harness.loadScript({
-        path: entryPath
-      })) as {
-        pluginData: {
-          mainFilePath: string;
-        };
-      };
-      const resolveResult = (await harness.resolveExtractedCss({
-        path: "extracted_rules.css.ts",
-        importer: entryPath,
-        pluginData: scriptLoadResult.pluginData
-      })) as {
-        path: string;
-        pluginData: {
-          path: string;
-          mainFilePath: string;
-        };
-      };
-
-      await expect(
-        harness.loadExtractedCss({
-          path: resolveResult.path,
-          pluginData: resolveResult.pluginData
-        })
-      ).rejects.toThrow(DEFINE_RULES_FUNCTION_CONFIG_DIAGNOSTIC);
-    });
-
-    it.skip("routes extracted css through shared preset backfill without breaking the namespace flow", async () => {
-      const captureSession = {
-        filePath: "/workspace/src/extracted_rules.css.ts",
-        instances: [
-          {
-            sentinelId: "provider",
-            filePath: "/workspace/src/extracted_rules.css.ts",
-            instanceIndex: 0,
-            getPresetSnapshot: () => ({
-              shared: "shared_class"
-            })
-          }
-        ]
-      };
-
+    it("routes extracted css through the shared preset registry wrapper without breaking the namespace flow", async () => {
       vi.spyOn(integrationHelpers, "babelTransform").mockResolvedValue({
         code: "export const app = {};",
         result: ["extracted_rules.css.ts", "resolver contents"]
@@ -1000,54 +1062,19 @@ if (import.meta.vitest) {
       vi.spyOn(integrationHelpers, "compile").mockResolvedValue({
         source: "compiled source"
       } as Awaited<ReturnType<typeof compile>>);
-      const captureSpy = vi
-        .spyOn(integrationHelpers, "captureDefineRulesPresetSession")
-        .mockImplementation(
-          async (_filePath: string, evaluate: () => Promise<string>) => ({
-            result: await evaluate(),
-            captureSession
-          })
+      const registryStepSpy = vi.spyOn(
+        integrationHelpers,
+        "runDefineRulesPresetRegistryStep"
+      );
+      const registrySpy = vi
+        .spyOn(integrationHelpers, "processDefineRulesPresetRegistryFile")
+        .mockResolvedValue(
+          createRegistryResult(createV3PresetBuildSource("shared_class"))
         );
-      const backfillSpy = vi
-        .spyOn(integrationHelpers, "backfillDefineRulesPresetArtifacts")
-        .mockReturnValue([
-          {
-            filePath: "/workspace/src/extracted_rules.css.ts",
-            source: createBackfilledBuildSource()
-          }
-        ]);
-      const processVanillaFileSpy = vi
-        .spyOn(vanillaExtractIntegrationHelpers, "processVanillaFile")
-        .mockResolvedValue(createSentinelBuildSource("provider"));
 
       const harness = createBuildHarness();
-      const scriptLoadResult = (await harness.loadScript({
-        path: "/workspace/src/app.ts"
-      })) as {
-        pluginData: {
-          mainFilePath: string;
-        };
-      };
-      const resolveResult = (await harness.resolveExtractedCss({
-        path: "extracted_rules.css.ts",
-        importer: "/workspace/src/app.ts",
-        pluginData: scriptLoadResult.pluginData
-      })) as {
-        namespace: string;
-        path: string;
-        pluginData: {
-          path: string;
-          mainFilePath: string;
-        };
-      };
-      const loadResult = (await harness.loadExtractedCss({
-        path: resolveResult.path,
-        pluginData: resolveResult.pluginData
-      })) as {
-        contents: string;
-        loader: string;
-        resolveDir: string;
-      };
+      const { loadResult, resolveResult } =
+        await loadExtractedCssFromEntry(harness);
 
       expect(resolveResult).toEqual({
         namespace: "extracted-css",
@@ -1057,72 +1084,24 @@ if (import.meta.vitest) {
           mainFilePath: "/workspace/src/app.ts"
         }
       });
-      expect(captureSpy).toHaveBeenCalledWith(
-        "/workspace/src/extracted_rules.css.ts",
-        expect.any(Function)
-      );
-      expect(processVanillaFileSpy).toHaveBeenCalledWith({
+      expect(registryStepSpy).toHaveBeenCalledWith(expect.any(Function));
+      expect(registryStepSpy).toHaveBeenCalledTimes(1);
+      expect(registrySpy).toHaveBeenCalledWith({
         source: "compiled source",
         filePath: "/workspace/src/extracted_rules.css.ts",
         outputCss: undefined,
         identOption: "debug"
       });
-      expect(backfillSpy).toHaveBeenCalledWith(
-        [
-          {
-            filePath: "/workspace/src/extracted_rules.css.ts",
-            source: expect.stringContaining(
-              `${DEFINE_RULES_PRESET_CAPTURE_SENTINEL_PREFIX}provider`
-            )
-          }
-        ],
-        captureSession
-      );
       expect(loadResult.loader).toBe("js");
       expect(loadResult.resolveDir).toBe("/workspace/src");
-      expect(loadResult.contents).toContain("presets");
-      expect(extractPresetMapsFromBuildSource(loadResult.contents)).toEqual([
-        {
-          shared: "shared_class"
-        }
-      ]);
-      expect(loadResult.contents).not.toContain(
-        DEFINE_RULES_PRESET_CAPTURE_SENTINEL_PREFIX
+      expectSourceToContainClassNameByCacheValue(
+        loadResult.contents,
+        "shared_class"
       );
+      expectSourceToOmitLegacyCaptureMarker(loadResult.contents);
     });
 
-    it.skip("backfills isolated raw preset maps from the multiple-instance fixture", async () => {
-      const fixtureBuildSource = injectDefineRulesPresetSentinels(
-        readFixtureSource(multipleInstancesFixturePath),
-        ["primary", "secondary"]
-      );
-
-      expect(fixtureBuildSource).toContain(
-        "export const preset = sharedPreset;"
-      );
-      expect(fixtureBuildSource).toContain("export const css = sharedCss;");
-      const captureSession = {
-        filePath: "/workspace/src/extracted_rules.css.ts",
-        instances: [
-          {
-            sentinelId: "primary",
-            filePath: "/workspace/src/extracted_rules.css.ts",
-            instanceIndex: 0,
-            getPresetSnapshot: () => ({
-              shared: "shared_class"
-            })
-          },
-          {
-            sentinelId: "secondary",
-            filePath: "/workspace/src/extracted_rules.css.ts",
-            instanceIndex: 1,
-            getPresetSnapshot: () => ({
-              secondary: "secondary_class"
-            })
-          }
-        ]
-      };
-
+    it("passes short identifiers to the registry wrapper when esbuild minifies", async () => {
       vi.spyOn(integrationHelpers, "babelTransform").mockResolvedValue({
         code: "export const app = {};",
         result: ["extracted_rules.css.ts", "resolver contents"]
@@ -1130,265 +1109,130 @@ if (import.meta.vitest) {
       vi.spyOn(integrationHelpers, "compile").mockResolvedValue({
         source: "compiled source"
       } as Awaited<ReturnType<typeof compile>>);
-      vi.spyOn(
-        integrationHelpers,
-        "captureDefineRulesPresetSession"
-      ).mockImplementation(
-        async (_filePath: string, evaluate: () => Promise<string>) => ({
-          result: await evaluate(),
-          captureSession
-        })
-      );
-      const backfillSpy = vi.spyOn(
-        integrationHelpers,
-        "backfillDefineRulesPresetArtifacts"
-      );
-      vi.spyOn(
-        vanillaExtractIntegrationHelpers,
-        "processVanillaFile"
-      ).mockResolvedValue(fixtureBuildSource);
+      const registrySpy = vi
+        .spyOn(integrationHelpers, "processDefineRulesPresetRegistryFile")
+        .mockResolvedValue(
+          createRegistryResult(createV3PresetBuildSource("short_class"))
+        );
 
-      const harness = createBuildHarness();
+      const harness = createBuildHarness({ minify: true });
+      await loadExtractedCssFromEntry(harness);
+
+      expect(registrySpy).toHaveBeenCalledWith({
+        source: "compiled source",
+        filePath: "/workspace/src/extracted_rules.css.ts",
+        outputCss: undefined,
+        identOption: "short"
+      });
+    });
+
+    it("serializes supported fixture matrix cases through the esbuild extracted-css registry path", async () => {
+      for (const fixtureCase of serializedRegistryFixtureCases) {
+        if (fixtureCase.caseId === "registry-imported-helper-executed") {
+          continue;
+        }
+
+        vi.restoreAllMocks();
+
+        const fixtureSource = readFixtureSource(fixtureCase.fixturePath);
+        for (const expectedSourceSnippet of fixtureCase.expectedSourceSnippets) {
+          expectSourceToContainSnippet(fixtureSource, expectedSourceSnippet);
+        }
+
+        vi.spyOn(integrationHelpers, "babelTransform").mockResolvedValue({
+          code: 'import "extracted_rules.css.ts";\nexport { css, preset, shared };',
+          result: ["extracted_rules.css.ts", "resolver contents"]
+        });
+        const compileFixtureSource = integrationHelpers.compile;
+        vi.spyOn(integrationHelpers, "compile").mockImplementation(
+          (options: Parameters<typeof compile>[0]) =>
+            compileFixtureSource({
+              ...options,
+              contents: fixtureSource
+            })
+        );
+        const registrySpy = vi.spyOn(
+          integrationHelpers,
+          "processDefineRulesPresetRegistryFile"
+        );
+
+        const realEsbuild = await import("esbuild");
+        const harness = createBuildHarness({
+          absWorkingDir: process.cwd(),
+          esbuild: realEsbuild
+        });
+        const { loadResult, resolveResult } = await loadExtractedCssFromEntry(
+          harness,
+          join(process.cwd(), "packages/esbuild/src/app.ts")
+        );
+
+        expect(registrySpy).toHaveBeenCalledWith({
+          source: expect.any(String),
+          filePath: resolveResult.path,
+          outputCss: undefined,
+          identOption: "debug"
+        });
+        expect(registrySpy).toHaveBeenCalledTimes(1);
+        expect(loadResult.loader).toBe("js");
+        expect(loadResult.resolveDir).toBe(dirname(resolveResult.path));
+        expectSourceToContainV3PresetArtifact(loadResult.contents);
+        expectSourceToContainPopulatedClassNameByCache(loadResult.contents);
+        expectSourceToOmitLegacyCaptureMarker(loadResult.contents);
+      }
+    });
+
+    it("skips function-valued config fixture registry artifacts through the esbuild registry path", async () => {
+      const fixtureCase = getRegistryFixtureCase(
+        "registry-function-config-invalid"
+      );
+      const fixtureSource = readFixtureSource(fixtureCase.fixturePath);
+      for (const expectedSourceSnippet of fixtureCase.expectedSourceSnippets) {
+        expectSourceToContainSnippet(fixtureSource, expectedSourceSnippet);
+      }
+
+      vi.spyOn(integrationHelpers, "babelTransform").mockResolvedValue({
+        code: 'import "extracted_rules.css.ts";\nexport { raw };',
+        result: ["extracted_rules.css.ts", "resolver contents"]
+      });
+      const compileFixtureSource = integrationHelpers.compile;
+      vi.spyOn(integrationHelpers, "compile").mockImplementation(
+        (options: Parameters<typeof compile>[0]) =>
+          compileFixtureSource({
+            ...options,
+            filePath: fixtureCase.fixturePath,
+            originalPath: fixtureCase.fixturePath,
+            contents: fixtureSource
+          })
+      );
+      const registrySpy = vi.spyOn(
+        integrationHelpers,
+        "processDefineRulesPresetRegistryFile"
+      );
+
+      const realEsbuild = await import("esbuild");
+      const harness = createBuildHarness({
+        absWorkingDir: process.cwd(),
+        esbuild: realEsbuild
+      });
       const scriptLoadResult = (await harness.loadScript({
-        path: "/workspace/src/app.ts"
-      })) as {
-        pluginData: {
-          mainFilePath: string;
-        };
-      };
+        path: join(process.cwd(), "packages/esbuild/src/app.ts")
+      })) as ScriptLoadResult;
       const resolveResult = (await harness.resolveExtractedCss({
         path: "extracted_rules.css.ts",
-        importer: "/workspace/src/app.ts",
+        importer: join(process.cwd(), "packages/esbuild/src/app.ts"),
         pluginData: scriptLoadResult.pluginData
-      })) as {
-        path: string;
-        pluginData: {
-          path: string;
-          mainFilePath: string;
-        };
-      };
+      })) as ResolvedExtractedCssResult;
       const loadResult = (await harness.loadExtractedCss({
         path: resolveResult.path,
         pluginData: resolveResult.pluginData
-      })) as {
-        contents: string;
-        loader: string;
-        resolveDir: string;
-      };
+      })) as ExtractedCssLoadResult;
 
-      expect(backfillSpy).toHaveBeenCalledWith(
-        [
-          {
-            filePath: "/workspace/src/extracted_rules.css.ts",
-            source: expect.stringContaining(
-              `${DEFINE_RULES_PRESET_CAPTURE_SENTINEL_PREFIX}primary`
-            )
-          }
-        ],
-        captureSession
-      );
+      expect(registrySpy).toHaveBeenCalledTimes(1);
       expect(loadResult.loader).toBe("js");
-      expect(loadResult.resolveDir).toBe("/workspace/src");
-      expect(loadResult.contents).toContain("presets");
-      expect(loadResult.contents).not.toContain(
-        DEFINE_RULES_PRESET_CAPTURE_SENTINEL_PREFIX
-      );
-      expect(loadResult.contents).toContain(
-        "export const preset = sharedPreset;"
-      );
-      expect(loadResult.contents).toContain("export const css = sharedCss;");
-      expect(extractPresetMapsFromBuildSource(loadResult.contents)).toEqual([
-        {
-          shared: "shared_class"
-        },
-        {
-          secondary: "secondary_class"
-        }
-      ]);
-    });
-
-    it.skip("backfills supported fixture matrix cases through the esbuild extracted-css matrix path", async () => {
-      for (const fixtureCase of supportedFixtureMatrixCases) {
-        vi.restoreAllMocks();
-
-        const fixtureSource = readFixtureSource(fixtureCase.fixturePath);
-        for (const expectedSourceSnippet of fixtureCase.expectedSourceSnippets) {
-          expectSourceToContainSnippet(fixtureSource, expectedSourceSnippet);
-        }
-
-        const buildSource = createFixtureBuildSource(
-          fixtureCase.fixturePath,
-          fixtureCase.caseId
-        );
-        const presetMap = {
-          [fixtureCase.caseId]: `${fixtureCase.caseId}_class`
-        };
-        let captureSession:
-          | ReturnType<typeof createPresetCaptureSession>
-          | undefined;
-
-        vi.spyOn(integrationHelpers, "babelTransform").mockResolvedValue({
-          code: "export const app = {};",
-          result: ["extracted_rules.css.ts", "resolver contents"]
-        });
-        vi.spyOn(integrationHelpers, "compile").mockResolvedValue({
-          source: "compiled source"
-        } as Awaited<ReturnType<typeof compile>>);
-        vi.spyOn(
-          integrationHelpers,
-          "captureDefineRulesPresetSession"
-        ).mockImplementation(
-          async (filePath: string, evaluate: () => Promise<string>) => {
-            captureSession = createPresetCaptureSession(
-              filePath,
-              fixtureCase.caseId,
-              presetMap
-            );
-
-            return {
-              result: await evaluate(),
-              captureSession
-            };
-          }
-        );
-        const backfillSpy = vi.spyOn(
-          integrationHelpers,
-          "backfillDefineRulesPresetArtifacts"
-        );
-        vi.spyOn(
-          vanillaExtractIntegrationHelpers,
-          "processVanillaFile"
-        ).mockResolvedValue(buildSource);
-
-        const harness = createBuildHarness();
-        const scriptLoadResult = (await harness.loadScript({
-          path: "/workspace/src/app.ts"
-        })) as {
-          pluginData: {
-            mainFilePath: string;
-          };
-        };
-        const resolveResult = (await harness.resolveExtractedCss({
-          path: "extracted_rules.css.ts",
-          importer: "/workspace/src/app.ts",
-          pluginData: scriptLoadResult.pluginData
-        })) as {
-          path: string;
-          pluginData: {
-            path: string;
-            mainFilePath: string;
-          };
-        };
-        const loadResult = (await harness.loadExtractedCss({
-          path: resolveResult.path,
-          pluginData: resolveResult.pluginData
-        })) as {
-          contents: string;
-          loader: string;
-          resolveDir: string;
-        };
-
-        expect(backfillSpy).toHaveBeenCalledWith(
-          [
-            {
-              filePath: "/workspace/src/extracted_rules.css.ts",
-              source: expect.stringContaining(
-                `${DEFINE_RULES_PRESET_CAPTURE_SENTINEL_PREFIX}${fixtureCase.caseId}`
-              )
-            }
-          ],
-          captureSession
-        );
-        expect(backfillSpy).toHaveBeenCalledTimes(1);
-        expect(loadResult.loader).toBe("js");
-        expect(loadResult.resolveDir).toBe("/workspace/src");
-
-        for (const expectedSourceSnippet of fixtureCase.expectedSourceSnippets) {
-          expectSourceToContainSnippet(
-            loadResult.contents,
-            expectedSourceSnippet
-          );
-        }
-
-        expect(extractPresetMapsFromBuildSource(loadResult.contents)).toEqual([
-          presetMap
-        ]);
-        expect(loadResult.contents).toContain("presets");
-        expect(loadResult.contents).not.toContain(
-          DEFINE_RULES_PRESET_CAPTURE_SENTINEL_PREFIX
-        );
-      }
-    });
-
-    it.skip("keeps the locked mismatch boundary for unsupported fixture matrix cases through the esbuild extracted-css path", async () => {
-      for (const fixtureCase of unsupportedFixtureMatrixCases) {
-        vi.restoreAllMocks();
-
-        const fixtureSource = readFixtureSource(fixtureCase.fixturePath);
-        for (const expectedSourceSnippet of fixtureCase.expectedSourceSnippets) {
-          expectSourceToContainSnippet(fixtureSource, expectedSourceSnippet);
-        }
-
-        const buildSource = createFixtureBuildSource(
-          fixtureCase.fixturePath,
-          fixtureCase.caseId
-        );
-
-        vi.spyOn(integrationHelpers, "babelTransform").mockResolvedValue({
-          code: "export const app = {};",
-          result: ["extracted_rules.css.ts", "resolver contents"]
-        });
-        vi.spyOn(integrationHelpers, "compile").mockResolvedValue({
-          source: "compiled source"
-        } as Awaited<ReturnType<typeof compile>>);
-        vi.spyOn(
-          integrationHelpers,
-          "captureDefineRulesPresetSession"
-        ).mockImplementation(
-          async (filePath: string, evaluate: () => Promise<string>) => ({
-            result: await evaluate(),
-            captureSession: createPresetCaptureSession(
-              filePath,
-              fixtureCase.caseId,
-              {
-                [fixtureCase.caseId]: `${fixtureCase.caseId}_class`
-              }
-            )
-          })
-        );
-        vi.spyOn(
-          vanillaExtractIntegrationHelpers,
-          "processVanillaFile"
-        ).mockResolvedValue(buildSource);
-
-        const harness = createBuildHarness();
-        const scriptLoadResult = (await harness.loadScript({
-          path: "/workspace/src/app.ts"
-        })) as {
-          pluginData: {
-            mainFilePath: string;
-          };
-        };
-        const resolveResult = (await harness.resolveExtractedCss({
-          path: "extracted_rules.css.ts",
-          importer: "/workspace/src/app.ts",
-          pluginData: scriptLoadResult.pluginData
-        })) as {
-          path: string;
-          pluginData: {
-            path: string;
-            mainFilePath: string;
-          };
-        };
-
-        await expect(
-          harness.loadExtractedCss({
-            path: resolveResult.path,
-            pluginData: resolveResult.pluginData
-          })
-        ).rejects.toThrow(DEFINE_RULES_PRESET_BACKFILL_MISMATCH_ERROR);
-      }
-    });
+      expect(countV3PresetArtifacts(loadResult.contents)).toBe(0);
+      expect(loadResult.contents).toContain("rebeccapurple");
+      expectSourceToOmitLegacyCaptureMarker(loadResult.contents);
+    }, 20000);
 
     it("keeps root css alias reuse paired with the explicit css asset import when no local extraction is needed", async () => {
       const consumerFixtureSource = readFixtureSource(
@@ -1440,29 +1284,19 @@ if (import.meta.vitest) {
       vi.spyOn(integrationHelpers, "compile").mockResolvedValue({
         source: "compiled source"
       } as Awaited<ReturnType<typeof compile>>);
-      const registryFileSpy = vi
+      const registrySpy = vi
         .spyOn(integrationHelpers, "processDefineRulesPresetRegistryFile")
         .mockRejectedValue(new ReferenceError("window is not defined"));
 
       const harness = createBuildHarness();
       const scriptLoadResult = (await harness.loadScript({
         path: "/workspace/src/app.ts"
-      })) as {
-        pluginData: {
-          mainFilePath: string;
-        };
-      };
+      })) as ScriptLoadResult;
       const resolveResult = (await harness.resolveExtractedCss({
         path: "extracted_rules.css.ts",
         importer: "/workspace/src/app.ts",
         pluginData: scriptLoadResult.pluginData
-      })) as {
-        path: string;
-        pluginData: {
-          path: string;
-          mainFilePath: string;
-        };
-      };
+      })) as ResolvedExtractedCssResult;
       const loadResult = (await harness.loadExtractedCss({
         path: resolveResult.path,
         pluginData: resolveResult.pluginData
@@ -1473,7 +1307,7 @@ if (import.meta.vitest) {
         }>;
       };
 
-      expect(registryFileSpy).toHaveBeenCalledWith({
+      expect(registrySpy).toHaveBeenCalledWith({
         source: "compiled source",
         filePath: "/workspace/src/extracted_rules.css.ts",
         outputCss: undefined,
@@ -1490,14 +1324,45 @@ if (import.meta.vitest) {
       });
     });
 
-    it.skip("defineRules preset capture sessions are queued so concurrent esbuild loads cannot overlap shared preset sessions", async () => {
+    it("cleans extracted-css resolvers on build end", async () => {
+      vi.spyOn(integrationHelpers, "babelTransform").mockResolvedValue({
+        code: 'import "extracted_rules.css.ts";\nexport const app = {};',
+        result: ["extracted_rules.css.ts", "resolver contents"]
+      });
+
+      const harness = createBuildHarness();
+      const scriptLoadResult = (await harness.loadScript({
+        path: "/workspace/src/app.ts"
+      })) as ScriptLoadResult;
+      const resolveBeforeEnd = await harness.resolveExtractedCss({
+        path: "extracted_rules.css.ts",
+        importer: "/workspace/src/app.ts",
+        pluginData: scriptLoadResult.pluginData
+      });
+
+      harness.endBuild();
+
+      const resolveAfterEnd = await harness.resolveExtractedCss({
+        path: "extracted_rules.css.ts",
+        importer: "/workspace/src/app.ts",
+        pluginData: scriptLoadResult.pluginData
+      });
+
+      expect(resolveBeforeEnd).toEqual({
+        namespace: "extracted-css",
+        path: "/workspace/src/extracted_rules.css.ts",
+        pluginData: {
+          path: "extracted_rules.css.ts",
+          mainFilePath: "/workspace/src/app.ts"
+        }
+      });
+      expect(resolveAfterEnd).toBeUndefined();
+    });
+
+    it("defineRules preset registry steps are queued so concurrent esbuild loads cannot overlap shared registry sessions", async () => {
       const firstDeferred = createDeferred<string>();
       const secondDeferred = createDeferred<string>();
       const processOrder: string[] = [];
-      const captureSessions = new Map<
-        string,
-        ReturnType<typeof createPresetCaptureSession>
-      >();
 
       vi.spyOn(integrationHelpers, "babelTransform")
         .mockResolvedValueOnce({
@@ -1514,103 +1379,52 @@ if (import.meta.vitest) {
             source: `compiled source:${options.filePath}`
           }) as Awaited<ReturnType<typeof compile>>
       );
-      vi.spyOn(
-        integrationHelpers,
-        "captureDefineRulesPresetSession"
-      ).mockImplementation(
-        async (filePath: string, evaluate: () => Promise<string>) => {
-          const result = await evaluate();
-          const sentinelId = filePath.endsWith("extracted_a.css.ts")
-            ? "provider-a"
-            : "provider-b";
-          const captureSession = createPresetCaptureSession(
-            filePath,
-            sentinelId,
-            {
-              [sentinelId]: `${sentinelId}_class`
+      const registrySpy = vi
+        .spyOn(integrationHelpers, "processDefineRulesPresetRegistryFile")
+        .mockImplementation(
+          async (
+            options: Parameters<typeof processDefineRulesPresetRegistryFile>[0]
+          ) => {
+            processOrder.push(`start:${options.filePath}`);
+
+            if (options.filePath.endsWith("extracted_a.css.ts")) {
+              const result = await firstDeferred.promise;
+              processOrder.push(`end:${options.filePath}`);
+              return createRegistryResult(result);
             }
-          );
-          captureSessions.set(filePath, captureSession);
 
-          return {
-            result,
-            captureSession
-          };
-        }
-      );
-      const backfillSpy = vi.spyOn(
-        integrationHelpers,
-        "backfillDefineRulesPresetArtifacts"
-      );
-      vi.spyOn(
-        vanillaExtractIntegrationHelpers,
-        "processVanillaFile"
-      ).mockImplementation(
-        async ({ filePath }: Parameters<typeof processVanillaFile>[0]) => {
-          processOrder.push(`start:${filePath}`);
-
-          if (filePath.endsWith("extracted_a.css.ts")) {
-            const result = await firstDeferred.promise;
-            processOrder.push(`end:${filePath}`);
-            return result;
+            const result = await secondDeferred.promise;
+            processOrder.push(`end:${options.filePath}`);
+            return createRegistryResult(result);
           }
-
-          const result = await secondDeferred.promise;
-          processOrder.push(`end:${filePath}`);
-          return result;
-        }
-      );
+        );
 
       const harness = createBuildHarness();
       const scriptLoadResultA = (await harness.loadScript({
         path: "/workspace/src/app-a.ts"
-      })) as {
-        pluginData: {
-          mainFilePath: string;
-        };
-      };
+      })) as ScriptLoadResult;
       const scriptLoadResultB = (await harness.loadScript({
         path: "/workspace/src/app-b.ts"
-      })) as {
-        pluginData: {
-          mainFilePath: string;
-        };
-      };
+      })) as ScriptLoadResult;
       const resolveResultA = (await harness.resolveExtractedCss({
         path: "extracted_a.css.ts",
         importer: "/workspace/src/app-a.ts",
         pluginData: scriptLoadResultA.pluginData
-      })) as {
-        path: string;
-        pluginData: {
-          path: string;
-          mainFilePath: string;
-        };
-      };
+      })) as ResolvedExtractedCssResult;
       const resolveResultB = (await harness.resolveExtractedCss({
         path: "extracted_b.css.ts",
         importer: "/workspace/src/app-b.ts",
         pluginData: scriptLoadResultB.pluginData
-      })) as {
-        path: string;
-        pluginData: {
-          path: string;
-          mainFilePath: string;
-        };
-      };
+      })) as ResolvedExtractedCssResult;
 
       const firstLoadPromise = harness.loadExtractedCss({
         path: resolveResultA.path,
         pluginData: resolveResultA.pluginData
-      }) as Promise<{
-        contents: string;
-      }>;
+      }) as Promise<ExtractedCssLoadResult>;
       const secondLoadPromise = harness.loadExtractedCss({
         path: resolveResultB.path,
         pluginData: resolveResultB.pluginData
-      }) as Promise<{
-        contents: string;
-      }>;
+      }) as Promise<ExtractedCssLoadResult>;
 
       await vi.waitFor(() => {
         expect(processOrder).toEqual([
@@ -1618,7 +1432,7 @@ if (import.meta.vitest) {
         ]);
       });
 
-      firstDeferred.resolve(createSentinelBuildSource("provider-a"));
+      firstDeferred.resolve(createV3PresetBuildSource("provider-a_class"));
       const firstLoadResult = await firstLoadPromise;
 
       await vi.waitFor(() => {
@@ -1629,7 +1443,7 @@ if (import.meta.vitest) {
         ]);
       });
 
-      secondDeferred.resolve(createSentinelBuildSource("provider-b"));
+      secondDeferred.resolve(createV3PresetBuildSource("provider-b_class"));
       const secondLoadResult = await secondLoadPromise;
 
       expect(processOrder).toEqual([
@@ -1638,40 +1452,26 @@ if (import.meta.vitest) {
         "start:/workspace/src/extracted_b.css.ts",
         "end:/workspace/src/extracted_b.css.ts"
       ]);
-      expect(backfillSpy).toHaveBeenNthCalledWith(
-        1,
-        [
-          {
-            filePath: "/workspace/src/extracted_a.css.ts",
-            source: expect.stringContaining("provider-a")
-          }
-        ],
-        captureSessions.get("/workspace/src/extracted_a.css.ts")
+      expect(registrySpy).toHaveBeenNthCalledWith(1, {
+        source: "compiled source:/workspace/src/extracted_a.css.ts",
+        filePath: "/workspace/src/extracted_a.css.ts",
+        outputCss: undefined,
+        identOption: "debug"
+      });
+      expect(registrySpy).toHaveBeenNthCalledWith(2, {
+        source: "compiled source:/workspace/src/extracted_b.css.ts",
+        filePath: "/workspace/src/extracted_b.css.ts",
+        outputCss: undefined,
+        identOption: "debug"
+      });
+      expectSourceToContainClassNameByCacheValue(
+        firstLoadResult.contents,
+        "provider-a_class"
       );
-      expect(backfillSpy).toHaveBeenNthCalledWith(
-        2,
-        [
-          {
-            filePath: "/workspace/src/extracted_b.css.ts",
-            source: expect.stringContaining("provider-b")
-          }
-        ],
-        captureSessions.get("/workspace/src/extracted_b.css.ts")
+      expectSourceToContainClassNameByCacheValue(
+        secondLoadResult.contents,
+        "provider-b_class"
       );
-      expect(
-        extractPresetMapsFromBuildSource(firstLoadResult.contents)
-      ).toEqual([
-        {
-          "provider-a": "provider-a_class"
-        }
-      ]);
-      expect(
-        extractPresetMapsFromBuildSource(secondLoadResult.contents)
-      ).toEqual([
-        {
-          "provider-b": "provider-b_class"
-        }
-      ]);
       expect(firstLoadResult.contents).not.toContain("provider-b_class");
       expect(secondLoadResult.contents).not.toContain("provider-a_class");
     });
