@@ -1073,7 +1073,7 @@ export const nestedPropertiesMap: NestedPropertiesMap = {
     Trim: "whiteSpaceTrim"
   }
 };
-export type NestedPropertiesMap = {
+export interface NestedPropertiesMap {
   msContentZoomLimit: {
     Max: "msContentZoomLimitMax";
     Min: "msContentZoomLimitMin";
@@ -1639,4 +1639,4 @@ export type NestedPropertiesMap = {
     Collapse: "whiteSpaceCollapse";
     Trim: "whiteSpaceTrim";
   };
-};
+}

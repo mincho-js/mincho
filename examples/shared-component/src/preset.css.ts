@@ -1,28 +1,6 @@
-import {
-  defineRules,
-  type CSSProperties,
-  type DefineRulesPresetMap
-} from "@mincho-js/css";
+import { defineRules } from "@mincho-js/css";
 
-type SharedCssInput = Pick<
-  CSSProperties,
-  "background" | "color" | "padding" | "borderRadius" | "display"
->;
-
-type SharedCss = (args: SharedCssInput) => string;
-
-type SharedPreset = {
-  schema: "mincho.defineRulesPreset";
-  version: 3;
-  classNameByCache: DefineRulesPresetMap;
-};
-
-type SharedPresetOwner = {
-  css: SharedCss;
-  preset: SharedPreset;
-};
-
-export const { css, preset }: SharedPresetOwner = defineRules({
+export const { css, preset } = defineRules({
   debugId: "sharedPreset",
   properties: {
     background: true,

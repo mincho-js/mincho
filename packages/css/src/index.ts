@@ -63,7 +63,11 @@ export type { ClassValue } from "./classname/index.js";
 export { defineRules } from "./defineRules/index.js";
 export type {
   DefineRulesCtx,
+  DefineRulesProperties,
+  DefineRulesShortcuts,
+  DefineRulesPresetArtifactV3,
   DefineRulesPresetMap,
+  DefineRulesCss,
   DefineRulesCssInput,
   DefineRulesComplexCssInput
 } from "./defineRules/types.js";

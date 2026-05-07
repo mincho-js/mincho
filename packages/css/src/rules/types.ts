@@ -189,14 +189,15 @@ export interface RecipeClassNames<Variants extends VariantGroups> {
   variants: VariantsClassNames<Variants>;
 }
 
-export type RuntimeFn<
+export interface RuntimeFn<
   Variants extends VariantGroups,
   Props extends ComplexPropDefinitions<PropTarget | undefined>
-> = ((options?: ResolveComplex<VariantSelection<Variants>>) => string) & {
+> {
+  (options?: ResolveComplex<VariantSelection<Variants>>): string;
   props: (options: Resolve<PropDefinitionOutput<Props>>) => CSSRule;
   variants: () => (keyof Variants)[];
   classNames: RecipeClassNames<Variants>;
-};
+}
 
 export type RulesVariants<
   RuleFn extends RuntimeFn<

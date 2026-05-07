@@ -169,7 +169,7 @@ export const shorthandProperties = ${stringify(shorthanded)} as const;
 export type ShorthandProperties = DeepWriteable<typeof shorthandProperties>;
 
 export const nestedPropertiesMap: NestedPropertiesMap = ${stringifyNested};
-export type NestedPropertiesMap = ${stringifyNested};
+export interface NestedPropertiesMap ${stringifyNested}
 `;
 
 // -- Run ----------------------------------------------------------------------

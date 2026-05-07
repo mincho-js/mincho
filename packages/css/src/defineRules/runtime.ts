@@ -2,6 +2,7 @@ import type { CSSProperties } from "@mincho-js/transform-to-vanilla";
 import { registerDefineRulesRegistryInstance } from "./registry.js";
 import { createCanonicalStyleCache } from "./utils.js";
 import type {
+  DefineRulesCss,
   DefineRulesComplexCssInput,
   DefineRulesCtx,
   DefineRulesPresetArtifactV3,
@@ -12,16 +13,11 @@ import type {
   DefineRulesShortcuts
 } from "./types.js";
 
-// == Define Rules Runtime =====================================================
-export type DefineRulesRuntimeCss<CssInput> = ((args: CssInput) => string) & {
-  raw(args: CssInput): CSSProperties;
-};
-
 export interface DefineRulesRuntimeResult<
   Properties extends DefineRulesProperties,
   Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts>
 > {
-  css: DefineRulesRuntimeCss<DefineRulesComplexCssInput<Properties, Shortcuts>>;
+  css: DefineRulesCss<DefineRulesComplexCssInput<Properties, Shortcuts>>;
   preset: DefineRulesPresetArtifactV3;
 }
 
@@ -102,7 +98,7 @@ export function createDefineRulesRuntime<
 
   const css = Object.assign(cssImpl, {
     raw: cssRaw
-  }) as DefineRulesRuntimeCss<CssInput>;
+  }) as DefineRulesCss<CssInput>;
   return { css, preset: presetArtifact };
 }
 

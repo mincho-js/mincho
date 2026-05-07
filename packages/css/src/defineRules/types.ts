@@ -72,6 +72,11 @@ export type DefineRulesPresetInput =
 
 export type DefineRulesPresetMap = DefineRulesPresetClassNameByCache;
 
+export interface DefineRulesCss<CssInput> {
+  (args: CssInput): string;
+  raw(args: CssInput): CSSProperties;
+}
+
 export interface DefineRulesCtx<
   Properties extends DefineRulesProperties,
   Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts>

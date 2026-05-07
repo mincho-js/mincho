@@ -13,10 +13,10 @@ import type {
   DefineRulesShortcuts
 } from "./types.js";
 
-type NormalizedDefineRulesRegistryFileScope = {
+interface NormalizedDefineRulesRegistryFileScope {
   packageName: string;
   filePath: string;
-};
+}
 
 export interface DefineRulesRegistryInstance {
   registrationId: string;
