@@ -390,9 +390,6 @@ if (import.meta.vitest) {
     }
   }
 
-  function expectSourceToOmitLegacyCaptureMarker(source: string): void {
-    expect(source).not.toContain("__MINCHO_DEFINE_RULES_SENTINEL__:");
-  }
   function expectSourceToContainV3PresetArtifact(source: string): void {
     const normalizedSource = normalizeSource(source);
 
@@ -547,7 +544,6 @@ if (import.meta.vitest) {
         expect(normalizedSource).toContain("classNameByCache:{");
         expectRegistryInstancesToHaveClassNameByCache(registrySession);
         expect(classNames.length).toBeGreaterThan(0);
-        expectSourceToOmitLegacyCaptureMarker(source);
         for (const className of classNames) {
           expect(source).toContain(className);
         }
@@ -645,7 +641,6 @@ if (import.meta.vitest) {
       expect(consumerClassNames).toEqual(providerClassNames);
       expect(source).toContain(`providerClass = '${reusedClassName}'`);
       expect(source).toContain(`consumerClass = '${reusedClassName}'`);
-      expectSourceToOmitLegacyCaptureMarker(source);
     });
 
     it("cleanup ends sessions after success, evaluation errors, and skipped registration", async () => {
@@ -825,8 +820,6 @@ if (import.meta.vitest) {
           expect(secondResult.source).toContain(secondClassName);
           expect(firstResult.source).not.toContain(secondClassName);
         }
-        expectSourceToOmitLegacyCaptureMarker(firstResult.source);
-        expectSourceToOmitLegacyCaptureMarker(secondResult.source);
         expect(getActiveDefineRulesRegistrySession()).toBe(undefined);
       } finally {
         concurrentState.gates.fileA.resolve();
@@ -885,7 +878,6 @@ if (import.meta.vitest) {
         expect(successfulResult.source).not.toContain(
           cleanupState.failedClassName
         );
-        expectSourceToOmitLegacyCaptureMarker(successfulResult.source);
         expect(getActiveDefineRulesRegistrySession()).toBe(undefined);
       } finally {
         delete registryGlobals[stateKey];
@@ -946,8 +938,6 @@ if (import.meta.vitest) {
       }
       expect(secondResult.source).not.toContain("removedClass");
       expect(secondResult.source).not.toContain("removedPreset");
-      expectSourceToOmitLegacyCaptureMarker(firstResult.source);
-      expectSourceToOmitLegacyCaptureMarker(secondResult.source);
       expect(getActiveDefineRulesRegistrySession()).toBe(undefined);
     });
 

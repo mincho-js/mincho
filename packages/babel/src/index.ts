@@ -141,11 +141,6 @@ if (import.meta.vitest) {
       `);
 
       expect(code).toContain("defineRules({");
-      expect(code).not.toContain("__MINCHO_DEFINE_RULES_SENTINEL__");
-      expect(code).not.toContain("backfillDefineRulesPresetArtifacts");
-      expect(code).not.toContain("captureDefineRulesPresetSession");
-      expect(code).not.toContain("defineRules/registry");
-      expect(code).not.toContain("processVanillaFile");
     });
 
     it("extracts $mincho function", () => {

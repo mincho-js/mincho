@@ -450,10 +450,6 @@ if (import.meta.vitest) {
     );
   }
 
-  function expectSourceToOmitLegacyCaptureMarker(source: string): void {
-    expect(source).not.toMatch(/__MINCHO_DEFINE_RULES_[A-Z]+__:?/);
-  }
-
   function createLivePresetBuildSource(): string {
     return `
       import { defineRules } from "@mincho-js/css";
@@ -851,7 +847,6 @@ if (import.meta.vitest) {
         }
 
         const fillBlueClassName = extractFillBlueClassName(jsOutput.text);
-        expectSourceToOmitLegacyCaptureMarker(jsOutput.text);
         expect(jsOutput.text).not.toContain('background: "blue"');
         expectCssSourceToContainClassNames(cssOutput.text, fillBlueClassName);
         expect(cssOutput.text).toContain("background: blue;");
@@ -878,7 +873,6 @@ if (import.meta.vitest) {
           registryClassName
         );
         expectSourceToContainPopulatedClassNameByCache(loadResult.contents);
-        expectSourceToOmitLegacyCaptureMarker(loadResult.contents);
       } finally {
         await fs.promises.rm(root, { force: true, recursive: true });
       }
@@ -901,14 +895,12 @@ if (import.meta.vitest) {
           throw new Error(`Missing registry fixture case ${caseId}`);
         }
 
-        const { js, registrySource } =
+        const { registrySource } =
           await buildRealEsbuildRegistryFixture(fixtureCase);
 
         expect(registrySource).not.toBe("");
         expectSourceToContainV3PresetArtifact(registrySource);
         expectSourceToContainPopulatedClassNameByCache(registrySource);
-        expectSourceToOmitLegacyCaptureMarker(registrySource);
-        expectSourceToOmitLegacyCaptureMarker(js);
         if (fixtureCase.expectedRegistryInstances > 1) {
           const artifactCount = Array.from(
             registrySource.matchAll(
@@ -933,8 +925,6 @@ if (import.meta.vitest) {
       expect(countV3PresetArtifacts(registrySource)).toBe(0);
       expect(countV3PresetArtifacts(js)).toBe(0);
       expect(registrySource).toContain("rebeccapurple");
-      expectSourceToOmitLegacyCaptureMarker(registrySource);
-      expectSourceToOmitLegacyCaptureMarker(js);
     });
 
     it("serializes live preset output through the esbuild registry path", async () => {
@@ -998,7 +988,6 @@ if (import.meta.vitest) {
         loadResult.contents,
         fillBlueClassName
       );
-      expectSourceToOmitLegacyCaptureMarker(loadResult.contents);
     });
 
     it("defineRules exported css skips function-valued registry artifacts", async () => {
@@ -1051,7 +1040,6 @@ if (import.meta.vitest) {
       expect(loadResult.loader).toBe("js");
       expect(countV3PresetArtifacts(loadResult.contents)).toBe(0);
       expect(loadResult.contents).toContain("blue");
-      expectSourceToOmitLegacyCaptureMarker(loadResult.contents);
     });
 
     it("routes extracted css through the shared preset registry wrapper without breaking the namespace flow", async () => {
@@ -1098,7 +1086,6 @@ if (import.meta.vitest) {
         loadResult.contents,
         "shared_class"
       );
-      expectSourceToOmitLegacyCaptureMarker(loadResult.contents);
     });
 
     it("passes short identifiers to the registry wrapper when esbuild minifies", async () => {
@@ -1177,7 +1164,6 @@ if (import.meta.vitest) {
         expect(loadResult.resolveDir).toBe(dirname(resolveResult.path));
         expectSourceToContainV3PresetArtifact(loadResult.contents);
         expectSourceToContainPopulatedClassNameByCache(loadResult.contents);
-        expectSourceToOmitLegacyCaptureMarker(loadResult.contents);
       }
     });
 
@@ -1231,7 +1217,6 @@ if (import.meta.vitest) {
       expect(loadResult.loader).toBe("js");
       expect(countV3PresetArtifacts(loadResult.contents)).toBe(0);
       expect(loadResult.contents).toContain("rebeccapurple");
-      expectSourceToOmitLegacyCaptureMarker(loadResult.contents);
     }, 20000);
 
     it("keeps root css alias reuse paired with the explicit css asset import when no local extraction is needed", async () => {

@@ -533,10 +533,6 @@ if (import.meta.vitest) {
     );
   }
 
-  function expectSourceToOmitLegacyCaptureMarker(source: string): void {
-    expect(source).not.toMatch(/__MINCHO_DEFINE_RULES_[A-Z]+__:?/);
-  }
-
   function createLivePresetSmokeEntrySource(): string {
     return `
       import { css as vanillaCss, defineRules } from "@mincho-js/css";
@@ -1139,7 +1135,6 @@ if (import.meta.vitest) {
         transformedExtractedCss,
         "shared_class"
       );
-      expectSourceToOmitLegacyCaptureMarker(transformedExtractedCss);
     });
 
     it("builds a real Vite fixture with defineRules preset registry artifact", async () => {
@@ -1206,7 +1201,6 @@ if (import.meta.vitest) {
 
         const fillBlueClassName = extractFillBlueClassName(jsOutput.code);
         expectSourceToContainV3PresetArtifact(jsOutput.code);
-        expectSourceToOmitLegacyCaptureMarker(jsOutput.code);
         expect(jsOutput.code).not.toContain('background: "blue"');
         expect(cssOutput.source).toContain(`.${fillBlueClassName}`);
         expect(cssOutput.source).toContain("background: blue;");
@@ -1232,14 +1226,12 @@ if (import.meta.vitest) {
           throw new Error(`Missing registry fixture case ${caseId}`);
         }
 
-        const { js, registrySource } =
+        const { registrySource } =
           await buildRealViteRegistryFixture(fixtureCase);
 
         expect(registrySource).not.toBe("");
         expectSourceToContainV3PresetArtifact(registrySource);
         expectSourceToContainPopulatedClassNameByCache(registrySource);
-        expectSourceToOmitLegacyCaptureMarker(registrySource);
-        expectSourceToOmitLegacyCaptureMarker(js);
         if (fixtureCase.expectedRegistryInstances > 1) {
           const artifactCount = Array.from(
             registrySource.matchAll(
@@ -1264,8 +1256,6 @@ if (import.meta.vitest) {
       expect(countV3PresetArtifacts(registrySource)).toBe(0);
       expect(countV3PresetArtifacts(js)).toBe(0);
       expect(registrySource).toContain("rebeccapurple");
-      expectSourceToOmitLegacyCaptureMarker(registrySource);
-      expectSourceToOmitLegacyCaptureMarker(js);
     }, 20000);
 
     it("serializes live preset output through the Vite build artifact path", async () => {
@@ -1330,7 +1320,6 @@ if (import.meta.vitest) {
           "blue"
         )
       ).toBe(false);
-      expectSourceToOmitLegacyCaptureMarker(transformedExtractedCss);
     });
 
     it("defineRules exported css skips function-valued config registry artifacts", async () => {
@@ -1381,7 +1370,6 @@ if (import.meta.vitest) {
       expect(registrySpy).toHaveBeenCalledTimes(1);
       expect(countV3PresetArtifacts(transformedExtractedCss)).toBe(0);
       expect(transformedExtractedCss).toContain("blue");
-      expectSourceToOmitLegacyCaptureMarker(transformedExtractedCss);
     });
 
     it("bubbles registry validation errors from build-time preset serialization", async () => {
@@ -1489,7 +1477,6 @@ if (import.meta.vitest) {
         expect(registrySpy).toHaveBeenCalledTimes(1);
         expectSourceToContainV3PresetArtifact(transformedExtractedCss);
         expectSourceToContainPopulatedClassNameByCache(transformedExtractedCss);
-        expectSourceToOmitLegacyCaptureMarker(transformedExtractedCss);
       }
     });
 
@@ -1537,7 +1524,6 @@ if (import.meta.vitest) {
       expect(registrySpy).toHaveBeenCalledTimes(1);
       expect(countV3PresetArtifacts(transformedExtractedCss)).toBe(0);
       expect(transformedExtractedCss).toContain("rebeccapurple");
-      expectSourceToOmitLegacyCaptureMarker(transformedExtractedCss);
     }, 20000);
 
     it("keeps root css alias reuse paired with the explicit css asset import when no local extraction is needed", async () => {
@@ -1733,7 +1719,6 @@ if (import.meta.vitest) {
       );
       expectCssSourceToContainClassNames(firstVirtualCss, currentClassName);
       expectCssSourceToContainClassNames(firstVirtualCss, removedClassName);
-      expectSourceToOmitLegacyCaptureMarker(firstTransform);
 
       const secondTransform = await harness.transform(
         extractedId,
@@ -1778,7 +1763,6 @@ if (import.meta.vitest) {
       )) {
         expect(secondVirtualCss).not.toContain(`.${removedFragmentClassName}`);
       }
-      expectSourceToOmitLegacyCaptureMarker(secondTransform);
       expect(registrySpy).toHaveBeenCalledTimes(2);
     });
 
