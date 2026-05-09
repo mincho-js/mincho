@@ -195,6 +195,31 @@ export function MyButton() {
 }
 ```
 
+### defineRules()
+
+The `defineRules()` function creates a scoped authoring API and returns `css`, `cx`, and `preset` together. The returned `cx` is the existing root `cx` from `@mincho-js/css`, so it has the same class-composition behavior as importing `cx` directly.
+
+```typescript
+import { defineRules } from "@mincho-js/css";
+
+const { css, cx } = defineRules({
+  properties: {
+    color: true,
+    padding: true
+  }
+});
+
+export const className = cx(
+  css({
+    color: "white",
+    padding: 12
+  }),
+  "external"
+);
+```
+
+Duplicate classes and conflicting utility-like classes are preserved in input order. No tailwind-merge-style conflict resolution, dedupe, or sorting is performed.
+
 ## Features
 
 Some features are already implemented in Vanilla Extract, but we're assuming a first-time reader.

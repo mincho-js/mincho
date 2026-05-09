@@ -400,6 +400,52 @@ if (import.meta.vitest) {
     expect(normalizedSource).toContain("classNameByCache:{");
   }
 
+  function expectSerializedPresetArtifactsToOmitCx(
+    source: string,
+    registrySession: DefineRulesRegistrySession
+  ): void {
+    const normalizedSource = normalizeSource(source);
+    const artifactMatches = Array.from(
+      normalizedSource.matchAll(/\{schema:["']mincho\.defineRulesPreset["']/g)
+    );
+
+    expect(artifactMatches).toHaveLength(registrySession.instances.length);
+    for (const artifactMatch of artifactMatches) {
+      let depth = 0;
+      let artifactEndIndex = artifactMatch.index;
+      for (
+        let index = artifactMatch.index;
+        index < normalizedSource.length;
+        index += 1
+      ) {
+        const character = normalizedSource[index];
+        if (character === "{") {
+          depth += 1;
+        }
+        if (character === "}") {
+          depth -= 1;
+          if (depth === 0) {
+            artifactEndIndex = index + 1;
+            break;
+          }
+        }
+      }
+      const artifactSource = normalizedSource.slice(
+        artifactMatch.index,
+        artifactEndIndex
+      );
+
+      expect(artifactSource).toContain("version:3");
+      expect(artifactSource).toContain("classNameByCache:{");
+      expect(artifactSource).not.toContain("cx:");
+      expect(artifactSource).not.toContain('"cx":');
+      expect(artifactSource).not.toContain("'cx':");
+    }
+    for (const instance of registrySession.instances) {
+      expect(Object.hasOwn(instance.presetArtifact, "cx")).toBe(false);
+    }
+  }
+
   function countV3PresetArtifacts(source: string): number {
     return Array.from(
       normalizeSource(source).matchAll(
@@ -685,6 +731,75 @@ if (import.meta.vitest) {
 
       expect(functionConfigResult.registrySession.instances).toHaveLength(0);
 
+      expect(getActiveDefineRulesRegistrySession()).toBe(undefined);
+    });
+
+    it("serializes owner-object defineRules css calls composed with returned cx", async () => {
+      const { source, registrySession, emittedCss } =
+        await processRegistryFixture(
+          `
+          import { defineRules } from "@mincho-js/css";
+
+          const owner = defineRules({
+            debugId: "owner-returned-cx",
+            properties: {
+              color: true
+            }
+          });
+          export const ownerClassName = owner.cx(owner.css({ color: "hotpink" }), "owner-external");
+          export const ownerPreset = owner.preset;
+        `,
+          "owner-returned-cx"
+        );
+      const [ownerInstance] = registrySession.instances;
+      const ownerClassNames = getRegistryInstanceClassNames(ownerInstance);
+
+      expect(registrySession.instances).toHaveLength(1);
+      expectSourceToContainV3PresetArtifact(source);
+      expectSerializedPresetArtifactsToOmitCx(source, registrySession);
+      expectRegistryInstancesToHaveClassNameByCache(registrySession);
+      expect(ownerClassNames).toHaveLength(1);
+      expect(source).toContain(
+        `ownerClassName = '${ownerClassNames[0]} owner-external'`
+      );
+      expect(source).toContain("owner-external");
+      expect(source).toContain(ownerClassNames[0]!);
+      expect(emittedCss).toMatch(/color:\s*hotpink/);
+      expect(getActiveDefineRulesRegistrySession()).toBe(undefined);
+    });
+
+    it("serializes destructured defineRules css calls composed with returned cx", async () => {
+      const { source, registrySession, emittedCss } =
+        await processRegistryFixture(
+          `
+          import { defineRules } from "@mincho-js/css";
+
+          const { css, cx, preset } = defineRules({
+            debugId: "destructured-returned-cx",
+            properties: {
+              display: true
+            }
+          });
+          export const destructuredClassName = cx(css({ display: "flex" }), "destructured-external");
+          export const destructuredPreset = preset;
+        `,
+          "destructured-returned-cx"
+        );
+      const [destructuredInstance] = registrySession.instances;
+      const destructuredClassNames =
+        getRegistryInstanceClassNames(destructuredInstance);
+
+      expect(registrySession.instances).toHaveLength(1);
+      expectSourceToContainV3PresetArtifact(source);
+      expectSerializedPresetArtifactsToOmitCx(source, registrySession);
+      expectRegistryInstancesToHaveClassNameByCache(registrySession);
+      expect(destructuredClassNames).toHaveLength(1);
+      expect(source).toContain(
+        `destructuredClassName = '${destructuredClassNames[0]} destructured-external'`
+      );
+      expect(source).toContain("destructured-external");
+      expect(source).toContain(destructuredClassNames[0]!);
+      expect(emittedCss).toMatch(/display:\s*flex/);
       expect(getActiveDefineRulesRegistrySession()).toBe(undefined);
     });
 

@@ -1,6 +1,6 @@
 import { defineRules } from "@mincho-js/css";
 
-export const { css, preset } = defineRules({
+export const { cx, css, preset } = defineRules({
   debugId: "sharedPreset",
   properties: {
     background: true,
@@ -11,10 +11,13 @@ export const { css, preset } = defineRules({
   }
 });
 
-export const sharedCardClassName = css({
-  background: "rebeccapurple",
-  color: "white",
-  padding: 16,
-  borderRadius: 12,
-  display: "block"
-});
+export const sharedCardClassName = cx(
+  css({
+    background: "rebeccapurple",
+    color: "white",
+    padding: 16,
+    borderRadius: 12,
+    display: "block"
+  }),
+  "shared-card"
+);

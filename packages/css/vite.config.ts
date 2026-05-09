@@ -18,6 +18,12 @@ export default (viteConfigEnv: ConfigEnv) => {
             "defineRules",
             "createDefineRulesCssRuntime.ts"
           ),
+          "defineRules/createDefineRulesCxRuntime": join(
+            packageDir,
+            "src",
+            "defineRules",
+            "createDefineRulesCxRuntime.ts"
+          ),
           "defineRules/registry": join(
             packageDir,
             "src",

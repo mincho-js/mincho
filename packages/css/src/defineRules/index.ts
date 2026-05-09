@@ -8,6 +8,7 @@ import {
 import type { Serializable } from "../rules/types.js";
 import { identifierName } from "../utils.js";
 import { createDefineRulesRuntime } from "./runtime.js";
+import { cx } from "../classname/cx.js";
 import type { DefineRulesRuntimeResult } from "./runtime.js";
 import type {
   DefineRulesCtx,
@@ -22,6 +23,9 @@ const DEFINE_RULES_SERIALIZED_CSS_FUNCTION_CONFIG_DIAGNOSTIC =
 const DEFINE_RULES_RUNTIME_IMPORT_PATH =
   "@mincho-js/css/defineRules/createDefineRulesCssRuntime";
 const DEFINE_RULES_RUNTIME_IMPORT_NAME = "createDefineRulesCssRuntime";
+const DEFINE_RULES_CX_RUNTIME_IMPORT_PATH =
+  "@mincho-js/css/defineRules/createDefineRulesCxRuntime";
+const DEFINE_RULES_CX_RUNTIME_IMPORT_NAME = "createDefineRulesCxRuntime";
 
 // == Define Rules =============================================================
 export function defineRules<
@@ -40,6 +44,7 @@ export function defineRules<
 
   return {
     ...result,
+    cx: addDefineRulesCxSerializer(result.cx),
     css: addFunctionSerializer(
       result.css,
       createDefineRulesSerializerRecipe(
@@ -48,6 +53,20 @@ export function defineRules<
       )
     ) as DefineRulesRuntimeResult<Properties, Shortcuts>["css"]
   };
+}
+
+function addDefineRulesCxSerializer<CxFunction extends object>(
+  cx: CxFunction
+): CxFunction {
+  if (Reflect.has(cx, "__recipe__")) {
+    return cx;
+  }
+
+  return addFunctionSerializer(cx, {
+    importPath: DEFINE_RULES_CX_RUNTIME_IMPORT_PATH,
+    importName: DEFINE_RULES_CX_RUNTIME_IMPORT_NAME,
+    args: []
+  });
 }
 
 function createDefineRulesSerializerRecipe(
@@ -134,30 +153,40 @@ if (import.meta.vitest) {
   type DefineRulesAuthoringShapeOwner = ReturnType<
     typeof createDefineRulesAuthoringShapeOwner
   >;
+  type DefineRulesAuthoringShapeBindings = Pick<
+    DefineRulesAuthoringShapeOwner,
+    "css" | "cx" | "preset"
+  >;
   type DefineRulesAuthoringShapeInput = Parameters<
     DefineRulesAuthoringShapeOwner["css"]
   >[0];
 
   function expectDefineRulesAuthoringShapeBindings(
-    bindings: Pick<DefineRulesAuthoringShapeOwner, "css" | "preset">
+    bindings: DefineRulesAuthoringShapeBindings
   ) {
     assertType<DefineRulesAuthoringShapeOwner["css"]>(bindings.css);
+    assertType<DefineRulesAuthoringShapeOwner["cx"]>(bindings.cx);
     assertType<DefineRulesPresetArtifactV3>(bindings.preset);
     assertType<DefineRulesAuthoringShapeInput>({
       color: "rebeccapurple",
       display: "flex"
     });
 
+    expect(bindings.cx).toBe(cx);
+    expect(bindings.cx.multiple).toBe(cx.multiple);
+    expect(bindings.cx.with).toBe(cx.with);
+
     expect(bindings.preset).toEqual({
       schema: "mincho.defineRulesPreset",
       version: 3,
-      classNameByCache: {}
+      classNameByCache: expect.any(Object)
     });
+    const className = bindings.css({ display: "flex" });
+
+    expect(bindings.cx(className, "external")).toBe(`${className} external`);
     expect(bindings.css.raw({ display: "flex" })).toEqual({
       display: "flex"
     });
-
-    const className = bindings.css({ display: "flex" });
 
     expect(Object.values(bindings.preset.classNameByCache)).toEqual([
       className
@@ -169,66 +198,84 @@ if (import.meta.vitest) {
       it("1. owner-object form: export const presetOwner = defineRules({...})", () => {
         const presetOwner =
           createDefineRulesAuthoringShapeOwner("ownerObjectShape");
+        const className = presetOwner.css({ display: "flex" });
 
         assertType<DefineRulesAuthoringShapeOwner>(presetOwner);
+        expect(presetOwner.cx(className, "external")).toBe(
+          `${className} external`
+        );
         expectDefineRulesAuthoringShapeBindings(presetOwner);
       });
 
-      it("2. direct destructuring form: export const { css, preset } = defineRules({...})", () => {
-        const { css, preset } = createDefineRulesAuthoringShapeOwner(
+      it("2. direct destructuring form: export const { css, cx, preset } = defineRules({...})", () => {
+        const { css, cx, preset } = createDefineRulesAuthoringShapeOwner(
           "directDestructuringShape"
         );
+        const className = css({ display: "flex" });
 
         assertType<DefineRulesAuthoringShapeOwner["css"]>(css);
+        assertType<DefineRulesAuthoringShapeOwner["cx"]>(cx);
         assertType<DefineRulesPresetArtifactV3>(preset);
-        expectDefineRulesAuthoringShapeBindings({ css, preset });
+        expect(cx(className, "external")).toBe(`${className} external`);
+        expectDefineRulesAuthoringShapeBindings({ css, cx, preset });
       });
 
-      it("3. aliased destructuring form: export const { css: sharedCss, preset: sharedPreset } = defineRules({...})", () => {
-        const { css: sharedCss, preset: sharedPreset } =
-          createDefineRulesAuthoringShapeOwner("aliasedDestructuringShape");
+      it("3. aliased destructuring form: export const { css: sharedCss, cx: compose, preset: sharedPreset } = defineRules({...})", () => {
+        const {
+          css: sharedCss,
+          cx: compose,
+          preset: sharedPreset
+        } = createDefineRulesAuthoringShapeOwner("aliasedDestructuringShape");
+        const className = sharedCss({ display: "flex" });
 
         assertType<DefineRulesAuthoringShapeOwner["css"]>(sharedCss);
+        assertType<DefineRulesAuthoringShapeOwner["cx"]>(compose);
         assertType<DefineRulesPresetArtifactV3>(sharedPreset);
+        expect(compose(className, "external")).toBe(`${className} external`);
         expectDefineRulesAuthoringShapeBindings({
           css: sharedCss,
+          cx: compose,
           preset: sharedPreset
         });
       });
 
-      it("4. owner-object member exports form: const presetOwner = defineRules({...}); export const css = presetOwner.css; export const preset = presetOwner.preset;", () => {
+      it("4. owner-object member exports form: const presetOwner = defineRules({...}); export const css = presetOwner.css; export const cx = presetOwner.cx; export const preset = presetOwner.preset;", () => {
         const presetOwner = createDefineRulesAuthoringShapeOwner(
           "ownerMemberExportsShape"
         );
         const css = presetOwner.css;
+        const compose = presetOwner.cx;
         const preset = presetOwner.preset;
 
         assertType<DefineRulesAuthoringShapeOwner["css"]>(css);
+        assertType<DefineRulesAuthoringShapeOwner["cx"]>(compose);
         assertType<DefineRulesPresetArtifactV3>(preset);
         expect(preset).toBe(presetOwner.preset);
-        expectDefineRulesAuthoringShapeBindings({ css, preset });
+        expectDefineRulesAuthoringShapeBindings({ css, cx: compose, preset });
       });
 
-      it("5. exported owner-object destructuring form: export const presetOwner = defineRules({...}); export const { css, preset } = presetOwner;", () => {
+      it("5. exported owner-object destructuring form: export const presetOwner = defineRules({...}); export const { css, cx, preset } = presetOwner;", () => {
         const presetOwner = createDefineRulesAuthoringShapeOwner(
           "exportedOwnerDestructuringShape"
         );
-        const { css, preset } = presetOwner;
+        const { css, cx: compose, preset } = presetOwner;
 
         assertType<DefineRulesAuthoringShapeOwner["css"]>(css);
+        assertType<DefineRulesAuthoringShapeOwner["cx"]>(compose);
         assertType<DefineRulesPresetArtifactV3>(preset);
         expect(preset).toBe(presetOwner.preset);
-        expectDefineRulesAuthoringShapeBindings({ css, preset });
+        expectDefineRulesAuthoringShapeBindings({ css, cx: compose, preset });
       });
 
-      it("6. local destructuring export-list form: const { css, preset } = defineRules({...}); export { css, preset };", () => {
-        const { css, preset } = createDefineRulesAuthoringShapeOwner(
+      it("6. local destructuring export-list form: const { css, cx, preset } = defineRules({...}); export { css, cx, preset };", () => {
+        const { css, cx, preset } = createDefineRulesAuthoringShapeOwner(
           "localDestructuringExportListShape"
         );
 
         assertType<DefineRulesAuthoringShapeOwner["css"]>(css);
+        assertType<DefineRulesAuthoringShapeOwner["cx"]>(cx);
         assertType<DefineRulesPresetArtifactV3>(preset);
-        expectDefineRulesAuthoringShapeBindings({ css, preset });
+        expectDefineRulesAuthoringShapeBindings({ css, cx, preset });
       });
 
       it("7. public defineRules signature accepts only config", () => {
@@ -238,6 +285,53 @@ if (import.meta.vitest) {
         };
 
         expect(assertRemovedPrivateArgument).toEqual(expect.any(Function));
+      });
+    });
+
+    describe.concurrent("DefineRules cx", () => {
+      it("preserves duplicate classes and input order", () => {
+        const owner = createDefineRulesAuthoringShapeOwner("cxNoMerge");
+
+        expect(owner.cx("a", "a")).toBe("a a");
+        expect(owner.cx("px-2", "px-4")).toBe("px-2 px-4");
+      });
+
+      it("filters falsy values like root cx", () => {
+        const owner = createDefineRulesAuthoringShapeOwner("cxFalsyFilter");
+
+        expect(owner.cx("a", false, undefined, null, "b")).toBe(
+          cx("a", false, undefined, null, "b")
+        );
+      });
+
+      it("matches root cx.multiple() output", () => {
+        const owner = createDefineRulesAuthoringShapeOwner("cxMultiple");
+        const result = owner.cx.multiple({ base: "a", active: ["a", "b"] });
+
+        expect(result).toEqual({ base: "a", active: "a b" });
+        expect(result).toEqual(cx.multiple({ base: "a", active: ["a", "b"] }));
+      });
+
+      it("supports typed constraints and runtime composition", () => {
+        type LayoutClass = "flex" | "grid" | "block";
+
+        const owner = createDefineRulesAuthoringShapeOwner("cxWith");
+        const constrained = owner.cx.with<LayoutClass>();
+
+        assertType<(...classNames: LayoutClass[]) => string>(constrained);
+        expect(constrained("flex", "grid")).toBe("flex grid");
+
+        const composed = owner.cx.with<{
+          base: string;
+          active?: string;
+        }>(({ base, active }) => [base, active && `active-${active}`]);
+
+        assertType<(params: { base: string; active?: string }) => string>(
+          composed
+        );
+        expect(composed({ base: "btn", active: "primary" })).toBe(
+          "btn active-primary"
+        );
       });
     });
 

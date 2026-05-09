@@ -73,6 +73,23 @@ export type ClassMultipleResult<T extends ClassMultipleInput> = {
   [K in keyof T]: string;
 };
 
+export interface CxWith<Input extends ClassValue> {
+  (...className: Input[]): string;
+  multiple<ClassNameMap extends Record<string, Input>>(
+    classNameMap: ClassNameMap
+  ): { [K in keyof ClassNameMap]: string };
+}
+
+export interface Cx {
+  (...inputs: ClassValue[]): string;
+  multiple<ClassNameMap extends Record<string, ClassValue>>(
+    map: ClassNameMap
+  ): { [K in keyof ClassNameMap]: string };
+  with<const Input extends ClassValue>(
+    callback?: (params: Input) => ClassValue
+  ): CxWith<Input>;
+}
+
 // == Tests ====================================================================
 // Ignore errors when compiling to CommonJS.
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
