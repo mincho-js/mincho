@@ -1,8 +1,20 @@
 import type {
   NonNullableString,
   CSSProperties,
+  CSSRule,
   CSSPropertiesWithVars
 } from "@mincho-js/transform-to-vanilla";
+import type {
+  DefineRulesConditionAliasKey,
+  DefineRulesConditions,
+  NormalizedCondition
+} from "./conditions.js";
+export type DefineRulesEmptyConditions = Record<never, never>;
+export type {
+  DefineRulesCondition,
+  DefineRulesConditionAliasKey,
+  DefineRulesConditions
+} from "./conditions.js";
 
 type CSSPropertiesKeys = keyof CSSProperties;
 
@@ -37,25 +49,50 @@ export type DefineRulesProperties =
 
 type ShortcutValue<
   Properties extends DefineRulesProperties,
-  Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts>,
-  ShortcutsKey extends keyof Shortcuts
+  Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts, Conditions>,
+  ShortcutsKey extends keyof Shortcuts,
+  Conditions extends DefineRulesConditions = DefineRulesEmptyConditions
 > =
   | keyof Properties
   | Exclude<keyof Shortcuts, ShortcutsKey>
   | ReadonlyArray<keyof Properties | Exclude<keyof Shortcuts, ShortcutsKey>>
-  | DefineRulesCssInput<Properties, Shortcuts>
-  | DefineRulesValueResolver<DefineRulesCssInput<Properties, Shortcuts>>;
+  | DefineRulesNestedCssInput<Properties, Shortcuts, Conditions>
+  | DefineRulesValueResolver<
+      DefineRulesNestedCssInput<Properties, Shortcuts, Conditions>
+    >;
 
 export type DefineRulesShortcuts<
   Properties extends DefineRulesProperties,
-  Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts>
+  Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts, Conditions>,
+  Conditions extends DefineRulesConditions = DefineRulesEmptyConditions
 > = {
   [ShortcutsKey in keyof Shortcuts]: ShortcutValue<
     Properties,
     Shortcuts,
-    ShortcutsKey
+    ShortcutsKey,
+    Conditions
   >;
 };
+
+export interface DefineRulesPresetCompiledKnownEntry {
+  kind: "known";
+  className: string;
+  writeKeyId: number;
+}
+
+export interface DefineRulesPresetCompiledUnknownEntry {
+  kind: "unknown";
+  className: string;
+}
+
+export type DefineRulesPresetCompiledEntry =
+  | DefineRulesPresetCompiledKnownEntry
+  | DefineRulesPresetCompiledUnknownEntry;
+
+export interface DefineRulesPresetCompiledSegment {
+  entries: DefineRulesPresetCompiledEntry[];
+  hasKnownAtomicClass: boolean;
+}
 
 export type DefineRulesPresetClassNameByCache = Record<string, string>;
 
@@ -65,8 +102,24 @@ export type DefineRulesPresetArtifactV3 = {
   classNameByCache: DefineRulesPresetClassNameByCache;
 };
 
+export interface DefineRulesPresetWriteKey {
+  conditionId: number;
+  propertyId: number;
+}
+
+export type DefineRulesPresetArtifactV4 = {
+  schema: "mincho.defineRulesPreset";
+  version: 4;
+  classNameByCache: DefineRulesPresetClassNameByCache;
+  writeKeyByCacheKey: Record<string, number>;
+  conditionById: Record<number, NormalizedCondition>;
+  propertyById: Record<number, string>;
+  writeKeyById: Record<number, DefineRulesPresetWriteKey>;
+};
+
 export type DefineRulesPresetInput =
   | DefineRulesPresetArtifactV3
+  | DefineRulesPresetArtifactV4
   | DefineRulesPresetClassNameByCache
   | readonly DefineRulesPresetInput[];
 
@@ -74,22 +127,47 @@ export type DefineRulesPresetMap = DefineRulesPresetClassNameByCache;
 
 export interface DefineRulesCss<CssInput> {
   (args: CssInput): string;
-  raw(args: CssInput): CSSProperties;
+  raw(args: CssInput): CSSRule;
 }
 
 export interface DefineRulesCtx<
   Properties extends DefineRulesProperties,
-  Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts>
+  Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts, Conditions>,
+  Conditions extends DefineRulesConditions = DefineRulesEmptyConditions
 > {
   debugId?: string;
   presets?: DefineRulesPresetInput;
+  conditions?: Conditions;
   properties?: Properties;
   shortcuts?: Shortcuts;
 }
 
-type PropertiesInput<Properties extends DefineRulesProperties> = {
-  [Key in keyof Properties]?: ResolvePropertiesValue<Key, Properties[Key]>;
+type PropertiesInput<
+  Properties extends DefineRulesProperties,
+  Conditions extends DefineRulesConditions
+> = {
+  [Key in keyof Properties]?: ResolveConditionableValue<
+    ResolvePropertiesValue<Key, Properties[Key]>,
+    Conditions
+  >;
 };
+
+type ResolveConditionableValue<
+  Value,
+  Conditions extends DefineRulesConditions
+> = Value | DefineRulesPropertyConditionInput<Value, Conditions>;
+
+type DefineRulesPropertyConditionInput<
+  Value,
+  Conditions extends DefineRulesConditions
+> = keyof Conditions extends never
+  ? never
+  : { base?: Value } & {
+      [Alias in DefineRulesConditionAliasKey<Conditions>]?: ResolveConditionableValue<
+        Value,
+        Conditions
+      >;
+    };
 
 type ResolvePropertiesValue<Key, Value> =
   Value extends ReadonlyArray<infer Item>
@@ -108,56 +186,89 @@ type ResolvePropertiesValue<Key, Value> =
 
 type ShortcutsInput<
   Properties extends Record<string, unknown>,
-  Shortcuts extends Record<string, unknown>
+  Shortcuts extends Record<string, unknown>,
+  Conditions extends DefineRulesConditions
 > = {
-  [Key in keyof Shortcuts]?: ResolveShortcutValue<
-    Properties,
-    Shortcuts,
-    Shortcuts[Key]
+  [Key in keyof Shortcuts]?: ResolveConditionableValue<
+    ResolveShortcutValue<Properties, Shortcuts, Conditions, Shortcuts[Key]>,
+    Conditions
   >;
 };
 
 type ResolveShortcutValue<
   Properties extends Record<string, unknown>,
   Shortcuts extends Record<string, unknown>,
+  Conditions extends DefineRulesConditions,
   Value
 > = Value extends readonly unknown[]
-  ? ResolveShortcutArrayRef<Properties, Shortcuts, Value>
+  ? ResolveShortcutArrayRef<Properties, Shortcuts, Conditions, Value>
   : Value extends (arg: infer Arg) => unknown
     ? Arg
     : Value extends Record<string, unknown>
       ? boolean
-      : ResolveShortcutRef<Properties, Shortcuts, Value>;
+      : ResolveShortcutRef<Properties, Shortcuts, Conditions, Value>;
 
 type ResolveShortcutArrayRef<
   Properties extends Record<string, unknown>,
   Shortcuts extends Record<string, unknown>,
+  Conditions extends DefineRulesConditions,
   Targets extends readonly unknown[]
 > = Targets extends readonly [infer H, ...infer R]
-  ? ResolveShortcutRef<Properties, Shortcuts, H> &
-      ResolveShortcutArrayRef<Properties, Shortcuts, R>
+  ? ResolveShortcutRef<Properties, Shortcuts, Conditions, H> &
+      ResolveShortcutArrayRef<Properties, Shortcuts, Conditions, R>
   : unknown;
 
 type ResolveShortcutRef<
   Properties extends Record<string, unknown>,
   Shortcuts extends Record<string, unknown>,
+  Conditions extends DefineRulesConditions,
   Ref
 > = [Ref] extends [keyof Properties]
   ? Properties[Ref]
   : [Ref] extends [keyof Shortcuts]
-    ? ShortcutsInput<Properties, Shortcuts>[Ref]
+    ? ShortcutsInput<Properties, Shortcuts, Conditions>[Ref]
     : never;
+
+type DefineRulesNestedConditionInput<
+  Properties extends DefineRulesProperties,
+  Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts, Conditions>,
+  Conditions extends DefineRulesConditions
+> = keyof Conditions extends never
+  ? DefineRulesEmptyConditions
+  : {
+      [Alias in DefineRulesConditionAliasKey<Conditions>]?: DefineRulesNestedCssInput<
+        Properties,
+        Shortcuts,
+        Conditions
+      >;
+    };
+
+type DefineRulesNestedCssInput<
+  Properties extends DefineRulesProperties,
+  Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts, Conditions>,
+  Conditions extends DefineRulesConditions
+> = DefineRulesCssInput<Properties, Shortcuts, Conditions> &
+  DefineRulesTransformNestedInput;
+
+type DefineRulesTransformNestedInput = Record<string, unknown>;
 
 export type DefineRulesCssInput<
   Properties extends DefineRulesProperties,
-  Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts>
-> = PropertiesInput<Properties> &
-  ShortcutsInput<PropertiesInput<Properties>, Shortcuts>;
+  Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts, Conditions>,
+  Conditions extends DefineRulesConditions = DefineRulesEmptyConditions
+> = PropertiesInput<Properties, Conditions> &
+  ShortcutsInput<
+    PropertiesInput<Properties, Conditions>,
+    Shortcuts,
+    Conditions
+  > &
+  DefineRulesNestedConditionInput<Properties, Shortcuts, Conditions>;
 
 export type DefineRulesInlineCssInput<
   Properties extends DefineRulesProperties,
-  Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts>,
-  CssInput = DefineRulesCssInput<Properties, Shortcuts>
+  Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts, Conditions>,
+  Conditions extends DefineRulesConditions = DefineRulesEmptyConditions,
+  CssInput = DefineRulesCssInput<Properties, Shortcuts, Conditions>
 > = keyof {
   [Key in keyof CssInput as boolean extends CssInput[Key]
     ? Key
@@ -166,13 +277,14 @@ export type DefineRulesInlineCssInput<
 
 export type DefineRulesComplexCssInput<
   Properties extends DefineRulesProperties,
-  Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts>
+  Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts, Conditions>,
+  Conditions extends DefineRulesConditions = DefineRulesEmptyConditions
 > =
-  | DefineRulesCssInput<Properties, Shortcuts>
-  | DefineRulesInlineCssInput<Properties, Shortcuts>
+  | DefineRulesCssInput<Properties, Shortcuts, Conditions>
+  | DefineRulesInlineCssInput<Properties, Shortcuts, Conditions>
   | Array<
-      | DefineRulesCssInput<Properties, Shortcuts>
-      | DefineRulesInlineCssInput<Properties, Shortcuts>
+      | DefineRulesCssInput<Properties, Shortcuts, Conditions>
+      | DefineRulesInlineCssInput<Properties, Shortcuts, Conditions>
     >;
 
 // == Tests ====================================================================
@@ -187,13 +299,20 @@ if (import.meta.vitest) {
   describe.concurrent("DefineRules Type Test", () => {
     function createDefineRulesTypeCase<
       const Properties extends DefineRulesProperties,
-      const Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts>
-    >(defineRulesCtx: DefineRulesCtx<Properties, Shortcuts>) {
+      const Shortcuts extends DefineRulesShortcuts<
+        Properties,
+        Shortcuts,
+        Conditions
+      >,
+      const Conditions extends DefineRulesConditions =
+        DefineRulesEmptyConditions
+    >(defineRulesCtx: DefineRulesCtx<Properties, Shortcuts, Conditions>) {
       return {
         defineRulesCtx,
         _cssInput: defineRulesCtx as unknown as DefineRulesComplexCssInput<
           Properties,
-          Shortcuts
+          Shortcuts,
+          Conditions
         >
       };
     }
@@ -399,31 +518,57 @@ if (import.meta.vitest) {
     });
 
     describe.concurrent("DefineRulesPresetInput Type", () => {
-      it("Accepts raw preset records", () => {
-        const { defineRulesCtx } = createDefineRulesTypeCase({
-          presets: {
-            colorRed: "color_red",
-            displayFlex: "display_flex"
-          },
-          properties: {
-            color: true
-          }
-        });
-
-        assertType<DefineRulesPresetInput | undefined>(defineRulesCtx.presets);
-      });
-
-      it("Accepts v3 preset artifacts and recursive arrays", () => {
-        const rawPreset: DefineRulesPresetClassNameByCache = {
-          colorRed: "color_red"
+      it("Accepts artifact-safe v4 metadata helper types", () => {
+        const knownEntry: DefineRulesPresetCompiledKnownEntry = {
+          kind: "known",
+          className: "color_red",
+          writeKeyId: 0
         };
-        const artifact: DefineRulesPresetArtifactV3 = {
+        const unknownEntry: DefineRulesPresetCompiledUnknownEntry = {
+          kind: "unknown",
+          className: "external"
+        };
+        const segment: DefineRulesPresetCompiledSegment = {
+          entries: [knownEntry, unknownEntry],
+          hasKnownAtomicClass: true
+        };
+        const writeKey: DefineRulesPresetWriteKey = {
+          conditionId: 0,
+          propertyId: 0
+        };
+        const artifact: DefineRulesPresetArtifactV4 = {
           schema: "mincho.defineRulesPreset",
-          version: 3,
-          classNameByCache: rawPreset
+          version: 4,
+          classNameByCache: {
+            colorRed: "color_red"
+          },
+          writeKeyByCacheKey: {
+            colorRed: 0
+          },
+          conditionById: {
+            0: {
+              layer: null,
+              supports: null,
+              media: null,
+              container: null,
+              selector: "&"
+            }
+          },
+          propertyById: {
+            0: "color"
+          },
+          writeKeyById: {
+            0: writeKey
+          }
         };
+
+        assertType<DefineRulesPresetCompiledEntry>(knownEntry);
+        assertType<DefineRulesPresetCompiledEntry>(unknownEntry);
+        assertType<DefineRulesPresetCompiledSegment>(segment);
+        assertType<DefineRulesPresetArtifactV4>(artifact);
+
         const { defineRulesCtx } = createDefineRulesTypeCase({
-          presets: [artifact, rawPreset, [artifact]],
+          presets: [artifact, [artifact]],
           properties: {
             color: true
           }
@@ -444,8 +589,122 @@ if (import.meta.vitest) {
           properties: {
             color: true
           },
-          // @ts-expect-error: presets accepts raw records, v3 artifacts, or arrays only.
+          // @ts-expect-error: presets accepts v4 artifacts or arrays only.
           presets: owner
+        });
+      });
+    });
+
+    describe.concurrent("DefineRulesConditions Type", () => {
+      it("accepts configured condition aliases in nested and property-level inputs", () => {
+        const { defineRulesCtx: _defineRulesCtx, _cssInput } =
+          createDefineRulesTypeCase({
+            conditions: {
+              mobile: {},
+              tablet: "@media screen and (min-width: 768px)",
+              desktop: {
+                "@media": "screen and (min-width: 1024px)"
+              },
+              interactive: {
+                selector: "&:hover",
+                "@supports": "(display: grid)"
+              }
+            },
+            properties: {
+              color: true,
+              display: ["none", "flex"],
+              fontSize: true
+            },
+            shortcuts: {
+              inline: {
+                display: "flex",
+                _tablet: {
+                  color: "blue"
+                }
+              }
+            }
+          });
+
+        assertType<"_mobile" | "_tablet" | "_desktop" | "_interactive">(
+          "" as DefineRulesConditionAliasKey<
+            NonNullable<typeof _defineRulesCtx.conditions>
+          >
+        );
+        assertType<typeof _cssInput>({
+          _mobile: {
+            color: "red",
+            _tablet: {
+              display: "flex"
+            },
+            "nav li > &": {
+              "@supports": {
+                "(display: grid)": {
+                  _hover: {
+                    fontSize: 12
+                  }
+                }
+              }
+            }
+          },
+          _desktop: {
+            display: "flex"
+          },
+          color: {
+            base: "black",
+            _tablet: "blue",
+            _interactive: {
+              _mobile: "green"
+            }
+          },
+          inline: true
+        });
+      });
+
+      it("rejects unconfigured condition aliases in nested and property-level inputs", () => {
+        const { _cssInput } = createDefineRulesTypeCase({
+          conditions: {
+            mobile: {}
+          },
+          properties: {
+            color: true
+          }
+        });
+
+        assertType<typeof _cssInput>({
+          // @ts-expect-error: _desktop is not configured.
+          _desktop: {
+            color: "red"
+          }
+        });
+        assertType<typeof _cssInput>({
+          color: {
+            base: "red",
+            _mobile: "blue"
+          }
+        });
+        assertType<typeof _cssInput>({
+          color: {
+            base: "red",
+            _mobile: {
+              _mobile: "blue"
+            }
+          }
+        });
+      });
+
+      it("rejects arbitrary nested condition config objects", () => {
+        createDefineRulesTypeCase({
+          conditions: {
+            mobile: {
+              // @ts-expect-error: condition config objects only support known condition keys.
+              nested: {
+                "@media": "screen and (min-width: 768px)"
+              }
+            }
+          },
+          properties: {
+            color: true
+          }
         });
       });
     });
@@ -656,6 +915,41 @@ if (import.meta.vitest) {
         assertType<typeof _cssInput>({
           // @ts-expect-error: invalid value
           center: "flex"
+        });
+      });
+
+      it("Function shortcut returns nested style objects", () => {
+        const { _cssInput } = createDefineRulesTypeCase({
+          properties: {
+            display: ["none", "inline", "block"],
+            paddingLeft: [0, 4, 8],
+            paddingRight: [0, 4, 8]
+          },
+          shortcuts: {
+            px: ["paddingLeft", "paddingRight"],
+            responsiveCenter(arg: "none" | "inline" | "block") {
+              return {
+                "@media": {
+                  "screen and (min-width: 768px)": {
+                    display: arg,
+                    px: 4
+                  }
+                },
+                "&:hover": {
+                  display: "block",
+                  px: 8
+                }
+              } as const;
+            }
+          }
+        });
+
+        assertType<typeof _cssInput>({
+          responsiveCenter: "inline"
+        });
+        assertType<typeof _cssInput>({
+          // @ts-expect-error: invalid value
+          responsiveCenter: "flex"
         });
       });
     });

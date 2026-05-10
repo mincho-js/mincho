@@ -12,6 +12,8 @@ import { cx } from "../classname/cx.js";
 import type { DefineRulesRuntimeResult } from "./runtime.js";
 import type {
   DefineRulesCtx,
+  DefineRulesConditions,
+  DefineRulesEmptyConditions,
   DefineRulesPresetArtifactV3,
   DefineRulesPresetInput,
   DefineRulesProperties,
@@ -30,14 +32,19 @@ const DEFINE_RULES_CX_RUNTIME_IMPORT_NAME = "createDefineRulesCxRuntime";
 // == Define Rules =============================================================
 export function defineRules<
   const Properties extends DefineRulesProperties,
-  const Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts>
+  const Shortcuts extends DefineRulesShortcuts<
+    Properties,
+    Shortcuts,
+    Conditions
+  >,
+  const Conditions extends DefineRulesConditions = DefineRulesEmptyConditions
 >(
-  config: DefineRulesCtx<Properties, Shortcuts>
-): DefineRulesRuntimeResult<Properties, Shortcuts> {
+  config: DefineRulesCtx<Properties, Shortcuts, Conditions>
+): DefineRulesRuntimeResult<Properties, Shortcuts, Conditions> {
   const functionValuedConfigPath =
     getFunctionValuedDefineRulesConfigPath(config);
-  const result: DefineRulesRuntimeResult<Properties, Shortcuts> =
-    createDefineRulesRuntime<Properties, Shortcuts>(config, {
+  const result: DefineRulesRuntimeResult<Properties, Shortcuts, Conditions> =
+    createDefineRulesRuntime<Properties, Shortcuts, Conditions>(config, {
       registerPreset: functionValuedConfigPath == null
     });
   const serializedConfig = { ...config, presets: result.preset };
@@ -51,7 +58,7 @@ export function defineRules<
         serializedConfig as Serializable,
         functionValuedConfigPath
       )
-    ) as DefineRulesRuntimeResult<Properties, Shortcuts>["css"]
+    ) as DefineRulesRuntimeResult<Properties, Shortcuts, Conditions>["css"]
   };
 }
 

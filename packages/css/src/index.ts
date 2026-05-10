@@ -63,6 +63,7 @@ export type { ClassValue, Cx } from "./classname/index.js";
 export { defineRules } from "./defineRules/index.js";
 export type {
   DefineRulesCtx,
+  DefineRulesEmptyConditions,
   DefineRulesProperties,
   DefineRulesShortcuts,
   DefineRulesPresetArtifactV3,

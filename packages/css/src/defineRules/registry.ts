@@ -6,11 +6,8 @@ import {
   setFileScope
 } from "@vanilla-extract/css/fileScope";
 import type {
-  DefineRulesCtx,
   DefineRulesPresetArtifactV3,
-  DefineRulesPresetMap,
-  DefineRulesProperties,
-  DefineRulesShortcuts
+  DefineRulesPresetMap
 } from "./types.js";
 
 interface NormalizedDefineRulesRegistryFileScope {
@@ -107,11 +104,8 @@ export function normalizeDefineRulesRegistryFileScope(
   };
 }
 
-export function registerDefineRulesRegistryInstance<
-  const Properties extends DefineRulesProperties,
-  const Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts>
->(metadata: {
-  config: DefineRulesCtx<Properties, Shortcuts>;
+export function registerDefineRulesRegistryInstance(metadata: {
+  config: unknown;
   presetArtifact: DefineRulesPresetArtifactV3;
   getPresetSnapshot(): DefineRulesPresetMap;
 }): DefineRulesRegistryInstance | undefined {

@@ -106,6 +106,7 @@
     "build": "yarn g:build",
     "build:watch": "yarn g:build-watch",
     "test": "yarn g:test",
+    "bench": "yarn run -T vitest bench",
     "test:watch": "yarn g:test-watch",
     "lint": "yarn g:lint",
     "fix": "yarn g:fix",

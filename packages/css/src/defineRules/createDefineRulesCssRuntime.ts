@@ -1,5 +1,7 @@
 import type {
+  DefineRulesConditions,
   DefineRulesCtx,
+  DefineRulesEmptyConditions,
   DefineRulesProperties,
   DefineRulesShortcuts
 } from "./types.js";
@@ -7,9 +9,14 @@ import { createDefineRulesRuntime } from "./runtime.js";
 
 export const createDefineRulesCssRuntime = <
   const Properties extends DefineRulesProperties,
-  const Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts>
+  const Shortcuts extends DefineRulesShortcuts<
+    Properties,
+    Shortcuts,
+    Conditions
+  >,
+  const Conditions extends DefineRulesConditions = DefineRulesEmptyConditions
 >(
-  config: DefineRulesCtx<Properties, Shortcuts>
+  config: DefineRulesCtx<Properties, Shortcuts, Conditions>
 ) => {
   return createDefineRulesRuntime(config, {
     preservePresetReference: true

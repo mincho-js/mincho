@@ -7,6 +7,8 @@ import type {
   DefineRulesCss,
   DefineRulesComplexCssInput,
   DefineRulesCtx,
+  DefineRulesConditions,
+  DefineRulesEmptyConditions,
   DefineRulesPresetArtifactV3,
   DefineRulesPresetClassNameByCache,
   DefineRulesPresetInput,
@@ -17,9 +19,12 @@ import type {
 
 export interface DefineRulesRuntimeResult<
   Properties extends DefineRulesProperties,
-  Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts>
+  Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts, Conditions>,
+  Conditions extends DefineRulesConditions = DefineRulesEmptyConditions
 > {
-  css: DefineRulesCss<DefineRulesComplexCssInput<Properties, Shortcuts>>;
+  css: DefineRulesCss<
+    DefineRulesComplexCssInput<Properties, Shortcuts, Conditions>
+  >;
   cx: Cx;
   preset: DefineRulesPresetArtifactV3;
 }
@@ -31,12 +36,17 @@ export interface DefineRulesRuntimeOptions {
 
 export function createDefineRulesRuntime<
   const Properties extends DefineRulesProperties,
-  const Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts>
+  const Shortcuts extends DefineRulesShortcuts<
+    Properties,
+    Shortcuts,
+    Conditions
+  >,
+  const Conditions extends DefineRulesConditions = DefineRulesEmptyConditions
 >(
-  config: DefineRulesCtx<Properties, Shortcuts>,
+  config: DefineRulesCtx<Properties, Shortcuts, Conditions>,
   options: DefineRulesRuntimeOptions = {}
-): DefineRulesRuntimeResult<Properties, Shortcuts> {
-  type CssInput = DefineRulesComplexCssInput<Properties, Shortcuts>;
+): DefineRulesRuntimeResult<Properties, Shortcuts, Conditions> {
+  type CssInput = DefineRulesComplexCssInput<Properties, Shortcuts, Conditions>;
   const presetArtifact = createDefineRulesPresetArtifact(
     config.presets,
     options?.preservePresetReference === true
@@ -56,7 +66,7 @@ export function createDefineRulesRuntime<
 
   function resolveToFragments(args: CssInput): ResolvedStyleFragment[] {
     const fragments: ResolvedStyleFragment[] = [];
-    applyInput(config, fragments, args, []);
+    applyInput(config as RuntimeDefineRulesCtx, fragments, args, []);
     return fragments;
   }
 
@@ -109,6 +119,11 @@ export function createDefineRulesRuntime<
 interface InputIdentity {
   property: string;
   value: unknown;
+}
+
+interface RuntimeDefineRulesCtx {
+  properties?: Record<string, unknown>;
+  shortcuts?: Record<string, unknown>;
 }
 
 interface ResolvedStyleFragment {
@@ -207,11 +222,8 @@ function pushResolvedFragment(
   });
 }
 
-function applyInput<
-  Properties extends DefineRulesProperties,
-  Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts>
->(
-  ctx: DefineRulesCtx<Properties, Shortcuts>,
+function applyInput(
+  ctx: RuntimeDefineRulesCtx,
   fragmentsOut: ResolvedStyleFragment[],
   input: unknown,
   shortcutStack: string[]
@@ -236,11 +248,8 @@ function applyInput<
   throw new Error(`Unsupported css() argument: ${String(input)}`);
 }
 
-function applyInlineShortcut<
-  Properties extends DefineRulesProperties,
-  Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts>
->(
-  ctx: DefineRulesCtx<Properties, Shortcuts>,
+function applyInlineShortcut(
+  ctx: RuntimeDefineRulesCtx,
   fragmentsOut: ResolvedStyleFragment[],
   shortcutName: string,
   shortcutStack: string[]
@@ -252,11 +261,8 @@ function applyInlineShortcut<
   throw new Error(`Unknown fixed style: "${shortcutName}"`);
 }
 
-function applyArray<
-  Properties extends DefineRulesProperties,
-  Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts>
->(
-  ctx: DefineRulesCtx<Properties, Shortcuts>,
+function applyArray(
+  ctx: RuntimeDefineRulesCtx,
   fragmentsOut: ResolvedStyleFragment[],
   arr: readonly unknown[],
   shortcutStack: string[]
@@ -266,11 +272,8 @@ function applyArray<
   }
 }
 
-function applyObject<
-  Properties extends DefineRulesProperties,
-  Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts>
->(
-  ctx: DefineRulesCtx<Properties, Shortcuts>,
+function applyObject(
+  ctx: RuntimeDefineRulesCtx,
   fragmentsOut: ResolvedStyleFragment[],
   obj: Record<string, unknown>,
   shortcutStack: string[]
@@ -280,11 +283,8 @@ function applyObject<
   }
 }
 
-function applyEntry<
-  Properties extends DefineRulesProperties,
-  Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts>
->(
-  ctx: DefineRulesCtx<Properties, Shortcuts>,
+function applyEntry(
+  ctx: RuntimeDefineRulesCtx,
   fragmentsOut: ResolvedStyleFragment[],
   key: string,
   value: unknown,
@@ -302,17 +302,14 @@ function applyEntry<
   applyProperty(ctx, fragmentsOut, key, value, shortcutStack);
 }
 
-function applyProperty<
-  Properties extends DefineRulesProperties,
-  Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts>
->(
-  ctx: DefineRulesCtx<Properties, Shortcuts>,
+function applyProperty(
+  ctx: RuntimeDefineRulesCtx,
   fragmentsOut: ResolvedStyleFragment[],
   prop: string,
   value: unknown,
   shortcutStack: string[]
 ) {
-  const propertyDefinition = ctx.properties?.[prop as keyof Properties];
+  const propertyDefinition = ctx.properties?.[prop];
 
   if (typeof propertyDefinition === "function") {
     const result = propertyDefinition(value);
@@ -374,11 +371,8 @@ function applyProperty<
   } as CSSProperties);
 }
 
-function applyShortcutReference<
-  Properties extends DefineRulesProperties,
-  Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts>
->(
-  ctx: DefineRulesCtx<Properties, Shortcuts>,
+function applyShortcutReference(
+  ctx: RuntimeDefineRulesCtx,
   fragmentsOut: ResolvedStyleFragment[],
   targetName: string,
   value: unknown,
@@ -392,11 +386,8 @@ function applyShortcutReference<
   applyProperty(ctx, fragmentsOut, targetName, value, shortcutStack);
 }
 
-function applyShortcut<
-  Properties extends DefineRulesProperties,
-  Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts>
->(
-  ctx: DefineRulesCtx<Properties, Shortcuts>,
+function applyShortcut(
+  ctx: RuntimeDefineRulesCtx,
   fragmentsOut: ResolvedStyleFragment[],
   name: string,
   value: unknown,
@@ -408,7 +399,7 @@ function applyShortcut<
     );
   }
 
-  const shortcutDefinition = ctx.shortcuts?.[name as keyof Shortcuts];
+  const shortcutDefinition = ctx.shortcuts?.[name];
   if (shortcutDefinition == null) return;
 
   const nextShortcutStack = shortcutStack.concat(name);
