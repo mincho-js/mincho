@@ -1,5 +1,13 @@
 export { transform } from "./transform.js";
 export {
+  collectStyleDeclarations,
+  type CollectStyleDeclarationsOptions,
+  type CollectedStyleDeclaration,
+  type ConditionAliasMap,
+  type ConditionAliasValue,
+  type NormalizedCondition
+} from "./transform-object/declaration-collection.js";
+export {
   initTransformContext,
   type TransformContext
 } from "./transform-object/index.js";

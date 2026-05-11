@@ -1,8 +1,13 @@
 export type {
+  CollectStyleDeclarationsOptions,
+  CollectedStyleDeclaration,
+  ConditionAliasMap,
+  ConditionAliasValue,
   CSSProperties,
   ComplexCSSRule,
   GlobalCSSRule,
-  CSSRule
+  CSSRule,
+  NormalizedCondition
 } from "@mincho-js/transform-to-vanilla";
 
 export type { Adapter, FileScope } from "@vanilla-extract/css";
@@ -62,13 +67,25 @@ export { cx } from "./classname/index.js";
 export type { ClassValue, Cx } from "./classname/index.js";
 export { defineRules } from "./defineRules/index.js";
 export type {
-  DefineRulesCtx,
-  DefineRulesEmptyConditions,
-  DefineRulesProperties,
-  DefineRulesShortcuts,
-  DefineRulesPresetArtifactV3,
-  DefineRulesPresetMap,
+  DefineRulesComplexCssInput,
+  DefineRulesCondition,
+  DefineRulesConditionAliasKey,
+  DefineRulesConditions,
   DefineRulesCss,
   DefineRulesCssInput,
-  DefineRulesComplexCssInput
+  DefineRulesCtx,
+  DefineRulesEmptyConditions,
+  DefineRulesInlineCssInput,
+  DefineRulesPresetArtifactV3,
+  DefineRulesPresetArtifactV4,
+  DefineRulesPresetCompiledEntry,
+  DefineRulesPresetCompiledKnownEntry,
+  DefineRulesPresetCompiledSegment,
+  DefineRulesPresetCompiledUnknownEntry,
+  DefineRulesPresetInput,
+  DefineRulesPresetMap,
+  DefineRulesPresetWriteKey,
+  DefineRulesProperties,
+  DefineRulesShortcuts
 } from "./defineRules/types.js";
+export type { DefineRulesConditionObject } from "./defineRules/conditions.js";

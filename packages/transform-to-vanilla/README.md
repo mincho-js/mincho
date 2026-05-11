@@ -49,3 +49,45 @@ const initTransformContext: TransformContext = {
   variantReference: {}
 };
 ```
+
+### collectStyleDeclarations()
+
+`collectStyleDeclarations()` walks a Mincho style object and returns source-order declarations instead of a Vanilla Extract object. Each entry contains the normalized condition tuple, the expanded property, and the raw value.
+
+```typescript
+import {
+  collectStyleDeclarations,
+  type CollectedStyleDeclaration,
+  type ConditionAliasMap,
+  type ConditionAliasValue,
+  type NormalizedCondition
+} from "@mincho-js/transform-to-vanilla";
+
+const conditions = {
+  _tablet: "screen and (min-width: 768px)",
+  _desktop: {
+    "@media": "screen and (min-width: 1024px)",
+    selector: "&[data-layout=wide]"
+  }
+} satisfies ConditionAliasMap;
+
+const declarations = collectStyleDeclarations(
+  {
+    color: {
+      base: "black",
+      _tablet: "blue"
+    },
+    _desktop: {
+      fontSize: 20
+    }
+  },
+  { conditions }
+) satisfies CollectedStyleDeclaration[];
+
+type DeclarationCondition = NormalizedCondition;
+type AliasValue = ConditionAliasValue;
+```
+
+`ConditionAliasMap` is keyed by underscore aliases, such as `_tablet`. A string `ConditionAliasValue` is a media condition. Object values may use `"@layer"`, `"@supports"`, `"@media"`, `"@container"`, and `selector`.
+
+The collector is meant for runtimes, build plugins, analyzers, and code generators that need declaration metadata before CSS emission. It is reusable and is not tied to one higher-level API.
