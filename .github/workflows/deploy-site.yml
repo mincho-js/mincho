@@ -20,12 +20,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
       - name: Setup
         uses: ./.github/actions/node-setup
         with:
           strict: false
+
       - name: Build site
         run: yarn workspace mincho-docs build
+
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
