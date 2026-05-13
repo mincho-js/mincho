@@ -1,7 +1,7 @@
 import type {
   DefineRulesConditions,
-  DefineRulesCtx,
   DefineRulesEmptyConditions,
+  DefineRulesCtx,
   DefineRulesProperties,
   DefineRulesShortcuts
 } from "./types.js";

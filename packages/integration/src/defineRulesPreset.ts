@@ -278,10 +278,22 @@ if (import.meta.vitest) {
           config,
           presetArtifact: {
             schema: "mincho.defineRulesPreset",
-            version: 3,
-            classNameByCache: {}
+            version: 4,
+            classNameByCache: {},
+            writeKeyByCacheKey: {},
+            conditionById: {},
+            propertyById: {},
+            writeKeyById: {}
           },
-          getPresetSnapshot: () => ({})
+          getPresetSnapshot: () => ({
+            schema: "mincho.defineRulesPreset",
+            version: 4,
+            classNameByCache: {},
+            writeKeyByCacheKey: {},
+            conditionById: {},
+            propertyById: {},
+            writeKeyById: {}
+          })
         }
       ],
       nextRegistrationIndex: 1,
@@ -390,14 +402,18 @@ if (import.meta.vitest) {
     }
   }
 
-  function expectSourceToContainV3PresetArtifact(source: string): void {
+  function expectSourceToContainV4PresetArtifact(source: string): void {
     const normalizedSource = normalizeSource(source);
 
     expect(normalizedSource).toMatch(
       /schema:["']mincho\.defineRulesPreset["']/
     );
-    expect(normalizedSource).toContain("version:3");
+    expect(normalizedSource).toContain("version:4");
     expect(normalizedSource).toContain("classNameByCache:{");
+    expect(normalizedSource).toContain("writeKeyByCacheKey:{");
+    expect(normalizedSource).toContain("conditionById:{");
+    expect(normalizedSource).toContain("propertyById:{");
+    expect(normalizedSource).toContain("writeKeyById:{");
   }
 
   function expectSerializedPresetArtifactsToOmitCx(
@@ -435,8 +451,12 @@ if (import.meta.vitest) {
         artifactEndIndex
       );
 
-      expect(artifactSource).toContain("version:3");
+      expect(artifactSource).toContain("version:4");
       expect(artifactSource).toContain("classNameByCache:{");
+      expect(artifactSource).toContain("writeKeyByCacheKey:{");
+      expect(artifactSource).toContain("conditionById:{");
+      expect(artifactSource).toContain("propertyById:{");
+      expect(artifactSource).toContain("writeKeyById:{");
       expect(artifactSource).not.toContain("cx:");
       expect(artifactSource).not.toContain('"cx":');
       expect(artifactSource).not.toContain("'cx':");
@@ -446,7 +466,7 @@ if (import.meta.vitest) {
     }
   }
 
-  function countV3PresetArtifacts(source: string): number {
+  function countV4PresetArtifacts(source: string): number {
     return Array.from(
       normalizeSource(source).matchAll(
         /schema:["']mincho\.defineRulesPreset["']/g
@@ -586,8 +606,12 @@ if (import.meta.vitest) {
         expect(normalizedSource).toMatch(
           /schema:["']mincho\.defineRulesPreset["']/
         );
-        expect(normalizedSource).toContain("version:3");
+        expect(normalizedSource).toContain("version:4");
         expect(normalizedSource).toContain("classNameByCache:{");
+        expect(normalizedSource).toContain("writeKeyByCacheKey:{");
+        expect(normalizedSource).toContain("conditionById:{");
+        expect(normalizedSource).toContain("propertyById:{");
+        expect(normalizedSource).toContain("writeKeyById:{");
         expectRegistryInstancesToHaveClassNameByCache(registrySession);
         expect(classNames.length).toBeGreaterThan(0);
         for (const className of classNames) {
@@ -598,7 +622,7 @@ if (import.meta.vitest) {
   });
 
   describe("defineRules preset registry wrapper", () => {
-    it("registry serializes live v3 preset artifacts from processed css calls", async () => {
+    it("registry serializes live v4 preset artifacts from processed css calls", async () => {
       const { source, registrySession, emittedCss } =
         await processRegistryFixture(
           `
@@ -627,15 +651,19 @@ if (import.meta.vitest) {
       expect(normalizedSource).toMatch(
         /schema:["']mincho\.defineRulesPreset["']/
       );
-      expect(normalizedSource).toContain("version:3");
+      expect(normalizedSource).toContain("version:4");
       expect(normalizedSource).toContain("classNameByCache:{");
+      expect(normalizedSource).toContain("writeKeyByCacheKey:{");
+      expect(normalizedSource).toContain("conditionById:{");
+      expect(normalizedSource).toContain("propertyById:{");
+      expect(normalizedSource).toContain("writeKeyById:{");
       expect(classNames).toHaveLength(1);
       expect(source).toContain(classNames[0]!);
       expect(emittedCss).toMatch(/color:\s*red/);
       expect(getActiveDefineRulesRegistrySession()).toBe(undefined);
     });
 
-    it("registry fixture validates v3 artifact extraction and consumer reuse", async () => {
+    it("registry fixture validates v4 artifact extraction and consumer reuse", async () => {
       const { source, registrySession } = await processRegistryFixture(
         `
           import { defineRules } from "@mincho-js/css";
@@ -679,7 +707,7 @@ if (import.meta.vitest) {
       );
 
       expect(registrySession.instances).toHaveLength(2);
-      expectSourceToContainV3PresetArtifact(source);
+      expectSourceToContainV4PresetArtifact(source);
       expectRegistryInstancesToHaveClassNameByCache(registrySession);
       const reusedClassName = providerClassNames.join(" ");
 
@@ -755,7 +783,7 @@ if (import.meta.vitest) {
       const ownerClassNames = getRegistryInstanceClassNames(ownerInstance);
 
       expect(registrySession.instances).toHaveLength(1);
-      expectSourceToContainV3PresetArtifact(source);
+      expectSourceToContainV4PresetArtifact(source);
       expectSerializedPresetArtifactsToOmitCx(source, registrySession);
       expectRegistryInstancesToHaveClassNameByCache(registrySession);
       expect(ownerClassNames).toHaveLength(1);
@@ -790,7 +818,7 @@ if (import.meta.vitest) {
         getRegistryInstanceClassNames(destructuredInstance);
 
       expect(registrySession.instances).toHaveLength(1);
-      expectSourceToContainV3PresetArtifact(source);
+      expectSourceToContainV4PresetArtifact(source);
       expectSerializedPresetArtifactsToOmitCx(source, registrySession);
       expectRegistryInstancesToHaveClassNameByCache(registrySession);
       expect(destructuredClassNames).toHaveLength(1);
@@ -914,10 +942,10 @@ if (import.meta.vitest) {
             secondResult.registrySession.instances[0]?.fileScope.filePath ?? ""
           )
         ).toBe(true);
-        expect(countV3PresetArtifacts(firstResult.source)).toBe(1);
-        expect(countV3PresetArtifacts(secondResult.source)).toBe(1);
-        expectSourceToContainV3PresetArtifact(firstResult.source);
-        expectSourceToContainV3PresetArtifact(secondResult.source);
+        expect(countV4PresetArtifacts(firstResult.source)).toBe(1);
+        expect(countV4PresetArtifacts(secondResult.source)).toBe(1);
+        expectSourceToContainV4PresetArtifact(firstResult.source);
+        expectSourceToContainV4PresetArtifact(secondResult.source);
         expectRegistryInstancesToHaveClassNameByCache(
           firstResult.registrySession
         );
@@ -989,7 +1017,7 @@ if (import.meta.vitest) {
         expectRegistryInstancesToHaveClassNameByCache(
           successfulResult.registrySession
         );
-        expectSourceToContainV3PresetArtifact(successfulResult.source);
+        expectSourceToContainV4PresetArtifact(successfulResult.source);
         expect(successfulResult.source).not.toContain(
           cleanupState.failedClassName
         );
@@ -1018,8 +1046,8 @@ if (import.meta.vitest) {
           (instance) => instance.registrationIndex
         )
       ).toEqual([0, 1]);
-      expect(countV3PresetArtifacts(firstResult.source)).toBe(2);
-      expectSourceToContainV3PresetArtifact(firstResult.source);
+      expect(countV4PresetArtifacts(firstResult.source)).toBe(2);
+      expectSourceToContainV4PresetArtifact(firstResult.source);
       expectRegistryInstancesToHaveClassNameByCache(
         firstResult.registrySession
       );
@@ -1038,8 +1066,8 @@ if (import.meta.vitest) {
 
       expect(secondResult.registrySession.instances).toHaveLength(1);
       expect(secondCurrentInstance?.registrationIndex).toBe(0);
-      expect(countV3PresetArtifacts(secondResult.source)).toBe(1);
-      expectSourceToContainV3PresetArtifact(secondResult.source);
+      expect(countV4PresetArtifacts(secondResult.source)).toBe(1);
+      expectSourceToContainV4PresetArtifact(secondResult.source);
       expectRegistryInstancesToHaveClassNameByCache(
         secondResult.registrySession
       );

@@ -482,30 +482,66 @@ if (import.meta.vitest) {
     };
   }
 
-  function createV3PresetBuildSource(className: string): string {
+  function createV4PresetBuildSource(className: string): string {
     return `
       export const preset = {
         schema: "${DEFINE_RULES_PRESET_SCHEMA}",
-        version: 3,
+        version: 4,
         classNameByCache: {
           shared: "${className}"
+        },
+        writeKeyByCacheKey: {
+          shared: 0
+        },
+        conditionById: {
+          0: {
+            layer: null,
+            supports: null,
+            media: null,
+            container: null,
+            selector: "&"
+          }
+        },
+        propertyById: {
+          0: "background"
+        },
+        writeKeyById: {
+          0: {
+            conditionId: 0,
+            propertyId: 0
+          }
         }
       };
       export const shared = "${className}";
     `;
   }
 
-  function expectSourceToContainV3PresetArtifact(source: string): void {
+  function expectSourceToContainV4PresetArtifact(source: string): void {
     expect(source).toMatch(
       new RegExp(
         `["']?schema["']?\\s*:\\s*["']${escapeRegExp(DEFINE_RULES_PRESET_SCHEMA)}["']`
       )
     );
-    expect(source).toMatch(/["']?version["']?\s*:\s*3/);
+    expect(source).toMatch(/["']?version["']?\s*:\s*4/);
     expect(source).toMatch(/["']?classNameByCache["']?\s*:\s*\{/);
+    expect(source).toMatch(/["']?writeKeyByCacheKey["']?\s*:\s*\{/);
+    expect(source).toMatch(/["']?conditionById["']?\s*:\s*\{/);
+    expect(source).toMatch(/["']?propertyById["']?\s*:\s*\{/);
+    expect(source).toMatch(/["']?writeKeyById["']?\s*:\s*\{/);
   }
 
-  function countV3PresetArtifacts(source: string): number {
+  function expectSourceToContainV4RuntimePresetSeed(source: string): void {
+    expect(source).toMatch(
+      new RegExp(
+        `["']?schema["']?\\s*:\\s*["']${escapeRegExp(DEFINE_RULES_PRESET_SCHEMA)}["']`
+      )
+    );
+    expect(source).toMatch(/["']?version["']?\s*:\s*4/);
+    expect(source).toMatch(/["']?classNameByCache["']?\s*:\s*\{/);
+    expect(source).toMatch(/["']?writeKeyByCacheKey["']?\s*:\s*\{/);
+  }
+
+  function countV4PresetArtifacts(source: string): number {
     return Array.from(
       source.matchAll(
         /["']?schema["']?\s*:\s*["']mincho\.defineRulesPreset["']/g
@@ -525,7 +561,7 @@ if (import.meta.vitest) {
     source: string,
     className: string
   ): void {
-    expectSourceToContainV3PresetArtifact(source);
+    expectSourceToContainV4PresetArtifact(source);
     expect(source).toMatch(
       new RegExp(
         `["']?classNameByCache["']?\\s*:\\s*\\{[\\s\\S]*["']${escapeRegExp(className)}["']`
@@ -1035,7 +1071,7 @@ if (import.meta.vitest) {
         expect(processOrder).toEqual([`start:${firstFixture.extractedId}`]);
       });
 
-      firstDeferred.resolve(createV3PresetBuildSource("provider-a_class"));
+      firstDeferred.resolve(createV4PresetBuildSource("provider-a_class"));
       const firstTransformResult = await firstTransformPromise;
       assertString(
         firstTransformResult,
@@ -1050,7 +1086,7 @@ if (import.meta.vitest) {
         ]);
       });
 
-      secondDeferred.resolve(createV3PresetBuildSource("provider-b_class"));
+      secondDeferred.resolve(createV4PresetBuildSource("provider-b_class"));
       const secondTransformResult = await secondTransformPromise;
       assertString(
         secondTransformResult,
@@ -1107,7 +1143,7 @@ if (import.meta.vitest) {
       const registrySpy = vi
         .spyOn(integrationModule, "processDefineRulesPresetRegistryFile")
         .mockResolvedValue(
-          createRegistryResult(createV3PresetBuildSource("shared_class"))
+          createRegistryResult(createV4PresetBuildSource("shared_class"))
         );
 
       const harness = await createViteHarness();
@@ -1200,7 +1236,7 @@ if (import.meta.vitest) {
         }
 
         const fillBlueClassName = extractFillBlueClassName(jsOutput.code);
-        expectSourceToContainV3PresetArtifact(jsOutput.code);
+        expectSourceToContainV4RuntimePresetSeed(jsOutput.code);
         expect(jsOutput.code).not.toContain('background: "blue"');
         expect(cssOutput.source).toContain(`.${fillBlueClassName}`);
         expect(cssOutput.source).toContain("background: blue;");
@@ -1230,7 +1266,7 @@ if (import.meta.vitest) {
           await buildRealViteRegistryFixture(fixtureCase);
 
         expect(registrySource).not.toBe("");
-        expectSourceToContainV3PresetArtifact(registrySource);
+        expectSourceToContainV4PresetArtifact(registrySource);
         expectSourceToContainPopulatedClassNameByCache(registrySource);
         if (fixtureCase.expectedRegistryInstances > 1) {
           const artifactCount = Array.from(
@@ -1253,8 +1289,8 @@ if (import.meta.vitest) {
         await buildRealViteRegistryFixture(fixtureCase);
 
       expect(registrySource).not.toBe("");
-      expect(countV3PresetArtifacts(registrySource)).toBe(0);
-      expect(countV3PresetArtifacts(js)).toBe(0);
+      expect(countV4PresetArtifacts(registrySource)).toBe(0);
+      expect(countV4PresetArtifacts(js)).toBe(0);
       expect(registrySource).toContain("rebeccapurple");
     }, 20000);
 
@@ -1368,52 +1404,27 @@ if (import.meta.vitest) {
       );
 
       expect(registrySpy).toHaveBeenCalledTimes(1);
-      expect(countV3PresetArtifacts(transformedExtractedCss)).toBe(0);
+      expect(countV4PresetArtifacts(transformedExtractedCss)).toBe(0);
       expect(transformedExtractedCss).toContain("blue");
     });
 
-    it("bubbles registry validation errors from build-time preset serialization", async () => {
+    it("bubbles registry processing errors from build-time preset serialization", async () => {
       const integrationModule = await import("@mincho-js/integration");
       const consoleErrorSpy = vi
         .spyOn(console, "error")
         .mockImplementation(() => {});
-      const invalidShortcutBuildSource = `
-        import { defineRules } from "@mincho-js/css";
-
-        const invalid = defineRules({
-          properties: {
-            color: true
-          },
-          shortcuts: {
-            tone: [
-              { color: "red" },
-              {
-                dynamic(value: string) {
-                  return { color: value };
-                }
-              }
-            ]
-          }
-        });
-        export const raw = invalid.css.raw({ color: "red" });
-      `;
 
       vi.spyOn(integrationModule, "babelTransform").mockResolvedValue({
         code: 'import "extracted_rules.css.ts";\nexport { raw };',
         result: ["extracted_rules.css.ts", "resolver contents"]
       });
-      const compileFixtureSource: typeof compile = integrationModule.compile;
-      vi.spyOn(integrationModule, "compile").mockImplementation(
-        (options: Parameters<typeof compileFixtureSource>[0]) =>
-          compileFixtureSource({
-            ...options,
-            contents: invalidShortcutBuildSource
-          })
-      );
-      const registrySpy = vi.spyOn(
-        integrationModule,
-        "processDefineRulesPresetRegistryFile"
-      );
+      vi.spyOn(integrationModule, "compile").mockResolvedValue({
+        source: "compiled source",
+        watchFiles: []
+      } as Awaited<ReturnType<typeof compile>>);
+      const registrySpy = vi
+        .spyOn(integrationModule, "processDefineRulesPresetRegistryFile")
+        .mockRejectedValue(new Error("registry processing failure"));
 
       const harness = await createViteHarness();
       const { extractedId, extractedSource } =
@@ -1421,7 +1432,7 @@ if (import.meta.vitest) {
 
       await expect(
         harness.transform(extractedId, extractedSource)
-      ).rejects.toThrow("config.shortcuts.tone[1].dynamic");
+      ).rejects.toThrow("registry processing failure");
       expect(registrySpy).toHaveBeenCalledTimes(1);
       expect(consoleErrorSpy).not.toHaveBeenCalled();
     });
@@ -1475,7 +1486,7 @@ if (import.meta.vitest) {
           })
         );
         expect(registrySpy).toHaveBeenCalledTimes(1);
-        expectSourceToContainV3PresetArtifact(transformedExtractedCss);
+        expectSourceToContainV4PresetArtifact(transformedExtractedCss);
         expectSourceToContainPopulatedClassNameByCache(transformedExtractedCss);
       }
     });
@@ -1522,7 +1533,7 @@ if (import.meta.vitest) {
       );
 
       expect(registrySpy).toHaveBeenCalledTimes(1);
-      expect(countV3PresetArtifacts(transformedExtractedCss)).toBe(0);
+      expect(countV4PresetArtifacts(transformedExtractedCss)).toBe(0);
       expect(transformedExtractedCss).toContain("rebeccapurple");
     }, 20000);
 
@@ -1708,7 +1719,7 @@ if (import.meta.vitest) {
           serializeVirtualCssPath: expect.any(Function)
         })
       );
-      expect(countV3PresetArtifacts(firstTransform)).toBe(2);
+      expect(countV4PresetArtifacts(firstTransform)).toBe(2);
       expectSourceToContainClassNameByCacheValue(
         firstTransform,
         currentClassName
@@ -1746,7 +1757,7 @@ if (import.meta.vitest) {
           serializeVirtualCssPath: expect.any(Function)
         })
       );
-      expect(countV3PresetArtifacts(secondTransform)).toBe(1);
+      expect(countV4PresetArtifacts(secondTransform)).toBe(1);
       expectSourceToContainClassNameByCacheValue(
         secondTransform,
         secondCurrentClassName

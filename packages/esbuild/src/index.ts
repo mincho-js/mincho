@@ -399,30 +399,55 @@ if (import.meta.vitest) {
     };
   }
 
-  function createV3PresetBuildSource(className: string): string {
+  function createV4PresetBuildSource(className: string): string {
     return `
       export const preset = {
         schema: "${DEFINE_RULES_PRESET_SCHEMA}",
-        version: 3,
+        version: 4,
         classNameByCache: {
           shared: "${className}"
+        },
+        writeKeyByCacheKey: {
+          shared: 0
+        },
+        conditionById: {
+          0: {
+            layer: null,
+            supports: null,
+            media: null,
+            container: null,
+            selector: "&"
+          }
+        },
+        propertyById: {
+          0: "background"
+        },
+        writeKeyById: {
+          0: {
+            conditionId: 0,
+            propertyId: 0
+          }
         }
       };
       export const shared = "${className}";
     `;
   }
 
-  function expectSourceToContainV3PresetArtifact(source: string): void {
+  function expectSourceToContainV4PresetArtifact(source: string): void {
     expect(source).toMatch(
       new RegExp(
         `["']?schema["']?\\s*:\\s*["']${escapeRegExp(DEFINE_RULES_PRESET_SCHEMA)}["']`
       )
     );
-    expect(source).toMatch(/["']?version["']?\s*:\s*3/);
+    expect(source).toMatch(/["']?version["']?\s*:\s*4/);
     expect(source).toMatch(/["']?classNameByCache["']?\s*:\s*\{/);
+    expect(source).toMatch(/["']?writeKeyByCacheKey["']?\s*:\s*\{/);
+    expect(source).toMatch(/["']?conditionById["']?\s*:\s*\{/);
+    expect(source).toMatch(/["']?propertyById["']?\s*:\s*\{/);
+    expect(source).toMatch(/["']?writeKeyById["']?\s*:\s*\{/);
   }
 
-  function countV3PresetArtifacts(source: string): number {
+  function countV4PresetArtifacts(source: string): number {
     return Array.from(
       source.matchAll(
         /["']?schema["']?\s*:\s*["']mincho\.defineRulesPreset["']/g
@@ -442,7 +467,7 @@ if (import.meta.vitest) {
     source: string,
     className: string
   ): void {
-    expectSourceToContainV3PresetArtifact(source);
+    expectSourceToContainV4PresetArtifact(source);
     expect(source).toMatch(
       new RegExp(
         `["']?classNameByCache["']?\\s*:\\s*\\{[\\s\\S]*["']${escapeRegExp(className)}["']`
@@ -899,7 +924,7 @@ if (import.meta.vitest) {
           await buildRealEsbuildRegistryFixture(fixtureCase);
 
         expect(registrySource).not.toBe("");
-        expectSourceToContainV3PresetArtifact(registrySource);
+        expectSourceToContainV4PresetArtifact(registrySource);
         expectSourceToContainPopulatedClassNameByCache(registrySource);
         if (fixtureCase.expectedRegistryInstances > 1) {
           const artifactCount = Array.from(
@@ -922,8 +947,8 @@ if (import.meta.vitest) {
         await buildRealEsbuildRegistryFixture(fixtureCase);
 
       expect(registrySource).not.toBe("");
-      expect(countV3PresetArtifacts(registrySource)).toBe(0);
-      expect(countV3PresetArtifacts(js)).toBe(0);
+      expect(countV4PresetArtifacts(registrySource)).toBe(0);
+      expect(countV4PresetArtifacts(js)).toBe(0);
       expect(registrySource).toContain("rebeccapurple");
     });
 
@@ -1038,7 +1063,7 @@ if (import.meta.vitest) {
 
       expect(registrySpy).toHaveBeenCalledTimes(1);
       expect(loadResult.loader).toBe("js");
-      expect(countV3PresetArtifacts(loadResult.contents)).toBe(0);
+      expect(countV4PresetArtifacts(loadResult.contents)).toBe(0);
       expect(loadResult.contents).toContain("blue");
     });
 
@@ -1057,7 +1082,7 @@ if (import.meta.vitest) {
       const registrySpy = vi
         .spyOn(integrationHelpers, "processDefineRulesPresetRegistryFile")
         .mockResolvedValue(
-          createRegistryResult(createV3PresetBuildSource("shared_class"))
+          createRegistryResult(createV4PresetBuildSource("shared_class"))
         );
 
       const harness = createBuildHarness();
@@ -1099,7 +1124,7 @@ if (import.meta.vitest) {
       const registrySpy = vi
         .spyOn(integrationHelpers, "processDefineRulesPresetRegistryFile")
         .mockResolvedValue(
-          createRegistryResult(createV3PresetBuildSource("short_class"))
+          createRegistryResult(createV4PresetBuildSource("short_class"))
         );
 
       const harness = createBuildHarness({ minify: true });
@@ -1162,7 +1187,7 @@ if (import.meta.vitest) {
         expect(registrySpy).toHaveBeenCalledTimes(1);
         expect(loadResult.loader).toBe("js");
         expect(loadResult.resolveDir).toBe(dirname(resolveResult.path));
-        expectSourceToContainV3PresetArtifact(loadResult.contents);
+        expectSourceToContainV4PresetArtifact(loadResult.contents);
         expectSourceToContainPopulatedClassNameByCache(loadResult.contents);
       }
     });
@@ -1215,7 +1240,7 @@ if (import.meta.vitest) {
 
       expect(registrySpy).toHaveBeenCalledTimes(1);
       expect(loadResult.loader).toBe("js");
-      expect(countV3PresetArtifacts(loadResult.contents)).toBe(0);
+      expect(countV4PresetArtifacts(loadResult.contents)).toBe(0);
       expect(loadResult.contents).toContain("rebeccapurple");
     }, 20000);
 
@@ -1417,7 +1442,7 @@ if (import.meta.vitest) {
         ]);
       });
 
-      firstDeferred.resolve(createV3PresetBuildSource("provider-a_class"));
+      firstDeferred.resolve(createV4PresetBuildSource("provider-a_class"));
       const firstLoadResult = await firstLoadPromise;
 
       await vi.waitFor(() => {
@@ -1428,7 +1453,7 @@ if (import.meta.vitest) {
         ]);
       });
 
-      secondDeferred.resolve(createV3PresetBuildSource("provider-b_class"));
+      secondDeferred.resolve(createV4PresetBuildSource("provider-b_class"));
       const secondLoadResult = await secondLoadPromise;
 
       expect(processOrder).toEqual([
