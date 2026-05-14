@@ -2,7 +2,7 @@ import type { CSSRule } from "@mincho-js/transform-to-vanilla";
 import { setFileScope } from "@vanilla-extract/css/fileScope";
 import hash from "@emotion/hash";
 import { css } from "../css/index.js";
-import { identifierName } from "../utils.js";
+import { identifierName, isUnSafeObjectKey } from "../utils.js";
 
 type CanonicalNode =
   | ["null"]
@@ -172,6 +172,10 @@ export function createCanonicalStyleCache(debugId?: string) {
 
   function importSnapshot(entries: Record<string, string>): void {
     for (const [cacheKey, className] of Object.entries(entries)) {
+      if (isUnSafeObjectKey(cacheKey)) {
+        continue;
+      }
+
       fragmentCacheKeys.add(cacheKey);
 
       if (!hasCacheKey(cacheKey)) {
@@ -473,6 +477,24 @@ if (import.meta.vitest) {
 
       expect(cache.exportSnapshot()).toEqual(seededSnapshot);
       expect(cache.size).toBe(2);
+    });
+
+    it("should ignore unsafe object keys when importing fragment snapshots", () => {
+      const cache = createCanonicalStyleCache(debugId);
+      const snapshot: Record<string, string> = {
+        constructor: "unsafe-constructor",
+        prototype: "unsafe-prototype"
+      };
+
+      Object.defineProperty(snapshot, "__proto__", {
+        value: "unsafe-proto",
+        enumerable: true
+      });
+
+      cache.importSnapshot(snapshot);
+
+      expect(cache.exportSnapshot()).toEqual({});
+      expect(cache.size).toBe(0);
     });
 
     it("should reuse seeded fragment entries without overwriting imported class names", () => {

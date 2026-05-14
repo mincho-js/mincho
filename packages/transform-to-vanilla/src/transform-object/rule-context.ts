@@ -1,7 +1,7 @@
 import { setFileScope } from "@vanilla-extract/css/fileScope";
 import { isRuleKey, atRuleKeyMerge } from "../transform-keys/at-rules.js";
 import { initTransformContext } from "./index.js";
-import { mergeObject } from "../utils/object.js";
+import { isUnSafeObjectKey, mergeObject } from "../utils/object.js";
 import type { StyleResult, AtRulesPrefix, TransformContext } from "./index.js";
 import type { VanillaStyleRuleValue } from "../types/style-rule.js";
 
@@ -47,22 +47,22 @@ export function createPathSetter(
   const variantResult: StyleResult = {};
   return (key: string, value: VanillaStyleRuleValue) => {
     let current = isVariantReference ? variantResult : result;
-    // Prevent  Prototype-polluting assignment
-    // https://codeql.github.com/codeql-query-help/javascript/js-prototype-polluting-assignment/
     for (const path of nestedPath) {
-      if (
-        path !== "__proto__" &&
-        path !== "constructor" &&
-        path !== "prototype" &&
-        current[path] === undefined
-      ) {
+      if (isUnSafeObjectKey(path)) {
+        return;
+      }
+
+      if (current[path] === undefined) {
         current[path] = {};
       }
       current = (current[path] as StyleResult) || ({} as StyleResult);
     }
-    if (key !== "__proto__" && key !== "constructor" && key !== "prototype") {
-      current[key] = value;
+
+    if (isUnSafeObjectKey(key)) {
+      return;
     }
+
+    current[key] = value;
 
     if (isVariantReference) {
       context.variantReference = mergeObject(context.variantReference, {
@@ -227,6 +227,61 @@ if (import.meta.vitest) {
           "nav li > &": { color: "red" }
         }
       });
+    });
+
+    it("should skip unsafe object keys", () => {
+      const context: TransformContext = {
+        ...structuredClone(initTransformContext),
+        parentSelector: "",
+        parentAtRules: {
+          "@layer": "",
+          "@supports": "",
+          "@media": "",
+          "@container": ""
+        }
+      };
+      const target: StyleResult = { color: "red" };
+
+      Object.defineProperty(target, "__proto__", {
+        value: { minchoPrototypePolluted: true },
+        enumerable: true
+      });
+      Object.defineProperty(target, "constructor", {
+        value: { minchoPrototypePolluted: true },
+        enumerable: true
+      });
+      Object.defineProperty(target, "prototype", {
+        value: { minchoPrototypePolluted: true },
+        enumerable: true
+      });
+
+      expect(createNestedObject(context, target)).toStrictEqual({
+        color: "red"
+      });
+    });
+
+    it("should stop before traversing unsafe path segments", () => {
+      const objectPrototype = Object.prototype as Record<string, unknown>;
+      const context: TransformContext = {
+        ...structuredClone(initTransformContext),
+        parentSelector: "__proto__",
+        parentAtRules: {
+          "@layer": "",
+          "@supports": "",
+          "@media": "",
+          "@container": ""
+        }
+      };
+      const target: StyleResult = { minchoPrototypePolluted: "true" };
+
+      try {
+        expect(createNestedObject(context, target)).toStrictEqual({
+          selectors: {}
+        });
+        expect(objectPrototype.minchoPrototypePolluted).toBe(undefined);
+      } finally {
+        delete objectPrototype.minchoPrototypePolluted;
+      }
     });
 
     it("should handle parentSelector", () => {

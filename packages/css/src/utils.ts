@@ -14,6 +14,12 @@ export function getDebugName(debugId: string | undefined, name: string) {
   return debugId ? `${debugId}_${name}` : name;
 }
 
+// Prevent prototype-polluting assignment.
+// https://codeql.github.com/codeql-query-help/javascript/js-prototype-polluting-assignment/
+export function isUnSafeObjectKey(key: string): boolean {
+  return key === "__proto__" || key === "constructor" || key === "prototype";
+}
+
 // Optimized version
 // https://github.com/vanilla-extract-css/vanilla-extract/blob/master/packages/private/src/getVarName.ts
 const VAR_PREFIX_LENGTH = "var(".length;

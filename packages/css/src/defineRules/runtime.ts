@@ -16,6 +16,7 @@ import type {
   ClassValue
 } from "../classname/types.js";
 import type { Cx } from "../classname/index.js";
+import { isUnSafeObjectKey } from "../utils.js";
 import { registerDefineRulesRegistryInstance } from "./registry.js";
 import { normalizeDefineRulesConditions } from "./conditions.js";
 import { createCanonicalStyleCache } from "./utils.js";
@@ -357,6 +358,10 @@ function mergeStyleInto(
   source: Record<string, unknown>
 ): void {
   for (const [key, value] of Object.entries(source)) {
+    if (isUnSafeObjectKey(key)) {
+      continue;
+    }
+
     const previous = target[key];
 
     if (isPlainObject(previous) && isPlainObject(value)) {
@@ -924,6 +929,43 @@ if (import.meta.vitest) {
   }
 
   describe("defineRules runtime presets", () => {
+    it("skips unsafe object keys while merging style fragments", () => {
+      const objectPrototype = Object.prototype as Record<string, unknown>;
+      const source: Record<string, unknown> = { color: "red" };
+      const target: Record<string, unknown> = {};
+
+      Object.defineProperty(source, "__proto__", {
+        value: { minchoPrototypePolluted: true },
+        enumerable: true
+      });
+      Object.defineProperty(source, "constructor", {
+        value: { minchoPrototypePolluted: true },
+        enumerable: true
+      });
+      Object.defineProperty(source, "prototype", {
+        value: { minchoPrototypePolluted: true },
+        enumerable: true
+      });
+
+      try {
+        mergeStyleInto(target, source);
+
+        expect(target).toEqual({ color: "red" });
+        expect(Object.prototype.hasOwnProperty.call(target, "__proto__")).toBe(
+          false
+        );
+        expect(
+          Object.prototype.hasOwnProperty.call(target, "constructor")
+        ).toBe(false);
+        expect(Object.prototype.hasOwnProperty.call(target, "prototype")).toBe(
+          false
+        );
+        expect(objectPrototype.minchoPrototypePolluted).toBe(undefined);
+      } finally {
+        delete objectPrototype.minchoPrototypePolluted;
+      }
+    });
+
     it("exports v4 artifacts with metadata maps and no runtime-only state", () => {
       setFileScope("runtime-v4.css.ts", "pkg");
       const runtime = createDefineRulesRuntime({
