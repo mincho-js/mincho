@@ -7,7 +7,7 @@ import {
 import { processVanillaFile } from "@vanilla-extract/integration";
 
 const DEFINE_RULES_REGISTRY_SERIALIZABLE_CONFIG_DIAGNOSTIC =
-  "defineRules registry serialization does not support function-valued properties or shortcuts";
+  "defineRules registry serialization does not support function-valued conditions, properties, or shortcuts";
 
 type Awaitable<Value> = Value | PromiseLike<Value>;
 
@@ -65,6 +65,11 @@ export function validateDefineRulesRegistrySession(
     };
 
     validateSerializableConfigEntry(
+      getConfigEntry(instance.config, "conditions"),
+      "config.conditions",
+      diagnosticContext
+    );
+    validateSerializableConfigEntry(
       getConfigEntry(instance.config, "properties"),
       "config.properties",
       diagnosticContext
@@ -92,7 +97,7 @@ function formatDefineRulesRegistryDiagnosticContext(
 
 function getConfigEntry(
   config: unknown,
-  key: "properties" | "shortcuts"
+  key: "conditions" | "properties" | "shortcuts"
 ): unknown {
   if (config == null || typeof config !== "object") {
     return undefined;
@@ -457,12 +462,64 @@ if (import.meta.vitest) {
       expect(artifactSource).toContain("conditionById:{");
       expect(artifactSource).toContain("propertyById:{");
       expect(artifactSource).toContain("writeKeyById:{");
+      expect(artifactSource).not.toContain("registeredSegments:");
+      expect(artifactSource).not.toContain("segmentCache:");
+      expect(artifactSource).not.toContain("fullResultCache:");
+      expect(artifactSource).not.toContain("atomicClassByClassName:");
       expect(artifactSource).not.toContain("cx:");
       expect(artifactSource).not.toContain('"cx":');
       expect(artifactSource).not.toContain("'cx':");
     }
     for (const instance of registrySession.instances) {
       expect(Object.hasOwn(instance.presetArtifact, "cx")).toBe(false);
+    }
+  }
+
+  function expectSerializedSourcePresetArtifactsToOmitCx(source: string): void {
+    const normalizedSource = normalizeSource(source);
+    const artifactMatches = Array.from(
+      normalizedSource.matchAll(/\{schema:["']mincho\.defineRulesPreset["']/g)
+    );
+
+    expect(artifactMatches.length).toBeGreaterThan(0);
+    for (const artifactMatch of artifactMatches) {
+      let depth = 0;
+      let artifactEndIndex = artifactMatch.index;
+      for (
+        let index = artifactMatch.index;
+        index < normalizedSource.length;
+        index += 1
+      ) {
+        const character = normalizedSource[index];
+        if (character === "{") {
+          depth += 1;
+        }
+        if (character === "}") {
+          depth -= 1;
+          if (depth === 0) {
+            artifactEndIndex = index + 1;
+            break;
+          }
+        }
+      }
+      const artifactSource = normalizedSource.slice(
+        artifactMatch.index,
+        artifactEndIndex
+      );
+
+      expect(artifactSource).toContain("version:4");
+      expect(artifactSource).toContain("classNameByCache:{");
+      expect(artifactSource).toContain("writeKeyByCacheKey:{");
+      expect(artifactSource).toContain("conditionById:{");
+      expect(artifactSource).toContain("propertyById:{");
+      expect(artifactSource).toContain("writeKeyById:{");
+      expect(artifactSource).not.toContain("registeredSegments:");
+      expect(artifactSource).not.toContain("segmentCache:");
+      expect(artifactSource).not.toContain("fullResultCache:");
+      expect(artifactSource).not.toContain("atomicClassByClassName:");
+      expect(artifactSource).not.toContain("cx:");
+      expect(artifactSource).not.toContain('"cx":');
+      expect(artifactSource).not.toContain("'cx':");
     }
   }
 
@@ -478,6 +535,243 @@ if (import.meta.vitest) {
     instance: DefineRulesRegistrySession["instances"][number] | undefined
   ): string[] {
     return Object.values(instance?.presetArtifact.classNameByCache ?? {});
+  }
+
+  type DefineRulesPresetArtifact =
+    DefineRulesRegistrySession["instances"][number]["presetArtifact"];
+
+  interface PresetWriteClassNameFilter {
+    property: string;
+    media: string | null;
+    excludeClassNames?: readonly string[];
+  }
+
+  const tabletMedia = "screen and (min-width: 768px)";
+  const desktopMedia = "screen and (min-width: 1024px)";
+
+  function getPresetWriteClassNames(
+    artifact: DefineRulesPresetArtifact,
+    filter: PresetWriteClassNameFilter
+  ): string[] {
+    const excludedClassNames = new Set(filter.excludeClassNames ?? []);
+    const classNames: string[] = [];
+
+    for (const [cacheKey, writeKeyId] of Object.entries(
+      artifact.writeKeyByCacheKey
+    )) {
+      const writeKey = artifact.writeKeyById[writeKeyId];
+      if (writeKey == null) {
+        continue;
+      }
+
+      const property = artifact.propertyById[writeKey.propertyId];
+      const condition = artifact.conditionById[writeKey.conditionId];
+      const className = artifact.classNameByCache[cacheKey];
+
+      if (
+        condition != null &&
+        property === filter.property &&
+        condition.media === filter.media &&
+        condition.selector === "&" &&
+        className != null &&
+        excludedClassNames.has(className) === false
+      ) {
+        classNames.push(className);
+      }
+    }
+
+    return classNames;
+  }
+
+  function expectSinglePresetWriteClassName(
+    artifact: DefineRulesPresetArtifact,
+    filter: PresetWriteClassNameFilter
+  ): string {
+    const classNames = getPresetWriteClassNames(artifact, filter);
+    expect(classNames).toHaveLength(1);
+    return classNames[0]!;
+  }
+
+  function expectPresetArtifactToContainConditionalWrites(
+    artifact: DefineRulesPresetArtifact
+  ): void {
+    expect(Object.values(artifact.conditionById)).toEqual(
+      expect.arrayContaining([
+        {
+          layer: null,
+          supports: null,
+          media: null,
+          container: null,
+          selector: "&"
+        },
+        {
+          layer: null,
+          supports: null,
+          media: tabletMedia,
+          container: null,
+          selector: "&"
+        },
+        {
+          layer: null,
+          supports: null,
+          media: desktopMedia,
+          container: null,
+          selector: "&"
+        }
+      ])
+    );
+    expect(Object.values(artifact.propertyById)).toEqual(
+      expect.arrayContaining(["color", "fontSize"])
+    );
+  }
+
+  function createCrossPackageConditionalProviderSource(): string {
+    return `
+      import { defineRules } from "@mincho-js/css";
+
+      const sharedConditions = {
+        mobile: {},
+        tablet: "@media screen and (min-width: 768px)",
+        desktop: { "@media": "screen and (min-width: 1024px)" }
+      } as const;
+      Object.setPrototypeOf(sharedConditions.mobile, null);
+      Object.setPrototypeOf(sharedConditions.desktop, null);
+      const sharedProperties = {
+        color: true,
+        fontSize: true
+      } as const;
+      const sharedShortcuts = {
+        responsiveText: {
+          _tablet: { fontSize: 16 },
+          fontSize: { _desktop: 20 }
+        }
+      } as const;
+
+      const provider = defineRules({
+        debugId: "cross-package-provider",
+        conditions: sharedConditions,
+        properties: sharedProperties,
+        shortcuts: sharedShortcuts
+      });
+
+      export const providerMobileClass = provider.css({
+        _mobile: { color: "navy" }
+      });
+      export const providerClass = provider.css({
+        _tablet: { fontSize: 16 },
+        fontSize: { _desktop: 20 }
+      });
+      export const providerTabletClass = provider.css({
+        _tablet: { fontSize: 16 }
+      });
+      export const providerDesktopClass = provider.css({
+        fontSize: { _desktop: 20 }
+      });
+      export const providerPreset = provider.preset;
+    `;
+  }
+
+  function createCrossPackageConditionalConsumerSource(
+    includeCxMergeExports: boolean
+  ): string {
+    const cxMergeExports = includeCxMergeExports
+      ? `
+          export const consumerDesktopOverride = consumer.css({
+            fontSize: { _desktop: 24 }
+          });
+          export const consumerTabletOverride = consumer.css({
+            _tablet: { fontSize: 18 }
+          });
+          export const mergedSameCondition = consumer.cx(
+            providerClass,
+            consumerDesktopOverride
+          );
+          export const mergedDifferentCondition = consumer.cx(
+            providerDesktopClass,
+            consumerTabletOverride
+          );
+        `
+      : "";
+
+    return `
+      import {
+        providerClass,
+        providerDesktopClass,
+        providerPreset,
+        providerTabletClass
+      } from "./provider.css.ts";
+      import { defineRules } from "@mincho-js/css";
+
+      const sharedConditions = {
+        mobile: {},
+        tablet: "@media screen and (min-width: 768px)",
+        desktop: { "@media": "screen and (min-width: 1024px)" }
+      } as const;
+      Object.setPrototypeOf(sharedConditions.mobile, null);
+      Object.setPrototypeOf(sharedConditions.desktop, null);
+      const sharedProperties = {
+        color: true,
+        fontSize: true
+      } as const;
+      const sharedShortcuts = {
+        responsiveText: {
+          _tablet: { fontSize: 16 },
+          fontSize: { _desktop: 20 }
+        }
+      } as const;
+
+      const consumer = defineRules({
+        debugId: "cross-package-consumer",
+        presets: providerPreset,
+        conditions: sharedConditions,
+        properties: sharedProperties,
+        shortcuts: sharedShortcuts
+      });
+
+      export const consumerClass = consumer.css({
+        _tablet: { fontSize: 16 },
+        fontSize: { _desktop: 20 }
+      });
+      ${cxMergeExports}
+      export const importedProviderClass = providerClass;
+      export const importedProviderTabletClass = providerTabletClass;
+      export const importedProviderDesktopClass = providerDesktopClass;
+      export const importedProviderPreset = providerPreset;
+      export const consumerPreset = consumer.preset;
+    `;
+  }
+
+  async function createCrossPackageConditionalRegistryFixture(
+    label: string,
+    includeCxMergeExports: boolean
+  ): Promise<{
+    consumerPath: string;
+    source: string;
+    cleanup: () => Promise<void>;
+  }> {
+    const fs = await import("node:fs/promises");
+    const path = await import("node:path");
+    fixtureIndex += 1;
+    const fixtureRoot = path.join(
+      process.env.TMPDIR ?? `${process.cwd()}/temps`,
+      `defineRulesPreset-cross-package-${fixtureIndex}-${label}`
+    );
+    const providerPath = path.join(fixtureRoot, "provider.css.ts");
+
+    await fs.mkdir(fixtureRoot, { recursive: true });
+    await fs.writeFile(
+      providerPath,
+      createCrossPackageConditionalProviderSource(),
+      "utf8"
+    );
+
+    return {
+      consumerPath: path.join(fixtureRoot, "consumer.css.ts"),
+      source: createCrossPackageConditionalConsumerSource(
+        includeCxMergeExports
+      ),
+      cleanup: () => fs.rm(fixtureRoot, { recursive: true, force: true })
+    };
   }
 
   function createConcurrentRegistryFixtureSource({
@@ -596,22 +890,14 @@ if (import.meta.vitest) {
           fixtureCase.caseId,
           fixtureCase.fixturePath
         );
-        const normalizedSource = normalizeSource(source);
         const classNames = collectClassNameByCacheValues(registrySession);
 
         expect(registrySession.instances).toHaveLength(
           fixtureCase.expectedRegistryInstances
         );
 
-        expect(normalizedSource).toMatch(
-          /schema:["']mincho\.defineRulesPreset["']/
-        );
-        expect(normalizedSource).toContain("version:4");
-        expect(normalizedSource).toContain("classNameByCache:{");
-        expect(normalizedSource).toContain("writeKeyByCacheKey:{");
-        expect(normalizedSource).toContain("conditionById:{");
-        expect(normalizedSource).toContain("propertyById:{");
-        expect(normalizedSource).toContain("writeKeyById:{");
+        expectSourceToContainV4PresetArtifact(source);
+        expectSerializedPresetArtifactsToOmitCx(source, registrySession);
         expectRegistryInstancesToHaveClassNameByCache(registrySession);
         expect(classNames.length).toBeGreaterThan(0);
         for (const className of classNames) {
@@ -644,19 +930,11 @@ if (import.meta.vitest) {
       const classNames = Object.values(
         registeredInstance?.presetArtifact.classNameByCache ?? {}
       );
-      const normalizedSource = normalizeSource(source);
 
       expect(registrySession.instances).toHaveLength(1);
       expect(registeredInstance?.registrationIndex).toBe(0);
-      expect(normalizedSource).toMatch(
-        /schema:["']mincho\.defineRulesPreset["']/
-      );
-      expect(normalizedSource).toContain("version:4");
-      expect(normalizedSource).toContain("classNameByCache:{");
-      expect(normalizedSource).toContain("writeKeyByCacheKey:{");
-      expect(normalizedSource).toContain("conditionById:{");
-      expect(normalizedSource).toContain("propertyById:{");
-      expect(normalizedSource).toContain("writeKeyById:{");
+      expectSourceToContainV4PresetArtifact(source);
+      expectSerializedPresetArtifactsToOmitCx(source, registrySession);
       expect(classNames).toHaveLength(1);
       expect(source).toContain(classNames[0]!);
       expect(emittedCss).toMatch(/color:\s*red/);
@@ -708,6 +986,7 @@ if (import.meta.vitest) {
 
       expect(registrySession.instances).toHaveLength(2);
       expectSourceToContainV4PresetArtifact(source);
+      expectSerializedPresetArtifactsToOmitCx(source, registrySession);
       expectRegistryInstancesToHaveClassNameByCache(registrySession);
       const reusedClassName = providerClassNames.join(" ");
 
@@ -715,6 +994,153 @@ if (import.meta.vitest) {
       expect(consumerClassNames).toEqual(providerClassNames);
       expect(source).toContain(`providerClass = '${reusedClassName}'`);
       expect(source).toContain(`consumerClass = '${reusedClassName}'`);
+    });
+
+    it("reuses conditional provider preset metadata across package fixture boundaries", async () => {
+      const fixture = await createCrossPackageConditionalRegistryFixture(
+        "conditional-reuse",
+        false
+      );
+
+      try {
+        const { source, registrySession, emittedCss } =
+          await processRegistryFixture(
+            fixture.source,
+            "conditional-reuse",
+            fixture.consumerPath
+          );
+        const [providerInstance, consumerInstance] = registrySession.instances;
+
+        expect(registrySession.instances).toHaveLength(2);
+        expect(providerInstance?.fileScope.filePath).toContain(
+          "provider.css.ts"
+        );
+        expect(consumerInstance?.fileScope.filePath).toContain(
+          "consumer.css.ts"
+        );
+        expectSourceToContainV4PresetArtifact(source);
+        expectSerializedSourcePresetArtifactsToOmitCx(source);
+        expectRegistryInstancesToHaveClassNameByCache(registrySession);
+        for (const instance of registrySession.instances) {
+          expect(Object.hasOwn(instance.presetArtifact, "cx")).toBe(false);
+        }
+
+        const providerArtifact = providerInstance!.presetArtifact;
+        const consumerArtifact = consumerInstance!.presetArtifact;
+        expectPresetArtifactToContainConditionalWrites(providerArtifact);
+        expectPresetArtifactToContainConditionalWrites(consumerArtifact);
+
+        const providerTabletClass = expectSinglePresetWriteClassName(
+          providerArtifact,
+          { property: "fontSize", media: tabletMedia }
+        );
+        const providerDesktopClass = expectSinglePresetWriteClassName(
+          providerArtifact,
+          { property: "fontSize", media: desktopMedia }
+        );
+        const consumerTabletClass = expectSinglePresetWriteClassName(
+          consumerArtifact,
+          { property: "fontSize", media: tabletMedia }
+        );
+        const consumerDesktopClass = expectSinglePresetWriteClassName(
+          consumerArtifact,
+          { property: "fontSize", media: desktopMedia }
+        );
+        const reusedClassName = `${providerTabletClass} ${providerDesktopClass}`;
+
+        expect(consumerTabletClass).toBe(providerTabletClass);
+        expect(consumerDesktopClass).toBe(providerDesktopClass);
+        expect(source).toContain(`consumerClass = '${reusedClassName}'`);
+        expect(source).toContain(
+          `importedProviderClass = '${reusedClassName}'`
+        );
+        expect(countV4PresetArtifacts(source)).toBe(2);
+        expect(emittedCss).toMatch(/@media\s+screen and \(min-width: 768px\)/);
+        expect(emittedCss).toMatch(/@media\s+screen and \(min-width: 1024px\)/);
+        expect(emittedCss).toMatch(/font-size:\s*16(?:px)?/);
+        expect(emittedCss).toMatch(/font-size:\s*20(?:px)?/);
+      } finally {
+        await fixture.cleanup();
+      }
+    });
+
+    it("merges conditional provider and consumer known classes through scoped cx", async () => {
+      const fixture = await createCrossPackageConditionalRegistryFixture(
+        "conditional-cx-merge",
+        true
+      );
+
+      try {
+        const { source, registrySession, emittedCss } =
+          await processRegistryFixture(
+            fixture.source,
+            "conditional-cx-merge",
+            fixture.consumerPath
+          );
+        const [providerInstance, consumerInstance] = registrySession.instances;
+
+        expect(registrySession.instances).toHaveLength(2);
+        expectSourceToContainV4PresetArtifact(source);
+        expectSerializedSourcePresetArtifactsToOmitCx(source);
+        expectRegistryInstancesToHaveClassNameByCache(registrySession);
+        for (const instance of registrySession.instances) {
+          expect(Object.hasOwn(instance.presetArtifact, "cx")).toBe(false);
+        }
+
+        const providerArtifact = providerInstance!.presetArtifact;
+        const consumerArtifact = consumerInstance!.presetArtifact;
+        expectPresetArtifactToContainConditionalWrites(providerArtifact);
+        expectPresetArtifactToContainConditionalWrites(consumerArtifact);
+
+        const providerTabletClass = expectSinglePresetWriteClassName(
+          providerArtifact,
+          { property: "fontSize", media: tabletMedia }
+        );
+        const providerDesktopClass = expectSinglePresetWriteClassName(
+          providerArtifact,
+          { property: "fontSize", media: desktopMedia }
+        );
+        const consumerDesktopOverride = expectSinglePresetWriteClassName(
+          consumerArtifact,
+          {
+            property: "fontSize",
+            media: desktopMedia,
+            excludeClassNames: [providerDesktopClass]
+          }
+        );
+        const consumerTabletOverride = expectSinglePresetWriteClassName(
+          consumerArtifact,
+          {
+            property: "fontSize",
+            media: tabletMedia,
+            excludeClassNames: [providerTabletClass]
+          }
+        );
+
+        expect(source).toContain(
+          `importedProviderClass = '${providerTabletClass} ${providerDesktopClass}'`
+        );
+        expect(countV4PresetArtifacts(source)).toBe(2);
+        expect(source).toContain(
+          `consumerDesktopOverride = '${consumerDesktopOverride}'`
+        );
+        expect(source).toContain(
+          `consumerTabletOverride = '${consumerTabletOverride}'`
+        );
+        expect(source).toContain(
+          `mergedSameCondition = '${providerTabletClass} ${consumerDesktopOverride}'`
+        );
+        expect(source).not.toContain(
+          `mergedSameCondition = '${providerTabletClass} ${providerDesktopClass} ${consumerDesktopOverride}'`
+        );
+        expect(source).toContain(
+          `mergedDifferentCondition = '${providerDesktopClass} ${consumerTabletOverride}'`
+        );
+        expect(emittedCss).toMatch(/font-size:\s*18(?:px)?/);
+        expect(emittedCss).toMatch(/font-size:\s*24(?:px)?/);
+      } finally {
+        await fixture.cleanup();
+      }
     });
 
     it("cleanup ends sessions after success, evaluation errors, and skipped registration", async () => {
@@ -742,18 +1168,18 @@ if (import.meta.vitest) {
 
       const functionConfigResult = await processRegistryFixture(
         `
-          import { defineRules } from "@mincho-js/css";
+            import { defineRules } from "@mincho-js/css";
 
-          const functionConfig = defineRules({
-            properties: {
-              color(value: string) {
-                return value;
+            const functionConfig = defineRules({
+              properties: {
+                color(value: string) {
+                  return value;
+                }
               }
-            }
-          });
+            });
 
-          export const raw = functionConfig.css.raw({ color: "red" });
-        `,
+            export const raw = functionConfig.css.raw({ color: "red" });
+          `,
         "cleanup-skipped-registration"
       );
 
@@ -1084,7 +1510,46 @@ if (import.meta.vitest) {
       expect(getActiveDefineRulesRegistrySession()).toBe(undefined);
     });
 
-    it("invalid config validation rejects function-valued properties and shortcuts with paths and registry metadata", () => {
+    it("valid config validation accepts serializable condition data", () => {
+      expect(() =>
+        validateDefineRulesRegistrySession(
+          createRegistrySession({
+            conditions: {
+              mobile: {},
+              tablet: "screen and (min-width: 768px)",
+              desktop: {
+                "@media": "screen and (min-width: 1024px)",
+                selector: "&[data-desktop]"
+              }
+            },
+            properties: {
+              color: true
+            },
+            shortcuts: {
+              layout: ["color"]
+            }
+          })
+        )
+      ).not.toThrow();
+    });
+
+    it("invalid config validation rejects function-valued conditions, properties, and shortcuts with paths and registry metadata", () => {
+      expect(() =>
+        validateDefineRulesRegistrySession(
+          createRegistrySession({
+            conditions: {
+              dynamic: {
+                selector(value: string) {
+                  return value;
+                }
+              }
+            }
+          })
+        )
+      ).toThrow(
+        "defineRules registry serialization does not support function-valued conditions, properties, or shortcuts at config.conditions.dynamic.selector (fileScope: test:registry.css.ts, registrationIndex: 0)"
+      );
+
       expect(() =>
         validateDefineRulesRegistrySession(
           createRegistrySession({
@@ -1096,7 +1561,7 @@ if (import.meta.vitest) {
           })
         )
       ).toThrow(
-        "defineRules registry serialization does not support function-valued properties or shortcuts at config.properties.color (fileScope: test:registry.css.ts, registrationIndex: 0)"
+        "defineRules registry serialization does not support function-valued conditions, properties, or shortcuts at config.properties.color (fileScope: test:registry.css.ts, registrationIndex: 0)"
       );
 
       expect(() =>
@@ -1120,7 +1585,7 @@ if (import.meta.vitest) {
           })
         )
       ).toThrow(
-        "defineRules registry serialization does not support function-valued properties or shortcuts at config.shortcuts.layout[1].tone (fileScope: test:registry.css.ts, registrationIndex: 0)"
+        "defineRules registry serialization does not support function-valued conditions, properties, or shortcuts at config.shortcuts.layout[1].tone (fileScope: test:registry.css.ts, registrationIndex: 0)"
       );
     });
 

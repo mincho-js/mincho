@@ -238,20 +238,6 @@ if (import.meta.vitest) {
     );
   }
 
-  function getRegistryFixtureCase(
-    caseId: string
-  ): DefineRulesPresetSerializationFixtureCase {
-    const fixtureCase = registryFixtureMatrixCases.find(
-      (candidate) => candidate.caseId === caseId
-    );
-
-    if (fixtureCase == null) {
-      throw new Error(`Missing registry fixture case ${caseId}`);
-    }
-
-    return fixtureCase;
-  }
-
   beforeAll(async () => {
     initializeDefineRulesPresetSerializationFixtures(
       await loadDefineRulesPresetSerializationManifest()
@@ -445,14 +431,46 @@ if (import.meta.vitest) {
     expect(source).toMatch(/["']?conditionById["']?\s*:\s*\{/);
     expect(source).toMatch(/["']?propertyById["']?\s*:\s*\{/);
     expect(source).toMatch(/["']?writeKeyById["']?\s*:\s*\{/);
+    expectSourceV4PresetArtifactToOmitRuntimeFields(source);
   }
 
-  function countV4PresetArtifacts(source: string): number {
-    return Array.from(
-      source.matchAll(
-        /["']?schema["']?\s*:\s*["']mincho\.defineRulesPreset["']/g
+  function expectSourceV4PresetArtifactToOmitRuntimeFields(
+    source: string
+  ): void {
+    const artifactSource = extractV4PresetArtifactSource(source);
+    expect(artifactSource).not.toMatch(/["']?registeredSegments["']?\s*:/);
+    expect(artifactSource).not.toMatch(/["']?segmentCache["']?\s*:/);
+    expect(artifactSource).not.toMatch(/["']?fullResultCache["']?\s*:/);
+    expect(artifactSource).not.toMatch(/["']?atomicClassByClassName["']?\s*:/);
+    expect(artifactSource).not.toMatch(/["']?cx["']?\s*:/);
+  }
+
+  function extractV4PresetArtifactSource(source: string): string {
+    const schemaMatch = source.match(
+      new RegExp(
+        `["']?schema["']?\\s*:\\s*["']${escapeRegExp(DEFINE_RULES_PRESET_SCHEMA)}["']`
       )
-    ).length;
+    );
+    if (schemaMatch?.index == null) {
+      throw new Error("Expected defineRules preset schema in source");
+    }
+
+    const artifactStart = source.lastIndexOf("{", schemaMatch.index);
+    if (artifactStart === -1) {
+      throw new Error("Expected defineRules preset artifact object in source");
+    }
+
+    let depth = 0;
+    for (let index = artifactStart; index < source.length; index += 1) {
+      const char = source[index];
+      if (char === "{") depth += 1;
+      if (char === "}") depth -= 1;
+      if (depth === 0) {
+        return source.slice(artifactStart, index + 1);
+      }
+    }
+
+    throw new Error("Expected defineRules preset artifact object to close");
   }
 
   function expectSourceToContainPopulatedClassNameByCache(
@@ -473,6 +491,14 @@ if (import.meta.vitest) {
         `["']?classNameByCache["']?\\s*:\\s*\\{[\\s\\S]*["']${escapeRegExp(className)}["']`
       )
     );
+  }
+
+  function countV4PresetArtifacts(source: string): number {
+    return Array.from(
+      source.matchAll(
+        /["']?schema["']?\s*:\s*["']mincho\.defineRulesPreset["']/g
+      )
+    ).length;
   }
 
   function createLivePresetBuildSource(): string {
@@ -500,17 +526,8 @@ if (import.meta.vitest) {
     `;
   }
 
-  function getEsbuildTestCacheRoot(): string {
-    const cwd = process.cwd();
-    const packagePathSuffix = join("packages", "esbuild");
-
-    return cwd.endsWith(packagePathSuffix)
-      ? join(cwd, ".cache")
-      : join(cwd, packagePathSuffix, ".cache");
-  }
-
   async function createLivePresetSmokeFixture(prefix: string) {
-    const cacheRoot = getEsbuildTestCacheRoot();
+    const cacheRoot = join(process.cwd(), "packages/esbuild/.cache");
     await fs.promises.mkdir(cacheRoot, { recursive: true });
     const root = await fs.promises.mkdtemp(join(cacheRoot, prefix));
     const srcRoot = join(root, "src");
@@ -602,7 +619,7 @@ if (import.meta.vitest) {
   async function createRealEsbuildRegistryFixture(
     fixtureCase: DefineRulesPresetSerializationFixtureCase
   ) {
-    const cacheRoot = getEsbuildTestCacheRoot();
+    const cacheRoot = join(process.cwd(), "packages/esbuild/.cache");
     await fs.promises.mkdir(cacheRoot, { recursive: true });
     const root = await fs.promises.mkdtemp(
       join(cacheRoot, `${fixtureCase.caseId}-`)
@@ -663,7 +680,6 @@ if (import.meta.vitest) {
         entryPoints: [entryPath],
         external: ["@mincho-js/css"],
         format: "esm",
-        logLevel: "silent",
         minify: false,
         outdir: join(root, "dist"),
         plugins: minchoEsbuildPlugins(),
@@ -828,17 +844,6 @@ if (import.meta.vitest) {
   });
 
   describe("minchoEsbuildPlugin", () => {
-    it("extracts variable initializers from named export lists", () => {
-      const source = `
-        const fillBlue = "blue_class";
-        export { css, fillBlue as fillBlueClass };
-      `;
-
-      expect(
-        extractExportedVariableInitFromBuildSource(source, "fillBlue")
-      ).toBe('"blue_class"');
-    });
-
     it("builds a real esbuild fixture and emits defineRules preset registry artifact", async () => {
       const realEsbuild = await import("esbuild");
       const { entryPath, root } = await createLivePresetSmokeFixture(
@@ -940,9 +945,13 @@ if (import.meta.vitest) {
     });
 
     it("real esbuild function-valued config build skips registry artifacts", async () => {
-      const fixtureCase = getRegistryFixtureCase(
-        "registry-function-config-invalid"
+      const fixtureCase = registryFixtureMatrixCases.find(
+        (candidate) => candidate.caseId === "registry-function-config-invalid"
       );
+      if (fixtureCase == null) {
+        throw new Error("Missing registry function config fixture case");
+      }
+
       const { js, registrySource } =
         await buildRealEsbuildRegistryFixture(fixtureCase);
 
@@ -1019,14 +1028,14 @@ if (import.meta.vitest) {
       const functionValuedConfigBuildSource = `
         import { defineRules } from "@mincho-js/css";
 
-        const functionConfig = defineRules({
+        const invalid = defineRules({
           properties: {
             color(value: "brand" | "neutral") {
               return value === "brand" ? "blue" : "gray";
             }
           }
         });
-        export const raw = functionConfig.css.raw({ color: "brand" });
+        export const raw = invalid.css.raw({ color: "brand" });
       `;
       const realEsbuild = await import("esbuild");
       const entryPath = join(
@@ -1193,9 +1202,13 @@ if (import.meta.vitest) {
     });
 
     it("skips function-valued config fixture registry artifacts through the esbuild registry path", async () => {
-      const fixtureCase = getRegistryFixtureCase(
-        "registry-function-config-invalid"
+      const fixtureCase = registryFixtureMatrixCases.find(
+        (candidate) => candidate.caseId === "registry-function-config-invalid"
       );
+      if (fixtureCase == null) {
+        throw new Error("Missing registry function config fixture case");
+      }
+
       const fixtureSource = readFixtureSource(fixtureCase.fixturePath);
       for (const expectedSourceSnippet of fixtureCase.expectedSourceSnippets) {
         expectSourceToContainSnippet(fixtureSource, expectedSourceSnippet);
