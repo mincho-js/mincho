@@ -14,7 +14,7 @@ The registry fixtures describe what actually executes while the extracted CSS mo
 
 `registry-exported-factory-not-executed` is the exported factory boundary. A factory that would call `defineRules(...)` does not serialize a preset artifact until the factory runs during `.css.ts` evaluation.
 
-`registry-function-config-invalid` is the function-valued config boundary. Function-valued `properties` or `shortcuts` can't be represented in the preset artifact, so public `defineRules(...)` calls with function-valued config are not registered and do not serialize a preset artifact. Their local `css.raw(...)` usage still executes normally.
+`registry-function-config-invalid` is the function-valued config boundary. Function-valued `conditions`, `properties`, or `shortcuts` can't be represented in the preset artifact, so public `defineRules(...)` calls with function-valued config are not registered and do not serialize a preset artifact. Their local `css.raw(...)` usage still executes normally.
 
 Serialized preset artifacts use the V4 shape:
 

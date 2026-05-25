@@ -197,28 +197,54 @@ export function MyButton() {
 
 ### defineRules()
 
-The `defineRules()` function creates a scoped authoring API and returns `css`, `cx`, and `preset` together. The returned `cx` is the existing root `cx` from `@mincho-js/css`, so it has the same class-composition behavior as importing `cx` directly.
+The `defineRules()` function creates a scoped authoring API and returns `css`, `cx`, and `preset` together. Use it when you want a typed styling surface for a shared package, preset, or design-system layer.
+
+`conditions` lets you name condition aliases once in the config. Config keys are bare names, and style input uses the same names with an underscore prefix. An empty object means the base condition. A string is treated as a media query, with a leading `@media` stripped if present. Object form supports `"@layer"`, `"@supports"`, `"@media"`, `"@container"`, and `selector`.
 
 ```typescript
 import { defineRules } from "@mincho-js/css";
 
-const { css, cx } = defineRules({
+const { css, cx, preset } = defineRules({
+  conditions: {
+    mobile: {},
+    tablet: "screen and (min-width: 768px)",
+    desktop: {
+      "@media": "screen and (min-width: 1024px)",
+      selector: "&[data-layout=wide]"
+    }
+  },
   properties: {
     color: true,
+    fontSize: true,
     padding: true
   }
 });
 
-export const className = cx(
-  css({
-    color: "white",
-    padding: 12
-  }),
-  "external"
-);
+export const card = css({
+  color: {
+    base: "black",
+    _desktop: "white"
+  },
+  padding: 12,
+  _tablet: {
+    fontSize: 16
+  },
+  fontSize: {
+    _desktop: 20
+  }
+});
+
+export const cardClassName = cx(card, "external");
+export const cardPreset = preset;
 ```
 
-Duplicate classes and conflicting utility-like classes are preserved in input order. No tailwind-merge-style conflict resolution, dedupe, or sorting is performed.
+The `preset` export is a V4 artifact. Pass it to another `defineRules({ presets })` call to reuse class names and the metadata needed by scoped `cx`.
+
+`defineRules().cx` is scoped and metadata aware. It flattens inputs like the root `cx`, then uses V4 preset metadata from its own scope and imported presets to keep the later known class for the same write key. The root `cx` export remains global and clsx-compatible. It does not read defineRules metadata.
+
+Unknown or external class tokens are preserved after root `cx` has flattened the inputs. They are not dropped, deduped, sorted, or moved relative to other unknown tokens.
+
+Known conflicts merge only when the normalized condition tuple and expanded write property are exactly equal. The condition tuple is `layer`, `supports`, `media`, `container`, and `selector`. For example, a `color` write under `_desktop` only conflicts with another `color` write under that exact tuple. There is no media range subsumption, selector equivalence, or cross-layer precedence inference.
 
 ## Features
 
