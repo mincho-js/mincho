@@ -1,5 +1,12 @@
 # react-swc
 
+## 0.1.1
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @examples/shared-component@0.0.1
+
 ## 0.1.0
 
 ### Minor Changes
