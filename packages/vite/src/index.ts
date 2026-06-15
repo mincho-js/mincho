@@ -431,20 +431,6 @@ if (import.meta.vitest) {
     );
   }
 
-  function getRegistryFixtureCase(
-    caseId: string
-  ): DefineRulesPresetSerializationFixtureCase {
-    const fixtureCase = registryFixtureMatrixCases.find(
-      (candidate) => candidate.caseId === caseId
-    );
-
-    if (fixtureCase == null) {
-      throw new Error(`Missing registry fixture case ${caseId}`);
-    }
-
-    return fixtureCase;
-  }
-
   beforeAll(async () => {
     initializeDefineRulesPresetSerializationFixtures(
       await loadDefineRulesPresetSerializationManifest()
@@ -528,6 +514,7 @@ if (import.meta.vitest) {
     expect(source).toMatch(/["']?conditionById["']?\s*:\s*\{/);
     expect(source).toMatch(/["']?propertyById["']?\s*:\s*\{/);
     expect(source).toMatch(/["']?writeKeyById["']?\s*:\s*\{/);
+    expectSourceV4PresetArtifactToOmitRuntimeFields(source);
   }
 
   function expectSourceToContainV4RuntimePresetSeed(source: string): void {
@@ -539,6 +526,45 @@ if (import.meta.vitest) {
     expect(source).toMatch(/["']?version["']?\s*:\s*4/);
     expect(source).toMatch(/["']?classNameByCache["']?\s*:\s*\{/);
     expect(source).toMatch(/["']?writeKeyByCacheKey["']?\s*:\s*\{/);
+  }
+
+  function expectSourceV4PresetArtifactToOmitRuntimeFields(
+    source: string
+  ): void {
+    const artifactSource = extractV4PresetArtifactSource(source);
+    expect(artifactSource).not.toMatch(/["']?registeredSegments["']?\s*:/);
+    expect(artifactSource).not.toMatch(/["']?segmentCache["']?\s*:/);
+    expect(artifactSource).not.toMatch(/["']?fullResultCache["']?\s*:/);
+    expect(artifactSource).not.toMatch(/["']?atomicClassByClassName["']?\s*:/);
+    expect(artifactSource).not.toMatch(/["']?cx["']?\s*:/);
+  }
+
+  function extractV4PresetArtifactSource(source: string): string {
+    const schemaMatch = source.match(
+      new RegExp(
+        `["']?schema["']?\\s*:\\s*["']${escapeRegExp(DEFINE_RULES_PRESET_SCHEMA)}["']`
+      )
+    );
+    if (schemaMatch?.index == null) {
+      throw new Error("Expected defineRules preset schema in source");
+    }
+
+    const artifactStart = source.lastIndexOf("{", schemaMatch.index);
+    if (artifactStart === -1) {
+      throw new Error("Expected defineRules preset artifact object in source");
+    }
+
+    let depth = 0;
+    for (let index = artifactStart; index < source.length; index += 1) {
+      const char = source[index];
+      if (char === "{") depth += 1;
+      if (char === "}") depth -= 1;
+      if (depth === 0) {
+        return source.slice(artifactStart, index + 1);
+      }
+    }
+
+    throw new Error("Expected defineRules preset artifact object to close");
   }
 
   function countV4PresetArtifacts(source: string): number {
@@ -1282,9 +1308,13 @@ if (import.meta.vitest) {
     }, 20000);
 
     it("real Vite function-valued config build skips registry artifacts", async () => {
-      const fixtureCase = getRegistryFixtureCase(
-        "registry-function-config-invalid"
+      const fixtureCase = registryFixtureMatrixCases.find(
+        (candidate) => candidate.caseId === "registry-function-config-invalid"
       );
+      if (fixtureCase == null) {
+        throw new Error("Missing registry function config fixture case");
+      }
+
       const { js, registrySource } =
         await buildRealViteRegistryFixture(fixtureCase);
 
@@ -1358,19 +1388,19 @@ if (import.meta.vitest) {
       ).toBe(false);
     });
 
-    it("defineRules exported css skips function-valued config registry artifacts", async () => {
+    it("defineRules exported css skips function-valued registry artifacts", async () => {
       const integrationModule = await import("@mincho-js/integration");
       const functionValuedConfigBuildSource = `
         import { defineRules } from "@mincho-js/css";
 
-        const functionConfig = defineRules({
+        const invalid = defineRules({
           properties: {
             color(value: "brand" | "neutral") {
               return value === "brand" ? "blue" : "gray";
             }
           }
         });
-        export const raw = functionConfig.css.raw({ color: "brand" });
+        export const raw = invalid.css.raw({ color: "brand" });
       `;
 
       vi.spyOn(integrationModule, "babelTransform").mockResolvedValue({
@@ -1492,9 +1522,13 @@ if (import.meta.vitest) {
     });
 
     it("keeps function-valued config fixture artifact-free through the Vite registry path", async () => {
-      const fixtureCase = getRegistryFixtureCase(
-        "registry-function-config-invalid"
+      const fixtureCase = registryFixtureMatrixCases.find(
+        (candidate) => candidate.caseId === "registry-function-config-invalid"
       );
+      if (fixtureCase == null) {
+        throw new Error("Missing registry function config fixture case");
+      }
+
       const fixtureSource = readFixtureSource(fixtureCase.fixturePath);
       for (const expectedSourceSnippet of fixtureCase.expectedSourceSnippets) {
         expectSourceToContainSnippet(fixtureSource, expectedSourceSnippet);

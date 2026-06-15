@@ -16,19 +16,40 @@ The registry fixtures describe what actually executes while the extracted CSS mo
 
 `registry-function-config-invalid` is the function-valued config boundary. Function-valued `properties` or `shortcuts` can't be represented in the preset artifact, so public `defineRules(...)` calls with function-valued config are not registered and do not serialize a preset artifact. Their local `css.raw(...)` usage still executes normally.
 
-Serialized preset artifacts use the V3 shape:
+Serialized preset artifacts use the V4 shape:
 
 ```ts
 {
   schema: "mincho.defineRulesPreset",
-  version: 3,
+  version: 4,
   classNameByCache: {
     "<cache-key>": "<class-name>"
+  },
+  writeKeyByCacheKey: {
+    "<cache-key>": 0
+  },
+  conditionById: {
+    0: {
+      layer: null,
+      supports: null,
+      media: null,
+      container: null,
+      selector: "&"
+    }
+  },
+  propertyById: {
+    0: "<property-name>"
+  },
+  writeKeyById: {
+    0: {
+      conditionId: 0,
+      propertyId: 0
+    }
   }
 }
 ```
 
-`classNameByCache` must be populated from executed `css(...)` calls. Empty artifacts only belong to cases where no `defineRules(...)` instance ran during evaluation.
+`classNameByCache` and `writeKeyByCacheKey` must be populated from executed `css(...)` calls. Empty artifacts only belong to cases where no `defineRules(...)` instance ran during evaluation.
 
 ## Regeneration and verification contract
 
@@ -45,7 +66,7 @@ yarn vitest run "packages/esbuild/src/index.ts" -t "defineRules|preset|fixture|e
 Expected fixture diffs are limited to:
 
 - class-name changes caused by intentional preset/style changes;
-- serialized V3 preset artifact changes that match the source fixture's executed `css(...)` calls;
+- serialized V4 preset artifact changes that match the source fixture's executed `css(...)` calls;
 - sidecar CSS changes required for provider exports consumed through package imports.
 
 Unexpected fixture diffs include removed sidecar imports, missing fake package metadata, or runtime `css({ ... })` calls left where a static class literal should be emitted.
