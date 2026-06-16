@@ -68,7 +68,7 @@ export function globalTheme<const ThemeTokens extends Theme>(
   return resolvedTokens;
 }
 
-export function theme<const ThemeTokens extends Theme>(
+function themeImpl<const ThemeTokens extends Theme>(
   tokens: ThemeTokensInput<ThemeTokens>,
   debugId?: string
 ): [string, ResolveThemeOutput<ThemeTokens>] {
@@ -79,6 +79,16 @@ export function theme<const ThemeTokens extends Theme>(
 
   return [themeClassName, resolvedTokens];
 }
+
+function themeWith<const ThemeTokens extends Theme>(): (
+  tokens: ThemeTokensInput<ThemeTokens>,
+  debugId?: string
+) => [string, ResolveThemeOutput<ThemeTokens>] {
+  return (tokens: ThemeTokensInput<ThemeTokens>, debugId?: string) =>
+    themeImpl(tokens, debugId);
+}
+
+export const theme = Object.assign(themeImpl, { with: themeWith });
 
 function extractLayerFromTokens<ThemeTokens extends Theme>(
   tokens: WithOptionalLayer<ThemeTokens>
@@ -723,7 +733,7 @@ function extractCSSValue(value: TokenValue): CSSVarValue {
 if (import.meta.vitest) {
   // eslint-disable-next-line @typescript-eslint/ban-ts-comment
   // @ts-ignore error TS1343: The 'import.meta' meta-property is only allowed when the '--module' option is 'es2020', 'es2022', 'esnext', 'system', 'node16', or 'nodenext'.
-  const { describe, it, expect, assertType } = import.meta.vitest;
+  const { describe, it, expect, assertType, expectTypeOf } = import.meta.vitest;
 
   const debugId = "myCSS";
   setFileScope("test");
@@ -1460,6 +1470,148 @@ if (import.meta.vitest) {
   });
 
   describe.concurrent("theme", () => {
+    it("exposes theme.with as a callable wrapper", () => {
+      expect(typeof theme.with).toBe("function");
+
+      const themeTokens = theme.with<{ color: string }>();
+      const result = themeTokens({ color: "red" }, "theme-with");
+
+      expect(Array.isArray(result)).toBe(true);
+      expect(result).toHaveLength(2);
+      expect(result[0]).toMatch(identifierName("theme-with"));
+      validateHashFormatForResolved(result[1]);
+    });
+
+    it("delegates theme.with() directly to theme()", () => {
+      const themeTokens = theme.with<{
+        color: string;
+        nested: { size: number };
+      }>();
+      const tokens = {
+        color: "red",
+        nested: { size: 12 }
+      } as const;
+
+      const wrapped = themeTokens(tokens, "theme1");
+      const direct = theme(tokens, "theme1");
+
+      expect(Array.isArray(wrapped)).toBe(true);
+      expect(wrapped).toHaveLength(2);
+      expect(wrapped[0]).toMatch(identifierName("theme1"));
+      expect(direct[0]).toMatch(identifierName("theme1"));
+      expect(normalizeResolvedTokens(wrapped[1])).toEqual(
+        normalizeResolvedTokens(direct[1])
+      );
+      validateHashFormatForResolved(wrapped[1]);
+      validateHashFormatForResolved(direct[1]);
+    });
+
+    it("enforces theme.with() token contracts", () => {
+      const myTheme = theme.with<{
+        color: { brand: string };
+        font: { body: string };
+      }>();
+
+      const [themeClass, vars] = myTheme({
+        color: { brand: "blue" },
+        font: { body: "arial" }
+      });
+
+      assertType<string>(themeClass);
+      assertType<PureCSSVarFunction>(vars.color.brand);
+      assertType<PureCSSVarFunction>(vars.font.body);
+      expectTypeOf<typeof vars.color.brand>().not.toBeAny();
+      expectTypeOf<
+        typeof vars.color.brand
+      >().branded.toEqualTypeOf<PureCSSVarFunction>();
+      expectTypeOf<typeof vars.color.brand>().not.toEqualTypeOf<
+        PureCSSVarFunction[]
+      >();
+      expectTypeOf<typeof vars.font.body>().not.toBeAny();
+      expectTypeOf<
+        typeof vars.font.body
+      >().branded.toEqualTypeOf<PureCSSVarFunction>();
+      expectTypeOf<typeof vars.font.body>().not.toEqualTypeOf<
+        PureCSSVarFunction[]
+      >();
+
+      // @ts-expect-error: font is required by the theme contract.
+      myTheme({
+        color: { brand: "blue" }
+      });
+      myTheme({
+        color: {
+          // @ts-expect-error: color.brand must be a string.
+          brand: 123
+        },
+        font: { body: "arial" }
+      });
+      myTheme({
+        color: { brand: "blue" },
+        font: { body: "arial" },
+        // @ts-expect-error: top-level keys outside the contract are not accepted.
+        space: "4px"
+      });
+      myTheme({
+        color: {
+          brand: "blue",
+          // @ts-expect-error: nested keys outside the contract are not accepted.
+          accent: "red"
+        },
+        font: { body: "arial" }
+      });
+    });
+
+    it("preserves @layer and semantic helpers through theme.with()", () => {
+      const semanticTheme = theme.with<{
+        color: {
+          brand: string;
+          semantic: { primary: string };
+        };
+        font: { body: string };
+      }>();
+
+      const [className, vars] = semanticTheme(
+        {
+          "@layer": "tokens",
+          color: {
+            brand: "#0055ff",
+            semantic: {
+              get primary(): string {
+                return this.fallbackVar(this.color.brand, "#0055ff");
+              }
+            }
+          },
+          font: { body: "Inter" }
+        },
+        "theme-with-layer"
+      );
+
+      assertType<PureCSSVarFunction>(vars.color.brand);
+      assertType<PureCSSVarFunction>(vars.color.semantic.primary);
+      assertType<PureCSSVarFunction>(vars.font.body);
+      expect(className).toMatch(identifierName("theme-with-layer"));
+      validateHashFormatForResolved(vars);
+      expect(normalizeResolvedTokens(vars)).toEqual({
+        color: {
+          brand: "var(--color-brand)",
+          semantic: {
+            primary: "var(--color-brand, #0055ff)"
+          }
+        },
+        font: {
+          body: "var(--font-body)"
+        }
+      });
+    });
+
+    it("keeps direct theme() calls working", () => {
+      const [className, themeVars] = theme({ color: "red" }, "theme2");
+
+      expect(className).toMatch(identifierName("theme2"));
+      validateHashFormatForResolved(themeVars);
+    });
+
     it("generates unique className with debugId", () => {
       const [className1, themeVars1] = theme({ color: "red" }, "theme1");
       const [className2, themeVars2] = theme({ color: "blue" }, "theme2");
