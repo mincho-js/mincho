@@ -456,7 +456,7 @@ Connect design tokens from `theme()`:
 
 ```typescript
 // Future API
-const [themeClass, themeVars] = theme({
+const [themeClass, themeVars, themeContract] = theme({
   colors: {
     text: { default: '#0f172a', muted: '#475569' },
     surface: { canvas: '#ffffff', brand: '#2563eb' }
@@ -464,6 +464,7 @@ const [themeClass, themeVars] = theme({
   space: [0, 4, 8, 12, 16, 20]
 });
 
+// themeContract is a structural ThemeContract object for theme(themeContract, nextTokens).
 const tokens = defineRules.themeSpec([
   {
     condition: [themeVars.colors],

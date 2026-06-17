@@ -45,6 +45,7 @@ export type {
   PropDefinitionOutput
 } from "./rules/types.js";
 export { globalTheme, theme } from "./theme/index.js";
+export type { ThemeContract, ThemeResult } from "./theme/index.js";
 export type {
   Theme,
   ThemeValue,

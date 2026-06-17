@@ -44,6 +44,23 @@ type ThemeTokensInput<ThemeTokens extends Theme> =
   WithOptionalLayer<ThemeTokens> &
     ThisType<ResolveThemeOutput<ThemeTokens> & ThemeSubFunctions>;
 
+const THEME_CONTRACT_EXPECTED_ERROR =
+  "Theme replacement expected ThemeContract as first argument";
+const THEME_CONTRACT_REPLACEMENT_TOKENS_EXPECTED_ERROR =
+  "Theme replacement expected replacement tokens when first argument is ThemeContract";
+
+export type ThemeContract<T extends Theme = Theme> = {
+  readonly vars: ResolveThemeOutput<T>;
+  readonly values: Readonly<Record<string, CSSVarValue>>;
+  readonly cssVarByPath: Readonly<CSSVarMap>;
+};
+
+export type ThemeResult<T extends Theme = Theme> = [
+  className: string,
+  vars: ResolveThemeOutput<T>,
+  contract: ThemeContract<T>
+];
+
 export function globalTheme<const ThemeTokens extends Theme>(
   selector: string,
   tokens: ThemeTokensInput<ThemeTokens>
@@ -71,24 +88,108 @@ export function globalTheme<const ThemeTokens extends Theme>(
 function themeImpl<const ThemeTokens extends Theme>(
   tokens: ThemeTokensInput<ThemeTokens>,
   debugId?: string
-): [string, ResolveThemeOutput<ThemeTokens>] {
-  const themeClassName = generateIdentifier(debugId);
-  registerClassName(themeClassName, getFileScope());
+): ThemeResult<ThemeTokens>;
+function themeImpl<const ThemeTokens extends Theme>(
+  contract: ThemeContract<ThemeTokens>,
+  replacementTokens: ThemeTokensInput<ThemeTokens>,
+  debugId?: string
+): ThemeResult<ThemeTokens>;
+function themeImpl<const ThemeTokens extends Theme>(
+  tokensOrVars: unknown,
+  debugIdOrReplacementTokens?: unknown,
+  debugId?: unknown
+): ThemeResult<ThemeTokens> {
+  if (isThemeExtensionCall(debugIdOrReplacementTokens)) {
+    if (debugId !== undefined && typeof debugId !== "string") {
+      throw new Error("theme() extension debugId must be a string.");
+    }
 
-  const resolvedTokens = globalTheme(themeClassName, tokens);
+    assertThemeContract<ThemeTokens>(tokensOrVars);
 
-  return [themeClassName, resolvedTokens];
+    return createThemeResult(
+      debugIdOrReplacementTokens as ThemeTokensInput<ThemeTokens>,
+      debugId,
+      (tokens) => assignReplacementTokensFromContract(tokensOrVars, tokens)
+    );
+  }
+
+  if (isThemeContract(tokensOrVars)) {
+    throw new Error(THEME_CONTRACT_REPLACEMENT_TOKENS_EXPECTED_ERROR);
+  }
+
+  if (
+    debugIdOrReplacementTokens !== undefined &&
+    typeof debugIdOrReplacementTokens !== "string"
+  ) {
+    throw new Error("theme() debugId must be a string.");
+  }
+
+  if (debugId !== undefined) {
+    throw new Error("theme() direct mode does not accept a third argument.");
+  }
+
+  return createThemeResult(
+    tokensOrVars as ThemeTokensInput<ThemeTokens>,
+    debugIdOrReplacementTokens as string | undefined,
+    assignTokens
+  );
 }
 
 function themeWith<const ThemeTokens extends Theme>(): (
   tokens: ThemeTokensInput<ThemeTokens>,
   debugId?: string
-) => [string, ResolveThemeOutput<ThemeTokens>] {
+) => ThemeResult<ThemeTokens> {
   return (tokens: ThemeTokensInput<ThemeTokens>, debugId?: string) =>
     themeImpl(tokens, debugId);
 }
 
 export const theme = Object.assign(themeImpl, { with: themeWith });
+
+// == Theme Orchestration =====================================================
+interface ThemeAssignmentResult<ThemeTokens extends Theme> {
+  vars: AssignedVars;
+  resolvedTokens: ResolveTheme<ThemeTokens>;
+  cssVarMap: CSSVarMap;
+}
+
+function createThemeResult<const ThemeTokens extends Theme>(
+  tokens: ThemeTokensInput<ThemeTokens>,
+  debugId: string | undefined,
+  assign: (tokens: ThemeTokens) => ThemeAssignmentResult<ThemeTokens>
+): ThemeResult<ThemeTokens> {
+  const themeClassName = generateIdentifier(debugId);
+  registerClassName(themeClassName, getFileScope());
+
+  const { layerName, tokens: themeTokens } = extractLayerFromTokens(tokens);
+  const { vars, resolvedTokens, cssVarMap } = assign(themeTokens);
+  const rule = createThemeRule(layerName, vars);
+  const resolvedThemeTokens = resolvedTokens as ResolveThemeOutput<ThemeTokens>;
+  const contract = createThemeContract<ThemeTokens>(
+    resolvedThemeTokens,
+    vars,
+    cssVarMap
+  );
+
+  globalCss(themeClassName, rule);
+  return [themeClassName, resolvedThemeTokens, contract];
+}
+
+function createThemeRule(
+  layerName: string | undefined,
+  vars: AssignedVars
+): GlobalCSSRule {
+  return layerName != null
+    ? {
+        "@layer": {
+          [layerName]: {
+            vars
+          }
+        }
+      }
+    : {
+        vars
+      };
+}
 
 function extractLayerFromTokens<ThemeTokens extends Theme>(
   tokens: WithOptionalLayer<ThemeTokens>
@@ -105,19 +206,81 @@ function extractLayerFromTokens<ThemeTokens extends Theme>(
   return { tokens };
 }
 
-// == Token Assignment Orchestration ===========================================
+// == Assignment State ========================================================
 interface AssignedVars {
   [cssVarName: string]: CSSVarValue;
 }
 interface CSSVarMap {
   [varPath: string]: PureCSSVarKey;
 }
+interface ThemeAssignmentMetadata {
+  cssVarMap: Readonly<CSSVarMap>;
+  assignedVars: Readonly<Record<string, CSSVarValue>>;
+}
+/**
+ * Context object for token processing functions
+ */
+interface TokenProcessingContext {
+  prefix: string; // Variable name prefix
+  path: string[]; // Current path in object tree
+  parentPath: string; // Current variable path
+  cssVarMap: CSSVarMap; // Cache for CSS variable names
+  aliasMap: Set<string>; // Track paths that should be aliases (not create CSS vars)
+}
 
+function createThemeContract<const ThemeTokens extends Theme>(
+  vars: ResolveThemeOutput<ThemeTokens>,
+  values: Readonly<Record<string, CSSVarValue>>,
+  cssVarByPath: Readonly<CSSVarMap>
+): ThemeContract<ThemeTokens> {
+  const contractValues = Object.freeze({ ...values }) as Readonly<
+    Record<string, CSSVarValue>
+  >;
+  const contractCSSVarByPath = Object.freeze({
+    ...cssVarByPath
+  }) as Readonly<CSSVarMap>;
+
+  return Object.freeze({
+    vars,
+    values: contractValues,
+    cssVarByPath: contractCSSVarByPath
+  }) as ThemeContract<ThemeTokens>;
+}
+
+function isThemeContract<ThemeTokens extends Theme = Theme>(
+  value: unknown
+): value is ThemeContract<ThemeTokens> {
+  if (!isPlainObject(value)) return false;
+
+  const contract = value as {
+    readonly vars?: unknown;
+    readonly values?: unknown;
+    readonly cssVarByPath?: unknown;
+  };
+
+  return (
+    "vars" in contract &&
+    isPlainObject(contract.vars) &&
+    isPlainObject(contract.values) &&
+    isPlainObject(contract.cssVarByPath)
+  );
+}
+
+function assertThemeContract<ThemeTokens extends Theme = Theme>(
+  value: unknown
+): asserts value is ThemeContract<ThemeTokens> {
+  if (!isThemeContract<ThemeTokens>(value)) {
+    throw new Error(THEME_CONTRACT_EXPECTED_ERROR);
+  }
+}
+
+// == Direct Theme Assignment ================================================
 function assignTokens<ThemeTokens extends Theme>(
   tokens: ThemeTokensInput<ThemeTokens>
 ): {
   vars: AssignedVars;
   resolvedTokens: ResolveTheme<ThemeTokens>;
+  cssVarMap: CSSVarMap;
 } {
   return assignTokensWithPrefix(tokens, "");
 }
@@ -132,6 +295,7 @@ function assignTokensWithPrefix<ThemeTokens extends Theme>(
 ): {
   vars: AssignedVars;
   resolvedTokens: ResolveTheme<ThemeTokens>;
+  cssVarMap: CSSVarMap;
 } {
   const vars: AssignedVars = {};
   const resolvedTokens = {} as ResolveTheme<ThemeTokens>;
@@ -174,19 +338,11 @@ function assignTokensWithPrefix<ThemeTokens extends Theme>(
   assignTokenVariables(tokens, vars, resolvedTokens, context);
   resolveSemanticTokens(tokens, vars, resolvedTokens, context);
 
-  return { vars, resolvedTokens };
-}
-
-// == Two-Pass Token Resolution ===============================================
-/**
- * Context object for token processing functions
- */
-interface TokenProcessingContext {
-  prefix: string; // Variable name prefix
-  path: string[]; // Current path in object tree
-  parentPath: string; // Current variable path
-  cssVarMap: CSSVarMap; // Cache for CSS variable names
-  aliasMap: Set<string>; // Track paths that should be aliases (not create CSS vars)
+  return {
+    vars,
+    resolvedTokens,
+    cssVarMap: { ...context.cssVarMap }
+  };
 }
 
 /**
@@ -436,7 +592,595 @@ function resolveSemanticTokens(
   }
 }
 
-// == Type Guards =============================================================
+// == Replacement Theme Assignment ============================================
+function isThemeExtensionCall(
+  value: unknown
+): value is ThemeTokensInput<Theme> {
+  return typeof value === "object" && value !== null;
+}
+
+function assignReplacementTokensFromContract<ThemeTokens extends Theme>(
+  contract: ThemeContract<ThemeTokens>,
+  replacementTokens: ThemeTokens
+): {
+  vars: AssignedVars;
+  resolvedTokens: ResolveTheme<ThemeTokens>;
+  cssVarMap: CSSVarMap;
+} {
+  const vars = contract.vars;
+  const assignedVars: AssignedVars = {};
+  const context: ReplacementProcessingContext = {
+    prefix: "",
+    path: [],
+    parentPath: "",
+    cssVarMap: { ...contract.cssVarByPath },
+    aliasMap: new Set(),
+    metadata: {
+      cssVarMap: contract.cssVarByPath,
+      assignedVars: contract.values
+    }
+  };
+  const resolvedTokens = createReplacementResolvedTokens(
+    vars,
+    assignedVars,
+    context
+  );
+
+  assignReplacementTokenVariables(
+    vars,
+    replacementTokens,
+    assignedVars,
+    resolvedTokens,
+    context
+  );
+  resolveReplacementSemanticTokens(
+    vars,
+    replacementTokens,
+    assignedVars,
+    resolvedTokens,
+    context
+  );
+
+  return {
+    vars: assignedVars,
+    resolvedTokens: resolvedTokens as ResolveTheme<ThemeTokens>,
+    cssVarMap: { ...contract.cssVarByPath }
+  };
+}
+
+interface ReplacementProcessingContext extends TokenProcessingContext {
+  metadata: ThemeAssignmentMetadata;
+}
+
+function createReplacementResolvedTokens(
+  vars: unknown,
+  assignedVars: AssignedVars,
+  context: ReplacementProcessingContext
+): Record<string, unknown> {
+  const resolvedTokens = cloneResolvedVars(vars);
+
+  if (!isPlainObject(resolvedTokens) || Array.isArray(resolvedTokens)) {
+    throw new Error(`Expected theme vars object at path "<root>".`);
+  }
+
+  Object.defineProperty(resolvedTokens, "fallbackVar", {
+    value: fallbackVar,
+    enumerable: false,
+    configurable: false,
+    writable: false
+  });
+
+  Object.defineProperty(resolvedTokens, "raw", {
+    value: createRawExtractor(assignedVars),
+    enumerable: false,
+    configurable: false,
+    writable: false
+  });
+
+  Object.defineProperty(resolvedTokens, "alias", {
+    value: createAliasFunction(context),
+    enumerable: false,
+    configurable: false,
+    writable: false
+  });
+
+  return resolvedTokens;
+}
+
+function cloneResolvedVars(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(cloneResolvedVars);
+  }
+
+  if (isPlainObject(value)) {
+    const cloned: Record<string, unknown> = {};
+
+    for (const key of Object.keys(value)) {
+      cloned[key] = cloneResolvedVars((value as Record<string, unknown>)[key]);
+    }
+
+    return cloned;
+  }
+
+  return value;
+}
+
+function assignReplacementTokenVariables(
+  varsNode: unknown,
+  replacementNode: unknown,
+  assignedVars: AssignedVars,
+  resolvedTokens: Record<string, unknown>,
+  context: ReplacementProcessingContext
+): void {
+  if (!isNestedTheme(replacementNode)) {
+    throw new Error(
+      `Unsupported replacement token at path "${formatTokenPath(context.path)}".`
+    );
+  }
+
+  if (!isPlainObject(varsNode) || Array.isArray(varsNode)) {
+    throw new Error(
+      `Expected theme vars object at path "${formatTokenPath(context.path)}".`
+    );
+  }
+
+  const varsRecord = varsNode as Record<string, unknown>;
+  const replacementRecord = replacementNode as Record<string, unknown>;
+  const descriptors = Object.getOwnPropertyDescriptors(replacementRecord);
+
+  for (const [key, descriptor] of Object.entries(descriptors)) {
+    const currentPath = [...context.path, key];
+    if (!Object.prototype.hasOwnProperty.call(varsRecord, key)) {
+      throw createThemeExtensionExtraReplacementError(currentPath);
+    }
+
+    if (typeof descriptor.get === "function") {
+      continue;
+    }
+
+    assignReplacementTokenValue(
+      varsRecord[key],
+      descriptor.value,
+      assignedVars,
+      resolvedTokens,
+      currentPath,
+      context
+    );
+  }
+
+  for (const key of Object.keys(varsRecord)) {
+    if (!Object.prototype.hasOwnProperty.call(descriptors, key)) {
+      throw createThemeExtensionMissingReplacementError([...context.path, key]);
+    }
+  }
+}
+
+function assignReplacementTokenValue(
+  varsNode: unknown,
+  replacementNode: unknown,
+  assignedVars: AssignedVars,
+  resolvedTokens: Record<string, unknown>,
+  path: string[],
+  context: ReplacementProcessingContext
+): void {
+  if (isSupportedReplacementLeaf(replacementNode)) {
+    const cssVar = getReplacementCSSVar(varsNode, path, context);
+    assignedVars[cssVar] = extractCSSValue(replacementNode);
+    setByPath(resolvedTokens, path, varsNode);
+    return;
+  }
+
+  if (Array.isArray(replacementNode)) {
+    assignReplacementTokenArray(
+      varsNode,
+      replacementNode,
+      assignedVars,
+      resolvedTokens,
+      path,
+      context
+    );
+    return;
+  }
+
+  if (isTokenDefinition(replacementNode)) {
+    assignReplacementTokenDefinition(
+      varsNode,
+      replacementNode,
+      assignedVars,
+      resolvedTokens,
+      path,
+      context
+    );
+    return;
+  }
+
+  if (isTokenCompositeValue(replacementNode)) {
+    assignReplacementCompositeVariables(
+      varsNode,
+      replacementNode,
+      assignedVars,
+      resolvedTokens,
+      path,
+      context
+    );
+    return;
+  }
+
+  if (isNestedTheme(replacementNode)) {
+    assignReplacementTokenVariables(
+      varsNode,
+      replacementNode,
+      assignedVars,
+      resolvedTokens,
+      createReplacementChildContext(context, path)
+    );
+    return;
+  }
+
+  throw new Error(
+    `Unsupported replacement token at path "${formatTokenPath(path)}".`
+  );
+}
+
+function assignReplacementTokenArray(
+  varsNode: unknown,
+  replacementArray: unknown[],
+  assignedVars: AssignedVars,
+  resolvedTokens: Record<string, unknown>,
+  path: string[],
+  context: ReplacementProcessingContext
+): void {
+  if (!Array.isArray(varsNode)) {
+    throw new Error(
+      `Expected theme vars array at path "${formatTokenPath(path)}".`
+    );
+  }
+
+  if (varsNode.length !== replacementArray.length) {
+    throw createThemeExtensionArrayLengthMismatchError(path);
+  }
+
+  replacementArray.forEach((item, index) => {
+    const currentPath = [...path, String(index)];
+    const cssVar = getReplacementCSSVar(varsNode[index], currentPath, context);
+    assignedVars[cssVar] = extractCSSValue(item as TokenValue);
+  });
+  setByPath(resolvedTokens, path, cloneResolvedVars(varsNode));
+}
+
+function assignReplacementTokenDefinition(
+  varsNode: unknown,
+  definition: TokenDefinition,
+  assignedVars: AssignedVars,
+  resolvedTokens: Record<string, unknown>,
+  path: string[],
+  context: ReplacementProcessingContext
+): void {
+  const tokenValue = definition.$value;
+
+  if (isStructuredTokenValue(definition.$type, tokenValue)) {
+    const cssVar = getReplacementCSSVar(varsNode, path, context);
+    assignedVars[cssVar] = extractTokenDefinitionValue(definition);
+    setByPath(resolvedTokens, path, varsNode);
+    return;
+  }
+
+  if (isNestedTheme(tokenValue)) {
+    assignReplacementTokenVariables(
+      varsNode,
+      tokenValue,
+      assignedVars,
+      resolvedTokens,
+      createReplacementChildContext(context, path)
+    );
+    return;
+  }
+
+  const cssVar = getReplacementCSSVar(varsNode, path, context);
+  assignedVars[cssVar] = extractTokenDefinitionValue(definition);
+  setByPath(resolvedTokens, path, varsNode);
+}
+
+function assignReplacementCompositeVariables(
+  varsNode: unknown,
+  replacementNode: TokenCompositeValue,
+  assignedVars: AssignedVars,
+  resolvedTokens: Record<string, unknown>,
+  path: string[],
+  context: ReplacementProcessingContext
+): void {
+  if (!isPlainObject(varsNode) || Array.isArray(varsNode)) {
+    throw new Error(
+      `Expected theme vars object at path "${formatTokenPath(path)}".`
+    );
+  }
+
+  const varsRecord = varsNode as Record<string, unknown>;
+  const descriptors = Object.getOwnPropertyDescriptors(replacementNode);
+
+  for (const [key, descriptor] of Object.entries(descriptors)) {
+    if (key === "resolved") continue;
+
+    const currentPath = [...path, key];
+    if (!Object.prototype.hasOwnProperty.call(varsRecord, key)) {
+      throw createThemeExtensionExtraReplacementError(currentPath);
+    }
+
+    if (typeof descriptor.get === "function") {
+      continue;
+    }
+
+    const cssVar = getReplacementCSSVar(varsRecord[key], currentPath, context);
+    assignedVars[cssVar] = extractCSSValue(descriptor.value as TokenValue);
+    setByPath(resolvedTokens, currentPath, varsRecord[key]);
+  }
+
+  for (const key of Object.keys(varsRecord)) {
+    if (key === "resolved") continue;
+
+    if (!Object.prototype.hasOwnProperty.call(descriptors, key)) {
+      throw createThemeExtensionMissingReplacementError([...path, key]);
+    }
+  }
+}
+
+function resolveReplacementSemanticTokens(
+  varsNode: unknown,
+  replacementNode: unknown,
+  assignedVars: AssignedVars,
+  resolvedTokens: Record<string, unknown>,
+  context: ReplacementProcessingContext
+): void {
+  if (isTokenDefinition(replacementNode)) {
+    if (isNestedTheme(replacementNode.$value)) {
+      resolveReplacementSemanticTokens(
+        varsNode,
+        replacementNode.$value,
+        assignedVars,
+        resolvedTokens,
+        context
+      );
+    }
+    return;
+  }
+
+  if (isTokenCompositeValue(replacementNode)) {
+    resolveReplacementCompositeValue(
+      varsNode,
+      replacementNode,
+      assignedVars,
+      resolvedTokens,
+      context.path,
+      context
+    );
+    return;
+  }
+
+  if (!isNestedTheme(replacementNode)) {
+    return;
+  }
+
+  if (!isPlainObject(varsNode) || Array.isArray(varsNode)) {
+    throw new Error(
+      `Expected theme vars object at path "${formatTokenPath(context.path)}".`
+    );
+  }
+
+  const varsRecord = varsNode as Record<string, unknown>;
+  const descriptors = Object.getOwnPropertyDescriptors(replacementNode);
+
+  for (const [key, descriptor] of Object.entries(descriptors)) {
+    const currentPath = [...context.path, key];
+    const childVarsNode = varsRecord[key];
+
+    if (typeof descriptor.get === "function") {
+      const computedValue = callReplacementGetter(
+        descriptor.get,
+        resolvedTokens,
+        currentPath
+      );
+      const currentPathKey = currentPath.join(".");
+
+      if (context.aliasMap.has(currentPathKey)) {
+        setByPath(resolvedTokens, currentPath, computedValue);
+      } else {
+        const cssVar = getReplacementCSSVar(
+          childVarsNode,
+          currentPath,
+          context
+        );
+        assignedVars[cssVar] = computedValue as CSSVarValue;
+        setByPath(resolvedTokens, currentPath, computedValue);
+      }
+
+      continue;
+    }
+
+    const value = descriptor.value;
+    const childContext = createReplacementChildContext(context, currentPath);
+
+    if (isTokenDefinition(value)) {
+      if (isNestedTheme(value.$value)) {
+        resolveReplacementSemanticTokens(
+          childVarsNode,
+          value.$value,
+          assignedVars,
+          resolvedTokens,
+          childContext
+        );
+      }
+      continue;
+    }
+
+    if (isTokenCompositeValue(value)) {
+      resolveReplacementCompositeValue(
+        childVarsNode,
+        value,
+        assignedVars,
+        resolvedTokens,
+        currentPath,
+        context
+      );
+      continue;
+    }
+
+    if (isNestedTheme(value)) {
+      resolveReplacementSemanticTokens(
+        childVarsNode,
+        value,
+        assignedVars,
+        resolvedTokens,
+        childContext
+      );
+    }
+  }
+}
+
+function resolveReplacementCompositeValue(
+  varsNode: unknown,
+  replacementNode: TokenCompositeValue,
+  assignedVars: AssignedVars,
+  resolvedTokens: Record<string, unknown>,
+  path: string[],
+  context: ReplacementProcessingContext
+): void {
+  const descriptors = Object.getOwnPropertyDescriptors(replacementNode);
+  const resolvedDescriptor = descriptors.resolved;
+
+  if (typeof resolvedDescriptor?.get !== "function") return;
+
+  const evaluationContext = Object.create(resolvedTokens) as Record<
+    string,
+    unknown
+  >;
+
+  for (const [key, descriptor] of Object.entries(descriptors)) {
+    if (key === "resolved") continue;
+    Object.defineProperty(evaluationContext, key, descriptor);
+  }
+
+  const resolvedPath = [...path, "resolved"];
+  const computedValue = callReplacementGetter(
+    resolvedDescriptor.get,
+    evaluationContext,
+    resolvedPath
+  );
+  const resolvedPathKey = resolvedPath.join(".");
+
+  if (context.aliasMap.has(resolvedPathKey)) {
+    setByPath(resolvedTokens, resolvedPath, computedValue);
+    return;
+  }
+
+  const fallbackVarReference = isPlainObject(varsNode)
+    ? (varsNode as Record<string, unknown>).resolved
+    : varsNode;
+  const cssVar = getReplacementCSSVar(fallbackVarReference, path, context);
+  assignedVars[cssVar] = extractCSSValue(computedValue as TokenValue);
+  setByPath(resolvedTokens, resolvedPath, `var(${cssVar})`);
+}
+
+function callReplacementGetter(
+  getter: () => unknown,
+  thisArg: unknown,
+  path: string[]
+): unknown {
+  currentProcessingPath = path;
+  try {
+    return getter.call(thisArg);
+  } finally {
+    currentProcessingPath = [];
+  }
+}
+
+function createReplacementChildContext(
+  context: ReplacementProcessingContext,
+  path: string[]
+): ReplacementProcessingContext {
+  return {
+    prefix: context.prefix,
+    path,
+    parentPath: tokenPathToCSSVarPath(path),
+    cssVarMap: context.cssVarMap,
+    aliasMap: context.aliasMap,
+    metadata: context.metadata
+  };
+}
+
+function getReplacementCSSVar(
+  varReference: unknown,
+  path: string[],
+  context: ReplacementProcessingContext
+): PureCSSVarKey {
+  const varPath = tokenPathToCSSVarPath(path);
+  const metadataVar = context.metadata.cssVarMap[varPath];
+
+  if (
+    metadataVar !== undefined &&
+    Object.prototype.hasOwnProperty.call(
+      context.metadata.assignedVars,
+      metadataVar
+    )
+  ) {
+    return metadataVar;
+  }
+
+  return extractCSSVarFromVarReference(varReference, path);
+}
+
+// == Shared Theme Helpers ====================================================
+function tokenPathToCSSVarPath(path: string[]): string {
+  return path.map(camelToKebab).join("-");
+}
+
+function isSupportedReplacementLeaf(value: unknown): value is TokenValue {
+  return isPrimitive(value) || isTokenUnitValue(value);
+}
+
+function extractCSSVarFromVarReference(
+  varReference: unknown,
+  path: string[]
+): PureCSSVarKey {
+  if (typeof varReference !== "string") {
+    throw createThemeExtensionExpectedVarReferenceError(path);
+  }
+
+  const cssVar = getVarName(varReference);
+  if (cssVar === varReference || !cssVar.startsWith("--")) {
+    throw createThemeExtensionExpectedVarReferenceError(path);
+  }
+
+  return cssVar;
+}
+
+function formatTokenPath(path: string[]): string {
+  return path.length > 0 ? path.join(".") : "<root>";
+}
+
+function createThemeExtensionMissingReplacementError(path: string[]): Error {
+  return new Error(
+    `Theme extension missing replacement token at "${formatTokenPath(path)}".`
+  );
+}
+
+function createThemeExtensionExtraReplacementError(path: string[]): Error {
+  return new Error(
+    `Theme extension replacement token at "${formatTokenPath(path)}" does not exist in base vars.`
+  );
+}
+
+function createThemeExtensionExpectedVarReferenceError(path: string[]): Error {
+  return new Error(
+    `Theme extension expected var() reference at "${formatTokenPath(path)}".`
+  );
+}
+
+function createThemeExtensionArrayLengthMismatchError(path: string[]): Error {
+  return new Error(
+    `Theme extension array length mismatch at "${formatTokenPath(path)}".`
+  );
+}
+
 function isPrimitive(value: unknown): value is TokenPrimitiveValue {
   const type = typeof value;
   return (
@@ -513,7 +1257,6 @@ function isTokenDefinition(value: unknown): value is TokenDefinition {
   );
 }
 
-// === Path Utilities ==========================================================
 /**
  * Gets a cached CSS variable name for the given path.
  * Creates and caches the CSS variable name if not already cached.
@@ -596,7 +1339,6 @@ function createAliasFunction(context: TokenProcessingContext) {
   };
 }
 
-// == Token Value Extractors ==================================================
 function extractFontFamilyValue(value: TokenFontFamilyValue): CSSVarValue {
   if (Array.isArray(value)) {
     return value.join(", ") as CSSVarValue;
@@ -726,14 +1468,15 @@ function extractCSSValue(value: TokenValue): CSSVarValue {
   throw new Error(`Unexpected value type in extractCSSValue: ${typeof value}`);
 }
 
-// == Tests ===================================================================
+// == Theme Tests =============================================================
 // Ignore errors when compiling to CommonJS.
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore error TS1343: The 'import.meta' meta-property is only allowed when the '--module' option is 'es2020', 'es2022', 'esnext', 'system', 'node16', or 'nodenext'.
 if (import.meta.vitest) {
   // eslint-disable-next-line @typescript-eslint/ban-ts-comment
   // @ts-ignore error TS1343: The 'import.meta' meta-property is only allowed when the '--module' option is 'es2020', 'es2022', 'esnext', 'system', 'node16', or 'nodenext'.
-  const { describe, it, expect, assertType, expectTypeOf } = import.meta.vitest;
+  const { describe, it, expect, assertType, expectTypeOf, vi } = import.meta
+    .vitest;
 
   const debugId = "myCSS";
   setFileScope("test");
@@ -786,6 +1529,71 @@ if (import.meta.vitest) {
       return normalized;
     }
     return tokens;
+  }
+
+  function deepFreezeObject<T>(value: T): T {
+    if (value && typeof value === "object") {
+      const descriptors = Object.getOwnPropertyDescriptors(value);
+
+      for (const descriptor of Object.values(descriptors)) {
+        if ("value" in descriptor) {
+          deepFreezeObject(descriptor.value);
+        }
+      }
+
+      Object.freeze(value);
+    }
+
+    return value;
+  }
+
+  function expectThemeContractResult<const ThemeTokens extends Theme>(
+    result: ThemeResult<ThemeTokens>
+  ): ThemeContract<ThemeTokens> {
+    const [, vars, contract] = result;
+
+    expect(result).toHaveLength(3);
+    expect(isThemeContract(contract)).toBe(true);
+    expect(contract.vars).toBe(vars);
+    expect(Object.isFrozen(contract)).toBe(true);
+    expect(Object.isFrozen(contract.values)).toBe(true);
+    expect(Object.isFrozen(contract.cssVarByPath)).toBe(true);
+    assertType<ThemeContract<ThemeTokens>>(contract);
+
+    return contract;
+  }
+
+  function expectThemeVarsContract(
+    vars: unknown,
+    contract: ThemeContract
+  ): void {
+    expect(isThemeContract(contract)).toBe(true);
+    expect(contract.vars).toBe(vars);
+    expect(Object.keys(contract)).toEqual(["vars", "values", "cssVarByPath"]);
+  }
+
+  function callThemeExtensionForRuntimeError<ThemeTokens extends Theme>(
+    contract: ThemeContract<ThemeTokens>,
+    replacementTokens: unknown,
+    debugId: string
+  ): ThemeResult<ThemeTokens> {
+    return theme(
+      contract,
+      replacementTokens as ThemeTokensInput<ThemeTokens>,
+      debugId
+    );
+  }
+
+  function callThemeForRuntimeError<ThemeTokens extends Theme>(
+    tokensOrContract: unknown,
+    debugIdOrReplacementTokens?: unknown,
+    debugId?: unknown
+  ): ThemeResult<ThemeTokens> {
+    const callTheme = theme as unknown as (
+      ...args: unknown[]
+    ) => ThemeResult<ThemeTokens>;
+
+    return callTheme(tokensOrContract, debugIdOrReplacementTokens, debugId);
   }
 
   // Validate that CSS variables have proper hash format
@@ -1470,6 +2278,120 @@ if (import.meta.vitest) {
   });
 
   describe.concurrent("theme", () => {
+    it("creates structural ThemeContract metadata", () => {
+      type ContractTheme = {
+        color: { brand: string; accent: string };
+      };
+      const tokens = {
+        color: { brand: "blue", accent: "cyan" }
+      } satisfies ThemeTokensInput<ContractTheme>;
+      const result = theme(tokens, "theme-contract-class");
+      const [, vars, contract] = result;
+      expectThemeContractResult(result);
+
+      assertType<ThemeContract<ContractTheme>>(contract);
+      assertType<ThemeResult<ContractTheme>>(result);
+      assertType<PureCSSVarFunction>(contract.vars.color.brand);
+      expectTypeOf(contract.values).toEqualTypeOf<
+        Readonly<Record<string, CSSVarValue>>
+      >();
+      expectTypeOf(contract.cssVarByPath).toEqualTypeOf<Readonly<CSSVarMap>>();
+      // @ts-expect-error: resolved vars are not full ThemeContract values.
+      assertType<ThemeContract<ContractTheme>>(contract.vars);
+      assertType<ThemeContract<ContractTheme>>({
+        vars: contract.vars,
+        values: contract.values,
+        cssVarByPath: contract.cssVarByPath
+      });
+
+      expect(Object.keys(contract)).toEqual(["vars", "values", "cssVarByPath"]);
+      expect(contract.vars).toBe(vars);
+      expect(Object.isFrozen(contract.values)).toBe(true);
+      expect(Object.isFrozen(contract.cssVarByPath)).toBe(true);
+      expect(Object.getOwnPropertySymbols(contract)).toEqual([]);
+
+      expect(contract.cssVarByPath["color-brand"]).toMatch(/^--color-brand__/);
+      expect(
+        Object.prototype.hasOwnProperty.call(
+          contract.values,
+          contract.cssVarByPath["color-brand"]
+        )
+      ).toBe(true);
+      expect(normalizeVars(contract.values as AssignedVars)).toEqual({
+        "--color-brand": "blue",
+        "--color-accent": "cyan"
+      });
+    });
+
+    it("rejects invalid ThemeContract replacement inputs", () => {
+      type ContractTheme = { color: { brand: string } };
+      const tokens = {
+        color: { brand: "blue" }
+      } satisfies ThemeTokensInput<ContractTheme>;
+      const result = theme(tokens, "theme-invalid-contract-base");
+      const [, vars, contract] = result;
+      const replacementTokens = {
+        color: { brand: "red" }
+      } satisfies ThemeTokensInput<ContractTheme>;
+
+      expectThemeContractResult(result);
+      expect(isThemeContract(contract)).toBe(true);
+      expect(isThemeContract({})).toBe(false);
+      expect(() => assertThemeContract({})).toThrow(
+        THEME_CONTRACT_EXPECTED_ERROR
+      );
+      expect(() => assertThemeContract(vars)).toThrow(
+        THEME_CONTRACT_EXPECTED_ERROR
+      );
+      expect(() =>
+        theme(
+          {} as unknown as ThemeContract<ContractTheme>,
+          replacementTokens,
+          "theme-invalid-contract-object"
+        )
+      ).toThrow(THEME_CONTRACT_EXPECTED_ERROR);
+      expect(() =>
+        theme(
+          vars as unknown as ThemeContract<ContractTheme>,
+          replacementTokens,
+          "theme-invalid-contract-vars"
+        )
+      ).toThrow(THEME_CONTRACT_EXPECTED_ERROR);
+      expect(() =>
+        callThemeForRuntimeError<ContractTheme>(vars, replacementTokens)
+      ).toThrow(THEME_CONTRACT_EXPECTED_ERROR);
+      expect(() =>
+        theme(
+          {
+            vars: contract.vars,
+            values: contract.values
+          } as unknown as ThemeContract<ContractTheme>,
+          replacementTokens,
+          "theme-invalid-contract-incomplete"
+        )
+      ).toThrow(THEME_CONTRACT_EXPECTED_ERROR);
+      expect(() =>
+        theme(
+          {
+            vars: contract.vars,
+            values: contract.values,
+            cssVarByPath: contract.cssVarByPath
+          },
+          replacementTokens,
+          "theme-structural-contract-object"
+        )
+      ).not.toThrow();
+      expect(() => callThemeForRuntimeError<ContractTheme>(contract)).toThrow(
+        THEME_CONTRACT_REPLACEMENT_TOKENS_EXPECTED_ERROR
+      );
+      expect(() =>
+        callThemeForRuntimeError<ContractTheme>(
+          contract,
+          "theme-contract-with-debug"
+        )
+      ).toThrow(THEME_CONTRACT_REPLACEMENT_TOKENS_EXPECTED_ERROR);
+    });
+
     it("exposes theme.with as a callable wrapper", () => {
       expect(typeof theme.with).toBe("function");
 
@@ -1477,7 +2399,7 @@ if (import.meta.vitest) {
       const result = themeTokens({ color: "red" }, "theme-with");
 
       expect(Array.isArray(result)).toBe(true);
-      expect(result).toHaveLength(2);
+      expectThemeContractResult(result);
       expect(result[0]).toMatch(identifierName("theme-with"));
       validateHashFormatForResolved(result[1]);
     });
@@ -1496,12 +2418,15 @@ if (import.meta.vitest) {
       const direct = theme(tokens, "theme1");
 
       expect(Array.isArray(wrapped)).toBe(true);
-      expect(wrapped).toHaveLength(2);
+      expectThemeContractResult(wrapped);
+      expectThemeContractResult(direct);
       expect(wrapped[0]).toMatch(identifierName("theme1"));
       expect(direct[0]).toMatch(identifierName("theme1"));
       expect(normalizeResolvedTokens(wrapped[1])).toEqual(
         normalizeResolvedTokens(direct[1])
       );
+      expect(wrapped[2].vars).toBe(wrapped[1]);
+      expect(direct[2].vars).toBe(direct[1]);
       validateHashFormatForResolved(wrapped[1]);
       validateHashFormatForResolved(direct[1]);
     });
@@ -1512,7 +2437,7 @@ if (import.meta.vitest) {
         font: { body: string };
       }>();
 
-      const [themeClass, vars] = myTheme({
+      const [themeClass, vars, contract] = myTheme({
         color: { brand: "blue" },
         font: { body: "arial" }
       });
@@ -1520,6 +2445,11 @@ if (import.meta.vitest) {
       assertType<string>(themeClass);
       assertType<PureCSSVarFunction>(vars.color.brand);
       assertType<PureCSSVarFunction>(vars.font.body);
+      assertType<
+        ThemeContract<{ color: { brand: string }; font: { body: string } }>
+      >(contract);
+      expect(isThemeContract(contract)).toBe(true);
+      expect(contract.vars).toBe(vars);
       expectTypeOf<typeof vars.color.brand>().not.toBeAny();
       expectTypeOf<
         typeof vars.color.brand
@@ -1571,7 +2501,7 @@ if (import.meta.vitest) {
         font: { body: string };
       }>();
 
-      const [className, vars] = semanticTheme(
+      const [className, vars, contract] = semanticTheme(
         {
           "@layer": "tokens",
           color: {
@@ -1590,6 +2520,14 @@ if (import.meta.vitest) {
       assertType<PureCSSVarFunction>(vars.color.brand);
       assertType<PureCSSVarFunction>(vars.color.semantic.primary);
       assertType<PureCSSVarFunction>(vars.font.body);
+      assertType<
+        ThemeContract<{
+          color: { brand: string; semantic: { primary: string } };
+          font: { body: string };
+        }>
+      >(contract);
+      expect(isThemeContract(contract)).toBe(true);
+      expect(contract.vars).toBe(vars);
       expect(className).toMatch(identifierName("theme-with-layer"));
       validateHashFormatForResolved(vars);
       expect(normalizeResolvedTokens(vars)).toEqual({
@@ -1605,17 +2543,579 @@ if (import.meta.vitest) {
       });
     });
 
-    it("keeps direct theme() calls working", () => {
-      const [className, themeVars] = theme({ color: "red" }, "theme2");
+    it("preserves overload return types", () => {
+      type ExpectedTheme = {
+        colors: { brand: string };
+        font: { body: string };
+      };
+      type ExpectedVars = {
+        colors: { brand: PureCSSVarFunction };
+        font: { body: PureCSSVarFunction };
+      };
+      type SingleTokenTheme = { color: string };
+      type SingleTokenVars = { color: PureCSSVarFunction };
+      const tokens: ThemeTokensInput<ExpectedTheme> = {
+        colors: { brand: "blue" },
+        font: { body: "arial" }
+      };
+      const direct = theme(tokens);
 
+      assertType<ThemeResult<ExpectedTheme>>(direct);
+      assertType<ExpectedVars>(direct[1]);
+      expectTypeOf(direct).toEqualTypeOf<ThemeResult<ExpectedTheme>>();
+      const directContract = expectThemeContractResult(direct);
+
+      const directWithDebug = theme(tokens, "theme-overload-direct-debug");
+
+      assertType<ThemeResult<ExpectedTheme>>(directWithDebug);
+      assertType<ExpectedVars>(directWithDebug[1]);
+      expectTypeOf(directWithDebug).toEqualTypeOf<ThemeResult<ExpectedTheme>>();
+      expectThemeContractResult(directWithDebug);
+      assertType<ThemeContract<ExpectedTheme>>(directContract);
+
+      const replacementTokens: ThemeTokensInput<ExpectedTheme> = {
+        colors: { brand: "red" },
+        font: { body: "helvetica" }
+      };
+      const derived = theme(directContract, replacementTokens);
+
+      assertType<ThemeResult<ExpectedTheme>>(derived);
+      assertType<ExpectedVars>(derived[1]);
+      expectTypeOf(derived).toEqualTypeOf<ThemeResult<ExpectedTheme>>();
+      expectThemeContractResult(derived);
+
+      const derivedWithDebug = theme(
+        directContract,
+        replacementTokens,
+        "theme-overload-derived-debug"
+      );
+
+      assertType<ThemeResult<ExpectedTheme>>(derivedWithDebug);
+      assertType<ExpectedVars>(derivedWithDebug[1]);
+      expectTypeOf(derivedWithDebug).toEqualTypeOf<
+        ThemeResult<ExpectedTheme>
+      >();
+      expectThemeContractResult(derivedWithDebug);
+      expect(derivedWithDebug[0]).toMatch(
+        identifierName("theme-overload-derived-debug")
+      );
+
+      const singleTokenTheme = theme.with<SingleTokenTheme>();
+      const wrappedSingle = singleTokenTheme({ color: "blue" });
+      const singleTokenContract = expectThemeContractResult(wrappedSingle);
+
+      assertType<ThemeResult<SingleTokenTheme>>(wrappedSingle);
+      assertType<SingleTokenVars>(wrappedSingle[1]);
+      expectTypeOf(wrappedSingle).toEqualTypeOf<
+        ThemeResult<SingleTokenTheme>
+      >();
+      assertType<ThemeContract<SingleTokenTheme>>(singleTokenContract);
+
+      const typedTheme = theme.with<ExpectedTheme>();
+      const wrapped = typedTheme(tokens);
+
+      assertType<ThemeResult<ExpectedTheme>>(wrapped);
+      assertType<ExpectedVars>(wrapped[1]);
+      expectTypeOf(wrapped).toEqualTypeOf<ThemeResult<ExpectedTheme>>();
+      expectThemeContractResult(wrapped);
+
+      type StrictTheme = {
+        color: { brand: string; accent: string };
+        font: { body: string };
+      };
+      const strictTheme = theme.with<StrictTheme>();
+      const strictTokens: ThemeTokensInput<StrictTheme> = {
+        color: { brand: "blue", accent: "cyan" },
+        font: { body: "arial" }
+      };
+      const strictResult = strictTheme(strictTokens);
+      const [, strictVars, strictContract] = strictResult;
+      expectThemeContractResult(strictResult);
+      const strictReplacementTokens: ThemeTokensInput<StrictTheme> = {
+        color: { brand: "red", accent: "orange" },
+        font: { body: "helvetica" }
+      };
+      const strictDerived = theme<StrictTheme>(
+        strictContract,
+        strictReplacementTokens
+      );
+
+      assertType<ThemeResult<StrictTheme>>(strictDerived);
+      expectTypeOf(strictDerived).toEqualTypeOf<ThemeResult<StrictTheme>>();
+      expectThemeContractResult(strictDerived);
+
+      const incompleteContract = {
+        vars: strictVars,
+        values: {}
+      };
+      const assertStrictReplacementTypeErrors = () => {
+        // @ts-expect-error: replacement mode requires ThemeContract, not resolved vars.
+        theme<StrictTheme>(strictVars, strictReplacementTokens);
+        // @ts-expect-error: replacement mode requires full ThemeContract metadata.
+        theme<StrictTheme>(incompleteContract, strictReplacementTokens);
+        // @ts-expect-error: font branch is required by the replacement contract.
+        theme<StrictTheme>(strictContract, {
+          color: { brand: "red", accent: "orange" }
+        });
+        // @ts-expect-error: color.accent is required by the replacement contract.
+        theme<StrictTheme>(strictContract, {
+          color: { brand: "red" },
+          font: { body: "helvetica" }
+        });
+        // @ts-expect-error: top-level replacement keys outside the contract are not accepted.
+        theme<StrictTheme>(strictContract, {
+          color: { brand: "red", accent: "orange" },
+          font: { body: "helvetica" },
+          space: "4px"
+        });
+        // @ts-expect-error: nested replacement keys outside the contract are not accepted.
+        theme<StrictTheme>(strictContract, {
+          color: { brand: "red", accent: "orange", neutral: "gray" },
+          font: { body: "helvetica" }
+        });
+        // @ts-expect-error: color.brand must be a string in the strict replacement contract.
+        theme<StrictTheme>(strictContract, {
+          color: { brand: 123, accent: "orange" },
+          font: { body: "helvetica" }
+        });
+        // @ts-expect-error: replacement-mode debugId must be a string.
+        theme<StrictTheme>(strictContract, strictReplacementTokens, 123);
+      };
+
+      assertType<() => void>(assertStrictReplacementTypeErrors);
+    });
+
+    it("creates a derived theme class from existing vars", async () => {
+      type UserTheme = {
+        colors: { brand: string };
+        font: { body: string };
+      };
+      const baseTokens: ThemeTokensInput<UserTheme> = {
+        colors: { brand: "blue" },
+        font: { body: "arial" }
+      };
+      const baseResult = theme(baseTokens, "theme-user-example");
+      const [baseClassName, vars, contract] = baseResult;
+      expectThemeContractResult(baseResult);
+      const transformSpy = vi.spyOn(
+        await import("@mincho-js/transform-to-vanilla"),
+        "transform"
+      );
+
+      try {
+        const derivedResult = theme(
+          contract,
+          {
+            colors: { brand: "red" },
+            font: { body: "helvetica" }
+          },
+          "theme-user-example-derived"
+        );
+        const [derivedClassName, nextVars, nextContract] = derivedResult;
+        const thirdResult = theme(
+          nextContract,
+          {
+            colors: { brand: "green" },
+            font: { body: "system-ui" }
+          },
+          "theme-user-example-third"
+        );
+        const [thirdClassName, thirdVars, thirdContract] = thirdResult;
+        const colorsBrandVar = getVarName(vars.colors.brand);
+        const fontBodyVar = getVarName(vars.font.body);
+
+        expectThemeContractResult(derivedResult);
+        expectThemeContractResult(thirdResult);
+        expect(typeof derivedClassName).toBe("string");
+        expect(derivedClassName).toMatch(
+          identifierName("theme-user-example-derived")
+        );
+        expect(thirdClassName).toMatch(
+          identifierName("theme-user-example-third")
+        );
+        expect(derivedClassName).not.toBe(baseClassName);
+        expect(thirdClassName).not.toBe(derivedClassName);
+        expect(nextContract).not.toBe(contract);
+        expect(thirdContract).not.toBe(nextContract);
+        expect(nextVars.colors.brand).toBe(vars.colors.brand);
+        expect(nextVars.font.body).toBe(vars.font.body);
+        expect(thirdVars.colors.brand).toBe(vars.colors.brand);
+        expect(thirdVars.font.body).toBe(vars.font.body);
+        expect(stripHash(colorsBrandVar)).toBe("--colors-brand");
+        expect(stripHash(fontBodyVar)).toBe("--font-body");
+
+        const derivedTransformInput = transformSpy.mock.calls
+          .map(
+            ([input]) =>
+              input as { selectors?: Record<string, { vars?: AssignedVars }> }
+          )
+          .find((input) => input.selectors?.[derivedClassName] !== undefined);
+        const emittedVars =
+          derivedTransformInput?.selectors?.[derivedClassName]?.vars;
+
+        expect(emittedVars).toBeDefined();
+        expect(normalizeVars(emittedVars as AssignedVars)).toEqual({
+          [stripHash(colorsBrandVar)]: "red",
+          [stripHash(fontBodyVar)]: "helvetica"
+        });
+      } finally {
+        transformSpy.mockRestore();
+      }
+    });
+
+    it("throws deterministic replacement mode errors", () => {
+      type RuntimeErrorTheme = {
+        color: { brand: string; semantic: { primary: string } };
+        font: { body: string };
+        space: number[];
+      };
+      const runtimeErrorTokens: ThemeTokensInput<RuntimeErrorTheme> =
+        compositeValue({
+          color: {
+            brand: "blue",
+            semantic: {
+              get primary(): string {
+                return this.alias(this.color.brand);
+              }
+            }
+          },
+          font: { body: "arial" },
+          space: [1, 2]
+        });
+      const runtimeErrorResult = theme(runtimeErrorTokens, "theme-errors-base");
+      const [, runtimeErrorVars, contract] = runtimeErrorResult;
+      expectThemeContractResult(runtimeErrorResult);
+      expectThemeVarsContract(runtimeErrorVars, contract);
+      const missingNestedBranch = {
+        color: { brand: "red" },
+        font: { body: "helvetica" },
+        space: [3, 4]
+      };
+      const extraTopLevelKey = {
+        color: { brand: "red", semantic: { primary: "crimson" } },
+        font: { body: "helvetica" },
+        space: [3, 4],
+        elevation: "high"
+      };
+      const extraNestedKey = {
+        color: {
+          brand: "red",
+          semantic: { primary: "crimson" },
+          accent: "pink"
+        },
+        font: { body: "helvetica" },
+        space: [3, 4]
+      };
+      const arrayLengthMismatch = {
+        color: { brand: "red", semantic: { primary: "crimson" } },
+        font: { body: "helvetica" },
+        space: [3]
+      };
+
+      expect(() =>
+        callThemeExtensionForRuntimeError<RuntimeErrorTheme>(
+          contract,
+          missingNestedBranch,
+          "theme-errors-missing-nested"
+        )
+      ).toThrow(
+        'Theme extension missing replacement token at "color.semantic".'
+      );
+      expect(() =>
+        callThemeExtensionForRuntimeError<RuntimeErrorTheme>(
+          contract,
+          extraTopLevelKey,
+          "theme-errors-extra-top"
+        )
+      ).toThrow(
+        'Theme extension replacement token at "elevation" does not exist in base vars.'
+      );
+      expect(() =>
+        callThemeExtensionForRuntimeError<RuntimeErrorTheme>(
+          contract,
+          extraNestedKey,
+          "theme-errors-extra-nested"
+        )
+      ).toThrow(
+        'Theme extension replacement token at "color.accent" does not exist in base vars.'
+      );
+      expect(() =>
+        callThemeExtensionForRuntimeError<RuntimeErrorTheme>(
+          contract,
+          arrayLengthMismatch,
+          "theme-errors-array-length"
+        )
+      ).toThrow('Theme extension array length mismatch at "space".');
+
+      Object.defineProperty(runtimeErrorVars.color.semantic, "primary", {
+        value: "not-a-var-reference",
+        enumerable: true,
+        configurable: true
+      });
+      expect(() =>
+        callThemeExtensionForRuntimeError<RuntimeErrorTheme>(
+          contract,
+          {
+            color: { brand: "red", semantic: { primary: "crimson" } },
+            font: { body: "helvetica" },
+            space: [3, 4]
+          },
+          "theme-errors-invalid-var-reference"
+        )
+      ).toThrow(
+        'Theme extension expected var() reference at "color.semantic.primary".'
+      );
+    });
+
+    it("extends replacement mode to token forms and @layer", async () => {
+      const baseTokens = compositeValue({
+        scalar: "base-scalar",
+        color: {
+          brand: "#0000ff",
+          definition: {
+            $type: "color",
+            $value: "#00ff00"
+          },
+          semantic: {
+            get primary(): string {
+              return this.color.brand;
+            },
+            get fallback(): string {
+              return this.fallbackVar(this.color.brand, "#123456");
+            },
+            get rawBrand(): string {
+              return this.raw(this.color.brand);
+            },
+            get aliasBrand(): string {
+              return this.alias(this.color.brand);
+            }
+          }
+        },
+        space: {
+          scale: [2, 4, 8],
+          unit: { value: 1, unit: "rem" } as TokenDimensionValue
+        },
+        shadow: {
+          card: compositeValue({
+            get resolved(): string {
+              const offsetX = `${this.offsetX.value}${this.offsetX.unit}`;
+              const offsetY = `${this.offsetY.value}${this.offsetY.unit}`;
+              const blur = `${this.blur.value}${this.blur.unit}`;
+              return `${this.color} ${offsetX} ${offsetY} ${blur}`;
+            },
+            color: "#00000080",
+            offsetX: { value: 1, unit: "px" },
+            offsetY: { value: 2, unit: "px" },
+            blur: { value: 4, unit: "px" }
+          })
+        }
+      });
+      const baseResult = theme(baseTokens, "theme-token-forms-base");
+      const [, vars, contract] = baseResult;
+      expectThemeContractResult(baseResult);
+      const varsSnapshot = normalizeResolvedTokens(vars);
+      const replacementTokens = compositeValue({
+        scalar: "replacement-scalar",
+        color: {
+          brand: "#ff0000",
+          definition: {
+            $type: "color",
+            $value: "#00aa00"
+          },
+          semantic: {
+            get primary(): string {
+              return this.color.brand;
+            },
+            get fallback(): string {
+              return this.fallbackVar(this.color.brand, "#654321");
+            },
+            get rawBrand(): string {
+              return this.raw(this.color.brand);
+            },
+            get aliasBrand(): string {
+              return this.alias(this.color.brand);
+            }
+          }
+        },
+        space: {
+          scale: [3, 6, 9],
+          unit: { value: 2, unit: "rem" } as TokenDimensionValue
+        },
+        shadow: {
+          card: compositeValue({
+            get resolved(): string {
+              const offsetX = `${this.offsetX.value}${this.offsetX.unit}`;
+              const offsetY = `${this.offsetY.value}${this.offsetY.unit}`;
+              const blur = `${this.blur.value}${this.blur.unit}`;
+              return `${this.color} ${offsetX} ${offsetY} ${blur}`;
+            },
+            color: "#11111180",
+            offsetX: { value: 2, unit: "px" },
+            offsetY: { value: 4, unit: "px" },
+            blur: { value: 8, unit: "px" }
+          })
+        }
+      });
+      const layeredReplacementTokens = {
+        "@layer": "theme-replacements",
+        ...replacementTokens
+      } as ThemeTokensInput<typeof baseTokens>;
+      const replacementPrimaryGetter = Object.getOwnPropertyDescriptor(
+        replacementTokens.color.semantic,
+        "primary"
+      )?.get;
+      deepFreezeObject(vars);
+      deepFreezeObject(layeredReplacementTokens);
+      const transformSpy = vi.spyOn(
+        await import("@mincho-js/transform-to-vanilla"),
+        "transform"
+      );
+
+      try {
+        const derivedResult = theme(
+          contract,
+          layeredReplacementTokens,
+          "theme-token-forms-derived"
+        );
+        const [derivedClassName, nextVars, nextContract] = derivedResult;
+        expectThemeContractResult(derivedResult);
+        expect(nextContract).not.toBe(contract);
+        expect(nextVars.scalar).toBe(vars.scalar);
+        expect(nextVars.color.brand).toBe(vars.color.brand);
+        expect(nextVars.space.scale[0]).toBe(vars.space.scale[0]);
+        expect(nextVars.shadow.card.color).toBe(vars.shadow.card.color);
+        const normalizedNextVars = normalizeResolvedTokens(nextVars);
+        expect(normalizedNextVars.shadow.card.resolved).toBe(
+          "var(--shadow-card)"
+        );
+        type ThemeTransformInput = {
+          selectors?: Record<
+            string,
+            {
+              vars?: AssignedVars;
+              "@layer"?: Record<string, { vars?: AssignedVars }>;
+            }
+          >;
+        };
+        const derivedTransformInput = transformSpy.mock.calls
+          .map(([input]) => input as ThemeTransformInput)
+          .find((input) => input.selectors?.[derivedClassName] !== undefined);
+        const emittedLayerVars =
+          derivedTransformInput?.selectors?.[derivedClassName]?.["@layer"]?.[
+            "theme-replacements"
+          ]?.vars;
+
+        expect(emittedLayerVars).toBeDefined();
+        const normalizedEmittedVars = normalizeVars(
+          emittedLayerVars as AssignedVars
+        );
+
+        expect(normalizedEmittedVars[stripHash(getVarName(vars.scalar))]).toBe(
+          "replacement-scalar"
+        );
+        expect(
+          normalizedEmittedVars[stripHash(getVarName(vars.color.brand))]
+        ).toBe("#ff0000");
+        expect(
+          normalizedEmittedVars[stripHash(getVarName(vars.color.definition))]
+        ).toBe("#00aa00");
+        expect(
+          normalizedEmittedVars[stripHash(getVarName(vars.space.scale[0]))]
+        ).toBe(3);
+        expect(
+          normalizedEmittedVars[stripHash(getVarName(vars.space.scale[1]))]
+        ).toBe(6);
+        expect(
+          normalizedEmittedVars[stripHash(getVarName(vars.space.scale[2]))]
+        ).toBe(9);
+        expect(
+          normalizedEmittedVars[stripHash(getVarName(vars.space.unit))]
+        ).toBe("2rem");
+        expect(
+          normalizedEmittedVars[stripHash(getVarName(vars.shadow.card.color))]
+        ).toBe("#11111180");
+        expect(
+          normalizedEmittedVars[stripHash(getVarName(vars.shadow.card.offsetX))]
+        ).toBe("2px");
+        expect(
+          normalizedEmittedVars[stripHash(getVarName(vars.shadow.card.offsetY))]
+        ).toBe("4px");
+        expect(
+          normalizedEmittedVars[stripHash(getVarName(vars.shadow.card.blur))]
+        ).toBe("8px");
+        expect(
+          stripHash(normalizedEmittedVars["--color-semantic-primary"] as string)
+        ).toBe("var(--color-brand)");
+        expect(
+          stripHash(
+            normalizedEmittedVars["--color-semantic-fallback"] as string
+          )
+        ).toBe("var(--color-brand, #654321)");
+        expect(normalizedEmittedVars["--color-semantic-raw-brand"]).toBe(
+          "#ff0000"
+        );
+        expect(
+          normalizedEmittedVars["--color-semantic-alias-brand"]
+        ).toBeUndefined();
+        expect(normalizedEmittedVars["--shadow-card"]).toBe(
+          "#11111180 2px 4px 8px"
+        );
+        expect(normalizeResolvedTokens(vars)).toEqual(varsSnapshot);
+        expect(
+          Object.getOwnPropertyDescriptor(
+            replacementTokens.color.semantic,
+            "primary"
+          )?.get
+        ).toBe(replacementPrimaryGetter);
+      } finally {
+        transformSpy.mockRestore();
+      }
+    });
+
+    it("stores assignment metadata on the structural ThemeContract", () => {
+      const result = theme(
+        compositeValue({
+          color: {
+            brand: "#0000ff",
+            semantic: {
+              get rawBrand(): string {
+                return this.raw(this.color.brand);
+              }
+            }
+          }
+        })
+      );
+      const [, vars, contract] = result;
+      expectThemeContractResult(result);
+      expectThemeVarsContract(vars, contract);
+      const rawBrandVar = contract.cssVarByPath["color-semantic-raw-brand"];
+
+      expect(Object.keys(contract)).toEqual(["vars", "values", "cssVarByPath"]);
+      expect(Object.getOwnPropertySymbols(contract)).toEqual([]);
+      expect(rawBrandVar).toMatch(/^--color-semantic-raw-brand__/);
+      expect(contract.values[rawBrandVar]).toBe("#0000ff");
+    });
+
+    it("keeps direct theme() calls working", () => {
+      const result = theme({ color: "red" }, "theme2");
+      const [className, themeVars, contract] = result;
+
+      expectThemeContractResult(result);
+      assertType<ThemeContract<{ color: string }>>(contract);
       expect(className).toMatch(identifierName("theme2"));
       validateHashFormatForResolved(themeVars);
     });
 
     it("generates unique className with debugId", () => {
-      const [className1, themeVars1] = theme({ color: "red" }, "theme1");
-      const [className2, themeVars2] = theme({ color: "blue" }, "theme2");
+      const result1 = theme({ color: "red" }, "theme1");
+      const result2 = theme({ color: "blue" }, "theme2");
+      const [className1, themeVars1, contract1] = result1;
+      const [className2, themeVars2, contract2] = result2;
 
+      expectThemeContractResult(result1);
+      expectThemeContractResult(result2);
+      expectThemeVarsContract(themeVars1, contract1);
+      expectThemeVarsContract(themeVars2, contract2);
       expect(className1).toMatch(identifierName("theme1"));
       expect(className2).toMatch(identifierName("theme2"));
       expect(className1).not.toBe(className2);
@@ -1625,13 +3125,16 @@ if (import.meta.vitest) {
     });
 
     it("generates className without debugId", () => {
-      const [className] = theme({ color: "red" });
+      const result = theme({ color: "red" });
+      const [className, themeVars, contract] = result;
 
+      expectThemeContractResult(result);
+      expectThemeVarsContract(themeVars, contract);
       expect(className).toMatch(/^[a-zA-Z_][a-zA-Z0-9_]*$/);
     });
 
     it("handles @layer in theme tokens", () => {
-      const [className, themeVars] = theme(
+      const result = theme(
         {
           "@layer": "tokens",
           color: {
@@ -1641,7 +3144,10 @@ if (import.meta.vitest) {
         },
         debugId
       );
+      const [className, themeVars, contract] = result;
 
+      expectThemeContractResult(result);
+      expectThemeVarsContract(themeVars, contract);
       expect(className).toMatch(identifierName(`${debugId}`));
 
       validateHashFormatForResolved(themeVars);
@@ -1654,7 +3160,7 @@ if (import.meta.vitest) {
     });
 
     it("handles primitive token values", () => {
-      const [className, themeVars] = theme({
+      const [className, themeVars, contract] = theme({
         color: "red",
         size: 16,
         enabled: true,
@@ -1662,6 +3168,7 @@ if (import.meta.vitest) {
       });
 
       expect(className).toBeDefined();
+      expectThemeVarsContract(themeVars, contract);
 
       validateHashFormatForResolved(themeVars);
       expect(normalizeResolvedTokens(themeVars)).toEqual({
@@ -1673,12 +3180,13 @@ if (import.meta.vitest) {
     });
 
     it("handles array tokens", () => {
-      const [className, themeVars] = theme({
+      const [className, themeVars, contract] = theme({
         space: [2, 4, 8, 16, 32],
         colors: ["#ff0000", "#00ff00", "#0000ff"]
       });
 
       expect(className).toBeDefined();
+      expectThemeVarsContract(themeVars, contract);
       expect(normalizeResolvedTokens(themeVars)).toEqual({
         space: [
           "var(--space-0)",
@@ -1692,7 +3200,7 @@ if (import.meta.vitest) {
     });
 
     it("handles nested theme objects", () => {
-      const [className, themeVars] = theme({
+      const [className, themeVars, contract] = theme({
         typography: {
           heading: {
             fontSize: "24px",
@@ -1706,6 +3214,7 @@ if (import.meta.vitest) {
       });
 
       expect(className).toBeDefined();
+      expectThemeVarsContract(themeVars, contract);
 
       validateHashFormatForResolved(themeVars);
       const normalized = normalizeResolvedTokens(themeVars);
@@ -1724,7 +3233,7 @@ if (import.meta.vitest) {
     });
 
     it("handles TokenDefinition with various types", () => {
-      const [className, themeVars] = theme({
+      const [className, themeVars, contract] = theme({
         color: {
           $type: "color",
           $value: "#ff5500"
@@ -1744,6 +3253,7 @@ if (import.meta.vitest) {
       });
 
       expect(className).toBeDefined();
+      expectThemeVarsContract(themeVars, contract);
 
       validateHashFormatForResolved(themeVars);
       expect(normalizeResolvedTokens(themeVars)).toEqual({
@@ -1755,7 +3265,7 @@ if (import.meta.vitest) {
     });
 
     it("handles semantic tokens with fallbackVar", () => {
-      const [className, themeVars] = theme(
+      const [className, themeVars, contract] = theme(
         compositeValue({
           color: {
             base: {
@@ -1772,6 +3282,7 @@ if (import.meta.vitest) {
       );
 
       expect(className).toMatch(identifierName(`${debugId}`));
+      expectThemeVarsContract(themeVars, contract);
 
       validateHashFormatForResolved(themeVars);
       expect(normalizeResolvedTokens(themeVars)).toEqual({
@@ -1787,7 +3298,7 @@ if (import.meta.vitest) {
     });
 
     it("handles semantic tokens with alias", () => {
-      const [className, themeVars] = theme(
+      const [className, themeVars, contract] = theme(
         compositeValue({
           color: {
             base: {
@@ -1808,6 +3319,7 @@ if (import.meta.vitest) {
       );
 
       expect(className).toMatch(identifierName(`${debugId}`));
+      expectThemeVarsContract(themeVars, contract);
 
       validateHashFormatForResolved(themeVars);
       const normalized = normalizeResolvedTokens(themeVars);
@@ -1816,7 +3328,7 @@ if (import.meta.vitest) {
     });
 
     it("handles semantic tokens with raw", () => {
-      const [className, themeVars] = theme(
+      const [className, themeVars, contract] = theme(
         compositeValue({
           color: {
             base: {
@@ -1837,6 +3349,7 @@ if (import.meta.vitest) {
       );
 
       expect(className).toMatch(identifierName(`${debugId}`));
+      expectThemeVarsContract(themeVars, contract);
 
       validateHashFormatForResolved(themeVars);
       expect(normalizeResolvedTokens(themeVars)).toEqual({
@@ -1863,11 +3376,12 @@ if (import.meta.vitest) {
         offsetY: { value: 0.5, unit: "rem" }
       });
 
-      const [className, themeVars] = theme({
+      const [className, themeVars, contract] = theme({
         shadow: shadowValue
       });
 
       expect(className).toBeDefined();
+      expectThemeVarsContract(themeVars, contract);
 
       validateHashFormatForResolved(themeVars);
       const normalized = normalizeResolvedTokens(themeVars);
@@ -1878,12 +3392,13 @@ if (import.meta.vitest) {
     });
 
     it("handles TokenUnitValue", () => {
-      const [className, themeVars] = theme({
+      const [className, themeVars, contract] = theme({
         spacing: { value: 1.5, unit: "rem" },
         borderWidth: { value: 2, unit: "px" }
       });
 
       expect(className).toBeDefined();
+      expectThemeVarsContract(themeVars, contract);
 
       validateHashFormatForResolved(themeVars);
       expect(normalizeResolvedTokens(themeVars)).toEqual({
@@ -1893,13 +3408,14 @@ if (import.meta.vitest) {
     });
 
     it("handles camelCase to kebab-case conversion", () => {
-      const [className, themeVars] = theme({
+      const [className, themeVars, contract] = theme({
         backgroundColor: "white",
         fontSize: "16px",
         lineHeight: 1.5
       });
 
       expect(className).toBeDefined();
+      expectThemeVarsContract(themeVars, contract);
 
       validateHashFormatForResolved(themeVars);
       expect(normalizeResolvedTokens(themeVars)).toEqual({
@@ -1910,7 +3426,7 @@ if (import.meta.vitest) {
     });
 
     it("handles deeply nested structures", () => {
-      const [className, themeVars] = theme({
+      const [className, themeVars, contract] = theme({
         design: {
           system: {
             color: {
@@ -1924,6 +3440,7 @@ if (import.meta.vitest) {
       });
 
       expect(className).toBeDefined();
+      expectThemeVarsContract(themeVars, contract);
 
       validateHashFormatForResolved(themeVars);
       const normalized = normalizeResolvedTokens(themeVars);
@@ -1936,7 +3453,7 @@ if (import.meta.vitest) {
     });
 
     it("handles mixed token types in single theme", () => {
-      const [className, themeVars] = theme({
+      const [className, themeVars, contract] = theme({
         primitives: {
           color: "red",
           size: 16
@@ -1956,6 +3473,7 @@ if (import.meta.vitest) {
       });
 
       expect(className).toBeDefined();
+      expectThemeVarsContract(themeVars, contract);
 
       validateHashFormatForResolved(themeVars);
       const normalized = normalizeResolvedTokens(themeVars);
@@ -1971,7 +3489,7 @@ if (import.meta.vitest) {
     });
 
     it("handles complex semantic token references", () => {
-      const [className, themeVars] = theme(
+      const [className, themeVars, contract] = theme(
         compositeValue({
           color: {
             base: {
@@ -1999,6 +3517,7 @@ if (import.meta.vitest) {
       );
 
       expect(className).toMatch(identifierName(`${debugId}`));
+      expectThemeVarsContract(themeVars, contract);
 
       validateHashFormatForResolved(themeVars);
       const normalized = normalizeResolvedTokens(themeVars);
@@ -2011,7 +3530,7 @@ if (import.meta.vitest) {
     });
 
     it("handles fontWeight token types", () => {
-      const [className, themeVars] = theme({
+      const [className, themeVars, contract] = theme({
         weight: {
           normal: {
             $type: "fontWeight",
@@ -2033,6 +3552,7 @@ if (import.meta.vitest) {
       });
 
       expect(className).toBeDefined();
+      expectThemeVarsContract(themeVars, contract);
 
       validateHashFormatForResolved(themeVars);
       const normalized = normalizeResolvedTokens(themeVars);
@@ -2043,7 +3563,7 @@ if (import.meta.vitest) {
     });
 
     it("handles number token types", () => {
-      const [className, themeVars] = theme({
+      const [className, themeVars, contract] = theme({
         lineHeight: {
           $type: "number",
           $value: 1.5
@@ -2055,6 +3575,7 @@ if (import.meta.vitest) {
       });
 
       expect(className).toBeDefined();
+      expectThemeVarsContract(themeVars, contract);
 
       validateHashFormatForResolved(themeVars);
       expect(normalizeResolvedTokens(themeVars)).toEqual({
@@ -2064,7 +3585,7 @@ if (import.meta.vitest) {
     });
 
     it("handles color tokens with complex values", () => {
-      const [className, themeVars] = theme({
+      const [className, themeVars, contract] = theme({
         color: {
           simple: {
             $type: "color",
@@ -2082,6 +3603,7 @@ if (import.meta.vitest) {
       });
 
       expect(className).toBeDefined();
+      expectThemeVarsContract(themeVars, contract);
 
       validateHashFormatForResolved(themeVars);
       const normalized = normalizeResolvedTokens(themeVars);
@@ -2090,7 +3612,7 @@ if (import.meta.vitest) {
     });
 
     it("handles complex color tokens and semantic references", () => {
-      const [className, themeVars] = theme(
+      const [className, themeVars, contract] = theme(
         {
           color: {
             base: {
@@ -2143,6 +3665,7 @@ if (import.meta.vitest) {
       );
 
       expect(className).toMatch(identifierName(`${debugId}`));
+      expectThemeVarsContract(themeVars, contract);
 
       validateHashFormatForResolved(themeVars);
       expect(normalizeResolvedTokens(themeVars)).toEqual({
@@ -2185,7 +3708,7 @@ if (import.meta.vitest) {
     });
 
     it("integrates with globalTheme correctly", () => {
-      const [className, themeVars] = theme(
+      const result = theme(
         {
           color: {
             primary: "#007bff"
@@ -2193,7 +3716,15 @@ if (import.meta.vitest) {
         },
         "testTheme"
       );
+      const [className, themeVars, contract] = result;
+      const globalThemeVars = globalTheme(".test-global-theme", {
+        color: {
+          primary: "#007bff"
+        }
+      });
 
+      expectThemeContractResult(result);
+      expectThemeVarsContract(themeVars, contract);
       expect(className).toMatch(identifierName("testTheme"));
 
       validateHashFormatForResolved(themeVars);
@@ -2202,11 +3733,20 @@ if (import.meta.vitest) {
           primary: "var(--color-primary)"
         }
       });
+      expect(Array.isArray(globalThemeVars)).toBe(false);
+      expect(normalizeResolvedTokens(globalThemeVars)).toEqual({
+        color: {
+          primary: "var(--color-primary)"
+        }
+      });
     });
 
     it("handles empty theme object", () => {
-      const [className, themeVars] = theme({});
+      const result = theme({});
+      const [className, themeVars, contract] = result;
 
+      expectThemeContractResult(result);
+      expectThemeVarsContract(themeVars, contract);
       expect(className).toBeDefined();
       expect(themeVars).toEqual({});
     });
