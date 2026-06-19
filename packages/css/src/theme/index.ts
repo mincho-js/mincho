@@ -35,7 +35,8 @@ type WithOptionalLayer<T extends Theme> = T & {
 
 interface ThemeSubFunctions {
   fallbackVar: typeof fallbackVar;
-  raw(varReference: unknown): string;
+  raw(varReference: PureCSSVarFunction): CSSVarValue;
+  raw<const T>(value: T): T;
   alias(varReference: unknown): string;
 }
 
@@ -1904,6 +1905,10 @@ if (import.meta.vitest) {
                 // Test raw with another token
                 return this.raw(this.color.base.red);
               },
+              get numeric(): number {
+                // Test raw with a literal number
+                return this.raw(1);
+              },
               get custom(): string {
                 // Test raw with a non-var value
                 return this.raw("#00ff00");
@@ -1913,13 +1918,13 @@ if (import.meta.vitest) {
           space: {
             base: [2, 4, 8, 16, 32, 64],
             semantic: {
-              get small(): string {
+              get small(): number {
                 return this.raw(this.space.base[1]);
               },
-              get medium(): string {
+              get medium(): number {
                 return this.raw(this.space.base[3]);
               },
-              get large(): string {
+              get large(): number {
                 return this.raw(this.space.base[5]);
               }
             }
@@ -1934,6 +1939,7 @@ if (import.meta.vitest) {
       // The semantic tokens should contain the raw values, not var() references
       expect(normalizedVars["--color-semantic-primary"]).toBe("#0000ff");
       expect(normalizedVars["--color-semantic-danger"]).toBe("#ff0000");
+      expect(normalizedVars["--color-semantic-numeric"]).toBe(1);
       expect(normalizedVars["--color-semantic-custom"]).toBe("#00ff00");
       expect(normalizedVars["--space-semantic-small"]).toBe(4);
       expect(normalizedVars["--space-semantic-medium"]).toBe(16);
@@ -2643,6 +2649,34 @@ if (import.meta.vitest) {
       assertType<ThemeResult<StrictTheme>>(strictDerived);
       expectTypeOf(strictDerived).toEqualTypeOf<ThemeResult<StrictTheme>>();
       expectThemeContractResult(strictDerived);
+
+      const rawLiteralTheme = theme(
+        compositeValue({
+          color: {
+            brand: "#0000ff",
+            semantic: {
+              get literal() {
+                const literal = this.raw("literal");
+                assertType<"literal">(literal);
+                return literal;
+              },
+              get numeric() {
+                const numeric = this.raw(1);
+                assertType<1>(numeric);
+                return numeric;
+              }
+            }
+          }
+        })
+      );
+      assertType<
+        ThemeResult<{
+          color: {
+            brand: string;
+            semantic: { literal: string; numeric: number };
+          };
+        }>
+      >(rawLiteralTheme);
 
       const incompleteContract = {
         vars: strictVars,
