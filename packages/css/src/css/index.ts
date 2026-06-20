@@ -137,28 +137,86 @@ export function cssImpl(style: ComplexCSSRule, debugId?: string) {
   return vStyle(transform(style), debugId);
 }
 
-function cssWith<const T extends CSSRule>(
-  callback?: (style: CSSRuleWith<T>) => ComplexCSSRule
-) {
-  type RestrictedCSSRule = CSSRuleWith<T>;
-  const cssFunction = callback ?? ((style: RestrictedCSSRule) => style);
+type CssWithStyleResult<T extends CSSRule> = ((
+  style: CSSRuleWith<T>,
+  debugId?: string
+) => string) & {
+  raw(style: CSSRuleWith<T>): ComplexCSSRule;
+  multiple<StyleMap extends Record<string | number, CSSRuleWith<T>>>(
+    styleMap: StyleMap,
+    debugId?: string
+  ): Record<keyof StyleMap, string>;
+};
 
-  function cssWithImpl(style: RestrictedCSSRule, debugId?: string) {
-    return cssImpl(cssFunction(style), debugId);
+type CssWithCallback = (...args: never[]) => ComplexCSSRule;
+
+type CssWithCallbackArgs<F extends CssWithCallback> = Parameters<F>;
+
+type IsMultiArgCallback<F extends CssWithCallback> =
+  2 extends CssWithCallbackArgs<F>["length"] ? F : never;
+
+type CssWithTupleValue<Args extends unknown[]> = Args | readonly [...Args];
+
+type CssWithMixinResult<Args extends unknown[]> = ((
+  ...args: Args
+) => string) & {
+  raw(...args: Args): ComplexCSSRule;
+  multiple<StyleMap extends Record<string | number, CssWithTupleValue<Args>>>(
+    styleMap: StyleMap,
+    debugId?: string
+  ): Record<keyof StyleMap, string>;
+};
+
+function cssWith<const T extends CSSRule>(): CssWithStyleResult<T>;
+function cssWith<const T extends CSSRule>(
+  callback: (style: CSSRuleWith<T>) => ComplexCSSRule
+): CssWithStyleResult<T>;
+function cssWith<const F extends CssWithCallback>(
+  callback: F & IsMultiArgCallback<F>
+): CssWithMixinResult<CssWithCallbackArgs<F>>;
+function cssWith<const T extends CSSRule, const F extends CssWithCallback>(
+  callback?:
+    | ((style: CSSRuleWith<T>) => ComplexCSSRule)
+    | (F & IsMultiArgCallback<F>)
+): CssWithStyleResult<T> & CssWithMixinResult<CssWithCallbackArgs<F>> {
+  type RestrictedCSSRule = CSSRuleWith<T>;
+  type CssWithRuntimeCallback = (...args: unknown[]) => ComplexCSSRule;
+  const cssFunction = (callback ??
+    ((style: RestrictedCSSRule) => style)) as CssWithRuntimeCallback;
+
+  function getCssWithDebugId(args: readonly unknown[]) {
+    // Legacy object-first calls keep runtime debug-label precedence: an object-first
+    // positional mixin still receives both args, but may use the second string as
+    // the compatibility debug label. Positional mixin direct debug IDs are not a public typed API.
+    return args.length === 2 &&
+      typeof args[1] === "string" &&
+      typeof args[0] === "object" &&
+      args[0] !== null &&
+      !Array.isArray(args[0])
+      ? args[1]
+      : undefined;
   }
-  function cssWithRaw(style: RestrictedCSSRule) {
-    return cssRaw(cssFunction(style));
+
+  function cssWithImpl(...args: unknown[]) {
+    return cssImpl(cssFunction(...args), getCssWithDebugId(args));
+  }
+  function cssWithRaw(...args: unknown[]) {
+    return cssRaw(cssFunction(...args));
   }
 
   function cssWithMultiple<
-    StyleMap extends Record<string | number, RestrictedCSSRule>
+    StyleMap extends Record<
+      string | number,
+      RestrictedCSSRule | CssWithTupleValue<CssWithCallbackArgs<F>>
+    >
   >(styleMap: StyleMap, debugId?: string): Record<keyof StyleMap, string> {
-    // TODO: Use css.with supported data mapping when available
-    // Transform each value using cssFunction
     type TransformedStyleMap = Record<keyof StyleMap, ComplexCSSRule>;
     const transformedStyleMap: TransformedStyleMap = {} as TransformedStyleMap;
     for (const key in styleMap) {
-      transformedStyleMap[key] = cssFunction(styleMap[key]);
+      const value = styleMap[key];
+      transformedStyleMap[key] = Array.isArray(value)
+        ? cssFunction(...value)
+        : cssFunction(value);
     }
     return cssMultiple(transformedStyleMap, debugId);
   }
@@ -166,7 +224,7 @@ function cssWith<const T extends CSSRule>(
   return Object.assign(cssWithImpl, {
     raw: cssWithRaw,
     multiple: cssWithMultiple
-  });
+  }) as CssWithStyleResult<T> & CssWithMixinResult<CssWithCallbackArgs<F>>;
 }
 
 // == CSS Multiple =============================================================
@@ -224,7 +282,7 @@ export function selector(selector: string): `&` {
 if (import.meta.vitest) {
   // eslint-disable-next-line @typescript-eslint/ban-ts-comment
   // @ts-ignore error TS1343: The 'import.meta' meta-property is only allowed when the '--module' option is 'es2020', 'es2022', 'esnext', 'system', 'node16', or 'nodenext'.
-  const { describe, it, assert, expect, vi } = import.meta.vitest;
+  const { describe, it, assert, expect, expectTypeOf, vi } = import.meta.vitest;
 
   const debugId = "myCSS";
   setFileScope("test");
@@ -650,6 +708,90 @@ if (import.meta.vitest) {
       myCss2.raw({ radius: 10 });
     });
 
+    it("css.with() overload type regressions", () => {
+      const restrictedCss = css.with<{ color: true; border: false }>();
+
+      restrictedCss({ color: "red" }, debugId);
+      restrictedCss.raw({ color: "red" });
+      restrictedCss.multiple({ primary: { color: "red" } }, debugId);
+      // @ts-expect-error: color is required
+      restrictedCss({});
+      // @ts-expect-error: color is required
+      restrictedCss.raw({});
+      restrictedCss({
+        color: "red",
+        // @ts-expect-error: border is not included in the restriction
+        border: "none"
+      });
+
+      const objectParamMixin = css.with<{ size: number }>(({ size }) => ({
+        width: size
+      }));
+
+      objectParamMixin({ size: 12 }, debugId);
+      objectParamMixin.raw({ size: 12 });
+      objectParamMixin.multiple({ sm: { size: 12 } }, debugId);
+      // @ts-expect-error: size is required
+      objectParamMixin.raw({});
+
+      const positionalMixin = css.with((size: number, radius?: number) => ({
+        width: size,
+        height: size,
+        ...(radius === undefined ? {} : { borderRadius: radius })
+      }));
+
+      expectTypeOf<Parameters<typeof positionalMixin>>().toEqualTypeOf<
+        [size: number, radius?: number]
+      >();
+      expectTypeOf<Parameters<typeof positionalMixin.raw>>().toEqualTypeOf<
+        [size: number, radius?: number]
+      >();
+      expectTypeOf<
+        ReturnType<typeof positionalMixin>
+      >().toEqualTypeOf<string>();
+      expectTypeOf<
+        ReturnType<typeof positionalMixin.raw>
+      >().toEqualTypeOf<ComplexCSSRule>();
+
+      const runTypeOnlyCalls: boolean = false;
+      if (runTypeOnlyCalls) {
+        positionalMixin(12);
+        positionalMixin(12, 4);
+        positionalMixin.raw(12);
+        positionalMixin.raw(12, 4);
+        const result = positionalMixin.multiple(
+          {
+            sm: [12],
+            md: [16, 4],
+            lg: [24, 8] as const
+          },
+          debugId
+        );
+        expectTypeOf(result).toEqualTypeOf<{
+          sm: string;
+          md: string;
+          lg: string;
+        }>();
+
+        // @ts-expect-error: one-argument positional mixins are not introduced
+        css.with((size: number) => ({ width: size }));
+        // @ts-expect-error: direct positional mixin calls do not accept object style args
+        positionalMixin({ size: 12 });
+        // @ts-expect-error: raw positional mixin calls do not accept object style args
+        positionalMixin.raw({ size: 12 });
+        // @ts-expect-error: multiple positional mixin maps require tuple values
+        positionalMixin.multiple({ sm: { size: 12 } });
+        // @ts-expect-error: multiple positional mixin maps require the first tuple element
+        positionalMixin.multiple({ xs: [] });
+        // @ts-expect-error: multiple positional mixin maps reject extra tuple elements
+        positionalMixin.multiple({ xl: [24, 8, 2] });
+        // @ts-expect-error: multiple positional mixin maps reject invalid tuple element types
+        positionalMixin.multiple({ bad: ["large", 8] });
+        // @ts-expect-error: direct positional mixin calls do not expose debugId args
+        positionalMixin(12, debugId);
+      }
+    });
+
     it("Basic callback transformation", () => {
       const withRedBackground = css.with((style) => ({
         ...style,
@@ -660,6 +802,54 @@ if (import.meta.vitest) {
 
       assert.isString(result);
       expect(result).toMatch(identifierName(debugId));
+    });
+
+    it("css.with().raw() forwards positional callback args", () => {
+      const mixin = css.with((size: number, radius?: number) => ({
+        width: size,
+        height: size,
+        borderRadius: radius ?? 0
+      }));
+
+      const result = mixin.raw(100, 8);
+
+      expect(result).toEqual({
+        width: 100,
+        height: 100,
+        borderRadius: 8
+      });
+    });
+
+    it("css.with() forwards direct and raw string args without positional debug labels", () => {
+      const callback = vi.fn((color: string, size: string) => ({
+        color,
+        fontFamily: size
+      }));
+      const mixin = css.with(callback);
+
+      const result = mixin("red", "lg");
+      const rawResult = mixin.raw("red", "lg");
+
+      expect(callback).toHaveBeenNthCalledWith(1, "red", "lg");
+      expect(callback).toHaveBeenNthCalledWith(2, "red", "lg");
+      expect(result).not.toMatch(identifierName("lg"));
+      expect(rawResult).toEqual({
+        color: "red",
+        fontFamily: "lg"
+      });
+    });
+
+    it("css.with() preserves object-first debug labels while forwarding both args", () => {
+      const callback = vi.fn((style: { color: string }, label: string) => ({
+        ...style,
+        fontFamily: label
+      }));
+      const mixin = css.with(callback);
+
+      const result = mixin({ color: "red" }, "lg");
+
+      expect(callback).toHaveBeenCalledWith({ color: "red" }, "lg");
+      expect(result).toMatch(identifierName("lg"));
     });
 
     it("css.with().raw()", () => {
@@ -693,6 +883,51 @@ if (import.meta.vitest) {
       assert.hasAllKeys(result, ["primary", "secondary"]);
       expect(result.primary).toMatch(identifierName(`${debugId}_primary`));
       expect(result.secondary).toMatch(identifierName(`${debugId}_secondary`));
+    });
+
+    it("css.with().multiple() forwards tuple map values as positional args", () => {
+      const callback = vi.fn((size: number, label: string) => ({
+        width: size,
+        height: size,
+        fontFamily: label
+      }));
+      const mixin = css.with(callback);
+
+      const result = mixin.multiple(
+        {
+          sm: [12, "sm"],
+          lg: [20, "lg"]
+        } as const,
+        debugId
+      );
+
+      assert.hasAllKeys(result, ["sm", "lg"]);
+      expect(result.sm).toMatch(identifierName(`${debugId}_sm`));
+      expect(result.lg).toMatch(identifierName(`${debugId}_lg`));
+      expect(callback.mock.calls).toEqual([
+        [12, "sm"],
+        [20, "lg"]
+      ]);
+    });
+
+    it("css.with().multiple() forwards optional tuple elements", () => {
+      const callback = vi.fn((size: number, radius?: number) => ({
+        width: size,
+        height: size,
+        borderRadius: radius ?? 0
+      }));
+      const mixin = css.with(callback);
+
+      const result = mixin.multiple(
+        {
+          compact: [8]
+        } as const,
+        debugId
+      );
+
+      assert.hasAllKeys(result, ["compact"]);
+      expect(result.compact).toMatch(identifierName(`${debugId}_compact`));
+      expect(callback.mock.calls).toEqual([[8]]);
     });
 
     it("css.with() with like mixin", () => {

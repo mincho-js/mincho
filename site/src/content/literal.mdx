@@ -1074,7 +1074,7 @@ const backgrounds = css.multiple({
 
 ### css.with()
 
-Creates a constrained CSS function with type restrictions or transformation logic.
+Creates a constrained CSS function in either style/object mode or positional mixin mode. No-callback mode and one callback parameter mode use `CSSRuleWith<T>` style objects. A callback with 2 or more parameters uses positional mixin mode.
 
 #### Type Restrictions
 
@@ -1094,12 +1094,12 @@ myCss({
 })
 ```
 
-#### Mixin Pattern
+#### Object Parameter Mixin Pattern
 
-Transform input parameters into styles:
+Use one object parameter when the callback transforms a `CSSRuleWith<T>` style object. This stays in style/object mode, so direct calls and `.multiple()` pass object values.
 
 ```ts
-const boxMixin = css.with<{ size: number; radius?: number }>(
+const objectBoxMixin = css.with<{ size: number; radius?: number }>(
   ({ size, radius = 0 }) => ({
     width: size,
     height: size,
@@ -1107,28 +1107,35 @@ const boxMixin = css.with<{ size: number; radius?: number }>(
   })
 )
 
-const smallBox = boxMixin({ size: 50 })
-const roundedBox = boxMixin({ size: 100, radius: 8 })
-```
-
-#### Chaining with Other Methods
-
-The returned function also has `raw()` and `multiple()` methods:
-
-```ts
-const coloredBox = css.with<{ color: string }>(
-  ({ color }) => ({ backgroundColor: color })
-)
-
-// Use raw() to get the style object
-const rawStyles = coloredBox.raw({ color: 'blue' })
-
-// Use multiple() to create variants
-const colorVariants = coloredBox.multiple({
-  primary: { color: 'blue' },
-  secondary: { color: 'green' }
+const smallBox = objectBoxMixin({ size: 50 })
+const roundedBox = objectBoxMixin({ size: 100, radius: 8 })
+const objectBoxVariants = objectBoxMixin.multiple({
+  small: { size: 50 },
+  rounded: { size: 100, radius: 8 }
 })
 ```
+
+#### Positional Mixin Pattern
+
+Use 2 or more callback parameters when you want calls to mirror the callback arguments. Direct calls and `.raw()` receive positional arguments. In this mode, `.multiple()` uses tuple values.
+
+```ts
+const boxMixin = css.with((size: number, radius?: number) => ({
+  width: size,
+  height: size,
+  borderRadius: radius ?? 0
+}))
+
+const smallBox = boxMixin(50)
+const roundedBox = boxMixin(100, 8)
+const rawBox = boxMixin.raw(100, 8)
+const boxVariants = boxMixin.multiple({
+  small: [50],
+  rounded: [100, 8]
+} as const)
+```
+
+One positional argument is not supported because one callback argument remains the `CSSRuleWith<T>` style-transform mode. Use an object parameter for single value mixins. Style/object mode `.multiple()` uses object values. Positional mixin mode `.multiple()` uses tuple values.
 
 ## Backward Compatibility
 
