@@ -2,7 +2,12 @@ import { clsx } from "clsx";
 import type {
   ClassValue,
   ClassMultipleInput,
-  ClassMultipleResult
+  ClassMultipleResult,
+  CxWith,
+  CxWithCallback,
+  CxWithCallbackArgs,
+  CxWithMixin,
+  CxWithTupleValue
 } from "./types.js";
 
 const cxImpl: (...inputs: ClassValue[]) => string = clsx;
@@ -49,29 +54,44 @@ function cxMultiple<T extends ClassMultipleInput>(
   return result;
 }
 
-function cxWith<const T extends ClassValue>(
-  callback?: (params: T) => ClassValue
-) {
-  const cxFunction = callback ?? ((className: T) => className);
+function cxWith<const T extends ClassValue>(): CxWith<T>;
+function cxWith<const F extends CxWithCallback>(
+  callback: F
+): CxWithMixin<CxWithCallbackArgs<F>>;
+function cxWith<const Input>(
+  callback: (params: Input) => ClassValue
+): CxWithMixin<[params: Input]>;
+function cxWith<const T extends ClassValue, const F extends CxWithCallback>(
+  callback?: ((params: T) => ClassValue) | F
+): CxWith<T> & CxWithMixin<CxWithCallbackArgs<F>> {
+  type CxWithRuntimeCallback = (...className: unknown[]) => ClassValue;
+  const cxFunction = (callback ??
+    ((...className: ClassValue[]) => className)) as CxWithRuntimeCallback;
 
-  function cxWithImpl(...className: T[]) {
-    const result = className.map((cn) => cxFunction(cn));
-    return cxImpl(...result);
+  function cxWithImpl(...className: unknown[]) {
+    return cxImpl(cxFunction(...className));
   }
 
-  function cxWithMultiple<ClassNameMap extends ClassMultipleInput<T>>(
-    classNameMap: ClassNameMap
-  ): ClassMultipleResult<ClassNameMap> {
+  function cxWithMultiple<
+    ClassNameMap extends Record<
+      string,
+      T | CxWithTupleValue<CxWithCallbackArgs<F>>
+    >
+  >(classNameMap: ClassNameMap): ClassMultipleResult<ClassNameMap> {
     type TransformedClassNameMap = Record<keyof ClassNameMap, ClassValue>;
     const transformedClassNameMap: TransformedClassNameMap =
       {} as TransformedClassNameMap;
     for (const key in classNameMap) {
-      transformedClassNameMap[key] = cxFunction(classNameMap[key]);
+      const value = classNameMap[key];
+      transformedClassNameMap[key] = Array.isArray(value)
+        ? cxFunction(...value)
+        : cxFunction(value);
     }
     return cxMultiple(transformedClassNameMap);
   }
 
-  return Object.assign(cxWithImpl, { multiple: cxWithMultiple });
+  return Object.assign(cxWithImpl, { multiple: cxWithMultiple }) as CxWith<T> &
+    CxWithMixin<CxWithCallbackArgs<F>>;
 }
 
 // == Tests ====================================================================
@@ -80,7 +100,7 @@ function cxWith<const T extends ClassValue>(
 if (import.meta.vitest) {
   // eslint-disable-next-line @typescript-eslint/ban-ts-comment
   // @ts-ignore error TS1343
-  const { describe, it, expect, assertType } = import.meta.vitest;
+  const { describe, it, expect, assertType, vi } = import.meta.vitest;
 
   describe.concurrent("cx()", () => {
     it("handles string inputs (variadic)", () => {
@@ -251,15 +271,36 @@ if (import.meta.vitest) {
       expect(layout("grid", { block: false, "m-1": true })).toBe("grid m-1");
     });
 
-    it("creates a typed constraint with transformer", () => {
-      const responsive = cx.with<{ base: string; md?: string; lg?: string }>(
-        ({ base, md, lg }) => [base, md && `md:${md}`, lg && `lg:${lg}`]
+    it("creates a typed positional mixin with transformer", () => {
+      const responsive = cx.with((base: string, md?: string, lg?: string) => [
+        base,
+        md && `md:${md}`,
+        lg && `lg:${lg}`
+      ]);
+
+      assertType<(base: string, md?: string, lg?: string) => string>(
+        responsive
+      );
+      expect(responsive("text-sm", "text-base", "text-lg")).toBe(
+        "text-sm md:text-base lg:text-lg"
+      );
+      expect(responsive("text-sm")).toBe("text-sm");
+    });
+
+    it("supports one-argument object mixins with tuple multiple values", () => {
+      const responsive = cx.with<{ base: string; md?: string }>(
+        ({ base, md }) => [base, md && `md:${md}`]
       );
 
+      expect(responsive({ base: "text-sm", md: "text-base" })).toBe(
+        "text-sm md:text-base"
+      );
       expect(
-        responsive({ base: "text-sm", md: "text-base", lg: "text-lg" })
-      ).toBe("text-sm md:text-base lg:text-lg");
-      expect(responsive({ base: "text-sm" })).toBe("text-sm");
+        responsive.multiple({
+          body: [{ base: "text-sm", md: "text-base" }],
+          caption: [{ base: "text-xs" }]
+        } as const)
+      ).toEqual({ body: "text-sm md:text-base", caption: "text-xs" });
     });
 
     it("filters out non-string and empty values without transformer", () => {
@@ -275,14 +316,31 @@ if (import.meta.vitest) {
       expect(test({ required: "foo", optional: "" })).toBe("required");
     });
 
-    it("transformer receives all params", () => {
-      const test = cx.with<{ a: string; b: boolean }>(({ a, b }) => [
-        a,
-        b && "active"
+    it("mixin transformer receives all direct call args at once", () => {
+      const callback = vi.fn((base: string, active: boolean) => [
+        base,
+        active && "active"
       ]);
+      const test = cx.with(callback);
 
-      expect(test({ a: "base", b: true })).toBe("base active");
-      expect(test({ a: "base", b: false })).toBe("base");
+      expect(test("base", true)).toBe("base active");
+      expect(test("base", false)).toBe("base");
+      expect(callback).toHaveBeenNthCalledWith(1, "base", true);
+      expect(callback).toHaveBeenNthCalledWith(2, "base", false);
+    });
+
+    it("expresses mapper behavior as a rest-args mixin", () => {
+      const prefixed = cx.with((...classNames: string[]) =>
+        classNames.map((className) => `ui-${className}`)
+      );
+
+      expect(prefixed("button", "active")).toBe("ui-button ui-active");
+      expect(
+        prefixed.multiple({
+          button: ["button", "active"],
+          icon: ["icon"]
+        })
+      ).toEqual({ button: "ui-button ui-active", icon: "ui-icon" });
     });
 
     it("cx.with().multiple() processes a map with typed constraint", () => {
@@ -299,16 +357,18 @@ if (import.meta.vitest) {
       expect(result.container).toBe("grid");
     });
 
-    it("cx.with().multiple() with transformer", () => {
-      const responsive = cx.with<{ base: string; md?: string; lg?: string }>(
-        ({ base, md, lg }) => [base, md && `md:${md}`, lg && `lg:${lg}`]
-      );
+    it("cx.with().multiple() with positional mixin transformer", () => {
+      const responsive = cx.with((base: string, md?: string, lg?: string) => [
+        base,
+        md && `md:${md}`,
+        lg && `lg:${lg}`
+      ]);
 
       const result = responsive.multiple({
-        heading: { base: "text-xl", md: "text-2xl", lg: "text-3xl" },
-        body: { base: "text-sm", md: "text-base" },
-        caption: { base: "text-xs" }
-      });
+        heading: ["text-xl", "text-2xl", "text-3xl"],
+        body: ["text-sm", "text-base"],
+        caption: ["text-xs"]
+      } as const);
 
       expect(result.heading).toBe("text-xl md:text-2xl lg:text-3xl");
       expect(result.body).toBe("text-sm md:text-base");

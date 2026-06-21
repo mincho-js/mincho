@@ -69,13 +69,28 @@ export type ClassMultipleInput<Input extends ClassValue = ClassValue> = Record<
   Input
 >;
 
-export type ClassMultipleResult<T extends ClassMultipleInput> = {
+export type ClassMultipleResult<T extends Record<string, unknown>> = {
   [K in keyof T]: string;
 };
+
+export type CxWithCallback = (...args: never[]) => ClassValue;
+
+export type CxWithCallbackArgs<F extends CxWithCallback> = Parameters<F>;
+
+export type CxWithTupleValue<Args extends unknown[]> =
+  | Args
+  | readonly [...Args];
 
 export interface CxWith<Input extends ClassValue> {
   (...className: Input[]): string;
   multiple<ClassNameMap extends Record<string, Input>>(
+    classNameMap: ClassNameMap
+  ): { [K in keyof ClassNameMap]: string };
+}
+
+export interface CxWithMixin<Args extends unknown[]> {
+  (...className: Args): string;
+  multiple<ClassNameMap extends Record<string, CxWithTupleValue<Args>>>(
     classNameMap: ClassNameMap
   ): { [K in keyof ClassNameMap]: string };
 }
@@ -85,9 +100,13 @@ export interface Cx {
   multiple<ClassNameMap extends Record<string, ClassValue>>(
     map: ClassNameMap
   ): { [K in keyof ClassNameMap]: string };
-  with<const Input extends ClassValue>(
-    callback?: (params: Input) => ClassValue
-  ): CxWith<Input>;
+  with<const Input extends ClassValue>(): CxWith<Input>;
+  with<const F extends CxWithCallback>(
+    callback: F
+  ): CxWithMixin<CxWithCallbackArgs<F>>;
+  with<const Input>(
+    callback: (params: Input) => ClassValue
+  ): CxWithMixin<[params: Input]>;
 }
 
 // == Tests ====================================================================
