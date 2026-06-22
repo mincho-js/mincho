@@ -287,7 +287,7 @@ if (import.meta.vitest) {
       expect(responsive("text-sm")).toBe("text-sm");
     });
 
-    it("supports one-argument object mixins with tuple multiple values", () => {
+    it("supports one-argument object mixins with direct multiple values", () => {
       const responsive = cx.with<{ base: string; md?: string }>(
         ({ base, md }) => [base, md && `md:${md}`]
       );
@@ -297,8 +297,8 @@ if (import.meta.vitest) {
       );
       expect(
         responsive.multiple({
-          body: [{ base: "text-sm", md: "text-base" }],
-          caption: [{ base: "text-xs" }]
+          body: { base: "text-sm", md: "text-base" },
+          caption: { base: "text-xs" }
         } as const)
       ).toEqual({ body: "text-sm md:text-base", caption: "text-xs" });
     });

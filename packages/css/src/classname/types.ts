@@ -79,7 +79,8 @@ export type CxWithCallbackArgs<F extends CxWithCallback> = Parameters<F>;
 
 export type CxWithTupleValue<Args extends unknown[]> =
   | Args
-  | readonly [...Args];
+  | readonly [...Args]
+  | (Args extends [input: infer Input] ? Input : never);
 
 export interface CxWith<Input extends ClassValue> {
   (...className: Input[]): string;
@@ -456,6 +457,27 @@ if (import.meta.vitest) {
       void _rootClass;
       void _labelClass;
       void _invalidKey;
+    });
+  });
+
+  describe.concurrent("Cx Type Test", () => {
+    it("accepts direct one-argument mixin values in multiple maps", () => {
+      type Params = { readonly base: string; readonly md?: string };
+
+      function assertCxType(typedCx: Cx) {
+        const responsive = typedCx.with<Params>(({ base, md }) => [
+          base,
+          md && `md:${md}`
+        ]);
+        const result = responsive.multiple({
+          body: { base: "text-sm", md: "text-base" },
+          caption: { base: "text-xs" }
+        });
+
+        assertType<{ body: string; caption: string }>(result);
+      }
+
+      void assertCxType;
     });
   });
 }

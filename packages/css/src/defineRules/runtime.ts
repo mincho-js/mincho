@@ -13,7 +13,12 @@ import { cx as rootCx } from "../classname/cx.js";
 import type {
   ClassMultipleInput,
   ClassMultipleResult,
-  ClassValue
+  ClassValue,
+  CxWith,
+  CxWithCallback,
+  CxWithCallbackArgs,
+  CxWithMixin,
+  CxWithTupleValue
 } from "../classname/types.js";
 import type { Cx } from "../classname/index.js";
 import { isUnSafeObjectKey } from "../utils.js";
@@ -186,29 +191,45 @@ function createDefineRulesCx(metadata: EngineMetadata): DefineRulesRuntimeCx {
     return result;
   }
 
-  function cxWith<const T extends ClassValue>(
-    callback?: (params: T) => ClassValue
-  ) {
-    const cxFunction = callback ?? ((className: T) => className);
+  function cxWith<const T extends ClassValue>(): CxWith<T>;
+  function cxWith<const F extends CxWithCallback>(
+    callback: F
+  ): CxWithMixin<CxWithCallbackArgs<F>>;
+  function cxWith<const Input>(
+    callback: (params: Input) => ClassValue
+  ): CxWithMixin<[params: Input]>;
+  function cxWith<const T extends ClassValue, const F extends CxWithCallback>(
+    callback?: ((params: T) => ClassValue) | F
+  ): CxWith<T> & CxWithMixin<CxWithCallbackArgs<F>> {
+    type CxWithRuntimeCallback = (...className: unknown[]) => ClassValue;
+    const cxFunction = (callback ??
+      ((...className: ClassValue[]) => className)) as CxWithRuntimeCallback;
 
-    function cxWithImpl(...className: T[]) {
-      const result = className.map((cn) => cxFunction(cn));
-      return cxImpl(...result);
+    function cxWithImpl(...className: unknown[]) {
+      return cxImpl(cxFunction(...className));
     }
 
-    function cxWithMultiple<ClassNameMap extends ClassMultipleInput<T>>(
-      classNameMap: ClassNameMap
-    ): ClassMultipleResult<ClassNameMap> {
+    function cxWithMultiple<
+      ClassNameMap extends Record<
+        string,
+        T | CxWithTupleValue<CxWithCallbackArgs<F>>
+      >
+    >(classNameMap: ClassNameMap): ClassMultipleResult<ClassNameMap> {
       type TransformedClassNameMap = Record<keyof ClassNameMap, ClassValue>;
       const transformedClassNameMap: TransformedClassNameMap =
         {} as TransformedClassNameMap;
       for (const key in classNameMap) {
-        transformedClassNameMap[key] = cxFunction(classNameMap[key]);
+        const value = classNameMap[key];
+        transformedClassNameMap[key] = Array.isArray(value)
+          ? cxFunction(...value)
+          : cxFunction(value);
       }
       return cxMultiple(transformedClassNameMap);
     }
 
-    return Object.assign(cxWithImpl, { multiple: cxWithMultiple });
+    return Object.assign(cxWithImpl, {
+      multiple: cxWithMultiple
+    }) as CxWith<T> & CxWithMixin<CxWithCallbackArgs<F>>;
   }
 
   return Object.assign(cxImpl, {

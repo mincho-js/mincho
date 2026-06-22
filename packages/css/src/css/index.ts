@@ -153,7 +153,13 @@ type CssWithCallback = (...args: never[]) => ComplexCSSRule;
 type CssWithCallbackArgs<F extends CssWithCallback> = Parameters<F>;
 
 type IsMultiArgCallback<F extends CssWithCallback> =
-  2 extends CssWithCallbackArgs<F>["length"] ? F : never;
+  CssWithCallbackArgs<F> extends [unknown, ...infer Rest]
+    ? Rest extends []
+      ? never
+      : F
+    : number extends CssWithCallbackArgs<F>["length"]
+      ? F
+      : never;
 
 type CssWithTupleValue<Args extends unknown[]> = Args | readonly [...Args];
 
@@ -885,18 +891,18 @@ if (import.meta.vitest) {
       expect(result.secondary).toMatch(identifierName(`${debugId}_secondary`));
     });
 
-    it("css.with().multiple() forwards tuple map values as positional args", () => {
-      const callback = vi.fn((size: number, label: string) => ({
-        width: size,
-        height: size,
+    it("css.with().multiple() forwards 3+ tuple map values as positional args", () => {
+      const callback = vi.fn((width: number, height: number, label: string) => ({
+        width,
+        height,
         fontFamily: label
       }));
       const mixin = css.with(callback);
 
       const result = mixin.multiple(
         {
-          sm: [12, "sm"],
-          lg: [20, "lg"]
+          sm: [12, 16, "sm"],
+          lg: [20, 24, "lg"]
         } as const,
         debugId
       );
@@ -905,8 +911,8 @@ if (import.meta.vitest) {
       expect(result.sm).toMatch(identifierName(`${debugId}_sm`));
       expect(result.lg).toMatch(identifierName(`${debugId}_lg`));
       expect(callback.mock.calls).toEqual([
-        [12, "sm"],
-        [20, "lg"]
+        [12, 16, "sm"],
+        [20, 24, "lg"]
       ]);
     });
 

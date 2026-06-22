@@ -201,7 +201,8 @@ function formatConfigPathSegment(key: string): string {
 if (import.meta.vitest) {
   // eslint-disable-next-line @typescript-eslint/ban-ts-comment
   // @ts-ignore error TS1343: The 'import.meta' meta-property is only allowed when the '--module' option is 'es2020', 'es2022', 'esnext', 'system', 'node16', or 'nodenext'.
-  const { describe, it, expect, afterEach, assertType } = import.meta.vitest;
+  const { describe, it, expect, afterEach, assertType, vi } = import.meta
+    .vitest;
 
   const debugId = "myCSS";
   setFileScope("test");
@@ -666,20 +667,22 @@ if (import.meta.vitest) {
         const owner = createDefineRulesAuthoringShapeOwner("cxWithKnownMerge");
         const displayNone = owner.css({ display: "none" });
         const displayFlex = owner.css({ display: "flex" });
-        const composed = owner.cx.with<{
-          base: string;
-          override?: string;
-        }>(({ base, override }) => [base, override]);
+        const callback = vi.fn((base: string, override?: string) => [
+          base,
+          override
+        ]);
+        const composed = owner.cx.with(callback);
 
-        expect(composed({ base: displayNone, override: displayFlex })).toBe(
-          displayFlex
-        );
+        expect(composed(displayNone, displayFlex)).toBe(displayFlex);
+        expect(callback).toHaveBeenNthCalledWith(1, displayNone, displayFlex);
         expect(
           composed.multiple({
-            inactive: { base: displayNone },
-            active: { base: displayNone, override: displayFlex }
-          })
+            inactive: [displayNone],
+            active: [displayNone, displayFlex]
+          } as const)
         ).toEqual({ inactive: displayNone, active: displayFlex });
+        expect(callback).toHaveBeenNthCalledWith(2, displayNone);
+        expect(callback).toHaveBeenNthCalledWith(3, displayNone, displayFlex);
       });
 
       it("preserves repeated full cx inputs while using the private full-result cache", () => {
@@ -724,17 +727,13 @@ if (import.meta.vitest) {
         assertType<(...classNames: LayoutClass[]) => string>(constrained);
         expect(constrained("flex", "grid")).toBe("flex grid");
 
-        const composed = owner.cx.with<{
-          base: string;
-          active?: string;
-        }>(({ base, active }) => [base, active && `active-${active}`]);
+        const composed = owner.cx.with((base: string, active?: string) => [
+          base,
+          active && `active-${active}`
+        ]);
 
-        assertType<(params: { base: string; active?: string }) => string>(
-          composed
-        );
-        expect(composed({ base: "btn", active: "primary" })).toBe(
-          "btn active-primary"
-        );
+        assertType<(base: string, active?: string) => string>(composed);
+        expect(composed("btn", "primary")).toBe("btn active-primary");
       });
     });
 
