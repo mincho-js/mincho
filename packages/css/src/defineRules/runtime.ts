@@ -55,10 +55,12 @@ type DefineRulesRuntimeCx = Cx;
 export interface DefineRulesRuntimeResult<
   Properties extends DefineRulesProperties,
   Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts, Conditions>,
-  Conditions extends DefineRulesConditions = DefineRulesEmptyConditions
+  Conditions extends DefineRulesConditions = DefineRulesEmptyConditions,
+  Context = undefined
 > {
   css: DefineRulesCss<
-    DefineRulesComplexCssInput<Properties, Shortcuts, Conditions>
+    DefineRulesComplexCssInput<Properties, Shortcuts, Conditions>,
+    Context
   >;
   cx: DefineRulesRuntimeCx;
   preset: DefineRulesPresetArtifactV4;
@@ -76,12 +78,14 @@ export function createDefineRulesRuntime<
     Shortcuts,
     Conditions
   >,
-  const Conditions extends DefineRulesConditions = DefineRulesEmptyConditions
+  const Conditions extends DefineRulesConditions = DefineRulesEmptyConditions,
+  const Context = undefined
 >(
-  config: DefineRulesCtx<Properties, Shortcuts, Conditions>,
+  config: DefineRulesCtx<Properties, Shortcuts, Conditions, Context>,
   options: DefineRulesRuntimeOptions = {}
-): DefineRulesRuntimeResult<Properties, Shortcuts, Conditions> {
+): DefineRulesRuntimeResult<Properties, Shortcuts, Conditions, Context> {
   type CssInput = DefineRulesComplexCssInput<Properties, Shortcuts, Conditions>;
+  type ContextualCssInput = CssInput | ((context: Context) => CssInput);
   const normalizedConditions = normalizeDefineRulesConditions(
     config.conditions
   );
@@ -96,7 +100,7 @@ export function createDefineRulesRuntime<
 
   if (options.registerPreset !== false) {
     registerDefineRulesRegistryInstance({
-      config,
+      config: config as DefineRulesCtx<Properties, Shortcuts, Conditions>,
       presetArtifact,
       getPresetSnapshot: () => clonePresetArtifact(presetArtifact)
     });
@@ -108,17 +112,31 @@ export function createDefineRulesRuntime<
     return fragments;
   }
 
-  function cssRaw(args: CssInput): CSSRule {
+  function resolveContextualInput(args: ContextualCssInput): CssInput {
+    if (typeof args === "function") {
+      return args(config.context as Context);
+    }
+
+    return args;
+  }
+
+  function cssRaw(args: ContextualCssInput): CSSRule {
     return flattenAtomicWrites(
       collectEmittedAtomicWrites(
-        collectAtomicWrites(resolveToFragments(args), normalizedConditions)
+        collectAtomicWrites(
+          resolveToFragments(resolveContextualInput(args)),
+          normalizedConditions
+        )
       )
     );
   }
 
-  function cssImpl(args: CssInput): string {
+  function cssImpl(args: ContextualCssInput): string {
     const atomicWrites = collectEmittedAtomicWrites(
-      collectAtomicWrites(resolveToFragments(args), normalizedConditions)
+      collectAtomicWrites(
+        resolveToFragments(resolveContextualInput(args)),
+        normalizedConditions
+      )
     );
     const entries = [] as Array<{
       kind: "known";
@@ -168,7 +186,7 @@ export function createDefineRulesRuntime<
 
   const css = Object.assign(cssImpl, {
     raw: cssRaw
-  }) as DefineRulesCss<CssInput>;
+  }) as DefineRulesCss<CssInput, Context>;
   const cx = createDefineRulesCx(metadata);
   return { css, cx, preset: presetArtifact };
 }
@@ -415,9 +433,10 @@ function pushResolvedFragment(
 function applyInput<
   Properties extends DefineRulesProperties,
   Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts, Conditions>,
-  Conditions extends DefineRulesConditions
+  Conditions extends DefineRulesConditions,
+  Context
 >(
-  ctx: DefineRulesCtx<Properties, Shortcuts, Conditions>,
+  ctx: DefineRulesCtx<Properties, Shortcuts, Conditions, Context>,
   fragmentsOut: ResolvedStyleFragment[],
   input: unknown,
   shortcutStack: string[]
@@ -445,9 +464,10 @@ function applyInput<
 function applyInlineShortcut<
   Properties extends DefineRulesProperties,
   Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts, Conditions>,
-  Conditions extends DefineRulesConditions
+  Conditions extends DefineRulesConditions,
+  Context
 >(
-  ctx: DefineRulesCtx<Properties, Shortcuts, Conditions>,
+  ctx: DefineRulesCtx<Properties, Shortcuts, Conditions, Context>,
   fragmentsOut: ResolvedStyleFragment[],
   shortcutName: string,
   shortcutStack: string[]
@@ -462,9 +482,10 @@ function applyInlineShortcut<
 function applyArray<
   Properties extends DefineRulesProperties,
   Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts, Conditions>,
-  Conditions extends DefineRulesConditions
+  Conditions extends DefineRulesConditions,
+  Context
 >(
-  ctx: DefineRulesCtx<Properties, Shortcuts, Conditions>,
+  ctx: DefineRulesCtx<Properties, Shortcuts, Conditions, Context>,
   fragmentsOut: ResolvedStyleFragment[],
   arr: readonly unknown[],
   shortcutStack: string[]
@@ -477,9 +498,10 @@ function applyArray<
 function applyObject<
   Properties extends DefineRulesProperties,
   Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts, Conditions>,
-  Conditions extends DefineRulesConditions
+  Conditions extends DefineRulesConditions,
+  Context
 >(
-  ctx: DefineRulesCtx<Properties, Shortcuts, Conditions>,
+  ctx: DefineRulesCtx<Properties, Shortcuts, Conditions, Context>,
   fragmentsOut: ResolvedStyleFragment[],
   obj: Record<string, unknown>,
   shortcutStack: string[]
@@ -492,9 +514,10 @@ function applyObject<
 function applyEntry<
   Properties extends DefineRulesProperties,
   Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts, Conditions>,
-  Conditions extends DefineRulesConditions
+  Conditions extends DefineRulesConditions,
+  Context
 >(
-  ctx: DefineRulesCtx<Properties, Shortcuts, Conditions>,
+  ctx: DefineRulesCtx<Properties, Shortcuts, Conditions, Context>,
   fragmentsOut: ResolvedStyleFragment[],
   key: string,
   value: unknown,
@@ -514,9 +537,10 @@ function applyEntry<
 function applyProperty<
   Properties extends DefineRulesProperties,
   Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts, Conditions>,
-  Conditions extends DefineRulesConditions
+  Conditions extends DefineRulesConditions,
+  Context
 >(
-  ctx: DefineRulesCtx<Properties, Shortcuts, Conditions>,
+  ctx: DefineRulesCtx<Properties, Shortcuts, Conditions, Context>,
   fragmentsOut: ResolvedStyleFragment[],
   prop: string,
   value: unknown,
@@ -587,9 +611,10 @@ function applyProperty<
 function applyShortcutReference<
   Properties extends DefineRulesProperties,
   Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts, Conditions>,
-  Conditions extends DefineRulesConditions
+  Conditions extends DefineRulesConditions,
+  Context
 >(
-  ctx: DefineRulesCtx<Properties, Shortcuts, Conditions>,
+  ctx: DefineRulesCtx<Properties, Shortcuts, Conditions, Context>,
   fragmentsOut: ResolvedStyleFragment[],
   targetName: string,
   value: unknown,
@@ -606,9 +631,10 @@ function applyShortcutReference<
 function applyShortcut<
   Properties extends DefineRulesProperties,
   Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts, Conditions>,
-  Conditions extends DefineRulesConditions
+  Conditions extends DefineRulesConditions,
+  Context
 >(
-  ctx: DefineRulesCtx<Properties, Shortcuts, Conditions>,
+  ctx: DefineRulesCtx<Properties, Shortcuts, Conditions, Context>,
   fragmentsOut: ResolvedStyleFragment[],
   name: string,
   value: unknown,

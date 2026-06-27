@@ -892,11 +892,13 @@ if (import.meta.vitest) {
     });
 
     it("css.with().multiple() forwards 3+ tuple map values as positional args", () => {
-      const callback = vi.fn((width: number, height: number, label: string) => ({
-        width,
-        height,
-        fontFamily: label
-      }));
+      const callback = vi.fn(
+        (width: number, height: number, label: string) => ({
+          width,
+          height,
+          fontFamily: label
+        })
+      );
       const mixin = css.with(callback);
 
       const result = mixin.multiple(

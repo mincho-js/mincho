@@ -125,18 +125,49 @@ export type DefineRulesPresetInput =
 
 export type DefineRulesPresetMap = DefineRulesPresetClassNameByCache;
 
-export interface DefineRulesCss<CssInput> {
-  (args: CssInput): string;
-  raw(args: CssInput): CSSRule;
+type DefineRulesNestedCallback = (...args: never[]) => unknown;
+
+type DefineRulesDirectCssInput<Args> = Args extends DefineRulesNestedCallback
+  ? never
+  : Args extends readonly [infer Head, ...infer Tail]
+    ? readonly [
+        DefineRulesDirectCssInput<Head>,
+        ...DefineRulesDirectCssInput<Tail>
+      ]
+    : Args extends ReadonlyArray<infer Item>
+      ? DefineRulesDirectCssInput<Item>[]
+      : Args extends object
+        ? {
+            [Key in keyof Args]: DefineRulesDirectCssInput<Args[Key]>;
+          }
+        : Args;
+
+type DefineRulesContextualCssInput<Args, Context> = (
+  context: Context
+) => DefineRulesDirectCssInput<Args>;
+
+export interface DefineRulesCss<CssInput, Context = undefined> {
+  <const Args extends CssInput>(
+    args: DefineRulesContextualCssInput<Args, Context>
+  ): string;
+  <const Args extends CssInput>(args: DefineRulesDirectCssInput<Args>): string;
+  raw<const Args extends CssInput>(
+    args: DefineRulesContextualCssInput<Args, Context>
+  ): CSSRule;
+  raw<const Args extends CssInput>(
+    args: DefineRulesDirectCssInput<Args>
+  ): CSSRule;
 }
 
 export interface DefineRulesCtx<
   Properties extends DefineRulesProperties,
   Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts, Conditions>,
-  Conditions extends DefineRulesConditions = DefineRulesEmptyConditions
+  Conditions extends DefineRulesConditions = DefineRulesEmptyConditions,
+  Context = undefined
 > {
   debugId?: string;
   presets?: DefineRulesPresetInput;
+  context?: Context;
   conditions?: Conditions;
   properties?: Properties;
   shortcuts?: Shortcuts;

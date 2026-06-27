@@ -25,6 +25,8 @@ import type {
 
 const DEFINE_RULES_SERIALIZED_CSS_FUNCTION_CONFIG_DIAGNOSTIC =
   "defineRules serialized css does not support function-valued conditions, properties, or shortcuts";
+const DEFINE_RULES_SERIALIZED_CSS_CONTEXT_DIAGNOSTIC =
+  "defineRules serialized css does not support non-serializable context";
 const DEFINE_RULES_RUNTIME_IMPORT_PATH =
   "@mincho-js/css/defineRules/createDefineRulesCssRuntime";
 const DEFINE_RULES_RUNTIME_IMPORT_NAME = "createDefineRulesCssRuntime";
@@ -40,17 +42,30 @@ export function defineRules<
     Shortcuts,
     Conditions
   >,
-  const Conditions extends DefineRulesConditions = DefineRulesEmptyConditions
+  const Conditions extends DefineRulesConditions = DefineRulesEmptyConditions,
+  const Context = undefined
 >(
-  config: DefineRulesCtx<Properties, Shortcuts, Conditions>
-): DefineRulesRuntimeResult<Properties, Shortcuts, Conditions> {
-  const functionValuedConfigPath =
+  config: DefineRulesCtx<Properties, Shortcuts, Conditions, Context>
+): DefineRulesRuntimeResult<Properties, Shortcuts, Conditions, Context> {
+  const functionValuedRegistryBlockerPath =
     getFunctionValuedDefineRulesConfigPath(config);
-  const result: DefineRulesRuntimeResult<Properties, Shortcuts, Conditions> =
-    createDefineRulesRuntime<Properties, Shortcuts, Conditions>(config, {
-      registerPreset: functionValuedConfigPath == null
-    });
+  const result: DefineRulesRuntimeResult<
+    Properties,
+    Shortcuts,
+    Conditions,
+    Context
+  > = createDefineRulesRuntime<Properties, Shortcuts, Conditions, Context>(
+    config,
+    {
+      registerPreset: functionValuedRegistryBlockerPath == null
+    }
+  );
   const serializedConfig = { ...config, presets: result.preset };
+  const getSerializerDiagnostic = () =>
+    getDefineRulesSerializerConfigDiagnostic(
+      config,
+      functionValuedRegistryBlockerPath
+    );
 
   return {
     ...result,
@@ -58,16 +73,21 @@ export function defineRules<
       result.cx,
       createDefineRulesCxSerializerRecipe(
         serializedConfig as unknown as Serializable,
-        functionValuedConfigPath
+        getSerializerDiagnostic
       )
     ),
     css: addFunctionSerializer(
       result.css,
       createDefineRulesSerializerRecipe(
         serializedConfig as unknown as Serializable,
-        functionValuedConfigPath
+        getSerializerDiagnostic
       )
-    ) as DefineRulesRuntimeResult<Properties, Shortcuts, Conditions>["css"]
+    ) as DefineRulesRuntimeResult<
+      Properties,
+      Shortcuts,
+      Conditions,
+      Context
+    >["css"]
   };
 }
 
@@ -84,52 +104,103 @@ function addDefineRulesCxSerializer<CxFunction extends object>(
 
 function createDefineRulesCxSerializerRecipe(
   serializedConfig: Serializable,
-  functionValuedConfigPath: string | undefined
+  getSerializerDiagnostic: () => DefineRulesSerializerDiagnostic | undefined
 ): Parameters<typeof addFunctionSerializer>[1] {
-  if (functionValuedConfigPath != null) {
-    return {
-      importPath: DEFINE_RULES_CX_RUNTIME_IMPORT_PATH,
-      importName: DEFINE_RULES_CX_RUNTIME_IMPORT_NAME,
-      get args(): ReadonlyArray<Serializable> {
-        throw new Error(
-          createFunctionValuedConfigDiagnostic(functionValuedConfigPath)
-        );
-      }
-    };
-  }
-
   return {
     importPath: DEFINE_RULES_CX_RUNTIME_IMPORT_PATH,
     importName: DEFINE_RULES_CX_RUNTIME_IMPORT_NAME,
-    args: [serializedConfig]
+    get args(): ReadonlyArray<Serializable> {
+      return getDefineRulesSerializerRecipeArgs(
+        serializedConfig,
+        getSerializerDiagnostic
+      );
+    }
   };
 }
 
 function createDefineRulesSerializerRecipe(
   serializedConfig: Serializable,
-  functionValuedConfigPath: string | undefined
+  getSerializerDiagnostic: () => DefineRulesSerializerDiagnostic | undefined
 ): Parameters<typeof addFunctionSerializer>[1] {
-  if (functionValuedConfigPath != null) {
-    return {
-      importPath: DEFINE_RULES_RUNTIME_IMPORT_PATH,
-      importName: DEFINE_RULES_RUNTIME_IMPORT_NAME,
-      get args(): ReadonlyArray<Serializable> {
-        throw new Error(
-          createFunctionValuedConfigDiagnostic(functionValuedConfigPath)
-        );
-      }
-    };
-  }
-
   return {
     importPath: DEFINE_RULES_RUNTIME_IMPORT_PATH,
     importName: DEFINE_RULES_RUNTIME_IMPORT_NAME,
-    args: [serializedConfig]
+    get args(): ReadonlyArray<Serializable> {
+      return getDefineRulesSerializerRecipeArgs(
+        serializedConfig,
+        getSerializerDiagnostic
+      );
+    }
   };
+}
+
+type DefineRulesSerializerDiagnostic =
+  | {
+      kind: "functionValuedConfig";
+      path: string;
+    }
+  | {
+      kind: "nonSerializableContext";
+      path: string;
+    };
+
+function getDefineRulesSerializerRecipeArgs(
+  serializedConfig: Serializable,
+  getSerializerDiagnostic: () => DefineRulesSerializerDiagnostic | undefined
+): ReadonlyArray<Serializable> {
+  const diagnostic = getSerializerDiagnostic();
+
+  if (diagnostic != null) {
+    throw new Error(createDefineRulesSerializerDiagnostic(diagnostic));
+  }
+
+  return [serializedConfig];
+}
+
+function getDefineRulesSerializerConfigDiagnostic(
+  config: {
+    context?: unknown;
+  },
+  functionValuedConfigPath: string | undefined
+): DefineRulesSerializerDiagnostic | undefined {
+  if (functionValuedConfigPath != null) {
+    return {
+      kind: "functionValuedConfig",
+      path: functionValuedConfigPath
+    };
+  }
+
+  const nonSerializableContextPath = getNonSerializableContextPath(
+    config.context,
+    "config.context"
+  );
+
+  if (nonSerializableContextPath != null) {
+    return {
+      kind: "nonSerializableContext",
+      path: nonSerializableContextPath
+    };
+  }
+
+  return undefined;
+}
+
+function createDefineRulesSerializerDiagnostic(
+  diagnostic: DefineRulesSerializerDiagnostic
+): string {
+  if (diagnostic.kind === "functionValuedConfig") {
+    return createFunctionValuedConfigDiagnostic(diagnostic.path);
+  }
+
+  return createNonSerializableContextDiagnostic(diagnostic.path);
 }
 
 function createFunctionValuedConfigDiagnostic(configPath: string): string {
   return `${DEFINE_RULES_SERIALIZED_CSS_FUNCTION_CONFIG_DIAGNOSTIC} at ${configPath}`;
+}
+
+function createNonSerializableContextDiagnostic(configPath: string): string {
+  return `${DEFINE_RULES_SERIALIZED_CSS_CONTEXT_DIAGNOSTIC} at ${configPath}`;
 }
 
 function getFunctionValuedDefineRulesConfigPath(config: {
@@ -186,6 +257,92 @@ function getFunctionValuedEntriesPath(
   return undefined;
 }
 
+function getNonSerializableContextPath(
+  entry: unknown,
+  path: string,
+  ancestors: WeakSet<object> = new WeakSet()
+): string | undefined {
+  if (
+    entry == null ||
+    typeof entry === "string" ||
+    typeof entry === "number" ||
+    typeof entry === "boolean" ||
+    typeof entry === "undefined"
+  ) {
+    return undefined;
+  }
+
+  if (
+    typeof entry === "function" ||
+    typeof entry === "symbol" ||
+    typeof entry === "bigint"
+  ) {
+    return path;
+  }
+
+  if (ancestors.has(entry)) {
+    return path;
+  }
+
+  ancestors.add(entry);
+  try {
+    if (Array.isArray(entry)) {
+      for (let index = 0; index < entry.length; index += 1) {
+        const nestedPath = getNonSerializableContextPath(
+          entry[index],
+          `${path}[${index}]`,
+          ancestors
+        );
+        if (nestedPath != null) return nestedPath;
+      }
+      return undefined;
+    }
+
+    if (!isPlainSerializableContextObject(entry)) {
+      return path;
+    }
+
+    for (const [key, value] of Object.entries(entry)) {
+      const nestedPath = getNonSerializableContextPath(
+        value,
+        `${path}${formatConfigPathSegment(key)}`,
+        ancestors
+      );
+      if (nestedPath != null) return nestedPath;
+    }
+
+    return undefined;
+  } finally {
+    ancestors.delete(entry);
+  }
+}
+
+function isPlainSerializableContextObject(entry: object): boolean {
+  const prototype = Object.getPrototypeOf(entry);
+
+  return prototype === null || isObjectPrototype(prototype);
+}
+
+function isObjectPrototype(prototype: object): boolean {
+  if (Object.getPrototypeOf(prototype) !== null) {
+    return false;
+  }
+
+  if (!Object.prototype.hasOwnProperty.call(prototype, "constructor")) {
+    return false;
+  }
+
+  const objectConstructor = (prototype as { constructor?: unknown })
+    .constructor;
+
+  return (
+    typeof objectConstructor === "function" &&
+    objectConstructor.prototype === prototype &&
+    Function.prototype.toString.call(objectConstructor) ===
+      Function.prototype.toString.call(Object)
+  );
+}
+
 function formatConfigPathSegment(key: string): string {
   if (/^[A-Za-z_$][\w$]*$/.test(key)) {
     return `.${key}`;
@@ -201,8 +358,8 @@ function formatConfigPathSegment(key: string): string {
 if (import.meta.vitest) {
   // eslint-disable-next-line @typescript-eslint/ban-ts-comment
   // @ts-ignore error TS1343: The 'import.meta' meta-property is only allowed when the '--module' option is 'es2020', 'es2022', 'esnext', 'system', 'node16', or 'nodenext'.
-  const { describe, it, expect, afterEach, assertType, vi } = import.meta
-    .vitest;
+  const { describe, it, expect, afterEach, assertType, expectTypeOf, vi } =
+    import.meta.vitest;
 
   const debugId = "myCSS";
   setFileScope("test");
@@ -361,6 +518,336 @@ if (import.meta.vitest) {
         };
 
         expect(assertRemovedPrivateArgument).toEqual(expect.any(Function));
+      });
+    });
+
+    describe.concurrent("DefineRules context callback type surface", () => {
+      it("types context callbacks without executing them", () => {
+        const assertContextCallbackInput = () => {
+          const contextRules = defineRules({
+            context: { tone: "brand" as const },
+            properties: {
+              color: true,
+              display: ["none", "flex"]
+            },
+            shortcuts: {
+              inline: { color: "brand" }
+            }
+          });
+          const contextCssCallbackInput = (ctx: { readonly tone: "brand" }) => {
+            expectTypeOf(ctx).not.toBeAny();
+            expectTypeOf(ctx).toEqualTypeOf<{ readonly tone: "brand" }>();
+            return { color: ctx.tone };
+          };
+          const contextRawCallbackInput = (ctx: { readonly tone: "brand" }) => {
+            expectTypeOf(ctx).not.toBeAny();
+            expectTypeOf(ctx).toEqualTypeOf<{ readonly tone: "brand" }>();
+            return { color: ctx.tone };
+          };
+
+          assertType<string>(contextRules.css(contextCssCallbackInput));
+          assertType<ReturnType<typeof contextRules.css.raw>>(
+            contextRules.css.raw(contextRawCallbackInput)
+          );
+
+          assertType<string>(
+            contextRules.css((ctx) => {
+              expectTypeOf(ctx).not.toBeAny();
+              expectTypeOf(ctx).toEqualTypeOf<{ readonly tone: "brand" }>();
+              return { color: ctx.tone };
+            })
+          );
+          assertType<ReturnType<typeof contextRules.css.raw>>(
+            contextRules.css.raw((ctx) => {
+              expectTypeOf(ctx).not.toBeAny();
+              expectTypeOf(ctx).toEqualTypeOf<{ readonly tone: "brand" }>();
+              return { color: ctx.tone };
+            })
+          );
+
+          assertType<string>(contextRules.css({ color: "brand" }));
+          assertType<string>(contextRules.css([{ color: "brand" }, "inline"]));
+          assertType<ReturnType<typeof contextRules.css.raw>>(
+            contextRules.css.raw("inline")
+          );
+
+          // @ts-expect-error callback return must match configured defineRules input.
+          contextRules.css((ctx) => ({ display: ctx.tone }));
+          // @ts-expect-error raw callback return must match configured defineRules input.
+          contextRules.css.raw((ctx) => ({ display: ctx.tone }));
+          // @ts-expect-error nested callback returns are unsupported.
+          contextRules.css(() => () => ({ color: "red" }));
+          // @ts-expect-error nested raw callback returns are unsupported.
+          contextRules.css.raw(() => () => ({ color: "red" }));
+          // @ts-expect-error array-contained callbacks are unsupported.
+          contextRules.css([() => ({ color: "red" })]);
+          // @ts-expect-error array-contained raw callbacks are unsupported.
+          contextRules.css.raw([() => ({ color: "red" })]);
+        };
+
+        const assertNoContextCallbackInput = () => {
+          const noContextRules = defineRules({
+            properties: {
+              color: true
+            }
+          });
+          const noContextCssCallbackInput = (ctx: undefined) => {
+            expectTypeOf(ctx).not.toBeAny();
+            expectTypeOf(ctx).toEqualTypeOf<undefined>();
+            return { color: ctx };
+          };
+
+          assertType<string>(noContextRules.css(noContextCssCallbackInput));
+
+          assertType<string>(
+            noContextRules.css((ctx) => {
+              expectTypeOf(ctx).not.toBeAny();
+              expectTypeOf(ctx).toEqualTypeOf<undefined>();
+              return { color: ctx };
+            })
+          );
+        };
+
+        const assertThemePropRejected = () => {
+          // @ts-expect-error defineRules uses context, not theme, as a config prop.
+          defineRules({ theme: {} });
+        };
+
+        expect(assertContextCallbackInput).toEqual(expect.any(Function));
+        expect(assertNoContextCallbackInput).toEqual(expect.any(Function));
+        expect(assertThemePropRejected).toEqual(expect.any(Function));
+      });
+    });
+
+    describe.concurrent("DefineRules context callback runtime", () => {
+      it("resolves css() top-level callbacks with the exact context object", () => {
+        const context = { color: "brand" as const };
+        const { css } = defineRules({
+          context,
+          properties: {
+            color: true
+          }
+        });
+        const callback = vi.fn((ctx: typeof context) => {
+          expect(ctx).toBe(context);
+          return { color: ctx.color };
+        });
+
+        expect(css(callback)).toBe(css({ color: context.color }));
+        expect(callback).toHaveBeenCalledTimes(1);
+        expect(callback).toHaveBeenCalledWith(context);
+      });
+
+      it("resolves css.raw() top-level callbacks with config context", () => {
+        const context = { color: "raw-brand" as const };
+        const { css } = defineRules({
+          context,
+          properties: {
+            color: true
+          }
+        });
+        const callback = vi.fn((ctx: typeof context) => {
+          expect(ctx).toBe(context);
+          return { color: ctx.color };
+        });
+
+        expect(css.raw(callback)).toEqual(css.raw({ color: context.color }));
+        expect(callback).toHaveBeenCalledTimes(1);
+        expect(callback).toHaveBeenCalledWith(context);
+      });
+
+      it("supports theme vars as context for callbacks, conditions, cx, and serializers", async () => {
+        const { theme } = await import("../theme/index.js");
+        const [themeClass, themeVars] = theme({
+          colors: {
+            text: {
+              base: "#111111",
+              inverse: "#ffffff"
+            },
+            surface: {
+              card: "#f8fafc"
+            }
+          },
+          space: {
+            card: "16px",
+            desktop: "24px"
+          },
+          radii: {
+            card: "12px",
+            pill: "999px"
+          }
+        });
+        const conditions = {
+          desktop: {
+            "@media": "screen and (min-width: 1024px)"
+          }
+        } as const;
+        const properties = {
+          backgroundColor: true,
+          borderRadius: true,
+          color: true,
+          padding: true
+        } as const;
+        const { css, cx: scopedCx } = defineRules({
+          context: themeVars,
+          conditions,
+          properties
+        });
+        const cardInput = (themeContext: typeof themeVars) => ({
+          backgroundColor: themeContext.colors.surface.card,
+          borderRadius: themeContext.radii.card,
+          color: themeContext.colors.text.base,
+          padding: {
+            base: themeContext.space.card,
+            _desktop: themeContext.space.desktop
+          },
+          _desktop: {
+            borderRadius: themeContext.radii.pill,
+            color: themeContext.colors.text.inverse
+          }
+        });
+        const expectedRaw = {
+          backgroundColor: themeVars.colors.surface.card,
+          borderRadius: themeVars.radii.card,
+          color: themeVars.colors.text.base,
+          padding: themeVars.space.card,
+          "@media": {
+            "screen and (min-width: 1024px)": {
+              borderRadius: themeVars.radii.pill,
+              color: themeVars.colors.text.inverse,
+              padding: themeVars.space.desktop
+            }
+          }
+        };
+        type DefineRulesRecipe = {
+          readonly args?: readonly unknown[];
+        };
+        const getRecipeArgs = (fn: object) =>
+          (
+            fn as unknown as {
+              readonly __recipe__?: DefineRulesRecipe;
+            }
+          ).__recipe__?.args;
+        let cssRecipeArgs: readonly unknown[] | undefined;
+        let cxRecipeArgs: readonly unknown[] | undefined;
+
+        expect(css.raw((themeContext) => cardInput(themeContext))).toEqual(
+          expectedRaw
+        );
+
+        const cardClass = css((themeContext) => cardInput(themeContext));
+        const baseColorClass = css({ color: themeVars.colors.text.base });
+        const inverseColorClass = css({ color: themeVars.colors.text.inverse });
+
+        expect(cardClass).not.toBe("");
+        expect(cardClass.split(" ").filter(Boolean).length).toBeGreaterThan(0);
+        expect(scopedCx(themeClass, cardClass)).toBe(
+          `${themeClass} ${cardClass}`
+        );
+        expect(scopedCx(themeClass, baseColorClass, inverseColorClass)).toBe(
+          `${themeClass} ${inverseColorClass}`
+        );
+        expect(
+          Object.getOwnPropertyDescriptor(themeVars, "fallbackVar")
+        ).toEqual(expect.objectContaining({ enumerable: false }));
+        expect(Object.getOwnPropertyDescriptor(themeVars, "raw")).toEqual(
+          expect.objectContaining({ enumerable: false })
+        );
+        expect(Object.getOwnPropertyDescriptor(themeVars, "alias")).toEqual(
+          expect.objectContaining({ enumerable: false })
+        );
+        expect(() => {
+          cssRecipeArgs = getRecipeArgs(css);
+        }).not.toThrow();
+        expect(() => {
+          cxRecipeArgs = getRecipeArgs(scopedCx);
+        }).not.toThrow();
+        expect(cssRecipeArgs?.[0]).toEqual(expect.any(Object));
+        expect(cxRecipeArgs?.[0]).toEqual(expect.any(Object));
+        expect((cssRecipeArgs?.[0] as { context?: unknown }).context).toBe(
+          themeVars
+        );
+        expect((cxRecipeArgs?.[0] as { context?: unknown }).context).toBe(
+          themeVars
+        );
+      });
+
+      it("passes exactly undefined to top-level callbacks when context is omitted", () => {
+        const { css } = defineRules({
+          properties: {
+            color: true
+          }
+        });
+        const cssCallback = vi.fn((ctx: undefined) => {
+          expect(ctx).toBeUndefined();
+          return { color: "red" };
+        });
+        const rawCallback = vi.fn((ctx: undefined) => {
+          expect(ctx).toBeUndefined();
+          return { color: "blue" };
+        });
+
+        expect(css(cssCallback)).toBe(css({ color: "red" }));
+        expect(css.raw(rawCallback)).toEqual(css.raw({ color: "blue" }));
+        expect(cssCallback).toHaveBeenCalledTimes(1);
+        expect(cssCallback).toHaveBeenCalledWith(undefined);
+        expect(rawCallback).toHaveBeenCalledTimes(1);
+        expect(rawCallback).toHaveBeenCalledWith(undefined);
+      });
+
+      it("preserves direct object, array, and inline shortcut inputs", () => {
+        const { css } = defineRules({
+          properties: {
+            color: true,
+            display: ["none", "inline"]
+          },
+          shortcuts: {
+            inline: { display: "inline" }
+          }
+        });
+
+        expect(css.raw({ color: "red" })).toEqual({ color: "red" });
+        expect(css.raw([{ color: "red" }, { color: "blue" }])).toEqual({
+          color: "blue"
+        });
+        expect(css.raw("inline")).toEqual({ display: "inline" });
+        expect(css({ color: "red" })).toBe(css([{ color: "red" }]));
+        expect(css([{ color: "red" }, { color: "blue" }])).toBe(
+          css({ color: "blue" })
+        );
+        expect(css("inline")).toBe(css({ display: "inline" }));
+      });
+
+      it("supports top-level callbacks returning inline shortcut strings", () => {
+        const context = { shortcut: "inline" as const };
+        const { css } = defineRules({
+          context,
+          properties: {
+            display: ["none", "inline"]
+          },
+          shortcuts: {
+            inline: { display: "inline" }
+          }
+        });
+
+        expect(css((ctx) => ctx.shortcut)).toBe(css("inline"));
+        expect(css.raw((ctx) => ctx.shortcut)).toEqual(css.raw("inline"));
+      });
+
+      it("keeps nested callback inputs unsupported with the existing diagnostic", () => {
+        const { css } = defineRules({
+          properties: {
+            color: true
+          }
+        });
+        const nestedCallback = () => ({ color: "red" as const });
+
+        expect(() => css([nestedCallback] as never)).toThrow(
+          "Unsupported css() argument:"
+        );
+        expect(() => css.raw([nestedCallback] as never)).toThrow(
+          "Unsupported css() argument:"
+        );
       });
     });
 
@@ -804,6 +1291,68 @@ if (import.meta.vitest) {
 
         expect(getActiveDefineRulesRegistrySession()).toBe(undefined);
       });
+
+      it("registers non-serializable context while function-valued config stays unregistered", () => {
+        const session = beginDefineRulesRegistrySession();
+
+        try {
+          const registryContext = {
+            palette: {
+              resolve() {
+                return "red" as const;
+              }
+            }
+          };
+          const contextOwner = defineRules<
+            { readonly color: true },
+            Record<never, never>,
+            DefineRulesEmptyConditions,
+            typeof registryContext
+          >({
+            context: registryContext,
+            properties: {
+              color: true
+            }
+          });
+          const functionPropertyOwner = defineRules({
+            properties: {
+              color(value: string) {
+                return value;
+              }
+            }
+          });
+          const functionShortcutOwner = defineRules({
+            properties: {
+              color: true
+            },
+            shortcuts: {
+              tone(value: "red" | "blue") {
+                return {
+                  color: value
+                } as const;
+              }
+            }
+          });
+
+          expect(
+            contextOwner.css((ctx) => ({ color: ctx.palette.resolve() }))
+          ).toBe(contextOwner.css({ color: "red" }));
+          expect(functionPropertyOwner.css({ color: "red" })).toBe(
+            functionPropertyOwner.css({ color: "red" })
+          );
+          expect(functionShortcutOwner.css({ tone: "blue" })).toBe(
+            functionShortcutOwner.css({ color: "blue" })
+          );
+          expect(
+            session.instances.map((instance) => instance.registrationId)
+          ).toEqual(["<root>:test#defineRules:0"]);
+          expect(session.instances[0]?.presetArtifact).toBe(
+            contextOwner.preset
+          );
+        } finally {
+          expect(endDefineRulesRegistrySession()).toBe(session);
+        }
+      });
     });
 
     describe.concurrent("DefineRules Presets", () => {
@@ -838,11 +1387,33 @@ if (import.meta.vitest) {
         )
       });
 
-      it("exposes a live v4 preset object through the serializer recipe", () => {
-        type DefineRulesRecipe = {
-          args?: unknown[];
-        };
+      type DefineRulesRecipe = {
+        readonly args?: readonly unknown[];
+      };
 
+      type DefineRulesRecipeConfig<Context> = DefineRulesCtx<
+        { readonly color: true },
+        Record<never, never>,
+        DefineRulesEmptyConditions,
+        Context
+      >;
+
+      const getDefineRulesRecipe = (fn: object) =>
+        (
+          fn as unknown as {
+            __recipe__?: DefineRulesRecipe;
+          }
+        ).__recipe__;
+
+      const getDefineRulesRecipeConfig = <Context>(fn: object) =>
+        getDefineRulesRecipe(fn)?.args?.[0] as
+          | DefineRulesRecipeConfig<Context>
+          | undefined;
+
+      const expectedNonSerializableContextDiagnostic = (path: string) =>
+        `defineRules serialized css does not support non-serializable context at ${path}`;
+
+      it("exposes a live v4 preset object through the serializer recipe", () => {
         type DefineRulesRecipeConfig = {
           presets?: unknown;
         };
@@ -854,11 +1425,7 @@ if (import.meta.vitest) {
           }
         });
 
-        const recipe = (
-          css as unknown as {
-            __recipe__?: DefineRulesRecipe;
-          }
-        ).__recipe__;
+        const recipe = getDefineRulesRecipe(css);
         const recipeConfig = recipe?.args?.[0];
 
         expect(recipeConfig).toEqual(expect.any(Object));
@@ -891,10 +1458,6 @@ if (import.meta.vitest) {
       });
 
       it("serializes an empty v4 preset object without static calls", () => {
-        type DefineRulesRecipe = {
-          args?: unknown[];
-        };
-
         const { css, preset } = defineRules({
           debugId: "emptySerializerPresetIdentity",
           properties: {
@@ -902,11 +1465,7 @@ if (import.meta.vitest) {
           }
         });
 
-        const recipe = (
-          css as unknown as {
-            __recipe__?: DefineRulesRecipe;
-          }
-        ).__recipe__;
+        const recipe = getDefineRulesRecipe(css);
         const recipeConfig = recipe?.args?.[0];
 
         expect(recipeConfig).toEqual(expect.any(Object));
@@ -935,25 +1494,227 @@ if (import.meta.vitest) {
         expect(css({ background: "blue" })).toBe(className);
       });
 
-      it("defineRules serializer rejects function-valued config with diagnostic", () => {
-        type DefineRulesRecipe = {
-          args?: unknown[];
+      it("serializes context and reconstructs css runtime callbacks", async () => {
+        const { createDefineRulesCssRuntime } =
+          await import("./createDefineRulesCssRuntime.js");
+        const context = {
+          color: "red" as const,
+          tokens: Object.assign(Object.create(null) as { color: "red" }, {
+            color: "red" as const
+          }),
+          nested: {
+            enabled: true,
+            count: 1
+          },
+          list: ["token", 2, false, null, undefined] as const
         };
+        const { css, preset } = defineRules({
+          context,
+          properties: {
+            color: true
+          }
+        });
 
+        const recipeConfig = getDefineRulesRecipeConfig<typeof context>(css);
+        expect(recipeConfig).toEqual(expect.any(Object));
+        expect(recipeConfig?.context).toBe(context);
+        expect(recipeConfig?.presets).toBe(preset);
+        expect(Object.keys(preset)).toEqual([
+          "schema",
+          "version",
+          "classNameByCache",
+          "writeKeyByCacheKey",
+          "conditionById",
+          "propertyById",
+          "writeKeyById"
+        ]);
+        expect(preset).not.toHaveProperty("context");
+
+        if (recipeConfig == null) return;
+        const reconstructedCss = createDefineRulesCssRuntime(recipeConfig);
+
+        expect(reconstructedCss).toEqual(expect.any(Function));
+        expect(reconstructedCss((ctx) => ({ color: ctx.color }))).toBe(
+          reconstructedCss({ color: context.color })
+        );
+        expect(reconstructedCss((ctx) => ({ color: ctx.tokens.color }))).toBe(
+          reconstructedCss({ color: context.tokens.color })
+        );
+      });
+
+      it("reconstructs scoped cx runtime with context without changing merge semantics", async () => {
+        const { createDefineRulesCxRuntime } =
+          await import("./createDefineRulesCxRuntime.js");
+        const context = { color: "brand" as const };
+        const { css, cx: scopedCx } = defineRules({
+          context,
+          properties: {
+            color: true
+          }
+        });
+        const red = css({ color: "red" });
+        const blue = css({ color: "blue" });
+
+        const recipeConfig =
+          getDefineRulesRecipeConfig<typeof context>(scopedCx);
+        expect(recipeConfig).toEqual(expect.any(Object));
+        expect(recipeConfig?.context).toBe(context);
+
+        if (recipeConfig == null) return;
+        const reconstructedCx = createDefineRulesCxRuntime(recipeConfig);
+
+        expect(reconstructedCx).not.toBe(cx);
+        expect(reconstructedCx(red, blue)).toBe(blue);
+        expect(reconstructedCx("external external", red, "external")).toBe(
+          `external external ${red} external`
+        );
+      });
+
+      it("delays non-serializable context diagnostics until recipe args are read", () => {
+        const context = {
+          palette: {
+            resolve() {
+              return "red" as const;
+            }
+          }
+        };
+        const { css, cx: scopedCx } = defineRules({
+          context,
+          properties: {
+            color: true
+          }
+        });
+
+        expect(css((ctx) => ({ color: ctx.palette.resolve() }))).toBe(
+          css({ color: "red" })
+        );
+        expect(() => getDefineRulesRecipe(css)?.args).toThrow(
+          expectedNonSerializableContextDiagnostic(
+            "config.context.palette.resolve"
+          )
+        );
+        expect(() => getDefineRulesRecipe(scopedCx)?.args).toThrow(
+          expectedNonSerializableContextDiagnostic(
+            "config.context.palette.resolve"
+          )
+        );
+      });
+
+      it("rejects enumerable non-serializable context values with precise paths", () => {
+        class PaletteClass {
+          readonly color = "red";
+        }
+
+        const customPrototype = Object.create(null) as { kind?: string };
+        customPrototype.kind = "palette";
+        const customPrototypeContext = Object.create(customPrototype) as {
+          color?: string;
+        };
+        customPrototypeContext.color = "red";
+        const cyclicContext: Record<string, unknown> = {};
+        cyclicContext.self = cyclicContext;
+        const cases = [
+          {
+            name: "Date",
+            context: { createdAt: new Date(0) },
+            path: "config.context.createdAt"
+          },
+          {
+            name: "Map",
+            context: { palette: new Map([["brand", "red"]]) },
+            path: "config.context.palette"
+          },
+          {
+            name: "Set",
+            context: { palette: new Set(["red"]) },
+            path: "config.context.palette"
+          },
+          {
+            name: "bigint",
+            context: { count: 1n },
+            path: "config.context.count"
+          },
+          {
+            name: "symbol",
+            context: { token: Symbol("x") },
+            path: "config.context.token"
+          },
+          {
+            name: "cycle",
+            context: cyclicContext,
+            path: "config.context.self"
+          },
+          {
+            name: "class instance",
+            context: { palette: new PaletteClass() },
+            path: "config.context.palette"
+          },
+          {
+            name: "custom prototype object",
+            context: { palette: customPrototypeContext },
+            path: "config.context.palette"
+          }
+        ];
+
+        for (const { context, path } of cases) {
+          const { css, cx: scopedCx } = defineRules({
+            context,
+            properties: {
+              color: true
+            }
+          });
+          const diagnostic = expectedNonSerializableContextDiagnostic(path);
+
+          expect(() => getDefineRulesRecipe(css)?.args, path).toThrow(
+            diagnostic
+          );
+          expect(() => getDefineRulesRecipe(scopedCx)?.args, path).toThrow(
+            diagnostic
+          );
+        }
+      });
+
+      it("ignores non-enumerable non-serializable context values", () => {
+        const context = { color: "red" as const };
+        Object.defineProperty(context, "resolve", {
+          enumerable: false,
+          value() {
+            return "blue";
+          }
+        });
+        const { css, cx: scopedCx } = defineRules({
+          context,
+          properties: {
+            color: true
+          }
+        });
+
+        expect(css((ctx) => ({ color: ctx.color }))).toBe(
+          css({ color: "red" })
+        );
+        expect(getDefineRulesRecipeConfig<typeof context>(css)?.context).toBe(
+          context
+        );
+        expect(
+          getDefineRulesRecipeConfig<typeof context>(scopedCx)?.context
+        ).toBe(context);
+      });
+
+      it("defineRules serializer rejects function-valued config with diagnostic", () => {
         const createRecipeArgsReader = (config: unknown) => {
           const { css } = defineRules(config as never);
-          const recipe = (
-            css as unknown as {
-              __recipe__?: DefineRulesRecipe;
-            }
-          ).__recipe__;
+          const recipe = getDefineRulesRecipe(css);
 
           return () => recipe?.args;
         };
         const createSerializerArgsReader = (config: unknown) => {
           const recipe = createDefineRulesSerializerRecipe(
             {} as Serializable,
-            getFunctionValuedDefineRulesConfigPath(config as never)
+            () =>
+              getDefineRulesSerializerConfigDiagnostic(
+                config as { context?: unknown },
+                getFunctionValuedDefineRulesConfigPath(config as never)
+              )
           );
 
           return () => recipe.args;

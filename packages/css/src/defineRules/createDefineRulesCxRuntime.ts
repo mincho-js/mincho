@@ -14,11 +14,15 @@ export const createDefineRulesCxRuntime = <
     Shortcuts,
     Conditions
   >,
-  const Conditions extends DefineRulesConditions = DefineRulesEmptyConditions
+  const Conditions extends DefineRulesConditions = DefineRulesEmptyConditions,
+  const Context = undefined
 >(
-  config: DefineRulesCtx<Properties, Shortcuts, Conditions>
+  config: DefineRulesCtx<Properties, Shortcuts, Conditions, Context>
 ) => {
-  return createDefineRulesRuntime(config, {
-    preservePresetReference: true
-  }).cx;
+  return createDefineRulesRuntime<Properties, Shortcuts, Conditions, Context>(
+    config,
+    {
+      preservePresetReference: true
+    }
+  ).cx;
 };
