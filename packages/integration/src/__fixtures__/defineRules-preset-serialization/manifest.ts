@@ -121,6 +121,18 @@ export const DEFINE_RULES_PRESET_SERIALIZATION_REGISTRY_MATRIX_CASES = [
     relativePath: "registry-const-config-executed/src/index.css.ts"
   },
   {
+    caseId: "registry-context-serializable",
+    expectedEvaluation: "serialized",
+    expectedRegistryInstances: 1,
+    expectedSourceSnippets: [
+      "const context = {",
+      "context,",
+      "const { css, preset } = defineRules(config);",
+      "export const shared = css({"
+    ],
+    relativePath: "registry-context-serializable/src/index.css.ts"
+  },
+  {
     caseId: "registry-exported-factory-not-executed",
     expectedEvaluation: "not-serialized",
     expectedRegistryInstances: 0,

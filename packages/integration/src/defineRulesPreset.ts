@@ -8,6 +8,8 @@ import { processVanillaFile } from "@vanilla-extract/integration";
 
 const DEFINE_RULES_REGISTRY_SERIALIZABLE_CONFIG_DIAGNOSTIC =
   "defineRules registry serialization does not support function-valued conditions, properties, or shortcuts";
+const DEFINE_RULES_REGISTRY_SERIALIZABLE_CONTEXT_DIAGNOSTIC =
+  "defineRules registry serialization does not support non-serializable context";
 
 type Awaitable<Value> = Value | PromiseLike<Value>;
 
@@ -79,6 +81,12 @@ export function validateDefineRulesRegistrySession(
       "config.shortcuts",
       diagnosticContext
     );
+    validateSerializableConfigEntry(
+      getConfigEntry(instance.config, "context"),
+      "config.context",
+      diagnosticContext,
+      { validatePlainSerializableValues: true }
+    );
   }
 }
 
@@ -97,7 +105,7 @@ function formatDefineRulesRegistryDiagnosticContext(
 
 function getConfigEntry(
   config: unknown,
-  key: "conditions" | "properties" | "shortcuts"
+  key: "conditions" | "context" | "properties" | "shortcuts"
 ): unknown {
   if (config == null || typeof config !== "object") {
     return undefined;
@@ -106,47 +114,126 @@ function getConfigEntry(
   return (config as Record<string, unknown>)[key];
 }
 
+interface SerializableConfigEntryValidationOptions {
+  validatePlainSerializableValues?: boolean;
+}
+
 function validateSerializableConfigEntry(
   entry: unknown,
   path: string,
   diagnosticContext: DefineRulesRegistryDiagnosticContext,
+  options: SerializableConfigEntryValidationOptions = {},
   seenEntries: WeakSet<object> = new WeakSet()
 ): void {
-  if (typeof entry === "function") {
-    throw new Error(
-      `${DEFINE_RULES_REGISTRY_SERIALIZABLE_CONFIG_DIAGNOSTIC} at ${path} (${formatDefineRulesRegistryDiagnosticContext(diagnosticContext)})`
-    );
+  if (
+    entry == null ||
+    typeof entry === "string" ||
+    typeof entry === "number" ||
+    typeof entry === "boolean" ||
+    typeof entry === "undefined"
+  ) {
+    return;
   }
 
-  if (entry == null || typeof entry !== "object") {
+  if (typeof entry === "function") {
+    throwSerializableConfigEntryDiagnostic(path, diagnosticContext, options);
+  }
+
+  if (
+    options.validatePlainSerializableValues === true &&
+    (typeof entry === "symbol" || typeof entry === "bigint")
+  ) {
+    throwSerializableConfigEntryDiagnostic(path, diagnosticContext, options);
+  }
+
+  if (typeof entry !== "object") {
     return;
   }
 
   if (seenEntries.has(entry)) {
+    if (options.validatePlainSerializableValues === true) {
+      throwSerializableConfigEntryDiagnostic(path, diagnosticContext, options);
+    }
     return;
   }
   seenEntries.add(entry);
 
-  if (Array.isArray(entry)) {
-    entry.forEach((item, index) => {
+  try {
+    if (Array.isArray(entry)) {
+      for (let index = 0; index < entry.length; index += 1) {
+        validateSerializableConfigEntry(
+          entry[index],
+          `${path}[${index}]`,
+          diagnosticContext,
+          options,
+          seenEntries
+        );
+      }
+      return;
+    }
+
+    if (
+      options.validatePlainSerializableValues === true &&
+      !isPlainSerializableConfigObject(entry)
+    ) {
+      throwSerializableConfigEntryDiagnostic(path, diagnosticContext, options);
+    }
+
+    for (const [key, value] of Object.entries(entry)) {
       validateSerializableConfigEntry(
-        item,
-        `${path}[${index}]`,
+        value,
+        `${path}${formatConfigPathSegment(key)}`,
         diagnosticContext,
+        options,
         seenEntries
       );
-    });
-    return;
+    }
+  } finally {
+    if (options.validatePlainSerializableValues === true) {
+      seenEntries.delete(entry);
+    }
+  }
+}
+
+function throwSerializableConfigEntryDiagnostic(
+  path: string,
+  diagnosticContext: DefineRulesRegistryDiagnosticContext,
+  options: SerializableConfigEntryValidationOptions
+): never {
+  const diagnosticMessage =
+    options.validatePlainSerializableValues === true
+      ? DEFINE_RULES_REGISTRY_SERIALIZABLE_CONTEXT_DIAGNOSTIC
+      : DEFINE_RULES_REGISTRY_SERIALIZABLE_CONFIG_DIAGNOSTIC;
+
+  throw new Error(
+    `${diagnosticMessage} at ${path} (${formatDefineRulesRegistryDiagnosticContext(diagnosticContext)})`
+  );
+}
+
+function isPlainSerializableConfigObject(entry: object): boolean {
+  const prototype = Object.getPrototypeOf(entry);
+
+  return prototype === null || isObjectPrototype(prototype);
+}
+
+function isObjectPrototype(prototype: object): boolean {
+  if (Object.getPrototypeOf(prototype) !== null) {
+    return false;
   }
 
-  for (const [key, value] of Object.entries(entry)) {
-    validateSerializableConfigEntry(
-      value,
-      `${path}${formatConfigPathSegment(key)}`,
-      diagnosticContext,
-      seenEntries
-    );
+  if (!Object.prototype.hasOwnProperty.call(prototype, "constructor")) {
+    return false;
   }
+
+  const objectConstructor = (prototype as { constructor?: unknown })
+    .constructor;
+
+  return (
+    typeof objectConstructor === "function" &&
+    objectConstructor.prototype === prototype &&
+    Function.prototype.toString.call(objectConstructor) ===
+      Function.prototype.toString.call(Object)
+  );
 }
 
 function formatConfigPathSegment(key: string): string {
@@ -305,7 +392,7 @@ if (import.meta.vitest) {
       nextRegistrationIndexByFileScope: {
         "test:registry.css.ts": 1
       }
-    };
+    } as unknown as DefineRulesRegistrySession;
   }
 
   type RegistryFixtureEvaluation = "serialized" | "not-serialized";
@@ -339,6 +426,7 @@ if (import.meta.vitest) {
     "registry-multiple-instances",
     "registry-imported-helper-executed",
     "registry-const-config-executed",
+    "registry-context-serializable",
     "registry-exported-factory-not-executed",
     "registry-function-config-invalid"
   ];
@@ -354,12 +442,26 @@ if (import.meta.vitest) {
     ).href;
   }
 
+  async function loadDefineRulesPresetSerializationManifest(): Promise<DefineRulesPresetSerializationManifest> {
+    return (await import(
+      getDefineRulesPresetSerializationManifestUrl()
+    )) as DefineRulesPresetSerializationManifest;
+  }
+
+  async function getDefineRulesPresetSerializationFixturePath(
+    relativePath: string
+  ): Promise<string> {
+    const manifest = await loadDefineRulesPresetSerializationManifest();
+
+    return manifest.createDefineRulesPresetSerializationFixturePath(
+      relativePath
+    );
+  }
+
   async function loadRegistryFixtureMatrixCases(): Promise<
     RegistryFixtureCase[]
   > {
-    const manifest = (await import(
-      getDefineRulesPresetSerializationManifestUrl()
-    )) as DefineRulesPresetSerializationManifest;
+    const manifest = await loadDefineRulesPresetSerializationManifest();
 
     return manifest.DEFINE_RULES_PRESET_SERIALIZATION_REGISTRY_MATRIX_CASES.map(
       (fixtureCase) => ({
@@ -387,6 +489,35 @@ if (import.meta.vitest) {
     expect(normalizeRegistryFixtureSource(source)).toContain(
       normalizeRegistryFixtureSource(snippet)
     );
+  }
+
+  async function expectRegistryFixtureToRejectWithDiagnostic({
+    caseId,
+    expectedPath,
+    relativePath
+  }: {
+    caseId: string;
+    expectedPath: string;
+    relativePath: string;
+  }): Promise<void> {
+    const fixturePath =
+      await getDefineRulesPresetSerializationFixturePath(relativePath);
+    const fixtureSource = await readRegistryFixtureSource(fixturePath);
+    let thrownError: unknown;
+
+    try {
+      await processRegistryFixture(fixtureSource, caseId, fixturePath);
+    } catch (error) {
+      thrownError = error;
+    }
+
+    expect(thrownError).toBeInstanceOf(Error);
+    const message = (thrownError as Error).message;
+    expect(message).toContain(
+      `defineRules registry serialization does not support non-serializable context at ${expectedPath}`
+    );
+    expect(message).toContain("fileScope:");
+    expect(message).toContain("registrationIndex: 0");
   }
 
   function collectClassNameByCacheValues(
@@ -1531,6 +1662,162 @@ if (import.meta.vitest) {
           })
         )
       ).not.toThrow();
+    });
+
+    it("valid config validation accepts serializable context data", () => {
+      const nullPrototypePalette = Object.assign(
+        Object.create(null) as { brand: string; accent: null },
+        {
+          brand: "rebeccapurple",
+          accent: null
+        }
+      );
+      const context = {
+        palette: nullPrototypePalette,
+        spacing: [0, 4, undefined],
+        enabled: true
+      };
+      Object.defineProperty(context.palette, "resolve", {
+        enumerable: false,
+        value() {
+          return context.palette.brand;
+        }
+      });
+
+      expect(() =>
+        validateDefineRulesRegistrySession(
+          createRegistrySession({
+            context,
+            properties: {
+              color: true
+            }
+          })
+        )
+      ).not.toThrow();
+    });
+
+    it("invalid config validation rejects non-serializable context with paths and registry metadata", () => {
+      class PaletteClass {
+        brand = "red";
+      }
+      const customPrototype = Object.create(null) as { kind?: string };
+      customPrototype.kind = "palette";
+      const customPrototypeContext = Object.create(customPrototype) as {
+        brand?: string;
+      };
+      customPrototypeContext.brand = "red";
+      const cyclicContext: { self?: unknown } = {};
+      cyclicContext.self = cyclicContext;
+      const cases = [
+        {
+          context: {
+            palette: {
+              resolve() {
+                return "red";
+              }
+            }
+          },
+          path: "config.context.palette.resolve"
+        },
+        {
+          context: { createdAt: new Date(0) },
+          path: "config.context.createdAt"
+        },
+        {
+          context: { palette: new Map([["brand", "red"]]) },
+          path: "config.context.palette"
+        },
+        {
+          context: { palette: new Set(["red"]) },
+          path: "config.context.palette"
+        },
+        {
+          context: { count: BigInt(1) },
+          path: "config.context.count"
+        },
+        {
+          context: { token: Symbol("token") },
+          path: "config.context.token"
+        },
+        {
+          context: cyclicContext,
+          path: "config.context.self"
+        },
+        {
+          context: { palette: new PaletteClass() },
+          path: "config.context.palette"
+        },
+        {
+          context: { palette: customPrototypeContext },
+          path: "config.context.palette"
+        }
+      ];
+
+      for (const { context, path } of cases) {
+        expect(() =>
+          validateDefineRulesRegistrySession(
+            createRegistrySession({
+              context,
+              properties: {
+                color: true
+              }
+            })
+          )
+        ).toThrow(
+          `defineRules registry serialization does not support non-serializable context at ${path} (fileScope: test:registry.css.ts, registrationIndex: 0)`
+        );
+      }
+    });
+
+    it("registry fixture processing rejects non-serializable context with registry metadata", async () => {
+      await expectRegistryFixtureToRejectWithDiagnostic({
+        caseId: "registry-context-function-invalid",
+        expectedPath: "config.context.palette.resolve",
+        relativePath: "registry-context-function-invalid/src/index.css.ts"
+      });
+      await expectRegistryFixtureToRejectWithDiagnostic({
+        caseId: "registry-context-date-invalid",
+        expectedPath: "config.context.createdAt",
+        relativePath: "registry-context-date-invalid/src/index.css.ts"
+      });
+    });
+
+    it("registry fixture processing rejects custom-prototype context with registry metadata", async () => {
+      let thrownError: unknown;
+
+      try {
+        await processRegistryFixture(
+          `
+            import { defineRules } from "@mincho-js/css";
+
+            const customPrototype = Object.create(null);
+            customPrototype.kind = "palette";
+            const palette = Object.create(customPrototype);
+            palette.brand = "red";
+
+            const owner = defineRules({
+              context: { palette },
+              properties: {
+                color: true
+              }
+            });
+
+            export const className = owner.css({ color: "red" });
+            export const preset = owner.preset;
+          `,
+          "registry-context-custom-prototype-invalid"
+        );
+      } catch (error) {
+        thrownError = error;
+      }
+
+      expect(thrownError).toBeInstanceOf(Error);
+      const message = (thrownError as Error).message;
+      expect(message).toContain(
+        "defineRules registry serialization does not support non-serializable context at config.context.palette"
+      );
+      expect(message).toContain("fileScope:");
+      expect(message).toContain("registrationIndex: 0");
     });
 
     it("invalid config validation rejects function-valued conditions, properties, and shortcuts with paths and registry metadata", () => {
