@@ -201,6 +201,45 @@ The `defineRules()` function creates a scoped authoring API and returns `css`, `
 
 `conditions` lets you name condition aliases once in the config. Config keys are bare names, and style input uses the same names with an underscore prefix. An empty object means the base condition. A string is treated as a media query, with a leading `@media` stripped if present. Object form supports `"@layer"`, `"@supports"`, `"@media"`, `"@container"`, and `selector`.
 
+`context` is a generic runtime authoring context for scoped `css` and `css.raw` callbacks. It is not a theme-specific API. Use it for any authoring data shape you want shared with styles.
+
+Callbacks are top-level only: pass `css((theme) => ({ ... }))` or `css.raw((theme) => ({ ... }))` directly. Nested callbacks are not supported. Direct object, array, and string inputs still work. These callbacks are static authoring helpers, not render-time dynamic props or React context.
+
+```typescript
+import { defineRules, theme } from "@mincho-js/css";
+
+const [themeClass, themeVars] = theme({
+  color: {
+    text: "black",
+    accent: "rebeccapurple"
+  },
+  space: {
+    card: "16px"
+  }
+});
+
+const { css } = defineRules({
+  context: themeVars,
+  properties: {
+    color: true,
+    padding: true
+  }
+});
+
+export const card = css((theme) => ({
+  color: theme.color.text,
+  padding: theme.space.card
+}));
+
+export const staticCard = css({
+  color: "black"
+});
+
+export const appThemeClass = themeClass;
+```
+
+Local-only authoring context can be any value your callbacks understand. Serialized or exported usage requires serializer-compatible enumerable context, such as primitives, arrays, and plain objects.
+
 ```typescript
 import { defineRules } from "@mincho-js/css";
 
