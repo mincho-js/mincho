@@ -277,6 +277,90 @@ export const cardClassName = cx(card, "external");
 export const cardPreset = preset;
 ```
 
+#### defineRules.propertyValues()
+
+`defineRules.propertyValues()` helps share one `properties` value across several CSS property names. In plain terms, `properties: { [key]: value }` can be grouped as `{ source: value, properties: [key1, key2] }`.
+
+`source` is passed as-is and is not recursively flattened. The helper assigns the same `source` value to every property listed in `properties`. Choose each target CSS property yourself, because the helper doesn't infer CSS properties from the source name.
+
+A leaf-array source accepts the listed values directly:
+
+```typescript
+import { defineRules, theme } from "@mincho-js/css";
+
+const [themeClass, themeVars] = theme({
+  colors: {
+    text: {
+      default: "#111111",
+      muted: "#666666"
+    }
+  }
+});
+
+const { css } = defineRules({
+  properties: defineRules.propertyValues([
+    {
+      source: [
+        themeVars.colors.text.default,
+        themeVars.colors.text.muted
+      ],
+      properties: ["color", "backgroundColor"]
+    }
+  ])
+});
+
+export const quietText = css({
+  color: themeVars.colors.text.muted
+});
+
+export const appThemeClass = themeClass;
+```
+
+An object-map source keeps the existing key-based value lookup:
+
+```typescript
+const { css } = defineRules({
+  properties: defineRules.propertyValues([
+    {
+      source: { muted: themeVars.colors.text.muted },
+      properties: ["color"]
+    }
+  ])
+});
+
+export const quietText = css({
+  color: "muted"
+});
+```
+
+For spacing leaves plus a custom variable, spread the spacing leaves into the source array:
+
+```typescript
+import { createVar, defineRules, theme } from "@mincho-js/css";
+
+const [, themeVars] = theme({
+  space: ["0px", "4px", "8px"]
+});
+
+const customSpacingVariable = createVar();
+
+const { css } = defineRules({
+  properties: defineRules.propertyValues([
+    {
+      source: [...themeVars.space, customSpacingVariable],
+      properties: ["gap", "padding"]
+    }
+  ])
+});
+
+export const padded = css({
+  gap: customSpacingVariable,
+  padding: themeVars.space[1]
+});
+```
+
+`source: [themeVars.space, customSpacingVariable]` preserves the nested array and does not flatten. Use `source: [...themeVars.space, customSpacingVariable]` when you want each spacing leaf plus the custom variable.
+
 The `preset` export is a V4 artifact. Pass it to another `defineRules({ presets })` call to reuse class names and the metadata needed by scoped `cx`.
 
 `defineRules().cx` is scoped and metadata aware. It flattens inputs like the root `cx`, then uses V4 preset metadata from its own scope and imported presets to keep the later known class for the same write key. The root `cx` export remains global and clsx-compatible. It does not read defineRules metadata.
