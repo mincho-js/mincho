@@ -47,6 +47,63 @@ export type DefineRulesProperties =
   | DefineRulesCssProperties
   | DefineRulesCustomProperties;
 
+export interface DefineRulesPropertyValuesEntry<
+  Source = unknown,
+  Property extends CSSPropertiesKeys = CSSPropertiesKeys
+> {
+  source: Source;
+  properties: readonly Property[];
+  condition?: never;
+}
+
+export type DefineRulesPropertyValuesEntries =
+  readonly DefineRulesPropertyValuesEntry[];
+
+export type DefineRulesPropertyValuesResult<
+  Entries extends DefineRulesPropertyValuesEntries
+> = ResolveDefineRulesPropertyValuesResult<Entries>;
+
+type ResolveDefineRulesPropertyValuesResult<
+  Entries extends DefineRulesPropertyValuesEntries,
+  Result extends object = Record<never, never>
+> = Entries extends readonly []
+  ? Simplify<Result>
+  : Entries extends readonly [
+        infer Entry extends DefineRulesPropertyValuesEntry,
+        ...infer Rest extends DefineRulesPropertyValuesEntries
+      ]
+    ? ResolveDefineRulesPropertyValuesResult<
+        Rest,
+        MergeDefineRulesPropertyValuesEntry<Result, Entry>
+      >
+    : Simplify<
+        UnionToIntersection<
+          DefineRulesPropertyValuesEntryResult<Entries[number]>
+        >
+      >;
+
+type MergeDefineRulesPropertyValuesEntry<
+  Result extends object,
+  Entry extends DefineRulesPropertyValuesEntry
+> = Simplify<
+  Omit<Result, keyof DefineRulesPropertyValuesEntryResult<Entry>> &
+    DefineRulesPropertyValuesEntryResult<Entry>
+>;
+
+type DefineRulesPropertyValuesEntryResult<
+  Entry extends DefineRulesPropertyValuesEntry
+> = {
+  [Property in Entry["properties"][number]]: Entry["source"];
+};
+
+type UnionToIntersection<Union> = (
+  Union extends unknown ? (value: Union) => void : never
+) extends (value: infer Intersection) => void
+  ? Intersection
+  : never;
+
+type Simplify<Value> = { [Key in keyof Value]: Value[Key] };
+
 type ShortcutValue<
   Properties extends DefineRulesProperties,
   Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts, Conditions>,

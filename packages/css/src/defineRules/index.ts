@@ -8,6 +8,7 @@ import {
 import type { Serializable } from "../rules/types.js";
 import { identifierName } from "../utils.js";
 import { createDefineRulesRuntime } from "./runtime.js";
+import { defineRulesPropertyValues } from "./propertyValues.js";
 import { cx } from "../classname/cx.js";
 import type { DefineRulesRuntimeResult } from "./runtime.js";
 import {
@@ -35,7 +36,7 @@ const DEFINE_RULES_CX_RUNTIME_IMPORT_PATH =
 const DEFINE_RULES_CX_RUNTIME_IMPORT_NAME = "createDefineRulesCxRuntime";
 
 // == Define Rules =============================================================
-export function defineRules<
+function defineRulesImpl<
   const Properties extends DefineRulesProperties,
   const Shortcuts extends DefineRulesShortcuts<
     Properties,
@@ -90,6 +91,10 @@ export function defineRules<
     >["css"]
   };
 }
+
+export const defineRules = Object.assign(defineRulesImpl, {
+  propertyValues: defineRulesPropertyValues
+});
 
 function addDefineRulesCxSerializer<CxFunction extends object>(
   cx: CxFunction,
@@ -427,6 +432,447 @@ if (import.meta.vitest) {
   }
 
   describe("defineRules", () => {
+    describe.concurrent("propertyValues type surface", () => {
+      it("preserves defineRules callable inference while exposing propertyValues", () => {
+        const rules = defineRules({
+          properties: {
+            color: true
+          }
+        });
+
+        assertType<string>(rules.css({ color: "rebeccapurple" }));
+        assertType<DefineRulesPresetArtifactV4>(rules.preset);
+        expectTypeOf(rules.css).not.toBeAny();
+        expectTypeOf(defineRules.propertyValues).not.toBeAny();
+      });
+
+      it("preserves propertyValues source types as-is", () => {
+        const themeVars = {
+          colors: {
+            accent: "var(--colors-accent)",
+            text: "var(--colors-text)"
+          }
+        } as const;
+        const arraySource = ["red", "blue"] as const;
+        const objectSource = themeVars.colors;
+        const wrapperArraySource = [themeVars.colors] as const;
+
+        const arrayProperties = defineRules.propertyValues([
+          {
+            source: arraySource,
+            properties: ["color", "backgroundColor"] as const
+          }
+        ]);
+        const objectProperties = defineRules.propertyValues([
+          {
+            source: objectSource,
+            properties: ["color"] as const
+          }
+        ]);
+        const wrapperArrayProperties = defineRules.propertyValues([
+          {
+            source: wrapperArraySource,
+            properties: ["color"] as const
+          }
+        ]);
+
+        expectTypeOf(arrayProperties.color).toEqualTypeOf<typeof arraySource>();
+        expectTypeOf(arrayProperties.backgroundColor).toEqualTypeOf<
+          typeof arraySource
+        >();
+        expectTypeOf(objectProperties.color).toEqualTypeOf<
+          typeof objectSource
+        >();
+        expectTypeOf(wrapperArrayProperties.color).toEqualTypeOf<
+          typeof wrapperArraySource
+        >();
+      });
+
+      it("rejects unsupported propertyValues API shapes", () => {
+        const assertUnsupportedShapes = () => {
+          const themeVars = {
+            colors: {
+              text: "var(--colors-text)"
+            }
+          } as const;
+
+          // @ts-expect-error defineRules.themeSpec is not part of the public API.
+          assertType(defineRules.themeSpec);
+
+          defineRules.propertyValues([
+            {
+              // @ts-expect-error propertyValues entries use source, not condition.
+              condition: themeVars.colors,
+              properties: ["color"] as const
+            }
+          ]);
+
+          defineRules.propertyValues([
+            {
+              source: ["red"] as const,
+              // @ts-expect-error propertyValues targets CSS property names only.
+              properties: ["madeUpProperty"] as const
+            }
+          ]);
+        };
+
+        void assertUnsupportedShapes;
+      });
+    });
+
+    describe.concurrent("propertyValues runtime", () => {
+      it("assigns object source values by exact reference", () => {
+        const source = {
+          accent: "rebeccapurple",
+          text: "black"
+        } as const;
+        const result = defineRules.propertyValues([
+          {
+            source,
+            properties: ["color", "backgroundColor"] as const
+          }
+        ]);
+
+        expect(result.color).toBe(source);
+        expect(result.backgroundColor).toBe(source);
+      });
+
+      it("assigns array source values by exact reference", () => {
+        const source = ["red", "blue"] as const;
+        const result = defineRules.propertyValues([
+          {
+            source,
+            properties: ["color", "backgroundColor"] as const
+          }
+        ]);
+
+        expect(result.color).toBe(source);
+        expect(result.backgroundColor).toBe(source);
+      });
+
+      it("assigns wrapper-array source values by exact reference", () => {
+        const sourceObject = {
+          accent: "var(--colors-accent)"
+        } as const;
+        const source = [sourceObject] as const;
+        const result = defineRules.propertyValues([
+          {
+            source,
+            properties: ["color"] as const
+          }
+        ]);
+
+        expect(result.color).toBe(source);
+      });
+
+      it("returns an empty null-prototype object for empty entries", () => {
+        const result = defineRules.propertyValues([]);
+
+        expect(Object.keys(result)).toEqual([]);
+        expect(Object.getPrototypeOf(result)).toBeNull();
+      });
+
+      it("creates no result keys for empty properties", () => {
+        const source = {
+          accent: "rebeccapurple"
+        } as const;
+        const result = defineRules.propertyValues([
+          {
+            source,
+            properties: [] as const
+          }
+        ]);
+
+        expect(Object.keys(result)).toEqual([]);
+      });
+
+      it("uses the last source for duplicate target properties", () => {
+        const firstSource = {
+          accent: "rebeccapurple"
+        } as const;
+        const secondSource = {
+          accent: "orange"
+        } as const;
+        const result = defineRules.propertyValues([
+          {
+            source: firstSource,
+            properties: ["color", "backgroundColor"] as const
+          },
+          {
+            source: secondSource,
+            properties: ["color"] as const
+          }
+        ]);
+
+        expect(result.color).toBe(secondSource);
+        expect(result.backgroundColor).toBe(firstSource);
+      });
+
+      it("throws defineRules.propertyValues diagnostics for malformed entries", () => {
+        const malformedEntries = [
+          [{ properties: ["color"] }],
+          [{ source: "red" }],
+          [{ source: "red", properties: "color" }]
+        ];
+
+        for (const entries of malformedEntries) {
+          expect(() => defineRules.propertyValues(entries as never)).toThrow(
+            /defineRules\.propertyValues/
+          );
+        }
+      });
+
+      it("throws for unsafe target property keys", () => {
+        for (const property of ["__proto__", "constructor", "prototype"]) {
+          expect(() =>
+            defineRules.propertyValues([
+              {
+                source: "red",
+                properties: [property]
+              }
+            ] as never)
+          ).toThrow(
+            `defineRules.propertyValues unsupported property ${JSON.stringify(
+              property
+            )}`
+          );
+        }
+      });
+
+      it("does not inspect source object getters", () => {
+        const getter = vi.fn(() => {
+          throw new Error("source getter invoked");
+        });
+        const source = Object.defineProperty({}, "accent", {
+          get: getter
+        });
+        const result = defineRules.propertyValues([
+          {
+            source,
+            properties: ["color"] as const
+          }
+        ]);
+
+        expect(result.color).toBe(source);
+        expect(getter).not.toHaveBeenCalled();
+      });
+    });
+
+    describe("propertyValues defineRules equivalence", () => {
+      type DefineRulesRecipe = {
+        readonly args?: readonly unknown[];
+      };
+
+      const getRecipeArgs = (fn: object) =>
+        (
+          fn as unknown as {
+            readonly __recipe__?: DefineRulesRecipe;
+          }
+        ).__recipe__?.args;
+
+      const createPropertyValuesThemeVars = async (debugId: string) => {
+        const { theme } = await import("../theme/index.js");
+        const [, themeVars] = theme(
+          {
+            colors: {
+              text: {
+                default: "#111111",
+                muted: "#666666"
+              }
+            },
+            space: ["0px", "4px", "8px"]
+          } as const,
+          debugId
+        );
+
+        return themeVars;
+      };
+
+      it("matches hand-written properties for leaf arrays while preserving runtime permissiveness", async () => {
+        const themeVars = await createPropertyValuesThemeVars(
+          "propertyValuesLeafTheme"
+        );
+        const leafColorSource = [
+          themeVars.colors.text.default,
+          themeVars.colors.text.muted
+        ] as const;
+        const helperProperties = defineRules.propertyValues([
+          {
+            source: leafColorSource,
+            properties: ["color", "backgroundColor"] as const
+          }
+        ]);
+        const manualProperties = {
+          color: leafColorSource,
+          backgroundColor: leafColorSource
+        } as const;
+        const { css: helperCss } = defineRules({
+          debugId: "propertyValuesLeafHelper",
+          properties: helperProperties
+        });
+        const { css: manualCss } = defineRules({
+          debugId: "propertyValuesLeafManual",
+          properties: manualProperties
+        });
+        const input = {
+          color: themeVars.colors.text.muted,
+          backgroundColor: themeVars.colors.text.default
+        } as const;
+        const missingArrayValue = "var(--property-values-runtime-color)";
+        const missingArrayValueInput = {
+          color: missingArrayValue
+        } as never;
+
+        assertType<string>(helperCss({ color: themeVars.colors.text.muted }));
+        expect({ ...helperProperties }).toEqual(manualProperties);
+        expect(helperCss.raw(input)).toEqual(manualCss.raw(input));
+        expect(helperCss.raw(input)).toEqual(input);
+        expect(helperCss({ color: themeVars.colors.text.muted })).toMatch(
+          identifierName("propertyValuesLeafHelper")
+        );
+        expect(helperCss.raw(missingArrayValueInput)).toEqual({
+          color: missingArrayValue
+        });
+        expect(helperCss(missingArrayValueInput)).toMatch(
+          identifierName("propertyValuesLeafHelper")
+        );
+      });
+
+      it("matches hand-written properties for object maps", async () => {
+        const themeVars = await createPropertyValuesThemeVars(
+          "propertyValuesObjectMapTheme"
+        );
+        const colorMapSource = {
+          muted: themeVars.colors.text.muted
+        } as const;
+        const helperProperties = defineRules.propertyValues([
+          {
+            source: colorMapSource,
+            properties: ["color"] as const
+          }
+        ]);
+        const manualProperties = {
+          color: colorMapSource
+        } as const;
+        const { css: helperCss } = defineRules({
+          debugId: "propertyValuesObjectMapHelper",
+          properties: helperProperties
+        });
+        const { css: manualCss } = defineRules({
+          debugId: "propertyValuesObjectMapManual",
+          properties: manualProperties
+        });
+        const input = { color: "muted" } as const;
+
+        assertType<string>(helperCss(input));
+        expect({ ...helperProperties }).toEqual(manualProperties);
+        expect(helperCss.raw(input)).toEqual(manualCss.raw(input));
+        expect(helperCss.raw(input)).toEqual({
+          color: themeVars.colors.text.muted
+        });
+        expect(helperCss(input)).toMatch(
+          identifierName("propertyValuesObjectMapHelper")
+        );
+      });
+
+      it("matches hand-written properties for spacing arrays with custom variables", async () => {
+        const themeVars = await createPropertyValuesThemeVars(
+          "propertyValuesSpacingTheme"
+        );
+        const customSpacingVariable =
+          "var(--property-values-custom-spacing)" as const;
+        const spacingSource = [
+          ...themeVars.space,
+          customSpacingVariable
+        ] as const;
+        const helperProperties = defineRules.propertyValues([
+          {
+            source: spacingSource,
+            properties: ["padding", "margin"] as const
+          }
+        ]);
+        const manualProperties = {
+          padding: spacingSource,
+          margin: spacingSource
+        } as const;
+        const { css: helperCss } = defineRules({
+          debugId: "propertyValuesSpacingHelper",
+          properties: helperProperties
+        });
+        const { css: manualCss } = defineRules({
+          debugId: "propertyValuesSpacingManual",
+          properties: manualProperties
+        });
+        const input = {
+          padding: customSpacingVariable,
+          margin: themeVars.space[1]
+        } as const;
+
+        assertType<string>(helperCss(input));
+        expect({ ...helperProperties }).toEqual(manualProperties);
+        expect(helperCss.raw(input)).toEqual(manualCss.raw(input));
+        expect(helperCss.raw(input)).toEqual(input);
+        expect(helperCss(input).split(" ")).toEqual([
+          expect.stringMatching(identifierName("propertyValuesSpacingHelper")),
+          expect.stringMatching(identifierName("propertyValuesSpacingHelper"))
+        ]);
+      });
+
+      it("keeps helper-generated property source shapes readable through serializer args", async () => {
+        const themeVars = await createPropertyValuesThemeVars(
+          "propertyValuesSerializerTheme"
+        );
+        const customSpacingVariable =
+          "var(--property-values-serializer-spacing)" as const;
+        const leafColorSource = [
+          themeVars.colors.text.default,
+          themeVars.colors.text.muted
+        ] as const;
+        const objectMapSource = {
+          muted: themeVars.colors.text.muted
+        } as const;
+        const spacingSource = [
+          ...themeVars.space,
+          customSpacingVariable
+        ] as const;
+        const helperProperties = defineRules.propertyValues([
+          {
+            source: leafColorSource,
+            properties: ["color", "backgroundColor"] as const
+          },
+          {
+            source: objectMapSource,
+            properties: ["borderColor"] as const
+          },
+          {
+            source: spacingSource,
+            properties: ["padding", "margin"] as const
+          }
+        ]);
+        const { css } = defineRules({
+          debugId: "propertyValuesSerializer",
+          properties: helperProperties
+        });
+        let recipeArgs: readonly unknown[] | undefined;
+
+        expect(() => {
+          recipeArgs = getRecipeArgs(css);
+        }).not.toThrow();
+
+        const recipeConfig = recipeArgs?.[0] as
+          | { properties?: Record<string, unknown> }
+          | undefined;
+        const recipeProperties = recipeConfig?.properties;
+
+        expect(recipeProperties).toBe(helperProperties);
+        expect(recipeProperties?.color).toBe(leafColorSource);
+        expect(recipeProperties?.backgroundColor).toBe(leafColorSource);
+        expect(recipeProperties?.borderColor).toBe(objectMapSource);
+        expect(recipeProperties?.padding).toBe(spacingSource);
+        expect(recipeProperties?.margin).toBe(spacingSource);
+      });
+    });
+
     describe.concurrent("DefineRules authoring/export shape matrix", () => {
       it("1. owner-object form: export const presetOwner = defineRules({...})", () => {
         const presetOwner =
