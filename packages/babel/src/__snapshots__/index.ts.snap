@@ -1,5 +1,24 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
+exports[`minchoBabelPlugin > accepts enabled jsx css prop mode when JSX has no css prop 1`] = `
+[
+  "extracted_1vdysta.css.ts",
+  "import { style } from '@mincho-js/css';
+export var _$mincho$$App = style({
+  color: "red"
+});
+var _$mincho$$App2 = _$mincho$$App;",
+]
+`;
+
+exports[`minchoBabelPlugin > accepts enabled jsx css prop mode when JSX has no css prop 2`] = `
+"import { _$mincho$$App as _$mincho$$App2 } from "extracted_1vdysta.css.ts";
+import { style } from '@mincho-js/css';
+function App() {
+  return <div class={_$mincho$$App2}>Hello</div>;
+}"
+`;
+
 exports[`minchoBabelPlugin > already exported 1`] = `
 [
   "extracted_1etlg14.css.ts",
@@ -344,6 +363,87 @@ function App() {
   return <div class={_$mincho$$App2}>Hello</div>;
 }
 console.log(red);"
+`;
+
+exports[`minchoBabelPlugin > leaves jsx css prop unchanged when css prop lowering is disabled 1`] = `
+[
+  "extracted_1a9gei1.css.ts",
+  "",
+]
+`;
+
+exports[`minchoBabelPlugin > leaves jsx css prop unchanged when css prop lowering is disabled 2`] = `
+"function App() {
+  return <div css={{
+    color: "red"
+  }} />;
+}"
+`;
+
+exports[`minchoBabelPlugin > lowers jsx css prop without existing className 1`] = `
+[
+  "extracted_1a9gei1.css.ts",
+  "import { css as _css } from "@mincho-js/css";
+export var _$mincho$$App = _css({
+  color: "red"
+});
+var _$mincho$$App2 = _$mincho$$App;",
+]
+`;
+
+exports[`minchoBabelPlugin > lowers jsx css prop without existing className 2`] = `
+"import { _$mincho$$App as _$mincho$$App2 } from "extracted_1a9gei1.css.ts";
+import { css as _css } from "@mincho-js/css";
+function App() {
+  return <div className={_$mincho$$App2} />;
+}"
+`;
+
+exports[`minchoBabelPlugin > merges expression className before generated css class 1`] = `
+[
+  "extracted_inft06.css.ts",
+  "import { css as _css, cx as _cx } from "@mincho-js/css";
+const styles = {
+  root: {
+    color: "red"
+  }
+};
+export var _$mincho$$App = _css(styles.root);
+var _$mincho$$App2 = _$mincho$$App;",
+]
+`;
+
+exports[`minchoBabelPlugin > merges expression className before generated css class 2`] = `
+"import { _$mincho$$App as _$mincho$$App2 } from "extracted_inft06.css.ts";
+import { css as _css, cx as _cx } from "@mincho-js/css";
+const base = "base";
+const styles = {
+  root: {
+    color: "red"
+  }
+};
+function App() {
+  return <div className={_cx(base, _$mincho$$App2)} />;
+}"
+`;
+
+exports[`minchoBabelPlugin > merges string literal className before generated css class 1`] = `
+[
+  "extracted_ucbrq2.css.ts",
+  "import { css as _css, cx as _cx } from "@mincho-js/css";
+export var _$mincho$$App = _css({
+  color: "red"
+});
+var _$mincho$$App2 = _$mincho$$App;",
+]
+`;
+
+exports[`minchoBabelPlugin > merges string literal className before generated css class 2`] = `
+"import { _$mincho$$App as _$mincho$$App2 } from "extracted_ucbrq2.css.ts";
+import { css as _css, cx as _cx } from "@mincho-js/css";
+function App() {
+  return <div className={_cx("base", _$mincho$$App2)} />;
+}"
 `;
 
 exports[`minchoBabelPlugin > mincho-ignore doesn't extract expression 1`] = `

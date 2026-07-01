@@ -1,16 +1,26 @@
 import { type PluginObj, transformSync } from "@babel/core";
 import { transformCallExpression } from "./transforms/callExpression.js";
+import { preprocessJsxCssProp } from "./jsxCssProp.js";
+import { supportedJsxCssPropTags } from "./jsxCssPropTags.js";
 import postprocess from "./transforms/postprocess.js";
-import preprocess from "./transforms/preprocess.js";
+import basePreprocess from "./transforms/preprocess.js";
 import type { PluginOptions, PluginState } from "./types.js";
 import { styledComponentPlugin } from "./styled.js";
+
+const preprocess = basePreprocess as (
+  path: Parameters<typeof basePreprocess>[0],
+  state: PluginState
+) => void;
 
 export function minchoBabelPlugin(): PluginObj<PluginState> {
   return {
     name: "mincho-babel-plugin",
     visitor: {
       Program: {
-        enter: preprocess,
+        enter(path, state) {
+          preprocess(path, state);
+          preprocessJsxCssProp(path, state);
+        },
         exit: postprocess
       },
       CallExpression: transformCallExpression
@@ -30,8 +40,11 @@ if (import.meta.vitest) {
   // @ts-ignore error TS1343: The 'import.meta' meta-property is only allowed when the '--module' option is 'es2020', 'es2022', 'esnext', 'system', 'node16', or 'nodenext'.
   const { describe, it, expect } = import.meta.vitest;
 
-  function babelTransform(code: string) {
-    const options: PluginOptions = { result: ["", ""] };
+  function babelTransform(
+    code: string,
+    pluginOptions: Partial<Pick<PluginOptions, "jsxCssProp">> = {}
+  ) {
+    const options: PluginOptions = { result: ["", ""], ...pluginOptions };
     const result = transformSync(code, {
       plugins: [[minchoBabelPlugin(), options], [styledComponentPlugin()]],
       presets: ["@babel/preset-typescript"],
@@ -43,6 +56,35 @@ if (import.meta.vitest) {
     }
 
     return { result: options.result, code: result.code };
+  }
+
+  const jsxCssPropErrorMessages = {
+    intrinsicElement:
+      "Mincho JSX css prop only supports intrinsic elements in v1",
+    supportedTag:
+      "Mincho JSX css prop only supports supported React DOM/SVG tags in v1",
+    spread:
+      "Mincho JSX css prop does not support spreads on elements with css in v1",
+    expressionValue: "Mincho JSX css prop requires an expression value",
+    cssValue: "Mincho JSX css prop expects a Mincho CSS object/expression",
+    duplicateCss: "Mincho JSX css prop must appear only once",
+    duplicateClassName:
+      "Mincho JSX css prop cannot merge duplicate className attributes",
+    classNameValue:
+      "Mincho JSX css prop requires className to be a string literal or expression"
+  } as const;
+
+  function expectJsxCssPropError(fixture: string, message: string) {
+    expect(() =>
+      babelTransform(
+        `
+          function App() {
+            return ${fixture};
+          }
+        `,
+        { jsxCssProp: true }
+      )
+    ).toThrow(message);
   }
 
   describe("minchoBabelPlugin", () => {
@@ -74,6 +116,199 @@ if (import.meta.vitest) {
 
       expect(result).toMatchSnapshot();
       expect(code).toMatchSnapshot();
+    });
+
+    it("leaves jsx css prop unchanged when css prop lowering is disabled", () => {
+      const source = `
+        function App() {
+          return <div css={{ color: "red" }} />;
+        }
+      `;
+      const omitted = babelTransform(source);
+      const explicitFalse = babelTransform(source, { jsxCssProp: false });
+
+      expect(omitted.result).toMatchSnapshot();
+      expect(omitted.code).toMatchSnapshot();
+      expect(explicitFalse.result).toEqual(omitted.result);
+      expect(explicitFalse.code).toBe(omitted.code);
+    });
+
+    it("accepts enabled jsx css prop mode when JSX has no css prop", () => {
+      const source = `
+        import { style } from '@mincho-js/css';
+
+        function App() {
+          return <div class={style({ color: "red" })}>Hello</div>;
+        }
+      `;
+      const disabled = babelTransform(source);
+      const enabled = babelTransform(source, { jsxCssProp: true });
+
+      expect(enabled.result).toEqual(disabled.result);
+      expect(enabled.code).toBe(disabled.code);
+      expect(enabled.result).toMatchSnapshot();
+      expect(enabled.code).toMatchSnapshot();
+    });
+
+    it("lowers jsx css prop without existing className", () => {
+      const { result, code } = babelTransform(
+        `
+        function App() {
+          return <div css={{ color: "red" }} />;
+        }
+      `,
+        { jsxCssProp: true }
+      );
+
+      expect(result).toMatchSnapshot();
+      expect(code).toMatchSnapshot();
+      expect(code).not.toContain(" css=");
+      expect(code).toContain("className={_$mincho$$App2}");
+    });
+
+    it("merges string literal className before generated css class", () => {
+      const { result, code } = babelTransform(
+        `
+        function App() {
+          return <div className="base" css={{ color: "red" }} />;
+        }
+      `,
+        { jsxCssProp: true }
+      );
+
+      expect(result).toMatchSnapshot();
+      expect(code).toMatchSnapshot();
+      expect(code).not.toContain(" css=");
+      expect(code).toContain('className={_cx("base", _$mincho$$App2)}');
+    });
+
+    it("merges expression className before generated css class", () => {
+      const { result, code } = babelTransform(
+        `
+        const base = "base";
+        const styles = {
+          root: { color: "red" }
+        };
+
+        function App() {
+          return <div className={base} css={styles.root} />;
+        }
+      `,
+        { jsxCssProp: true }
+      );
+
+      expect(result).toMatchSnapshot();
+      expect(code).toMatchSnapshot();
+      expect(code).not.toContain(" css=");
+      expect(code).toContain("className={_cx(base, _$mincho$$App2)}");
+    });
+
+    const unsupportedJsxCssPropFixtures = [
+      {
+        name: "rejects custom components",
+        fixture: `<Button css={{ color: "red" }} />`,
+        message: jsxCssPropErrorMessages.intrinsicElement
+      },
+      {
+        name: "rejects member-expression components",
+        fixture: `<motion.div css={{ color: "red" }} />`,
+        message: jsxCssPropErrorMessages.intrinsicElement
+      },
+      {
+        name: "rejects fragment components",
+        fixture: `<React.Fragment css={{ color: "red" }} />`,
+        message: jsxCssPropErrorMessages.intrinsicElement
+      },
+      {
+        name: "rejects unsupported custom elements",
+        fixture: `<my-element css={{ color: "red" }} />`,
+        message: jsxCssPropErrorMessages.supportedTag
+      },
+      {
+        name: "rejects spreads before css on css-prop elements",
+        fixture: `<div {...props} css={{ color: "red" }} />`,
+        message: jsxCssPropErrorMessages.spread
+      },
+      {
+        name: "rejects spreads after css on css-prop elements",
+        fixture: `<div css={{ color: "red" }} {...props} />`,
+        message: jsxCssPropErrorMessages.spread
+      },
+      {
+        name: "rejects shorthand css",
+        fixture: `<div css />`,
+        message: jsxCssPropErrorMessages.expressionValue
+      },
+      {
+        name: "rejects raw string css values",
+        fixture: `<div css="color: red" />`,
+        message: jsxCssPropErrorMessages.cssValue
+      },
+      {
+        name: "rejects template literal css values",
+        fixture: `<div css={\`color: red\`} />`,
+        message: jsxCssPropErrorMessages.cssValue
+      },
+      {
+        name: "rejects raw number css values",
+        fixture: `<div css={1} />`,
+        message: jsxCssPropErrorMessages.cssValue
+      },
+      {
+        name: "rejects raw boolean css values",
+        fixture: `<div css={true} />`,
+        message: jsxCssPropErrorMessages.cssValue
+      },
+      {
+        name: "rejects raw null css values",
+        fixture: `<div css={null} />`,
+        message: jsxCssPropErrorMessages.cssValue
+      },
+      {
+        name: "rejects direct function css values",
+        fixture: `<div css={() => ({ color: "red" })} />`,
+        message: jsxCssPropErrorMessages.cssValue
+      },
+      {
+        name: "rejects duplicate css attributes",
+        fixture: `<div css={{ color: "red" }} css={{ color: "blue" }} />`,
+        message: jsxCssPropErrorMessages.duplicateCss
+      },
+      {
+        name: "rejects duplicate className attributes",
+        fixture: `<div className="base" className="extra" css={{ color: "red" }} />`,
+        message: jsxCssPropErrorMessages.duplicateClassName
+      },
+      {
+        name: "rejects shorthand className on css-prop elements",
+        fixture: `<div className css={{ color: "red" }} />`,
+        message: jsxCssPropErrorMessages.classNameValue
+      }
+    ] as const;
+
+    for (const { name, fixture, message } of unsupportedJsxCssPropFixtures) {
+      it(name, () => {
+        expectJsxCssPropError(fixture, message);
+      });
+    }
+
+    it("keeps Babel css prop tag literals mirrored from React tags", () => {
+      const babelTags = [...supportedJsxCssPropTags];
+      const reactTagModules = import.meta.glob("../../react/src/tags.ts", {
+        query: "?raw",
+        import: "default",
+        eager: true
+      });
+      const reactTagsSource = Object.values(reactTagModules)[0] as string;
+      const [, reactTagsLiteral = ""] =
+        /export const tags = \[([\s\S]*?)\] as const/.exec(reactTagsSource) ??
+        [];
+      const reactTags = Array.from(
+        reactTagsLiteral.matchAll(/"([^"]+)"/g),
+        ([, tag]) => tag
+      );
+
+      expect(babelTags).toEqual(reactTags);
     });
 
     it("hoists inline expression", () => {
