@@ -3,11 +3,14 @@ import { dirname, join } from "node:path";
 import { vanillaExtractPlugin } from "@vanilla-extract/esbuild-plugin";
 import { type Plugin as EsbuildPlugin } from "esbuild";
 import {
+  type BabelOptions,
   babelTransform,
   compile,
   processDefineRulesPresetRegistryFile,
   runDefineRulesPresetRegistryStep
 } from "@mincho-js/integration";
+
+type ScriptLoader = "js" | "jsx" | "ts" | "tsx";
 
 const integrationHelpers = {
   babelTransform,
@@ -16,8 +19,18 @@ const integrationHelpers = {
   runDefineRulesPresetRegistryStep
 };
 
+type MinchoBabelOptions = BabelOptions & { jsxCssProp?: boolean };
+
+function getScriptLoader(path: string): ScriptLoader {
+  if (/\.tsx$/i.test(path)) return "tsx";
+  if (/\.ts$/i.test(path)) return "ts";
+  if (/\.jsx$/i.test(path)) return "jsx";
+  return "js";
+}
+
 interface MinchoEsbuildPluginOptions {
   includeNodeModulesPattern?: RegExp;
+  jsxCssProp?: boolean;
 }
 
 /**
@@ -35,7 +48,8 @@ interface MinchoEsbuildPluginOptions {
  * enabling zero-runtime CSS-in-JS with type safety.
  */
 export function minchoEsbuildPlugin({
-  includeNodeModulesPattern
+  includeNodeModulesPattern,
+  jsxCssProp
 }: MinchoEsbuildPluginOptions = {}): EsbuildPlugin {
   return {
     name: "mincho-js-esbuild",
@@ -122,10 +136,12 @@ export function minchoEsbuildPlugin({
         // gets handled by vanilla-extract/esbuild-plugin
         if (args.path.endsWith(".css.ts")) return;
 
+        const babelOptions: MinchoBabelOptions | undefined =
+          jsxCssProp === undefined ? undefined : { jsxCssProp };
         const {
           code,
           result: [file, cssExtract]
-        } = await integrationHelpers.babelTransform(args.path);
+        } = await integrationHelpers.babelTransform(args.path, babelOptions);
 
         // the extracted code and original are the same -> no css extracted
         if (file && cssExtract && cssExtract != code) {
@@ -135,7 +151,7 @@ export function minchoEsbuildPlugin({
 
         return {
           contents: code,
-          loader: args.path.match(/\.(ts|tsx)$/i) ? "ts" : "js",
+          loader: getScriptLoader(args.path),
           pluginData: {
             mainFilePath: args.path
           }
@@ -261,6 +277,8 @@ if (import.meta.vitest) {
   }
 
   type ScriptLoadResult = {
+    contents: string;
+    loader: ScriptLoader;
     pluginData: {
       mainFilePath: string;
     };
@@ -288,11 +306,13 @@ if (import.meta.vitest) {
   function createBuildHarness({
     absWorkingDir = "/workspace",
     esbuild,
-    minify = false
+    minify = false,
+    plugin = minchoEsbuildPlugin()
   }: {
     absWorkingDir?: string;
     esbuild?: TestEsbuildApi;
     minify?: boolean;
+    plugin?: EsbuildPlugin;
   } = {}) {
     let extractedCssResolveCallback: ResolveCallback | undefined;
     let extractedCssLoadCallback: LoadCallback | undefined;
@@ -324,7 +344,7 @@ if (import.meta.vitest) {
       }
     } as unknown as Parameters<EsbuildPlugin["setup"]>[0];
 
-    minchoEsbuildPlugin().setup(build);
+    plugin.setup(build);
 
     return {
       endBuild() {
@@ -534,6 +554,26 @@ if (import.meta.vitest) {
     const entryPath = join(srcRoot, "entry.ts");
     await fs.promises.mkdir(srcRoot, { recursive: true });
     await fs.promises.writeFile(entryPath, createLivePresetSmokeEntrySource());
+
+    return {
+      entryPath,
+      root
+    };
+  }
+
+  async function createJsxCssPropFixture(prefix: string) {
+    const cacheRoot = join(process.cwd(), "packages/esbuild/.cache");
+    await fs.promises.mkdir(cacheRoot, { recursive: true });
+    const root = await fs.promises.mkdtemp(join(cacheRoot, prefix));
+    const srcRoot = join(root, "src");
+    const entryPath = join(srcRoot, "entry.tsx");
+    const source = `
+      function App() {
+        return <div className="base" css={{ color: "red" }} />;
+      }
+    `;
+    await fs.promises.mkdir(srcRoot, { recursive: true });
+    await fs.promises.writeFile(entryPath, source, "utf8");
 
     return {
       entryPath,
@@ -799,6 +839,29 @@ if (import.meta.vitest) {
     ).test(source);
   }
 
+  function extractCssPropSidecarImport(code: string): {
+    file: string;
+    localNames: string[];
+  } {
+    const sidecarImportMatch =
+      /import \{ ([^}]+) \} from "(extracted_[^"]+\.css\.ts)";/.exec(code);
+
+    if (sidecarImportMatch == null) {
+      throw new Error(
+        "Expected transformed code to import an extracted sidecar"
+      );
+    }
+
+    return {
+      file: sidecarImportMatch[2]!,
+      localNames: [
+        ...(sidecarImportMatch[1]?.matchAll(
+          /(?:^|, )([A-Za-z_$][\w$]*)(?: as ([A-Za-z_$][\w$]*))?/g
+        ) ?? [])
+      ].map(([, importedName, localName]) => localName ?? importedName)
+    };
+  }
+
   function createDeferred<Value>() {
     let resolve!: (value: Value | PromiseLike<Value>) => void;
     let reject!: (reason?: unknown) => void;
@@ -844,6 +907,175 @@ if (import.meta.vitest) {
   });
 
   describe("minchoEsbuildPlugin", () => {
+    it("loads a TSX fixture with jsxCssProp enabled and registers extracted css sidecar content", async () => {
+      const { entryPath, root } = await createJsxCssPropFixture(
+        "jsx-css-prop-enabled-"
+      );
+      const babelTransformSpy = vi.spyOn(integrationHelpers, "babelTransform");
+      const compileSpy = vi
+        .spyOn(integrationHelpers, "compile")
+        .mockResolvedValue({
+          source: "compiled source"
+        } as Awaited<ReturnType<typeof compile>>);
+      vi.spyOn(
+        integrationHelpers,
+        "processDefineRulesPresetRegistryFile"
+      ).mockResolvedValue(createRegistryResult("registered source"));
+
+      try {
+        const harness = createBuildHarness({
+          plugin: minchoEsbuildPlugin({ jsxCssProp: true })
+        });
+        const scriptLoadResult = (await harness.loadScript({
+          path: entryPath
+        })) as ScriptLoadResult;
+        const { file: sidecarFile, localNames: sidecarLocalNames } =
+          extractCssPropSidecarImport(scriptLoadResult.contents);
+        const cxImportMatch =
+          /import \{ [^}]*\bcx(?: as ([A-Za-z_$][\w$]*))?[^}]*\} from "@mincho-js\/css";/.exec(
+            scriptLoadResult.contents
+          );
+        const cxIdentifier = cxImportMatch?.[1] ?? "cx";
+        const classNameMergeMatch =
+          /className=\{([A-Za-z_$][\w$]*)\("base", ([A-Za-z_$][\w$]*)\)\}/.exec(
+            scriptLoadResult.contents
+          );
+
+        expect(babelTransformSpy).toHaveBeenCalledWith(entryPath, {
+          jsxCssProp: true
+        });
+        expect(scriptLoadResult.loader).toBe("tsx");
+        expect(scriptLoadResult.contents).not.toContain(" css=");
+        expect(scriptLoadResult.contents).not.toContain("css={{");
+        expect(scriptLoadResult.contents).not.toContain('color: "red"');
+        expect(cxImportMatch).not.toBeNull();
+        expect(classNameMergeMatch).not.toBeNull();
+        expect(classNameMergeMatch?.[1]).toBe(cxIdentifier);
+        expect(sidecarLocalNames).toContain(classNameMergeMatch?.[2]);
+
+        const resolveResult = (await harness.resolveExtractedCss({
+          path: sidecarFile,
+          importer: entryPath,
+          pluginData: scriptLoadResult.pluginData
+        })) as ResolvedExtractedCssResult;
+        const loadResult = (await harness.loadExtractedCss({
+          path: resolveResult.path,
+          pluginData: resolveResult.pluginData
+        })) as ExtractedCssLoadResult;
+        const compileOptions = compileSpy.mock.calls[0]?.[0];
+
+        if (compileOptions == null) {
+          throw new Error("Expected extracted css sidecar to be compiled");
+        }
+
+        expect(resolveResult).toEqual({
+          namespace: "extracted-css",
+          path: join(entryPath, "..", sidecarFile),
+          pluginData: {
+            path: sidecarFile,
+            mainFilePath: entryPath
+          }
+        });
+        expect(compileOptions).toEqual(
+          expect.objectContaining({
+            filePath: resolveResult.path,
+            originalPath: entryPath,
+            contents: expect.any(String)
+          })
+        );
+        expect(compileOptions.contents).toContain("@mincho-js/css");
+        expect(compileOptions.contents).toMatch(
+          /export var [A-Za-z_$][\w$]* = [A-Za-z_$][\w$]*css\(\{\s*color: "red"\s*\}\);/s
+        );
+        expect(loadResult.contents).toBe("registered source");
+      } finally {
+        await fs.promises.rm(root, { force: true, recursive: true });
+      }
+    });
+
+    it("forwards jsxCssProp through the exported plugin array", async () => {
+      const { entryPath, root } = await createJsxCssPropFixture(
+        "jsx-css-prop-plugin-array-"
+      );
+      const minchoPlugin = minchoEsbuildPlugins({ jsxCssProp: true })[0];
+      const babelTransformSpy = vi
+        .spyOn(integrationHelpers, "babelTransform")
+        .mockResolvedValue({
+          code: "export const app = {};",
+          result: ["", ""]
+        });
+
+      if (minchoPlugin == null) {
+        throw new Error(
+          "Expected exported plugin array to include Mincho plugin"
+        );
+      }
+
+      try {
+        const harness = createBuildHarness({ plugin: minchoPlugin });
+        await harness.loadScript({ path: entryPath });
+
+        expect(babelTransformSpy).toHaveBeenCalledWith(entryPath, {
+          jsxCssProp: true
+        });
+      } finally {
+        await fs.promises.rm(root, { force: true, recursive: true });
+      }
+    });
+
+    it("leaves TSX css prop unchanged when jsxCssProp is omitted or false", async () => {
+      const fixtureCases = [
+        {
+          prefix: "jsx-css-prop-default-",
+          plugin: minchoEsbuildPlugin(),
+          expectedBabelOptions: undefined
+        },
+        {
+          prefix: "jsx-css-prop-false-",
+          plugin: minchoEsbuildPlugin({ jsxCssProp: false }),
+          expectedBabelOptions: { jsxCssProp: false }
+        }
+      ] as const;
+
+      for (const fixtureCase of fixtureCases) {
+        const { entryPath, root } = await createJsxCssPropFixture(
+          fixtureCase.prefix
+        );
+        const babelTransformSpy = vi.spyOn(
+          integrationHelpers,
+          "babelTransform"
+        );
+
+        try {
+          const harness = createBuildHarness({ plugin: fixtureCase.plugin });
+          const scriptLoadResult = (await harness.loadScript({
+            path: entryPath
+          })) as ScriptLoadResult;
+          const resolveResult = await harness.resolveExtractedCss({
+            path: "extracted_missing.css.ts",
+            importer: entryPath,
+            pluginData: scriptLoadResult.pluginData
+          });
+
+          expect(babelTransformSpy).toHaveBeenCalledWith(
+            entryPath,
+            fixtureCase.expectedBabelOptions
+          );
+          expect(scriptLoadResult.loader).toBe("tsx");
+          expect(scriptLoadResult.contents).toContain('className="base"');
+          expect(scriptLoadResult.contents).toContain("css={{");
+          expect(scriptLoadResult.contents).toContain('color: "red"');
+          expect(scriptLoadResult.contents).not.toMatch(
+            /className=\{[A-Za-z_$][\w$]*\("base", [A-Za-z_$][\w$]*\)\}/
+          );
+          expect(resolveResult).toBeUndefined();
+        } finally {
+          babelTransformSpy.mockRestore();
+          await fs.promises.rm(root, { force: true, recursive: true });
+        }
+      }
+    });
+
     it("builds a real esbuild fixture and emits defineRules preset registry artifact", async () => {
       const realEsbuild = await import("esbuild");
       const { entryPath, root } = await createLivePresetSmokeFixture(

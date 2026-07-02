@@ -75,9 +75,16 @@ function extractedCssFileFilter(filePath: string) {
   return true;
 }
 
-export function minchoVitePlugin(_options?: {
-  babel?: BabelOptions;
-}): PluginOption {
+type MinchoBabelOptions = BabelOptions & { jsxCssProp?: boolean };
+
+interface MinchoVitePluginOptions {
+  babel?: MinchoBabelOptions;
+  jsxCssProp?: boolean;
+}
+
+export function minchoVitePlugin(
+  _options?: MinchoVitePluginOptions
+): PluginOption {
   let config: ResolvedConfig;
   let server: ViteDevServer;
   const cssMap = new Map<string, string>();
@@ -248,10 +255,14 @@ export function minchoVitePlugin(_options?: {
           return;
         }
 
+        const babelOptions: MinchoBabelOptions | undefined =
+          _options?.jsxCssProp === undefined
+            ? _options?.babel
+            : { ..._options.babel, jsxCssProp: _options.jsxCssProp };
         const {
           code,
           result: [file, cssExtract]
-        } = await babelTransform(id, _options?.babel);
+        } = await babelTransform(id, babelOptions);
 
         if (!cssExtract || !file) return null;
 
@@ -867,12 +878,14 @@ if (import.meta.vitest) {
 
   async function createViteHarness({
     configOverrides,
+    pluginOptions,
     server
   }: {
     configOverrides?: Partial<ResolvedConfig>;
+    pluginOptions?: MinchoVitePluginOptions;
     server?: ViteDevServer;
   } = {}) {
-    const plugin = minchoVitePlugin();
+    const plugin = minchoVitePlugin(pluginOptions);
 
     await plugin.configResolved?.(createResolvedConfig(configOverrides));
     if (server) {
@@ -947,6 +960,136 @@ if (import.meta.vitest) {
 
   function escapeRegExp(value: string): string {
     return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+
+  type ExtractedCssImport = {
+    importedNames: string[];
+    localNames: string[];
+    source: string;
+  };
+
+  function createJsxCssPropFixtureSource(): string {
+    return `
+      function App() {
+        return <div className="base" css={{ color: "red" }} />;
+      }
+
+      export { App };
+    `;
+  }
+
+  async function createJsxCssPropViteFixture(prefix: string) {
+    const cacheRoot = createViteFixtureCacheRoot();
+    await fs.promises.mkdir(cacheRoot, { recursive: true });
+    const root = await fs.promises.mkdtemp(join(cacheRoot, prefix));
+    const srcRoot = join(root, "src");
+    const entryPath = join(srcRoot, "entry.tsx");
+    const source = createJsxCssPropFixtureSource();
+
+    await fs.promises.mkdir(srcRoot, { recursive: true });
+    await fs.promises.writeFile(entryPath, source);
+
+    return {
+      entryPath,
+      root,
+      source
+    };
+  }
+
+  async function spyOnSourceBabelTransform() {
+    const sourceIntegrationUrl = new URL(
+      "../../integration/src/babel" + ".ts",
+      import.meta.url
+    ).href;
+    const [integrationModule, sourceIntegrationModule] = await Promise.all([
+      import("@mincho-js/integration"),
+      import(/* @vite-ignore */ sourceIntegrationUrl) as Promise<{
+        babelTransform: typeof babelTransform;
+      }>
+    ]);
+
+    return vi
+      .spyOn(integrationModule, "babelTransform")
+      .mockImplementation(sourceIntegrationModule.babelTransform);
+  }
+
+  function extractViteTransformCode(
+    transformResult: unknown,
+    message: string
+  ): string {
+    if (
+      transformResult == null ||
+      typeof transformResult !== "object" ||
+      !("code" in transformResult) ||
+      typeof transformResult.code !== "string"
+    ) {
+      throw new Error(message);
+    }
+
+    return transformResult.code;
+  }
+
+  function extractNamedCssImportFromSource(source: string): ExtractedCssImport {
+    const importMatch =
+      /import\s+\{\s*([^}]+?)\s*\}\s+from\s+["']([^"']*extracted_[^"']+\.css\.ts)["'];?/.exec(
+        source
+      );
+
+    if (importMatch?.[1] == null || importMatch[2] == null) {
+      throw new Error("Expected transformed source to import extracted css");
+    }
+
+    const importedNames: string[] = [];
+    const localNames: string[] = [];
+
+    for (const rawSpecifier of importMatch[1].split(",")) {
+      const specifier = rawSpecifier.trim();
+      if (specifier === "") continue;
+
+      const specifierMatch =
+        /^([A-Za-z_$][\w$]*)(?:\s+as\s+([A-Za-z_$][\w$]*))?$/.exec(specifier);
+
+      if (specifierMatch?.[1] == null) {
+        throw new Error(
+          `Expected named extracted css import, got ${specifier}`
+        );
+      }
+
+      importedNames.push(specifierMatch[1]);
+      localNames.push(specifierMatch[2] ?? specifierMatch[1]);
+    }
+
+    return {
+      importedNames,
+      localNames,
+      source: importMatch[2]
+    };
+  }
+
+  function extractCxIdentifierFromSource(source: string): string {
+    const cxImportMatch =
+      /import\s+\{\s*[^}]*\bcx(?:\s+as\s+([A-Za-z_$][\w$]*))?[^}]*\}\s+from\s+["']@mincho-js\/css["'];?/.exec(
+        source
+      );
+
+    if (cxImportMatch == null) {
+      throw new Error("Expected transformed source to import cx");
+    }
+
+    return cxImportMatch[1] ?? "cx";
+  }
+
+  function expectSourceToContainCssPropClassNameMerge(
+    source: string,
+    cxIdentifier: string,
+    generatedLocalNames: string[]
+  ): void {
+    const classNameMergeMatch = new RegExp(
+      `className=\\{${escapeRegExp(cxIdentifier)}\\(\\s*"base"\\s*,\\s*([A-Za-z_$][\\w$]*)\\s*\\)\\}`
+    ).exec(source);
+
+    expect(classNameMergeMatch).not.toBeNull();
+    expect(generatedLocalNames).toContain(classNameMergeMatch?.[1]);
   }
 
   function extractExportedVariableInitializerFromBuildSource(
@@ -1039,6 +1182,150 @@ if (import.meta.vitest) {
   });
 
   describe("minchoVitePlugin", () => {
+    it("lowers enabled jsx css prop before React JSX lowering and serves generated CSS", async () => {
+      const fixture = await createJsxCssPropViteFixture(
+        "jsx-css-prop-enabled-"
+      );
+
+      try {
+        const babelTransformSpy = await spyOnSourceBabelTransform();
+        const harness = await createViteHarness({
+          configOverrides: {
+            root: fixture.root
+          },
+          pluginOptions: {
+            jsxCssProp: true
+          }
+        });
+        const transformedEntry = extractViteTransformCode(
+          await harness.transform(fixture.entryPath, fixture.source),
+          "Expected enabled css-prop entry transform to return code"
+        );
+
+        expect(babelTransformSpy).toHaveBeenCalledWith(fixture.entryPath, {
+          jsxCssProp: true
+        });
+        const extractedCssImport =
+          extractNamedCssImportFromSource(transformedEntry);
+        const cxIdentifier = extractCxIdentifierFromSource(transformedEntry);
+
+        expect(transformedEntry).not.toContain(" css=");
+        expect(transformedEntry).not.toContain("css={{");
+        expect(transformedEntry).not.toContain('color: "red"');
+        expectSourceToContainCssPropClassNameMerge(
+          transformedEntry,
+          cxIdentifier,
+          extractedCssImport.localNames
+        );
+
+        const extractedId = harness.resolveId(
+          extractedCssImport.source,
+          fixture.entryPath
+        );
+        assertString(
+          extractedId,
+          "Expected enabled css-prop sidecar import to resolve"
+        );
+
+        const extractedSource = await harness.load(extractedId);
+        assertString(
+          extractedSource,
+          "Expected enabled css-prop sidecar source to load"
+        );
+        expect(extractedSource).toMatch(
+          /export var [A-Za-z_$][\w$]* = [A-Za-z_$][\w$]*css\(\{\s*color: "red"\s*\}\);/s
+        );
+
+        const transformedExtractedCss = await harness.transform(
+          extractedId,
+          extractedSource
+        );
+        assertString(
+          transformedExtractedCss,
+          "Expected enabled css-prop sidecar transform to return source text"
+        );
+
+        const generatedClassName = extractExportedStringValueFromBuildSource(
+          transformedExtractedCss,
+          extractedCssImport.importedNames[0]!
+        );
+        const virtualImportMatch = transformedExtractedCss.match(
+          /import\s+"([^"]+\.vanilla\.css)";/
+        );
+
+        if (virtualImportMatch?.[1] == null) {
+          throw new Error(
+            "Expected enabled css-prop output to import virtual CSS"
+          );
+        }
+
+        const resolvedVirtualId = harness.resolveId(virtualImportMatch[1]);
+        assertString(
+          resolvedVirtualId,
+          "Expected enabled css-prop virtual CSS id to resolve"
+        );
+
+        const virtualCss = await harness.load(resolvedVirtualId);
+        assertString(
+          virtualCss,
+          "Expected enabled css-prop virtual CSS to load"
+        );
+        expectCssSourceToContainClassNames(virtualCss, generatedClassName);
+        expect(virtualCss).toContain("color: red;");
+      } finally {
+        await fs.promises.rm(fixture.root, { force: true, recursive: true });
+      }
+    });
+
+    it("leaves jsx css prop lowering disabled by default and by explicit false", async () => {
+      const fixture = await createJsxCssPropViteFixture(
+        "jsx-css-prop-disabled-"
+      );
+      const disabledCases: {
+        label: string;
+        pluginOptions?: MinchoVitePluginOptions;
+      }[] = [
+        { label: "default" },
+        { label: "explicit false", pluginOptions: { jsxCssProp: false } }
+      ];
+
+      try {
+        const babelTransformSpy = await spyOnSourceBabelTransform();
+
+        for (const disabledCase of disabledCases) {
+          const harness = await createViteHarness({
+            configOverrides: {
+              root: fixture.root
+            },
+            pluginOptions: disabledCase.pluginOptions
+          });
+
+          await expect(
+            harness.transform(fixture.entryPath, fixture.source),
+            disabledCase.label
+          ).resolves.toBeNull();
+        }
+
+        expect(babelTransformSpy).toHaveBeenNthCalledWith(
+          1,
+          fixture.entryPath,
+          undefined
+        );
+        expect(babelTransformSpy).toHaveBeenNthCalledWith(
+          2,
+          fixture.entryPath,
+          {
+            jsxCssProp: false
+          }
+        );
+        expect(fixture.source).toContain(
+          '<div className="base" css={{ color: "red" }} />'
+        );
+      } finally {
+        await fs.promises.rm(fixture.root, { force: true, recursive: true });
+      }
+    });
+
     it("defineRules preset registry steps are queued in Vite extracted transforms", async () => {
       const integrationModule = await import("@mincho-js/integration");
       const firstDeferred = createDeferred<string>();
