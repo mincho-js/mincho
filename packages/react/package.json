@@ -45,6 +45,26 @@
         "types": "./dist/cjs/runtime.d.cts",
         "default": "./dist/cjs/runtime.cjs"
       }
+    },
+    "./jsx-runtime": {
+      "import": {
+        "types": "./dist/esm/jsx-runtime.d.ts",
+        "default": "./dist/esm/jsx-runtime.mjs"
+      },
+      "require": {
+        "types": "./dist/cjs/jsx-runtime.d.cts",
+        "default": "./dist/cjs/jsx-runtime.cjs"
+      }
+    },
+    "./jsx-dev-runtime": {
+      "import": {
+        "types": "./dist/esm/jsx-dev-runtime.d.ts",
+        "default": "./dist/esm/jsx-dev-runtime.mjs"
+      },
+      "require": {
+        "types": "./dist/cjs/jsx-dev-runtime.d.cts",
+        "default": "./dist/cjs/jsx-dev-runtime.cjs"
+      }
     }
   },
   "files": [
@@ -57,6 +77,7 @@
     "build": "yarn g:build",
     "build:watch": "yarn g:build-watch",
     "coverage": "yarn g:coverage",
+    "test": "yarn g:test",
     "lint": "yarn g:lint",
     "fix": "yarn g:fix",
     "check": "yarn g:check"

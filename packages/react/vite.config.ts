@@ -10,7 +10,9 @@ export default (viteConfigEnv: ConfigEnv) => {
       lib: {
         entry: {
           index: resolve(process.cwd(), "src/index.ts"),
-          runtime: resolve(process.cwd(), "src/runtime.ts")
+          runtime: resolve(process.cwd(), "src/runtime.ts"),
+          "jsx-runtime": resolve(process.cwd(), "src/jsx-runtime.ts"),
+          "jsx-dev-runtime": resolve(process.cwd(), "src/jsx-dev-runtime.ts")
         }
       }
     }
