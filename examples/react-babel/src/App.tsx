@@ -66,7 +66,12 @@ function App() {
       <Container size="large" color="blue">
         Hello World
       </Container>
-      <div className={sharedCardHostClassName}>
+      <div
+        className={sharedCardHostClassName}
+        css={{
+          margin: "20px",
+        }}
+      >
         <SharedExampleCard />
       </div>
     </>

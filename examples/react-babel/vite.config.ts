@@ -6,9 +6,8 @@ import type { PluginOption } from "vite";
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [
-    // Only use the minchoVitePlugin which handles all necessary transformations
-    minchoVitePlugin() as unknown as PluginOption,
-    // Add React plugin without custom Babel config
+    // Run Mincho before React so css-prop and styled transforms lower before JSX handling.
+    minchoVitePlugin({ jsxCssProp: true }) as unknown as PluginOption,
     react(),
   ],
   esbuild: {

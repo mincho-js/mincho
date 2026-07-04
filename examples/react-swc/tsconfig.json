@@ -5,7 +5,13 @@
       "path": "../shared-component"
     },
     {
+      "path": "../../packages/react"
+    },
+    {
       "path": "../../packages/css"
+    },
+    {
+      "path": "../../packages/vite"
     },
     {
       "path": "./tsconfig.app.json"

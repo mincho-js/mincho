@@ -18,6 +18,7 @@
     "moduleDetection": "force",
     "noEmit": true,
     "jsx": "react-jsx",
+    "jsxImportSource": "@mincho-js/react",
     "types": ["vitest/importMeta", "vite/client"],
     
     /* Linting */
@@ -30,7 +31,9 @@
     "baseUrl": "../../",
     "paths": {
       "@examples/shared-component": ["examples/shared-component/src"],
-      "@mincho-js/css": ["packages/css/src"]
+      "@mincho-js/css": ["packages/css/src"],
+      "@mincho-js/react": ["packages/react/src"],
+      "@mincho-js/vite": ["packages/vite/src"]
     },
 
     "tsBuildInfoFile": "./.cache/typescript/tsbuildinfo-app"

@@ -1,0 +1,161 @@
+:root {
+  --react-swc-font-family-body: system-ui, Avenir, Helvetica, Arial, sans-serif;
+  --react-swc-line-height-body: 1.5;
+  --react-swc-line-height-heading: 1.1;
+  --react-swc-font-weight-regular: 400;
+  --react-swc-font-weight-medium: 500;
+  --react-swc-color-text: rgba(255, 255, 255, 0.87);
+  --react-swc-color-surface: #242424;
+  --react-swc-color-link: #646cff;
+  --react-swc-color-link-hover: #535bf2;
+  --react-swc-color-button-surface: #1a1a1a;
+  --react-swc-color-button-border: transparent;
+  --react-swc-color-focus-outline: -webkit-focus-ring-color;
+  --react-swc-color-read-the-docs: #888;
+  --react-swc-color-logo-vite-glow: #646cffaa;
+  --react-swc-color-logo-react-glow: #61dafbaa;
+  --react-swc-size-root-max: 1280px;
+  --react-swc-size-body-min-width: 320px;
+  --react-swc-size-body-min-height: 100vh;
+  --react-swc-size-heading: 3.2em;
+  --react-swc-size-button-text: 1em;
+  --react-swc-size-logo: 6em;
+  --react-swc-size-logo-shadow: 2em;
+  --react-swc-size-button-border: 1px;
+  --react-swc-size-focus-outline: 4px;
+  --react-swc-space-0: 0;
+  --react-swc-space-root-inline: auto;
+  --react-swc-space-root-padding: 2rem;
+  --react-swc-space-logo-padding: 1.5em;
+  --react-swc-space-card-padding: 2em;
+  --react-swc-space-button-y: 0.6em;
+  --react-swc-space-button-x: 1.2em;
+  --react-swc-radius-button: 8px;
+  --react-swc-duration-fast: 250ms;
+  --react-swc-duration-logo-filter: 300ms;
+  --react-swc-duration-logo-spin: 20s;
+  --react-swc-angle-logo-start: 0deg;
+  --react-swc-angle-logo-end: 360deg;
+
+  color-scheme: light dark;
+  color: var(--react-swc-color-text);
+  background-color: var(--react-swc-color-surface);
+  font-family: var(--react-swc-font-family-body);
+  font-synthesis: none;
+  font-weight: var(--react-swc-font-weight-regular);
+  line-height: var(--react-swc-line-height-body);
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --react-swc-color-text: #213547;
+    --react-swc-color-surface: #ffffff;
+    --react-swc-color-link-hover: #747bff;
+    --react-swc-color-button-surface: #f9f9f9;
+  }
+}
+
+a {
+  color: var(--react-swc-color-link);
+  font-weight: var(--react-swc-font-weight-medium);
+  text-decoration: inherit;
+}
+
+a:hover {
+  color: var(--react-swc-color-link-hover);
+}
+
+body {
+  display: flex;
+  margin: var(--react-swc-space-0);
+  min-width: var(--react-swc-size-body-min-width);
+  min-height: var(--react-swc-size-body-min-height);
+  place-items: center;
+}
+
+h1 {
+  font-size: var(--react-swc-size-heading);
+  line-height: var(--react-swc-line-height-heading);
+}
+
+button {
+  border: var(--react-swc-size-button-border) solid
+    var(--react-swc-color-button-border);
+  border-radius: var(--react-swc-radius-button);
+  padding: var(--react-swc-space-button-y) var(--react-swc-space-button-x);
+  background-color: var(--react-swc-color-button-surface);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: var(--react-swc-size-button-text);
+  font-weight: var(--react-swc-font-weight-medium);
+  transition: border-color var(--react-swc-duration-fast);
+}
+
+button:hover {
+  border-color: var(--react-swc-color-link);
+}
+
+button:focus,
+button:focus-visible {
+  outline: var(--react-swc-size-focus-outline) auto
+    var(--react-swc-color-focus-outline);
+}
+
+#root {
+  max-width: var(--react-swc-size-root-max);
+  margin: var(--react-swc-space-0) var(--react-swc-space-root-inline);
+  padding: var(--react-swc-space-root-padding);
+  text-align: center;
+}
+
+.logo {
+  height: var(--react-swc-size-logo);
+  padding: var(--react-swc-space-logo-padding);
+  transition: filter var(--react-swc-duration-logo-filter);
+  will-change: filter;
+}
+
+.logo:hover {
+  filter: drop-shadow(
+    0 0 var(--react-swc-size-logo-shadow)
+      var(--react-swc-color-logo-vite-glow)
+  );
+}
+
+.logo.react:hover {
+  filter: drop-shadow(
+    0 0 var(--react-swc-size-logo-shadow)
+      var(--react-swc-color-logo-react-glow)
+  );
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  a:nth-of-type(2) .logo {
+    animation: logo-spin infinite var(--react-swc-duration-logo-spin) linear;
+  }
+}
+
+.card {
+  padding: var(--react-swc-space-card-padding);
+}
+
+.shared-card-consumer {
+  display: block;
+}
+
+.read-the-docs {
+  color: var(--react-swc-color-read-the-docs);
+}
+
+@keyframes logo-spin {
+  from {
+    transform: rotate(var(--react-swc-angle-logo-start));
+  }
+
+  to {
+    transform: rotate(var(--react-swc-angle-logo-end));
+  }
+}
