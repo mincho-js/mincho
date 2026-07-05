@@ -36,15 +36,10 @@ if (import.meta.vitest) {
 
   describe("Mincho development JSX runtime", () => {
     it("throws when an own css prop survives transform", () => {
+      const props = { css: "base" };
+
       expect(() =>
-        jsxDEV(
-          "div",
-          { css: { color: "red" } },
-          undefined,
-          false,
-          undefined,
-          undefined
-        )
+        jsxDEV("div", props, undefined, false, undefined, undefined)
       ).toThrow(missedTransformErrorMessage);
     });
 
