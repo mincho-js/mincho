@@ -1,4 +1,4 @@
-import { type PluginObj, transformSync } from "@babel/core";
+import { type PluginObj, transformSync, types as t } from "@babel/core";
 import { transformCallExpression } from "./transforms/callExpression.js";
 import { preprocessJsxCssProp } from "./jsxCssProp.js";
 import { supportedJsxCssPropTags } from "./jsxCssPropTags.js";
@@ -19,7 +19,7 @@ export function minchoBabelPlugin(): PluginObj<PluginState> {
       Program: {
         enter(path, state) {
           preprocess(path, state);
-          preprocessJsxCssProp(path, state);
+          state.opts.jsxCssPropTransformed = preprocessJsxCssProp(path, state);
         },
         exit: postprocess
       },
@@ -51,22 +51,211 @@ if (import.meta.vitest) {
       filename: "test.tsx"
     });
 
-    if (result === null || result.code === null) {
+    if (result === null || result.code == null) {
       throw new Error("Failed to transform code");
     }
 
     return { result: options.result, code: result.code };
   }
 
+  type RuntimeJsx = (
+    tag: unknown,
+    props?: Record<string, unknown>
+  ) => Record<string, unknown>;
+  type RuntimeCx = (...values: unknown[]) => string;
+  type RuntimeCss = (styles: unknown) => string;
+
+  function runJsxCssPropRuntime(
+    source: string,
+    returnStatement: string
+  ): unknown {
+    const { code } = babelTransform(source, { jsxCssProp: true });
+    const result = transformSync(code, {
+      plugins: [jsxRuntimeTransformPlugin()],
+      presets: ["@babel/preset-typescript"],
+      filename: "runtime-test.tsx"
+    });
+
+    if (result === null) {
+      throw new Error("Failed to transform runtime test code");
+    }
+
+    const runtimeCode = result.code;
+
+    if (runtimeCode == null) {
+      throw new Error("Failed to transform runtime test code");
+    }
+
+    const execute = new Function(
+      "__minchoJsx",
+      "__minchoCx",
+      "__minchoCss",
+      `${runtimeCode}\n${returnStatement}`
+    ) as (jsx: RuntimeJsx, cx: RuntimeCx, css: RuntimeCss) => unknown;
+
+    return execute(
+      (_tag, props = {}) => props,
+      (...values) => values.filter(Boolean).join(" "),
+      () => "css-rule"
+    );
+  }
+
+  function jsxRuntimeTransformPlugin(): PluginObj {
+    return {
+      visitor: {
+        ImportDeclaration(importPath) {
+          if (importPath.node.source.value !== "@mincho-js/css") {
+            return;
+          }
+
+          const declarations = importPath.node.specifiers.flatMap(
+            (specifier) => {
+              if (
+                !t.isImportSpecifier(specifier) ||
+                !t.isIdentifier(specifier.imported)
+              ) {
+                return [];
+              }
+
+              const runtimeIdentifier = getRuntimeImportIdentifier(
+                specifier.imported.name
+              );
+
+              if (!runtimeIdentifier) {
+                return [];
+              }
+
+              return t.variableDeclaration("const", [
+                t.variableDeclarator(
+                  t.cloneNode(specifier.local),
+                  runtimeIdentifier
+                )
+              ]);
+            }
+          );
+
+          if (declarations.length === 0) {
+            importPath.remove();
+            return;
+          }
+
+          importPath.replaceWithMultiple(declarations);
+        },
+        JSXElement(jsxPath) {
+          jsxPath.replaceWith(
+            t.callExpression(t.identifier("__minchoJsx"), [
+              createRuntimeJsxTagExpression(jsxPath.node.openingElement.name),
+              createRuntimeJsxPropsExpression(jsxPath.node.openingElement)
+            ])
+          );
+        }
+      }
+    };
+  }
+
+  function getRuntimeImportIdentifier(methodName: string): t.Identifier | null {
+    if (methodName === "cx") {
+      return t.identifier("__minchoCx");
+    }
+
+    if (methodName === "css") {
+      return t.identifier("__minchoCss");
+    }
+
+    return null;
+  }
+
+  function createRuntimeJsxTagExpression(
+    name: t.JSXOpeningElement["name"]
+  ): t.Expression {
+    if (t.isJSXIdentifier(name)) {
+      if (/^[a-z]/.test(name.name)) {
+        return t.stringLiteral(name.name);
+      }
+
+      return t.identifier(name.name);
+    }
+
+    if (t.isJSXMemberExpression(name)) {
+      return t.memberExpression(
+        createRuntimeJsxTagExpression(name.object),
+        t.identifier(name.property.name)
+      );
+    }
+
+    return t.stringLiteral(`${name.namespace.name}:${name.name.name}`);
+  }
+
+  function createRuntimeJsxPropsExpression(
+    openingElement: t.JSXOpeningElement
+  ): t.ObjectExpression {
+    return t.objectExpression(
+      openingElement.attributes.map((attribute) => {
+        if (t.isJSXSpreadAttribute(attribute)) {
+          return t.spreadElement(t.cloneNode(attribute.argument));
+        }
+
+        return t.objectProperty(
+          createRuntimeJsxAttributeKey(attribute.name),
+          createRuntimeJsxAttributeValue(attribute)
+        );
+      })
+    );
+  }
+
+  function createRuntimeJsxAttributeKey(
+    name: t.JSXAttribute["name"]
+  ): t.Identifier | t.StringLiteral {
+    if (t.isJSXNamespacedName(name)) {
+      return t.stringLiteral(`${name.namespace.name}:${name.name.name}`);
+    }
+
+    if (t.isValidIdentifier(name.name)) {
+      return t.identifier(name.name);
+    }
+
+    return t.stringLiteral(name.name);
+  }
+
+  function createRuntimeJsxAttributeValue(
+    attribute: t.JSXAttribute
+  ): t.Expression {
+    if (attribute.value === null) {
+      return t.booleanLiteral(true);
+    }
+
+    if (t.isStringLiteral(attribute.value)) {
+      return t.cloneNode(attribute.value);
+    }
+
+    if (t.isJSXExpressionContainer(attribute.value)) {
+      const { expression } = attribute.value;
+
+      if (t.isJSXEmptyExpression(expression)) {
+        return t.identifier("undefined");
+      }
+
+      return t.cloneNode(expression);
+    }
+
+    return t.identifier("undefined");
+  }
+
   const jsxCssPropErrorMessages = {
-    intrinsicElement:
-      "Mincho JSX css prop only supports intrinsic elements in v1",
-    supportedTag:
-      "Mincho JSX css prop only supports supported React DOM/SVG tags in v1",
-    spread:
-      "Mincho JSX css prop does not support spreads on elements with css in v1",
+    fragmentTarget:
+      "Mincho JSX css prop does not support fragments because fragments cannot receive className",
+    namespacedTarget:
+      "Mincho JSX css prop does not support namespaced JSX elements",
+    spreadAfterCss:
+      "Mincho JSX css prop does not support spreads after css in compile-away mode",
+    keyRefSpread:
+      "Mincho JSX css prop does not support key/ref on spread elements in compile-away mode",
+    spreadAggregationContext:
+      "Mincho JSX css prop spread aggregation only supports direct return or expression statement JSX in compile-away mode",
     expressionValue: "Mincho JSX css prop requires an expression value",
     cssValue: "Mincho JSX css prop expects a Mincho CSS object/expression",
+    unsupportedFunction:
+      "Mincho JSX css prop does not support function values in compile-away mode",
     duplicateCss: "Mincho JSX css prop must appear only once",
     duplicateClassName:
       "Mincho JSX css prop cannot merge duplicate className attributes",
@@ -150,7 +339,7 @@ if (import.meta.vitest) {
       expect(enabled.code).toMatchSnapshot();
     });
 
-    it("lowers jsx css prop without existing className", () => {
+    it("lowers inline object jsx css prop through css rule mode", () => {
       const { result, code } = babelTransform(
         `
         function App() {
@@ -166,7 +355,7 @@ if (import.meta.vitest) {
       expect(code).toContain("className={_$mincho$$App2}");
     });
 
-    it("merges string literal className before generated css class", () => {
+    it("merges string literal className before generated css rule class", () => {
       const { result, code } = babelTransform(
         `
         function App() {
@@ -182,12 +371,12 @@ if (import.meta.vitest) {
       expect(code).toContain('className={_cx("base", _$mincho$$App2)}');
     });
 
-    it("merges expression className before generated css class", () => {
+    it("merges expression className before class-value css prop", () => {
       const { result, code } = babelTransform(
         `
         const base = "base";
         const styles = {
-          root: { color: "red" }
+          root: "root"
         };
 
         function App() {
@@ -200,39 +389,398 @@ if (import.meta.vitest) {
       expect(result).toMatchSnapshot();
       expect(code).toMatchSnapshot();
       expect(code).not.toContain(" css=");
-      expect(code).toContain("className={_cx(base, _$mincho$$App2)}");
+      expect(code).toContain("className={_cx(base, styles.root)}");
+      expect(code).not.toContain("_css(styles.root)");
+    });
+
+    it("lowers literal class-value jsx css props through cx", () => {
+      const { result, code } = babelTransform(
+        `
+        function App() {
+          return <>
+            <div css="base" />
+            <div css={1} />
+            <div css={false} />
+            <div css={null} />
+          </>;
+        }
+      `,
+        { jsxCssProp: true }
+      );
+
+      expect(result).toMatchSnapshot();
+      expect(code).toMatchSnapshot();
+      expect(code).not.toContain(" css=");
+      expect(code).toContain('className={_cx("base")}');
+      expect(code).toContain("className={_cx(1)}");
+      expect(code).toContain("className={_cx(false)}");
+      expect(code).toContain("className={_cx(null)}");
+    });
+
+    it("lowers array class-value jsx css prop through cx", () => {
+      const { result, code } = babelTransform(
+        `
+        const isActive = true;
+
+        function App() {
+          return <div css={["base", isActive && "active"]} />;
+        }
+      `,
+        { jsxCssProp: true }
+      );
+
+      expect(result).toMatchSnapshot();
+      expect(code).toMatchSnapshot();
+      expect(code).not.toContain(" css=");
+      expect(code).toContain('className={_cx(["base", isActive && "active"])}');
+    });
+
+    it("lowers identifier css result through cx without double wrapping", () => {
+      const { result, code } = babelTransform(
+        `
+        import { css } from "@mincho-js/css";
+
+        const styleA = css({ color: "red" });
+
+        function App() {
+          return <div css={styleA} />;
+        }
+      `,
+        { jsxCssProp: true }
+      );
+
+      expect(result).toMatchSnapshot();
+      expect(code).toMatchSnapshot();
+      expect(code).not.toContain(" css=");
+      expect(code).toContain("className={_cx(styleA)}");
+      expect(code).not.toContain("_css(styleA)");
+      expect(code).not.toContain("css(styleA)");
+    });
+
+    it("keeps inline object class dictionary syntax in css rule mode", () => {
+      const { result, code } = babelTransform(
+        `
+        const isActive = true;
+
+        function App() {
+          return <div css={{ active: isActive }} />;
+        }
+      `,
+        { jsxCssProp: true }
+      );
+
+      expect(result).toMatchSnapshot();
+      expect(code).toMatchSnapshot();
+      expect(code).not.toContain(" css=");
+      expect(result[1]).toContain("active: isActive");
+      expect(code).toContain("className={_$mincho$$App2}");
+      expect(code).not.toContain("_cx({");
+    });
+
+    it("lowers custom component class-value jsx css prop through cx", () => {
+      const { result, code } = babelTransform(
+        `
+        const styleA = "base";
+
+        function Button(props) {
+          return <button {...props} />;
+        }
+
+        function App() {
+          return <Button css={styleA} />;
+        }
+      `,
+        { jsxCssProp: true }
+      );
+
+      expect(result).toMatchSnapshot();
+      expect(code).toMatchSnapshot();
+      expect(code).not.toContain(" css=");
+      expect(code).toContain("return <Button className={_cx(styleA)} />");
+    });
+
+    it("lowers custom component inline object jsx css prop through css rule mode", () => {
+      const { result, code } = babelTransform(
+        `
+        function Button(props) {
+          return <button {...props} />;
+        }
+
+        function App() {
+          return <Button css={{ color: "red" }} />;
+        }
+      `,
+        { jsxCssProp: true }
+      );
+
+      expect(result).toMatchSnapshot();
+      expect(code).toMatchSnapshot();
+      expect(result[1]).toContain("_css({");
+      expect(result[1]).toContain('color: "red"');
+      expect(code).not.toContain(" css=");
+      expect(code).toContain("return <Button className={_$mincho$$App2} />");
+    });
+
+    it("lowers member-expression class-value jsx css prop through cx", () => {
+      const { result, code } = babelTransform(
+        `
+        const motion = { div: "div" };
+        const styleA = "base";
+
+        function App() {
+          return <motion.div css={styleA} />;
+        }
+      `,
+        { jsxCssProp: true }
+      );
+
+      expect(result).toMatchSnapshot();
+      expect(code).toMatchSnapshot();
+      expect(code).not.toContain(" css=");
+      expect(code).toContain("return <motion.div className={_cx(styleA)} />");
+    });
+
+    it("lowers custom element class-value jsx css prop through className", () => {
+      const { result, code } = babelTransform(
+        `
+        const styleA = "base";
+
+        function App() {
+          return <my-element css={styleA} />;
+        }
+      `,
+        { jsxCssProp: true }
+      );
+
+      expect(result).toMatchSnapshot();
+      expect(code).toMatchSnapshot();
+      expect(code).not.toContain(" css=");
+      expect(code).toContain("return <my-element className={_cx(styleA)} />");
+      expect(code).not.toContain("<my-element class=");
+    });
+
+    it("aggregates spread props before explicit class-value css prop", () => {
+      const { result, code } = babelTransform(
+        `
+        const styleA = "style-a";
+        const props = {
+          className: "base",
+          css: "leaked",
+          id: "root"
+        };
+
+        function App() {
+          return <div {...props} css={styleA} />;
+        }
+      `,
+        { jsxCssProp: true }
+      );
+
+      expect(result).toMatchSnapshot();
+      expect(code).toMatchSnapshot();
+      expect(code).not.toContain(" css=");
+      expect(code).toContain("css: _minchoCssProp");
+      expect(code).toContain("..._minchoRest");
+      expect(code).toContain("className={_cx(_minchoClassName, styleA)}");
+    });
+
+    it("aggregates multiple spreads and className before inline object css prop", () => {
+      const { result, code } = babelTransform(
+        `
+        const a = { id: "a" };
+        const b = { className: "from-b" };
+
+        function App() {
+          return <div {...a} className="base" {...b} css={{ color: "red" }} />;
+        }
+      `,
+        { jsxCssProp: true }
+      );
+
+      expect(result).toMatchSnapshot();
+      expect(code).toMatchSnapshot();
+      expect(result[1]).toContain("_css({");
+      expect(result[1]).toContain('color: "red"');
+      expect(code).not.toContain(" css=");
+      expect(code).toContain("...a");
+      expect(code).toContain('className: "base"');
+      expect(code).toContain("...b");
+      expect(code).toContain(
+        "className={_cx(_minchoClassName, _$mincho$$App2)}"
+      );
+    });
+
+    it("evaluates spread aggregation inputs once in source order", () => {
+      const observed = runJsxCssPropRuntime(
+        `
+        const styleA = "style-a";
+        const events: string[] = [];
+        const spreadA = () => {
+          events.push("spread-a");
+          return { id: "a", className: "from-a", css: "leak-a" };
+        };
+        const spreadB = () => {
+          events.push("spread-b");
+          return { title: "b", className: "from-b", css: "leak-b" };
+        };
+        const named = () => {
+          events.push("className");
+          return "base";
+        };
+
+        function App() {
+          return <div {...spreadA()} className={named()} {...spreadB()} css={styleA} />;
+        }
+      `,
+        "return { props: App(), events };"
+      ) as { props: Record<string, unknown>; events: string[] };
+
+      expect(observed.events).toEqual(["spread-a", "className", "spread-b"]);
+      expect(observed.props).toMatchObject({
+        id: "a",
+        title: "b",
+        className: "from-b style-a"
+      });
+      expect("css" in observed.props).toBe(false);
+    });
+
+    it("reads spread-provided className once through aggregate props", () => {
+      const observed = runJsxCssPropRuntime(
+        `
+        const styleA = "style-a";
+        let classNameReads = 0;
+        const props = {
+          get className() {
+            classNameReads += 1;
+            return "base";
+          },
+          css: "leak",
+          id: "root"
+        };
+
+        function App() {
+          return <div {...props} css={styleA} />;
+        }
+      `,
+        "return { props: App(), classNameReads };"
+      ) as { props: Record<string, unknown>; classNameReads: number };
+
+      expect(observed.classNameReads).toBe(1);
+      expect(observed.props).toMatchObject({
+        id: "root",
+        className: "base style-a"
+      });
+      expect("css" in observed.props).toBe(false);
+    });
+
+    it("leaves spread-only runtime css props untransformed", () => {
+      const { result, code } = babelTransform(
+        `
+        const styleA = "style-a";
+
+        function App() {
+          return <div {...{ css: styleA }} />;
+        }
+      `,
+        { jsxCssProp: true }
+      );
+
+      expect(result).toMatchSnapshot();
+      expect(code).toMatchSnapshot();
+      expect(code).toContain("css: styleA");
+      expect(code).not.toContain("className=");
+      expect(code).not.toContain("_cx");
+    });
+
+    it("rejects unbraced if return spread aggregation", () => {
+      expect(() =>
+        babelTransform(
+          `
+          const styleA = "style-a";
+
+          function App(props, ok) {
+            if (ok) return <div {...props} css={styleA} />;
+            return null;
+          }
+        `,
+          { jsxCssProp: true }
+        )
+      ).toThrow(jsxCssPropErrorMessages.spreadAggregationContext);
+    });
+
+    it("rejects unbraced if expression statement spread aggregation", () => {
+      expect(() =>
+        babelTransform(
+          `
+          const styleA = "style-a";
+
+          function App(props, ok) {
+            if (ok) <div {...props} css={styleA} />;
+          }
+        `,
+          { jsxCssProp: true }
+        )
+      ).toThrow(jsxCssPropErrorMessages.spreadAggregationContext);
     });
 
     const unsupportedJsxCssPropFixtures = [
       {
-        name: "rejects custom components",
-        fixture: `<Button css={{ color: "red" }} />`,
-        message: jsxCssPropErrorMessages.intrinsicElement
-      },
-      {
-        name: "rejects member-expression components",
-        fixture: `<motion.div css={{ color: "red" }} />`,
-        message: jsxCssPropErrorMessages.intrinsicElement
-      },
-      {
-        name: "rejects fragment components",
+        name: "rejects React.Fragment css prop targets",
         fixture: `<React.Fragment css={{ color: "red" }} />`,
-        message: jsxCssPropErrorMessages.intrinsicElement
+        message: jsxCssPropErrorMessages.fragmentTarget
       },
       {
-        name: "rejects unsupported custom elements",
-        fixture: `<my-element css={{ color: "red" }} />`,
-        message: jsxCssPropErrorMessages.supportedTag
+        name: "rejects Fragment identifier css prop targets",
+        fixture: `<Fragment css={{ color: "red" }} />`,
+        message: jsxCssPropErrorMessages.fragmentTarget
       },
       {
-        name: "rejects spreads before css on css-prop elements",
-        fixture: `<div {...props} css={{ color: "red" }} />`,
-        message: jsxCssPropErrorMessages.spread
+        name: "rejects namespaced JSX css prop targets",
+        fixture: `<svg:path css={{ color: "red" }} />`,
+        message: jsxCssPropErrorMessages.namespacedTarget
       },
       {
         name: "rejects spreads after css on css-prop elements",
-        fixture: `<div css={{ color: "red" }} {...props} />`,
-        message: jsxCssPropErrorMessages.spread
+        fixture: `<div css={styleA} {...props} />`,
+        message: jsxCssPropErrorMessages.spreadAfterCss
+      },
+      {
+        name: "rejects spreads after css even when earlier spreads exist",
+        fixture: `<div {...a} css={styleA} {...b} />`,
+        message: jsxCssPropErrorMessages.spreadAfterCss
+      },
+      {
+        name: "rejects explicit key on spread-aggregated css-prop elements",
+        fixture: `<div key="x" {...props} css={styleA} />`,
+        message: jsxCssPropErrorMessages.keyRefSpread
+      },
+      {
+        name: "rejects explicit ref on spread-aggregated css-prop components",
+        fixture: `<Component ref={ref} {...props} css={styleA} />`,
+        message: jsxCssPropErrorMessages.keyRefSpread
+      },
+      {
+        name: "rejects expression-bodied arrow spread aggregation",
+        fixture: `(() => {
+          const App = (props) => <div {...props} css={styleA} />;
+          return <App />;
+        })()`,
+        message: jsxCssPropErrorMessages.spreadAggregationContext
+      },
+      {
+        name: "rejects conditional spread aggregation",
+        fixture: `ok ? <div {...props} css={styleA} /> : null`,
+        message: jsxCssPropErrorMessages.spreadAggregationContext
+      },
+      {
+        name: "rejects logical spread aggregation",
+        fixture: `ok && <div {...props} css={styleA} />`,
+        message: jsxCssPropErrorMessages.spreadAggregationContext
+      },
+      {
+        name: "rejects call-argument spread aggregation",
+        fixture: `render(<div {...props} css={styleA} />)`,
+        message: jsxCssPropErrorMessages.spreadAggregationContext
       },
       {
         name: "rejects shorthand css",
@@ -240,34 +788,14 @@ if (import.meta.vitest) {
         message: jsxCssPropErrorMessages.expressionValue
       },
       {
-        name: "rejects raw string css values",
-        fixture: `<div css="color: red" />`,
-        message: jsxCssPropErrorMessages.cssValue
-      },
-      {
-        name: "rejects template literal css values",
-        fixture: `<div css={\`color: red\`} />`,
-        message: jsxCssPropErrorMessages.cssValue
-      },
-      {
-        name: "rejects raw number css values",
-        fixture: `<div css={1} />`,
-        message: jsxCssPropErrorMessages.cssValue
-      },
-      {
-        name: "rejects raw boolean css values",
-        fixture: `<div css={true} />`,
-        message: jsxCssPropErrorMessages.cssValue
-      },
-      {
-        name: "rejects raw null css values",
-        fixture: `<div css={null} />`,
-        message: jsxCssPropErrorMessages.cssValue
-      },
-      {
-        name: "rejects direct function css values",
+        name: "rejects inline arrow function css values",
         fixture: `<div css={() => ({ color: "red" })} />`,
-        message: jsxCssPropErrorMessages.cssValue
+        message: jsxCssPropErrorMessages.unsupportedFunction
+      },
+      {
+        name: "rejects inline function expression css values",
+        fixture: `<div css={function () { return { color: "red" }; }} />`,
+        message: jsxCssPropErrorMessages.unsupportedFunction
       },
       {
         name: "rejects duplicate css attributes",

@@ -17,7 +17,16 @@ export type BabelOptions = Omit<
   jsxCssProp?: boolean;
 };
 
-export async function babelTransform(path: string, babel: BabelOptions = {}) {
+export type BabelTransformResult = {
+  code: string;
+  readonly jsxCssPropTransformed?: boolean;
+  result: [string, string];
+};
+
+export async function babelTransform(
+  path: string,
+  babel: BabelOptions = {}
+): Promise<BabelTransformResult> {
   const { jsxCssProp = false, ...babelCoreOptions } = babel;
   const options: PluginOptions & { jsxCssProp?: boolean } = {
     result: ["", ""],
@@ -45,7 +54,11 @@ export async function babelTransform(path: string, babel: BabelOptions = {}) {
     throw new Error(`Failed to transform ${path}`);
   }
 
-  return { result: options.result, code: result.code };
+  return {
+    result: options.result,
+    code: result.code,
+    jsxCssPropTransformed: options.jsxCssPropTransformed === true
+  };
 }
 
 // == Tests ====================================================================
@@ -144,6 +157,79 @@ if (import.meta.vitest) {
       expect(code).not.toContain(" css=");
       expect(code).not.toContain("css={{");
       expect(code).not.toContain('color: "red"');
+    });
+
+    it("keeps class-value css props on the cx path without double wrapping", async () => {
+      const fixturePath = await createBabelFixture(
+        `
+          import { css } from "@mincho-js/css";
+
+          const styleA = css({ color: "blue" });
+
+          function App() {
+            return <>
+              <div className="base" css={{ color: "red" }} />
+              <div css={styleA} />
+              <div css="literal-class" />
+            </>;
+          }
+        `,
+        "css-prop-v2-classification"
+      );
+      const { result, code } = await babelTransform(fixturePath, {
+        jsxCssProp: true
+      });
+      const [sidecarFile, sidecarSource] = result;
+      const exportedDeclarations = sidecarSource.match(/export var/g) ?? [];
+      const cxImportMatch =
+        /import \{ [^}]*\bcx(?: as ([A-Za-z_$][\w$]*))?[^}]*\} from "@mincho-js\/css";/.exec(
+          code
+        );
+      const cxIdentifier = cxImportMatch?.[1] ?? "cx";
+
+      expect(sidecarFile).toMatch(/^extracted_[a-z0-9]+\.css\.ts$/);
+      expect(exportedDeclarations).toHaveLength(2);
+      expect(sidecarSource).toMatch(
+        /export var [A-Za-z_$][\w$]* = [A-Za-z_$][\w$]*\(\{\s*color: "blue"\s*\}\);/s
+      );
+      expect(sidecarSource).toMatch(
+        /export var [A-Za-z_$][\w$]* = [A-Za-z_$][\w$]*\(\{\s*color: "red"\s*\}\);/s
+      );
+      expect(sidecarSource).not.toMatch(/\bcss\(styleA\)/);
+      expect(sidecarSource).not.toMatch(
+        /export var [A-Za-z_$][\w$]* = [A-Za-z_$][\w$]*cx\(/s
+      );
+      expect(cxImportMatch).not.toBeNull();
+      expect(code).not.toContain(" css=");
+      expect(code).not.toContain("css={styleA}");
+      expect(code).not.toContain("css(styleA)");
+      expect(code).not.toContain("_css(styleA)");
+      expect(code).toMatch(
+        new RegExp(`className=\\{${escapeRegExp(cxIdentifier)}\\(styleA\\)\\}`)
+      );
+      expect(code).toMatch(
+        new RegExp(
+          `className=\\{${escapeRegExp(cxIdentifier)}\\("literal-class"\\)\\}`
+        )
+      );
+    });
+
+    it("leaves jsx css prop lowering disabled by default", async () => {
+      const fixturePath = await createBabelFixture(
+        `
+          function App() {
+            return <div className="base" css={{ color: "red" }} />;
+          }
+        `,
+        "css-prop-disabled-default"
+      );
+      const { result, code } = await babelTransform(fixturePath);
+
+      expect(result[1]).toBe("");
+      expect(code).toContain('className="base"');
+      expect(code).toContain("css={{");
+      expect(code).toContain('color: "red"');
+      expect(code).not.toContain("extracted_");
     });
   });
 }

@@ -4,6 +4,7 @@ import type { Scope } from "@babel/traverse";
 export interface PluginOptions {
   result: [string, string];
   jsxCssProp?: boolean;
+  jsxCssPropTransformed?: boolean;
 }
 
 export interface PluginState extends PluginPass {

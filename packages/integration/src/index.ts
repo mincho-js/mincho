@@ -1,4 +1,8 @@
-export { babelTransform, type BabelOptions } from "./babel.js";
+export {
+  babelTransform,
+  type BabelOptions,
+  type BabelTransformResult
+} from "./babel.js";
 export { compile } from "./compile.js";
 export {
   processDefineRulesPresetRegistryFile,

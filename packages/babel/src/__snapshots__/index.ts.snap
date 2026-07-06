@@ -19,6 +19,69 @@ function App() {
 }"
 `;
 
+exports[`minchoBabelPlugin > aggregates multiple spreads and className before inline object css prop 1`] = `
+[
+  "extracted_17cnpin.css.ts",
+  "import { css as _css, cx as _cx } from "@mincho-js/css";
+export var _$mincho$$App = _css({
+  color: "red"
+});
+var _$mincho$$App2 = _$mincho$$App;",
+]
+`;
+
+exports[`minchoBabelPlugin > aggregates multiple spreads and className before inline object css prop 2`] = `
+"import { _$mincho$$App as _$mincho$$App2 } from "extracted_17cnpin.css.ts";
+import { css as _css, cx as _cx } from "@mincho-js/css";
+const a = {
+  id: "a"
+};
+const b = {
+  className: "from-b"
+};
+function App() {
+  const _minchoProps = {
+    ...a,
+    className: "base",
+    ...b
+  };
+  const {
+    css: _minchoCssProp,
+    className: _minchoClassName,
+    ..._minchoRest
+  } = _minchoProps;
+  return <div {..._minchoRest} className={_cx(_minchoClassName, _$mincho$$App2)} />;
+}"
+`;
+
+exports[`minchoBabelPlugin > aggregates spread props before explicit class-value css prop 1`] = `
+[
+  "extracted_48djc5.css.ts",
+  "",
+]
+`;
+
+exports[`minchoBabelPlugin > aggregates spread props before explicit class-value css prop 2`] = `
+"import { cx as _cx } from "@mincho-js/css";
+const styleA = "style-a";
+const props = {
+  className: "base",
+  css: "leaked",
+  id: "root"
+};
+function App() {
+  const _minchoProps = {
+    ...props
+  };
+  const {
+    css: _minchoCssProp,
+    className: _minchoClassName,
+    ..._minchoRest
+  } = _minchoProps;
+  return <div {..._minchoRest} className={_cx(_minchoClassName, styleA)} />;
+}"
+`;
+
 exports[`minchoBabelPlugin > already exported 1`] = `
 [
   "extracted_1etlg14.css.ts",
@@ -365,6 +428,27 @@ function App() {
 console.log(red);"
 `;
 
+exports[`minchoBabelPlugin > keeps inline object class dictionary syntax in css rule mode 1`] = `
+[
+  "extracted_1wvwi3h.css.ts",
+  "import { css as _css } from "@mincho-js/css";
+const isActive = true;
+export var _$mincho$$App = _css({
+  active: isActive
+});
+var _$mincho$$App2 = _$mincho$$App;",
+]
+`;
+
+exports[`minchoBabelPlugin > keeps inline object class dictionary syntax in css rule mode 2`] = `
+"import { _$mincho$$App as _$mincho$$App2 } from "extracted_1wvwi3h.css.ts";
+import { css as _css } from "@mincho-js/css";
+const isActive = true;
+function App() {
+  return <div className={_$mincho$$App2} />;
+}"
+`;
+
 exports[`minchoBabelPlugin > leaves jsx css prop unchanged when css prop lowering is disabled 1`] = `
 [
   "extracted_1a9gei1.css.ts",
@@ -380,7 +464,113 @@ exports[`minchoBabelPlugin > leaves jsx css prop unchanged when css prop lowerin
 }"
 `;
 
-exports[`minchoBabelPlugin > lowers jsx css prop without existing className 1`] = `
+exports[`minchoBabelPlugin > leaves spread-only runtime css props untransformed 1`] = `
+[
+  "extracted_1dre7mx.css.ts",
+  "",
+]
+`;
+
+exports[`minchoBabelPlugin > leaves spread-only runtime css props untransformed 2`] = `
+"const styleA = "style-a";
+function App() {
+  return <div {...{
+    css: styleA
+  }} />;
+}"
+`;
+
+exports[`minchoBabelPlugin > lowers array class-value jsx css prop through cx 1`] = `
+[
+  "extracted_1rdghqi.css.ts",
+  "",
+]
+`;
+
+exports[`minchoBabelPlugin > lowers array class-value jsx css prop through cx 2`] = `
+"import { cx as _cx } from "@mincho-js/css";
+const isActive = true;
+function App() {
+  return <div className={_cx(["base", isActive && "active"])} />;
+}"
+`;
+
+exports[`minchoBabelPlugin > lowers custom component class-value jsx css prop through cx 1`] = `
+[
+  "extracted_1ypr351.css.ts",
+  "",
+]
+`;
+
+exports[`minchoBabelPlugin > lowers custom component class-value jsx css prop through cx 2`] = `
+"import { cx as _cx } from "@mincho-js/css";
+const styleA = "base";
+function Button(props) {
+  return <button {...props} />;
+}
+function App() {
+  return <Button className={_cx(styleA)} />;
+}"
+`;
+
+exports[`minchoBabelPlugin > lowers custom component inline object jsx css prop through css rule mode 1`] = `
+[
+  "extracted_y60r8r.css.ts",
+  "import { css as _css } from "@mincho-js/css";
+export var _$mincho$$App = _css({
+  color: "red"
+});
+var _$mincho$$App2 = _$mincho$$App;",
+]
+`;
+
+exports[`minchoBabelPlugin > lowers custom component inline object jsx css prop through css rule mode 2`] = `
+"import { _$mincho$$App as _$mincho$$App2 } from "extracted_y60r8r.css.ts";
+import { css as _css } from "@mincho-js/css";
+function Button(props) {
+  return <button {...props} />;
+}
+function App() {
+  return <Button className={_$mincho$$App2} />;
+}"
+`;
+
+exports[`minchoBabelPlugin > lowers custom element class-value jsx css prop through className 1`] = `
+[
+  "extracted_k5klam.css.ts",
+  "",
+]
+`;
+
+exports[`minchoBabelPlugin > lowers custom element class-value jsx css prop through className 2`] = `
+"import { cx as _cx } from "@mincho-js/css";
+const styleA = "base";
+function App() {
+  return <my-element className={_cx(styleA)} />;
+}"
+`;
+
+exports[`minchoBabelPlugin > lowers identifier css result through cx without double wrapping 1`] = `
+[
+  "extracted_mcgo2u.css.ts",
+  "import { css, cx as _cx } from "@mincho-js/css";
+export var _$mincho$$styleA = css({
+  color: "red"
+});
+var _$mincho$$styleA2 = _$mincho$$styleA;",
+]
+`;
+
+exports[`minchoBabelPlugin > lowers identifier css result through cx without double wrapping 2`] = `
+"import { _$mincho$$styleA as _$mincho$$styleA2 } from "extracted_mcgo2u.css.ts";
+import { css, cx as _cx } from "@mincho-js/css";
+const styleA = _$mincho$$styleA2;
+function App() {
+  return <div className={_cx(styleA)} />;
+}"
+`;
+
+exports[`minchoBabelPlugin > lowers inline object jsx css prop through css rule mode 1`] = `
 [
   "extracted_1a9gei1.css.ts",
   "import { css as _css } from "@mincho-js/css";
@@ -391,7 +581,7 @@ var _$mincho$$App2 = _$mincho$$App;",
 ]
 `;
 
-exports[`minchoBabelPlugin > lowers jsx css prop without existing className 2`] = `
+exports[`minchoBabelPlugin > lowers inline object jsx css prop through css rule mode 2`] = `
 "import { _$mincho$$App as _$mincho$$App2 } from "extracted_1a9gei1.css.ts";
 import { css as _css } from "@mincho-js/css";
 function App() {
@@ -399,35 +589,62 @@ function App() {
 }"
 `;
 
-exports[`minchoBabelPlugin > merges expression className before generated css class 1`] = `
+exports[`minchoBabelPlugin > lowers literal class-value jsx css props through cx 1`] = `
 [
-  "extracted_inft06.css.ts",
-  "import { css as _css, cx as _cx } from "@mincho-js/css";
-const styles = {
-  root: {
-    color: "red"
-  }
-};
-export var _$mincho$$App = _css(styles.root);
-var _$mincho$$App2 = _$mincho$$App;",
+  "extracted_1nyqu7u.css.ts",
+  "",
 ]
 `;
 
-exports[`minchoBabelPlugin > merges expression className before generated css class 2`] = `
-"import { _$mincho$$App as _$mincho$$App2 } from "extracted_inft06.css.ts";
-import { css as _css, cx as _cx } from "@mincho-js/css";
-const base = "base";
-const styles = {
-  root: {
-    color: "red"
-  }
-};
+exports[`minchoBabelPlugin > lowers literal class-value jsx css props through cx 2`] = `
+"import { cx as _cx } from "@mincho-js/css";
 function App() {
-  return <div className={_cx(base, _$mincho$$App2)} />;
+  return <>
+            <div className={_cx("base")} />
+            <div className={_cx(1)} />
+            <div className={_cx(false)} />
+            <div className={_cx(null)} />
+          </>;
 }"
 `;
 
-exports[`minchoBabelPlugin > merges string literal className before generated css class 1`] = `
+exports[`minchoBabelPlugin > lowers member-expression class-value jsx css prop through cx 1`] = `
+[
+  "extracted_2bu5eg.css.ts",
+  "",
+]
+`;
+
+exports[`minchoBabelPlugin > lowers member-expression class-value jsx css prop through cx 2`] = `
+"import { cx as _cx } from "@mincho-js/css";
+const motion = {
+  div: "div"
+};
+const styleA = "base";
+function App() {
+  return <motion.div className={_cx(styleA)} />;
+}"
+`;
+
+exports[`minchoBabelPlugin > merges expression className before class-value css prop 1`] = `
+[
+  "extracted_i8fczg.css.ts",
+  "",
+]
+`;
+
+exports[`minchoBabelPlugin > merges expression className before class-value css prop 2`] = `
+"import { cx as _cx } from "@mincho-js/css";
+const base = "base";
+const styles = {
+  root: "root"
+};
+function App() {
+  return <div className={_cx(base, styles.root)} />;
+}"
+`;
+
+exports[`minchoBabelPlugin > merges string literal className before generated css rule class 1`] = `
 [
   "extracted_ucbrq2.css.ts",
   "import { css as _css, cx as _cx } from "@mincho-js/css";
@@ -438,7 +655,7 @@ var _$mincho$$App2 = _$mincho$$App;",
 ]
 `;
 
-exports[`minchoBabelPlugin > merges string literal className before generated css class 2`] = `
+exports[`minchoBabelPlugin > merges string literal className before generated css rule class 2`] = `
 "import { _$mincho$$App as _$mincho$$App2 } from "extracted_ucbrq2.css.ts";
 import { css as _css, cx as _cx } from "@mincho-js/css";
 function App() {
