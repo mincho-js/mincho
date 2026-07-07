@@ -260,11 +260,24 @@ export function minchoVitePlugin(
             ? _options?.babel
             : { ..._options.babel, jsxCssProp: _options.jsxCssProp };
         const {
-          code,
+          code: transformedCode,
+          jsxCssPropTransformed,
           result: [file, cssExtract]
         } = await babelTransform(id, babelOptions);
 
-        if (!cssExtract || !file) return null;
+        if (!cssExtract || !file) {
+          if (
+            babelOptions?.jsxCssProp === true &&
+            jsxCssPropTransformed === true
+          ) {
+            return {
+              code: transformedCode,
+              map: { mappings: "" }
+            };
+          }
+
+          return null;
+        }
 
         if (config.command === "build" && config.build.watch) {
           this.addWatchFile(file);
@@ -299,7 +312,7 @@ export function minchoVitePlugin(
         });
 
         return {
-          code,
+          code: transformedCode,
           map: { mappings: "" }
         };
       }
@@ -978,13 +991,45 @@ if (import.meta.vitest) {
     `;
   }
 
-  async function createJsxCssPropViteFixture(prefix: string) {
+  function createJsxCssPropV2ClassValueFixtureSource(): string {
+    return `
+      const styleA = "style-a";
+      const styleB = ["style-b"];
+      const spreadProps = {
+        className: "from-spread",
+        css: "leaked-css",
+        id: "root"
+      };
+      const motion = { div: "div" };
+
+      function Button(props) {
+        return <button {...props} />;
+      }
+
+      function App() {
+        return <>
+          <Button css={styleA} />
+          <motion.div css={styleB} />
+        </>;
+      }
+
+      function SpreadApp() {
+        return <div {...spreadProps} css={styleA} />;
+      }
+
+      export { App, SpreadApp };
+    `;
+  }
+
+  async function createJsxCssPropViteFixture(
+    prefix: string,
+    source = createJsxCssPropFixtureSource()
+  ) {
     const cacheRoot = createViteFixtureCacheRoot();
     await fs.promises.mkdir(cacheRoot, { recursive: true });
     const root = await fs.promises.mkdtemp(join(cacheRoot, prefix));
     const srcRoot = join(root, "src");
     const entryPath = join(srcRoot, "entry.tsx");
-    const source = createJsxCssPropFixtureSource();
 
     await fs.promises.mkdir(srcRoot, { recursive: true });
     await fs.promises.writeFile(entryPath, source);
@@ -1090,6 +1135,29 @@ if (import.meta.vitest) {
 
     expect(classNameMergeMatch).not.toBeNull();
     expect(generatedLocalNames).toContain(classNameMergeMatch?.[1]);
+  }
+
+  function expectSourceToContainV2ClassValueCssPropLowering(
+    source: string,
+    cxIdentifier: string
+  ): void {
+    expect(source).toMatch(
+      new RegExp(
+        `<Button className=\\{${escapeRegExp(cxIdentifier)}\\(styleA\\)\\} />`
+      )
+    );
+    expect(source).toMatch(
+      new RegExp(
+        `<motion\\.div className=\\{${escapeRegExp(cxIdentifier)}\\(styleB\\)\\} />`
+      )
+    );
+    expect(source).toContain("css: _minchoCssProp");
+    expect(source).toContain("..._minchoRest");
+    expect(source).toMatch(
+      new RegExp(
+        `className=\\{${escapeRegExp(cxIdentifier)}\\(_minchoClassName, styleA\\)\\}`
+      )
+    );
   }
 
   function extractExportedVariableInitializerFromBuildSource(
@@ -1272,6 +1340,79 @@ if (import.meta.vitest) {
         );
         expectCssSourceToContainClassNames(virtualCss, generatedClassName);
         expect(virtualCss).toContain("color: red;");
+      } finally {
+        await fs.promises.rm(fixture.root, { force: true, recursive: true });
+      }
+    });
+
+    it("lowers v2 class-value component and pre-css spread css props before React JSX handling", async () => {
+      const fixture = await createJsxCssPropViteFixture(
+        "jsx-css-prop-v2-class-value-",
+        createJsxCssPropV2ClassValueFixtureSource()
+      );
+
+      try {
+        const babelTransformSpy = await spyOnSourceBabelTransform();
+        const harness = await createViteHarness({
+          configOverrides: {
+            root: fixture.root
+          },
+          pluginOptions: {
+            jsxCssProp: true
+          }
+        });
+        const transformedEntry = extractViteTransformCode(
+          await harness.transform(fixture.entryPath, fixture.source),
+          "Expected v2 class-value css-prop entry transform to return code"
+        );
+        const cxIdentifier = extractCxIdentifierFromSource(transformedEntry);
+
+        expect(babelTransformSpy).toHaveBeenCalledWith(fixture.entryPath, {
+          jsxCssProp: true
+        });
+        expect(transformedEntry).not.toContain(" css=");
+        expect(transformedEntry).not.toContain("css={styleA}");
+        expect(transformedEntry).not.toContain("css={styleB}");
+        expect(transformedEntry).not.toContain("css(styleA)");
+        expect(transformedEntry).not.toContain("_css(styleA)");
+        expectSourceToContainV2ClassValueCssPropLowering(
+          transformedEntry,
+          cxIdentifier
+        );
+      } finally {
+        await fs.promises.rm(fixture.root, { force: true, recursive: true });
+      }
+    });
+
+    it("preserves downstream transforms when enabled jsx css prop processing is unused", async () => {
+      const fixture = await createJsxCssPropViteFixture(
+        "jsx-css-prop-unused-",
+        `
+          function App() {
+            return <div className="base" />;
+          }
+
+          export { App };
+        `
+      );
+
+      try {
+        const babelTransformSpy = await spyOnSourceBabelTransform();
+        const harness = await createViteHarness({
+          configOverrides: {
+            root: fixture.root
+          },
+          pluginOptions: {
+            jsxCssProp: true
+          }
+        });
+
+        await expect(
+          harness.transform(fixture.entryPath, fixture.source)
+        ).resolves.toBeNull();
+        expect(babelTransformSpy).toHaveBeenCalledWith(fixture.entryPath, {
+          jsxCssProp: true
+        });
       } finally {
         await fs.promises.rm(fixture.root, { force: true, recursive: true });
       }

@@ -561,23 +561,58 @@ if (import.meta.vitest) {
     };
   }
 
-  async function createJsxCssPropFixture(prefix: string) {
+  function createJsxCssPropFixtureSource(): string {
+    return `
+      function App() {
+        return <div className="base" css={{ color: "red" }} />;
+      }
+    `;
+  }
+
+  function createJsxCssPropV2ClassValueFixtureSource(): string {
+    return `
+      const styleA = "style-a";
+      const styleB = ["style-b"];
+      const spreadProps = {
+        className: "from-spread",
+        css: "leaked-css",
+        id: "root"
+      };
+      const motion = { div: "div" };
+
+      function Button(props) {
+        return <button {...props} />;
+      }
+
+      function App() {
+        return <>
+          <Button css={styleA} />
+          <motion.div css={styleB} />
+        </>;
+      }
+
+      function SpreadApp() {
+        return <div {...spreadProps} css={styleA} />;
+      }
+    `;
+  }
+
+  async function createJsxCssPropFixture(
+    prefix: string,
+    source = createJsxCssPropFixtureSource()
+  ) {
     const cacheRoot = join(process.cwd(), "packages/esbuild/.cache");
     await fs.promises.mkdir(cacheRoot, { recursive: true });
     const root = await fs.promises.mkdtemp(join(cacheRoot, prefix));
     const srcRoot = join(root, "src");
     const entryPath = join(srcRoot, "entry.tsx");
-    const source = `
-      function App() {
-        return <div className="base" css={{ color: "red" }} />;
-      }
-    `;
     await fs.promises.mkdir(srcRoot, { recursive: true });
     await fs.promises.writeFile(entryPath, source, "utf8");
 
     return {
       entryPath,
-      root
+      root,
+      source
     };
   }
 
@@ -862,6 +897,42 @@ if (import.meta.vitest) {
     };
   }
 
+  function extractCxIdentifierFromSource(source: string): string {
+    const cxImportMatch =
+      /import \{ [^}]*\bcx(?: as ([A-Za-z_$][\w$]*))?[^}]*\} from "@mincho-js\/css";/.exec(
+        source
+      );
+
+    if (cxImportMatch == null) {
+      throw new Error("Expected transformed source to import cx");
+    }
+
+    return cxImportMatch[1] ?? "cx";
+  }
+
+  function expectSourceToContainV2ClassValueCssPropLowering(
+    source: string,
+    cxIdentifier: string
+  ): void {
+    expect(source).toMatch(
+      new RegExp(
+        `<Button className=\\{${escapeRegExp(cxIdentifier)}\\(styleA\\)\\} />`
+      )
+    );
+    expect(source).toMatch(
+      new RegExp(
+        `<motion\\.div className=\\{${escapeRegExp(cxIdentifier)}\\(styleB\\)\\} />`
+      )
+    );
+    expect(source).toContain("css: _minchoCssProp");
+    expect(source).toContain("..._minchoRest");
+    expect(source).toMatch(
+      new RegExp(
+        `className=\\{${escapeRegExp(cxIdentifier)}\\(_minchoClassName, styleA\\)\\}`
+      )
+    );
+  }
+
   function createDeferred<Value>() {
     let resolve!: (value: Value | PromiseLike<Value>) => void;
     let reject!: (reason?: unknown) => void;
@@ -993,17 +1064,55 @@ if (import.meta.vitest) {
       }
     });
 
+    it("lowers v2 class-value component and pre-css spread css props with jsxCssProp enabled", async () => {
+      const { entryPath, root } = await createJsxCssPropFixture(
+        "jsx-css-prop-v2-class-value-",
+        createJsxCssPropV2ClassValueFixtureSource()
+      );
+      const babelTransformSpy = vi.spyOn(integrationHelpers, "babelTransform");
+
+      try {
+        const harness = createBuildHarness({
+          plugin: minchoEsbuildPlugin({ jsxCssProp: true })
+        });
+        const scriptLoadResult = (await harness.loadScript({
+          path: entryPath
+        })) as ScriptLoadResult;
+        const cxIdentifier = extractCxIdentifierFromSource(
+          scriptLoadResult.contents
+        );
+        const missingResolveResult = await harness.resolveExtractedCss({
+          path: "extracted_missing.css.ts",
+          importer: entryPath,
+          pluginData: scriptLoadResult.pluginData
+        });
+
+        expect(babelTransformSpy).toHaveBeenCalledWith(entryPath, {
+          jsxCssProp: true
+        });
+        expect(scriptLoadResult.loader).toBe("tsx");
+        expect(scriptLoadResult.contents).not.toContain(" css=");
+        expect(scriptLoadResult.contents).not.toContain("css={styleA}");
+        expect(scriptLoadResult.contents).not.toContain("css={styleB}");
+        expect(scriptLoadResult.contents).not.toContain("css(styleA)");
+        expect(scriptLoadResult.contents).not.toContain("_css(styleA)");
+        expectSourceToContainV2ClassValueCssPropLowering(
+          scriptLoadResult.contents,
+          cxIdentifier
+        );
+        expect(missingResolveResult).toBeUndefined();
+      } finally {
+        await fs.promises.rm(root, { force: true, recursive: true });
+      }
+    });
+
     it("forwards jsxCssProp through the exported plugin array", async () => {
       const { entryPath, root } = await createJsxCssPropFixture(
-        "jsx-css-prop-plugin-array-"
+        "jsx-css-prop-plugin-array-",
+        createJsxCssPropV2ClassValueFixtureSource()
       );
       const minchoPlugin = minchoEsbuildPlugins({ jsxCssProp: true })[0];
-      const babelTransformSpy = vi
-        .spyOn(integrationHelpers, "babelTransform")
-        .mockResolvedValue({
-          code: "export const app = {};",
-          result: ["", ""]
-        });
+      const babelTransformSpy = vi.spyOn(integrationHelpers, "babelTransform");
 
       if (minchoPlugin == null) {
         throw new Error(
@@ -1013,11 +1122,21 @@ if (import.meta.vitest) {
 
       try {
         const harness = createBuildHarness({ plugin: minchoPlugin });
-        await harness.loadScript({ path: entryPath });
+        const scriptLoadResult = (await harness.loadScript({
+          path: entryPath
+        })) as ScriptLoadResult;
+        const cxIdentifier = extractCxIdentifierFromSource(
+          scriptLoadResult.contents
+        );
 
         expect(babelTransformSpy).toHaveBeenCalledWith(entryPath, {
           jsxCssProp: true
         });
+        expect(scriptLoadResult.contents).not.toContain(" css=");
+        expectSourceToContainV2ClassValueCssPropLowering(
+          scriptLoadResult.contents,
+          cxIdentifier
+        );
       } finally {
         await fs.promises.rm(root, { force: true, recursive: true });
       }
