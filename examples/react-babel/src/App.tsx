@@ -1,8 +1,24 @@
 import "@examples/shared-component/style.css";
 import { SharedExampleCard } from "@examples/shared-component";
+import { css } from "@mincho-js/css";
 import { styled } from "@mincho-js/react";
+import type { ReactNode } from "react";
 
 import { sharedCardHostClassName } from "./App.css.ts";
+
+const styleA = css({
+  display: "block",
+});
+
+function ClassNameForwardingExample({
+  children,
+  className,
+}: {
+  children: ReactNode;
+  className?: string;
+}) {
+  return <section className={className}>{children}</section>;
+}
 
 const BaseComponent = styled.div({
   base: {
@@ -66,6 +82,10 @@ function App() {
       <Container size="large" color="blue">
         Hello World
       </Container>
+      <div css={styleA}>Class-value css prop mode</div>
+      <ClassNameForwardingExample css={styleA}>
+        Custom component css prop forwarding
+      </ClassNameForwardingExample>
       <div
         className={sharedCardHostClassName}
         css={{
