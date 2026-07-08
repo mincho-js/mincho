@@ -66,8 +66,10 @@ With `jsxCssProp: true`, supported values are lowered to either the existing Min
 
 The scoped React JSX types define the `css` prop value as `ComplexCSSRule | ClassValue`.
 
-- Inline object expressions are CSS-rule mode through `css(...)`, so `<div css={{ color: "red" }} />` extracts a Mincho CSS rule. Inline object class dictionaries are not supported in this position; assign a `ClassValue` to an identifier, call, member expression, array, conditional, or literal value instead.
-- Identifiers, calls, member expressions, arrays, conditionals, strings, numbers, booleans, `null`, and `undefined` are class-value mode through `cx(...)` semantics. This is the migration path for existing Mincho class values: `const styleA = css(...); <div css={styleA} />`.
+- Inline object expressions are CSS-rule mode through `css(...)`, so `<div css={{ color: "red" }} />` extracts a Mincho CSS rule. Inline object class dictionaries are not supported in this position; assign a `ClassValue` to an identifier, call, member expression, conditional, or literal value instead.
+- Inline array expressions are also CSS-rule mode through `css([...])`, so `<div css={[baseClass, { color: "red" }]} />` composes class names and CSS rule objects through Mincho's `ComplexCSSRule` path.
+- Identifiers, calls, member expressions, conditionals, strings, numbers, booleans, `null`, and `undefined` are class-value mode through `cx(...)` semantics. This is the migration path for existing Mincho class values: `const styleA = css(...); <div css={styleA} />`.
+- Class-value arrays must be explicit, for example `<div css={cx(["base", active && "active"])} />`, or assigned to an identifier before being passed to `css`.
 - Strings are class values, not raw CSS declarations. `css="base"` means `cx("base")`, not a serialized CSS body.
 - Function values are unsupported in compile-away mode.
 

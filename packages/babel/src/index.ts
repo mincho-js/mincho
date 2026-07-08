@@ -417,13 +417,13 @@ if (import.meta.vitest) {
       expect(code).toContain("className={_cx(null)}");
     });
 
-    it("lowers array class-value jsx css prop through cx", () => {
+    it("lowers array literal jsx css prop through css rule mode", () => {
       const { result, code } = babelTransform(
         `
-        const isActive = true;
+        const base = "base";
 
         function App() {
-          return <div css={["base", isActive && "active"]} />;
+          return <div css={[base, { color: "red" }]} />;
         }
       `,
         { jsxCssProp: true }
@@ -432,7 +432,32 @@ if (import.meta.vitest) {
       expect(result).toMatchSnapshot();
       expect(code).toMatchSnapshot();
       expect(code).not.toContain(" css=");
-      expect(code).toContain('className={_cx(["base", isActive && "active"])}');
+      expect(result[1]).toContain("_css([base, {");
+      expect(result[1]).toContain('color: "red"');
+      expect(code).toContain("className={_$mincho$$App2}");
+      expect(code).not.toContain("_cx([base");
+    });
+
+    it("lowers explicit cx array class values through class-value mode", () => {
+      const { result, code } = babelTransform(
+        `
+        import { cx } from "@mincho-js/css";
+
+        const isActive = true;
+
+        function App() {
+          return <div css={cx(["base", isActive && "active"])} />;
+        }
+      `,
+        { jsxCssProp: true }
+      );
+
+      expect(result).toMatchSnapshot();
+      expect(code).toMatchSnapshot();
+      expect(code).not.toContain(" css=");
+      expect(code).toContain(
+        'className={_cx(cx(["base", isActive && "active"]))}'
+      );
     });
 
     it("lowers identifier css result through cx without double wrapping", () => {

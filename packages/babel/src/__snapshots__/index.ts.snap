@@ -480,18 +480,24 @@ function App() {
 }"
 `;
 
-exports[`minchoBabelPlugin > lowers array class-value jsx css prop through cx 1`] = `
+exports[`minchoBabelPlugin > lowers array literal jsx css prop through css rule mode 1`] = `
 [
-  "extracted_1rdghqi.css.ts",
-  "",
+  "extracted_1q6f771.css.ts",
+  "import { css as _css } from "@mincho-js/css";
+const base = "base";
+export var _$mincho$$App = _css([base, {
+  color: "red"
+}]);
+var _$mincho$$App2 = _$mincho$$App;",
 ]
 `;
 
-exports[`minchoBabelPlugin > lowers array class-value jsx css prop through cx 2`] = `
-"import { cx as _cx } from "@mincho-js/css";
-const isActive = true;
+exports[`minchoBabelPlugin > lowers array literal jsx css prop through css rule mode 2`] = `
+"import { _$mincho$$App as _$mincho$$App2 } from "extracted_1q6f771.css.ts";
+import { css as _css } from "@mincho-js/css";
+const base = "base";
 function App() {
-  return <div className={_cx(["base", isActive && "active"])} />;
+  return <div className={_$mincho$$App2} />;
 }"
 `;
 
@@ -547,6 +553,21 @@ exports[`minchoBabelPlugin > lowers custom element class-value jsx css prop thro
 const styleA = "base";
 function App() {
   return <my-element className={_cx(styleA)} />;
+}"
+`;
+
+exports[`minchoBabelPlugin > lowers explicit cx array class values through class-value mode 1`] = `
+[
+  "extracted_zgs157.css.ts",
+  "",
+]
+`;
+
+exports[`minchoBabelPlugin > lowers explicit cx array class values through class-value mode 2`] = `
+"import { cx, cx as _cx } from "@mincho-js/css";
+const isActive = true;
+function App() {
+  return <div className={_cx(cx(["base", isActive && "active"]))} />;
 }"
 `;
 

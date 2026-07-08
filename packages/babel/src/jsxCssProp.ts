@@ -529,7 +529,7 @@ function getCssExpression(
 function classifyCssPropValue(
   expression: t.Expression
 ): CssPropValueClassification {
-  if (t.isObjectExpression(expression)) {
+  if (t.isObjectExpression(expression) || t.isArrayExpression(expression)) {
     return "css-rule";
   }
 
