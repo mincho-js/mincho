@@ -118,6 +118,14 @@ if (import.meta.vitest) {
       expect(cx("foo", undefined, "baz")).toBe("foo baz");
     });
 
+    it("handles direct runtime fallback expressions", () => {
+      const providedClass = "";
+      const maybeClass = null;
+
+      expect(cx("base", providedClass || "fallback")).toBe("base fallback");
+      expect(cx("base", maybeClass ?? "fallback")).toBe("base fallback");
+    });
+
     it("handles object inputs", () => {
       expect(cx({ foo: true, bar: false, baz: true })).toBe("foo baz");
       expect(cx({ foo: true })).toBe("foo");

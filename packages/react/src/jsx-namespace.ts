@@ -44,6 +44,10 @@ if (import.meta.vitest) {
     it("defines css values from ComplexCSSRule and ClassValue", () => {
       const cssRule: ComplexCSSRule = { color: "red" };
       const condition = true as boolean;
+      const providedClass: string | undefined =
+        Math.random() > 0.5 ? "base" : undefined;
+      const maybeClass: string | null = Math.random() > 0.5 ? null : "base";
+      const getClassName = () => "base";
 
       assertType<MinchoCssPropValue>(cssRule);
       assertType<MinchoCssPropValue>("base");
@@ -51,12 +55,32 @@ if (import.meta.vitest) {
       assertType<MinchoCssPropValue>(null);
       assertType<MinchoCssPropValue>(undefined);
       assertType<MinchoCssPropValue>(["base", condition && "active"]);
+      assertType<MinchoCssPropValue>(condition ? "base" : "fallback");
+      assertType<MinchoCssPropValue>(condition && "active");
+      assertType<MinchoCssPropValue>(condition || "fallback");
+      assertType<MinchoCssPropValue>(maybeClass ?? "fallback");
+      assertType<MinchoCssPropValue>(getClassName());
       assertType<MinchoCssPropValue>({ active: condition });
+      assertType<MinchoCssPropValue>(providedClass || { color: "red" });
+      assertType<MinchoCssPropValue>(maybeClass ?? [{ color: "red" }]);
+      // @ts-expect-error TypeScript rejects always-truthy object literal logical left operands before Mincho css prop typing.
+      // eslint-disable-next-line no-constant-binary-expression -- The constant operand is the TypeScript error under test.
+      assertType<MinchoCssPropValue>({ color: "red" } || providedClass);
+      // @ts-expect-error TypeScript rejects never-nullish object literal nullish left operands before Mincho css prop typing.
+      // eslint-disable-next-line no-constant-binary-expression -- The constant operand is the TypeScript error under test.
+      assertType<MinchoCssPropValue>({ color: "red" } ?? providedClass);
+      // @ts-expect-error TypeScript rejects always-truthy object literal logical left operands before Mincho css prop typing.
+      // eslint-disable-next-line no-constant-binary-expression -- The constant operand is the TypeScript error under test.
+      assertType<MinchoCssPropValue>({ color: "red" } && providedClass);
     });
 
     it("adds css to string-compatible intrinsic className props", () => {
       const cssRule: ComplexCSSRule = { color: "red" };
       const condition = true as boolean;
+      const providedClass: string | undefined =
+        Math.random() > 0.5 ? "base" : undefined;
+      const maybeClass: string | null = Math.random() > 0.5 ? null : "base";
+      const getClassName = () => "base";
 
       assertType<JSX.IntrinsicElements["div"]>({
         css: "base"
@@ -71,7 +95,53 @@ if (import.meta.vitest) {
       });
 
       assertType<JSX.IntrinsicElements["div"]>({
+        css: condition ? "base" : "fallback"
+      });
+
+      assertType<JSX.IntrinsicElements["div"]>({
+        css: condition && "active"
+      });
+
+      assertType<JSX.IntrinsicElements["div"]>({
+        css: condition || "fallback"
+      });
+
+      assertType<JSX.IntrinsicElements["div"]>({
+        css: maybeClass ?? "fallback"
+      });
+
+      assertType<JSX.IntrinsicElements["div"]>({
+        css: getClassName()
+      });
+
+      assertType<JSX.IntrinsicElements["div"]>({
         css: { color: "red" }
+      });
+
+      assertType<JSX.IntrinsicElements["div"]>({
+        css: providedClass || { color: "red" }
+      });
+
+      assertType<JSX.IntrinsicElements["div"]>({
+        css: maybeClass ?? [{ color: "red" }]
+      });
+
+      assertType<JSX.IntrinsicElements["div"]>({
+        // @ts-expect-error TypeScript rejects always-truthy object literal logical left operands before Mincho css prop typing.
+        // eslint-disable-next-line no-constant-binary-expression -- The constant operand is the TypeScript error under test.
+        css: { color: "red" } || providedClass
+      });
+
+      assertType<JSX.IntrinsicElements["div"]>({
+        // @ts-expect-error TypeScript rejects never-nullish object literal nullish left operands before Mincho css prop typing.
+        // eslint-disable-next-line no-constant-binary-expression -- The constant operand is the TypeScript error under test.
+        css: { color: "red" } ?? providedClass
+      });
+
+      assertType<JSX.IntrinsicElements["div"]>({
+        // @ts-expect-error TypeScript rejects always-truthy object literal logical left operands before Mincho css prop typing.
+        // eslint-disable-next-line no-constant-binary-expression -- The constant operand is the TypeScript error under test.
+        css: { color: "red" } && providedClass
       });
 
       assertType<ReactJSX.IntrinsicElements["div"]>({
@@ -129,7 +199,10 @@ if (import.meta.vitest) {
         Props
       >;
 
+      const condition: boolean = Math.random() > 0.5;
       const functionCss = () => "base";
+      const maybeClass: string | null = Math.random() > 0.5 ? null : "base";
+      const getClassName = () => "base";
 
       assertType<ManagedProps<{ className?: string; label: string }>>({
         css: "base",
@@ -147,6 +220,37 @@ if (import.meta.vitest) {
       >({
         css: { color: "red" },
         label: "Button"
+      });
+
+      assertType<ManagedProps<{ className?: string; label: string }>>({
+        css: condition ? "base" : "fallback",
+        label: "Button"
+      });
+
+      assertType<ManagedProps<{ className?: string; label: string }>>({
+        css: condition && "active",
+        label: "Button"
+      });
+
+      assertType<ManagedProps<{ className?: string; label: string }>>({
+        css: condition || "fallback",
+        label: "Button"
+      });
+
+      assertType<ManagedProps<{ className?: string; label: string }>>({
+        css: maybeClass ?? "fallback",
+        label: "Button"
+      });
+
+      assertType<ManagedProps<{ className?: string; label: string }>>({
+        css: getClassName(),
+        label: "Button"
+      });
+
+      assertType<ManagedProps<{ className?: string; label: string }>>({
+        label: "Button",
+        // @ts-expect-error function-valued css identifiers are not valid css prop values.
+        css: getClassName
       });
 
       assertType<ManagedProps<{ label: string }>>({

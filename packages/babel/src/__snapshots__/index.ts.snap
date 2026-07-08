@@ -173,6 +173,34 @@ const longClass = \`abc \${red}\`;
 console.log(longClass);"
 `;
 
+exports[`minchoBabelPlugin > direct-emits string-literal class-value jsx css props 1`] = `
+[
+  "extracted_fd2g76.css.ts",
+  "",
+]
+`;
+
+exports[`minchoBabelPlugin > direct-emits string-literal class-value jsx css props 2`] = `
+"const motion = {
+  div: "div"
+};
+function Button(props) {
+  return <button {...props} />;
+}
+function App() {
+  return <>
+            <div className="base" />
+            <div className="base" />
+            <div className="" />
+            <div className=" " />
+            <div className="base active" />
+            <Button className="base" />
+            <motion.div className="base" />
+            <my-element className="base" />
+          </>;
+}"
+`;
+
 exports[`minchoBabelPlugin > export default style 1`] = `
 [
   "extracted_w4qxwb.css.ts",
@@ -449,6 +477,43 @@ function App() {
 }"
 `;
 
+exports[`minchoBabelPlugin > keeps mixed literal class-value jsx css props in direct and cx modes 1`] = `
+[
+  "extracted_ihi0ar.css.ts",
+  "",
+]
+`;
+
+exports[`minchoBabelPlugin > keeps mixed literal class-value jsx css props in direct and cx modes 2`] = `
+"import { cx as _cx } from "@mincho-js/css";
+const styleA = "style-a";
+function App() {
+  return <>
+            <div className="base" />
+            <div className={_cx(styleA)} />
+          </>;
+}"
+`;
+
+exports[`minchoBabelPlugin > keeps non-string literal class-value jsx css props through cx 1`] = `
+[
+  "extracted_gvqbk7.css.ts",
+  "",
+]
+`;
+
+exports[`minchoBabelPlugin > keeps non-string literal class-value jsx css props through cx 2`] = `
+"import { cx as _cx } from "@mincho-js/css";
+function App() {
+  return <>
+            <div className={_cx(1)} />
+            <div className={_cx(false)} />
+            <div className={_cx(null)} />
+            <div className={_cx(undefined)} />
+          </>;
+}"
+`;
+
 exports[`minchoBabelPlugin > leaves jsx css prop unchanged when css prop lowering is disabled 1`] = `
 [
   "extracted_1a9gei1.css.ts",
@@ -607,25 +672,6 @@ exports[`minchoBabelPlugin > lowers inline object jsx css prop through css rule 
 import { css as _css } from "@mincho-js/css";
 function App() {
   return <div className={_$mincho$$App2} />;
-}"
-`;
-
-exports[`minchoBabelPlugin > lowers literal class-value jsx css props through cx 1`] = `
-[
-  "extracted_1nyqu7u.css.ts",
-  "",
-]
-`;
-
-exports[`minchoBabelPlugin > lowers literal class-value jsx css props through cx 2`] = `
-"import { cx as _cx } from "@mincho-js/css";
-function App() {
-  return <>
-            <div className={_cx("base")} />
-            <div className={_cx(1)} />
-            <div className={_cx(false)} />
-            <div className={_cx(null)} />
-          </>;
 }"
 `;
 

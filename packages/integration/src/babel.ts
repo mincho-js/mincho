@@ -159,18 +159,31 @@ if (import.meta.vitest) {
       expect(code).not.toContain('color: "red"');
     });
 
-    it("keeps class-value css props on the cx path without double wrapping", async () => {
+    it("lowers bare string css props directly and dynamic values through cx", async () => {
       const fixturePath = await createBabelFixture(
         `
           import { css } from "@mincho-js/css";
 
           const styleA = css({ color: "blue" });
+          const condition = true;
+          const flag = false;
+          const providedClass = "provided";
+          const maybeClass = null;
+
+          function getClassName() {
+            return "call-class";
+          }
 
           function App() {
             return <>
               <div className="base" css={{ color: "red" }} />
               <div css={styleA} />
               <div css="literal-class" />
+              <div css={condition ? "active" : "inactive"} />
+              <div css={flag && "active"} />
+              <div css={providedClass || "fallback"} />
+              <div css={maybeClass ?? "fallback"} />
+              <div css={getClassName()} />
             </>;
           }
         `,
@@ -207,11 +220,136 @@ if (import.meta.vitest) {
       expect(code).toMatch(
         new RegExp(`className=\\{${escapeRegExp(cxIdentifier)}\\(styleA\\)\\}`)
       );
+      expect(code).toContain('className="literal-class"');
       expect(code).toMatch(
         new RegExp(
-          `className=\\{${escapeRegExp(cxIdentifier)}\\("literal-class"\\)\\}`
+          `className=\\{${escapeRegExp(cxIdentifier)}\\(${escapeRegExp(
+            'condition ? "active" : "inactive"'
+          )}\\)\\}`
         )
       );
+      expect(code).toMatch(
+        new RegExp(
+          `className=\\{${escapeRegExp(cxIdentifier)}\\(${escapeRegExp(
+            'flag && "active"'
+          )}\\)\\}`
+        )
+      );
+      expect(code).toMatch(
+        new RegExp(
+          `className=\\{${escapeRegExp(cxIdentifier)}\\(${escapeRegExp(
+            'providedClass || "fallback"'
+          )}\\)\\}`
+        )
+      );
+      expect(code).toMatch(
+        new RegExp(
+          `className=\\{${escapeRegExp(cxIdentifier)}\\(${escapeRegExp(
+            'maybeClass ?? "fallback"'
+          )}\\)\\}`
+        )
+      );
+      expect(code).toMatch(
+        new RegExp(
+          `className=\\{${escapeRegExp(cxIdentifier)}\\(${escapeRegExp(
+            "getClassName()"
+          )}\\)\\}`
+        )
+      );
+    });
+
+    it("lowers representative logical css rule branches", async () => {
+      const fixturePath = await createBabelFixture(
+        `
+          const providedClass = "provided";
+          const maybeClass = null;
+          const andClass = "and-class";
+
+          function App() {
+            return <>
+              <div css={providedClass || { color: "red" }} />
+              <div css={maybeClass ?? [{ color: "green" }]} />
+              <div css={{ color: "blue" } || unreachableClass} />
+              <div css={{ color: "yellow" } && andClass} />
+              <div css={{ color: "purple" } && { color: "orange" }} />
+            </>;
+          }
+        `,
+        "css-prop-logical-rule-branches"
+      );
+      const { result, code } = await babelTransform(fixturePath, {
+        jsxCssProp: true
+      });
+      const [sidecarFile, sidecarSource] = result;
+      const exportedDeclarations = sidecarSource.match(/export var/g) ?? [];
+      const sidecarImportMatch = new RegExp(
+        `import \\{ ([^}]+) \\} from "${escapeRegExp(sidecarFile)}";`
+      ).exec(code);
+      const sidecarRuntimeNames = [
+        ...((sidecarImportMatch?.[1] ?? "").matchAll(
+          /(?:^|, )([A-Za-z_$][\w$]*)(?: as ([A-Za-z_$][\w$]*))?/g
+        ) ?? [])
+      ].map(([, importedName, localName]) => localName ?? importedName);
+      const cxImportMatch =
+        /import \{ [^}]*\bcx(?: as ([A-Za-z_$][\w$]*))?[^}]*\} from "@mincho-js\/css";/.exec(
+          code
+        );
+      const cxIdentifier = cxImportMatch?.[1] ?? "cx";
+      const rightOrClassNameMatch = new RegExp(
+        `className=\\{${escapeRegExp(
+          cxIdentifier
+        )}\\(providedClass \\|\\| ([A-Za-z_$][\\w$]*)\\)\\}`
+      ).exec(code);
+      const rightNullishClassNameMatch = new RegExp(
+        `className=\\{${escapeRegExp(
+          cxIdentifier
+        )}\\(maybeClass \\?\\? ([A-Za-z_$][\\w$]*)\\)\\}`
+      ).exec(code);
+      const generatedOnlyClassNameMatches = [
+        ...code.matchAll(/className=\{([A-Za-z_$][\w$]*)\}/g)
+      ];
+      const orangeCssMatches = [...sidecarSource.matchAll(/color: "orange"/g)];
+
+      expect(sidecarFile).toMatch(/^extracted_[a-z0-9]+\.css\.ts$/);
+      expect(sidecarImportMatch).not.toBeNull();
+      expect(cxImportMatch).not.toBeNull();
+      expect(exportedDeclarations).toHaveLength(4);
+      expect(sidecarSource).toMatch(
+        /export var [A-Za-z_$][\w$]* = [A-Za-z_$][\w$]*\(\{\s*color: "red"\s*\}\);/s
+      );
+      expect(sidecarSource).toMatch(
+        /export var [A-Za-z_$][\w$]* = [A-Za-z_$][\w$]*\(\[\{\s*color: "green"\s*\}\]\);/s
+      );
+      expect(sidecarSource).toMatch(
+        /export var [A-Za-z_$][\w$]* = [A-Za-z_$][\w$]*\(\{\s*color: "blue"\s*\}\);/s
+      );
+      expect(sidecarSource).toMatch(
+        /export var [A-Za-z_$][\w$]* = [A-Za-z_$][\w$]*\(\{\s*color: "orange"\s*\}\);/s
+      );
+      expect(orangeCssMatches).toHaveLength(1);
+      expect(code).not.toContain(" css=");
+      expect(rightOrClassNameMatch).not.toBeNull();
+      expect(rightNullishClassNameMatch).not.toBeNull();
+      expect(sidecarRuntimeNames).toContain(rightOrClassNameMatch?.[1]);
+      expect(sidecarRuntimeNames).toContain(rightNullishClassNameMatch?.[1]);
+      expect(
+        generatedOnlyClassNameMatches.some(([, className]) =>
+          sidecarRuntimeNames.includes(className)
+        )
+      ).toBe(true);
+      expect(
+        generatedOnlyClassNameMatches.filter(([, className]) =>
+          sidecarRuntimeNames.includes(className)
+        )
+      ).toHaveLength(2);
+      expect(code).toMatch(
+        new RegExp(
+          `className=\\{${escapeRegExp(cxIdentifier)}\\(andClass\\)\\}`
+        )
+      );
+      expect(`${code}\n${sidecarSource}`).not.toContain("unreachableClass");
+      expect(`${code}\n${sidecarSource}`).not.toContain('color: "yellow"');
+      expect(`${code}\n${sidecarSource}`).not.toContain('color: "purple"');
     });
 
     it("leaves jsx css prop lowering disabled by default", async () => {

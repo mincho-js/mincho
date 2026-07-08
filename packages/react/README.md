@@ -66,12 +66,82 @@ With `jsxCssProp: true`, supported values are lowered to either the existing Min
 
 The scoped React JSX types define the `css` prop value as `ComplexCSSRule | ClassValue`.
 
-- Inline object expressions are CSS-rule mode through `css(...)`, so `<div css={{ color: "red" }} />` extracts a Mincho CSS rule. Inline object class dictionaries are not supported in this position; assign a `ClassValue` to an identifier, call, member expression, conditional, or literal value instead.
-- Inline array expressions are also CSS-rule mode through `css([...])`, so `<div css={[baseClass, { color: "red" }]} />` composes class names and CSS rule objects through Mincho's `ComplexCSSRule` path.
-- Identifiers, calls, member expressions, conditionals, strings, numbers, booleans, `null`, and `undefined` are class-value mode through `cx(...)` semantics. This is the migration path for existing Mincho class values: `const styleA = css(...); <div css={styleA} />`.
+- Inline object expressions are CSS-rule mode through `css(...)`, so `<div css={{ color: "red" }} />` extracts a Mincho CSS rule. Transparent direct wrappers keep that mode, including `<div css={{ color: "red" }!} />`, `<div css={{ color: "red" } as const} />`, `<div css={{ color: "red" } satisfies ComplexCSSRule} />`, and `<div css={({ color: "red" })} />`.
+- Inline array expressions are also CSS-rule mode through `css([...])`, so `<div css={[baseClass, { color: "red" }]} />` composes class names and CSS rule objects through Mincho's `ComplexCSSRule` path. Transparent direct array wrappers are supported too, for example `<div css={[{ color: "red" }] as const} />` and `<div css={([{ color: "red" }])} />`.
+- All dynamic class values lower through `cx(...)`. This includes identifiers, members, calls, conditionals, logicals, non-string literals, template literals, and explicit `cx(...)` calls. This is the migration path for existing Mincho class values: `const styleA = css(...); <div css={styleA} />`.
 - Class-value arrays must be explicit, for example `<div css={cx(["base", active && "active"])} />`, or assigned to an identifier before being passed to `css`.
-- Strings are class values, not raw CSS declarations. `css="base"` means `cx("base")`, not a serialized CSS body.
+- Strings are class values, not raw CSS declarations. Bare string-literal class values such as `<div css="base" />` and `<div css={"base"} />` lower directly to `className="base"` without `cx(...)` when no explicit `className` or spread-derived `className` must be merged.
+- If an explicit `className` or pre-css spread aggregate contributes an existing class, string-literal class values still merge through `cx(existing, cssValue)` with the existing class first.
 - Function values are unsupported in compile-away mode.
+
+Supported expression-valued `css` props are class values and lower through `cx(...)`:
+
+```tsx
+<div css={condition ? "panel active" : "panel"} />
+<div css={flag && "panel-active"} />
+<div css={providedClass || "panel-fallback"} />
+<div css={maybeClass ?? "panel-fallback"} />
+<div css={getClassName()} />
+```
+
+First-level static CSS-rule branches are also supported. Mincho lowers each object or array branch with the same CSS-rule extraction path used for direct `css` rules, then composes the generated class names. It does not call `css(condition ? ...)` and does not generate CSS at runtime.
+
+```tsx
+<div css={condition ? { color: "red" } : { color: "blue" }} />
+<div css={condition ? [{ color: "red" }] : [{ color: "blue" }]} />
+<div css={condition && { color: "red" }} />
+<div css={condition && [{ color: "red" }]} />
+<div css={condition ? styleA : { color: "red" }} />
+<div css={condition ? classNameA : { color: "red" }} />
+```
+
+Pure object/object or array/array ternaries compile to a `className` conditional between generated class identifiers. Mixed class-value/object branches keep the class-value branch as written and lower only the static CSS-rule branch inside `cx(...)`. Logical `condition && { ... }` and `condition && [{ ... }]` lower the right branch and compose through `cx(condition && generatedClass)`, so `false` does not become class text.
+
+First-level `||` and `??` rule fallbacks are supported when a direct object or array rule is the right operand. The generated class stays inside one logical `_cx(...)` expression, for example `_cx(providedClass || generatedClass)`, not `_cx(providedClass, generatedClass)`.
+
+```tsx
+<div css={providedClass || { color: "red" }} />
+<div css={providedClass || [{ color: "red" }]} />
+<div css={maybeClass ?? { color: "red" }} />
+<div css={maybeClass ?? [{ color: "red" }]} />
+```
+
+Static-left `||` and `??` rule operands simplify to the generated class for the left rule. The right fallback is unreachable, so Mincho does not evaluate it, reference it, or extract CSS from it. When no explicit `className` or spread aggregate must be merged, the generated-only result emits the generated class directly, not `cx(generatedClass)`. If an explicit `className` or spread aggregate is present, Mincho still merges the existing class first, equivalent to `cx(existing, generated)`.
+
+```tsx
+<div css={{ color: "red" } || providedClass} />
+<div css={[{ color: "red" }] || providedClass} />
+<div css={{ color: "red" } ?? providedClass} />
+<div css={[{ color: "red" }] ?? providedClass} />
+```
+
+Static-left `&&` object and array rules are truthy guards only. The left rule is not applied as a style, and Mincho emits no dead CSS for it. A dynamic right operand remains `cx(dynamicRight)` because the right operand is a class-value expression, so `{ color: "red" } && providedClass` lowers as `_cx(providedClass)` or equivalent. When both sides are static rules, `{ color: "red" } && { color: "blue" }` extracts only the blue right rule and, when no merge is needed, emits that generated class directly instead of `cx(generatedClass)`. Explicit `className` or spread aggregate merges still use `cx(existing, generated)`.
+
+```tsx
+<div css={{ color: "red" } && providedClass} />
+<div css={[{ color: "red" }] && providedClass} />
+<div css={{ color: "red" } && { color: "blue" }} />
+```
+
+The static-rule support is first-level only. Nested, chained, permutation-style, and sequence-expression object/array CSS-rule branches remain unsupported:
+
+```tsx
+<div css={outer ? inner ? { color: "red" } : { color: "blue" } : styleA} />
+<div css={condition && flag && { color: "red" }} />
+<div css={(condition && flag) || { color: "red" }} />
+<div css={a || b || { color: "red" }} />
+<div css={(0, { color: "red" })} />
+<div css={(0, [{ color: "red" }])} />
+```
+
+Class-value-only `||` and `??` still lower through `cx(...)` without CSS-rule extraction:
+
+```tsx
+<div css={providedClass || "panel-fallback"} />
+<div css={maybeClass ?? "panel-fallback"} />
+```
+
+The transform only treats syntactic `ObjectExpression` and `ArrayExpression` values, after transparent wrapper normalization, as static CSS rules. It does not evaluate identifiers, member expressions, imports, object variables, constants, or function calls into CSS rules. There is no static evaluation for identifier, member, call, or import-based CSS-rule discovery.
 
 ### v2 Targets and Forwarding
 
@@ -95,6 +165,8 @@ Spread-only css values are not transformed by Babel. If an own `css` prop reache
 
 `@mincho-js/react/jsx-runtime` and `@mincho-js/react/jsx-dev-runtime` are thin wrappers around React's automatic JSX runtimes. They only guard missed transforms for own `css` props.
 
+Supported static rule branches are converted to generated class names before JSX reaches the runtime. Mincho does not provide StyleX `stylex.props` fallback behavior, inject a StyleX helper namespace, evaluate imported files for CSS rules, or fall back to runtime CSS generation.
+
 If an own `css` prop reaches either runtime, Mincho throws:
 
 ```text
@@ -117,6 +189,7 @@ When `jsxCssProp: true` is enabled, unsupported v2 cases fail during the transfo
 | Explicit `key` or `ref` on a spread css-prop element | `Mincho JSX css prop does not support key/ref on spread elements in compile-away mode` |
 | Shorthand `css` | `Mincho JSX css prop requires an expression value` |
 | Function value | `Mincho JSX css prop does not support function values in compile-away mode` |
+| Nested, chained, sequence, unsupported logical, or dynamically resolved object/array CSS-rule value | `Mincho JSX css prop does not support conditional, logical, or wrapped object/array CSS rule values in compile-away mode` |
 | Duplicate `css` | `Mincho JSX css prop must appear only once` |
 | Duplicate `className` | `Mincho JSX css prop cannot merge duplicate className attributes` |
 | Shorthand or unsupported `className` value | `Mincho JSX css prop requires className to be a string literal or expression` |
