@@ -31,7 +31,7 @@ type ClassIgnored = true | bigint;
 /**
  * All primitive values
  */
-type ClassPrimitive = ClassStringable | ClassFalsy | ClassIgnored;
+export type ClassPrimitive = ClassStringable | ClassFalsy | ClassIgnored;
 
 // -- Composite Types (complex values, processed recursively) ------------------
 /**

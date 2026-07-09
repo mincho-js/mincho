@@ -1,3 +1,3 @@
 export { cx } from "./cx.js";
 
-export type { ClassValue, Cx } from "./types.js";
+export type { ClassPrimitive, ClassValue, Cx } from "./types.js";

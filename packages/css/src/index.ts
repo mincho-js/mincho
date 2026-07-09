@@ -65,7 +65,7 @@ export type {
   ResolveTheme
 } from "./theme/types.js";
 export { cx } from "./classname/index.js";
-export type { ClassValue, Cx } from "./classname/index.js";
+export type { ClassPrimitive, ClassValue, Cx } from "./classname/index.js";
 export { defineRules } from "./defineRules/index.js";
 export type {
   DefineRulesComplexCssInput,

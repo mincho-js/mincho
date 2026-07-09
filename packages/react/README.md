@@ -64,17 +64,16 @@ With `jsxCssProp: true`, supported values are lowered to either the existing Min
 
 ### v2 Value Semantics
 
-The scoped React JSX types define the `css` prop value as `ComplexCSSRule | ClassValue`.
+The scoped React JSX types define the `css` prop value as `ComplexCSSRule | ClassPrimitive`, not the full recursive `ClassValue` type. The primitive side reuses the existing exported `ClassPrimitive` that backs `cx(...)`; React does not duplicate it with a JSX-only union. Object and array syntax belongs to CSS-rule and composition semantics.
 
 - Inline object expressions are CSS-rule mode through `css(...)`, so `<div css={{ color: "red" }} />` extracts a Mincho CSS rule. Transparent direct wrappers keep that mode, including `<div css={{ color: "red" }!} />`, `<div css={{ color: "red" } as const} />`, `<div css={{ color: "red" } satisfies ComplexCSSRule} />`, and `<div css={({ color: "red" })} />`.
-- Inline array expressions are also CSS-rule mode through `css([...])`, so `<div css={[baseClass, { color: "red" }]} />` composes class names and CSS rule objects through Mincho's `ComplexCSSRule` path. Transparent direct array wrappers are supported too, for example `<div css={[{ color: "red" }] as const} />` and `<div css={([{ color: "red" }])} />`.
-- All dynamic class values lower through `cx(...)`. This includes identifiers, members, calls, conditionals, logicals, non-string literals, template literals, and explicit `cx(...)` calls. This is the migration path for existing Mincho class values: `const styleA = css(...); <div css={styleA} />`.
-- Class-value arrays must be explicit, for example `<div css={cx(["base", active && "active"])} />`, or assigned to an identifier before being passed to `css`.
 - Strings are class values, not raw CSS declarations. Bare string-literal class values such as `<div css="base" />` and `<div css={"base"} />` lower directly to `className="base"` without `cx(...)` when no explicit `className` or spread-derived `className` must be merged.
+- Dynamic primitive class values lower through `cx(...)`. This includes identifiers, members, calls, conditionals, logicals, non-string literals, and template literals. This is the migration path for existing Mincho class values: `const styleA = css(...); <div css={styleA} />`.
 - If an explicit `className` or pre-css spread aggregate contributes an existing class, string-literal class values still merge through `cx(existing, cssValue)` with the existing class first.
+- Class dictionaries require explicit `cx(...)`, for example `<div css={cx({ active: condition })} />`. Explicit `css={cx(...)}` remains a class-value escape hatch and is not unwrapped by the JSX transform.
 - Function values are unsupported in compile-away mode.
 
-Supported expression-valued `css` props are class values and lower through `cx(...)`:
+Supported expression-valued primitive `css` props lower through `cx(...)`:
 
 ```tsx
 <div css={condition ? "panel active" : "panel"} />
@@ -84,7 +83,55 @@ Supported expression-valued `css` props are class values and lower through `cx(.
 <div css={getClassName()} />
 ```
 
-First-level static CSS-rule branches are also supported. Mincho lowers each object or array branch with the same CSS-rule extraction path used for direct `css` rules, then composes the generated class names. It does not call `css(condition ? ...)` and does not generate CSS at runtime.
+Static JSX `css` arrays stay on the `css([...])` composition path. They are static `ComplexCSSRule` composition arrays, not recursive `ClassValue` arrays, and they do not lower to `cx(...)` just because they contain string items.
+
+```tsx
+<div css={["base", "active"]} />
+<div css={["base", ""]} />
+<div css={["base", { color: "red" }]} />
+```
+
+These are equivalent to `css(["base", "active"])`, `css(["base", ""])`, and `css(["base", { color: "red" }])` static composition.
+
+First-level dynamic primitive array branches lower through one `cx(...)` merge. Primitive branches pass through as arguments, so the empty string stays present as a `ClassPrimitive` value in dynamic arrays.
+
+```tsx
+<div css={["base", condition && "active"]} />
+<div css={["base", providedClass || "fallback"]} />
+<div css={["base", maybeClass ?? "fallback"]} />
+<div css={["base", activeClass]} />
+<div css={["base", "", activeClass]} />
+```
+
+`<div css={["base", "", activeClass]} />` lowers through `cx(...)` with `""` preserved as a `ClassPrimitive` argument, equivalent to `cx("base", "", activeClass)`. Non-string `ClassPrimitive` literals in arrays also lower through `cx(...)`, not static composition:
+
+```tsx
+<div css={["base", false]} />
+<div css={["base", true]} />
+<div css={["base", null]} />
+<div css={["base", undefined]} />
+<div css={["base", 0]} />
+<div css={["base", 1]} />
+<div css={["base", 0n]} />
+<div css={["base", 1n]} />
+```
+
+First-level dynamic object and array CSS-rule branches are extracted at build time, then merged or selected with `cx(...)`. Mincho extracts the static rule branch to a generated class and keeps primitive branches as written.
+
+```tsx
+<div css={["base", condition && { color: "red" }]} />
+<div css={["base", providedClass || { color: "red" }]} />
+<div css={["base", maybeClass ?? { color: "red" }]} />
+<div css={["base", condition ? { color: "red" } : "inactive"]} />
+<div css={["base", condition ? "active" : { color: "blue" }]} />
+<div css={["base", condition && [{ color: "red" }]]} />
+<div css={["base", condition && ["active", { color: "red" }]]} />
+<div css={["base", { color: "red" }, activeClass]} />
+```
+
+The first example lowers like `cx("base", condition && generatedClass)`. Direct static CSS-rule items in otherwise dynamic arrays use the same extraction path, so `<div css={["base", { color: "red" }, activeClass]} />` lowers like `cx("base", generatedClass, activeClass)`.
+
+First-level CSS-rule branches outside arrays are also supported. Mincho lowers each object or array branch with the same CSS-rule extraction path used for direct `css` rules, then composes the generated class names. It does not call `css(condition ? ...)` and does not generate CSS at runtime.
 
 ```tsx
 <div css={condition ? { color: "red" } : { color: "blue" }} />
@@ -123,9 +170,12 @@ Static-left `&&` object and array rules are truthy guards only. The left rule is
 <div css={{ color: "red" } && { color: "blue" }} />
 ```
 
-The static-rule support is first-level only. Nested, chained, permutation-style, and sequence-expression object/array CSS-rule branches remain unsupported:
+The static-rule support is first-level only. Nested dynamic arrays, array spreads, chained branches, permutation-style branches, and sequence-expression object/array CSS-rule branches remain unsupported:
 
 ```tsx
+<div css={["base", ["nested", condition && { color: "red" }]]} />
+<div css={["base", condition && ["active", nested && { color: "red" }]]} />
+<div css={["base", ...classes]} />
 <div css={outer ? inner ? { color: "red" } : { color: "blue" } : styleA} />
 <div css={condition && flag && { color: "red" }} />
 <div css={(condition && flag) || { color: "red" }} />
@@ -189,6 +239,8 @@ When `jsxCssProp: true` is enabled, unsupported v2 cases fail during the transfo
 | Explicit `key` or `ref` on a spread css-prop element | `Mincho JSX css prop does not support key/ref on spread elements in compile-away mode` |
 | Shorthand `css` | `Mincho JSX css prop requires an expression value` |
 | Function value | `Mincho JSX css prop does not support function values in compile-away mode` |
+| Spread element inside a `css` array | `Mincho JSX css prop array values do not support spread elements in compile-away mode` |
+| Nested dynamic array branch inside a `css` array | `Mincho JSX css prop array branch extraction only supports first-level dynamic branches` |
 | Nested, chained, sequence, unsupported logical, or dynamically resolved object/array CSS-rule value | `Mincho JSX css prop does not support conditional, logical, or wrapped object/array CSS rule values in compile-away mode` |
 | Duplicate `css` | `Mincho JSX css prop must appear only once` |
 | Duplicate `className` | `Mincho JSX css prop cannot merge duplicate className attributes` |

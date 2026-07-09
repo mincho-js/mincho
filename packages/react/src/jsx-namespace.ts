@@ -1,7 +1,18 @@
-import type { ClassValue, ComplexCSSRule } from "@mincho-js/css";
+import type { ClassPrimitive, ComplexCSSRule } from "@mincho-js/css";
 import type { JSX as ReactJSX } from "react";
 
-export type MinchoCssPropValue = ComplexCSSRule | ClassValue;
+type ComplexCSSRuleArrayItem = Extract<ComplexCSSRule, unknown[]>[number];
+type MinchoCssPropFirstLevelArrayItem =
+  | ComplexCSSRuleArrayItem
+  | ClassPrimitive;
+type MinchoCssPropFirstLevelArray =
+  | MinchoCssPropFirstLevelArrayItem[]
+  | readonly MinchoCssPropFirstLevelArrayItem[];
+
+export type MinchoCssPropValue =
+  | ComplexCSSRule
+  | ClassPrimitive
+  | MinchoCssPropFirstLevelArray;
 
 type MinchoCssProp = {
   css?: MinchoCssPropValue;
@@ -41,28 +52,100 @@ if (import.meta.vitest) {
   const { describe, it, assertType, expectTypeOf } = import.meta.vitest;
 
   describe("scoped Mincho JSX namespace", () => {
-    it("defines css values from ComplexCSSRule and ClassValue", () => {
+    it("defines css values from ComplexCSSRule and ClassPrimitive", () => {
       const cssRule: ComplexCSSRule = { color: "red" };
       const condition = true as boolean;
+      const activeClass = "active-class";
+      const styles = { active: "styles-active" };
+      const providedClassName: string = Math.random() > 0.5 ? "base" : "";
       const providedClass: string | undefined =
         Math.random() > 0.5 ? "base" : undefined;
       const maybeClass: string | null = Math.random() > 0.5 ? null : "base";
       const getClassName = () => "base";
+      const emptyClassName: ClassPrimitive = "";
 
+      expectTypeOf<MinchoCssPropValue>().toEqualTypeOf<
+        ComplexCSSRule | ClassPrimitive | MinchoCssPropFirstLevelArray
+      >();
+
+      assertType<ClassPrimitive>(emptyClassName);
       assertType<MinchoCssPropValue>(cssRule);
       assertType<MinchoCssPropValue>("base");
+      assertType<MinchoCssPropValue>(emptyClassName);
       assertType<MinchoCssPropValue>(false);
+      assertType<MinchoCssPropValue>(true);
       assertType<MinchoCssPropValue>(null);
       assertType<MinchoCssPropValue>(undefined);
-      assertType<MinchoCssPropValue>(["base", condition && "active"]);
+      assertType<MinchoCssPropValue>(1);
+      assertType<MinchoCssPropValue>(0);
+      assertType<MinchoCssPropValue>(0n);
+      assertType<MinchoCssPropValue>(1n);
       assertType<MinchoCssPropValue>(condition ? "base" : "fallback");
       assertType<MinchoCssPropValue>(condition && "active");
       assertType<MinchoCssPropValue>(condition || "fallback");
       assertType<MinchoCssPropValue>(maybeClass ?? "fallback");
       assertType<MinchoCssPropValue>(getClassName());
-      assertType<MinchoCssPropValue>({ active: condition });
+
+      // Object literals in JSX css are CSS-rule syntax, not cx class dictionaries.
+      assertType<MinchoCssPropValue>({ color: "red" });
+      assertType<MinchoCssPropValue>({ color: condition ? "red" : "blue" });
+      assertType<MinchoCssPropValue>(["base", "active"]);
+      assertType<MinchoCssPropValue>(["base", ""]);
+      assertType<MinchoCssPropValue>(["base", { color: "red" }]);
+      assertType<MinchoCssPropValue>(["base", false]);
+      assertType<MinchoCssPropValue>(["base", true]);
+      assertType<MinchoCssPropValue>(["base", null]);
+      assertType<MinchoCssPropValue>(["base", undefined]);
+      assertType<MinchoCssPropValue>(["base", 0]);
+      assertType<MinchoCssPropValue>(["base", 1]);
+      assertType<MinchoCssPropValue>(["base", 0n]);
+      assertType<MinchoCssPropValue>(["base", 1n]);
+      assertType<MinchoCssPropValue>(["base", activeClass]);
+      assertType<MinchoCssPropValue>(["base", "", activeClass]);
+      assertType<MinchoCssPropValue>(["base", styles.active]);
+      assertType<MinchoCssPropValue>(["base", getClassName()]);
+      assertType<MinchoCssPropValue>(["base", condition && "active"]);
+      assertType<MinchoCssPropValue>(["base", providedClassName && "active"]);
+      assertType<MinchoCssPropValue>(["base", providedClass || "fallback"]);
+      assertType<MinchoCssPropValue>(["base", maybeClass ?? "fallback"]);
+      assertType<MinchoCssPropValue>([
+        "base",
+        condition ? "active" : "inactive"
+      ]);
+      assertType<MinchoCssPropValue>(["base", { color: "red" }, activeClass]);
+      assertType<MinchoCssPropValue>([
+        "base",
+        providedClass || { color: "red" }
+      ]);
+      assertType<MinchoCssPropValue>(["base", maybeClass ?? { color: "red" }]);
+      assertType<MinchoCssPropValue>([
+        "base",
+        condition ? { color: "red" } : "inactive"
+      ]);
+      assertType<MinchoCssPropValue>([
+        "base",
+        condition ? "active" : { color: "blue" }
+      ]);
+      assertType<MinchoCssPropValue>([
+        "base",
+        condition ? { color: "red" } : { color: "blue" }
+      ]);
+      assertType<MinchoCssPropValue>(condition && { color: "red" });
+      assertType<MinchoCssPropValue>(condition && [{ color: "red" }]);
       assertType<MinchoCssPropValue>(providedClass || { color: "red" });
       assertType<MinchoCssPropValue>(maybeClass ?? [{ color: "red" }]);
+
+      // ClassValue-only object dictionaries with non-CSS keys are rejected.
+      // CSS-shaped objects, for example `{ color: "red" }`, are intentionally
+      // accepted as CSS-rule syntax and cannot be distinguished structurally.
+      // @ts-expect-error Direct class dictionaries are not css prop values.
+      assertType<MinchoCssPropValue>({ active: condition });
+      // @ts-expect-error Direct class dictionaries are not css prop values.
+      assertType<MinchoCssPropValue>({ "is-active": true });
+      // @ts-expect-error Recursive arrays with falsy leaves are ClassValue-only.
+      assertType<MinchoCssPropValue>([["base", false]]);
+      // @ts-expect-error Recursive arrays with numeric leaves are ClassValue-only.
+      assertType<MinchoCssPropValue>([[1]]);
       // @ts-expect-error TypeScript rejects always-truthy object literal logical left operands before Mincho css prop typing.
       // eslint-disable-next-line no-constant-binary-expression -- The constant operand is the TypeScript error under test.
       assertType<MinchoCssPropValue>({ color: "red" } || providedClass);
@@ -77,6 +160,8 @@ if (import.meta.vitest) {
     it("adds css to string-compatible intrinsic className props", () => {
       const cssRule: ComplexCSSRule = { color: "red" };
       const condition = true as boolean;
+      const activeClass = "active-class";
+      const providedClassName: string = Math.random() > 0.5 ? "base" : "";
       const providedClass: string | undefined =
         Math.random() > 0.5 ? "base" : undefined;
       const maybeClass: string | null = Math.random() > 0.5 ? null : "base";
@@ -87,11 +172,103 @@ if (import.meta.vitest) {
       });
 
       assertType<JSX.IntrinsicElements["div"]>({
+        css: ""
+      });
+
+      assertType<JSX.IntrinsicElements["div"]>({
+        css: 1
+      });
+
+      assertType<JSX.IntrinsicElements["div"]>({
         css: false
       });
 
       assertType<JSX.IntrinsicElements["div"]>({
+        css: true
+      });
+
+      assertType<JSX.IntrinsicElements["div"]>({
+        css: null
+      });
+
+      assertType<JSX.IntrinsicElements["div"]>({
+        css: undefined
+      });
+
+      assertType<JSX.IntrinsicElements["div"]>({
+        css: 0
+      });
+
+      assertType<JSX.IntrinsicElements["div"]>({
+        css: 0n
+      });
+
+      assertType<JSX.IntrinsicElements["div"]>({
+        css: 1n
+      });
+
+      assertType<JSX.IntrinsicElements["div"]>({
+        css: ["base", "active"]
+      });
+
+      assertType<JSX.IntrinsicElements["div"]>({
+        css: ["base", ""]
+      });
+
+      assertType<JSX.IntrinsicElements["div"]>({
+        css: ["base", false]
+      });
+
+      assertType<JSX.IntrinsicElements["div"]>({
+        css: ["base", true]
+      });
+
+      assertType<JSX.IntrinsicElements["div"]>({
+        css: ["base", null]
+      });
+
+      assertType<JSX.IntrinsicElements["div"]>({
+        css: ["base", undefined]
+      });
+
+      assertType<JSX.IntrinsicElements["div"]>({
+        css: ["base", 0]
+      });
+
+      assertType<JSX.IntrinsicElements["div"]>({
+        css: ["base", 1]
+      });
+
+      assertType<JSX.IntrinsicElements["div"]>({
+        css: ["base", 0n]
+      });
+
+      assertType<JSX.IntrinsicElements["div"]>({
+        css: ["base", 1n]
+      });
+
+      assertType<JSX.IntrinsicElements["div"]>({
+        css: ["base", activeClass]
+      });
+
+      assertType<JSX.IntrinsicElements["div"]>({
+        css: ["base", getClassName()]
+      });
+
+      assertType<JSX.IntrinsicElements["div"]>({
         css: ["base", condition && "active"]
+      });
+
+      assertType<JSX.IntrinsicElements["div"]>({
+        css: ["base", providedClassName && "active"]
+      });
+
+      assertType<JSX.IntrinsicElements["div"]>({
+        css: ["base", condition ? "active" : "inactive"]
+      });
+
+      assertType<JSX.IntrinsicElements["div"]>({
+        css: ["base", providedClass || { color: "red" }]
       });
 
       assertType<JSX.IntrinsicElements["div"]>({
@@ -119,11 +296,24 @@ if (import.meta.vitest) {
       });
 
       assertType<JSX.IntrinsicElements["div"]>({
+        css: condition && [{ color: "red" }]
+      });
+
+      assertType<JSX.IntrinsicElements["div"]>({
+        css: ["base", { color: "red" }, activeClass]
+      });
+
+      assertType<JSX.IntrinsicElements["div"]>({
         css: providedClass || { color: "red" }
       });
 
       assertType<JSX.IntrinsicElements["div"]>({
         css: maybeClass ?? [{ color: "red" }]
+      });
+
+      assertType<JSX.IntrinsicElements["div"]>({
+        // @ts-expect-error Direct class dictionaries are not css prop values.
+        css: { active: condition }
       });
 
       assertType<JSX.IntrinsicElements["div"]>({

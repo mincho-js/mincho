@@ -173,6 +173,57 @@ const longClass = \`abc \${red}\`;
 console.log(longClass);"
 `;
 
+exports[`minchoBabelPlugin > classifies first-level primitive jsx css prop array branches 1`] = `
+[
+  "extracted_1mfmy2m.css.ts",
+  "import { css as _css, cx as _cx } from "@mincho-js/css";
+export var _$mincho$$App = _css(["base", "active"]);
+var _$mincho$$App2 = _$mincho$$App;
+export var _$mincho$$App3 = _css(["base", ""]);
+var _$mincho$$App4 = _$mincho$$App3;",
+]
+`;
+
+exports[`minchoBabelPlugin > classifies first-level primitive jsx css prop array branches 2`] = `
+"import { _$mincho$$App as _$mincho$$App2, _$mincho$$App3 as _$mincho$$App4 } from "extracted_1mfmy2m.css.ts";
+import { css as _css, cx as _cx } from "@mincho-js/css";
+const activeClass = "active-class";
+const styles = {
+  active: "styles-active"
+};
+const condition = true;
+const providedClass = "";
+const maybeClass = null;
+const suffix = "suffix";
+function getClassName() {
+  return "called";
+}
+function App() {
+  return <>
+            <div className={_$mincho$$App2} />
+            <div className={_$mincho$$App4} />
+            <div className={_cx("base", false)} />
+            <div className={_cx("base", true)} />
+            <div className={_cx("base", null)} />
+            <div className={_cx("base", undefined)} />
+            <div className={_cx("base", 0)} />
+            <div className={_cx("base", 1)} />
+            <div className={_cx("base", 0n)} />
+            <div className={_cx("base", 1n)} />
+            <div className={_cx("base", activeClass)} />
+            <div className={_cx("base", "", activeClass)} />
+            <div className={_cx("base", styles.active)} />
+            <div className={_cx("base", getClassName())} />
+            <div className={_cx("base", \`active \${suffix}\`)} />
+            <div className={_cx("base", condition && "active")} />
+            <div className={_cx("base", providedClass || "fallback")} />
+            <div className={_cx("base", maybeClass ?? "fallback")} />
+            <div className={_cx("base", condition ? "active" : "inactive")} />
+            <div className={_cx("external", "base", condition && "active")} />
+          </>;
+}"
+`;
+
 exports[`minchoBabelPlugin > direct-emits string-literal class-value jsx css props 1`] = `
 [
   "extracted_fd2g76.css.ts",
@@ -234,6 +285,109 @@ exports[`minchoBabelPlugin > extracts $mincho function 2`] = `
 import { mincho$ } from '@mincho-js/css';
 const red = _$mincho$$red2;
 console.log(red);"
+`;
+
+exports[`minchoBabelPlugin > extracts first-level CSS-rule branch array branches through cx 1`] = `
+[
+  "extracted_1evk0ii.css.ts",
+  "import { css as _css, cx as _cx } from "@mincho-js/css";
+export var _$mincho$$App = _css({
+  color: "red"
+});
+var _$mincho$$App2 = _$mincho$$App;
+export var _$mincho$$App3 = _css({
+  color: "red"
+});
+var _$mincho$$App4 = _$mincho$$App3;
+export var _$mincho$$App5 = _css({
+  color: "red"
+});
+var _$mincho$$App6 = _$mincho$$App5;
+export var _$mincho$$App7 = _css([{
+  color: "red"
+}]);
+var _$mincho$$App8 = _$mincho$$App7;
+export var _$mincho$$App9 = _css(["active", {
+  color: "red"
+}]);
+var _$mincho$$App0 = _$mincho$$App9;
+export var _$mincho$$App1 = _css([{
+  color: "red"
+}]);
+var _$mincho$$App10 = _$mincho$$App1;
+export var _$mincho$$App11 = _css(["active", {
+  color: "red"
+}]);
+var _$mincho$$App12 = _$mincho$$App11;
+export var _$mincho$$App13 = _css({
+  color: "red"
+});
+var _$mincho$$App14 = _$mincho$$App13;
+export var _$mincho$$App15 = _css([{
+  color: "red"
+}]);
+var _$mincho$$App16 = _$mincho$$App15;
+export var _$mincho$$App17 = _css({
+  color: "red"
+});
+var _$mincho$$App18 = _$mincho$$App17;
+export var _$mincho$$App19 = _css([{
+  color: "red"
+}]);
+var _$mincho$$App20 = _$mincho$$App19;
+export var _$mincho$$App21 = _css({
+  color: "blue"
+});
+var _$mincho$$App22 = _$mincho$$App21;
+export var _$mincho$$App23 = _css(["fallback", {
+  color: "blue"
+}]);
+var _$mincho$$App24 = _$mincho$$App23;
+export var _$mincho$$App25 = _css({
+  color: "red"
+});
+var _$mincho$$App26 = _$mincho$$App25;
+export var _$mincho$$App27 = _css({
+  color: "blue"
+});
+var _$mincho$$App28 = _$mincho$$App27;
+export var _$mincho$$App29 = _css(["red", {
+  color: "red"
+}]);
+var _$mincho$$App30 = _$mincho$$App29;
+export var _$mincho$$App31 = _css(["blue", {
+  color: "blue"
+}]);
+var _$mincho$$App32 = _$mincho$$App31;",
+]
+`;
+
+exports[`minchoBabelPlugin > extracts first-level CSS-rule branch array branches through cx 2`] = `
+"import { _$mincho$$App as _$mincho$$App2, _$mincho$$App3 as _$mincho$$App4, _$mincho$$App5 as _$mincho$$App6, _$mincho$$App7 as _$mincho$$App8, _$mincho$$App9 as _$mincho$$App0, _$mincho$$App1 as _$mincho$$App10, _$mincho$$App11 as _$mincho$$App12, _$mincho$$App13 as _$mincho$$App14, _$mincho$$App15 as _$mincho$$App16, _$mincho$$App17 as _$mincho$$App18, _$mincho$$App19 as _$mincho$$App20, _$mincho$$App21 as _$mincho$$App22, _$mincho$$App23 as _$mincho$$App24, _$mincho$$App25 as _$mincho$$App26, _$mincho$$App27 as _$mincho$$App28, _$mincho$$App29 as _$mincho$$App30, _$mincho$$App31 as _$mincho$$App32 } from "extracted_1evk0ii.css.ts";
+import { css as _css, cx as _cx } from "@mincho-js/css";
+const activeClass = "active-class";
+const condition = true;
+const providedClass = "";
+const maybeClass = null;
+function App() {
+  return <>
+            <div className={_cx("base", condition && _$mincho$$App2)} />
+            <div className={_cx("base", providedClass || _$mincho$$App4)} />
+            <div className={_cx("base", maybeClass ?? _$mincho$$App6)} />
+            <div className={_cx("base", providedClass || _$mincho$$App8)} />
+            <div className={_cx("base", maybeClass ?? _$mincho$$App0)} />
+            <div className={_cx("base", condition && _$mincho$$App10)} />
+            <div className={_cx("base", condition && _$mincho$$App12)} />
+            <div className={_cx("base", _$mincho$$App14, activeClass)} />
+            <div className={_cx("base", _$mincho$$App16, condition && "active")} />
+            <div className={_cx("base", condition ? _$mincho$$App18 : "inactive")} />
+            <div className={_cx("base", condition ? _$mincho$$App20 : "inactive")} />
+            <div className={_cx("base", condition ? "active" : _$mincho$$App22)} />
+            <div className={_cx("base", condition ? "active" : _$mincho$$App24)} />
+            <div className={_cx("base", condition ? _$mincho$$App26 : _$mincho$$App28)} />
+            <div className={_cx("base", condition ? _$mincho$$App30 : _$mincho$$App32)} />
+          </>;
+}"
 `;
 
 exports[`minchoBabelPlugin > extracts style function 1`] = `
@@ -547,10 +701,9 @@ function App() {
 
 exports[`minchoBabelPlugin > lowers array literal jsx css prop through css rule mode 1`] = `
 [
-  "extracted_1q6f771.css.ts",
+  "extracted_1e65177.css.ts",
   "import { css as _css } from "@mincho-js/css";
-const base = "base";
-export var _$mincho$$App = _css([base, {
+export var _$mincho$$App = _css(["base", {
   color: "red"
 }]);
 var _$mincho$$App2 = _$mincho$$App;",
@@ -558,9 +711,8 @@ var _$mincho$$App2 = _$mincho$$App;",
 `;
 
 exports[`minchoBabelPlugin > lowers array literal jsx css prop through css rule mode 2`] = `
-"import { _$mincho$$App as _$mincho$$App2 } from "extracted_1q6f771.css.ts";
+"import { _$mincho$$App as _$mincho$$App2 } from "extracted_1e65177.css.ts";
 import { css as _css } from "@mincho-js/css";
-const base = "base";
 function App() {
   return <div className={_$mincho$$App2} />;
 }"
@@ -621,18 +773,26 @@ function App() {
 }"
 `;
 
-exports[`minchoBabelPlugin > lowers explicit cx array class values through class-value mode 1`] = `
+exports[`minchoBabelPlugin > lowers explicit cx array and dictionary class values through class-value mode 1`] = `
 [
-  "extracted_zgs157.css.ts",
+  "extracted_g1q7fc.css.ts",
   "",
 ]
 `;
 
-exports[`minchoBabelPlugin > lowers explicit cx array class values through class-value mode 2`] = `
+exports[`minchoBabelPlugin > lowers explicit cx array and dictionary class values through class-value mode 2`] = `
 "import { cx, cx as _cx } from "@mincho-js/css";
 const isActive = true;
 function App() {
-  return <div className={_cx(cx(["base", isActive && "active"]))} />;
+  return <>
+            <div className={_cx(cx(["base", isActive && "active"]))} />
+            <div className={_cx(cx({
+      active: isActive
+    }))} />
+            <div className={_cx(cx(["base", {
+      active: isActive
+    }]))} />
+          </>;
 }"
 `;
 

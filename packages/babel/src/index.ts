@@ -289,6 +289,10 @@ if (import.meta.vitest) {
       "Mincho JSX css prop does not support function values in compile-away mode",
     unsupportedDynamicCssRule:
       "Mincho JSX css prop does not support conditional, logical, or wrapped object/array CSS rule values in compile-away mode",
+    unsupportedArraySpread:
+      "Mincho JSX css prop array values do not support spread elements in compile-away mode",
+    unsupportedFirstLevelArrayBranch:
+      "Mincho JSX css prop array branch extraction only supports first-level dynamic branches",
     duplicateCss: "Mincho JSX css prop must appear only once",
     duplicateClassName:
       "Mincho JSX css prop cannot merge duplicate className attributes",
@@ -596,10 +600,8 @@ if (import.meta.vitest) {
     it("lowers array literal jsx css prop through css rule mode", () => {
       const { result, code } = babelTransform(
         `
-        const base = "base";
-
         function App() {
-          return <div css={[base, { color: "red" }]} />;
+          return <div css={["base", { color: "red" }]} />;
         }
       `,
         { jsxCssProp: true }
@@ -608,10 +610,203 @@ if (import.meta.vitest) {
       expect(result).toMatchSnapshot();
       expect(code).toMatchSnapshot();
       expect(code).not.toContain(" css=");
-      expect(result[1]).toContain("_css([base, {");
+      expect(result[1]).toContain('_css(["base", {');
       expect(result[1]).toContain('color: "red"');
       expect(code).toContain("className={_$mincho$$App2}");
       expect(code).not.toContain("_cx([base");
+    });
+
+    it("classifies first-level primitive jsx css prop array branches", () => {
+      const { result, code } = babelTransform(
+        `
+        const activeClass = "active-class";
+        const styles = { active: "styles-active" };
+        const condition = true;
+        const providedClass = "";
+        const maybeClass = null;
+        const suffix = "suffix";
+
+        function getClassName() {
+          return "called";
+        }
+
+        function App() {
+          return <>
+            <div css={["base", "active"]} />
+            <div css={["base", ""]} />
+            <div css={["base", false]} />
+            <div css={["base", true]} />
+            <div css={["base", null]} />
+            <div css={["base", undefined]} />
+            <div css={["base", 0]} />
+            <div css={["base", 1]} />
+            <div css={["base", 0n]} />
+            <div css={["base", 1n]} />
+            <div css={["base", activeClass]} />
+            <div css={["base", "", activeClass]} />
+            <div css={["base", styles.active]} />
+            <div css={["base", getClassName()]} />
+            <div css={["base", \`active \${suffix}\`]} />
+            <div css={["base", condition && "active"]} />
+            <div css={["base", providedClass || "fallback"]} />
+            <div css={["base", maybeClass ?? "fallback"]} />
+            <div css={["base", condition ? "active" : "inactive"]} />
+            <div className="external" css={["base", condition && "active"]} />
+          </>;
+        }
+      `,
+        { jsxCssProp: true }
+      );
+
+      expect(result).toMatchSnapshot();
+      expect(code).toMatchSnapshot();
+      expect(code).not.toContain(" css=");
+      expect(code).not.toContain('_cx(["base"');
+      expect(result[1].match(/_css\(/g) ?? []).toHaveLength(2);
+      expect(result[1]).toContain('_css(["base", "active"])');
+      expect(result[1]).toContain('_css(["base", ""])');
+      expect(result[1]).not.toContain("activeClass");
+      expect(result[1]).not.toContain("getClassName");
+      expect(result[1]).not.toContain("suffix");
+      expect(code).toContain('className={_cx("base", false)}');
+      expect(code).toContain('className={_cx("base", true)}');
+      expect(code).toContain('className={_cx("base", null)}');
+      expect(code).toContain('className={_cx("base", undefined)}');
+      expect(code).toContain('className={_cx("base", 0)}');
+      expect(code).toContain('className={_cx("base", 1)}');
+      expect(code).toContain('className={_cx("base", 0n)}');
+      expect(code).toContain('className={_cx("base", 1n)}');
+      expect(code).toContain('className={_cx("base", activeClass)}');
+      expect(code).toContain('className={_cx("base", "", activeClass)}');
+      expect(code).toContain('className={_cx("base", styles.active)}');
+      expect(code).toContain('className={_cx("base", getClassName())}');
+      expect(code).toContain('className={_cx("base", `active ${suffix}`)}');
+      expect(code).toContain('className={_cx("base", condition && "active")}');
+      expect(code).toContain(
+        'className={_cx("base", providedClass || "fallback")}'
+      );
+      expect(code).toContain(
+        'className={_cx("base", maybeClass ?? "fallback")}'
+      );
+      expect(code).toContain(
+        'className={_cx("base", condition ? "active" : "inactive")}'
+      );
+      expect(code).toContain(
+        'className={_cx("external", "base", condition && "active")}'
+      );
+    });
+
+    it("extracts first-level CSS-rule branch array branches through cx", () => {
+      const { result, code } = babelTransform(
+        `
+        const activeClass = "active-class";
+        const condition = true;
+        const providedClass = "";
+        const maybeClass = null;
+
+        function App() {
+          return <>
+            <div css={["base", condition && { color: "red" }]} />
+            <div css={["base", providedClass || { color: "red" }]} />
+            <div css={["base", maybeClass ?? { color: "red" }]} />
+            <div css={["base", providedClass || [{ color: "red" }]]} />
+            <div css={["base", maybeClass ?? ["active", { color: "red" }]]} />
+            <div css={["base", condition && [{ color: "red" }]]} />
+            <div css={["base", condition && ["active", { color: "red" }]]} />
+            <div css={["base", { color: "red" }, activeClass]} />
+            <div css={["base", [{ color: "red" }], condition && "active"]} />
+            <div css={["base", condition ? { color: "red" } : "inactive"]} />
+            <div css={["base", condition ? [{ color: "red" }] : "inactive"]} />
+            <div css={["base", condition ? "active" : { color: "blue" }]} />
+            <div css={["base", condition ? "active" : ["fallback", { color: "blue" }]]} />
+            <div css={["base", condition ? { color: "red" } : { color: "blue" }]} />
+            <div css={["base", condition ? ["red", { color: "red" }] : ["blue", { color: "blue" }]]} />
+          </>;
+        }
+      `,
+        { jsxCssProp: true }
+      );
+      const expectedClassNames = [
+        /className=\{_cx\("base", condition && _\$mincho\$\$App\d+\)\}/,
+        /className=\{_cx\("base", providedClass \|\| _\$mincho\$\$App\d+\)\}/,
+        /className=\{_cx\("base", maybeClass \?\? _\$mincho\$\$App\d+\)\}/,
+        /className=\{_cx\("base", _\$mincho\$\$App\d+, activeClass\)\}/,
+        /className=\{_cx\("base", _\$mincho\$\$App\d+, condition && "active"\)\}/,
+        /className=\{_cx\("base", condition \? _\$mincho\$\$App\d+ : "inactive"\)\}/,
+        /className=\{_cx\("base", condition \? "active" : _\$mincho\$\$App\d+\)\}/,
+        /className=\{_cx\("base", condition \? _\$mincho\$\$App\d+ : _\$mincho\$\$App\d+\)\}/
+      ] as const;
+
+      expect(result).toMatchSnapshot();
+      expect(code).toMatchSnapshot();
+      expect(code).not.toContain(" css=");
+      expect(code).not.toContain("_css(");
+      expect(code).not.toContain('color: "red"');
+      expect(code).not.toContain('color: "blue"');
+      expect(code).not.toContain("[{");
+      expect(code).not.toContain('["active", {');
+      expect(code).not.toContain('["fallback", {');
+      expect(result[1].match(/_css\(/g) ?? []).toHaveLength(17);
+      expect(result[1].match(/_css\(\{/g) ?? []).toHaveLength(8);
+      expect(result[1].match(/_css\(\[/g) ?? []).toHaveLength(9);
+      expect(result[1]).toContain('_css(["active", {');
+      expect(result[1]).toContain('_css(["fallback", {');
+      expect(result[1]).toContain('_css(["red", {');
+      expect(result[1]).toContain('_css(["blue", {');
+
+      for (const expectedClassName of expectedClassNames) {
+        expect(code).toMatch(expectedClassName);
+      }
+    });
+
+    it("supports first-level dynamic branches with static array CSS-rule units", () => {
+      const { result, code } = babelTransform(
+        `
+        const condition = true;
+
+        function App() {
+          return <>
+            <div css={["base", condition && [{ color: "red" }]]} />
+            <div css={["base", condition && ["active", { color: "red" }]]} />
+          </>;
+        }
+      `,
+        { jsxCssProp: true }
+      );
+
+      expect(code).not.toContain(" css=");
+      expect(
+        code.match(
+          /className=\{_cx\("base", condition && _\$mincho\$\$App\d+\)\}/g
+        ) ?? []
+      ).toHaveLength(2);
+      expect(code).not.toContain("[{");
+      expect(code).not.toContain('["active", {');
+      expect(result[1].match(/_css\(\[/g) ?? []).toHaveLength(2);
+      expect(result[1]).toContain("_css([{");
+      expect(result[1]).toContain('_css(["active", {');
+    });
+
+    it("evaluates first-level array call branches once", () => {
+      const observed = runJsxCssPropRuntime(
+        `
+        let callCount = 0;
+
+        function getClassName() {
+          callCount += 1;
+          return "dynamic";
+        }
+
+        function App() {
+          return <div css={["base", getClassName()]} />;
+        }
+      `,
+        "return { props: App(), callCount };"
+      ) as { props: Record<string, unknown>; callCount: number };
+
+      expect(observed.callCount).toBe(1);
+      expect(observed.props.className).toBe("base dynamic");
+      expect("css" in observed.props).toBe(false);
     });
 
     it("lowers transparent wrapped direct jsx css prop rules through css rule mode", () => {
@@ -645,8 +840,8 @@ if (import.meta.vitest) {
           expectedRule: "_css({"
         },
         {
-          fixture: `<div css={([base, { color: "red" }])} />`,
-          expectedRule: "_css([base, {"
+          fixture: `<div css={(["base", { color: "red" }])} />`,
+          expectedRule: '_css(["base", {'
         }
       ] as const;
 
@@ -1231,7 +1426,7 @@ if (import.meta.vitest) {
       }
     });
 
-    it("lowers explicit cx array class values through class-value mode", () => {
+    it("lowers explicit cx array and dictionary class values through class-value mode", () => {
       const { result, code } = babelTransform(
         `
         import { cx } from "@mincho-js/css";
@@ -1239,7 +1434,11 @@ if (import.meta.vitest) {
         const isActive = true;
 
         function App() {
-          return <div css={cx(["base", isActive && "active"])} />;
+          return <>
+            <div css={cx(["base", isActive && "active"])} />
+            <div css={cx({ active: isActive })} />
+            <div css={cx(["base", { active: isActive }])} />
+          </>;
         }
       `,
         { jsxCssProp: true }
@@ -1251,6 +1450,13 @@ if (import.meta.vitest) {
       expect(code).toContain(
         'className={_cx(cx(["base", isActive && "active"]))}'
       );
+      expect(code).toMatch(
+        /className=\{_cx\(cx\(\{\s+active: isActive\s+\}\)\)\}/
+      );
+      expect(code).toMatch(
+        /className=\{_cx\(cx\(\["base", \{\s+active: isActive\s+\}\]\)\)\}/
+      );
+      expect(result[1]).not.toContain("_css(");
     });
 
     it("lowers identifier css result through cx without double wrapping", () => {
@@ -1842,6 +2048,21 @@ if (import.meta.vitest) {
         name: "rejects sequence array literal css rule values",
         fixture: `<div css={(0, [{ color: "red" }])} />`,
         message: jsxCssPropErrorMessages.unsupportedDynamicCssRule
+      },
+      {
+        name: "rejects array spread css prop array values",
+        fixture: `<div css={["base", ...classes]} />`,
+        message: jsxCssPropErrorMessages.unsupportedArraySpread
+      },
+      {
+        name: "rejects unsupported first-level dynamic branches in nested css prop arrays",
+        fixture: `<div css={["base", ["nested", condition && { color: "red" }]]} />`,
+        message: jsxCssPropErrorMessages.unsupportedFirstLevelArrayBranch
+      },
+      {
+        name: "rejects unsupported first-level dynamic branches inside static array branches",
+        fixture: `<div css={["base", condition && ["active", nested && { color: "red" }]]} />`,
+        message: jsxCssPropErrorMessages.unsupportedFirstLevelArrayBranch
       },
       {
         name: "rejects duplicate css attributes",
