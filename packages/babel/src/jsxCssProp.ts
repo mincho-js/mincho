@@ -1,5 +1,11 @@
 import { types as t } from "@babel/core";
 import type { NodePath } from "@babel/core";
+import { unwrapTransparentCssRuleExpression } from "./staticCssEval/candidates.js";
+import {
+  findUnsupportedImportedStaticCssEvalReferenceDiagnostic,
+  resolveImportedStaticCssEvalExpression
+} from "./staticCssEval/importedModules.js";
+import { resolveSameFileStaticCssEvalExpression } from "./staticCssEval/sameFile.js";
 import type { PluginState, ProgramScope } from "./types.js";
 import { registerImportMethod } from "./utils.js";
 
@@ -59,7 +65,11 @@ export function preprocessJsxCssProp(
 
   path.traverse({
     JSXOpeningElement(openingElementPath) {
-      const normalizedElement = normalizeOpeningElement(openingElementPath);
+      const normalizedElement = normalizeOpeningElement(
+        openingElementPath,
+        path,
+        state
+      );
 
       if (!normalizedElement) {
         return;
@@ -150,7 +160,9 @@ function isUnusedCssModuleHelperImport(
 }
 
 function normalizeOpeningElement(
-  openingElementPath: NodePath<t.JSXOpeningElement>
+  openingElementPath: NodePath<t.JSXOpeningElement>,
+  programPath: NodePath<t.Program>,
+  state: PluginState
 ): {
   cssAttribute: t.JSXAttribute;
   cssExpression: t.Expression;
@@ -207,7 +219,12 @@ function normalizeOpeningElement(
     );
   }
 
-  const cssExpression = getCssExpression(openingElementPath, cssAttribute);
+  const cssExpression = getResolvedCssExpression(
+    openingElementPath,
+    programPath,
+    state,
+    cssAttribute
+  );
   const cssValueClassification = classifyCssPropValue(cssExpression);
 
   if (cssValueClassification === "unsupported-function") {
@@ -243,6 +260,67 @@ function normalizeOpeningElement(
     attributesAfterCss,
     hasSpreadBeforeCss
   };
+}
+
+function getResolvedCssExpression(
+  path: NodePath<t.JSXOpeningElement>,
+  programPath: NodePath<t.Program>,
+  state: PluginState,
+  attribute: t.JSXAttribute
+): t.Expression {
+  const cssExpression = getCssExpression(path, attribute);
+  const ownerFile = getStaticCssEvalOwnerFile(state);
+  const staticCssEvalResult = resolveSameFileStaticCssEvalExpression({
+    expression: cssExpression,
+    ownerFile,
+    programPath,
+    scope: path.scope
+  });
+
+  if (staticCssEvalResult.kind === "error") {
+    throw path.buildCodeFrameError(staticCssEvalResult.diagnostic.message);
+  }
+
+  if (staticCssEvalResult.kind === "resolved") {
+    return staticCssEvalResult.expression;
+  }
+
+  const importedStaticCssEvalResult = resolveImportedStaticCssEvalExpression({
+    expression: cssExpression,
+    ownerFile,
+    provider: state.opts.staticCssEvalProvider,
+    allowUnsupportedSourceFallback: true
+  });
+
+  if (importedStaticCssEvalResult.kind === "error") {
+    throw path.buildCodeFrameError(
+      importedStaticCssEvalResult.diagnostic.message
+    );
+  }
+
+  const resolvedCssExpression =
+    importedStaticCssEvalResult.kind === "resolved"
+      ? importedStaticCssEvalResult.expression
+      : cssExpression;
+
+  const unsupportedImportedReferenceDiagnostic =
+    findUnsupportedImportedStaticCssEvalReferenceDiagnostic({
+      expression: resolvedCssExpression,
+      ownerFile,
+      provider: state.opts.staticCssEvalProvider
+    });
+
+  if (unsupportedImportedReferenceDiagnostic) {
+    throw path.buildCodeFrameError(
+      unsupportedImportedReferenceDiagnostic.message
+    );
+  }
+
+  return resolvedCssExpression;
+}
+
+function getStaticCssEvalOwnerFile(state: PluginState): string {
+  return state.file.opts.filename ?? "<unknown>";
 }
 
 function assertSupportedCssPropElement(
@@ -1226,39 +1304,10 @@ function isUnsupportedDynamicCssRuleValue(
   return false;
 }
 
-type TransparentCssRuleWrapperExpression = t.Expression & {
-  expression: t.Expression;
-};
-
-function unwrapTransparentCssRuleExpression(
-  expression: t.Expression
-): t.Expression {
-  let currentExpression = expression;
-
-  while (isTransparentCssRuleWrapperExpression(currentExpression)) {
-    currentExpression = currentExpression.expression;
-  }
-
-  return currentExpression;
-}
-
 function createStaticStringExpression(
   expression: t.StringLiteral
 ): t.StringLiteral {
   return t.cloneNode(expression);
-}
-
-function isTransparentCssRuleWrapperExpression(
-  expression: t.Expression
-): expression is TransparentCssRuleWrapperExpression {
-  return (
-    expression.type === "TSNonNullExpression" ||
-    expression.type === "TSAsExpression" ||
-    expression.type === "TSSatisfiesExpression" ||
-    expression.type === "ParenthesizedExpression" ||
-    expression.type === "TypeCastExpression" ||
-    expression.type === "TSTypeAssertion"
-  );
 }
 
 function getClassNameExpression(
