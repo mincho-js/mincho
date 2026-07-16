@@ -11,3 +11,16 @@ export {
   type DefineRulesPresetRegistryFileOptions,
   type DefineRulesPresetRegistryResult
 } from "./defineRulesPreset.js";
+export {
+  createStaticCssEvalSourceHash,
+  createUnsupportedStaticCssEvalResolution,
+  getExistingRealpath,
+  getRealpathOrResolvedPath,
+  hasNodeModulesSegment,
+  isPathInsideRoot,
+  isProjectLocalImportPath,
+  isUnsupportedStaticCssEvalResolutionId,
+  isVirtualStaticCssEvalId,
+  trimTrailingSlash,
+  unsupportedStaticCssEvalResolutionPrefix
+} from "./staticCssEval.js";
