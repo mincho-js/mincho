@@ -3,6 +3,7 @@ import { SharedExampleCard } from "@examples/shared-component";
 import { css } from "@mincho-js/css";
 import { type ReactNode, useState } from "react";
 import reactLogo from "./assets/react.svg";
+import importedDefaultStyle, { importedNamedStyle } from "./staticStyles";
 import viteLogo from "/vite.svg";
 
 const styleA = css({
@@ -51,6 +52,8 @@ function App() {
       <ClassNameForwardingExample css={styleA}>
         Custom component css prop forwarding
       </ClassNameForwardingExample>
+      <div css={importedNamedStyle}>Imported named static css prop</div>
+      <div css={importedDefaultStyle}>Imported default static css prop</div>
       <div
         className={sharedCardContainerClassName}
         css={{

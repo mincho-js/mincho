@@ -390,12 +390,11 @@ const Box = styled('div', {
 
 ---
 
-## CSS Prop (Coming Soon)
+## CSS Prop
 
-The `css` prop for ad-hoc styling is planned but not yet implemented:
+The `css` prop is available when TypeScript uses the scoped JSX runtime and the Mincho transform runs with `jsxCssProp: true`. Supported values compile away before React handles JSX:
 
 ```tsx
-// Future API (not yet available)
 /** @jsxImportSource @mincho-js/react */
 
 function MyComponent() {
@@ -407,7 +406,53 @@ function MyComponent() {
 }
 ```
 
-This feature will enable:
-- Ad-hoc styling directly on JSX elements
-- Zero-runtime CSS extraction (like Emotion but build-time)
-- Array composition for multiple style objects
+V1 static evaluation supports direct object/array values, mutation-free same-file `const` object/array values, direct project-local ESM named imports, aliased named imports, default imports/exports, and static member paths such as `styles.button`:
+
+```tsx
+const button = { color: 'blue' } as const;
+const stack = [{ display: 'flex' }, { gap: 8 }] as const;
+const styles = {
+  button: { color: 'green' },
+} as const;
+
+<div css={button} />
+<div css={stack} />
+<div css={styles.button} />
+```
+
+```tsx
+// styles.ts
+export const card = { padding: 16 } as const;
+
+const panel = { color: 'green' } as const;
+export default panel;
+
+// App.tsx
+import panel, { card } from './styles';
+
+<div css={card} />
+<div css={panel} />
+```
+
+The practical literal grammar is small: string, number, boolean, `null`, unary numeric values, no-expression template literals such as `` `grid` ``, and nested object/array literals.
+
+Bundlers provide source resolution and loading only. Vite and esbuild give Mincho project-local source text and dependency edges, then Mincho parses that source and statically evaluates the supported AST subset. No module execution is used. Mincho never executes user modules to obtain `css` prop values, and it does not use Node, VM, `eval`, `require()`, dynamic import, or bundler runtime execution for static evaluation.
+
+V1 is project-local only. It excludes namespace imports, reexports or barrels, package exports from `node_modules`, virtual modules, CommonJS, calls/functions/mixins as CSS-rule values, object/array spreads, computed dynamic keys, optional chaining, template expressions, runtime dynamic values, SWC-native integration, and webpack integration.
+
+Existing dynamic class-value identifiers keep class-value behavior when they cannot be proven static. Proven CSS-rule candidates with unsupported internals fail with `Cannot statically evaluate css prop value` diagnostics.
+
+```tsx
+const color = 'red';
+const badIdentifierValue = { color };
+const badSpread = { ...base, color: 'red' };
+const styles = { button: { color: 'red' } } as const;
+const variant = 'button';
+
+<div css={badIdentifierValue} />
+<div css={badSpread} />
+<div css={styles[variant]} />
+<div css={styles?.button} />
+```
+
+These examples fail because v1 does not evaluate identifier object values, object spreads, dynamic member paths, or optional member paths inside static CSS-rule candidates.

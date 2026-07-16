@@ -5,6 +5,7 @@ import { styled } from "@mincho-js/react";
 import type { ReactNode } from "react";
 
 import { sharedCardHostClassName } from "./App.css.ts";
+import importedDefaultStyle, { importedNamedStyle } from "./staticStyles";
 
 const styleA = css({
   display: "block",
@@ -86,6 +87,8 @@ function App() {
       <ClassNameForwardingExample css={styleA}>
         Custom component css prop forwarding
       </ClassNameForwardingExample>
+      <div css={importedNamedStyle}>Imported named static css prop</div>
+      <div css={importedDefaultStyle}>Imported default static css prop</div>
       <div
         className={sharedCardHostClassName}
         css={{

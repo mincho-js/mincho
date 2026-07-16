@@ -62,13 +62,13 @@ export function App() {
 
 With `jsxCssProp: true`, supported values are lowered to either the existing Mincho `css(...)` extraction path or `cx(...)` class-value merging. If `className` is present, merge order is the existing `className` first and the `css` prop class value second, equivalent to `cx(existingClassName, nextCssClassName)`.
 
-### v2 Value Semantics
+### Value Semantics
 
 The scoped React JSX types define the `css` prop value as `ComplexCSSRule | ClassPrimitive`, not the full recursive `ClassValue` type. The primitive side reuses the existing exported `ClassPrimitive` that backs `cx(...)`; React does not duplicate it with a JSX-only union. Object and array syntax belongs to CSS-rule and composition semantics.
 
-- Inline object expressions are CSS-rule mode through `css(...)`, so `<div css={{ color: "red" }} />` extracts a Mincho CSS rule. Transparent direct wrappers keep that mode, including `<div css={{ color: "red" }!} />`, `<div css={{ color: "red" } as const} />`, `<div css={{ color: "red" } satisfies ComplexCSSRule} />`, and `<div css={({ color: "red" })} />`.
+- Inline object and array expressions are CSS-rule mode through `css(...)`, so `<div css={{ color: "red" }} />` extracts a Mincho CSS rule. Transparent direct wrappers keep that mode, including `<div css={{ color: "red" }!} />`, `<div css={{ color: "red" } as const} />`, `<div css={{ color: "red" } satisfies ComplexCSSRule} />`, and `<div css={({ color: "red" })} />`.
 - Strings are class values, not raw CSS declarations. Bare string-literal class values such as `<div css="base" />` and `<div css={"base"} />` lower directly to `className="base"` without `cx(...)` when no explicit `className` or spread-derived `className` must be merged.
-- Dynamic primitive class values lower through `cx(...)`. This includes identifiers, members, calls, conditionals, logicals, non-string literals, and template literals. This is the migration path for existing Mincho class values: `const styleA = css(...); <div css={styleA} />`.
+- Dynamic primitive class values lower through `cx(...)` when they are not proven static CSS rules. This includes identifiers, members, calls, conditionals, logicals, non-string literals, and template literals. This is the migration path for existing Mincho class values: `const styleA = css(...); <div css={styleA} />`.
 - If an explicit `className` or pre-css spread aggregate contributes an existing class, string-literal class values still merge through `cx(existing, cssValue)` with the existing class first.
 - Class dictionaries require explicit `cx(...)`, for example `<div css={cx({ active: condition })} />`. Explicit `css={cx(...)}` remains a class-value escape hatch and is not unwrapped by the JSX transform.
 - Function values are unsupported in compile-away mode.
@@ -82,6 +82,72 @@ Supported expression-valued primitive `css` props lower through `cx(...)`:
 <div css={maybeClass ?? "panel-fallback"} />
 <div css={getClassName()} />
 ```
+
+### Static Evaluation v1
+
+V1 can statically evaluate CSS-rule candidates when the value is a direct object or array, a mutation-free same-file `const`, or a direct project-local ESM named/default import that resolves to a supported object or array. Static member paths over those objects are supported, including `styles.button`, `styles.button.primary`, `styles["button"]`, and `styles["button"].primary`.
+
+The practical literal grammar is intentionally small: string, number, boolean, `null`, unary numeric expressions such as `-1`, no-expression template literals such as `` `grid` ``, and nested object/array literals. Supported values are reconstructed as AST literals and then use the same CSS-rule extraction path as inline `css={{ ... }}`.
+
+Same-file examples:
+
+```tsx
+const button = { color: "red" } as const;
+const stack = [{ display: "flex" }, { gap: 8 }] as const;
+const styles = {
+  button: { color: "blue" },
+  media: { wide: { padding: 24 } }
+} as const;
+
+<div css={button} />
+<div css={stack} />
+<div css={styles.button} />
+<div css={styles["media"].wide} />
+```
+
+Project-local import examples:
+
+```tsx
+// styles.ts
+export const card = { padding: 16 } as const;
+export const layout = { stack: [{ display: "flex" }, { gap: 8 }] } as const;
+
+const panel = { color: "green" } as const;
+export default panel;
+
+// App.tsx
+import panel, { card, layout } from "./styles";
+
+<div css={card} />
+<div css={panel} />
+<div css={layout.stack} />
+```
+
+Bundlers provide source resolution and loading only. Vite and esbuild give Mincho project-local source text plus dependency edges. Mincho parses that source and statically evaluates the supported AST subset. No module execution is used. Mincho never executes user modules to obtain `css` prop values, and it does not use Node, VM, `eval`, `require()`, dynamic import, or bundler runtime execution for static evaluation.
+
+V1 is project-local only. Resolved files must be real files inside the project root, outside `node_modules`, not virtual modules, and not package exports outside the root. V1 does not support namespace imports, reexports or barrels, package exports from `node_modules`, virtual modules, CommonJS, calls/functions/mixins as CSS-rule values, object/array spreads, computed dynamic keys, optional chaining, template expressions, runtime dynamic values, SWC-native integration, or webpack integration.
+
+Failure policy:
+
+- Existing dynamic class-value identifiers and members that cannot be proven static keep class-value behavior, so `css={activeClass}` and `css={styles.activeClass}` still lower through `cx(...)` when accepted as class values.
+- Proven CSS-rule candidates with unsupported internals throw `Cannot statically evaluate css prop value` diagnostics instead of dropping CSS, guessing, or executing code.
+
+Unsupported examples:
+
+```tsx
+const color = "red";
+const badIdentifierValue = { color };
+const badSpread = { ...base, color: "red" };
+const styles = { button: { color: "red" } } as const;
+const variant = "button";
+
+<div css={badIdentifierValue} />
+<div css={badSpread} />
+<div css={styles[variant]} />
+<div css={styles?.button} />
+```
+
+`badIdentifierValue` fails because object values cannot reference identifiers in v1. `badSpread` fails because object and array spreads are not part of the static literal grammar. `styles[variant]` fails because computed dynamic member paths are unsupported. `styles?.button` fails because optional member paths are unsupported.
 
 Static JSX `css` arrays stay on the `css([...])` composition path. They are static `ComplexCSSRule` composition arrays, not recursive `ClassValue` arrays, and they do not lower to `cx(...)` just because they contain string items.
 
@@ -191,9 +257,9 @@ Class-value-only `||` and `??` still lower through `cx(...)` without CSS-rule ex
 <div css={maybeClass ?? "panel-fallback"} />
 ```
 
-The transform only treats syntactic `ObjectExpression` and `ArrayExpression` values, after transparent wrapper normalization, as static CSS rules. It does not evaluate identifiers, member expressions, imports, object variables, constants, or function calls into CSS rules. There is no static evaluation for identifier, member, call, or import-based CSS-rule discovery.
+The transform treats direct object/array syntax plus proven same-file or imported static `const` references as CSS rules. Unresolved identifiers, unsupported imports, calls, and runtime expressions remain class-value expressions when they are not proven CSS-rule candidates.
 
-### v2 Targets and Forwarding
+### Targets and Forwarding
 
 The transform accepts JSX identifiers and member-expression components, including intrinsic elements, custom React components, member-expression components such as `<motion.div />`, and custom elements.
 
@@ -215,7 +281,7 @@ Spread-only css values are not transformed by Babel. If an own `css` prop reache
 
 `@mincho-js/react/jsx-runtime` and `@mincho-js/react/jsx-dev-runtime` are thin wrappers around React's automatic JSX runtimes. They only guard missed transforms for own `css` props.
 
-Supported static rule branches are converted to generated class names before JSX reaches the runtime. Mincho does not provide StyleX `stylex.props` fallback behavior, inject a StyleX helper namespace, evaluate imported files for CSS rules, or fall back to runtime CSS generation.
+Supported static rule branches are converted to generated class names before JSX reaches the runtime. Static imported values are resolved before runtime through the project-local AST evaluator described above. Mincho does not provide StyleX `stylex.props` fallback behavior, inject a StyleX helper namespace, execute imported files, or fall back to runtime CSS generation.
 
 If an own `css` prop reaches either runtime, Mincho throws:
 
@@ -227,7 +293,7 @@ There is no Emotion runtime parity. Mincho does not provide an Emotion runtime s
 
 ### Transform Errors
 
-When `jsxCssProp: true` is enabled, unsupported v2 cases fail during the transform with explicit diagnostics:
+When `jsxCssProp: true` is enabled, unsupported css prop cases fail during the transform with explicit diagnostics:
 
 | Case | Message |
 | --- | --- |
@@ -245,5 +311,7 @@ When `jsxCssProp: true` is enabled, unsupported v2 cases fail during the transfo
 | Duplicate `css` | `Mincho JSX css prop must appear only once` |
 | Duplicate `className` | `Mincho JSX css prop cannot merge duplicate className attributes` |
 | Shorthand or unsupported `className` value | `Mincho JSX css prop requires className to be a string literal or expression` |
+
+Static evaluation failures use diagnostics that start with `Cannot statically evaluate css prop value`, followed by the unsupported reason such as `identifier-object-value`, `object-or-array-spread`, `dynamic-member-path`, `optional-member-path`, `template-expression`, `reexport-or-barrel`, `node-modules-import`, or `virtual-module`.
 
 The same `jsxCssProp: true` transform flag is exposed through `@mincho-js/babel`, `@mincho-js/integration`, `@mincho-js/vite`, and `@mincho-js/esbuild`.
