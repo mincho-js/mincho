@@ -146,15 +146,9 @@ if (import.meta.vitest) {
       assertType<MinchoCssPropValue>([["base", false]]);
       // @ts-expect-error Recursive arrays with numeric leaves are ClassValue-only.
       assertType<MinchoCssPropValue>([[1]]);
-      // @ts-expect-error TypeScript rejects always-truthy object literal logical left operands before Mincho css prop typing.
-      // eslint-disable-next-line no-constant-binary-expression -- The constant operand is the TypeScript error under test.
-      assertType<MinchoCssPropValue>({ color: "red" } || providedClass);
-      // @ts-expect-error TypeScript rejects never-nullish object literal nullish left operands before Mincho css prop typing.
-      // eslint-disable-next-line no-constant-binary-expression -- The constant operand is the TypeScript error under test.
-      assertType<MinchoCssPropValue>({ color: "red" } ?? providedClass);
-      // @ts-expect-error TypeScript rejects always-truthy object literal logical left operands before Mincho css prop typing.
-      // eslint-disable-next-line no-constant-binary-expression -- The constant operand is the TypeScript error under test.
-      assertType<MinchoCssPropValue>({ color: "red" } && providedClass);
+      assertType<MinchoCssPropValue>(cssRule || providedClass);
+      assertType<MinchoCssPropValue>(cssRule ?? providedClass);
+      assertType<MinchoCssPropValue>(cssRule && providedClass);
     });
 
     it("adds css to string-compatible intrinsic className props", () => {
@@ -317,21 +311,15 @@ if (import.meta.vitest) {
       });
 
       assertType<JSX.IntrinsicElements["div"]>({
-        // @ts-expect-error TypeScript rejects always-truthy object literal logical left operands before Mincho css prop typing.
-        // eslint-disable-next-line no-constant-binary-expression -- The constant operand is the TypeScript error under test.
-        css: { color: "red" } || providedClass
+        css: cssRule || providedClass
       });
 
       assertType<JSX.IntrinsicElements["div"]>({
-        // @ts-expect-error TypeScript rejects never-nullish object literal nullish left operands before Mincho css prop typing.
-        // eslint-disable-next-line no-constant-binary-expression -- The constant operand is the TypeScript error under test.
-        css: { color: "red" } ?? providedClass
+        css: cssRule ?? providedClass
       });
 
       assertType<JSX.IntrinsicElements["div"]>({
-        // @ts-expect-error TypeScript rejects always-truthy object literal logical left operands before Mincho css prop typing.
-        // eslint-disable-next-line no-constant-binary-expression -- The constant operand is the TypeScript error under test.
-        css: { color: "red" } && providedClass
+        css: cssRule && providedClass
       });
 
       assertType<ReactJSX.IntrinsicElements["div"]>({
@@ -389,10 +377,10 @@ if (import.meta.vitest) {
         Props
       >;
 
-      const condition: boolean = Math.random() > 0.5;
       const functionCss = () => "base";
       const maybeClass: string | null = Math.random() > 0.5 ? null : "base";
       const getClassName = () => "base";
+      const condition = true as boolean;
 
       assertType<ManagedProps<{ className?: string; label: string }>>({
         css: "base",
