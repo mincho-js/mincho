@@ -10,18 +10,186 @@ export interface StaticCssEvalQuery {
   memberPath?: string[];
 }
 
+// Maintainer boundary: these contracts model AST-derived css values only.
+// Token/theme semantics are not interpreted unless they arrive as JS bindings.
 export type StaticCssEvalResult =
-  | { kind: "not-candidate" }
+  | StaticCssEvalLegacyNotCandidateResult
+  | StaticCssEvalLegacyResolvedResult
+  | StaticCssEvalLegacyErrorResult
+  | StaticCssEvalResolvedResult
+  | StaticCssEvalUnsupportedResult
+  | StaticCssEvalErrorResult;
+
+type StaticCssEvalLegacyNotCandidateResult = {
+  kind: "not-candidate";
+  value?: never;
+  diagnostic?: never;
+};
+
+type StaticCssEvalLegacyResolvedResult = {
+  kind: "resolved";
+  value: StaticCssLiteral;
+  dependencies: string[];
+  diagnostic?: never;
+};
+
+type StaticCssEvalLegacyErrorResult = {
+  kind: "error";
+  diagnostic: StaticCssEvalDiagnostic;
+  dependencies: string[];
+  value?: never;
+};
+
+export interface StaticCssEvalResolvedResult {
+  kind: "resolved";
+  status: "resolved";
+  expression: string;
+  value: StaticCssLiteral;
+  provenance?: BindingProvenance;
+  dependencies: ResolutionDependency[];
+  resolutionChain?: ResolutionChainEntry[];
+  diagnostics?: [];
+  cacheKey?: StaticCssEvalCacheKey;
+  diagnostic?: never;
+}
+
+export interface StaticCssEvalUnsupportedResult {
+  kind: "not-candidate";
+  status: "unsupported";
+  expression: string;
+  provenance?: BindingProvenance;
+  dependencies: ResolutionDependency[];
+  resolutionChain?: ResolutionChainEntry[];
+  diagnostics: StaticCssEvalDiagnostic[];
+  cacheKey?: StaticCssEvalCacheKey;
+  value?: never;
+  diagnostic?: never;
+}
+
+export interface StaticCssEvalErrorResult {
+  kind: "error";
+  status: "error";
+  expression: string;
+  provenance?: BindingProvenance;
+  dependencies: ResolutionDependency[];
+  resolutionChain?: ResolutionChainEntry[];
+  diagnostic: StaticCssEvalDiagnostic;
+  diagnostics: StaticCssEvalDiagnostic[];
+  cacheKey?: StaticCssEvalCacheKey;
+  value?: never;
+}
+
+export type StaticCssEvalResultStatus = "resolved" | "unsupported" | "error";
+
+export type BindingProvenance =
   | {
-      kind: "resolved";
-      value: StaticCssLiteral;
-      dependencies: string[];
+      kind: "local";
+      file: string;
+      bindingName: string;
+      declarationKind?: "const" | "let" | "var" | "function" | "class";
     }
   | {
-      kind: "error";
-      diagnostic: StaticCssEvalDiagnostic;
-      dependencies: string[];
+      kind: "imported";
+      file: string;
+      importer: string;
+      specifier: string;
+      exportName: StaticCssEvalExportName;
+      memberPath: string[];
+    }
+  | {
+      kind: "reexported";
+      file: string;
+      importer: string;
+      specifier: string;
+      exportName: StaticCssEvalExportName;
+      memberPath: string[];
+      reexportName: string;
+    }
+  | {
+      kind: "namespace-member";
+      file: string;
+      importer: string;
+      specifier: string;
+      exportName: StaticCssEvalExportName;
+      memberPath: string[];
+      namespaceBinding: string;
     };
+
+export type ResolutionDependencyKind =
+  | "local"
+  | "imported"
+  | "reexported"
+  | "namespace-member"
+  | "unresolved";
+
+export interface ResolutionDependency {
+  file: string;
+  kind: ResolutionDependencyKind;
+  importer: string;
+  specifier: string;
+  exportName: StaticCssEvalExportName;
+  memberPath: string[];
+  inspected: boolean;
+  contributed: boolean;
+}
+
+export interface ResolutionChainEntry {
+  importer: string;
+  source: string;
+  exportName: StaticCssEvalExportName;
+  memberPath: string[];
+  provenance?: BindingProvenance;
+}
+
+export interface StaticCssEvalCacheKey {
+  importerFile: string;
+  resolvedFile: string;
+  exportName: StaticCssEvalExportName;
+  memberPath: string[];
+  sourceHash: string;
+  sourceVersion?: string | number;
+  pluginOptionsVersion: string | number;
+  resolverOptionsVersion: string | number;
+  staticEvalSupportVersion: string | number;
+  resolvedId?: string;
+  parserOptions?: StaticCssEvalParserOptionsKey;
+  projectLocalBoundary?: StaticCssEvalProjectLocalBoundaryState;
+}
+
+export type StaticCssEvalDiagnosticId =
+  | "STATIC_CSS_EVAL_LOCAL_ALIAS_CYCLE"
+  | "STATIC_CSS_EVAL_MUTABLE_BINDING"
+  | "STATIC_CSS_EVAL_MUTATED_BINDING"
+  | "STATIC_CSS_EVAL_UNSUPPORTED_ARRAY_ELEMENT"
+  | "STATIC_CSS_EVAL_OBJECT_SPREAD_UNSUPPORTED"
+  | "STATIC_CSS_EVAL_COMPUTED_MEMBER_UNSUPPORTED"
+  | "STATIC_CSS_EVAL_DYNAMIC_EXPRESSION_UNSUPPORTED"
+  | "STATIC_CSS_EVAL_EXPORT_STAR_UNSUPPORTED"
+  | "STATIC_CSS_EVAL_NAMESPACE_UNSUPPORTED"
+  | "STATIC_CSS_EVAL_PACKAGE_IMPORT_UNSUPPORTED"
+  | "STATIC_CSS_EVAL_CJS_UNSUPPORTED"
+  | "STATIC_CSS_EVAL_IMPORT_CYCLE"
+  | "STATIC_CSS_EVAL_UNRESOLVED_IMPORT"
+  | "STATIC_CSS_EVAL_UNRESOLVED_EXPORT"
+  | "STATIC_CSS_EVAL_RESOLUTION_DEPTH_EXCEEDED";
+
+export const STATIC_CSS_EVAL_DIAGNOSTIC_IDS = [
+  "STATIC_CSS_EVAL_LOCAL_ALIAS_CYCLE",
+  "STATIC_CSS_EVAL_MUTABLE_BINDING",
+  "STATIC_CSS_EVAL_MUTATED_BINDING",
+  "STATIC_CSS_EVAL_UNSUPPORTED_ARRAY_ELEMENT",
+  "STATIC_CSS_EVAL_OBJECT_SPREAD_UNSUPPORTED",
+  "STATIC_CSS_EVAL_COMPUTED_MEMBER_UNSUPPORTED",
+  "STATIC_CSS_EVAL_DYNAMIC_EXPRESSION_UNSUPPORTED",
+  "STATIC_CSS_EVAL_EXPORT_STAR_UNSUPPORTED",
+  "STATIC_CSS_EVAL_NAMESPACE_UNSUPPORTED",
+  "STATIC_CSS_EVAL_PACKAGE_IMPORT_UNSUPPORTED",
+  "STATIC_CSS_EVAL_CJS_UNSUPPORTED",
+  "STATIC_CSS_EVAL_IMPORT_CYCLE",
+  "STATIC_CSS_EVAL_UNRESOLVED_IMPORT",
+  "STATIC_CSS_EVAL_UNRESOLVED_EXPORT",
+  "STATIC_CSS_EVAL_RESOLUTION_DEPTH_EXCEEDED"
+] as const satisfies readonly StaticCssEvalDiagnosticId[];
 
 export type StaticCssLiteral =
   | string
@@ -82,6 +250,7 @@ export type StaticCssEvalUnsupportedReason =
   (typeof STATIC_CSS_EVAL_UNSUPPORTED_REASONS)[number];
 
 export interface StaticCssEvalDiagnostic {
+  id?: StaticCssEvalDiagnosticId;
   code: StaticCssEvalDiagnosticCode;
   message: string;
   reason: StaticCssEvalUnsupportedReason;
@@ -138,16 +307,6 @@ export interface StaticCssEvalParserOptionsKey {
   typescript: boolean;
 }
 
-export interface StaticCssEvalCacheKey {
-  resolvedId: string;
-  sourceHash: string;
-  sourceVersion?: string | number;
-  parserOptions: StaticCssEvalParserOptionsKey;
-  exportName: StaticCssEvalExportName;
-  memberPath: string[];
-  projectLocalBoundary: StaticCssEvalProjectLocalBoundaryState;
-}
-
 export const STATIC_CSS_EVAL_LIMITS = {
   maxImportDepth: 10,
   maxEvaluatedModulesPerOwner: 100,
@@ -167,12 +326,14 @@ export const STATIC_CSS_EVAL_GUARDRAILS = [
   "no-module-execution",
   "no-node-vm-eval-dynamic-import",
   "no-bundler-runtime-evaluation",
-  "no-reexports-or-barrels-v1",
-  "no-namespace-imports-v1",
+  "direct-named-reexports-only-v1",
+  "limited-project-local-namespace-members-v1",
   "no-node-modules-or-virtual-modules-v1",
   "async-prepass-sync-babel-boundary"
 ] as const;
 
+// Keep unsupported boundaries fail-closed: dynamic/export-star/package/CJS,
+// object spread, computed paths, and runtime fallback are outside this model.
 export type StaticCssEvalSupportStatus =
   | "preserved"
   | "supported"
@@ -263,12 +424,24 @@ export const STATIC_CSS_EVAL_SUPPORT_MATRIX = [
     status: "supported"
   },
   {
-    construct: 'Reexports / barrels (`export { x } from "./x"`, `export *`)',
+    construct: 'Direct named re-export (`export { x } from "./x"`)',
+    behavior: "Supported for project-local ESM source with dependency chain metadata",
+    status: "supported"
+  },
+  {
+    construct: "Export star (`export *`)",
     behavior: "Unsupported",
     status: "unsupported"
   },
   {
-    construct: "Namespace imports (`import * as styles`)",
+    construct:
+      'Limited namespace member import (`import * as styles from "./style"; styles.x.y`)',
+    behavior:
+      "Supported for project-local ESM source and literal member chains only",
+    status: "supported"
+  },
+  {
+    construct: "Broad/package/computed namespace usage",
     behavior: "Unsupported",
     status: "unsupported"
   },
@@ -344,6 +517,158 @@ export const STATIC_CSS_EVAL_SUPPORT_MATRIX = [
 if (import.meta.vitest) {
   const { describe, expect, it } = import.meta.vitest;
 
+  const staticCssEvalDiagnosticExhaustiveMap = {
+    STATIC_CSS_EVAL_LOCAL_ALIAS_CYCLE: true,
+    STATIC_CSS_EVAL_MUTABLE_BINDING: true,
+    STATIC_CSS_EVAL_MUTATED_BINDING: true,
+    STATIC_CSS_EVAL_UNSUPPORTED_ARRAY_ELEMENT: true,
+    STATIC_CSS_EVAL_OBJECT_SPREAD_UNSUPPORTED: true,
+    STATIC_CSS_EVAL_COMPUTED_MEMBER_UNSUPPORTED: true,
+    STATIC_CSS_EVAL_DYNAMIC_EXPRESSION_UNSUPPORTED: true,
+    STATIC_CSS_EVAL_EXPORT_STAR_UNSUPPORTED: true,
+    STATIC_CSS_EVAL_NAMESPACE_UNSUPPORTED: true,
+    STATIC_CSS_EVAL_PACKAGE_IMPORT_UNSUPPORTED: true,
+    STATIC_CSS_EVAL_CJS_UNSUPPORTED: true,
+    STATIC_CSS_EVAL_IMPORT_CYCLE: true,
+    STATIC_CSS_EVAL_UNRESOLVED_IMPORT: true,
+    STATIC_CSS_EVAL_UNRESOLVED_EXPORT: true,
+    STATIC_CSS_EVAL_RESOLUTION_DEPTH_EXCEEDED: true
+  } satisfies Record<StaticCssEvalDiagnosticId, true>;
+
+  const staticCssEvalDiagnosticIds = Object.keys(
+    staticCssEvalDiagnosticExhaustiveMap
+  ) as StaticCssEvalDiagnosticId[];
+
+  const staticCssEvalResolvedResult = {
+    kind: "resolved",
+    status: "resolved",
+    expression: "styles.button",
+    value: { color: "red" },
+    provenance: {
+      kind: "imported",
+      file: "/project/src/styles.ts",
+      importer: "/project/src/App.tsx",
+      specifier: "./styles",
+      exportName: "default",
+      memberPath: ["button"]
+    },
+    dependencies: [
+      {
+        file: "/project/src/styles.ts",
+        kind: "imported",
+        importer: "/project/src/App.tsx",
+        specifier: "./styles",
+        exportName: "default",
+        memberPath: ["button"],
+        inspected: true,
+        contributed: true
+      }
+    ],
+    resolutionChain: [
+      {
+        importer: "/project/src/App.tsx",
+        source: "/project/src/styles.ts",
+        exportName: "default",
+        memberPath: ["button"],
+        provenance: {
+          kind: "imported",
+          file: "/project/src/styles.ts",
+          importer: "/project/src/App.tsx",
+          specifier: "./styles",
+          exportName: "default",
+          memberPath: ["button"]
+        }
+      }
+    ],
+    cacheKey: {
+      importerFile: "/project/src/App.tsx",
+      resolvedFile: "/project/src/styles.ts",
+      exportName: "default",
+      memberPath: ["button"],
+      sourceHash: "sha256:source",
+      sourceVersion: 1,
+      pluginOptionsVersion: 1,
+      resolverOptionsVersion: 1,
+      staticEvalSupportVersion: 1,
+      resolvedId: "/project/src/styles.ts",
+      parserOptions: {
+        plugins: ["jsx", "typescript"],
+        sourceType: "module",
+        jsx: true,
+        typescript: true
+      },
+      projectLocalBoundary: {
+        rootRealpath: "/project",
+        resolvedRealpath: "/project/src/styles.ts",
+        insideRoot: true,
+        insideNodeModules: false,
+        virtual: false,
+        packageExportOutsideRoot: false
+      }
+    }
+  } satisfies StaticCssEvalResult;
+
+  const staticCssEvalUnsupportedResult = {
+    kind: "not-candidate",
+    status: "unsupported",
+    expression: "styles[key]",
+    dependencies: [],
+    diagnostics: [
+      {
+        id: "STATIC_CSS_EVAL_COMPUTED_MEMBER_UNSUPPORTED",
+        code: "unsupported-source",
+        message: "computed member access is unsupported",
+        reason: "dynamic-member-path",
+        owner: {
+          file: "/project/src/App.tsx",
+          start: 42,
+          end: 55
+        }
+      }
+    ],
+    cacheKey: {
+      importerFile: "/project/src/App.tsx",
+      resolvedFile: "/project/src/styles.ts",
+      exportName: "default",
+      memberPath: ["button"],
+      sourceHash: "sha256:source",
+      pluginOptionsVersion: 1,
+      resolverOptionsVersion: 1,
+      staticEvalSupportVersion: 1
+    }
+  } satisfies StaticCssEvalResult;
+
+  const staticCssEvalErrorResult = {
+    kind: "error",
+    status: "error",
+    expression: "missing.button",
+    dependencies: [],
+    diagnostic: {
+      id: "STATIC_CSS_EVAL_UNRESOLVED_EXPORT",
+      code: "unsupported-source",
+      message: "export could not be resolved",
+      reason: "reexport-or-barrel",
+      owner: {
+        file: "/project/src/App.tsx",
+        start: 42,
+        end: 55
+      }
+    },
+    diagnostics: [
+      {
+        id: "STATIC_CSS_EVAL_UNRESOLVED_EXPORT",
+        code: "unsupported-source",
+        message: "export could not be resolved",
+        reason: "reexport-or-barrel",
+        owner: {
+          file: "/project/src/App.tsx",
+          start: 42,
+          end: 55
+        }
+      }
+    ]
+  } satisfies StaticCssEvalResult;
+
   describe("static css evaluator contracts", () => {
     it("encodes v1 static evaluator limits and guardrails", () => {
       expect(STATIC_CSS_EVAL_LIMITS).toEqual({
@@ -363,7 +688,19 @@ if (import.meta.vitest) {
       expect(
         STATIC_CSS_EVAL_SUPPORT_MATRIX.find(
           ({ construct }) =>
-            construct === "Namespace imports (`import * as styles`)"
+            construct ===
+            'Limited namespace member import (`import * as styles from "./style"; styles.x.y`)'
+        )?.status
+      ).toBe("supported");
+      expect(
+        STATIC_CSS_EVAL_SUPPORT_MATRIX.find(
+          ({ construct }) =>
+            construct === 'Direct named re-export (`export { x } from "./x"`)'
+        )?.status
+      ).toBe("supported");
+      expect(
+        STATIC_CSS_EVAL_SUPPORT_MATRIX.find(
+          ({ construct }) => construct === "Export star (`export *`)"
         )?.status
       ).toBe("unsupported");
       expect(
@@ -371,7 +708,7 @@ if (import.meta.vitest) {
           ({ construct }) => construct === '`import x from "./style"`'
         )?.status
       ).toBe("supported");
-      expect(STATIC_CSS_EVAL_SUPPORT_MATRIX).toHaveLength(30);
+      expect(STATIC_CSS_EVAL_SUPPORT_MATRIX).toHaveLength(32);
     });
 
     it("accepts synchronous provider and cache key contracts", () => {
@@ -391,16 +728,22 @@ if (import.meta.vitest) {
         }
       };
       const cacheKey: StaticCssEvalCacheKey = {
-        resolvedId: "/project/src/styles.ts",
+        importerFile: "/project/src/App.tsx",
+        resolvedFile: "/project/src/styles.ts",
+        exportName: "default",
+        memberPath: ["button"],
         sourceHash: "sha256:source",
+        sourceVersion: 1,
+        pluginOptionsVersion: 1,
+        resolverOptionsVersion: 1,
+        staticEvalSupportVersion: 1,
+        resolvedId: "/project/src/styles.ts",
         parserOptions: {
           plugins: ["jsx", "typescript"],
           sourceType: "module",
           jsx: true,
           typescript: true
         },
-        exportName: "default",
-        memberPath: ["button"],
         projectLocalBoundary: {
           rootRealpath: "/project",
           resolvedRealpath: "/project/src/styles.ts",
@@ -411,7 +754,8 @@ if (import.meta.vitest) {
         }
       };
 
-      expect(cacheKey.projectLocalBoundary.insideRoot).toBe(true);
+      expect(cacheKey.importerFile).toBe("/project/src/App.tsx");
+      expect(cacheKey.projectLocalBoundary?.insideRoot).toBe(true);
       expect(
         provider.getResolvedCssValue({
           importerId: "/project/src/App.tsx",
@@ -425,6 +769,48 @@ if (import.meta.vitest) {
         value: { color: "red" },
         dependencies: ["/project/src/styles.ts"]
       });
+    });
+
+    it("models resolved, unsupported, and error result shapes", () => {
+      expect(staticCssEvalResolvedResult.status).toBe("resolved");
+      expect(staticCssEvalResolvedResult.kind).toBe("resolved");
+      expect(staticCssEvalResolvedResult.dependencies[0]?.file).toBe(
+        "/project/src/styles.ts"
+      );
+      expect(staticCssEvalUnsupportedResult.status).toBe("unsupported");
+      expect(staticCssEvalUnsupportedResult.kind).toBe("not-candidate");
+      expect(staticCssEvalUnsupportedResult.diagnostics[0]?.id).toBe(
+        "STATIC_CSS_EVAL_COMPUTED_MEMBER_UNSUPPORTED"
+      );
+      expect(staticCssEvalErrorResult.status).toBe("error");
+      expect(staticCssEvalErrorResult.kind).toBe("error");
+      expect(staticCssEvalErrorResult.diagnostics[0]?.id).toBe(
+        "STATIC_CSS_EVAL_UNRESOLVED_EXPORT"
+      );
+    });
+
+    it("keeps legacy kind narrowing ergonomic", () => {
+      const legacyResult: StaticCssEvalResult = {
+        kind: "error",
+        diagnostic: {
+          code: "unsupported-source",
+          message: "legacy error",
+          reason: "reexport-or-barrel",
+          owner: { file: "/project/src/App.tsx" }
+        },
+        dependencies: []
+      };
+
+      if (legacyResult.kind === "error") {
+        expect(legacyResult.diagnostic.message).toBe("legacy error");
+      }
+    });
+
+    it("keeps diagnostic ids exhaustive", () => {
+      expect(staticCssEvalDiagnosticIds).toEqual(
+        STATIC_CSS_EVAL_DIAGNOSTIC_IDS
+      );
+      expect(staticCssEvalDiagnosticIds).toHaveLength(15);
     });
   });
 }

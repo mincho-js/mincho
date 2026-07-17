@@ -1,12 +1,24 @@
 import { types as t } from "@babel/core";
 import type { NodePath } from "@babel/core";
-import { unwrapTransparentCssRuleExpression } from "./staticCssEval/candidates.js";
+import {
+  createStaticCssEvalCandidate,
+  unwrapTransparentCssRuleExpression
+} from "./staticCssEval/candidates.js";
 import {
   findUnsupportedImportedStaticCssEvalReferenceDiagnostic,
   resolveImportedStaticCssEvalExpression
 } from "./staticCssEval/importedModules.js";
+import type {
+  ResolutionDependency,
+  StaticCssEvalCacheKey,
+  StaticCssEvalDiagnostic
+} from "./staticCssEval/types.js";
 import { resolveSameFileStaticCssEvalExpression } from "./staticCssEval/sameFile.js";
-import type { PluginState, ProgramScope } from "./types.js";
+import type {
+  MinchoStaticCssEvalMetadata,
+  PluginState,
+  ProgramScope
+} from "./types.js";
 import { registerImportMethod } from "./utils.js";
 
 const cssAttributeName = "css";
@@ -52,6 +64,13 @@ type CssPropValueClassification =
   | "unsupported-array-spread"
   | "unsupported-first-level-array-branch"
   | "unsupported-function";
+
+type StaticCssEvalMetadataSource = {
+  dependencies?: readonly (ResolutionDependency | string)[];
+  diagnostics?: readonly StaticCssEvalDiagnostic[];
+  diagnostic?: StaticCssEvalDiagnostic;
+  cacheKey?: StaticCssEvalCacheKey;
+};
 
 export function preprocessJsxCssProp(
   path: NodePath<t.Program>,
@@ -276,6 +295,7 @@ function getResolvedCssExpression(
     programPath,
     scope: path.scope
   });
+  registerStaticCssEvalResultMetadata(state, staticCssEvalResult);
 
   if (staticCssEvalResult.kind === "error") {
     throw path.buildCodeFrameError(staticCssEvalResult.diagnostic.message);
@@ -285,6 +305,12 @@ function getResolvedCssExpression(
     return staticCssEvalResult.expression;
   }
 
+  registerImportedStaticCssEvalProviderResultMetadata({
+    expression: cssExpression,
+    ownerFile,
+    state
+  });
+
   const importedStaticCssEvalResult = resolveImportedStaticCssEvalExpression({
     expression: cssExpression,
     ownerFile,
@@ -293,6 +319,10 @@ function getResolvedCssExpression(
   });
 
   if (importedStaticCssEvalResult.kind === "error") {
+    registerStaticCssEvalDiagnosticMetadata(
+      state,
+      importedStaticCssEvalResult.diagnostic
+    );
     throw path.buildCodeFrameError(
       importedStaticCssEvalResult.diagnostic.message
     );
@@ -311,6 +341,10 @@ function getResolvedCssExpression(
     });
 
   if (unsupportedImportedReferenceDiagnostic) {
+    registerStaticCssEvalDiagnosticMetadata(
+      state,
+      unsupportedImportedReferenceDiagnostic
+    );
     throw path.buildCodeFrameError(
       unsupportedImportedReferenceDiagnostic.message
     );
@@ -321,6 +355,200 @@ function getResolvedCssExpression(
 
 function getStaticCssEvalOwnerFile(state: PluginState): string {
   return state.file.opts.filename ?? "<unknown>";
+}
+
+function registerImportedStaticCssEvalProviderResultMetadata(options: {
+  expression: t.Expression;
+  ownerFile: string;
+  state: PluginState;
+}): void {
+  const { staticCssEvalProvider } = options.state.opts;
+
+  if (!staticCssEvalProvider) {
+    return;
+  }
+
+  const candidate = createStaticCssEvalCandidate(
+    options.expression,
+    options.ownerFile
+  );
+
+  if (!candidate) {
+    return;
+  }
+
+  registerStaticCssEvalResultMetadata(
+    options.state,
+    staticCssEvalProvider.getResolvedCssValue(candidate)
+  );
+}
+
+function registerStaticCssEvalResultMetadata(
+  state: PluginState,
+  result: StaticCssEvalMetadataSource
+): void {
+  const dependencies = (result.dependencies ?? []).filter(
+    isResolutionDependency
+  );
+  const diagnostics =
+    result.diagnostics ?? (result.diagnostic ? [result.diagnostic] : []);
+  const cacheKeys = result.cacheKey ? [result.cacheKey] : [];
+
+  if (
+    dependencies.length === 0 &&
+    diagnostics.length === 0 &&
+    cacheKeys.length === 0
+  ) {
+    return;
+  }
+
+  const metadata = getMinchoStaticCssEvalMetadata(state);
+  appendUniqueMetadataItems(
+    metadata.dependencies,
+    dependencies,
+    createResolutionDependencyMetadataKey
+  );
+  appendUniqueMetadataItems(
+    metadata.diagnostics,
+    diagnostics,
+    createStaticCssEvalDiagnosticMetadataKey
+  );
+  appendUniqueMetadataItems(
+    metadata.cacheKeys,
+    cacheKeys,
+    createStaticCssEvalCacheKeyMetadataKey
+  );
+  appendUniqueResolvedModuleIds(metadata, dependencies, cacheKeys);
+}
+
+function registerStaticCssEvalDiagnosticMetadata(
+  state: PluginState,
+  diagnostic: StaticCssEvalDiagnostic
+): void {
+  registerStaticCssEvalResultMetadata(state, { diagnostics: [diagnostic] });
+}
+
+function getMinchoStaticCssEvalMetadata(
+  state: PluginState
+): MinchoStaticCssEvalMetadata {
+  const metadata = state.file.metadata.minchoStaticCssEval;
+
+  if (metadata) {
+    return metadata;
+  }
+
+  const nextMetadata: MinchoStaticCssEvalMetadata = {
+    dependencies: [],
+    diagnostics: [],
+    cacheKeys: [],
+    resolvedModuleIds: []
+  };
+  state.file.metadata.minchoStaticCssEval = nextMetadata;
+  return nextMetadata;
+}
+
+function isResolutionDependency(
+  dependency: ResolutionDependency | string
+): dependency is ResolutionDependency {
+  return typeof dependency === "object" && dependency !== null;
+}
+
+function appendUniqueMetadataItems<T>(
+  target: T[],
+  items: readonly T[],
+  createKey: (item: T) => string
+): void {
+  const existingKeys = new Set(target.map(createKey));
+
+  for (const item of items) {
+    const key = createKey(item);
+
+    if (existingKeys.has(key)) {
+      continue;
+    }
+
+    existingKeys.add(key);
+    target.push(item);
+  }
+}
+
+function appendUniqueResolvedModuleIds(
+  metadata: MinchoStaticCssEvalMetadata,
+  dependencies: readonly ResolutionDependency[],
+  cacheKeys: readonly StaticCssEvalCacheKey[]
+): void {
+  const moduleIds = [
+    ...cacheKeys.flatMap((cacheKey) => cacheKey.resolvedId ?? []),
+    ...dependencies.flatMap((dependency) =>
+      isResolvedModuleDependency(dependency) ? [dependency.file] : []
+    )
+  ];
+
+  appendUniqueMetadataItems(
+    metadata.resolvedModuleIds,
+    moduleIds,
+    (moduleId) => moduleId
+  );
+}
+
+function isResolvedModuleDependency(dependency: ResolutionDependency): boolean {
+  return (
+    dependency.kind !== "local" &&
+    dependency.kind !== "unresolved" &&
+    dependency.inspected &&
+    dependency.file.length > 0
+  );
+}
+
+function createResolutionDependencyMetadataKey(
+  dependency: ResolutionDependency
+): string {
+  return JSON.stringify([
+    dependency.file,
+    dependency.kind,
+    dependency.importer,
+    dependency.specifier,
+    dependency.exportName,
+    dependency.memberPath,
+    dependency.inspected,
+    dependency.contributed
+  ]);
+}
+
+function createStaticCssEvalDiagnosticMetadataKey(
+  diagnostic: StaticCssEvalDiagnostic
+): string {
+  return JSON.stringify([
+    diagnostic.id,
+    diagnostic.code,
+    diagnostic.reason,
+    diagnostic.message,
+    diagnostic.owner.file,
+    diagnostic.owner.start,
+    diagnostic.owner.end,
+    diagnostic.dependency?.file,
+    diagnostic.importPath,
+    diagnostic.exportName,
+    diagnostic.memberPath,
+    diagnostic.importChain
+  ]);
+}
+
+function createStaticCssEvalCacheKeyMetadataKey(
+  cacheKey: StaticCssEvalCacheKey
+): string {
+  return JSON.stringify([
+    cacheKey.importerFile,
+    cacheKey.resolvedFile,
+    cacheKey.exportName,
+    cacheKey.memberPath,
+    cacheKey.sourceHash,
+    cacheKey.sourceVersion,
+    cacheKey.pluginOptionsVersion,
+    cacheKey.resolverOptionsVersion,
+    cacheKey.staticEvalSupportVersion,
+    cacheKey.resolvedId
+  ]);
 }
 
 function assertSupportedCssPropElement(

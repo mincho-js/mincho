@@ -1,5 +1,5 @@
-import { transformSync, types as t } from "@babel/core";
-import type { NodePath, PluginObj } from "@babel/core";
+import { types as t } from "@babel/core";
+import type { NodePath } from "@babel/core";
 import {
   getStaticObjectMemberValue,
   getStaticObjectPropertyName,
@@ -7,19 +7,53 @@ import {
 } from "./ast.js";
 import {
   createStaticCssEvalCandidate,
+  getStaticCssEvalMemberReference,
   unwrapTransparentCssRuleExpression
 } from "./candidates.js";
-import { createStaticCssEvalDiagnostic } from "./diagnostics.js";
+import {
+  createStaticCssEvalCjsUnsupportedDiagnostic,
+  createStaticCssEvalComputedMemberUnsupportedDiagnostic,
+  createStaticCssEvalDiagnostic,
+  createStaticCssEvalDynamicExpressionUnsupportedDiagnostic,
+  createStaticCssEvalExportStarUnsupportedDiagnostic,
+  createStaticCssEvalMutableBindingDiagnostic,
+  createStaticCssEvalMutatedBindingDiagnostic,
+  createStaticCssEvalNamespaceImportUnsupportedDiagnostic,
+  createStaticCssEvalPackageImportUnsupportedDiagnostic,
+  createStaticCssEvalUnresolvedExportDiagnostic,
+  createStaticCssEvalUnresolvedImportDiagnostic,
+  guardStaticCssEvalImportCycle,
+  guardStaticCssEvalResolutionDepth
+} from "./diagnostics.js";
+import type { StaticCssEvalImportCycleKey } from "./diagnostics.js";
 import {
   enforceStaticCssEvalLiteralNodeCount,
   enforceStaticCssEvalObjectArrayRecursionDepth,
   enforceStaticCssEvalSourceSize
 } from "./limits.js";
 import {
+  createExportMapCacheKey,
+  createStaticCssModuleCache,
+  formatExportMapCacheKey,
+  STATIC_CSS_MODULE_CACHE_SUPPORT_VERSION
+} from "./moduleCache.js";
+import type {
+  ExportMapEntry,
+  ExportMapLocalEntry,
+  ParsedStaticCssModule,
+  StaticCssModuleCache,
+  StaticCssModuleSource
+} from "./moduleCache.js";
+import {
   getStaticCssEvalConstBindingInitExpression,
   hasStaticCssEvalBindingMutation
 } from "./sameFile.js";
 import type {
+  BindingProvenance,
+  ResolutionChainEntry,
+  ResolutionDependency,
+  ResolutionDependencyKind,
+  StaticCssEvalCacheKey,
   StaticCssEvalDiagnostic,
   StaticCssEvalExportName,
   StaticCssEvalProvider,
@@ -27,8 +61,8 @@ import type {
   StaticCssEvalResult,
   StaticCssEvalSourceLocation,
   StaticCssEvalUnsupportedReason,
-  StaticCssLiteral,
-  StaticCssEvalModuleRecord
+  StaticCssEvalModuleRecord,
+  StaticCssLiteral
 } from "./types.js";
 
 export type ImportedStaticCssEvalImportBinding =
@@ -50,28 +84,22 @@ export type ImportedStaticCssEvalImportBinding =
       importPath: string;
     };
 
-export type ImportedStaticCssEvalExportBinding =
-  | {
-      kind: "local";
-      exportName: StaticCssEvalExportName;
-      localName: string;
-    }
-  | {
-      kind: "expression";
-      exportName: StaticCssEvalExportName;
-      expression: t.Expression;
-    }
-  | {
-      kind: "unsupported";
-      exportName: StaticCssEvalExportName;
-      reason: StaticCssEvalUnsupportedReason;
-      detail: string;
-    };
+export type ImportedStaticCssEvalExportBinding = ExportMapEntry;
 
 type ImportedStaticCssEvalResolutionResult =
   | { kind: "not-candidate" }
-  | { kind: "resolved"; value: StaticCssLiteral }
-  | { kind: "error"; diagnostic: StaticCssEvalDiagnostic };
+  | {
+      kind: "resolved";
+      value: StaticCssLiteral;
+      provenance: BindingProvenance;
+      cacheKey: StaticCssEvalCacheKey;
+    }
+  | {
+      kind: "error";
+      diagnostic: StaticCssEvalDiagnostic;
+      provenance?: BindingProvenance;
+      cacheKey?: StaticCssEvalCacheKey;
+    };
 
 interface ImportedStaticCssEvalContext {
   owner: StaticCssEvalSourceLocation;
@@ -79,6 +107,29 @@ interface ImportedStaticCssEvalContext {
   importPath: string;
   exportName: StaticCssEvalExportName;
   memberPath: string[];
+}
+
+type ImportedStaticCssEvalProvenanceKind = Exclude<
+  BindingProvenance["kind"],
+  "local"
+>;
+
+interface ImportedStaticCssEvalResolutionRequest {
+  importer: string;
+  specifier: string;
+  exportName: StaticCssEvalExportName;
+  memberPath: string[];
+  dependencyKind: ResolutionDependencyKind;
+  provenanceKind: ImportedStaticCssEvalProvenanceKind;
+  namespaceBinding?: string;
+  reexportName?: string;
+}
+
+interface ImportedStaticCssEvalResolutionState {
+  owner: StaticCssEvalSourceLocation;
+  dependencies: Map<string, ResolutionDependency>;
+  resolutionChain: ResolutionChainEntry[];
+  stack: StaticCssEvalImportCycleKey[];
 }
 
 interface StaticCssLiteralValidationState {
@@ -107,6 +158,7 @@ export interface ImportedStaticCssEvalModuleRecord extends StaticCssEvalModuleRe
     ImportedStaticCssEvalExportBinding
   >;
   exportAllReexportSources: readonly string[];
+  parsedModule: ParsedStaticCssModule;
   programPath: NodePath<t.Program>;
 }
 
@@ -114,6 +166,10 @@ export interface CreateImportedStaticCssEvalProviderOptions {
   modules: readonly ImportedStaticCssEvalLoadedModule[];
   importResolutions: readonly ImportedStaticCssEvalImportResolution[];
   moduleRecords?: readonly ImportedStaticCssEvalModuleRecord[];
+}
+
+interface ImportedStaticCssEvalResolverOptions extends CreateImportedStaticCssEvalProviderOptions {
+  moduleCache?: StaticCssModuleCache;
 }
 
 export type ResolveImportedStaticCssEvalExpressionResult =
@@ -126,6 +182,9 @@ const importResolutionKeySeparator = "\0";
 export function createImportedStaticCssEvalProvider(
   options: CreateImportedStaticCssEvalProviderOptions
 ): StaticCssEvalProvider {
+  // Imported css props are resolved from parsed ESM AST/export maps only.
+  // Keep module execution, `export *`, packages, CJS, spread, computed paths,
+  // and broad namespace handling unsupported instead of adding fallbacks here.
   const resolver = new ImportedStaticCssEvalResolver(options);
 
   return {
@@ -138,52 +197,24 @@ export function createImportedStaticCssEvalProvider(
 export function createImportedStaticCssEvalModuleRecord(
   loadedModule: ImportedStaticCssEvalLoadedModule
 ): ImportedStaticCssEvalModuleRecord {
-  const programPathRef: { current?: NodePath<t.Program> } = {};
-  const isTypeScript = /\.[cm]?tsx?$/.test(loadedModule.id);
-  const isJsx = /\.[jt]sx$/.test(loadedModule.id);
-  const captureProgramPathPlugin: PluginObj = {
-    visitor: {
-      Program(path: NodePath<t.Program>) {
-        programPathRef.current = path;
-        path.stop();
-      }
-    }
-  };
+  return createImportedStaticCssEvalModuleRecordWithCache(
+    loadedModule,
+    createStaticCssModuleCache()
+  );
+}
 
-  transformSync(loadedModule.source, {
-    filename: loadedModule.id,
-    ast: true,
-    code: false,
-    sourceType: "module",
-    configFile: false,
-    babelrc: false,
-    parserOpts: {
-      plugins: [
-        ...(isJsx ? (["jsx"] as const) : []),
-        ...(isTypeScript ? (["typescript"] as const) : [])
-      ]
-    },
-    plugins: [captureProgramPathPlugin]
-  });
-
-  const capturedProgramPath = programPathRef.current;
-
-  if (!capturedProgramPath) {
-    throw new Error(
-      `Failed to create static css module scope ${loadedModule.id}`
-    );
-  }
+function createImportedStaticCssEvalModuleRecordWithCache(
+  loadedModule: ImportedStaticCssEvalLoadedModule,
+  moduleCache: StaticCssModuleCache
+): ImportedStaticCssEvalModuleRecord {
+  const parsedModule = moduleCache.getParsedModule(
+    createStaticCssModuleSource(loadedModule)
+  );
 
   const imports = new Map<string, ImportedStaticCssEvalImportBinding>();
-  const exports = new Map<
-    StaticCssEvalExportName,
-    ImportedStaticCssEvalExportBinding
-  >();
-  const exportAllReexportSources: string[] = [];
 
-  for (const statement of capturedProgramPath.node.body) {
+  for (const statement of parsedModule.program.body) {
     collectModuleImportBindings(statement, imports);
-    collectModuleExportBindings(statement, exports, exportAllReexportSources);
   }
 
   return {
@@ -197,9 +228,12 @@ export function createImportedStaticCssEvalModuleRecord(
     dependencies: [],
     source: loadedModule.source,
     imports,
-    exports,
-    exportAllReexportSources,
-    programPath: capturedProgramPath
+    exports: parsedModule.exportMap,
+    exportAllReexportSources: parsedModule.unsupportedExportStars.flatMap(
+      (entry) => (entry.source ? [entry.source] : [])
+    ),
+    parsedModule,
+    programPath: parsedModule.programPath
   };
 }
 
@@ -231,7 +265,8 @@ export function resolveImportedStaticCssEvalExpression(options: {
   if (result.kind === "error") {
     if (
       options.allowUnsupportedSourceFallback === true &&
-      result.diagnostic.reason === "reexport-or-barrel"
+      result.diagnostic.reason === "reexport-or-barrel" &&
+      result.diagnostic.id === undefined
     ) {
       return { kind: "not-candidate" };
     }
@@ -279,7 +314,14 @@ export function findUnsupportedImportedStaticCssEvalReferenceDiagnostic(options:
     );
   }
 
-  return null;
+  return findUnsupportedImportedExpressionReferenceDiagnostic(
+    unwrappedExpression,
+    {
+      ownerFile: options.ownerFile,
+      provider,
+      includeSupportedReferenceErrors: false
+    }
+  );
 }
 
 export function createStaticCssLiteralExpression(
@@ -319,8 +361,11 @@ class ImportedStaticCssEvalResolver {
   readonly #modules = new Map<string, ImportedStaticCssEvalLoadedModule>();
   readonly #records = new Map<string, ImportedStaticCssEvalModuleRecord>();
   readonly #importResolutions = new Map<string, string>();
+  readonly #moduleCache: StaticCssModuleCache;
 
-  constructor(options: CreateImportedStaticCssEvalProviderOptions) {
+  constructor(options: ImportedStaticCssEvalResolverOptions) {
+    this.#moduleCache = options.moduleCache ?? createStaticCssModuleCache();
+
     for (const loadedModule of options.modules) {
       this.#modules.set(loadedModule.id, loadedModule);
     }
@@ -350,121 +395,465 @@ class ImportedStaticCssEvalResolver {
 
     const importBinding = ownerRecord.imports.get(query.bindingName);
 
-    if (!importBinding || importBinding.kind === "namespace") {
-      return { kind: "not-candidate" };
+    if (!importBinding) {
+      const cjsDiagnostic = this.#createCjsUnsupportedDiagnostic(
+        ownerRecord,
+        query
+      );
+
+      return cjsDiagnostic
+        ? createImportedStaticCssEvalErrorResult({
+            query,
+            diagnostic: cjsDiagnostic,
+            state: createResolutionState(createQueryOwnerLocation(query))
+          })
+        : { kind: "not-candidate" };
     }
 
     const owner = createQueryOwnerLocation(query);
-    const resolvedId = this.#resolveImport(
-      query.importerId,
-      importBinding.importPath
+    const state = createResolutionState(owner);
+    const requestResult = createResolutionRequest(query, importBinding, owner);
+
+    if (requestResult.kind === "error") {
+      return createImportedStaticCssEvalErrorResult({
+        query,
+        diagnostic: requestResult.diagnostic,
+        state
+      });
+    }
+
+    const importResult = this.#resolveProjectLocalImport(
+      requestResult.request,
+      owner,
+      state
     );
 
-    if (!resolvedId) {
-      const diagnostic = createImportedStaticCssEvalDiagnostic({
-        owner,
-        dependency: { file: importBinding.importPath },
-        importPath: importBinding.importPath,
-        exportName: importBinding.importedName,
-        memberPath: query.memberPath ?? [],
-        code: "failed-project-local-dependency",
-        reason: "failed-project-local-dependency",
-        detail: `failed to resolve project-local dependency ${importBinding.importPath}`
+    if (importResult.kind === "error") {
+      return createImportedStaticCssEvalErrorResult({
+        query,
+        diagnostic: importResult.diagnostic,
+        state
       });
-
-      return {
-        kind: "error",
-        diagnostic,
-        dependencies: []
-      };
     }
 
-    const dependency = { file: resolvedId };
-    const loadedModule = this.#modules.get(resolvedId);
-
-    if (!loadedModule) {
-      const diagnostic = createImportedStaticCssEvalDiagnostic({
-        owner,
-        dependency,
-        importPath: importBinding.importPath,
-        exportName: importBinding.importedName,
-        memberPath: query.memberPath ?? [],
-        code: "failed-project-local-dependency",
-        reason: "failed-project-local-dependency",
-        detail: `failed to load project-local dependency ${resolvedId}`
-      });
-
-      return {
-        kind: "error",
-        diagnostic,
-        dependencies: [resolvedId]
-      };
-    }
-
-    const sourceSizeResult = enforceStaticCssEvalSourceSize({
-      owner,
-      dependency,
-      importPath: importBinding.importPath,
-      exportName: importBinding.importedName,
-      memberPath: query.memberPath,
-      source: loadedModule.source
-    });
-
-    if (!sourceSizeResult.ok) {
-      return {
-        kind: "error",
-        diagnostic: sourceSizeResult.diagnostic,
-        dependencies: [resolvedId]
-      };
-    }
-
-    const dependencyRecord = this.#getModuleRecord(resolvedId);
-
-    if (!dependencyRecord) {
-      const diagnostic = createImportedStaticCssEvalDiagnostic({
-        owner,
-        dependency,
-        importPath: importBinding.importPath,
-        exportName: importBinding.importedName,
-        memberPath: query.memberPath ?? [],
-        code: "failed-project-local-dependency",
-        reason: "failed-project-local-dependency",
-        detail: `failed to parse project-local dependency ${resolvedId}`
-      });
-
-      return {
-        kind: "error",
-        diagnostic,
-        dependencies: [resolvedId]
-      };
-    }
-
-    const context: ImportedStaticCssEvalContext = {
-      owner,
-      dependency,
-      importPath: importBinding.importPath,
-      exportName: importBinding.importedName,
-      memberPath: [...(query.memberPath ?? [])]
-    };
-    const result = resolveImportedModuleExport(dependencyRecord, context);
+    const result = this.#resolveModuleExport(
+      importResult.record,
+      requestResult.request,
+      state
+    );
 
     if (result.kind === "not-candidate") {
       return { kind: "not-candidate" };
     }
 
     if (result.kind === "error") {
+      return createImportedStaticCssEvalErrorResult({
+        query,
+        diagnostic: result.diagnostic,
+        state,
+        provenance: result.provenance,
+        cacheKey: result.cacheKey
+      });
+    }
+
+    markResolutionDependenciesContributed(state);
+
+    return createImportedStaticCssEvalResolvedResult({
+      query,
+      value: result.value,
+      provenance: result.provenance,
+      cacheKey: result.cacheKey,
+      state
+    });
+  }
+
+  #resolveProjectLocalImport(
+    request: ImportedStaticCssEvalResolutionRequest,
+    owner: StaticCssEvalSourceLocation,
+    state: ImportedStaticCssEvalResolutionState
+  ):
+    | { kind: "resolved"; record: ImportedStaticCssEvalModuleRecord }
+    | { kind: "error"; diagnostic: StaticCssEvalDiagnostic } {
+    const resolvedId = this.#resolveImport(request.importer, request.specifier);
+
+    if (!resolvedId) {
+      addResolutionDependency(state, {
+        file: request.specifier,
+        kind: "unresolved",
+        importer: request.importer,
+        specifier: request.specifier,
+        exportName: request.exportName,
+        memberPath: request.memberPath,
+        inspected: false,
+        contributed: false
+      });
+
       return {
         kind: "error",
-        diagnostic: result.diagnostic,
-        dependencies: [resolvedId]
+        diagnostic: createStaticCssEvalUnresolvedImportDiagnostic(
+          {
+            owner,
+            dependency: { file: request.specifier },
+            importPath: request.specifier,
+            exportName: request.exportName,
+            memberPath: request.memberPath,
+            importChain: createResolutionImportChain(state, request.specifier)
+          },
+          request.specifier
+        )
+      };
+    }
+
+    addResolutionDependency(state, {
+      file: resolvedId,
+      kind: request.dependencyKind,
+      importer: request.importer,
+      specifier: request.specifier,
+      exportName: request.exportName,
+      memberPath: request.memberPath,
+      inspected: false,
+      contributed: false
+    });
+
+    const loadedModule = this.#modules.get(resolvedId);
+
+    if (!loadedModule) {
+      return {
+        kind: "error",
+        diagnostic: createStaticCssEvalUnresolvedImportDiagnostic(
+          {
+            owner,
+            dependency: { file: resolvedId },
+            importPath: request.specifier,
+            exportName: request.exportName,
+            memberPath: request.memberPath,
+            importChain: createResolutionImportChain(state, resolvedId)
+          },
+          request.specifier
+        )
+      };
+    }
+
+    const sourceSizeResult = enforceStaticCssEvalSourceSize({
+      owner,
+      dependency: { file: resolvedId },
+      importPath: request.specifier,
+      exportName: request.exportName,
+      memberPath: request.memberPath,
+      source: loadedModule.source
+    });
+
+    if (!sourceSizeResult.ok) {
+      markResolutionDependencyInspected(state, resolvedId);
+      return { kind: "error", diagnostic: sourceSizeResult.diagnostic };
+    }
+
+    const record = this.#getModuleRecord(resolvedId);
+
+    if (!record) {
+      return {
+        kind: "error",
+        diagnostic: createStaticCssEvalUnresolvedImportDiagnostic(
+          {
+            owner,
+            dependency: { file: resolvedId },
+            importPath: request.specifier,
+            exportName: request.exportName,
+            memberPath: request.memberPath,
+            importChain: createResolutionImportChain(state, resolvedId)
+          },
+          request.specifier
+        )
+      };
+    }
+
+    markResolutionDependencyInspected(state, resolvedId);
+    return { kind: "resolved", record };
+  }
+
+  #resolveModuleExport(
+    record: ImportedStaticCssEvalModuleRecord,
+    request: ImportedStaticCssEvalResolutionRequest,
+    state: ImportedStaticCssEvalResolutionState
+  ): ImportedStaticCssEvalResolutionResult {
+    const guardResult = this.#guardResolution(record, request, state);
+
+    if (!guardResult.ok) {
+      for (const dependency of guardResult.dependencies) {
+        addResolutionDependency(state, {
+          file: dependency,
+          kind: "reexported",
+          importer: request.importer,
+          specifier: request.specifier,
+          exportName: request.exportName,
+          memberPath: request.memberPath,
+          inspected: true,
+          contributed: false
+        });
+      }
+
+      return { kind: "error", diagnostic: guardResult.diagnostic };
+    }
+
+    const stackEntry: StaticCssEvalImportCycleKey = {
+      file: record.id,
+      exportName: request.exportName,
+      memberPath: request.memberPath
+    };
+    state.stack.push(stackEntry);
+
+    try {
+      return this.#resolveGuardedModuleExport(record, request, state);
+    } finally {
+      state.stack.pop();
+    }
+  }
+
+  #resolveGuardedModuleExport(
+    record: ImportedStaticCssEvalModuleRecord,
+    request: ImportedStaticCssEvalResolutionRequest,
+    state: ImportedStaticCssEvalResolutionState
+  ): ImportedStaticCssEvalResolutionResult {
+    const exportEntry = record.exports.get(request.exportName);
+
+    if (!exportEntry) {
+      return this.#createMissingExportResult(record, request, state);
+    }
+
+    const effectiveRequest =
+      exportEntry.kind === "reexport"
+        ? {
+            ...request,
+            dependencyKind: "reexported" as const,
+            provenanceKind: "reexported" as const,
+            reexportName: formatExportName(exportEntry.exportName)
+          }
+        : request;
+    const provenance = createBindingProvenance(record.id, effectiveRequest);
+    state.resolutionChain.push({
+      importer: effectiveRequest.importer,
+      source: record.id,
+      exportName: effectiveRequest.exportName,
+      memberPath: [...effectiveRequest.memberPath],
+      provenance
+    });
+    updateResolutionDependencyKind(
+      state,
+      record.id,
+      effectiveRequest.dependencyKind
+    );
+
+    if (exportEntry.kind === "unsupported") {
+      return {
+        kind: "error",
+        diagnostic: createUnsupportedExportEntryDiagnostic(
+          exportEntry,
+          record,
+          effectiveRequest,
+          state
+        ),
+        provenance,
+        cacheKey: createImportedStaticCssEvalCacheKey(
+          state.owner.file,
+          record.parsedModule,
+          effectiveRequest.exportName,
+          effectiveRequest.memberPath
+        )
+      };
+    }
+
+    if (exportEntry.kind === "reexport") {
+      return this.#resolveReexportEntry(
+        record,
+        exportEntry,
+        effectiveRequest,
+        state,
+        provenance
+      );
+    }
+
+    return resolveStaticExportMapEntry(
+      record,
+      exportEntry,
+      effectiveRequest,
+      state,
+      provenance
+    );
+  }
+
+  #resolveReexportEntry(
+    record: ImportedStaticCssEvalModuleRecord,
+    exportEntry: Extract<ExportMapEntry, { kind: "reexport" }>,
+    request: ImportedStaticCssEvalResolutionRequest,
+    state: ImportedStaticCssEvalResolutionState,
+    provenance: BindingProvenance
+  ): ImportedStaticCssEvalResolutionResult {
+    if (!isProjectLocalStaticCssImportSpecifier(exportEntry.source)) {
+      return {
+        kind: "error",
+        diagnostic: createStaticCssEvalPackageImportUnsupportedDiagnostic(
+          {
+            owner: state.owner,
+            dependency: { file: record.id },
+            importPath: exportEntry.source,
+            exportName: exportEntry.importedName,
+            memberPath: request.memberPath,
+            importChain: createResolutionImportChain(state, record.id)
+          },
+          exportEntry.source
+        ),
+        provenance,
+        cacheKey: createImportedStaticCssEvalCacheKey(
+          state.owner.file,
+          record.parsedModule,
+          request.exportName,
+          request.memberPath
+        )
+      };
+    }
+
+    const reexportRequest: ImportedStaticCssEvalResolutionRequest = {
+      importer: record.id,
+      specifier: exportEntry.source,
+      exportName: exportEntry.importedName,
+      memberPath: [...request.memberPath],
+      dependencyKind: "reexported",
+      provenanceKind: "reexported",
+      reexportName: formatExportName(exportEntry.exportName)
+    };
+    const importResult = this.#resolveProjectLocalImport(
+      reexportRequest,
+      state.owner,
+      state
+    );
+
+    return importResult.kind === "error"
+      ? {
+          kind: "error",
+          diagnostic: importResult.diagnostic,
+          provenance,
+          cacheKey: createImportedStaticCssEvalCacheKey(
+            state.owner.file,
+            record.parsedModule,
+            request.exportName,
+            request.memberPath
+          )
+        }
+      : this.#resolveModuleExport(importResult.record, reexportRequest, state);
+  }
+
+  #createMissingExportResult(
+    record: ImportedStaticCssEvalModuleRecord,
+    request: ImportedStaticCssEvalResolutionRequest,
+    state: ImportedStaticCssEvalResolutionState
+  ): ImportedStaticCssEvalResolutionResult {
+    const exportStar = record.parsedModule.unsupportedExportStars[0];
+
+    if (exportStar) {
+      return {
+        kind: "error",
+        diagnostic: createStaticCssEvalExportStarUnsupportedDiagnostic(
+          {
+            owner: state.owner,
+            dependency: { file: record.id },
+            importPath: exportStar.source ?? request.specifier,
+            exportName: request.exportName,
+            memberPath: request.memberPath,
+            importChain: createResolutionImportChain(state, record.id)
+          },
+          exportStar.source ?? request.specifier
+        ),
+        cacheKey: createImportedStaticCssEvalCacheKey(
+          state.owner.file,
+          record.parsedModule,
+          request.exportName,
+          request.memberPath
+        )
       };
     }
 
     return {
-      kind: "resolved",
-      value: result.value,
-      dependencies: [resolvedId]
+      kind: "error",
+      diagnostic: createStaticCssEvalUnresolvedExportDiagnostic(
+        {
+          owner: state.owner,
+          dependency: { file: record.id },
+          importPath: request.specifier,
+          exportName: request.exportName,
+          memberPath: request.memberPath,
+          importChain: createResolutionImportChain(state, record.id)
+        },
+        request.exportName
+      ),
+      cacheKey: createImportedStaticCssEvalCacheKey(
+        state.owner.file,
+        record.parsedModule,
+        request.exportName,
+        request.memberPath
+      )
     };
+  }
+
+  #guardResolution(
+    record: ImportedStaticCssEvalModuleRecord,
+    request: ImportedStaticCssEvalResolutionRequest,
+    state: ImportedStaticCssEvalResolutionState
+  ) {
+    const next = {
+      file: record.id,
+      exportName: request.exportName,
+      memberPath: request.memberPath
+    };
+    const cycleResult = guardStaticCssEvalImportCycle({
+      owner: state.owner,
+      dependency: { file: record.id },
+      importPath: request.specifier,
+      exportName: request.exportName,
+      memberPath: request.memberPath,
+      stack: state.stack,
+      next
+    });
+
+    if (!cycleResult.ok) {
+      return cycleResult;
+    }
+
+    return guardStaticCssEvalResolutionDepth({
+      owner: state.owner,
+      dependency: { file: record.id },
+      importPath: request.specifier,
+      exportName: request.exportName,
+      memberPath: request.memberPath,
+      resolutionDepth: state.stack.length + 1
+    });
+  }
+
+  #createCjsUnsupportedDiagnostic(
+    ownerRecord: ImportedStaticCssEvalModuleRecord,
+    query: StaticCssEvalQuery
+  ): StaticCssEvalDiagnostic | null {
+    const bindingName = query.bindingName;
+
+    if (!bindingName) {
+      return null;
+    }
+
+    const binding = ownerRecord.programPath.scope.getBinding(bindingName);
+    const init = binding
+      ? getStaticCssEvalConstBindingInitExpression(binding)
+      : null;
+
+    if (
+      !init ||
+      !isRequireCallExpression(unwrapTransparentCssRuleExpression(init))
+    ) {
+      return null;
+    }
+
+    return createStaticCssEvalCjsUnsupportedDiagnostic({
+      owner: createQueryOwnerLocation(query),
+      memberPath: query.memberPath
+    });
   }
 
   #resolveImport(importerId: string, importPath: string): string | null {
@@ -489,10 +878,16 @@ class ImportedStaticCssEvalResolver {
     }
 
     try {
-      const record = createImportedStaticCssEvalModuleRecord(loadedModule);
+      const record = createImportedStaticCssEvalModuleRecordWithCache(
+        loadedModule,
+        this.#moduleCache
+      );
       this.#records.set(id, record);
       return record;
-    } catch {
+    } catch (error) {
+      if (!(error instanceof Error)) {
+        return null;
+      }
       return null;
     }
   }
@@ -543,239 +938,161 @@ function collectModuleImportBindings(
   }
 }
 
-function collectModuleExportBindings(
-  statement: t.Statement,
-  exports: Map<StaticCssEvalExportName, ImportedStaticCssEvalExportBinding>,
-  exportAllReexportSources: string[]
-): void {
-  if (t.isExportAllDeclaration(statement)) {
-    exportAllReexportSources.push(statement.source.value);
-    return;
-  }
-
-  if (t.isExportDefaultDeclaration(statement)) {
-    collectDefaultExportBinding(statement, exports);
-    return;
-  }
-
-  if (
-    !t.isExportNamedDeclaration(statement) ||
-    statement.exportKind === "type"
-  ) {
-    return;
-  }
-
-  if (statement.source) {
-    collectReexportBindings(statement, exports);
-    return;
-  }
-
-  if (statement.declaration) {
-    collectDeclaredExportBindings(statement.declaration, exports);
-    return;
-  }
-
-  for (const specifier of statement.specifiers) {
-    if (!t.isExportSpecifier(specifier) || specifier.exportKind === "type") {
-      continue;
-    }
-
-    const localName = getModuleStringName(specifier.local);
-    const exportName = getModuleStringName(specifier.exported);
-
-    if (localName && exportName) {
-      exports.set(exportName, {
-        kind: "local",
-        exportName,
-        localName
-      });
-    }
-  }
+function createStaticCssModuleSource(
+  loadedModule: ImportedStaticCssEvalLoadedModule
+): StaticCssModuleSource {
+  return {
+    resolvedFile: loadedModule.id,
+    source: loadedModule.source,
+    sourceHash:
+      loadedModule.sourceHash ?? `inline:${loadedModule.source.length}`,
+    ...(loadedModule.version !== undefined
+      ? { sourceVersion: loadedModule.version }
+      : {})
+  };
 }
 
-function collectDefaultExportBinding(
-  statement: t.ExportDefaultDeclaration,
-  exports: Map<StaticCssEvalExportName, ImportedStaticCssEvalExportBinding>
-): void {
-  const { declaration } = statement;
-
-  if (t.isIdentifier(declaration)) {
-    exports.set("default", {
-      kind: "local",
-      exportName: "default",
-      localName: declaration.name
-    });
-    return;
-  }
-
-  if (t.isExpression(declaration)) {
-    exports.set("default", {
-      kind: "expression",
-      exportName: "default",
-      expression: declaration
-    });
-    return;
-  }
-
-  exports.set("default", {
-    kind: "unsupported",
-    exportName: "default",
-    reason: "function-or-call",
-    detail: "default export declaration is not a static expression"
-  });
+function createResolutionState(
+  owner: StaticCssEvalSourceLocation
+): ImportedStaticCssEvalResolutionState {
+  return {
+    owner,
+    dependencies: new Map<string, ResolutionDependency>(),
+    resolutionChain: [],
+    stack: []
+  };
 }
 
-function collectReexportBindings(
-  statement: t.ExportNamedDeclaration,
-  exports: Map<StaticCssEvalExportName, ImportedStaticCssEvalExportBinding>
-): void {
-  for (const specifier of statement.specifiers) {
-    if (t.isExportSpecifier(specifier)) {
-      const exportName = getModuleStringName(specifier.exported);
+function createResolutionRequest(
+  query: StaticCssEvalQuery,
+  importBinding: ImportedStaticCssEvalImportBinding,
+  owner: StaticCssEvalSourceLocation
+):
+  | { kind: "resolved"; request: ImportedStaticCssEvalResolutionRequest }
+  | { kind: "error"; diagnostic: StaticCssEvalDiagnostic } {
+  const queryMemberPath = [...(query.memberPath ?? [])];
 
-      if (exportName) {
-        exports.set(exportName, {
-          kind: "unsupported",
-          exportName,
-          reason: "reexport-or-barrel",
-          detail: `export "${exportName}" uses unsupported reexport/barrel syntax`
-        });
-      }
-      continue;
-    }
-
-    if (t.isExportNamespaceSpecifier(specifier)) {
-      const exportName = getModuleStringName(specifier.exported);
-
-      if (exportName) {
-        exports.set(exportName, {
-          kind: "unsupported",
-          exportName,
-          reason: "reexport-or-barrel",
-          detail: `export "${exportName}" uses unsupported reexport/barrel syntax`
-        });
-      }
-    }
-  }
-}
-
-function collectDeclaredExportBindings(
-  declaration: t.Declaration,
-  exports: Map<StaticCssEvalExportName, ImportedStaticCssEvalExportBinding>
-): void {
-  if (t.isVariableDeclaration(declaration)) {
-    for (const declarator of declaration.declarations) {
-      if (!t.isIdentifier(declarator.id)) {
-        continue;
-      }
-
-      if (declaration.kind !== "const") {
-        exports.set(declarator.id.name, {
-          kind: "unsupported",
-          exportName: declarator.id.name,
-          reason: "let-or-var-binding",
-          detail: `export "${declarator.id.name}" is not a const binding`
-        });
-        continue;
-      }
-
-      exports.set(declarator.id.name, {
-        kind: "local",
-        exportName: declarator.id.name,
-        localName: declarator.id.name
-      });
-    }
-    return;
-  }
-
-  if (
-    (t.isFunctionDeclaration(declaration) ||
-      t.isClassDeclaration(declaration)) &&
-    declaration.id
-  ) {
-    exports.set(declaration.id.name, {
-      kind: "unsupported",
-      exportName: declaration.id.name,
-      reason: "function-or-call",
-      detail: `export "${declaration.id.name}" is not a static const literal`
-    });
-  }
-}
-
-function resolveImportedModuleExport(
-  record: ImportedStaticCssEvalModuleRecord,
-  context: ImportedStaticCssEvalContext
-): ImportedStaticCssEvalResolutionResult {
-  const exportBinding = record.exports.get(context.exportName);
-
-  if (!exportBinding) {
-    if (record.exportAllReexportSources.length > 0) {
+  if (importBinding.kind === "namespace") {
+    if (!isProjectLocalStaticCssImportSpecifier(importBinding.importPath)) {
       return {
         kind: "error",
-        diagnostic: createImportedStaticCssEvalDiagnostic({
-          ...context,
-          code: "unsupported-source",
-          reason: "reexport-or-barrel",
-          detail: `export "${formatExportName(
-            context.exportName
-          )}" may come from unsupported export * barrel syntax`
-        })
+        diagnostic: createStaticCssEvalNamespaceImportUnsupportedDiagnostic(
+          {
+            owner,
+            importPath: importBinding.importPath,
+            memberPath: queryMemberPath
+          },
+          importBinding.importPath
+        )
       };
     }
 
-    return { kind: "not-candidate" };
-  }
+    const [exportName, ...memberPath] = queryMemberPath;
 
-  if (exportBinding.kind === "unsupported") {
+    if (!exportName) {
+      return {
+        kind: "error",
+        diagnostic: createStaticCssEvalNamespaceImportUnsupportedDiagnostic(
+          {
+            owner,
+            importPath: importBinding.importPath,
+            memberPath: queryMemberPath
+          },
+          importBinding.importPath
+        )
+      };
+    }
+
     return {
-      kind: "error",
-      diagnostic: createImportedStaticCssEvalDiagnostic({
-        ...context,
-        code:
-          exportBinding.reason === "reexport-or-barrel"
-            ? "unsupported-source"
-            : "unsupported-syntax",
-        reason: exportBinding.reason,
-        detail: exportBinding.detail
-      })
+      kind: "resolved",
+      request: {
+        importer: query.importerId,
+        specifier: importBinding.importPath,
+        exportName,
+        memberPath,
+        dependencyKind: "namespace-member",
+        provenanceKind: "namespace-member",
+        namespaceBinding: importBinding.localName
+      }
     };
   }
 
-  const localName =
-    exportBinding.kind === "local" ? exportBinding.localName : null;
-  const expression =
-    exportBinding.kind === "expression"
-      ? exportBinding.expression
-      : getLocalConstBindingExpression(record, exportBinding.localName);
-
-  if (!expression) {
-    return { kind: "not-candidate" };
+  if (!isProjectLocalStaticCssImportSpecifier(importBinding.importPath)) {
+    return {
+      kind: "error",
+      diagnostic: createStaticCssEvalPackageImportUnsupportedDiagnostic(
+        {
+          owner,
+          importPath: importBinding.importPath,
+          exportName: importBinding.importedName,
+          memberPath: queryMemberPath
+        },
+        importBinding.importPath
+      )
+    };
   }
 
-  const memberExpression = resolveStaticObjectMemberPath(
-    expression,
-    context.memberPath
+  return {
+    kind: "resolved",
+    request: {
+      importer: query.importerId,
+      specifier: importBinding.importPath,
+      exportName: importBinding.importedName,
+      memberPath: queryMemberPath,
+      dependencyKind: "imported",
+      provenanceKind: "imported"
+    }
+  };
+}
+
+function resolveStaticExportMapEntry(
+  record: ImportedStaticCssEvalModuleRecord,
+  exportEntry: Exclude<ExportMapEntry, { kind: "reexport" | "unsupported" }>,
+  request: ImportedStaticCssEvalResolutionRequest,
+  state: ImportedStaticCssEvalResolutionState,
+  provenance: BindingProvenance
+): ImportedStaticCssEvalResolutionResult {
+  const expressionResult = getStaticExportEntryExpression(record, exportEntry);
+  const cacheKey = createImportedStaticCssEvalCacheKey(
+    state.owner.file,
+    record.parsedModule,
+    request.exportName,
+    request.memberPath
   );
 
-  if (
-    !memberExpression ||
-    !isStaticCssRuleLiteralExpression(memberExpression)
-  ) {
-    return { kind: "not-candidate" };
+  if (expressionResult.kind === "error") {
+    return {
+      kind: "error",
+      diagnostic: expressionResult.diagnostic,
+      provenance,
+      cacheKey
+    };
   }
+
+  const localName = expressionResult.localName;
 
   if (localName && hasImportedStaticCssBindingMutation(record, localName)) {
     return {
       kind: "error",
-      diagnostic: createImportedStaticCssEvalDiagnostic({
-        ...context,
-        code: "mutation-detected",
-        reason: "mutated-binding",
-        detail: `imported binding "${localName}" from "${context.importPath}" is mutated`
-      })
+      diagnostic: createStaticCssEvalMutatedBindingDiagnostic(
+        createImportedDiagnosticContext(record, request, state),
+        localName
+      ),
+      provenance,
+      cacheKey
     };
   }
 
+  const memberExpression = resolveStaticObjectMemberPath(
+    expressionResult.expression,
+    request.memberPath
+  );
+
+  if (!memberExpression) {
+    return { kind: "not-candidate" };
+  }
+
+  const context = createImportedLiteralContext(record, request, state);
   const literalResult = evaluateStaticCssLiteralExpression(
     memberExpression,
     context,
@@ -784,22 +1101,380 @@ function resolveImportedModuleExport(
   );
 
   if (literalResult.kind === "error") {
-    return literalResult;
+    return {
+      kind: "error",
+      diagnostic: literalResult.diagnostic,
+      provenance,
+      cacheKey
+    };
   }
 
   return {
     kind: "resolved",
-    value: literalResult.value
+    value: literalResult.value,
+    provenance,
+    cacheKey
   };
 }
 
-function getLocalConstBindingExpression(
+function getStaticExportEntryExpression(
   record: ImportedStaticCssEvalModuleRecord,
-  localName: string
-): t.Expression | null {
-  const binding = record.programPath.scope.getBinding(localName);
+  exportEntry:
+    | ExportMapLocalEntry
+    | Extract<ExportMapEntry, { kind: "expression" }>
+):
+  | { kind: "resolved"; expression: t.Expression; localName: string | null }
+  | { kind: "error"; diagnostic: StaticCssEvalDiagnostic } {
+  if (exportEntry.kind === "expression") {
+    const expression = unwrapTransparentCssRuleExpression(
+      exportEntry.expression
+    );
 
-  return binding ? getStaticCssEvalConstBindingInitExpression(binding) : null;
+    if (t.isIdentifier(expression)) {
+      return getLocalBindingExpressionResult(
+        record,
+        expression.name,
+        exportEntry.exportName
+      );
+    }
+
+    return { kind: "resolved", expression, localName: null };
+  }
+
+  return getLocalBindingExpressionResult(
+    record,
+    exportEntry.localName,
+    exportEntry.exportName
+  );
+}
+
+function getLocalBindingExpressionResult(
+  record: ImportedStaticCssEvalModuleRecord,
+  localName: string,
+  exportName: StaticCssEvalExportName
+):
+  | { kind: "resolved"; expression: t.Expression; localName: string }
+  | { kind: "error"; diagnostic: StaticCssEvalDiagnostic } {
+  const binding = record.programPath.scope.getBinding(localName);
+  const expression = binding
+    ? getStaticCssEvalConstBindingInitExpression(binding)
+    : null;
+
+  if (expression) {
+    return {
+      kind: "resolved",
+      expression: unwrapTransparentCssRuleExpression(expression),
+      localName
+    };
+  }
+
+  return {
+    kind: "error",
+    diagnostic: createStaticCssEvalMutableBindingDiagnostic(
+      {
+        owner: { file: record.id },
+        dependency: { file: record.id },
+        exportName
+      },
+      localName
+    )
+  };
+}
+
+function createImportedLiteralContext(
+  record: ImportedStaticCssEvalModuleRecord,
+  request: ImportedStaticCssEvalResolutionRequest,
+  state: ImportedStaticCssEvalResolutionState
+): ImportedStaticCssEvalContext {
+  return {
+    owner: state.owner,
+    dependency: { file: record.id },
+    importPath: request.specifier,
+    exportName: request.exportName,
+    memberPath: [...request.memberPath]
+  };
+}
+
+function createImportedDiagnosticContext(
+  record: ImportedStaticCssEvalModuleRecord,
+  request: ImportedStaticCssEvalResolutionRequest,
+  state: ImportedStaticCssEvalResolutionState
+) {
+  return {
+    owner: state.owner,
+    dependency: { file: record.id },
+    importPath: request.specifier,
+    exportName: request.exportName,
+    memberPath: request.memberPath,
+    importChain: createResolutionImportChain(state, record.id)
+  };
+}
+
+function createUnsupportedExportEntryDiagnostic(
+  exportEntry: Extract<ExportMapEntry, { kind: "unsupported" }>,
+  record: ImportedStaticCssEvalModuleRecord,
+  request: ImportedStaticCssEvalResolutionRequest,
+  state: ImportedStaticCssEvalResolutionState
+): StaticCssEvalDiagnostic {
+  const context = createImportedDiagnosticContext(record, request, state);
+
+  if (exportEntry.unsupportedKind === "export-star") {
+    return createStaticCssEvalExportStarUnsupportedDiagnostic(
+      context,
+      exportEntry.source ?? request.specifier
+    );
+  }
+
+  if (exportEntry.unsupportedKind === "export-namespace") {
+    return createStaticCssEvalNamespaceImportUnsupportedDiagnostic(
+      context,
+      exportEntry.source ?? request.specifier
+    );
+  }
+
+  return createStaticCssEvalDynamicExpressionUnsupportedDiagnostic(
+    context,
+    exportEntry.declaration.type
+  );
+}
+
+function createBindingProvenance(
+  file: string,
+  request: ImportedStaticCssEvalResolutionRequest
+): BindingProvenance {
+  if (request.provenanceKind === "namespace-member") {
+    return {
+      kind: "namespace-member",
+      file,
+      importer: request.importer,
+      specifier: request.specifier,
+      exportName: request.exportName,
+      memberPath: [...request.memberPath],
+      namespaceBinding: request.namespaceBinding ?? "<namespace>"
+    };
+  }
+
+  if (request.provenanceKind === "reexported") {
+    return {
+      kind: "reexported",
+      file,
+      importer: request.importer,
+      specifier: request.specifier,
+      exportName: request.exportName,
+      memberPath: [...request.memberPath],
+      reexportName: request.reexportName ?? formatExportName(request.exportName)
+    };
+  }
+
+  return {
+    kind: "imported",
+    file,
+    importer: request.importer,
+    specifier: request.specifier,
+    exportName: request.exportName,
+    memberPath: [...request.memberPath]
+  };
+}
+
+function createImportedStaticCssEvalCacheKey(
+  importerFile: string,
+  parsedModule: ParsedStaticCssModule,
+  exportName: StaticCssEvalExportName,
+  memberPath: readonly string[]
+): StaticCssEvalCacheKey {
+  return {
+    importerFile,
+    resolvedFile: parsedModule.resolvedFile,
+    exportName,
+    memberPath: [...memberPath],
+    sourceHash: parsedModule.sourceHash,
+    ...(parsedModule.sourceVersion !== undefined
+      ? { sourceVersion: parsedModule.sourceVersion }
+      : {}),
+    pluginOptionsVersion: "static-css-eval-provider:v1",
+    resolverOptionsVersion: "static-css-eval-provider:v1",
+    staticEvalSupportVersion: STATIC_CSS_MODULE_CACHE_SUPPORT_VERSION,
+    resolvedId: parsedModule.resolvedFile,
+    parserOptions: parsedModule.cacheKey.parserOptions
+  };
+}
+
+function createImportedStaticCssEvalResolvedResult(options: {
+  query: StaticCssEvalQuery;
+  value: StaticCssLiteral;
+  provenance: BindingProvenance;
+  cacheKey: StaticCssEvalCacheKey;
+  state: ImportedStaticCssEvalResolutionState;
+}): StaticCssEvalResult {
+  return {
+    kind: "resolved",
+    status: "resolved",
+    expression: formatStaticCssEvalQueryExpression(options.query),
+    value: options.value,
+    provenance: options.provenance,
+    dependencies: getResolutionDependencies(options.state),
+    resolutionChain: [...options.state.resolutionChain],
+    diagnostics: [],
+    cacheKey: options.cacheKey
+  };
+}
+
+function createImportedStaticCssEvalErrorResult(options: {
+  query: StaticCssEvalQuery;
+  diagnostic: StaticCssEvalDiagnostic;
+  state: ImportedStaticCssEvalResolutionState;
+  provenance?: BindingProvenance;
+  cacheKey?: StaticCssEvalCacheKey;
+}): StaticCssEvalResult {
+  return {
+    kind: "error",
+    status: "error",
+    expression: formatStaticCssEvalQueryExpression(options.query),
+    ...(options.provenance ? { provenance: options.provenance } : {}),
+    dependencies: getResolutionDependencies(options.state),
+    resolutionChain: [...options.state.resolutionChain],
+    diagnostic: options.diagnostic,
+    diagnostics: [options.diagnostic],
+    ...(options.cacheKey ? { cacheKey: options.cacheKey } : {})
+  };
+}
+
+function addResolutionDependency(
+  state: ImportedStaticCssEvalResolutionState,
+  dependency: ResolutionDependency
+): void {
+  const key = createResolutionDependencyKey(dependency);
+  const existing = state.dependencies.get(key);
+
+  state.dependencies.set(key, {
+    ...dependency,
+    ...(existing
+      ? {
+          kind: mergeResolutionDependencyKind(existing.kind, dependency.kind),
+          inspected: existing.inspected || dependency.inspected,
+          contributed: existing.contributed || dependency.contributed
+        }
+      : {})
+  });
+}
+
+function updateResolutionDependencyKind(
+  state: ImportedStaticCssEvalResolutionState,
+  file: string,
+  kind: ResolutionDependencyKind
+): void {
+  for (const [key, dependency] of state.dependencies) {
+    if (dependency.file === file) {
+      state.dependencies.set(key, {
+        ...dependency,
+        kind: mergeResolutionDependencyKind(dependency.kind, kind)
+      });
+    }
+  }
+}
+
+function markResolutionDependencyInspected(
+  state: ImportedStaticCssEvalResolutionState,
+  file: string
+): void {
+  for (const [key, dependency] of state.dependencies) {
+    if (dependency.file === file) {
+      state.dependencies.set(key, { ...dependency, inspected: true });
+    }
+  }
+}
+
+function markResolutionDependenciesContributed(
+  state: ImportedStaticCssEvalResolutionState
+): void {
+  for (const [key, dependency] of state.dependencies) {
+    state.dependencies.set(key, {
+      ...dependency,
+      contributed: dependency.inspected && dependency.kind !== "unresolved"
+    });
+  }
+}
+
+function getResolutionDependencies(
+  state: ImportedStaticCssEvalResolutionState
+): ResolutionDependency[] {
+  return [...state.dependencies.values()].map((dependency) => ({
+    ...dependency,
+    memberPath: [...dependency.memberPath]
+  }));
+}
+
+function createResolutionDependencyKey(
+  dependency: ResolutionDependency
+): string {
+  return JSON.stringify([
+    dependency.file,
+    dependency.importer,
+    dependency.specifier,
+    dependency.exportName,
+    dependency.memberPath
+  ]);
+}
+
+function mergeResolutionDependencyKind(
+  previous: ResolutionDependencyKind,
+  next: ResolutionDependencyKind
+): ResolutionDependencyKind {
+  if (previous === "unresolved" || next === "unresolved") {
+    return next === "unresolved" ? previous : next;
+  }
+
+  if (previous === "reexported" || next === "reexported") {
+    return "reexported";
+  }
+
+  if (previous === "namespace-member" || next === "namespace-member") {
+    return "namespace-member";
+  }
+
+  return next;
+}
+
+function createResolutionImportChain(
+  state: ImportedStaticCssEvalResolutionState,
+  nextFile: string
+): string[] {
+  return [
+    state.owner.file,
+    ...state.stack.map(formatStaticCssEvalResolutionFrame),
+    nextFile
+  ];
+}
+
+function formatStaticCssEvalResolutionFrame(
+  frame: StaticCssEvalImportCycleKey
+): string {
+  const memberPath = frame.memberPath?.length
+    ? `.${frame.memberPath.join(".")}`
+    : "";
+
+  return `${frame.file}#${formatExportName(frame.exportName)}${memberPath}`;
+}
+
+function formatStaticCssEvalQueryExpression(query: StaticCssEvalQuery): string {
+  const bindingName = query.bindingName ?? "<unknown>";
+  const memberPath = query.memberPath?.length
+    ? `.${query.memberPath.join(".")}`
+    : "";
+
+  return `${bindingName}${memberPath}`;
+}
+
+function isProjectLocalStaticCssImportSpecifier(importPath: string): boolean {
+  return importPath.startsWith(".") || importPath.startsWith("/");
+}
+
+function isRequireCallExpression(expression: t.Expression): boolean {
+  return (
+    t.isCallExpression(expression) &&
+    t.isIdentifier(expression.callee) &&
+    expression.callee.name === "require"
+  );
 }
 
 function hasImportedStaticCssBindingMutation(
@@ -841,6 +1516,27 @@ function resolveStaticObjectMemberPath(
   return currentExpression
     ? unwrapTransparentCssRuleExpression(currentExpression)
     : null;
+}
+
+function getStaticObjectMemberValue(
+  expression: t.ObjectExpression,
+  memberName: string
+): t.Expression | null {
+  for (let index = expression.properties.length - 1; index >= 0; index -= 1) {
+    const property = expression.properties[index];
+
+    if (!property || !t.isObjectProperty(property) || property.computed) {
+      return null;
+    }
+
+    if (getStaticObjectPropertyName(property.key) !== memberName) {
+      continue;
+    }
+
+    return t.isExpression(property.value) ? property.value : null;
+  }
+
+  return null;
 }
 
 function evaluateStaticCssLiteralExpression(
@@ -1078,6 +1774,7 @@ function findUnsupportedImportedObjectReferenceDiagnostic(
   options: {
     ownerFile: string;
     provider: StaticCssEvalProvider;
+    includeSupportedReferenceErrors?: boolean;
   }
 ): StaticCssEvalDiagnostic | null {
   for (const property of expression.properties) {
@@ -1103,6 +1800,7 @@ function findUnsupportedImportedArrayReferenceDiagnostic(
   options: {
     ownerFile: string;
     provider: StaticCssEvalProvider;
+    includeSupportedReferenceErrors?: boolean;
   }
 ): StaticCssEvalDiagnostic | null {
   for (const element of expression.elements) {
@@ -1128,15 +1826,59 @@ function findUnsupportedImportedExpressionReferenceDiagnostic(
   options: {
     ownerFile: string;
     provider: StaticCssEvalProvider;
+    includeSupportedReferenceErrors?: boolean;
   }
 ): StaticCssEvalDiagnostic | null {
   const unwrappedExpression = unwrapTransparentCssRuleExpression(expression);
+  const reference = getStaticCssEvalMemberReference(unwrappedExpression);
+
+  if (reference?.kind === "unsupported") {
+    const result = options.provider.getResolvedCssValue({
+      importerId: options.ownerFile,
+      expressionStart: unwrappedExpression.start ?? 0,
+      expressionEnd: unwrappedExpression.end ?? 0,
+      bindingName: reference.bindingName,
+      ...(reference.memberPath.length > 0
+        ? { memberPath: reference.memberPath }
+        : {})
+    });
+
+    if (result.kind === "not-candidate") {
+      return null;
+    }
+
+    if (reference.reason === "dynamic-member-path") {
+      return createStaticCssEvalComputedMemberUnsupportedDiagnostic({
+        owner: createExpressionOwnerLocation(
+          unwrappedExpression,
+          options.ownerFile
+        ),
+        memberPath: reference.memberPath
+      });
+    }
+
+    return result.kind === "error"
+      ? result.diagnostic
+      : createStaticCssEvalDynamicExpressionUnsupportedDiagnostic(
+          {
+            owner: createExpressionOwnerLocation(
+              unwrappedExpression,
+              options.ownerFile
+            )
+          },
+          reference.detail
+        );
+  }
+
   const candidate = createStaticCssEvalCandidate(
     unwrappedExpression,
     options.ownerFile
   );
 
-  if (candidate?.bindingName) {
+  if (
+    options.includeSupportedReferenceErrors !== false &&
+    candidate?.bindingName
+  ) {
     const result = options.provider.getResolvedCssValue(candidate);
 
     if (result.kind === "error") {
@@ -1244,6 +1986,19 @@ function createQueryOwnerLocation(
   };
 }
 
+function createExpressionOwnerLocation(
+  expression: t.Expression,
+  ownerFile: string
+): StaticCssEvalSourceLocation {
+  return {
+    file: ownerFile,
+    ...(typeof expression.start === "number"
+      ? { start: expression.start }
+      : {}),
+    ...(typeof expression.end === "number" ? { end: expression.end } : {})
+  };
+}
+
 function getModuleStringName(
   node: t.Identifier | t.StringLiteral
 ): string | null {
@@ -1256,17 +2011,6 @@ function getModuleStringName(
   }
 
   return null;
-}
-
-function isStaticCssRuleLiteralExpression(
-  expression: t.Expression
-): expression is t.ObjectExpression | t.ArrayExpression {
-  const unwrappedExpression = unwrapTransparentCssRuleExpression(expression);
-
-  return (
-    t.isObjectExpression(unwrappedExpression) ||
-    t.isArrayExpression(unwrappedExpression)
-  );
 }
 
 function isStaticCssRuleLiteralValue(
@@ -1292,24 +2036,110 @@ if (import.meta.vitest) {
   const ownerId = "/project/src/App.tsx";
   const stylesId = "/project/src/styles.ts";
   const barrelId = "/project/src/barrel.ts";
+  const buttonId = "/project/src/button.ts";
+
+  function createProviderFromModules(options: {
+    modules: readonly ImportedStaticCssEvalLoadedModule[];
+    importResolutions: readonly ImportedStaticCssEvalImportResolution[];
+    moduleCache?: StaticCssModuleCache;
+  }): StaticCssEvalProvider {
+    const resolver = new ImportedStaticCssEvalResolver(options);
+
+    return {
+      getResolvedCssValue(query) {
+        return resolver.resolve(query);
+      }
+    };
+  }
+
+  function createCountingStaticCssModuleCache(): {
+    cache: StaticCssModuleCache;
+    missesByFile: ReadonlyMap<string, number>;
+  } {
+    const delegate = createStaticCssModuleCache();
+    const seenKeys = new Set<string>();
+    const missesByFile = new Map<string, number>();
+    const cache: StaticCssModuleCache = {
+      getParsedModule(source) {
+        const key = formatExportMapCacheKey(createExportMapCacheKey(source));
+
+        if (!seenKeys.has(key)) {
+          seenKeys.add(key);
+          missesByFile.set(
+            source.resolvedFile,
+            (missesByFile.get(source.resolvedFile) ?? 0) + 1
+          );
+        }
+
+        return delegate.getParsedModule(source);
+      },
+      getExportMap(source) {
+        return cache.getParsedModule(source).exportMap;
+      },
+      getExportMapEntry(source, exportName) {
+        return cache.getParsedModule(source).exportMap.get(exportName) ?? null;
+      }
+    };
+
+    return { cache, missesByFile };
+  }
+
+  type ResolvedStaticCssEvalResultWithMetadata = {
+    kind: "resolved";
+    value: StaticCssLiteral;
+    cacheKey: StaticCssEvalCacheKey;
+    dependencies: ResolutionDependency[];
+  };
+
+  function expectResolvedResult(
+    result: StaticCssEvalResult
+  ): ResolvedStaticCssEvalResultWithMetadata {
+    expect(result.kind).toBe("resolved");
+
+    if (result.kind !== "resolved") {
+      throw new Error("Expected static css eval result to resolve");
+    }
+
+    if (!("cacheKey" in result)) {
+      throw new Error(
+        "Expected resolved static css eval result to include cache key"
+      );
+    }
+
+    if (
+      !Array.isArray(result.dependencies) ||
+      result.dependencies.some((dependency) => typeof dependency === "string")
+    ) {
+      throw new Error(
+        "Expected resolved static css eval result dependencies metadata"
+      );
+    }
+
+    return result as ResolvedStaticCssEvalResultWithMetadata;
+  }
 
   function createProvider(
     stylesSource: string,
     ownerSource = `import { button } from "./styles"; <div css={button} />;`,
-    barrelSource = `export { button } from "./styles";`
+    barrelSource = `export { button } from "./styles";`,
+    extraModules: readonly ImportedStaticCssEvalLoadedModule[] = [],
+    extraImportResolutions: readonly ImportedStaticCssEvalImportResolution[] = []
   ): StaticCssEvalProvider {
-    return createImportedStaticCssEvalProvider({
+    return createProviderFromModules({
       modules: [
         { id: ownerId, source: ownerSource },
         { id: stylesId, source: stylesSource },
         {
           id: barrelId,
           source: barrelSource
-        }
+        },
+        ...extraModules
       ],
       importResolutions: [
         { importerId: ownerId, importPath: "./styles", resolvedId: stylesId },
-        { importerId: ownerId, importPath: "./barrel", resolvedId: barrelId }
+        { importerId: ownerId, importPath: "./barrel", resolvedId: barrelId },
+        { importerId: barrelId, importPath: "./styles", resolvedId: stylesId },
+        ...extraImportResolutions
       ]
     });
   }
@@ -1361,7 +2191,19 @@ if (import.meta.vitest) {
       ).toMatchObject({
         kind: "resolved",
         value: { color: "red" },
-        dependencies: [stylesId]
+        provenance: { kind: "imported", file: stylesId, exportName: "button" },
+        dependencies: [
+          {
+            file: stylesId,
+            kind: "imported",
+            importer: ownerId,
+            specifier: "./styles",
+            exportName: "button",
+            memberPath: [],
+            inspected: true,
+            contributed: true
+          }
+        ]
       });
 
       expect(
@@ -1433,8 +2275,148 @@ if (import.meta.vitest) {
       });
     });
 
-    it("rejects reexports and exported const mutations deterministically", () => {
+    it("resolves direct named reexport chains with inspected dependency metadata", () => {
+      const result = resolveFixture(
+        createProvider(
+          `export const button = { color: "red" } as const;`,
+          `import { button } from "./barrel"; <div css={button} />;`
+        ),
+        "button"
+      );
+
+      expect(result).toMatchObject({
+        kind: "resolved",
+        value: { color: "red" },
+        provenance: {
+          kind: "reexported",
+          file: stylesId,
+          exportName: "button"
+        },
+        dependencies: [
+          {
+            file: barrelId,
+            kind: "reexported",
+            inspected: true,
+            contributed: true
+          },
+          {
+            file: stylesId,
+            kind: "reexported",
+            inspected: true,
+            contributed: true
+          }
+        ],
+        resolutionChain: [
+          { importer: ownerId, source: barrelId, exportName: "button" },
+          { importer: barrelId, source: stylesId, exportName: "button" }
+        ]
+      });
+    });
+
+    it("parses one imported source identity once for repeated binding resolutions", () => {
+      const { cache, missesByFile } = createCountingStaticCssModuleCache();
+      const provider = createProviderFromModules({
+        modules: [
+          {
+            id: ownerId,
+            source: `
+              import { button, card, banner } from "./styles";
+              <>
+                <div css={button} />
+                <div css={card} />
+                <div css={banner} />
+                <div css={button} />
+              </>;
+            `,
+            sourceHash: "hash:owner-v1",
+            version: "owner-v1"
+          },
+          {
+            id: stylesId,
+            source: `
+              export const button = { color: "red" } as const;
+              export const card = { color: "blue" } as const;
+              export const banner = { color: "green" } as const;
+            `,
+            sourceHash: "hash:styles-v1",
+            version: "styles-v1"
+          }
+        ],
+        importResolutions: [
+          { importerId: ownerId, importPath: "./styles", resolvedId: stylesId }
+        ],
+        moduleCache: cache
+      });
+
+      const button = expectResolvedResult(resolveFixture(provider, "button"));
+      const card = expectResolvedResult(resolveFixture(provider, "card"));
+      const banner = expectResolvedResult(resolveFixture(provider, "banner"));
+      const repeatedButton = expectResolvedResult(
+        resolveFixture(provider, "button")
+      );
+
+      expect(button.value).toEqual({ color: "red" });
+      expect(card.value).toEqual({ color: "blue" });
+      expect(banner.value).toEqual({ color: "green" });
+      expect(repeatedButton.value).toEqual({ color: "red" });
+      expect(missesByFile.get(stylesId)).toBe(1);
+      expect(missesByFile.get(ownerId)).toBe(1);
       expect(
+        [button, card, banner, repeatedButton].map((result) => ({
+          resolvedFile: result.cacheKey.resolvedFile,
+          sourceHash: result.cacheKey.sourceHash,
+          sourceVersion: result.cacheKey.sourceVersion,
+          pluginOptionsVersion: result.cacheKey.pluginOptionsVersion,
+          resolverOptionsVersion: result.cacheKey.resolverOptionsVersion,
+          staticEvalSupportVersion: result.cacheKey.staticEvalSupportVersion
+        }))
+      ).toEqual([
+        {
+          resolvedFile: stylesId,
+          sourceHash: "hash:styles-v1",
+          sourceVersion: "styles-v1",
+          pluginOptionsVersion: "static-css-eval-provider:v1",
+          resolverOptionsVersion: "static-css-eval-provider:v1",
+          staticEvalSupportVersion: STATIC_CSS_MODULE_CACHE_SUPPORT_VERSION
+        },
+        {
+          resolvedFile: stylesId,
+          sourceHash: "hash:styles-v1",
+          sourceVersion: "styles-v1",
+          pluginOptionsVersion: "static-css-eval-provider:v1",
+          resolverOptionsVersion: "static-css-eval-provider:v1",
+          staticEvalSupportVersion: STATIC_CSS_MODULE_CACHE_SUPPORT_VERSION
+        },
+        {
+          resolvedFile: stylesId,
+          sourceHash: "hash:styles-v1",
+          sourceVersion: "styles-v1",
+          pluginOptionsVersion: "static-css-eval-provider:v1",
+          resolverOptionsVersion: "static-css-eval-provider:v1",
+          staticEvalSupportVersion: STATIC_CSS_MODULE_CACHE_SUPPORT_VERSION
+        },
+        {
+          resolvedFile: stylesId,
+          sourceHash: "hash:styles-v1",
+          sourceVersion: "styles-v1",
+          pluginOptionsVersion: "static-css-eval-provider:v1",
+          resolverOptionsVersion: "static-css-eval-provider:v1",
+          staticEvalSupportVersion: STATIC_CSS_MODULE_CACHE_SUPPORT_VERSION
+        }
+      ]);
+    });
+
+    it("normalizes direct imports and direct reexports to the same terminal dependency file", () => {
+      const directResult = expectResolvedResult(
+        resolveFixture(
+          createProvider(
+            `export const button = { color: "red" } as const;`,
+            `import { button } from "./styles"; <div css={button} />;`
+          ),
+          "button"
+        )
+      );
+      const reexportResult = expectResolvedResult(
         resolveFixture(
           createProvider(
             `export const button = { color: "red" } as const;`,
@@ -1442,15 +2424,113 @@ if (import.meta.vitest) {
           ),
           "button"
         )
-      ).toMatchObject({
-        kind: "error",
-        diagnostic: {
-          code: "unsupported-source",
-          reason: "reexport-or-barrel"
-        },
-        dependencies: [barrelId]
-      });
+      );
+      const directDependency = directResult.dependencies.find(
+        (dependency) => dependency.file === stylesId
+      );
+      const reexportDependency = reexportResult.dependencies.find(
+        (dependency) => dependency.file === stylesId
+      );
 
+      expect(directDependency).toMatchObject({
+        file: stylesId,
+        kind: "imported"
+      });
+      expect(reexportDependency).toMatchObject({
+        file: stylesId,
+        kind: "reexported"
+      });
+      expect(directResult.cacheKey.resolvedFile).toBe(stylesId);
+      expect(reexportResult.cacheKey.resolvedFile).toBe(stylesId);
+      expect(directResult.cacheKey.resolvedId).toBe(
+        reexportResult.cacheKey.resolvedId
+      );
+    });
+
+    it("changes cache identity when imported source content identity changes", () => {
+      const createVersionedProvider = (
+        source: string,
+        sourceHash: string,
+        version: string
+      ) =>
+        createProviderFromModules({
+          modules: [
+            {
+              id: ownerId,
+              source: `import { button } from "./styles"; <div css={button} />;`
+            },
+            { id: stylesId, source, sourceHash, version }
+          ],
+          importResolutions: [
+            {
+              importerId: ownerId,
+              importPath: "./styles",
+              resolvedId: stylesId
+            }
+          ]
+        });
+      const red = expectResolvedResult(
+        resolveFixture(
+          createVersionedProvider(
+            `export const button = { color: "red" } as const;`,
+            "hash:styles-red",
+            "styles-red"
+          ),
+          "button"
+        )
+      );
+      const blue = expectResolvedResult(
+        resolveFixture(
+          createVersionedProvider(
+            `export const button = { color: "blue" } as const;`,
+            "hash:styles-blue",
+            "styles-blue"
+          ),
+          "button"
+        )
+      );
+
+      expect(red.value).toEqual({ color: "red" });
+      expect(blue.value).toEqual({ color: "blue" });
+      expect(red.cacheKey.resolvedFile).toBe(blue.cacheKey.resolvedFile);
+      expect(red.cacheKey.sourceHash).toBe("hash:styles-red");
+      expect(blue.cacheKey.sourceHash).toBe("hash:styles-blue");
+      expect(red.cacheKey.sourceVersion).toBe("styles-red");
+      expect(blue.cacheKey.sourceVersion).toBe("styles-blue");
+      expect(red.cacheKey).not.toEqual(blue.cacheKey);
+    });
+
+    it("resolves limited namespace members from project-local literal chains", () => {
+      expect(
+        resolveFixture(
+          createProvider(
+            `export const button = { color: "red" } as const;`,
+            `import * as styles from "./styles"; <div css={styles.button} />;`
+          ),
+          "styles",
+          ["button"]
+        )
+      ).toMatchObject({
+        kind: "resolved",
+        value: { color: "red" },
+        provenance: {
+          kind: "namespace-member",
+          file: stylesId,
+          exportName: "button",
+          namespaceBinding: "styles"
+        },
+        dependencies: [
+          {
+            file: stylesId,
+            kind: "namespace-member",
+            inspected: true,
+            contributed: true
+          }
+        ]
+      });
+    });
+
+    it("rejects export stars, missing exports, packages, cjs, and cycles with exact diagnostics", () => {
       expect(
         resolveFixture(
           createProvider(
@@ -1463,12 +2543,139 @@ if (import.meta.vitest) {
       ).toMatchObject({
         kind: "error",
         diagnostic: {
-          code: "unsupported-source",
-          reason: "reexport-or-barrel"
+          id: "STATIC_CSS_EVAL_EXPORT_STAR_UNSUPPORTED"
         },
-        dependencies: [barrelId]
+        dependencies: [{ file: barrelId, inspected: true, contributed: false }]
       });
 
+      expect(
+        resolveFixture(
+          createProvider(
+            `export const card = { color: "red" } as const;`,
+            `import { button } from "./styles"; <div css={button} />;`
+          ),
+          "button"
+        )
+      ).toMatchObject({
+        kind: "error",
+        diagnostic: {
+          id: "STATIC_CSS_EVAL_UNRESOLVED_EXPORT"
+        }
+      });
+
+      expect(
+        resolveFixture(
+          createProvider(
+            `export const button = { color: "red" } as const;`,
+            `import { button } from "pkg"; <div css={button} />;`
+          ),
+          "button"
+        )
+      ).toMatchObject({
+        kind: "error",
+        diagnostic: {
+          id: "STATIC_CSS_EVAL_PACKAGE_IMPORT_UNSUPPORTED"
+        }
+      });
+
+      expect(
+        resolveFixture(
+          createProvider(
+            `export const button = { color: "red" } as const;`,
+            `import * as styles from "pkg"; <div css={styles.button} />;`
+          ),
+          "styles",
+          ["button"]
+        )
+      ).toMatchObject({
+        kind: "error",
+        diagnostic: {
+          id: "STATIC_CSS_EVAL_NAMESPACE_UNSUPPORTED"
+        }
+      });
+
+      expect(
+        resolveFixture(
+          createProvider(
+            `export const button = { color: "red" } as const;`,
+            `const button = require("./styles"); <div css={button} />;`
+          ),
+          "button"
+        )
+      ).toMatchObject({
+        kind: "error",
+        diagnostic: {
+          id: "STATIC_CSS_EVAL_CJS_UNSUPPORTED"
+        }
+      });
+
+      expect(
+        resolveFixture(
+          createProviderFromModules({
+            modules: [
+              {
+                id: ownerId,
+                source: `import { button } from "./a"; <div css={button} />;`
+              },
+              { id: barrelId, source: `export { button } from "./button";` },
+              { id: buttonId, source: `export { button } from "./barrel";` }
+            ],
+            importResolutions: [
+              { importerId: ownerId, importPath: "./a", resolvedId: barrelId },
+              {
+                importerId: barrelId,
+                importPath: "./button",
+                resolvedId: buttonId
+              },
+              {
+                importerId: buttonId,
+                importPath: "./barrel",
+                resolvedId: barrelId
+              }
+            ]
+          }),
+          "button"
+        )
+      ).toMatchObject({
+        kind: "error",
+        diagnostic: {
+          id: "STATIC_CSS_EVAL_IMPORT_CYCLE"
+        }
+      });
+    });
+
+    it("rejects computed namespace members and ignores type-only imports", () => {
+      const provider = createProvider(
+        `export const button = { color: "red" } as const;`,
+        `import * as styles from "./styles"; <div css={styles[variant]} />;`
+      );
+      const diagnostic =
+        findUnsupportedImportedStaticCssEvalReferenceDiagnostic({
+          expression: t.memberExpression(
+            t.identifier("styles"),
+            t.identifier("variant"),
+            true
+          ),
+          ownerFile: ownerId,
+          provider
+        });
+
+      expect(diagnostic).toMatchObject({
+        id: "STATIC_CSS_EVAL_COMPUTED_MEMBER_UNSUPPORTED"
+      });
+
+      expect(
+        resolveFixture(
+          createProvider(
+            `export const button = { color: "red" } as const;`,
+            `import type { button } from "./styles"; <div css={button} />;`
+          ),
+          "button"
+        )
+      ).toEqual({ kind: "not-candidate" });
+    });
+
+    it("rejects exported const mutations deterministically", () => {
       expect(
         resolveFixture(
           createProvider(
@@ -1479,10 +2686,9 @@ if (import.meta.vitest) {
       ).toMatchObject({
         kind: "error",
         diagnostic: {
-          code: "mutation-detected",
-          reason: "mutated-binding"
+          id: "STATIC_CSS_EVAL_MUTATED_BINDING"
         },
-        dependencies: [stylesId]
+        dependencies: [{ file: stylesId, inspected: true, contributed: false }]
       });
 
       expect(
@@ -1496,10 +2702,9 @@ if (import.meta.vitest) {
       ).toMatchObject({
         kind: "error",
         diagnostic: {
-          code: "mutation-detected",
-          reason: "mutated-binding"
+          id: "STATIC_CSS_EVAL_MUTATED_BINDING"
         },
-        dependencies: [stylesId]
+        dependencies: [{ file: stylesId, inspected: true, contributed: false }]
       });
     });
   });

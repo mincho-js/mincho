@@ -61,6 +61,13 @@ export function getStaticMemberPropertyName(
 export function getUnsupportedLiteralReason(
   expression: t.Expression
 ): StaticCssEvalUnsupportedReason {
+  if (
+    expression.type === "ImportExpression" ||
+    (t.isCallExpression(expression) && t.isImport(expression.callee))
+  ) {
+    return "dynamic-import";
+  }
+
   if (t.isIdentifier(expression)) {
     return "identifier-object-value";
   }

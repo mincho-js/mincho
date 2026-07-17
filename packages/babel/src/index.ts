@@ -5,9 +5,14 @@ import {
   removeUnusedJsxCssPropCssModuleImports
 } from "./jsxCssProp.js";
 import { supportedJsxCssPropTags } from "./jsxCssPropTags.js";
+import { createImportedStaticCssEvalProvider } from "./staticCssEval/importedModules.js";
 import postprocess from "./transforms/postprocess.js";
 import basePreprocess from "./transforms/preprocess.js";
-import type { PluginOptions, PluginState } from "./types.js";
+import type {
+  MinchoBabelFileMetadata,
+  PluginOptions,
+  PluginState
+} from "./types.js";
 import { styledComponentPlugin } from "./styled.js";
 
 const preprocess = basePreprocess as (
@@ -40,7 +45,11 @@ export {
   createImportedStaticCssEvalModuleRecord as internalCreateImportedStaticCssEvalModuleRecord,
   createImportedStaticCssEvalProvider as internalCreateImportedStaticCssEvalProvider
 } from "./staticCssEval/importedModules.js";
-export type { PluginOptions } from "./types.js";
+export type {
+  MinchoBabelFileMetadata,
+  MinchoStaticCssEvalMetadata,
+  PluginOptions
+} from "./types.js";
 export type {
   ImportedStaticCssEvalImportResolution as InternalImportedStaticCssEvalImportResolution,
   ImportedStaticCssEvalLoadedModule as InternalImportedStaticCssEvalLoadedModule,
@@ -60,20 +69,25 @@ if (import.meta.vitest) {
     code: string,
     pluginOptions: Partial<
       Pick<PluginOptions, "jsxCssProp" | "staticCssEvalProvider">
-    > = {}
+    > = {},
+    transformOptions: { filename?: string } = {}
   ) {
     const options: PluginOptions = { result: ["", ""], ...pluginOptions };
     const result = transformSync(code, {
       plugins: [[minchoBabelPlugin(), options], [styledComponentPlugin()]],
       presets: ["@babel/preset-typescript"],
-      filename: "test.tsx"
+      filename: transformOptions.filename ?? "test.tsx"
     });
 
     if (result === null || result.code == null) {
       throw new Error("Failed to transform code");
     }
 
-    return { result: options.result, code: result.code };
+    return {
+      result: options.result,
+      code: result.code,
+      metadata: (result.metadata ?? {}) as MinchoBabelFileMetadata
+    };
   }
 
   type RuntimeJsx = (
@@ -385,6 +399,56 @@ if (import.meta.vitest) {
     ).toThrow(message);
   }
 
+  function captureJsxCssPropFailure(
+    code: string,
+    pluginOptions: Partial<
+      Pick<PluginOptions, "jsxCssProp" | "staticCssEvalProvider">
+    > = {},
+    transformOptions: { filename?: string } = {}
+  ): {
+    code: string;
+    error: Error;
+    metadata: MinchoBabelFileMetadata;
+  } {
+    const options: PluginOptions = { result: ["", ""], ...pluginOptions };
+    let capturedError: Error | null = null;
+    let capturedMetadata: MinchoBabelFileMetadata = {};
+    const capturePlugin: PluginObj<PluginState> = {
+      visitor: {
+        Program(path, state) {
+          try {
+            preprocess(path, state);
+            preprocessJsxCssProp(path, state);
+          } catch (error) {
+            capturedError =
+              error instanceof Error ? error : new Error(String(error));
+            capturedMetadata = state.file.metadata;
+            path.stop();
+          }
+        }
+      }
+    };
+    const result = transformSync(code, {
+      plugins: [[capturePlugin, options]],
+      presets: ["@babel/preset-typescript"],
+      filename: transformOptions.filename ?? "test.tsx"
+    });
+
+    if (!capturedError) {
+      throw new Error("Expected JSX css prop transform to fail");
+    }
+
+    if (result === null || result.code == null) {
+      throw new Error("Failed to transform failure capture code");
+    }
+
+    return {
+      code: result.code,
+      error: capturedError,
+      metadata: capturedMetadata
+    };
+  }
+
   describe("minchoBabelPlugin", () => {
     it("export default style", () => {
       const { result, code } = babelTransform(`
@@ -550,6 +614,53 @@ if (import.meta.vitest) {
       expect(
         imported.code.match(/className=\{_\$mincho\$\$App\d+\}/g)
       ).toHaveLength(2);
+    });
+
+    it("records imported static css eval metadata during css prop lowering", () => {
+      const ownerFile = "/project/src/App.tsx";
+      const stylesFile = "/project/src/styles.ts";
+      const source = `
+        import { button } from "./styles";
+
+        function App() {
+          return <div css={button} />;
+        }
+      `;
+      const { result, code, metadata } = babelTransform(
+        source,
+        {
+          jsxCssProp: true,
+          staticCssEvalProvider: createImportedStaticCssEvalProvider({
+            modules: [
+              { id: ownerFile, source },
+              {
+                id: stylesFile,
+                source: `export const button = { color: "red" } as const;`
+              }
+            ],
+            importResolutions: [
+              {
+                importerId: ownerFile,
+                importPath: "./styles",
+                resolvedId: stylesFile
+              }
+            ]
+          })
+        },
+        { filename: ownerFile }
+      );
+      const staticCssEvalMetadata = metadata.minchoStaticCssEval;
+
+      expect(staticCssEvalMetadata?.dependencies[0]?.file).toBe(stylesFile);
+      expect(staticCssEvalMetadata?.dependencies[0]?.contributed).toBe(true);
+      expect(staticCssEvalMetadata?.diagnostics).toEqual([]);
+      expect(staticCssEvalMetadata?.cacheKeys[0]?.resolvedId).toBe(stylesFile);
+      expect(staticCssEvalMetadata?.resolvedModuleIds).toContain(stylesFile);
+      expect(code).not.toContain(" css=");
+      expect(code).toMatch(/className=\{_\$mincho\$\$App\d+\}/);
+      expect(code).not.toContain("_cx(button)");
+      expect(result[1]).toContain("_css({");
+      expect(result[1]).toContain('color: "red"');
     });
 
     it("merges expression className before provider-resolved css rule class", () => {
@@ -855,6 +966,34 @@ if (import.meta.vitest) {
           )
         ).toThrow(reason);
       }
+    });
+
+    it("records static css eval metadata before unsupported css prop failures", () => {
+      const source = `
+        const variant = "button";
+        const styles = {
+          button: { color: "red" }
+        };
+
+        function App() {
+          return <div css={styles[variant]} />;
+        }
+      `;
+
+      expect(() => babelTransform(source, { jsxCssProp: true })).toThrow(
+        "dynamic-member-path"
+      );
+
+      const failure = captureJsxCssPropFailure(source, { jsxCssProp: true });
+      const staticCssEvalMetadata = failure.metadata.minchoStaticCssEval;
+
+      expect(failure.error.message).toContain("dynamic-member-path");
+      expect(staticCssEvalMetadata?.diagnostics.map(({ id }) => id)).toContain(
+        "STATIC_CSS_EVAL_COMPUTED_MEMBER_UNSUPPORTED"
+      );
+      expect(failure.code).not.toContain('from "@mincho-js/css"');
+      expect(failure.code).not.toContain("_css(");
+      expect(failure.code).not.toContain("_cx(");
     });
 
     it("preserves class-value fallback when static css rule candidacy is unproven", () => {
