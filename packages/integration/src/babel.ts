@@ -1,38 +1,28 @@
 import { type TransformOptions, transformFileAsync } from "@babel/core";
 import {
-  internalCollectJsxCssPropStaticCssEvalCandidates as collectJsxCssPropStaticCssEvalCandidates,
-  internalCreateImportedStaticCssEvalModuleRecord as createImportedStaticCssEvalModuleRecord,
-  internalCreateImportedStaticCssEvalProvider as createImportedStaticCssEvalProvider,
-  type InternalImportedStaticCssEvalImportResolution as ImportedStaticCssEvalImportResolution,
-  type InternalImportedStaticCssEvalLoadedModule as ImportedStaticCssEvalLoadedModule,
   type InternalImportedStaticCssEvalModuleRecord as ImportedStaticCssEvalModuleRecord,
   type MinchoStaticCssEvalMetadata,
   type PluginOptions,
   minchoBabelPlugin,
   minchoStyledComponentPlugin
 } from "@mincho-js/babel";
+import {
+  createEmptyStaticCssEvalMetadata,
+  createObservingStaticCssEvalProvider,
+  createStaticCssEvalTransformResult,
+  getStaticCssEvalMetadata,
+  mergeStaticCssEvalMetadata
+} from "./staticCssEvalMetadata.js";
+import { createStaticCssEvalPrepass } from "./staticCssEvalPrepass.js";
 
 type MaybePromise<T> = T | Promise<T>;
 
-type StaticCssEvalProvider = NonNullable<
-  PluginOptions["staticCssEvalProvider"]
->;
-type StaticCssEvalProviderResult = ReturnType<
-  StaticCssEvalProvider["getResolvedCssValue"]
->;
 type StaticCssEvalMetadataDependency =
   MinchoStaticCssEvalMetadata["dependencies"][number];
 type StaticCssEvalMetadataDiagnostic =
   MinchoStaticCssEvalMetadata["diagnostics"][number];
 type StaticCssEvalMetadataCacheKey =
   MinchoStaticCssEvalMetadata["cacheKeys"][number];
-type StaticCssEvalProviderMetadataSource = {
-  dependencies?: readonly unknown[];
-  diagnostics?: readonly StaticCssEvalMetadataDiagnostic[];
-  diagnostic?: StaticCssEvalMetadataDiagnostic;
-  cacheKey?: StaticCssEvalMetadataCacheKey;
-};
-
 export type StaticCssEvalResolverKind =
   | "source-provider"
   | "filesystem"
@@ -114,31 +104,6 @@ export interface StaticCssEvalResolvedDependency {
 
 export interface StaticCssEvalTransformResult
   extends StaticCssEvalPrepassResult, MinchoStaticCssEvalMetadata {}
-
-interface NormalizedStaticCssEvalSourceResolution {
-  resolvedFile: string;
-  canonicalModuleId: string;
-  normalizedPathKey: string;
-  resolverKind: StaticCssEvalResolverKind;
-  realpath?: string;
-  sourceIdentity?: StaticCssEvalSourceIdentity;
-}
-
-interface PreparedStaticCssEvalPrepass {
-  provider: StaticCssEvalProvider;
-  result: StaticCssEvalPrepassResult;
-}
-
-interface StaticCssEvalPrepassState {
-  loadedModules: ImportedStaticCssEvalLoadedModule[];
-  importResolutions: ImportedStaticCssEvalImportResolution[];
-  resolvedModuleCache: Map<string, ImportedStaticCssEvalModuleRecord>;
-  ownerDependencies: string[];
-  dependencyToOwners: Map<string, string[]>;
-  resolvedDependencies: StaticCssEvalResolvedDependency[];
-  resolvedImports: Map<string, NormalizedStaticCssEvalSourceResolution | null>;
-  loadedDependencyIds: Set<string>;
-}
 
 export class BabelTransformError extends Error {
   readonly file: string;
@@ -262,667 +227,6 @@ export async function babelTransform(
     jsxCssPropTransformed: options.jsxCssPropTransformed === true,
     ...(staticCssEval ? { staticCssEval } : {})
   };
-}
-
-async function createStaticCssEvalPrepass(
-  ownerId: string,
-  sourceProvider: StaticCssEvalSourceProvider
-): Promise<PreparedStaticCssEvalPrepass> {
-  const ownerSource = await sourceProvider.load(ownerId);
-
-  if (!ownerSource) {
-    throw new Error(`Failed to load static css eval owner source ${ownerId}`);
-  }
-
-  const ownerModule = createLoadedModule(ownerId, ownerSource);
-  const ownerRecord = createImportedStaticCssEvalModuleRecord(ownerModule);
-  const candidates = collectJsxCssPropStaticCssEvalCandidates(
-    ownerRecord.programPath,
-    { importerId: ownerId }
-  );
-  const prepassState: StaticCssEvalPrepassState = {
-    loadedModules: [ownerModule],
-    importResolutions: [],
-    resolvedModuleCache: new Map([[ownerRecord.id, ownerRecord]]),
-    ownerDependencies: [],
-    dependencyToOwners: new Map(),
-    resolvedDependencies: [],
-    resolvedImports: new Map(),
-    loadedDependencyIds: new Set([ownerId])
-  };
-
-  for (const candidate of candidates) {
-    const importBinding = candidate.bindingName
-      ? ownerRecord.imports.get(candidate.bindingName)
-      : undefined;
-
-    if (!importBinding) {
-      continue;
-    }
-
-    const moduleRecord = await loadStaticCssEvalPrepassDependency(
-      ownerId,
-      importBinding.importPath,
-      sourceProvider,
-      prepassState
-    );
-
-    if (!moduleRecord) {
-      continue;
-    }
-
-    if (importBinding.kind !== "namespace") {
-      await loadDirectReexportDependencies(
-        moduleRecord,
-        importBinding.importedName,
-        sourceProvider,
-        prepassState
-      );
-    }
-  }
-
-  const ownerToDependencies = new Map<string, string[]>([
-    [ownerId, prepassState.ownerDependencies]
-  ]);
-  const provider = createImportedStaticCssEvalProvider({
-    modules: prepassState.loadedModules,
-    importResolutions: prepassState.importResolutions,
-    moduleRecords: [...prepassState.resolvedModuleCache.values()]
-  });
-
-  return {
-    provider,
-    result: {
-      dependencyFiles: [...prepassState.ownerDependencies],
-      ownerToDependencies,
-      dependencyToOwners: prepassState.dependencyToOwners,
-      resolvedModuleCache: prepassState.resolvedModuleCache,
-      resolvedDependencies: prepassState.resolvedDependencies
-    }
-  };
-}
-
-async function loadStaticCssEvalPrepassDependency(
-  importerId: string,
-  importPath: string,
-  sourceProvider: StaticCssEvalSourceProvider,
-  prepassState: StaticCssEvalPrepassState
-): Promise<ImportedStaticCssEvalModuleRecord | undefined> {
-  const resolvedImportKey = `${importerId}\0${importPath}`;
-  let resolution = prepassState.resolvedImports.get(resolvedImportKey);
-
-  if (!prepassState.resolvedImports.has(resolvedImportKey)) {
-    const sourceResolution = await sourceProvider.resolve(
-      importerId,
-      importPath
-    );
-    resolution = sourceResolution
-      ? normalizeStaticCssEvalSourceResolution(sourceResolution)
-      : null;
-    prepassState.resolvedImports.set(resolvedImportKey, resolution ?? null);
-
-    if (resolution) {
-      prepassState.importResolutions.push({
-        importerId,
-        importPath,
-        resolvedId: resolution.resolvedFile
-      });
-      prepassState.resolvedDependencies.push(
-        createStaticCssEvalResolvedDependency(
-          importerId,
-          importPath,
-          resolution,
-          false
-        )
-      );
-    }
-  }
-
-  if (!resolution) {
-    return undefined;
-  }
-
-  addOwnerDependency(
-    prepassState.ownerDependencies,
-    prepassState.dependencyToOwners,
-    prepassState.loadedModules[0]?.id ?? importerId,
-    resolution.resolvedFile
-  );
-
-  const cachedRecord = prepassState.resolvedModuleCache.get(
-    resolution.resolvedFile
-  );
-
-  if (cachedRecord) {
-    return cachedRecord;
-  }
-
-  if (prepassState.loadedDependencyIds.has(resolution.resolvedFile)) {
-    return undefined;
-  }
-
-  prepassState.loadedDependencyIds.add(resolution.resolvedFile);
-  const loadedSource = await sourceProvider.load(resolution.normalizedPathKey);
-
-  if (!loadedSource) {
-    return undefined;
-  }
-
-  markResolvedDependencyLoaded(
-    prepassState.resolvedDependencies,
-    importerId,
-    importPath,
-    resolution,
-    loadedSource
-  );
-
-  const loadedModule = createLoadedModule(
-    resolution.resolvedFile,
-    loadedSource,
-    resolution
-  );
-
-  try {
-    const moduleRecord = createImportedStaticCssEvalModuleRecord(loadedModule);
-    prepassState.resolvedModuleCache.set(moduleRecord.id, moduleRecord);
-    prepassState.loadedModules.push(loadedModule);
-
-    return moduleRecord;
-  } catch {
-    return undefined;
-  }
-}
-
-async function loadDirectReexportDependencies(
-  moduleRecord: ImportedStaticCssEvalModuleRecord,
-  exportName: string,
-  sourceProvider: StaticCssEvalSourceProvider,
-  prepassState: StaticCssEvalPrepassState
-): Promise<void> {
-  let currentRecord: ImportedStaticCssEvalModuleRecord | undefined =
-    moduleRecord;
-  let currentExportName = exportName;
-  const seenReexports = new Set<string>();
-
-  while (currentRecord) {
-    const exportEntry = currentRecord.exports.get(currentExportName);
-
-    if (!exportEntry || exportEntry.kind !== "reexport") {
-      return;
-    }
-
-    const reexportKey = `${currentRecord.id}\0${currentExportName}`;
-
-    if (seenReexports.has(reexportKey)) {
-      return;
-    }
-
-    seenReexports.add(reexportKey);
-
-    currentRecord = await loadStaticCssEvalPrepassDependency(
-      currentRecord.id,
-      exportEntry.source,
-      sourceProvider,
-      prepassState
-    );
-    currentExportName = exportEntry.importedName;
-  }
-}
-
-function createLoadedModule(
-  id: string,
-  loadedSource: StaticCssEvalLoadedSource,
-  resolution?: NormalizedStaticCssEvalSourceResolution
-): ImportedStaticCssEvalLoadedModule {
-  const sourceText = getLoadedSourceText(id, loadedSource);
-  const sourceIdentity = createLoadedSourceIdentity(
-    sourceText,
-    loadedSource,
-    resolution
-  );
-
-  return {
-    id,
-    source: sourceText,
-    realpath: loadedSource.realpath ?? resolution?.realpath,
-    sourceHash: sourceIdentity.sourceHash,
-    version: sourceIdentity.version
-  };
-}
-
-function getLoadedSourceText(
-  id: string,
-  loadedSource: StaticCssEvalLoadedSource
-): string {
-  const sourceText = loadedSource.sourceText ?? loadedSource.source;
-
-  if (sourceText === undefined) {
-    throw new Error(
-      `Static css eval source provider did not return source for ${id}`
-    );
-  }
-
-  return sourceText;
-}
-
-function normalizeStaticCssEvalSourceResolution(
-  resolution: StaticCssEvalSourceResolution
-): NormalizedStaticCssEvalSourceResolution {
-  const resolvedFile = resolution.resolvedFile ?? resolution.id;
-
-  if (!resolvedFile) {
-    throw new Error(
-      "Static css eval source resolution requires resolvedFile or id"
-    );
-  }
-
-  const canonicalModuleId =
-    resolution.canonicalModuleId ?? resolution.id ?? resolvedFile;
-  const normalizedPathKey =
-    resolution.normalizedPathKey ?? canonicalModuleId ?? resolvedFile;
-
-  return {
-    resolvedFile,
-    canonicalModuleId,
-    normalizedPathKey,
-    resolverKind: resolution.resolverKind ?? "source-provider",
-    realpath: resolution.realpath,
-    sourceIdentity: normalizeStaticCssEvalSourceIdentity(
-      resolution.sourceIdentity,
-      resolution.sourceHash,
-      resolution.version
-    )
-  };
-}
-
-function normalizeStaticCssEvalSourceIdentity(
-  sourceIdentity: StaticCssEvalSourceIdentity | undefined,
-  sourceHash: string | undefined,
-  version: string | number | undefined
-): StaticCssEvalSourceIdentity | undefined {
-  const normalizedSourceHash = sourceIdentity?.sourceHash ?? sourceHash;
-  const normalizedVersion = sourceIdentity?.version ?? version;
-
-  if (normalizedSourceHash === undefined && normalizedVersion === undefined) {
-    return undefined;
-  }
-
-  return {
-    ...(normalizedSourceHash !== undefined
-      ? { sourceHash: normalizedSourceHash }
-      : {}),
-    ...(normalizedVersion !== undefined ? { version: normalizedVersion } : {})
-  };
-}
-
-function createLoadedSourceIdentity(
-  sourceText: string,
-  loadedSource: StaticCssEvalLoadedSource,
-  resolution?: NormalizedStaticCssEvalSourceResolution
-): Required<Pick<StaticCssEvalSourceIdentity, "sourceHash">> &
-  Pick<StaticCssEvalSourceIdentity, "version"> {
-  const sourceIdentity = normalizeStaticCssEvalSourceIdentity(
-    loadedSource.sourceIdentity,
-    loadedSource.sourceHash,
-    loadedSource.version
-  );
-  const sourceHash =
-    sourceIdentity?.sourceHash ??
-    resolution?.sourceIdentity?.sourceHash ??
-    createStaticCssEvalSourceTextHash(sourceText);
-  const version =
-    sourceIdentity?.version ?? resolution?.sourceIdentity?.version;
-
-  return {
-    sourceHash,
-    ...(version !== undefined ? { version } : {})
-  };
-}
-
-function createStaticCssEvalResolvedDependency(
-  importerId: string,
-  specifier: string,
-  resolution: NormalizedStaticCssEvalSourceResolution,
-  loaded: boolean,
-  loadedSource?: StaticCssEvalLoadedSource
-): StaticCssEvalResolvedDependency {
-  const sourceText = loadedSource
-    ? getLoadedSourceText(resolution.normalizedPathKey, loadedSource)
-    : undefined;
-  const sourceIdentity = loadedSource
-    ? createLoadedSourceIdentity(sourceText ?? "", loadedSource, resolution)
-    : resolution.sourceIdentity;
-
-  return {
-    importerId,
-    specifier,
-    resolvedFile: resolution.resolvedFile,
-    canonicalModuleId: resolution.canonicalModuleId,
-    normalizedPathKey: resolution.normalizedPathKey,
-    resolverKind: resolution.resolverKind,
-    loaded,
-    ...(sourceIdentity ? { sourceIdentity } : {})
-  };
-}
-
-function markResolvedDependencyLoaded(
-  resolvedDependencies: StaticCssEvalResolvedDependency[],
-  importerId: string,
-  specifier: string,
-  resolution: NormalizedStaticCssEvalSourceResolution,
-  loadedSource: StaticCssEvalLoadedSource
-): void {
-  const resolvedDependencyIndex = resolvedDependencies.findIndex(
-    (dependency) =>
-      dependency.importerId === importerId &&
-      dependency.specifier === specifier &&
-      dependency.resolvedFile === resolution.resolvedFile
-  );
-  const loadedDependency = createStaticCssEvalResolvedDependency(
-    importerId,
-    specifier,
-    resolution,
-    true,
-    loadedSource
-  );
-
-  if (resolvedDependencyIndex === -1) {
-    resolvedDependencies.push(loadedDependency);
-    return;
-  }
-
-  resolvedDependencies[resolvedDependencyIndex] = loadedDependency;
-}
-
-function createStaticCssEvalSourceTextHash(sourceText: string): string {
-  let hash = 0x811c9dc5;
-
-  for (let index = 0; index < sourceText.length; index += 1) {
-    hash ^= sourceText.charCodeAt(index);
-    hash = Math.imul(hash, 0x01000193);
-  }
-
-  return `fnv1a:${(hash >>> 0).toString(16).padStart(8, "0")}:${sourceText.length}`;
-}
-
-function createObservingStaticCssEvalProvider(
-  provider: StaticCssEvalProvider,
-  metadata: MinchoStaticCssEvalMetadata
-): StaticCssEvalProvider {
-  return {
-    getResolvedCssValue(query): StaticCssEvalProviderResult {
-      const result = provider.getResolvedCssValue(query);
-      appendStaticCssEvalResultMetadata(metadata, result);
-      return result;
-    }
-  };
-}
-
-function appendStaticCssEvalResultMetadata(
-  metadata: MinchoStaticCssEvalMetadata,
-  result: StaticCssEvalProviderResult
-): void {
-  const metadataSource = result as StaticCssEvalProviderMetadataSource;
-  const dependencies = (metadataSource.dependencies ?? []).filter(
-    isStaticCssEvalResolutionDependency
-  );
-  const diagnostics =
-    metadataSource.diagnostics ??
-    (metadataSource.diagnostic ? [metadataSource.diagnostic] : []);
-  const cacheKeys = metadataSource.cacheKey ? [metadataSource.cacheKey] : [];
-
-  appendUniqueMetadataItems(
-    metadata.dependencies,
-    dependencies,
-    createStaticCssEvalDependencyKey
-  );
-  appendUniqueMetadataItems(
-    metadata.diagnostics,
-    diagnostics,
-    createStaticCssEvalDiagnosticKey
-  );
-  appendUniqueMetadataItems(
-    metadata.cacheKeys,
-    cacheKeys,
-    createStaticCssEvalCacheKeyKey
-  );
-  appendUniqueMetadataItems(
-    metadata.resolvedModuleIds,
-    [
-      ...cacheKeys.flatMap((cacheKey) => cacheKey.resolvedId ?? []),
-      ...dependencies.flatMap((dependency) =>
-        dependency.kind !== "local" &&
-        dependency.kind !== "unresolved" &&
-        dependency.inspected
-          ? [dependency.file]
-          : []
-      )
-    ],
-    (moduleId) => moduleId
-  );
-}
-
-function isStaticCssEvalResolutionDependency(
-  dependency: unknown
-): dependency is StaticCssEvalMetadataDependency {
-  return typeof dependency === "object" && dependency !== null;
-}
-
-function getStaticCssEvalMetadata(
-  metadata: unknown
-): MinchoStaticCssEvalMetadata | undefined {
-  const staticCssEval = (
-    metadata as { minchoStaticCssEval?: MinchoStaticCssEvalMetadata } | null
-  )?.minchoStaticCssEval;
-
-  if (!staticCssEval) {
-    return undefined;
-  }
-
-  return cloneStaticCssEvalMetadata(staticCssEval);
-}
-
-function createStaticCssEvalTransformResult(
-  prepassResult: StaticCssEvalPrepassResult | undefined,
-  metadata: MinchoStaticCssEvalMetadata | undefined
-): StaticCssEvalTransformResult | undefined {
-  const staticCssEvalMetadata = metadata
-    ? cloneStaticCssEvalMetadata(metadata)
-    : createEmptyStaticCssEvalMetadata();
-  const hasMetadata =
-    staticCssEvalMetadata.dependencies.length > 0 ||
-    staticCssEvalMetadata.diagnostics.length > 0 ||
-    staticCssEvalMetadata.cacheKeys.length > 0 ||
-    staticCssEvalMetadata.resolvedModuleIds.length > 0;
-
-  if (!prepassResult && !hasMetadata) {
-    return undefined;
-  }
-
-  return {
-    dependencyFiles: prepassResult?.dependencyFiles ?? [],
-    ownerToDependencies: prepassResult?.ownerToDependencies ?? new Map(),
-    dependencyToOwners: prepassResult?.dependencyToOwners ?? new Map(),
-    resolvedModuleCache: prepassResult?.resolvedModuleCache ?? new Map(),
-    resolvedDependencies: prepassResult?.resolvedDependencies ?? [],
-    ...staticCssEvalMetadata
-  };
-}
-
-function mergeStaticCssEvalMetadata(
-  ...metadataItems: Array<MinchoStaticCssEvalMetadata | undefined>
-): MinchoStaticCssEvalMetadata {
-  const mergedMetadata = createEmptyStaticCssEvalMetadata();
-
-  for (const metadata of metadataItems) {
-    if (!metadata) {
-      continue;
-    }
-
-    appendUniqueMetadataItems(
-      mergedMetadata.dependencies,
-      metadata.dependencies,
-      createStaticCssEvalDependencyKey
-    );
-    appendUniqueMetadataItems(
-      mergedMetadata.diagnostics,
-      metadata.diagnostics,
-      createStaticCssEvalDiagnosticKey
-    );
-    appendUniqueMetadataItems(
-      mergedMetadata.cacheKeys,
-      metadata.cacheKeys,
-      createStaticCssEvalCacheKeyKey
-    );
-    appendUniqueMetadataItems(
-      mergedMetadata.resolvedModuleIds,
-      metadata.resolvedModuleIds,
-      (moduleId) => moduleId
-    );
-  }
-
-  return mergedMetadata;
-}
-
-function createEmptyStaticCssEvalMetadata(): MinchoStaticCssEvalMetadata {
-  return {
-    dependencies: [],
-    diagnostics: [],
-    cacheKeys: [],
-    resolvedModuleIds: []
-  };
-}
-
-function cloneStaticCssEvalMetadata(
-  metadata: MinchoStaticCssEvalMetadata
-): MinchoStaticCssEvalMetadata {
-  return {
-    dependencies: metadata.dependencies.map((dependency) => ({
-      ...dependency,
-      memberPath: [...dependency.memberPath]
-    })),
-    diagnostics: metadata.diagnostics.map((diagnostic) => ({
-      ...diagnostic,
-      owner: { ...diagnostic.owner },
-      ...(diagnostic.dependency
-        ? { dependency: { ...diagnostic.dependency } }
-        : {}),
-      ...(diagnostic.memberPath
-        ? { memberPath: [...diagnostic.memberPath] }
-        : {}),
-      ...(diagnostic.importChain
-        ? { importChain: [...diagnostic.importChain] }
-        : {})
-    })),
-    cacheKeys: metadata.cacheKeys.map((cacheKey) => ({
-      ...cacheKey,
-      memberPath: [...cacheKey.memberPath],
-      ...(cacheKey.parserOptions
-        ? {
-            parserOptions: {
-              ...cacheKey.parserOptions,
-              plugins: [...cacheKey.parserOptions.plugins]
-            }
-          }
-        : {}),
-      ...(cacheKey.projectLocalBoundary
-        ? { projectLocalBoundary: { ...cacheKey.projectLocalBoundary } }
-        : {})
-    })),
-    resolvedModuleIds: [...metadata.resolvedModuleIds]
-  };
-}
-
-function appendUniqueMetadataItems<T>(
-  target: T[],
-  items: readonly T[],
-  createKey: (item: T) => string
-): void {
-  const existingKeys = new Set(target.map(createKey));
-
-  for (const item of items) {
-    const key = createKey(item);
-
-    if (existingKeys.has(key)) {
-      continue;
-    }
-
-    existingKeys.add(key);
-    target.push(item);
-  }
-}
-
-function createStaticCssEvalDependencyKey(
-  dependency: StaticCssEvalMetadataDependency
-): string {
-  return JSON.stringify([
-    dependency.file,
-    dependency.kind,
-    dependency.importer,
-    dependency.specifier,
-    dependency.exportName,
-    dependency.memberPath,
-    dependency.inspected,
-    dependency.contributed
-  ]);
-}
-
-function createStaticCssEvalDiagnosticKey(
-  diagnostic: StaticCssEvalMetadataDiagnostic
-): string {
-  return JSON.stringify([
-    diagnostic.id,
-    diagnostic.code,
-    diagnostic.reason,
-    diagnostic.message,
-    diagnostic.owner.file,
-    diagnostic.owner.start,
-    diagnostic.owner.end,
-    diagnostic.dependency?.file,
-    diagnostic.importPath,
-    diagnostic.exportName,
-    diagnostic.memberPath,
-    diagnostic.importChain
-  ]);
-}
-
-function createStaticCssEvalCacheKeyKey(
-  cacheKey: StaticCssEvalMetadataCacheKey
-): string {
-  return JSON.stringify([
-    cacheKey.importerFile,
-    cacheKey.resolvedFile,
-    cacheKey.exportName,
-    cacheKey.memberPath,
-    cacheKey.sourceHash,
-    cacheKey.sourceVersion,
-    cacheKey.pluginOptionsVersion,
-    cacheKey.resolverOptionsVersion,
-    cacheKey.staticEvalSupportVersion,
-    cacheKey.resolvedId
-  ]);
-}
-
-function addOwnerDependency(
-  ownerDependencies: string[],
-  dependencyToOwners: Map<string, string[]>,
-  ownerId: string,
-  dependencyId: string
-): void {
-  if (!ownerDependencies.includes(dependencyId)) {
-    ownerDependencies.push(dependencyId);
-  }
-
-  const owners = dependencyToOwners.get(dependencyId);
-
-  if (!owners) {
-    dependencyToOwners.set(dependencyId, [ownerId]);
-    return;
-  }
-
-  if (!owners.includes(ownerId)) {
-    owners.push(ownerId);
-  }
 }
 
 // == Tests ====================================================================
@@ -1380,6 +684,91 @@ if (import.meta.vitest) {
       expect(code).not.toContain("_cx(styles.button.primary)");
     });
 
+    it("static css eval metadata dedupes dependency diagnostics and resolved module ids", async () => {
+      const fixturePath = await createBabelFixture(
+        `
+          import { button } from "./styles";
+
+          function App() {
+            return <div css={button} />;
+          }
+        `,
+        "css-prop-metadata-dedupe"
+      );
+      const dependency = {
+        file: "/provider/styles.ts",
+        kind: "imported",
+        importer: fixturePath,
+        specifier: "./styles",
+        exportName: "button",
+        memberPath: [],
+        inspected: true,
+        contributed: true
+      } satisfies StaticCssEvalMetadataDependency;
+      const diagnostic = {
+        id: "STATIC_CSS_EVAL_UNRESOLVED_EXPORT",
+        code: "unsupported-source",
+        message: "test static css eval metadata diagnostic",
+        reason: "reexport-or-barrel",
+        owner: { file: fixturePath, start: 0, end: 1 },
+        dependency: { file: dependency.file },
+        importPath: "./styles",
+        exportName: "button",
+        memberPath: [],
+        importChain: [fixturePath, dependency.file]
+      } satisfies StaticCssEvalMetadataDiagnostic;
+      const cacheKey = {
+        importerFile: fixturePath,
+        resolvedFile: dependency.file,
+        resolvedId: dependency.file,
+        exportName: "button",
+        memberPath: [],
+        sourceHash: "test:metadata-dedupe",
+        pluginOptionsVersion: "test-plugin-options",
+        resolverOptionsVersion: "test-resolver-options",
+        staticEvalSupportVersion: "test-static-eval"
+      } satisfies StaticCssEvalMetadataCacheKey;
+      const provider: StaticCssEvalProvider = {
+        getResolvedCssValue(): StaticCssEvalProviderResult {
+          return {
+            kind: "resolved",
+            value: { color: "red" },
+            dependencies: [dependency, { ...dependency }],
+            diagnostics: [diagnostic, { ...diagnostic }],
+            cacheKey
+          } as unknown as StaticCssEvalProviderResult;
+        }
+      };
+
+      const { result, code, staticCssEval } = await babelTransform(
+        fixturePath,
+        {
+          jsxCssProp: true,
+          staticCssEvalProvider: provider
+        }
+      );
+      const [, sidecarSource] = result;
+
+      expect(sidecarSource).toContain('color: "red"');
+      expect(code).not.toContain("_cx(button)");
+      expect(
+        staticCssEval?.dependencies.filter(
+          (item) => item.file === dependency.file && item.kind === "imported"
+        )
+      ).toHaveLength(1);
+      expect(
+        staticCssEval?.diagnostics.filter((item) => item.id === diagnostic.id)
+      ).toHaveLength(1);
+      expect(staticCssEval?.cacheKeys).toEqual(
+        expect.arrayContaining([expect.objectContaining(cacheKey)])
+      );
+      expect(
+        staticCssEval?.resolvedModuleIds.filter(
+          (moduleId) => moduleId === dependency.file
+        )
+      ).toHaveLength(1);
+    });
+
     it("runs async prepass only for css-prop-reachable imports", async () => {
       const path = await import("node:path");
       const ownerSource = `
@@ -1441,7 +830,7 @@ if (import.meta.vitest) {
       expect(staticCssEval?.resolvedModuleCache.has(unusedId)).toBe(false);
     });
 
-    it("uses imported source identity when only the imported style file changes", async () => {
+    it("static css eval metadata preserves dependency files resolved dependencies cache keys and source identity", async () => {
       const fs = await import("node:fs/promises");
       const componentSource = `
         import { button } from "./styles";
@@ -1597,7 +986,7 @@ if (import.meta.vitest) {
       ]);
     });
 
-    it("attaches deterministic imported failure context to transform errors", async () => {
+    it("BabelTransformError preserves static css eval metadata and deterministic imported failure context", async () => {
       const componentSource = `
         import { button } from "./styles";
 
@@ -1775,6 +1164,60 @@ if (import.meta.vitest) {
       );
     });
 
+    it("excludes failed dependency parses from async prepass caches", async () => {
+      const path = await import("node:path");
+      const ownerSource = `
+        import { button } from "./styles";
+
+        function App() {
+          return <div css={button} />;
+        }
+      `;
+      const fixturePath = await createBabelFixture(
+        ownerSource,
+        "css-prop-async-prepass-parse-failure"
+      );
+      const fixtureRoot = path.dirname(fixturePath);
+      const stylesId = path.join(fixtureRoot, "styles.ts");
+      const { provider, calls } = createFakeStaticCssEvalSourceProvider({
+        sources: {
+          [fixturePath]: ownerSource,
+          [stylesId]: `export const button = ;`
+        },
+        resolutions: {
+          [`${fixturePath}\0./styles`]: stylesId
+        }
+      });
+      const prepass = await createStaticCssEvalPrepass(fixturePath, provider);
+      const resolution = prepass.provider.getResolvedCssValue({
+        importerId: fixturePath,
+        expressionStart: 0,
+        expressionEnd: "button".length,
+        bindingName: "button"
+      });
+
+      expect(calls.resolved).toEqual([
+        { importerId: fixturePath, importPath: "./styles" }
+      ]);
+      expect(calls.loaded).toEqual([fixturePath, stylesId]);
+      expect(prepass.result.dependencyFiles).toEqual([stylesId]);
+      expect(prepass.result.resolvedModuleCache.has(fixturePath)).toBe(true);
+      expect(prepass.result.resolvedModuleCache.has(stylesId)).toBe(false);
+      expect(resolution.kind).toBe("error");
+
+      if (resolution.kind !== "error") {
+        throw new Error("Expected failed dependency resolution");
+      }
+
+      expect(resolution.dependencies).toEqual([stylesId]);
+      expect(resolution.diagnostic.code).toBe(
+        "failed-project-local-dependency"
+      );
+      expect(resolution.diagnostic.message).toContain(
+        `failed to load project-local dependency ${stylesId}`
+      );
+    });
+
     it("resolves namespace members from the async source-provider prepass", async () => {
       const path = await import("node:path");
       const ownerSource = `
@@ -1852,60 +1295,6 @@ if (import.meta.vitest) {
         memberPath: ["primary"]
       });
       expect(staticCssEval?.resolvedModuleIds).toContain(stylesId);
-    });
-
-    it("excludes failed dependency parses from async prepass caches", async () => {
-      const path = await import("node:path");
-      const ownerSource = `
-        import { button } from "./styles";
-
-        function App() {
-          return <div css={button} />;
-        }
-      `;
-      const fixturePath = await createBabelFixture(
-        ownerSource,
-        "css-prop-async-prepass-parse-failure"
-      );
-      const fixtureRoot = path.dirname(fixturePath);
-      const stylesId = path.join(fixtureRoot, "styles.ts");
-      const { provider, calls } = createFakeStaticCssEvalSourceProvider({
-        sources: {
-          [fixturePath]: ownerSource,
-          [stylesId]: `export const button = ;`
-        },
-        resolutions: {
-          [`${fixturePath}\0./styles`]: stylesId
-        }
-      });
-      const prepass = await createStaticCssEvalPrepass(fixturePath, provider);
-      const resolution = prepass.provider.getResolvedCssValue({
-        importerId: fixturePath,
-        expressionStart: 0,
-        expressionEnd: "button".length,
-        bindingName: "button"
-      });
-
-      expect(calls.resolved).toEqual([
-        { importerId: fixturePath, importPath: "./styles" }
-      ]);
-      expect(calls.loaded).toEqual([fixturePath, stylesId]);
-      expect(prepass.result.dependencyFiles).toEqual([stylesId]);
-      expect(prepass.result.resolvedModuleCache.has(fixturePath)).toBe(true);
-      expect(prepass.result.resolvedModuleCache.has(stylesId)).toBe(false);
-      expect(resolution.kind).toBe("error");
-
-      if (resolution.kind !== "error") {
-        throw new Error("Expected failed dependency resolution");
-      }
-
-      expect(resolution.dependencies).toEqual([stylesId]);
-      expect(resolution.diagnostic.code).toBe(
-        "failed-project-local-dependency"
-      );
-      expect(resolution.diagnostic.message).toContain(
-        `failed to load project-local dependency ${stylesId}`
-      );
     });
 
     it("preserves whole-expression reexport fallback but rejects reexports inside static css rules", async () => {

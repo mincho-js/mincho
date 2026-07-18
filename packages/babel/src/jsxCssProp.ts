@@ -453,7 +453,7 @@ function isResolutionDependency(
   return typeof dependency === "object" && dependency !== null;
 }
 
-function appendUniqueMetadataItems<T>(
+export function appendUniqueMetadataItems<T>(
   target: T[],
   items: readonly T[],
   createKey: (item: T) => string
@@ -472,7 +472,7 @@ function appendUniqueMetadataItems<T>(
   }
 }
 
-function appendUniqueResolvedModuleIds(
+export function appendUniqueResolvedModuleIds(
   metadata: MinchoStaticCssEvalMetadata,
   dependencies: readonly ResolutionDependency[],
   cacheKeys: readonly StaticCssEvalCacheKey[]
@@ -500,7 +500,7 @@ function isResolvedModuleDependency(dependency: ResolutionDependency): boolean {
   );
 }
 
-function createResolutionDependencyMetadataKey(
+export function createResolutionDependencyMetadataKey(
   dependency: ResolutionDependency
 ): string {
   return JSON.stringify([
@@ -515,7 +515,7 @@ function createResolutionDependencyMetadataKey(
   ]);
 }
 
-function createStaticCssEvalDiagnosticMetadataKey(
+export function createStaticCssEvalDiagnosticMetadataKey(
   diagnostic: StaticCssEvalDiagnostic
 ): string {
   return JSON.stringify([
@@ -534,7 +534,7 @@ function createStaticCssEvalDiagnosticMetadataKey(
   ]);
 }
 
-function createStaticCssEvalCacheKeyMetadataKey(
+export function createStaticCssEvalCacheKeyMetadataKey(
   cacheKey: StaticCssEvalCacheKey
 ): string {
   return JSON.stringify([

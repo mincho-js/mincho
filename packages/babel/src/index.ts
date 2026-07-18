@@ -40,6 +40,13 @@ export function minchoBabelPlugin(): PluginObj<PluginState> {
 }
 
 export { styledComponentPlugin as minchoStyledComponentPlugin } from "./styled.js";
+export {
+  appendUniqueMetadataItems as internalAppendUniqueStaticCssEvalMetadataItems,
+  appendUniqueResolvedModuleIds as internalAppendUniqueStaticCssEvalResolvedModuleIds,
+  createResolutionDependencyMetadataKey as internalCreateStaticCssEvalDependencyMetadataKey,
+  createStaticCssEvalCacheKeyMetadataKey as internalCreateStaticCssEvalCacheKeyMetadataKey,
+  createStaticCssEvalDiagnosticMetadataKey as internalCreateStaticCssEvalDiagnosticMetadataKey
+} from "./jsxCssProp.js";
 export { collectJsxCssPropStaticCssEvalCandidates as internalCollectJsxCssPropStaticCssEvalCandidates } from "./staticCssEval/candidates.js";
 export {
   createImportedStaticCssEvalModuleRecord as internalCreateImportedStaticCssEvalModuleRecord,

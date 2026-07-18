@@ -24,3 +24,19 @@ export {
   trimTrailingSlash,
   unsupportedStaticCssEvalResolutionPrefix
 } from "./staticCssEval.js";
+export {
+  internalCollectStaticCssEvalDependencyIds,
+  internalCreateStaticCssEvalSourceHash,
+  internalCreateStaticCssEvalSourceIdentity,
+  internalGetExistingStaticCssEvalRealpath,
+  internalGetExistingStaticCssEvalStat,
+  internalGetStaticCssEvalRealpathOrResolvedPath,
+  internalHasStaticCssEvalNodeModulesSegment,
+  internalIsProjectLocalStaticCssEvalImportPath,
+  internalIsStaticCssEvalPathInsideRoot,
+  internalIsVirtualStaticCssEvalId,
+  internalNormalizeStaticCssEvalPathSyntax,
+  normalizeStaticCssEvalFileId as internalNormalizeStaticCssEvalFileId,
+  type InternalStaticCssEvalMetadataLike,
+  type InternalStaticCssEvalSourceIdentity
+} from "./staticCssEvalUtils.js";
