@@ -689,6 +689,8 @@ if (import.meta.vitest) {
   function getDefineRulesPresetSerializationManifestUrl(): string {
     return new URL(
       "../../integration/src/__fixtures__/defineRules-preset-serialization/manifest.ts",
+      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+      // @ts-ignore error TS1343: The 'import.meta' meta-property is only allowed when the '--module' option is 'es2020', 'es2022', 'esnext', 'system', 'node16', or 'nodenext'.
       import.meta.url
     ).href;
   }
@@ -1573,6 +1575,8 @@ if (import.meta.vitest) {
   async function spyOnSourceBabelTransform() {
     const sourceIntegrationUrl = new URL(
       "../../integration/src/babel" + ".ts",
+      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+      // @ts-ignore error TS1343: The 'import.meta' meta-property is only allowed when the '--module' option is 'es2020', 'es2022', 'esnext', 'system', 'node16', or 'nodenext'.
       import.meta.url
     ).href;
     const sourceIntegrationModule = (await import(

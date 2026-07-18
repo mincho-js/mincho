@@ -1,0 +1,18 @@
+{
+  "extends": ["//"],
+  "tasks": {
+    "build": {
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "mdx-components.tsx",
+        "next.config.mjs",
+        "package.json",
+        "src/**/*.mdx",
+        "src/**/*.ts",
+        "src/**/*.tsx",
+        "tsconfig.json"
+      ],
+      "outputs": [".next/**", "!.next/cache/**", "!.next/dev/**", "out/**"]
+    }
+  }
+}

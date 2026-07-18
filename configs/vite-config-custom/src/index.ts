@@ -51,7 +51,11 @@ function NodeBuilder(viteConfigEnv: ConfigEnv) {
 
   const runtimeEnv = getRuntimeEnv();
   if (ViteEnv.isProd()) {
-    if (runtimeEnv === "LOCAL" || runtimeEnv === "PUBLISH") {
+    if (
+      runtimeEnv === "LOCAL" ||
+      runtimeEnv === "PUBLISH" ||
+      runtimeEnv === "ACTIONS"
+    ) {
       plugins.add(
         // This is currently a proprietary implementation. You might also like to see
         // https://github.com/qmhc/vite-plugin-dts/issues/267
@@ -61,22 +65,20 @@ function NodeBuilder(viteConfigEnv: ConfigEnv) {
         })
       );
     }
-    if (runtimeEnv === "PUBLISH") {
-      plugins.add(
-        dtsForCjs({
-          include: ["src"],
-          tsconfigPath: resolve(packageRoot, "tsconfig.lib.json"),
-          compilerOptions: {
-            tsBuildInfoFile: resolve(
-              packageRoot,
-              ".cache",
-              "typescript",
-              "tsbuildinfo-cjs"
-            )
-          }
-        })
-      );
-    }
+    plugins.add(
+      dtsForCjs({
+        include: ["src"],
+        tsconfigPath: resolve(packageRoot, "tsconfig.lib.json"),
+        compilerOptions: {
+          tsBuildInfoFile: resolve(
+            packageRoot,
+            ".cache",
+            "typescript",
+            "tsbuildinfo-cjs"
+          )
+        }
+      })
+    );
     plugins.add(externalizeDeps());
   }
 

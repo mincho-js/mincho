@@ -226,7 +226,13 @@ function trimStaticCssEvalTrailingSlash(filePath: string): string {
   return filePath.length > 1 ? filePath.replace(/\/+$/g, "") : filePath;
 }
 
+// == Tests ====================================================================
+// Ignore errors when compiling to CommonJS.
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore error TS1343: The 'import.meta' meta-property is only allowed when the '--module' option is 'es2020', 'es2022', 'esnext', 'system', 'node16', or 'nodenext'.
 if (import.meta.vitest) {
+  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+  // @ts-ignore error TS1343: The 'import.meta' meta-property is only allowed when the '--module' option is 'es2020', 'es2022', 'esnext', 'system', 'node16', or 'nodenext'.
   const { describe, expect, it } = import.meta.vitest;
 
   const owner = { file: "/project/src/App.tsx", start: 11, end: 18 };

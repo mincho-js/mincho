@@ -363,8 +363,9 @@ function formatConfigPathSegment(key: string): string {
 if (import.meta.vitest) {
   // eslint-disable-next-line @typescript-eslint/ban-ts-comment
   // @ts-ignore error TS1343: The 'import.meta' meta-property is only allowed when the '--module' option is 'es2020', 'es2022', 'esnext', 'system', 'node16', or 'nodenext'.
+  const vitest = import.meta.vitest;
   const { describe, it, expect, afterEach, assertType, expectTypeOf, vi } =
-    import.meta.vitest;
+    vitest;
 
   const debugId = "myCSS";
   setFileScope("test");
