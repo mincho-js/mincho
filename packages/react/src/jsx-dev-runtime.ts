@@ -1,12 +1,13 @@
 import type { ElementType, Key, ReactElement } from "react";
 import type { JSXSource } from "react/jsx-dev-runtime";
 import { Fragment, jsxDEV as reactJsxDEV } from "react/jsx-dev-runtime";
+import {
+  missedTransformErrorMessage,
+  throwForOwnCssProp
+} from "./jsxCssPropRuntimeGuard.js";
 
 export { Fragment };
 export type { JSX } from "./jsx-namespace.js";
-
-const missedTransformErrorMessage =
-  "Mincho JSX css prop was not compiled. Enable the Mincho transform with jsxCssProp: true and ensure it runs before React JSX transform.";
 
 export function jsxDEV(
   type: ElementType,
@@ -16,19 +17,9 @@ export function jsxDEV(
   source?: JSXSource,
   self?: unknown
 ): ReactElement {
-  if (hasOwnCssProp(props)) {
-    throw new Error(missedTransformErrorMessage);
-  }
+  throwForOwnCssProp(props);
 
   return reactJsxDEV(type, props, key, isStatic, source, self);
-}
-
-function hasOwnCssProp(props: unknown): boolean {
-  return (
-    typeof props === "object" &&
-    props !== null &&
-    Object.prototype.hasOwnProperty.call(props, "css")
-  );
 }
 
 if (import.meta.vitest) {

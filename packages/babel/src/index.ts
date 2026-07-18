@@ -3154,58 +3154,39 @@ if (import.meta.vitest) {
       expect(code).toMatchSnapshot();
     });
 
-    // it("react styled components get converted to recipe", () => {
-    //   const { result, code } = babelTransform(`
-    //   import { styled } from '@macaron-css/react';
+    it("react styled components get converted to runtime", () => {
+      const { result, code } = babelTransform(`
+      import { styled } from '@mincho-js/react';
 
-    //   const Button = styled("button", {
-    //     base: { color: 'red' }
-    //   })
-    //   console.log(Button)
-    // `);
+      const Button = styled("button", {
+        base: { color: 'red' }
+      })
+      const Link = styled.a({
+        base: { color: 'blue' }
+      })
+      console.log(Button, Link)
+    `);
 
-    //   expect(result).toMatchSnapshot();
-    //   expect(code).toMatchSnapshot();
-    // });
+      expect(result).toMatchSnapshot();
+      expect(code).toMatchSnapshot();
+    });
 
-    // it("solid styled components get converted to recipe", () => {
-    //   const { result, code } = babelTransform(`
-    //   import { styled } from '@macaron-css/solid';
+    it("non-Mincho styled calls are ignored", () => {
+      const { result, code } = babelTransform(`
+      import { styled } from '@emotion/styled';
 
-    //   const Button = styled("button", {
-    //     base: { color: 'red' }
-    //   })
-    //   console.log(Button)
-    // `);
+      const Button = styled("button", {
+        color: 'red'
+      })
+      const Link = styled.a({
+        color: 'blue'
+      })
+      console.log(Button, Link)
+    `);
 
-    //   expect(result).toMatchSnapshot();
-    //   expect(code).toMatchSnapshot();
-    // });
-
-    // it("leading comments of `styled` get passed to recipe", () => {
-    //   const { result, code } = babelTransform(`
-    //   import { styled } from '@macaron-css/solid';
-    //   import {macaron$} from '@mincho-js/css';
-
-    //   const fn = () => {
-    //     const arr = [1,2]
-    //     for (const _ of arr) {
-    //       const Button = /* macaron-ignore */ styled("button", {
-    //         base: { color: _ }
-    //       })
-    //     }
-    //     return Button;
-    //   }
-    //   const test = macaron$(() => {
-    //     console.log(fn())
-    //     return "test"
-    //   })
-    //   console.log(test)
-    // `);
-
-    //   expect(result).toMatchSnapshot();
-    //   expect(code).toMatchSnapshot();
-    // });
+      expect(result).toMatchSnapshot();
+      expect(code).toMatchSnapshot();
+    });
 
     it("mincho-ignore on parent node", () => {
       const { result, code } = babelTransform(`

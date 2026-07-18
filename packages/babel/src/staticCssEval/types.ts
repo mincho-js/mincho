@@ -425,7 +425,8 @@ export const STATIC_CSS_EVAL_SUPPORT_MATRIX = [
   },
   {
     construct: 'Direct named re-export (`export { x } from "./x"`)',
-    behavior: "Supported for project-local ESM source with dependency chain metadata",
+    behavior:
+      "Supported for project-local ESM source with dependency chain metadata",
     status: "supported"
   },
   {

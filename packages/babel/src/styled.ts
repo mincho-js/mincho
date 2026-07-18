@@ -3,6 +3,14 @@ import type { NodePath, PluginObj } from "@babel/core";
 import type { PluginState, ProgramScope } from "./types.js";
 import { registerImportMethod } from "./utils.js";
 
+const runtimeImport = "@mincho-js/react/runtime";
+
+type NormalizedStyledCall = {
+  tag: t.Expression;
+  styles: t.Expression;
+  rest: Array<t.Expression | t.SpreadElement>;
+};
+
 /**
  * The plugin for transforming styled components
  *
@@ -32,10 +40,6 @@ export function styledComponentPlugin(): PluginObj<PluginState> {
                 return;
               }
 
-              const { tag, styles, rest } = normalizedArguments;
-
-              const runtimeImport = "@mincho-js/react/runtime";
-
               const styledIdentifier = registerImportMethod(
                 callPath,
                 "$$styled",
@@ -48,36 +52,12 @@ export function styledComponentPlugin(): PluginObj<PluginState> {
                 "@mincho-js/css"
               );
 
-              // Create the recipe call expression
-              const recipeCallExpression = t.callExpression(recipeIdentifier, [
-                t.cloneNode(styles)
-              ]);
-
-              // Preserve existing comments if any
-              if (callPath.node.leadingComments?.length) {
-                t.addComments(
-                  recipeCallExpression,
-                  "leading",
-                  callPath.node.leadingComments
-                );
-              }
-
-              // Preserve source locations for better source maps
-              recipeCallExpression.loc = styles.loc;
-
-              const callExpression = t.callExpression(styledIdentifier, [
-                t.cloneNode(tag),
-                recipeCallExpression,
-                ...rest.map((argument) => t.cloneNode(argument))
-              ]);
-
-              // Add @__PURE__ annotation for tree-shaking
-              t.addComments(callExpression, "leading", [
-                { type: "CommentBlock", value: " @__PURE__ " }
-              ]);
-
-              // Preserve source locations
-              callExpression.loc = callPath.node.loc;
+              const callExpression = createStyledRuntimeCall(
+                normalizedArguments,
+                styledIdentifier,
+                recipeIdentifier,
+                callPath.node
+              );
 
               callPath.replaceWith(callExpression);
 
@@ -91,21 +71,66 @@ export function styledComponentPlugin(): PluginObj<PluginState> {
   };
 }
 
-function normalizeStyledCall(callPath: NodePath<t.CallExpression>): {
-  tag: t.Expression;
-  styles: t.Expression;
-  rest: Array<t.Expression | t.SpreadElement>;
-} | null {
+function createStyledRuntimeCall(
+  normalizedCall: NormalizedStyledCall,
+  styledIdentifier: t.Expression,
+  recipeIdentifier: t.Expression,
+  originalCall: t.CallExpression
+): t.CallExpression {
+  const { tag, styles, rest } = normalizedCall;
+  const recipeCallExpression = createRecipeCallExpression(
+    styles,
+    recipeIdentifier,
+    originalCall
+  );
+  const callExpression = t.callExpression(styledIdentifier, [
+    t.cloneNode(tag),
+    recipeCallExpression,
+    ...cloneStyledRestArguments(rest)
+  ]);
+
+  t.addComments(callExpression, "leading", [
+    { type: "CommentBlock", value: " @__PURE__ " }
+  ]);
+
+  callExpression.loc = originalCall.loc;
+
+  return callExpression;
+}
+
+function createRecipeCallExpression(
+  styles: t.Expression,
+  recipeIdentifier: t.Expression,
+  originalCall: t.CallExpression
+): t.CallExpression {
+  const recipeCallExpression = t.callExpression(recipeIdentifier, [
+    t.cloneNode(styles)
+  ]);
+
+  if (originalCall.leadingComments?.length) {
+    t.addComments(
+      recipeCallExpression,
+      "leading",
+      originalCall.leadingComments
+    );
+  }
+
+  recipeCallExpression.loc = styles.loc;
+
+  return recipeCallExpression;
+}
+
+function cloneStyledRestArguments(
+  rest: NormalizedStyledCall["rest"]
+): NormalizedStyledCall["rest"] {
+  return rest.map((argument) => t.cloneNode(argument));
+}
+
+function normalizeStyledCall(
+  callPath: NodePath<t.CallExpression>
+): NormalizedStyledCall | null {
   const callee = callPath.get("callee");
   const args = callPath.node.arguments;
-
-  const toValidRestArguments = (
-    input: typeof args
-  ): Array<t.Expression | t.SpreadElement> =>
-    input.filter(
-      (arg): arg is t.Expression | t.SpreadElement =>
-        t.isExpression(arg) || t.isSpreadElement(arg)
-    );
 
   if (callee.isIdentifier()) {
     if (!callee.referencesImport("@mincho-js/react", "styled")) {
@@ -167,4 +192,13 @@ function normalizeStyledCall(callPath: NodePath<t.CallExpression>): {
     styles,
     rest: toValidRestArguments(restArgs)
   };
+}
+
+function toValidRestArguments(
+  input: t.CallExpression["arguments"]
+): Array<t.Expression | t.SpreadElement> {
+  return input.filter(
+    (arg): arg is t.Expression | t.SpreadElement =>
+      t.isExpression(arg) || t.isSpreadElement(arg)
+  );
 }

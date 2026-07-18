@@ -1005,6 +1005,52 @@ const red = _$mincho$$red2;
 console.log(red);"
 `;
 
+exports[`minchoBabelPlugin > non-Mincho styled calls are ignored 1`] = `
+[
+  "extracted_17gu07x.css.ts",
+  "",
+]
+`;
+
+exports[`minchoBabelPlugin > non-Mincho styled calls are ignored 2`] = `
+"import { styled } from '@emotion/styled';
+const Button = styled("button", {
+  color: 'red'
+});
+const Link = styled.a({
+  color: 'blue'
+});
+console.log(Button, Link);"
+`;
+
+exports[`minchoBabelPlugin > react styled components get converted to runtime 1`] = `
+[
+  "extracted_1q59b9y.css.ts",
+  "import { rules as _rules } from "@mincho-js/css";
+export var _$mincho$$Button = _rules({
+  base: {
+    color: 'red'
+  }
+});
+var _$mincho$$Button2 = _$mincho$$Button;
+export var _$mincho$$Link = _rules({
+  base: {
+    color: 'blue'
+  }
+});
+var _$mincho$$Link2 = _$mincho$$Link;",
+]
+`;
+
+exports[`minchoBabelPlugin > react styled components get converted to runtime 2`] = `
+"import { _$mincho$$Button as _$mincho$$Button2, _$mincho$$Link as _$mincho$$Link2 } from "extracted_1q59b9y.css.ts";
+import { rules as _rules } from "@mincho-js/css";
+import { $$styled as _$$styled } from "@mincho-js/react/runtime";
+const Button = /* @__PURE__ */_$$styled("button", _$mincho$$Button2);
+const Link = /* @__PURE__ */_$$styled("a", _$mincho$$Link2);
+console.log(Button, Link);"
+`;
+
 exports[`minchoBabelPlugin > same binding in multiple declarations 1`] = `
 [
   "extracted_141089g.css.ts",
