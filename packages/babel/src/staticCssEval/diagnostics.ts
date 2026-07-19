@@ -3,7 +3,9 @@ import type {
   StaticCssEvalDiagnosticCode,
   StaticCssEvalDiagnosticId,
   StaticCssEvalExportName,
+  StaticCssEvalSourceKind,
   StaticCssEvalSourceLocation,
+  StaticCssEvalSourceOrigin,
   StaticCssEvalUnsupportedReason
 } from "./types.js";
 
@@ -42,6 +44,17 @@ export interface StaticCssEvalImportCycleGuardOptions extends StaticCssEvalDiagn
 export interface StaticCssEvalResolutionDepthGuardOptions extends StaticCssEvalDiagnosticContext {
   resolutionDepth: number;
   maxResolutionDepth?: number;
+}
+
+export interface StaticCssEvalProviderSourceUnsupportedOptions extends StaticCssEvalDiagnosticContext {
+  sourceId: string;
+  sourceKind: StaticCssEvalSourceKind;
+  sourceOrigin: StaticCssEvalSourceOrigin;
+  reason: StaticCssEvalUnsupportedReason;
+}
+
+export interface StaticCssEvalPartialNamespaceFailureOptions extends StaticCssEvalDiagnosticContext {
+  failedReason: StaticCssEvalUnsupportedReason;
 }
 
 export type StaticCssEvalGuardResult =
@@ -176,19 +189,36 @@ export function createStaticCssEvalComputedMemberUnsupportedDiagnostic(
   });
 }
 
-export function createStaticCssEvalPackageImportUnsupportedDiagnostic(
-  context: StaticCssEvalDiagnosticContext,
-  importPath: string
+export function createStaticCssEvalProviderSourceUnsupportedDiagnostic(
+  options: StaticCssEvalProviderSourceUnsupportedOptions
 ): StaticCssEvalDiagnostic {
   return createStaticCssEvalDiagnostic({
-    id: "STATIC_CSS_EVAL_PACKAGE_IMPORT_UNSUPPORTED",
+    id: "STATIC_CSS_EVAL_PROVIDER_SOURCE_UNSUPPORTED",
     code: "unsupported-source",
-    reason: "node-modules-import",
-    detail: `package import "${importPath}" is unsupported`,
+    reason: options.reason,
+    detail: formatStaticCssEvalProviderSourceUnsupportedDetail(options),
+    owner: options.owner,
+    dependency: options.dependency,
+    importPath: options.importPath,
+    exportName: options.exportName,
+    memberPath: options.memberPath,
+    importChain: options.importChain
+  });
+}
+
+export function createStaticCssEvalAmbiguousExportStarDiagnostic(
+  context: StaticCssEvalDiagnosticContext,
+  exportName: StaticCssEvalExportName
+): StaticCssEvalDiagnostic {
+  return createStaticCssEvalDiagnostic({
+    id: "STATIC_CSS_EVAL_EXPORT_STAR_AMBIGUOUS",
+    code: "unsupported-source",
+    reason: "ambiguous-star",
+    detail: `export "${exportName ?? "<local>"}" is ambiguous across export-star sources`,
     owner: context.owner,
     dependency: context.dependency,
-    importPath,
-    exportName: context.exportName,
+    importPath: context.importPath,
+    exportName,
     memberPath: context.memberPath,
     importChain: context.importChain
   });
@@ -229,21 +259,38 @@ export function createStaticCssEvalExportStarUnsupportedDiagnostic(
   });
 }
 
-export function createStaticCssEvalNamespaceImportUnsupportedDiagnostic(
+export function createStaticCssEvalNamespaceReexportUnsupportedDiagnostic(
   context: StaticCssEvalDiagnosticContext,
   importPath: string
 ): StaticCssEvalDiagnostic {
   return createStaticCssEvalDiagnostic({
-    id: "STATIC_CSS_EVAL_NAMESPACE_UNSUPPORTED",
+    id: "STATIC_CSS_EVAL_NAMESPACE_REEXPORT_UNSUPPORTED",
     code: "unsupported-source",
-    reason: "namespace-import",
-    detail: `namespace import "${importPath}" is unsupported`,
+    reason: "unsupported-namespace-reexport",
+    detail: `namespace re-export from "${importPath}" is unsupported`,
     owner: context.owner,
     dependency: context.dependency,
     importPath,
     exportName: context.exportName,
     memberPath: context.memberPath,
     importChain: context.importChain
+  });
+}
+
+export function createStaticCssEvalPartialNamespaceFailureDiagnostic(
+  options: StaticCssEvalPartialNamespaceFailureOptions
+): StaticCssEvalDiagnostic {
+  return createStaticCssEvalDiagnostic({
+    id: "STATIC_CSS_EVAL_NAMESPACE_PARTIAL_UNSUPPORTED",
+    code: "unsupported-source",
+    reason: "partial-namespace-failure",
+    detail: `namespace import cannot be partially evaluated because export "${options.exportName ?? "<local>"}" failed with reason "${options.failedReason}"`,
+    owner: options.owner,
+    dependency: options.dependency,
+    importPath: options.importPath,
+    exportName: options.exportName,
+    memberPath: options.memberPath,
+    importChain: options.importChain
   });
 }
 
@@ -420,6 +467,35 @@ export function formatStaticCssEvalDiagnosticMessage(detail: string): string {
   return `${STATIC_CSS_EVAL_DIAGNOSTIC_MESSAGE_PREFIX}: ${detail}`;
 }
 
+function formatStaticCssEvalProviderSourceUnsupportedDetail(
+  options: StaticCssEvalProviderSourceUnsupportedOptions
+): string {
+  switch (options.reason) {
+    case "external-no-source":
+      return `external module "${options.sourceId}" has no provider source`;
+    case "provider-virtual-no-source":
+      return `provider virtual module "${options.sourceId}" has no source from the bundler provider`;
+    case "dynamic-import":
+      return `dynamic import graph "${options.sourceId}" is unsupported`;
+    case "runtime-wasm-init":
+      return `runtime wasm init output "${options.sourceId}" is unsupported`;
+    case "runtime-wasm-module":
+      return `runtime wasm module output "${options.sourceId}" is unsupported`;
+    case "runtime-wasm-init-or-function":
+      return `runtime wasm init/function output "${options.sourceId}" is unsupported`;
+    case "invalid-json-data":
+      return `JSON data source "${options.sourceId}" is not valid JSON`;
+    case "source-size-limit-exceeded":
+      return `source "${options.sourceId}" exceeds the static css eval source size limit`;
+    case "non-literal-loader-output":
+      return `loader output "${options.sourceId}" is not a static literal`;
+    case "unresolved":
+      return `module "${options.sourceId}" could not be resolved by the provider`;
+    default:
+      return `provider source kind "${options.sourceKind}" from origin "${options.sourceOrigin}" is unsupported`;
+  }
+}
+
 export function getStaticCssEvalDiagnosticDependencies(
   diagnostic: StaticCssEvalDiagnostic
 ): string[] {
@@ -570,18 +646,26 @@ if (import.meta.vitest) {
       });
 
       expect(
-        createStaticCssEvalPackageImportUnsupportedDiagnostic(
-          { owner },
-          "pkg/styles"
-        )
+        createStaticCssEvalProviderSourceUnsupportedDiagnostic({
+          owner,
+          dependency: { file: "external:pkg/styles" },
+          importPath: "pkg/styles",
+          exportName: "button",
+          sourceId: "external:pkg/styles",
+          sourceKind: "external-no-source",
+          sourceOrigin: "external",
+          reason: "external-no-source"
+        })
       ).toEqual({
-        id: "STATIC_CSS_EVAL_PACKAGE_IMPORT_UNSUPPORTED",
+        id: "STATIC_CSS_EVAL_PROVIDER_SOURCE_UNSUPPORTED",
         code: "unsupported-source",
         message:
-          'Cannot statically evaluate css prop value: package import "pkg/styles" is unsupported',
-        reason: "node-modules-import",
+          'Cannot statically evaluate css prop value: external module "external:pkg/styles" has no provider source',
+        reason: "external-no-source",
         owner,
-        importPath: "pkg/styles"
+        dependency: { file: "external:pkg/styles" },
+        importPath: "pkg/styles",
+        exportName: "button"
       });
 
       expect(createStaticCssEvalCjsUnsupportedDiagnostic({ owner })).toEqual({
@@ -610,18 +694,55 @@ if (import.meta.vitest) {
       });
 
       expect(
-        createStaticCssEvalNamespaceImportUnsupportedDiagnostic(
+        createStaticCssEvalNamespaceReexportUnsupportedDiagnostic(
           { owner },
           "./styles"
         )
       ).toEqual({
-        id: "STATIC_CSS_EVAL_NAMESPACE_UNSUPPORTED",
+        id: "STATIC_CSS_EVAL_NAMESPACE_REEXPORT_UNSUPPORTED",
         code: "unsupported-source",
         message:
-          'Cannot statically evaluate css prop value: namespace import "./styles" is unsupported',
-        reason: "namespace-import",
+          'Cannot statically evaluate css prop value: namespace re-export from "./styles" is unsupported',
+        reason: "unsupported-namespace-reexport",
         owner,
         importPath: "./styles"
+      });
+
+      expect(
+        createStaticCssEvalPartialNamespaceFailureDiagnostic({
+          owner,
+          dependency,
+          importPath: "./styles",
+          exportName: "dynamic",
+          failedReason: "function-or-call"
+        })
+      ).toEqual({
+        id: "STATIC_CSS_EVAL_NAMESPACE_PARTIAL_UNSUPPORTED",
+        code: "unsupported-source",
+        message:
+          'Cannot statically evaluate css prop value: namespace import cannot be partially evaluated because export "dynamic" failed with reason "function-or-call"',
+        reason: "partial-namespace-failure",
+        owner,
+        dependency,
+        importPath: "./styles",
+        exportName: "dynamic"
+      });
+
+      expect(
+        createStaticCssEvalAmbiguousExportStarDiagnostic(
+          { owner, dependency, importPath: "./barrel" },
+          "button"
+        )
+      ).toEqual({
+        id: "STATIC_CSS_EVAL_EXPORT_STAR_AMBIGUOUS",
+        code: "unsupported-source",
+        message:
+          'Cannot statically evaluate css prop value: export "button" is ambiguous across export-star sources',
+        reason: "ambiguous-star",
+        owner,
+        dependency,
+        importPath: "./barrel",
+        exportName: "button"
       });
 
       expect(

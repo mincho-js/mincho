@@ -406,7 +406,7 @@ function MyComponent() {
 }
 ```
 
-V1 static evaluation supports direct object/array values, mutation-free same-file `const` object/array values, project local ESM named imports, aliased named imports, default imports/exports, selected namespace members such as `styles.button`, whole namespace objects such as `css={styles}`, direct named reexports, and `export *` barrels:
+Static evaluation supports direct object/array values, mutation-free same-file `const` object/array values, and provider-backed ESM sources. Supported sources include project files, package files such as `@pkg/styles`, package barrels, static data modules, and provider-backed virtual modules when the bundler supplies deterministic source text or a literal payload. Named imports, aliased named imports, default imports/exports, selected namespace members such as `styles.button`, whole namespace objects such as `css={styles}`, direct named reexports, and `export *` barrels use the same ESM rules across all supported source kinds:
 
 ```tsx
 const button = { color: 'blue' } as const;
@@ -449,7 +449,7 @@ import * as styles from './styles';
 <div css={styles} />
 ```
 
-Project local reexport chains are static too. Direct named reexports and star barrels can expose values for named imports and namespace members:
+Provider-backed reexport chains are static too. Direct named reexports and star barrels can expose values for named imports and namespace members from project files or package barrels:
 
 ```tsx
 // primitives.ts
@@ -466,6 +466,27 @@ import * as styles from './styles';
 
 <div css={primaryButton} />
 <div css={styles.button} />
+```
+
+Package, data, and virtual sources are supported only through the source provider. Mincho does not resolve package exports on its own; Vite, esbuild, or another integration must provide the source/literal payload and stable identity metadata:
+
+```tsx
+// App.tsx
+import pkgStyles, { card as packageCard } from '@pkg/styles';
+import { button as packageButton } from '@pkg/styles/barrel';
+import tokens, { brandColor } from '@pkg/styles/tokens.json';
+import rawColor from '@pkg/styles/color.txt?raw';
+import wasmUrl from '@pkg/styles/icon.wasm?url';
+import virtualStyles from 'virtual:mincho-styles';
+
+<div css={packageCard} />
+<div css={pkgStyles.root} />
+<div css={packageButton} />
+<div css={tokens.card} />
+<div css={{ color: brandColor }} />
+<div css={{ color: rawColor }} />
+<div css={{ backgroundImage: wasmUrl }} />
+<div css={virtualStyles.button} />
 ```
 
 `export *` follows ESM semantics and does not forward `default`. Use an explicit default reexport when a barrel should expose a default value:
@@ -487,9 +508,9 @@ import rootDefault, { root } from './styles';
 
 The practical literal grammar is small: string, number, boolean, `null`, unary numeric values, no-expression template literals such as `` `grid` ``, and nested object/array literals.
 
-Bundlers provide source resolution and loading only. Vite and esbuild give Mincho project local source text and dependency edges through the source provider, then Mincho parses that source, reads AST export manifests, and statically evaluates only the supported literal subset. No module execution is used. Mincho never executes user modules to obtain `css` prop values, and it does not use Node, VM, `eval`, `require()`, dynamic import, or bundler runtime execution for static evaluation.
+Bundlers provide source resolution and loading only. Vite and esbuild give Mincho provider-backed project/package/data/virtual source text, literal payloads, identity metadata, and dependency edges through the source provider. Mincho then parses source, reads AST export manifests, and statically evaluates only the supported literal subset. No module execution is used. Mincho never executes user modules to obtain `css` prop values, and it does not use Node, VM, `eval`, `require()`, dynamic import, or bundler runtime execution for static evaluation.
 
-V1 is project local only. It still excludes package exports from `node_modules`, outside root imports, virtual modules, CommonJS, namespace reexports such as `export * as ns from './styles'`, calls/functions/mixins as CSS-rule values, object/array spreads, computed dynamic keys, optional chaining, template expressions, runtime dynamic values, SWC native integration, and webpack integration.
+First-iteration exclusions are explicit: remote/http modules, CommonJS and `require()`, runtime wasm init/function exports such as `.wasm?init`, arbitrary virtual modules without provider-supplied source, dynamic import graphs, non-literal loader output, namespace reexports such as `export * as ns from './styles'`, calls/functions/mixins as CSS-rule values, object/array spreads, computed dynamic keys, optional chaining, template expressions, runtime dynamic values, SWC native integration, and webpack integration remain unsupported. Static wasm support is limited to provider-supplied raw/url string forms that arrive as literals; runtime wasm initialization is not evaluated.
 
 Existing dynamic class-value identifiers keep class-value behavior when they cannot be proven static. Proven CSS-rule candidates with unsupported internals fail with `Cannot statically evaluate css prop value` diagnostics.
 
@@ -499,14 +520,16 @@ const badIdentifierValue = { color };
 const badSpread = { ...base, color: 'red' };
 const styles = { button: { color: 'red' } } as const;
 const variant = 'button';
+const dynamicModule = import('./styles');
 
 <div css={badIdentifierValue} />
 <div css={badSpread} />
 <div css={styles[variant]} />
 <div css={styles?.button} />
+<div css={dynamicModule} />
 ```
 
-These examples fail because V1 does not evaluate identifier object values, object spreads, dynamic member paths, or optional member paths inside static CSS-rule candidates.
+These examples fail because static evaluation does not evaluate identifier object values, object spreads, dynamic member paths, optional member paths, or dynamic import graphs inside static CSS-rule candidates.
 
 Ambiguous star barrels fail instead of picking a value:
 

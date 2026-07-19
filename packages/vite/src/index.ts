@@ -2,8 +2,6 @@ import {
   type BabelOptions,
   babelTransform,
   compile,
-  createUnsupportedStaticCssEvalResolution as createSharedUnsupportedStaticCssEvalResolution,
-  isUnsupportedStaticCssEvalResolutionId as sharedIsUnsupportedStaticCssEvalResolutionId,
   internalCollectStaticCssEvalDependencyIds as collectStaticCssEvalDependencyIds,
   internalCreateStaticCssEvalSourceHash as createStaticCssEvalSourceHash,
   internalCreateStaticCssEvalSourceIdentity as createStaticCssEvalSourceIdentity,
@@ -11,16 +9,21 @@ import {
   internalGetExistingStaticCssEvalStat as getExistingStat,
   internalGetStaticCssEvalRealpathOrResolvedPath as getRealpathOrResolvedPath,
   internalHasStaticCssEvalNodeModulesSegment as hasNodeModulesSegment,
+  internalIsMissingStaticCssEvalFileSystemEntryError as isMissingFileSystemEntryError,
   internalIsProjectLocalStaticCssEvalImportPath as isProjectLocalImportPath,
+  internalIsStaticCssEvalStaticDataFile as isStaticCssEvalStaticDataFile,
   internalIsStaticCssEvalPathInsideRoot as isPathInsideRoot,
   internalIsVirtualStaticCssEvalId as isVirtualStaticCssEvalId,
   internalNormalizeStaticCssEvalFileId as normalizeStaticCssEvalFileId,
+  internalPrepareStaticCssEvalStaticDataSource as prepareStaticCssEvalStaticDataSource,
+  internalStaticCssEvalExternalResolutionPrefix as externalStaticCssEvalResolutionPrefix,
   processDefineRulesPresetRegistryFile,
   runDefineRulesPresetRegistryStep
 } from "@mincho-js/integration";
 import { normalizePath } from "@rollup/pluginutils";
 import { dirname, join, resolve } from "node:path";
 import * as fs from "node:fs";
+import { fileURLToPath } from "node:url";
 
 interface Module {
   lastHMRTimestamp?: number;
@@ -34,6 +37,10 @@ interface ViteDevServer {
     getModulesByFile?: (file: string) => Set<Module> | undefined;
     invalidateModule: (module: Module) => void;
   };
+  transformRequest?: (
+    url: string,
+    options?: { ssr?: boolean }
+  ) => Promise<{ code?: string } | null>;
 }
 
 interface ResolvedConfig {
@@ -47,6 +54,9 @@ interface ResolvedConfig {
 
 interface PluginContext {
   addWatchFile: (id: string) => void;
+  load?: (options: {
+    id: string;
+  }) => Promise<{ code?: string } | null> | { code?: string } | null;
   resolve?: (
     source: string,
     importer?: string,
@@ -111,11 +121,15 @@ interface StaticCssEvalSourceResolution {
   sourceHash?: string;
   version?: string | number;
   sourceIdentity?: StaticCssEvalSourceIdentity;
+  sourceKind?: StaticCssEvalSourceKind;
+  sourceOrigin?: StaticCssEvalSourceOrigin;
+  unsupportedReason?: StaticCssEvalSourceUnsupportedReason;
+  watchFiles?: readonly string[];
   resolverKind?: StaticCssEvalResolverKind;
 }
 
 interface StaticCssEvalLoadedSource {
-  source: string;
+  source?: string;
   sourceText?: string;
   resolvedFile?: string;
   canonicalModuleId?: string;
@@ -124,6 +138,10 @@ interface StaticCssEvalLoadedSource {
   sourceHash?: string;
   version?: string | number;
   sourceIdentity?: StaticCssEvalSourceIdentity;
+  sourceKind?: StaticCssEvalSourceKind;
+  sourceOrigin?: StaticCssEvalSourceOrigin;
+  unsupportedReason?: StaticCssEvalSourceUnsupportedReason;
+  watchFiles?: readonly string[];
   resolverKind?: StaticCssEvalResolverKind;
 }
 
@@ -139,6 +157,29 @@ type StaticCssEvalResolverKind =
   | "esbuild"
   | "test"
   | (string & {});
+
+type StaticCssEvalSourceKind =
+  | "project-source"
+  | "package-source"
+  | "provider-virtual"
+  | "static-data"
+  | "external-no-source"
+  | "unresolved"
+  | "unsupported-source-shape";
+
+type StaticCssEvalSourceOrigin =
+  | "project"
+  | "package"
+  | "provider"
+  | "data"
+  | "external"
+  | "unresolved"
+  | "unsupported";
+
+type StaticCssEvalSourceUnsupportedReason =
+  | "external-no-source"
+  | "unresolved"
+  | "unsupported-source-shape";
 
 interface StaticCssEvalSourceProvider {
   resolve(
@@ -182,12 +223,20 @@ interface StaticCssEvalMetadata {
 interface StaticCssEvalResolutionDependency {
   file: string;
   kind?: string;
+  sourceKind?: StaticCssEvalSourceKind;
+  sourceOrigin?: StaticCssEvalSourceOrigin;
+  unsupportedReason?: StaticCssEvalSourceUnsupportedReason;
+  watchFiles?: readonly string[];
 }
 
 interface StaticCssEvalResolvedDependency {
   resolvedFile: string;
   canonicalModuleId?: string;
   normalizedPathKey?: string;
+  sourceKind?: StaticCssEvalSourceKind;
+  sourceOrigin?: StaticCssEvalSourceOrigin;
+  unsupportedReason?: StaticCssEvalSourceUnsupportedReason;
+  watchFiles?: readonly string[];
 }
 
 interface StaticCssEvalDiagnostic {
@@ -201,6 +250,13 @@ interface StaticCssEvalCacheKey {
   importerFile?: string;
   resolvedFile?: string;
   resolvedId?: string;
+  canonicalModuleId?: string;
+  normalizedPathKey?: string;
+  sourceKind?: StaticCssEvalSourceKind;
+  sourceOrigin?: StaticCssEvalSourceOrigin;
+  unsupportedReason?: StaticCssEvalSourceUnsupportedReason;
+  watchFiles?: readonly string[];
+  parserVersion?: string | number;
 }
 
 interface MinchoVitePluginOptions {
@@ -369,12 +425,7 @@ export function minchoVitePlugin(
   }
 
   function isWatchableStaticCssEvalDependency(id: string): boolean {
-    return (
-      rootRealpath !== "" &&
-      !isVirtualStaticCssEvalId(id) &&
-      !hasNodeModulesSegment(id) &&
-      isPathInsideRoot(rootRealpath, id)
-    );
+    return rootRealpath !== "" && fs.existsSync(id);
   }
 
   return {
@@ -562,7 +613,8 @@ export function minchoVitePlugin(
                     this,
                     fileId,
                     code,
-                    rootRealpath
+                    rootRealpath,
+                    server
                   )
               }
             : babelOptions;
@@ -670,42 +722,37 @@ function createViteStaticCssEvalSourceProvider(
   pluginContext: PluginContext,
   ownerId: string,
   ownerSource: string,
-  rootRealpath: string
+  rootRealpath: string,
+  serverInstance?: ViteDevServer
 ): StaticCssEvalSourceProvider {
   return {
     async resolve(importerId: string, importPath: string) {
-      if (!isProjectLocalImportPath(importPath)) {
-        return createUnsupportedStaticCssEvalResolution(importPath);
-      }
-
       const resolved = await pluginContext.resolve?.(importPath, importerId, {
         skipSelf: true
       });
 
-      if (!resolved || resolved.external) {
+      if (!resolved) {
         return null;
+      }
+
+      if (resolved.external) {
+        return createExternalStaticCssEvalResolution(resolved.id);
       }
 
       if (isVirtualStaticCssEvalId(resolved.id)) {
-        return createUnsupportedStaticCssEvalResolution(importPath);
+        return canLoadViteStaticCssEvalVirtualSource(
+          pluginContext,
+          serverInstance
+        )
+          ? createViteStaticCssEvalVirtualResolution(resolved.id)
+          : createUnsupportedStaticCssEvalResolution(importPath);
       }
 
-      const canonicalModuleId = normalizeStaticCssEvalFileId(
-        resolved.id,
-        rootRealpath
-      );
-      const resolvedId = canonicalModuleId;
-      const resolvedRealpath = await getExistingRealpath(resolvedId);
+      const fileId = normalizeStaticCssEvalFileId(resolved.id, rootRealpath);
+      const resolvedRealpath = await getExistingRealpath(fileId);
 
       if (!resolvedRealpath) {
         return null;
-      }
-
-      if (
-        hasNodeModulesSegment(resolvedRealpath) ||
-        !isPathInsideRoot(rootRealpath, resolvedRealpath)
-      ) {
-        return createUnsupportedStaticCssEvalResolution(importPath);
       }
 
       let stat: fs.Stats;
@@ -719,19 +766,15 @@ function createViteStaticCssEvalSourceProvider(
 
         throw error;
       }
-      const sourceIdentity = createStaticCssEvalSourceIdentity(stat);
 
-      return {
-        id: resolvedRealpath,
-        resolvedFile: resolvedRealpath,
-        canonicalModuleId,
-        normalizedPathKey: resolvedRealpath,
+      const metadata = createViteStaticCssEvalFileMetadata({
+        id: resolved.id,
         realpath: resolvedRealpath,
-        sourceHash: sourceIdentity.sourceHash,
-        version: sourceIdentity.version,
-        sourceIdentity,
-        resolverKind: "vite"
-      };
+        rootRealpath,
+        stat
+      });
+
+      return { id: metadata.resolvedFile, ...metadata };
     },
     async load(id: string) {
       const fileId = normalizeStaticCssEvalFileId(id, rootRealpath);
@@ -752,32 +795,59 @@ function createViteStaticCssEvalSourceProvider(
           normalizedPathKey: ownerId,
           ...(ownerRealpath ? { realpath: ownerRealpath } : {}),
           ...(sourceIdentity ? { sourceIdentity } : {}),
+          sourceKind: "project-source",
+          sourceOrigin: "project",
+          ...(ownerRealpath ? { watchFiles: [ownerRealpath] } : {}),
           resolverKind: "vite"
         };
       }
 
       if (isUnsupportedStaticCssEvalResolutionId(id)) {
-        return { sourceText: "export {};", source: "export {};" };
+        return {
+          sourceText: "export {};",
+          source: "export {};",
+          sourceKind: "unsupported-source-shape",
+          sourceOrigin: "unsupported",
+          unsupportedReason: "unsupported-source-shape",
+          resolverKind: "vite"
+        };
       }
 
-      if (isVirtualStaticCssEvalId(id) || hasNodeModulesSegment(fileId)) {
+      if (isExternalStaticCssEvalResolutionId(id)) {
         return null;
+      }
+
+      if (isVirtualStaticCssEvalId(id)) {
+        const virtualSource = await loadViteStaticCssEvalVirtualSource(
+          id,
+          pluginContext,
+          serverInstance
+        );
+
+        return virtualSource
+          ? {
+              sourceText: virtualSource,
+              source: virtualSource,
+              resolvedFile: id,
+              canonicalModuleId: id,
+              normalizedPathKey: id,
+              sourceKind: "provider-virtual",
+              sourceOrigin: "provider",
+              resolverKind: "vite"
+            }
+          : null;
       }
 
       const realpath = await getExistingRealpath(fileId);
-      if (
-        !realpath ||
-        hasNodeModulesSegment(realpath) ||
-        !isPathInsideRoot(rootRealpath, realpath)
-      ) {
+      if (!realpath) {
         return null;
       }
 
-      let source: string;
+      let fileSource: string;
       let stat: fs.Stats;
 
       try {
-        [source, stat] = await Promise.all([
+        [fileSource, stat] = await Promise.all([
           fs.promises.readFile(realpath, "utf8"),
           fs.promises.stat(realpath)
         ]);
@@ -788,29 +858,275 @@ function createViteStaticCssEvalSourceProvider(
 
         throw error;
       }
-
+      const metadata = createViteStaticCssEvalFileMetadata({
+        id,
+        realpath,
+        rootRealpath,
+        stat
+      });
+      const source = getViteStaticCssEvalStaticDataSource({
+        id,
+        realpath,
+        rootRealpath,
+        source: fileSource
+      });
       return {
         sourceText: source,
         source,
-        resolvedFile: realpath,
-        canonicalModuleId: fileId,
-        normalizedPathKey: realpath,
-        realpath,
-        sourceHash: createStaticCssEvalSourceHash(stat),
-        version: stat.mtimeMs,
-        sourceIdentity: createStaticCssEvalSourceIdentity(stat),
-        resolverKind: "vite"
+        ...metadata
       };
     }
   };
 }
 
-function createUnsupportedStaticCssEvalResolution(importPath: string) {
-  return createSharedUnsupportedStaticCssEvalResolution(importPath);
+interface ViteStaticCssEvalFileMetadataOptions {
+  id: string;
+  realpath: string;
+  rootRealpath: string;
+  stat: fs.Stats;
+}
+
+function createViteStaticCssEvalFileMetadata({
+  id,
+  realpath,
+  rootRealpath,
+  stat
+}: ViteStaticCssEvalFileMetadataOptions): Required<
+  Pick<
+    StaticCssEvalSourceResolution,
+    | "canonicalModuleId"
+    | "normalizedPathKey"
+    | "realpath"
+    | "resolvedFile"
+    | "resolverKind"
+    | "sourceHash"
+    | "sourceIdentity"
+    | "sourceKind"
+    | "sourceOrigin"
+    | "version"
+    | "watchFiles"
+  >
+> {
+  const sourceHash = createStaticCssEvalSourceHash(stat);
+  const version = stat.mtimeMs;
+  const sourceIdentity: Required<
+    Pick<StaticCssEvalSourceIdentity, "sourceHash" | "version">
+  > = {
+    sourceHash,
+    version
+  };
+  const sourceKind = getViteStaticCssEvalFileSourceKind({
+    id,
+    realpath,
+    rootRealpath
+  });
+  const querySuffix =
+    sourceKind === "static-data" ? getViteStaticCssEvalQuerySuffix(id) : "";
+  const resolvedFile = `${realpath}${querySuffix}`;
+
+  return {
+    resolvedFile,
+    canonicalModuleId: resolvedFile,
+    normalizedPathKey: resolvedFile,
+    realpath,
+    sourceHash: sourceIdentity.sourceHash,
+    version: sourceIdentity.version,
+    sourceIdentity,
+    sourceKind,
+    sourceOrigin: getViteStaticCssEvalSourceOrigin(sourceKind),
+    watchFiles: [realpath],
+    resolverKind: "vite"
+  };
+}
+
+function getViteStaticCssEvalFileSourceKind({
+  id,
+  realpath,
+  rootRealpath
+}: Pick<
+  ViteStaticCssEvalFileMetadataOptions,
+  "id" | "realpath" | "rootRealpath"
+>): StaticCssEvalSourceKind {
+  if (isStaticCssEvalStaticDataFile(id, realpath)) {
+    return "static-data";
+  }
+
+  return hasNodeModulesSegment(realpath) ||
+    !isPathInsideRoot(rootRealpath, realpath)
+    ? "package-source"
+    : "project-source";
+}
+
+function getViteStaticCssEvalSourceOrigin(
+  sourceKind: StaticCssEvalSourceKind
+): StaticCssEvalSourceOrigin {
+  switch (sourceKind) {
+    case "project-source":
+      return "project";
+    case "package-source":
+      return "package";
+    case "provider-virtual":
+      return "provider";
+    case "static-data":
+      return "data";
+    case "external-no-source":
+      return "external";
+    case "unresolved":
+      return "unresolved";
+    case "unsupported-source-shape":
+      return "unsupported";
+    default:
+      return assertNeverStaticCssEvalSourceKind(sourceKind);
+  }
+}
+
+function getViteStaticCssEvalQueryFlags(id: string): string[] {
+  const querySuffix = getViteStaticCssEvalQuerySuffix(id);
+
+  if (querySuffix === "") {
+    return [];
+  }
+
+  return querySuffix
+    .slice(1)
+    .split("&")
+    .map((part) => part.split("=")[0])
+    .filter((flag) => flag !== "");
+}
+
+function getViteStaticCssEvalQuerySuffix(id: string): string {
+  const queryStart = id.indexOf("?");
+
+  if (queryStart === -1) {
+    return "";
+  }
+
+  const hashStart = id.indexOf("#", queryStart);
+
+  return id.slice(queryStart, hashStart === -1 ? undefined : hashStart);
+}
+
+function getViteStaticCssEvalStaticDataSource(options: {
+  id: string;
+  realpath: string;
+  rootRealpath: string;
+  source: string;
+}): string {
+  const flags = getViteStaticCssEvalQueryFlags(options.id);
+
+  if (flags.includes("url")) {
+    const assetUrl = getViteStaticCssEvalUrlSource(
+      options.realpath,
+      options.rootRealpath
+    );
+
+    return `export default ${JSON.stringify(assetUrl)};\n`;
+  }
+
+  return prepareStaticCssEvalStaticDataSource(options.id, options.source);
+}
+
+function getViteStaticCssEvalUrlSource(
+  realpath: string,
+  rootRealpath: string
+): string {
+  const normalizedRealpath = normalizePath(realpath);
+  const normalizedRootRealpath = normalizePath(rootRealpath);
+
+  if (isPathInsideRoot(normalizedRootRealpath, normalizedRealpath)) {
+    return `/${customNormalize(normalizedRealpath.slice(normalizedRootRealpath.length))}`;
+  }
+
+  return `/@fs/${customNormalize(normalizedRealpath)}`;
+}
+
+function createViteStaticCssEvalVirtualResolution(
+  id: string
+): StaticCssEvalSourceResolution {
+  return {
+    id,
+    resolvedFile: id,
+    canonicalModuleId: id,
+    normalizedPathKey: id,
+    sourceKind: "provider-virtual",
+    sourceOrigin: "provider",
+    resolverKind: "vite"
+  };
+}
+
+function canLoadViteStaticCssEvalVirtualSource(
+  pluginContext: PluginContext,
+  serverInstance: ViteDevServer | undefined
+): boolean {
+  return Boolean(serverInstance?.transformRequest || pluginContext.load);
+}
+
+async function loadViteStaticCssEvalVirtualSource(
+  id: string,
+  pluginContext: PluginContext,
+  serverInstance: ViteDevServer | undefined
+): Promise<string | null> {
+  const transformed = await serverInstance?.transformRequest?.(id, {
+    ssr: true
+  });
+
+  if (typeof transformed?.code === "string") {
+    return transformed.code;
+  }
+
+  const loaded = await pluginContext.load?.({ id });
+
+  return typeof loaded?.code === "string" ? loaded.code : null;
+}
+
+function createExternalStaticCssEvalResolution(
+  id: string
+): StaticCssEvalSourceResolution {
+  const resolvedId = `${externalStaticCssEvalResolutionPrefix}${encodeURIComponent(
+    id
+  )}`;
+
+  return {
+    id: resolvedId,
+    resolvedFile: resolvedId,
+    canonicalModuleId: id,
+    normalizedPathKey: resolvedId,
+    sourceKind: "external-no-source",
+    sourceOrigin: "external",
+    unsupportedReason: "external-no-source",
+    resolverKind: "vite"
+  };
+}
+
+function createUnsupportedStaticCssEvalResolution(
+  importPath: string
+): StaticCssEvalSourceResolution {
+  const id = `virtual:mincho-static-css-eval-unsupported:${encodeURIComponent(
+    importPath
+  )}`;
+
+  return {
+    id,
+    resolvedFile: id,
+    canonicalModuleId: id,
+    normalizedPathKey: id,
+    sourceKind: "unsupported-source-shape",
+    sourceOrigin: "unsupported",
+    unsupportedReason: "unsupported-source-shape",
+    resolverKind: "vite"
+  };
 }
 
 function isUnsupportedStaticCssEvalResolutionId(id: string): boolean {
-  return sharedIsUnsupportedStaticCssEvalResolutionId(id);
+  return id.startsWith("virtual:mincho-static-css-eval-unsupported:");
+}
+
+function isExternalStaticCssEvalResolutionId(id: string): boolean {
+  return id.startsWith(externalStaticCssEvalResolutionPrefix);
+}
+
+function assertNeverStaticCssEvalSourceKind(value: never): never {
+  throw new TypeError(`Unexpected static css eval source kind: ${value}`);
 }
 
 function getStaticCssEvalFromTransformError(
@@ -819,6 +1135,7 @@ function getStaticCssEvalFromTransformError(
   return (error as { staticCssEval?: StaticCssEvalMetadata } | null)
     ?.staticCssEval;
 }
+
 // == Tests ====================================================================
 // Ignore errors when compiling to CommonJS.
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
@@ -2022,21 +2339,27 @@ if (import.meta.vitest) {
       }
     });
 
-    it("static css eval shared helpers ignore virtual node_modules and outside-root dependencies for Vite", async () => {
+    it("static css eval watch files include real package and outside-root dependencies for Vite", async () => {
       const fixture = await createImportedCssPropViteFixture(
         "static-css-eval-shared-helper-boundary-"
       );
 
       try {
         const integrationModule = await import("@mincho-js/integration");
-        const rootRealpath = normalizePath(
-          await fs.promises.realpath(fixture.root)
-        );
         const stylesRealpath = normalizePath(
           await fs.promises.realpath(fixture.stylesPath)
         );
         const outsideRootFile = normalizePath(
           join(process.cwd(), "package.json")
+        );
+        const packagePath = join(fixture.root, "node_modules/pkg/styles.ts");
+        await fs.promises.mkdir(dirname(packagePath), { recursive: true });
+        await fs.promises.writeFile(
+          packagePath,
+          createImportedStyleSource("blue")
+        );
+        const packageRealpath = normalizePath(
+          await fs.promises.realpath(packagePath)
         );
 
         vi.spyOn(integrationModule, "babelTransform").mockResolvedValue({
@@ -2046,8 +2369,15 @@ if (import.meta.vitest) {
             dependencyFiles: [
               stylesRealpath,
               "virtual:mincho-static-css-eval-test",
-              `${rootRealpath}/node_modules/pkg/styles.ts`,
               outsideRootFile
+            ],
+            resolvedDependencies: [
+              {
+                resolvedFile: "virtual:mincho-static-css-eval-provider",
+                canonicalModuleId: "virtual:mincho-static-css-eval-provider",
+                normalizedPathKey: "virtual:mincho-static-css-eval-provider",
+                watchFiles: [packageRealpath]
+              }
             ]
           }
         } as unknown as BabelTransformResult);
@@ -2063,7 +2393,9 @@ if (import.meta.vitest) {
 
         await harness.transform(fixture.entryPath, fixture.entrySource);
 
-        expect(harness.watchFiles).toEqual([stylesRealpath]);
+        expect(new Set(harness.watchFiles)).toEqual(
+          new Set([stylesRealpath, packageRealpath, outsideRootFile])
+        );
       } finally {
         await fs.promises.rm(fixture.root, { force: true, recursive: true });
       }
@@ -2489,6 +2821,407 @@ if (import.meta.vitest) {
       }
     });
 
+    it("supplies Vite package data virtual and unsupported source records to static css eval", async () => {
+      const fixture = await createJsxCssPropViteFixture(
+        "static-css-eval-provider-package-data-virtual-",
+        `
+          import { button } from "@pkg/styles";
+          import { token } from "@pkg/styles/styles.json";
+          import rawTokens from "@pkg/styles/tokens.css?raw";
+          import textToken from "@pkg/styles/token.txt?text";
+          import assetUrl from "@pkg/styles/asset.svg?url";
+          import wasmUrl from "@pkg/styles/icon.wasm?url";
+          import initWasm from "@pkg/styles/icon.wasm?init";
+          import { virtualButton } from "virtual:mincho-test-styles";
+          import { externalButton } from "@pkg/external";
+
+          function App() {
+            return <>
+              <div css={button} />
+              <div css={token} />
+              <div css={rawTokens} />
+              <div css={textToken} />
+              <div css={assetUrl} />
+              <div css={wasmUrl} />
+              <div css={initWasm} />
+              <div css={virtualButton} />
+              <div css={externalButton} />
+            </>;
+          }
+
+          export { App };
+        `
+      );
+      const packageRoot = join(fixture.root, "node_modules/@pkg/styles");
+      const packageIndexPath = join(packageRoot, "index.ts");
+      const packageJsonPath = join(packageRoot, "styles.json");
+      const rawTokensPath = join(packageRoot, "tokens.css");
+      const textTokenPath = join(packageRoot, "token.txt");
+      const assetPath = join(packageRoot, "asset.svg");
+      const wasmPath = join(packageRoot, "icon.wasm");
+      const virtualId = "\0virtual:mincho-test-styles";
+      const captured: {
+        loaded: Record<string, StaticCssEvalLoadedSource | null | undefined>;
+        resolved: Record<
+          string,
+          StaticCssEvalSourceResolution | null | undefined
+        >;
+      } = { loaded: {}, resolved: {} };
+
+      try {
+        const integrationModule = await import("@mincho-js/integration");
+        await fs.promises.mkdir(packageRoot, { recursive: true });
+        await fs.promises.writeFile(
+          packageIndexPath,
+          'export const button = { color: "red" } as const;',
+          "utf8"
+        );
+        await fs.promises.writeFile(
+          packageJsonPath,
+          JSON.stringify({ token: { color: "green" } }),
+          "utf8"
+        );
+        await fs.promises.writeFile(
+          rawTokensPath,
+          ".token { color: blue; }",
+          "utf8"
+        );
+        await fs.promises.writeFile(textTokenPath, "purple", "utf8");
+        await fs.promises.writeFile(assetPath, "<svg></svg>", "utf8");
+        await fs.promises.writeFile(wasmPath, "wasm-init", "utf8");
+
+        vi.spyOn(integrationModule, "babelTransform").mockImplementation(
+          async (
+            _path: string,
+            options: MinchoBabelOptionsWithStaticCssEval = {}
+          ) => {
+            const sourceProvider = options.staticCssEvalSourceProvider;
+
+            if (!sourceProvider) {
+              throw new Error("Expected Vite static css eval source provider");
+            }
+
+            const importPaths = [
+              "@pkg/styles",
+              "@pkg/styles/styles.json",
+              "@pkg/styles/tokens.css?raw",
+              "@pkg/styles/token.txt?text",
+              "@pkg/styles/asset.svg?url",
+              "@pkg/styles/icon.wasm?url",
+              "@pkg/styles/icon.wasm?init",
+              "virtual:mincho-test-styles",
+              "@pkg/external"
+            ] as const;
+
+            for (const importPath of importPaths) {
+              const resolution = await sourceProvider.resolve(
+                fixture.entryPath,
+                importPath
+              );
+              captured.resolved[importPath] = resolution;
+              captured.loaded[importPath] = resolution?.normalizedPathKey
+                ? await sourceProvider.load(resolution.normalizedPathKey)
+                : undefined;
+            }
+
+            return {
+              code: fixture.source,
+              result: ["", ""]
+            } as unknown as BabelTransformResult;
+          }
+        );
+
+        const virtualTransform = vi.fn(async (id: string) =>
+          id === virtualId
+            ? {
+                code: 'export const virtualButton = { color: "blue" } as const;'
+              }
+            : null
+        );
+        const harness = await createViteHarness({
+          configOverrides: {
+            root: fixture.root
+          },
+          pluginOptions: {
+            jsxCssProp: true
+          },
+          resolve(source) {
+            if (source === "@pkg/styles") {
+              return { id: `/@fs${packageIndexPath}?import` };
+            }
+            if (source === "@pkg/styles/styles.json") {
+              return { id: `/@fs${packageJsonPath}?import` };
+            }
+            if (source === "@pkg/styles/tokens.css?raw") {
+              return { id: `/@fs${rawTokensPath}?raw` };
+            }
+            if (source === "@pkg/styles/token.txt?text") {
+              return { id: `/@fs${textTokenPath}?text` };
+            }
+            if (source === "@pkg/styles/asset.svg?url") {
+              return { id: `/@fs${assetPath}?url` };
+            }
+            if (source === "@pkg/styles/icon.wasm?url") {
+              return { id: `/@fs${wasmPath}?url` };
+            }
+            if (source === "@pkg/styles/icon.wasm?init") {
+              return { id: `/@fs${wasmPath}?init` };
+            }
+            if (source === "virtual:mincho-test-styles") {
+              return { id: virtualId };
+            }
+            if (source === "@pkg/external") {
+              return { id: source, external: true };
+            }
+
+            return null;
+          },
+          server: {
+            moduleGraph: {
+              getModuleById: () => undefined,
+              invalidateModule: vi.fn()
+            },
+            transformRequest: virtualTransform
+          }
+        });
+
+        await harness.transform(fixture.entryPath, fixture.source);
+
+        const packageRealpath = normalizePath(
+          await fs.promises.realpath(packageIndexPath)
+        );
+        const jsonRealpath = normalizePath(
+          await fs.promises.realpath(packageJsonPath)
+        );
+        const rawRealpath = normalizePath(
+          await fs.promises.realpath(rawTokensPath)
+        );
+        const textRealpath = normalizePath(
+          await fs.promises.realpath(textTokenPath)
+        );
+        const assetRealpath = normalizePath(
+          await fs.promises.realpath(assetPath)
+        );
+        const wasmRealpath = normalizePath(
+          await fs.promises.realpath(wasmPath)
+        );
+        const assetUrl = "/node_modules/@pkg/styles/asset.svg";
+        const wasmUrl = "/node_modules/@pkg/styles/icon.wasm";
+
+        expect(captured.resolved["@pkg/styles"]).toMatchObject({
+          resolvedFile: packageRealpath,
+          normalizedPathKey: packageRealpath,
+          realpath: packageRealpath,
+          sourceKind: "package-source",
+          sourceOrigin: "package",
+          watchFiles: [packageRealpath],
+          resolverKind: "vite"
+        });
+        expect(captured.loaded["@pkg/styles"]).toMatchObject({
+          sourceText: 'export const button = { color: "red" } as const;',
+          resolvedFile: packageRealpath,
+          sourceKind: "package-source",
+          sourceOrigin: "package",
+          watchFiles: [packageRealpath],
+          resolverKind: "vite"
+        });
+        expect(captured.resolved["@pkg/styles/styles.json"]).toMatchObject({
+          resolvedFile: `${jsonRealpath}?import`,
+          normalizedPathKey: `${jsonRealpath}?import`,
+          realpath: jsonRealpath,
+          sourceKind: "static-data",
+          sourceOrigin: "data",
+          watchFiles: [jsonRealpath]
+        });
+        expect(captured.loaded["@pkg/styles/styles.json"]).toMatchObject({
+          sourceText: JSON.stringify({ token: { color: "green" } }),
+          sourceKind: "static-data",
+          sourceOrigin: "data",
+          watchFiles: [jsonRealpath]
+        });
+        expect(captured.resolved["@pkg/styles/tokens.css?raw"]).toMatchObject({
+          resolvedFile: `${rawRealpath}?raw`,
+          normalizedPathKey: `${rawRealpath}?raw`,
+          realpath: rawRealpath,
+          sourceKind: "static-data",
+          sourceOrigin: "data",
+          watchFiles: [rawRealpath]
+        });
+        expect(captured.resolved["@pkg/styles/token.txt?text"]).toMatchObject({
+          resolvedFile: `${textRealpath}?text`,
+          normalizedPathKey: `${textRealpath}?text`,
+          realpath: textRealpath,
+          sourceKind: "static-data",
+          sourceOrigin: "data",
+          watchFiles: [textRealpath]
+        });
+        expect(captured.loaded["@pkg/styles/token.txt?text"]).toMatchObject({
+          sourceText: `export default "purple";\n`,
+          sourceKind: "static-data",
+          sourceOrigin: "data",
+          watchFiles: [textRealpath]
+        });
+        expect(captured.resolved["@pkg/styles/asset.svg?url"]).toMatchObject({
+          resolvedFile: `${assetRealpath}?url`,
+          normalizedPathKey: `${assetRealpath}?url`,
+          realpath: assetRealpath,
+          sourceKind: "static-data",
+          sourceOrigin: "data",
+          watchFiles: [assetRealpath]
+        });
+        expect(captured.loaded["@pkg/styles/asset.svg?url"]).toMatchObject({
+          sourceText: `export default ${JSON.stringify(assetUrl)};\n`,
+          sourceKind: "static-data",
+          sourceOrigin: "data",
+          watchFiles: [assetRealpath]
+        });
+        expect(captured.resolved["@pkg/styles/icon.wasm?url"]).toMatchObject({
+          resolvedFile: `${wasmRealpath}?url`,
+          normalizedPathKey: `${wasmRealpath}?url`,
+          realpath: wasmRealpath,
+          sourceKind: "static-data",
+          sourceOrigin: "data",
+          watchFiles: [wasmRealpath]
+        });
+        expect(captured.loaded["@pkg/styles/icon.wasm?url"]).toMatchObject({
+          sourceText: `export default ${JSON.stringify(wasmUrl)};\n`,
+          sourceKind: "static-data",
+          sourceOrigin: "data",
+          watchFiles: [wasmRealpath]
+        });
+        expect(captured.resolved["@pkg/styles/icon.wasm?init"]).toMatchObject({
+          resolvedFile: `${wasmRealpath}?init`,
+          normalizedPathKey: `${wasmRealpath}?init`,
+          realpath: wasmRealpath,
+          sourceKind: "static-data",
+          sourceOrigin: "data",
+          watchFiles: [wasmRealpath]
+        });
+        expect(captured.resolved["virtual:mincho-test-styles"]).toMatchObject({
+          resolvedFile: virtualId,
+          canonicalModuleId: virtualId,
+          normalizedPathKey: virtualId,
+          sourceKind: "provider-virtual",
+          sourceOrigin: "provider"
+        });
+        expect(captured.loaded["virtual:mincho-test-styles"]).toMatchObject({
+          sourceText:
+            'export const virtualButton = { color: "blue" } as const;',
+          sourceKind: "provider-virtual",
+          sourceOrigin: "provider"
+        });
+        expect(virtualTransform).toHaveBeenCalledWith(virtualId, { ssr: true });
+        expect(captured.resolved["@pkg/external"]).toMatchObject({
+          resolvedFile: "external:mincho-static-css-eval:%40pkg%2Fexternal",
+          sourceKind: "external-no-source",
+          sourceOrigin: "external",
+          unsupportedReason: "external-no-source"
+        });
+        expect(captured.loaded["@pkg/external"]).toBeNull();
+      } finally {
+        await fs.promises.rm(fixture.root, { force: true, recursive: true });
+      }
+    });
+
+    it("statically evaluates Vite static css eval package url wasm and provider virtual css prop imports", async () => {
+      const fixture = await createJsxCssPropViteFixture(
+        "static-css-eval-package-virtual-transform-",
+        `
+          import defaultButton, { button } from "@pkg/styles";
+          import * as styles from "@pkg/styles";
+          import assetUrl from "@pkg/styles/asset.svg?url";
+          import wasmUrl from "@pkg/styles/icon.wasm?url";
+          import { virtualButton } from "virtual:mincho-test-styles";
+
+          function App() {
+            return <>
+              <div css={button} />
+              <div css={defaultButton} />
+              <div css={styles.card} />
+              <div css={assetUrl} />
+              <div css={wasmUrl} />
+              <div css={virtualButton} />
+            </>;
+          }
+
+          export { App };
+        `
+      );
+      const packageRoot = join(fixture.root, "node_modules/@pkg/styles");
+      const packageIndexPath = join(packageRoot, "index.ts");
+      const assetPath = join(packageRoot, "asset.svg");
+      const wasmPath = join(packageRoot, "icon.wasm");
+      const virtualId = "\0virtual:mincho-test-styles";
+
+      try {
+        await fs.promises.mkdir(packageRoot, { recursive: true });
+        await fs.promises.writeFile(
+          packageIndexPath,
+          `
+            export const button = { color: "red" } as const;
+            export const card = { color: "green" } as const;
+            export default { color: "orange" } as const;
+          `,
+          "utf8"
+        );
+        await fs.promises.writeFile(assetPath, "<svg></svg>", "utf8");
+        await fs.promises.writeFile(wasmPath, "wasm-binary", "utf8");
+        await spyOnSourceBabelTransform();
+
+        const harness = await createViteHarness({
+          configOverrides: {
+            root: fixture.root
+          },
+          pluginOptions: {
+            jsxCssProp: true
+          },
+          resolve(source) {
+            if (source === "@pkg/styles") {
+              return { id: `/@fs${packageIndexPath}?import` };
+            }
+            if (source === "@pkg/styles/asset.svg?url") {
+              return { id: `/@fs${assetPath}?url` };
+            }
+            if (source === "@pkg/styles/icon.wasm?url") {
+              return { id: `/@fs${wasmPath}?url` };
+            }
+            if (source === "virtual:mincho-test-styles") {
+              return { id: virtualId };
+            }
+
+            return null;
+          },
+          server: {
+            moduleGraph: {
+              getModuleById: () => undefined,
+              invalidateModule: vi.fn()
+            },
+            async transformRequest(id) {
+              return id === virtualId
+                ? {
+                    code: 'export const virtualButton = { color: "blue" } as const;'
+                  }
+                : null;
+            }
+          }
+        });
+        const artifact = await transformImportedCssPropToVirtualCss(
+          harness,
+          fixture.entryPath,
+          fixture.source
+        );
+
+        expect(artifact.virtualCss).toContain("color: red;");
+        expect(artifact.virtualCss).toContain("color: orange;");
+        expect(artifact.virtualCss).toContain("color: green;");
+        expect(artifact.virtualCss).not.toContain("<svg></svg>");
+        expect(artifact.virtualCss).not.toContain("wasm-binary");
+        expect(artifact.virtualCss).toContain("color: blue;");
+      } finally {
+        await fs.promises.rm(fixture.root, { force: true, recursive: true });
+      }
+    });
+
     it("registers dependency files for successful imported evaluations", async () => {
       const supportedFixture = await createImportedCssPropViteFixture(
         "jsx-css-prop-imported-watch-supported-"
@@ -2799,12 +3532,25 @@ if (import.meta.vitest) {
 
       try {
         await spyOnSourceBabelTransform();
+        const missingVirtualId = "\0virtual:styles";
         const fallbackHarness = await createViteHarness({
           configOverrides: {
             root: fallbackFixture.root
           },
           pluginOptions: {
             jsxCssProp: true
+          },
+          resolve(source) {
+            return source === "virtual:styles"
+              ? { id: missingVirtualId }
+              : null;
+          },
+          server: {
+            moduleGraph: {
+              getModuleById: () => undefined,
+              invalidateModule: vi.fn()
+            },
+            transformRequest: vi.fn(async () => null)
           }
         });
         await expect(
@@ -2812,7 +3558,9 @@ if (import.meta.vitest) {
             fallbackFixture.entryPath,
             fallbackFixture.source
           )
-        ).rejects.toThrow('package import "virtual:styles" is unsupported');
+        ).rejects.toThrow(
+          "Cannot statically evaluate css prop value: provider virtual module"
+        );
         expect(fallbackHarness.watchFiles).toEqual([]);
 
         const staticRuleHarness = await createViteHarness({
@@ -2841,45 +3589,6 @@ if (import.meta.vitest) {
             recursive: true
           })
         ]);
-      }
-    });
-
-    it("refuses symlinked node_modules sources in static css eval load", async () => {
-      const cacheRoot = createViteFixtureCacheRoot();
-      await fs.promises.mkdir(cacheRoot, { recursive: true });
-      const root = await fs.promises.mkdtemp(
-        join(cacheRoot, "jsx-css-prop-imported-boundary-symlink-")
-      );
-      const srcRoot = join(root, "src");
-      const stylesPath = join(srcRoot, "styles.ts");
-      const nodeModulesStylesPath = join(root, "node_modules/pkg/styles.ts");
-
-      try {
-        await Promise.all([
-          fs.promises.mkdir(srcRoot, { recursive: true }),
-          fs.promises.mkdir(dirname(nodeModulesStylesPath), {
-            recursive: true
-          })
-        ]);
-        await fs.promises.writeFile(
-          nodeModulesStylesPath,
-          createImportedStyleSource("red"),
-          "utf8"
-        );
-        await fs.promises.symlink(nodeModulesStylesPath, stylesPath);
-
-        const sourceProvider = createViteStaticCssEvalSourceProvider(
-          {
-            addWatchFile() {}
-          },
-          join(srcRoot, "entry.tsx"),
-          'export const owner = "ignored";',
-          await getRealpathOrResolvedPath(root)
-        );
-
-        await expect(sourceProvider.load(stylesPath)).resolves.toBeNull();
-      } finally {
-        await fs.promises.rm(root, { force: true, recursive: true });
       }
     });
 

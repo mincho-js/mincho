@@ -10,6 +10,32 @@ export interface StaticCssEvalQuery {
   memberPath?: string[];
 }
 
+export const STATIC_CSS_EVAL_SOURCE_KINDS = [
+  "project-source",
+  "package-source",
+  "provider-virtual",
+  "static-data",
+  "external-no-source",
+  "unresolved",
+  "unsupported-source-shape"
+] as const;
+
+export type StaticCssEvalSourceKind =
+  (typeof STATIC_CSS_EVAL_SOURCE_KINDS)[number];
+
+export const STATIC_CSS_EVAL_SOURCE_ORIGINS = [
+  "project",
+  "package",
+  "provider",
+  "data",
+  "external",
+  "unresolved",
+  "unsupported"
+] as const;
+
+export type StaticCssEvalSourceOrigin =
+  (typeof STATIC_CSS_EVAL_SOURCE_ORIGINS)[number];
+
 // Maintainer boundary: these contracts model AST-derived css values only.
 // Token/theme semantics are not interpreted unless they arrive as JS bindings.
 export type StaticCssEvalResult =
@@ -131,6 +157,12 @@ export interface ResolutionDependency {
   memberPath: string[];
   inspected: boolean;
   contributed: boolean;
+  readonly sourceKind?: StaticCssEvalSourceKind;
+  readonly sourceOrigin?: StaticCssEvalSourceOrigin;
+  readonly canonicalModuleId?: string;
+  readonly normalizedPathKey?: string;
+  readonly watchFiles?: readonly string[];
+  readonly unsupportedReason?: StaticCssEvalUnsupportedReason;
 }
 
 export interface ResolutionChainEntry {
@@ -139,6 +171,12 @@ export interface ResolutionChainEntry {
   exportName: StaticCssEvalExportName;
   memberPath: string[];
   provenance?: BindingProvenance;
+  readonly sourceKind?: StaticCssEvalSourceKind;
+  readonly sourceOrigin?: StaticCssEvalSourceOrigin;
+  readonly canonicalModuleId?: string;
+  readonly normalizedPathKey?: string;
+  readonly watchFiles?: readonly string[];
+  readonly unsupportedReason?: StaticCssEvalUnsupportedReason;
 }
 
 export interface StaticCssEvalCacheKey {
@@ -150,8 +188,15 @@ export interface StaticCssEvalCacheKey {
   sourceVersion?: string | number;
   pluginOptionsVersion: string | number;
   resolverOptionsVersion: string | number;
+  parserVersion?: string | number;
   staticEvalSupportVersion: string | number;
   resolvedId?: string;
+  readonly sourceKind?: StaticCssEvalSourceKind;
+  readonly sourceOrigin?: StaticCssEvalSourceOrigin;
+  readonly canonicalModuleId?: string;
+  readonly normalizedPathKey?: string;
+  readonly watchFiles?: readonly string[];
+  readonly unsupportedReason?: StaticCssEvalUnsupportedReason;
   parserOptions?: StaticCssEvalParserOptionsKey;
   projectLocalBoundary?: StaticCssEvalProjectLocalBoundaryState;
 }
@@ -164,9 +209,12 @@ export type StaticCssEvalDiagnosticId =
   | "STATIC_CSS_EVAL_OBJECT_SPREAD_UNSUPPORTED"
   | "STATIC_CSS_EVAL_COMPUTED_MEMBER_UNSUPPORTED"
   | "STATIC_CSS_EVAL_DYNAMIC_EXPRESSION_UNSUPPORTED"
+  | "STATIC_CSS_EVAL_PROVIDER_SOURCE_UNSUPPORTED"
   | "STATIC_CSS_EVAL_EXPORT_STAR_UNSUPPORTED"
+  | "STATIC_CSS_EVAL_EXPORT_STAR_AMBIGUOUS"
   | "STATIC_CSS_EVAL_NAMESPACE_UNSUPPORTED"
-  | "STATIC_CSS_EVAL_PACKAGE_IMPORT_UNSUPPORTED"
+  | "STATIC_CSS_EVAL_NAMESPACE_REEXPORT_UNSUPPORTED"
+  | "STATIC_CSS_EVAL_NAMESPACE_PARTIAL_UNSUPPORTED"
   | "STATIC_CSS_EVAL_CJS_UNSUPPORTED"
   | "STATIC_CSS_EVAL_IMPORT_CYCLE"
   | "STATIC_CSS_EVAL_UNRESOLVED_IMPORT"
@@ -181,9 +229,12 @@ export const STATIC_CSS_EVAL_DIAGNOSTIC_IDS = [
   "STATIC_CSS_EVAL_OBJECT_SPREAD_UNSUPPORTED",
   "STATIC_CSS_EVAL_COMPUTED_MEMBER_UNSUPPORTED",
   "STATIC_CSS_EVAL_DYNAMIC_EXPRESSION_UNSUPPORTED",
+  "STATIC_CSS_EVAL_PROVIDER_SOURCE_UNSUPPORTED",
   "STATIC_CSS_EVAL_EXPORT_STAR_UNSUPPORTED",
+  "STATIC_CSS_EVAL_EXPORT_STAR_AMBIGUOUS",
   "STATIC_CSS_EVAL_NAMESPACE_UNSUPPORTED",
-  "STATIC_CSS_EVAL_PACKAGE_IMPORT_UNSUPPORTED",
+  "STATIC_CSS_EVAL_NAMESPACE_REEXPORT_UNSUPPORTED",
+  "STATIC_CSS_EVAL_NAMESPACE_PARTIAL_UNSUPPORTED",
   "STATIC_CSS_EVAL_CJS_UNSUPPORTED",
   "STATIC_CSS_EVAL_IMPORT_CYCLE",
   "STATIC_CSS_EVAL_UNRESOLVED_IMPORT",
@@ -229,8 +280,12 @@ export const STATIC_CSS_EVAL_UNSUPPORTED_REASONS = [
   "commonjs-require",
   "node-modules-import",
   "virtual-module",
+  "provider-virtual-no-source",
   "function-or-call",
   "runtime-dynamic-value",
+  "dynamic-import",
+  "runtime-wasm-init-or-function",
+  "non-literal-loader-output",
   "computed-object-key",
   "object-or-array-spread",
   "conditional-or-logical-expression",
@@ -242,8 +297,18 @@ export const STATIC_CSS_EVAL_UNSUPPORTED_REASONS = [
   "numeric-member-path",
   "optional-member-path",
   "unsupported-literal",
+  "runtime-wasm-init",
+  "runtime-wasm-module",
+  "invalid-json-data",
+  "source-size-limit-exceeded",
   "not-project-local",
-  "failed-project-local-dependency"
+  "failed-project-local-dependency",
+  "external-no-source",
+  "unresolved",
+  "unsupported-source-shape",
+  "ambiguous-star",
+  "partial-namespace-failure",
+  "unsupported-namespace-reexport"
 ] as const;
 
 export type StaticCssEvalUnsupportedReason =
@@ -275,6 +340,12 @@ export interface StaticCssEvalDependencyMetadata {
   projectLocal: boolean;
   insideNodeModules: boolean;
   virtual: boolean;
+  readonly sourceKind?: StaticCssEvalSourceKind;
+  readonly sourceOrigin?: StaticCssEvalSourceOrigin;
+  readonly canonicalModuleId?: string;
+  readonly normalizedPathKey?: string;
+  readonly watchFiles?: readonly string[];
+  readonly unsupportedReason?: StaticCssEvalUnsupportedReason;
 }
 
 export interface StaticCssEvalModuleRecord {
@@ -283,6 +354,12 @@ export interface StaticCssEvalModuleRecord {
   sourceHash: string;
   version?: string | number;
   dependencies: StaticCssEvalDependencyMetadata[];
+  readonly sourceKind?: StaticCssEvalSourceKind;
+  readonly sourceOrigin?: StaticCssEvalSourceOrigin;
+  readonly canonicalModuleId?: string;
+  readonly normalizedPathKey?: string;
+  readonly watchFiles?: readonly string[];
+  readonly unsupportedReason?: StaticCssEvalUnsupportedReason;
 }
 
 export interface StaticCssEvalDependencyMaps {
@@ -322,13 +399,14 @@ export const STATIC_CSS_EVAL_CYCLE_KEY_FIELDS = [
 ] as const satisfies readonly (keyof StaticCssEvalCacheKey)[];
 
 export const STATIC_CSS_EVAL_GUARDRAILS = [
-  "project-local-files-only",
   "no-module-execution",
   "no-node-vm-eval-dynamic-import",
   "no-bundler-runtime-evaluation",
-  "project-local-esm-source-provider-export-graph-v2",
-  "limited-project-local-namespace-values-v2",
-  "no-node-modules-virtual-cjs-or-outside-root-v1",
+  "esm-source-provider-export-graph-v3",
+  "all-esm-package-source-provider-policy-v1",
+  "provider-backed-static-data-json-raw-url-wasm-string-v1",
+  "provider-backed-virtual-source-v1",
+  "fail-closed-namespace-star-and-source-shape-v1",
   "async-prepass-sync-babel-boundary"
 ] as const;
 
@@ -423,15 +501,16 @@ export const STATIC_CSS_EVAL_SUPPORT_MATRIX = [
   },
   {
     construct:
-      'Project-local ESM re-export graph (`export { x } from "./x"`, barrels, and transitive aliases)',
+      'Provider-backed ESM re-export graph (`export { x } from "./x"`, barrels, package barrels, and transitive aliases)',
     behavior:
-      "Supported under source-provider constraints with dependency chain metadata",
+      "Supported for project, package, data, and provider-backed virtual ESM source with dependency chain metadata",
     status: "supported"
   },
   {
-    construct: 'Project-local export-star barrel graph (`export * from "./x"`)',
+    construct:
+      'Provider-backed export-star barrel graph (`export * from "./x"`)',
     behavior:
-      "Supported under source-provider constraints; explicit exports win, `default` is not forwarded, and ambiguity fails closed",
+      "Supported for project and package barrels; explicit exports win, `default` is not forwarded, and ambiguity fails closed",
     status: "supported"
   },
   {
@@ -465,14 +544,48 @@ export const STATIC_CSS_EVAL_SUPPORT_MATRIX = [
     status: "unsupported"
   },
   {
-    construct: "Package, `node_modules`, or outside-root imports",
+    construct:
+      "Provider-backed package, `node_modules`, and outside-root ESM source",
     behavior:
-      "Unsupported; preserve class-value or error per candidate policy without filesystem fallback",
+      "Supported when the bundler/provider supplies parseable ESM source and identity metadata; no Babel filesystem package resolver is used",
+    status: "supported"
+  },
+  {
+    construct: "Package barrel reexports",
+    behavior:
+      "Supported with the same direct reexport, `export *`, namespace, and default semantics as project source",
+    status: "supported"
+  },
+  {
+    construct:
+      "Static data imports (JSON, `?raw`, `?url`, and safe wasm string forms)",
+    behavior:
+      "Supported when the provider synthesizes literal ESM source for JSON default/named exports or string payloads",
+    status: "supported"
+  },
+  {
+    construct: "Provider-backed virtual modules with supplied source",
+    behavior:
+      "Supported when the bundler/provider returns deterministic source or literal ESM payload plus source identity",
+    status: "supported"
+  },
+  {
+    construct: "Provider/external modules without loadable source",
+    behavior:
+      "Unsupported with source-kind diagnostics such as `external-no-source` or `provider-virtual-no-source`",
     status: "unsupported"
   },
   {
-    construct: "Virtual modules",
-    behavior: "Unsupported",
+    construct:
+      "Runtime wasm init/functions, non-literal loader output, and dynamic import graphs",
+    behavior:
+      "Unsupported; static evaluation never runs loader/runtime functions or dynamic import graphs",
+    status: "unsupported"
+  },
+  {
+    construct: "Remote/http modules",
+    behavior:
+      "Unsupported in the first iteration; providers must supply deterministic local/package/data/virtual source or literal payloads",
     status: "unsupported"
   },
   {
@@ -546,9 +659,12 @@ if (import.meta.vitest) {
     STATIC_CSS_EVAL_OBJECT_SPREAD_UNSUPPORTED: true,
     STATIC_CSS_EVAL_COMPUTED_MEMBER_UNSUPPORTED: true,
     STATIC_CSS_EVAL_DYNAMIC_EXPRESSION_UNSUPPORTED: true,
+    STATIC_CSS_EVAL_PROVIDER_SOURCE_UNSUPPORTED: true,
     STATIC_CSS_EVAL_EXPORT_STAR_UNSUPPORTED: true,
+    STATIC_CSS_EVAL_EXPORT_STAR_AMBIGUOUS: true,
     STATIC_CSS_EVAL_NAMESPACE_UNSUPPORTED: true,
-    STATIC_CSS_EVAL_PACKAGE_IMPORT_UNSUPPORTED: true,
+    STATIC_CSS_EVAL_NAMESPACE_REEXPORT_UNSUPPORTED: true,
+    STATIC_CSS_EVAL_NAMESPACE_PARTIAL_UNSUPPORTED: true,
     STATIC_CSS_EVAL_CJS_UNSUPPORTED: true,
     STATIC_CSS_EVAL_IMPORT_CYCLE: true,
     STATIC_CSS_EVAL_UNRESOLVED_IMPORT: true,
@@ -704,12 +820,24 @@ if (import.meta.vitest) {
         "async-prepass-sync-babel-boundary"
       );
       expect(STATIC_CSS_EVAL_GUARDRAILS).toContain(
-        "project-local-esm-source-provider-export-graph-v2"
+        "esm-source-provider-export-graph-v3"
       );
       expect(STATIC_CSS_EVAL_GUARDRAILS).toContain(
-        "limited-project-local-namespace-values-v2"
+        "all-esm-package-source-provider-policy-v1"
       );
       expect(STATIC_CSS_EVAL_GUARDRAILS).toContain(
+        "provider-backed-static-data-json-raw-url-wasm-string-v1"
+      );
+      expect(STATIC_CSS_EVAL_GUARDRAILS).toContain(
+        "provider-backed-virtual-source-v1"
+      );
+      expect(STATIC_CSS_EVAL_GUARDRAILS).toContain(
+        "fail-closed-namespace-star-and-source-shape-v1"
+      );
+      expect(STATIC_CSS_EVAL_GUARDRAILS).not.toContain(
+        "project-local-files-only"
+      );
+      expect(STATIC_CSS_EVAL_GUARDRAILS).not.toContain(
         "no-node-modules-virtual-cjs-or-outside-root-v1"
       );
       expect(STATIC_CSS_EVAL_GUARDRAILS).not.toContain(
@@ -726,12 +854,12 @@ if (import.meta.vitest) {
 
       expect(
         supportMatrixByConstruct.get(
-          'Project-local ESM re-export graph (`export { x } from "./x"`, barrels, and transitive aliases)'
+          'Provider-backed ESM re-export graph (`export { x } from "./x"`, barrels, package barrels, and transitive aliases)'
         )
       ).toMatchObject({ status: "supported" });
       expect(
         supportMatrixByConstruct.get(
-          'Project-local export-star barrel graph (`export * from "./x"`)'
+          'Provider-backed export-star barrel graph (`export * from "./x"`)'
         )
       ).toMatchObject({ status: "supported" });
       expect(
@@ -756,9 +884,35 @@ if (import.meta.vitest) {
       ).toMatchObject({ status: "unsupported" });
       expect(
         supportMatrixByConstruct.get(
-          "Package, `node_modules`, or outside-root imports"
+          "Provider-backed package, `node_modules`, and outside-root ESM source"
+        )
+      ).toMatchObject({ status: "supported" });
+      expect(
+        supportMatrixByConstruct.get("Package barrel reexports")
+      ).toMatchObject({ status: "supported" });
+      expect(
+        supportMatrixByConstruct.get(
+          "Static data imports (JSON, `?raw`, `?url`, and safe wasm string forms)"
+        )
+      ).toMatchObject({ status: "supported" });
+      expect(
+        supportMatrixByConstruct.get(
+          "Provider-backed virtual modules with supplied source"
+        )
+      ).toMatchObject({ status: "supported" });
+      expect(
+        supportMatrixByConstruct.get(
+          "Provider/external modules without loadable source"
         )
       ).toMatchObject({ status: "unsupported" });
+      expect(
+        supportMatrixByConstruct.get(
+          "Runtime wasm init/functions, non-literal loader output, and dynamic import graphs"
+        )
+      ).toMatchObject({ status: "unsupported" });
+      expect(supportMatrixByConstruct.get("Remote/http modules")).toMatchObject(
+        { status: "unsupported" }
+      );
       expect(
         supportMatrixByConstruct.get("CommonJS / `require()`")
       ).toMatchObject({ status: "unsupported" });
@@ -767,7 +921,7 @@ if (import.meta.vitest) {
           (construct) => construct === "Export star (`export *`)"
         )
       ).toBe(false);
-      expect(STATIC_CSS_EVAL_SUPPORT_MATRIX).toHaveLength(34);
+      expect(STATIC_CSS_EVAL_SUPPORT_MATRIX).toHaveLength(39);
     });
 
     it("accepts synchronous provider and cache key contracts", () => {
@@ -869,7 +1023,7 @@ if (import.meta.vitest) {
       expect(staticCssEvalDiagnosticIds).toEqual(
         STATIC_CSS_EVAL_DIAGNOSTIC_IDS
       );
-      expect(staticCssEvalDiagnosticIds).toHaveLength(15);
+      expect(staticCssEvalDiagnosticIds).toHaveLength(18);
     });
   });
 }

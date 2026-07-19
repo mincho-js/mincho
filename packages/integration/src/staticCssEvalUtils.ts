@@ -2,6 +2,9 @@ import * as fs from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+export const internalStaticCssEvalExternalResolutionPrefix =
+  "external:mincho-static-css-eval:";
+
 export interface InternalStaticCssEvalSourceIdentity {
   sourceHash?: string;
   version?: string | number;
@@ -10,17 +13,22 @@ export interface InternalStaticCssEvalSourceIdentity {
 interface InternalStaticCssEvalDependency {
   file: string;
   kind?: string;
+  watchFiles?: readonly string[];
 }
 
 interface InternalStaticCssEvalResolvedDependency {
   resolvedFile: string;
   canonicalModuleId?: string;
   normalizedPathKey?: string;
+  watchFiles?: readonly string[];
 }
 
 interface InternalStaticCssEvalCacheKey {
   resolvedFile?: string;
   resolvedId?: string;
+  canonicalModuleId?: string;
+  normalizedPathKey?: string;
+  watchFiles?: readonly string[];
 }
 
 export interface InternalStaticCssEvalMetadataLike {
@@ -42,18 +50,26 @@ export function internalCollectStaticCssEvalDependencyIds(
     ...(staticCssEval.dependencyFiles ?? []),
     ...(staticCssEval.dependencies ?? [])
       .filter((dependency) => dependency.kind !== "local")
-      .map((dependency) => dependency.file),
+      .flatMap((dependency) => [dependency.file, ...getWatchFiles(dependency)]),
     ...(staticCssEval.resolvedDependencies ?? []).flatMap((dependency) => [
       dependency.resolvedFile,
       dependency.canonicalModuleId,
-      dependency.normalizedPathKey
+      dependency.normalizedPathKey,
+      ...getWatchFiles(dependency)
     ]),
     ...(staticCssEval.cacheKeys ?? []).flatMap((cacheKey) => [
       cacheKey.resolvedFile,
-      cacheKey.resolvedId
+      cacheKey.resolvedId,
+      cacheKey.canonicalModuleId,
+      cacheKey.normalizedPathKey,
+      ...getWatchFiles(cacheKey)
     ]),
     ...(staticCssEval.resolvedModuleIds ?? [])
   ]);
+}
+
+function getWatchFiles(value: { watchFiles?: readonly string[] }): string[] {
+  return [...(value.watchFiles ?? [])];
 }
 
 export function normalizeStaticCssEvalFileId(
@@ -174,11 +190,47 @@ export function internalCreateStaticCssEvalSourceHash(stat: fs.Stats): string {
 
 export function internalCreateStaticCssEvalSourceIdentity(
   stat: fs.Stats
-): InternalStaticCssEvalSourceIdentity {
+): Required<InternalStaticCssEvalSourceIdentity> {
   return {
     sourceHash: internalCreateStaticCssEvalSourceHash(stat),
     version: stat.mtimeMs
   };
+}
+
+export function internalIsMissingStaticCssEvalFileSystemEntryError(
+  error: unknown
+): boolean {
+  return (
+    error instanceof Error &&
+    "code" in error &&
+    (error.code === "ENOENT" || error.code === "ENOTDIR")
+  );
+}
+
+export function internalIsStaticCssEvalStaticDataFile(
+  sourceId: string,
+  realpath: string
+): boolean {
+  const flags = internalGetStaticCssEvalQueryFlags(sourceId);
+
+  return (
+    realpath.endsWith(".json") ||
+    realpath.endsWith(".wasm") ||
+    flags.some((flag) =>
+      ["raw", "url", "text", "string", "init"].includes(flag)
+    )
+  );
+}
+
+export function internalPrepareStaticCssEvalStaticDataSource(
+  sourceId: string,
+  source: string
+): string {
+  const flags = internalGetStaticCssEvalQueryFlags(sourceId);
+
+  return flags.includes("text") || flags.includes("string")
+    ? `export default ${JSON.stringify(source)};\n`
+    : source;
 }
 
 function internalStripStaticCssEvalSsrPrefix(id: string): string {
@@ -197,7 +249,17 @@ function internalStripStaticCssEvalRequestQuery(id: string): string {
 }
 
 function internalTrimStaticCssEvalTrailingSlash(filePath: string): string {
-  return filePath.length > 1 ? filePath.replace(/\/+$/g, "") : filePath;
+  if (filePath.length <= 1) {
+    return filePath;
+  }
+
+  let end = filePath.length;
+
+  while (end > 0 && filePath.charAt(end - 1) === "/") {
+    end -= 1;
+  }
+
+  return filePath.slice(0, end);
 }
 
 function internalNormalizePathSyntax(filePath: string): string {
@@ -214,4 +276,23 @@ function internalIsStaticCssEvalStringValue(
   value: string | undefined
 ): value is string {
   return typeof value === "string" && value !== "";
+}
+
+function internalGetStaticCssEvalQueryFlags(sourceId: string): string[] {
+  const queryIndex = sourceId.indexOf("?");
+
+  if (queryIndex === -1) {
+    return [];
+  }
+
+  const hashIndex = sourceId.indexOf("#", queryIndex);
+  const query = sourceId.slice(
+    queryIndex + 1,
+    hashIndex === -1 ? undefined : hashIndex
+  );
+
+  return query
+    .split("&")
+    .map((part) => part.split("=")[0])
+    .filter(internalIsStaticCssEvalStringValue);
 }

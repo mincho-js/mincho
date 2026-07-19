@@ -33,9 +33,13 @@ export {
   internalGetStaticCssEvalRealpathOrResolvedPath,
   internalHasStaticCssEvalNodeModulesSegment,
   internalIsProjectLocalStaticCssEvalImportPath,
+  internalIsMissingStaticCssEvalFileSystemEntryError,
+  internalIsStaticCssEvalStaticDataFile,
   internalIsStaticCssEvalPathInsideRoot,
   internalIsVirtualStaticCssEvalId,
   internalNormalizeStaticCssEvalPathSyntax,
+  internalPrepareStaticCssEvalStaticDataSource,
+  internalStaticCssEvalExternalResolutionPrefix,
   normalizeStaticCssEvalFileId as internalNormalizeStaticCssEvalFileId,
   type InternalStaticCssEvalMetadataLike,
   type InternalStaticCssEvalSourceIdentity

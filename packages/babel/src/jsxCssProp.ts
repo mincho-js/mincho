@@ -511,7 +511,13 @@ export function createResolutionDependencyMetadataKey(
     dependency.exportName,
     dependency.memberPath,
     dependency.inspected,
-    dependency.contributed
+    dependency.contributed,
+    dependency.sourceKind,
+    dependency.sourceOrigin,
+    dependency.canonicalModuleId,
+    dependency.normalizedPathKey,
+    dependency.watchFiles,
+    dependency.unsupportedReason
   ]);
 }
 
@@ -546,8 +552,17 @@ export function createStaticCssEvalCacheKeyMetadataKey(
     cacheKey.sourceVersion,
     cacheKey.pluginOptionsVersion,
     cacheKey.resolverOptionsVersion,
+    cacheKey.parserVersion,
     cacheKey.staticEvalSupportVersion,
-    cacheKey.resolvedId
+    cacheKey.resolvedId,
+    cacheKey.sourceKind,
+    cacheKey.sourceOrigin,
+    cacheKey.canonicalModuleId,
+    cacheKey.normalizedPathKey,
+    cacheKey.watchFiles,
+    cacheKey.unsupportedReason,
+    cacheKey.parserOptions,
+    cacheKey.projectLocalBoundary
   ]);
 }
 

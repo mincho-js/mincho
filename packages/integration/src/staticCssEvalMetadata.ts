@@ -1,4 +1,9 @@
 import {
+  internalAppendUniqueStaticCssEvalMetadataItems as appendUniqueMetadataItems,
+  internalAppendUniqueStaticCssEvalResolvedModuleIds as appendUniqueResolvedModuleIds,
+  internalCreateStaticCssEvalCacheKeyMetadataKey as createStaticCssEvalCacheKeyKey,
+  internalCreateStaticCssEvalDependencyMetadataKey as createStaticCssEvalDependencyKey,
+  internalCreateStaticCssEvalDiagnosticMetadataKey as createStaticCssEvalDiagnosticKey,
   type MinchoStaticCssEvalMetadata,
   type PluginOptions
 } from "@mincho-js/babel";
@@ -67,20 +72,7 @@ function appendStaticCssEvalResultMetadata(
     cacheKeys,
     createStaticCssEvalCacheKeyKey
   );
-  appendUniqueMetadataItems(
-    metadata.resolvedModuleIds,
-    [
-      ...cacheKeys.flatMap((cacheKey) => cacheKey.resolvedId ?? []),
-      ...dependencies.flatMap((dependency) =>
-        dependency.kind !== "local" &&
-        dependency.kind !== "unresolved" &&
-        dependency.inspected
-          ? [dependency.file]
-          : []
-      )
-    ],
-    (moduleId) => moduleId
-  );
+  appendUniqueResolvedModuleIds(metadata, dependencies, cacheKeys);
 }
 
 function isStaticCssEvalResolutionDependency(
@@ -180,7 +172,10 @@ function cloneStaticCssEvalMetadata(
   return {
     dependencies: metadata.dependencies.map((dependency) => ({
       ...dependency,
-      memberPath: [...dependency.memberPath]
+      memberPath: [...dependency.memberPath],
+      ...(dependency.watchFiles
+        ? { watchFiles: [...dependency.watchFiles] }
+        : {})
     })),
     diagnostics: metadata.diagnostics.map((diagnostic) => ({
       ...diagnostic,
@@ -198,6 +193,7 @@ function cloneStaticCssEvalMetadata(
     cacheKeys: metadata.cacheKeys.map((cacheKey) => ({
       ...cacheKey,
       memberPath: [...cacheKey.memberPath],
+      ...(cacheKey.watchFiles ? { watchFiles: [...cacheKey.watchFiles] } : {}),
       ...(cacheKey.parserOptions
         ? {
             parserOptions: {
@@ -212,74 +208,4 @@ function cloneStaticCssEvalMetadata(
     })),
     resolvedModuleIds: [...metadata.resolvedModuleIds]
   };
-}
-
-function appendUniqueMetadataItems<T>(
-  target: T[],
-  items: readonly T[],
-  createKey: (item: T) => string
-): void {
-  const existingKeys = new Set(target.map(createKey));
-
-  for (const item of items) {
-    const key = createKey(item);
-
-    if (existingKeys.has(key)) {
-      continue;
-    }
-
-    existingKeys.add(key);
-    target.push(item);
-  }
-}
-
-function createStaticCssEvalDependencyKey(
-  dependency: StaticCssEvalMetadataDependency
-): string {
-  return JSON.stringify([
-    dependency.file,
-    dependency.kind,
-    dependency.importer,
-    dependency.specifier,
-    dependency.exportName,
-    dependency.memberPath,
-    dependency.inspected,
-    dependency.contributed
-  ]);
-}
-
-function createStaticCssEvalDiagnosticKey(
-  diagnostic: StaticCssEvalMetadataDiagnostic
-): string {
-  return JSON.stringify([
-    diagnostic.id,
-    diagnostic.code,
-    diagnostic.reason,
-    diagnostic.message,
-    diagnostic.owner.file,
-    diagnostic.owner.start,
-    diagnostic.owner.end,
-    diagnostic.dependency?.file,
-    diagnostic.importPath,
-    diagnostic.exportName,
-    diagnostic.memberPath,
-    diagnostic.importChain
-  ]);
-}
-
-function createStaticCssEvalCacheKeyKey(
-  cacheKey: StaticCssEvalMetadataCacheKey
-): string {
-  return JSON.stringify([
-    cacheKey.importerFile,
-    cacheKey.resolvedFile,
-    cacheKey.exportName,
-    cacheKey.memberPath,
-    cacheKey.sourceHash,
-    cacheKey.sourceVersion,
-    cacheKey.pluginOptionsVersion,
-    cacheKey.resolverOptionsVersion,
-    cacheKey.staticEvalSupportVersion,
-    cacheKey.resolvedId
-  ]);
 }

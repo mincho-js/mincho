@@ -1,10 +1,12 @@
 import { transformSync, types as t } from "@babel/core";
 import type { NodePath, PluginObj } from "@babel/core";
+import { createStaticCssEvalDiagnostic } from "./diagnostics.js";
 import type {
   StaticCssEvalDiagnostic,
   StaticCssEvalExportName,
   StaticCssEvalParserOptionsKey,
-  StaticCssEvalSourceLocation
+  StaticCssEvalSourceLocation,
+  StaticCssEvalUnsupportedReason
 } from "./types.js";
 
 export const STATIC_CSS_MODULE_CACHE_PARSER_VERSION = "babel-core-parser:v2";
@@ -256,7 +258,10 @@ function parseStaticCssModule(
     configFile: false,
     babelrc: false,
     parserOpts: {
-      plugins: parserOptions.plugins
+      plugins: [
+        ...(parserOptions.jsx ? (["jsx"] as const) : []),
+        ...(parserOptions.typescript ? (["typescript"] as const) : [])
+      ]
     },
     plugins: [captureProgramPathPlugin]
   });
@@ -312,7 +317,9 @@ function parseStaticCssModule(
 function getStaticCssModuleParserOptions(
   filePath: string
 ): StaticCssEvalParserOptionsKey {
-  const typescript = /\.[cm]?tsx?$/.test(filePath);
+  const typescript =
+    /\.[cm]?tsx?$/.test(filePath) ||
+    /^(?:\0?virtual:|pkg:|data:)/.test(filePath);
   const jsx = /\.[jt]sx$/.test(filePath);
 
   return {
@@ -425,6 +432,7 @@ function collectDefaultExportEntry(
       id: "STATIC_CSS_EVAL_DYNAMIC_EXPRESSION_UNSUPPORTED",
       owner: { file: state.file },
       detail: "default export declaration is not a static expression",
+      reason: "runtime-dynamic-value",
       exportName: "default"
     })
   });
@@ -533,8 +541,9 @@ function collectDirectNamedReexportEntries(
           source: declaration.source?.value,
           diagnostic: createUnsupportedDiagnostic({
             id: "STATIC_CSS_EVAL_NAMESPACE_UNSUPPORTED",
-            owner: { file: declaration.source?.value ?? "<unknown>" },
+            owner: { file: state.file },
             detail: `namespace re-export "${exportName}" is unsupported`,
+            reason: "unsupported-namespace-reexport",
             exportName,
             importPath: declaration.source?.value
           })
@@ -655,24 +664,21 @@ function createUnsupportedDiagnostic(options: {
   id: NonNullable<StaticCssEvalDiagnostic["id"]>;
   owner: StaticCssEvalSourceLocation;
   detail: string;
+  reason: StaticCssEvalUnsupportedReason;
   dependency?: StaticCssEvalSourceLocation;
   exportName?: StaticCssEvalExportName;
   importPath?: string;
 }): StaticCssEvalDiagnostic {
-  return {
+  return createStaticCssEvalDiagnostic({
     id: options.id,
     code: "unsupported-source",
-    message: `Cannot statically evaluate css prop value: ${options.detail}`,
-    reason: "reexport-or-barrel",
+    reason: options.reason,
+    detail: options.detail,
     owner: options.owner,
-    ...(options.dependency ? { dependency: options.dependency } : {}),
-    ...(options.exportName !== undefined
-      ? { exportName: options.exportName }
-      : {}),
-    ...(options.importPath !== undefined
-      ? { importPath: options.importPath }
-      : {})
-  };
+    dependency: options.dependency,
+    exportName: options.exportName,
+    importPath: options.importPath
+  });
 }
 
 function isStaticCssModuleExportDeclaration(
@@ -1038,8 +1044,8 @@ if (import.meta.vitest) {
           diagnostic: expect.objectContaining({
             id: "STATIC_CSS_EVAL_NAMESPACE_UNSUPPORTED",
             code: "unsupported-source",
-            reason: "reexport-or-barrel",
-            owner: { file: "./button" },
+            reason: "unsupported-namespace-reexport",
+            owner: { file: stylesId },
             importPath: "./button",
             exportName: "ns"
           })

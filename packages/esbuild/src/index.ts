@@ -10,18 +10,20 @@ import {
   type BabelOptions,
   babelTransform,
   compile,
-  createUnsupportedStaticCssEvalResolution as createSharedUnsupportedStaticCssEvalResolution,
-  isUnsupportedStaticCssEvalResolutionId as sharedIsUnsupportedStaticCssEvalResolutionId,
   internalCollectStaticCssEvalDependencyIds as collectStaticCssEvalDependencyIds,
   internalCreateStaticCssEvalSourceIdentity as createStaticCssEvalSourceIdentity,
   internalGetExistingStaticCssEvalRealpath as getExistingRealpath,
   internalGetExistingStaticCssEvalStat as getExistingStat,
   internalGetStaticCssEvalRealpathOrResolvedPath as getRealpathOrResolvedPath,
   internalHasStaticCssEvalNodeModulesSegment as hasNodeModulesSegment,
+  internalIsMissingStaticCssEvalFileSystemEntryError as isMissingFileSystemEntryError,
   internalIsProjectLocalStaticCssEvalImportPath as isProjectLocalImportPath,
+  internalIsStaticCssEvalStaticDataFile as isStaticCssEvalStaticDataFile,
   internalIsStaticCssEvalPathInsideRoot as isPathInsideRoot,
   internalIsVirtualStaticCssEvalId as isVirtualStaticCssEvalId,
   internalNormalizeStaticCssEvalFileId as normalizeStaticCssEvalFileId,
+  internalPrepareStaticCssEvalStaticDataSource as prepareStaticCssEvalStaticDataSource,
+  internalStaticCssEvalExternalResolutionPrefix as externalStaticCssEvalResolutionPrefix,
   processDefineRulesPresetRegistryFile,
   runDefineRulesPresetRegistryStep
 } from "@mincho-js/integration";
@@ -39,6 +41,10 @@ interface StaticCssEvalSourceResolution {
   sourceHash?: string;
   version?: string | number;
   sourceIdentity?: StaticCssEvalSourceIdentity;
+  sourceKind?: StaticCssEvalSourceKind;
+  sourceOrigin?: StaticCssEvalSourceOrigin;
+  unsupportedReason?: StaticCssEvalSourceUnsupportedReason;
+  watchFiles?: readonly string[];
   resolverKind?: StaticCssEvalResolverKind;
 }
 
@@ -52,6 +58,10 @@ interface StaticCssEvalLoadedSource {
   sourceHash?: string;
   version?: string | number;
   sourceIdentity?: StaticCssEvalSourceIdentity;
+  sourceKind?: StaticCssEvalSourceKind;
+  sourceOrigin?: StaticCssEvalSourceOrigin;
+  unsupportedReason?: StaticCssEvalSourceUnsupportedReason;
+  watchFiles?: readonly string[];
   resolverKind?: StaticCssEvalResolverKind;
 }
 
@@ -67,6 +77,29 @@ type StaticCssEvalResolverKind =
   | "esbuild"
   | "test"
   | (string & {});
+
+type StaticCssEvalSourceKind =
+  | "project-source"
+  | "package-source"
+  | "provider-virtual"
+  | "static-data"
+  | "external-no-source"
+  | "unresolved"
+  | "unsupported-source-shape";
+
+type StaticCssEvalSourceOrigin =
+  | "project"
+  | "package"
+  | "provider"
+  | "data"
+  | "external"
+  | "unresolved"
+  | "unsupported";
+
+type StaticCssEvalSourceUnsupportedReason =
+  | "external-no-source"
+  | "unresolved"
+  | "unsupported-source-shape";
 
 interface StaticCssEvalSourceProvider {
   resolve(
@@ -111,12 +144,20 @@ interface StaticCssEvalMetadata {
 interface StaticCssEvalResolutionDependency {
   file: string;
   kind?: string;
+  sourceKind?: StaticCssEvalSourceKind;
+  sourceOrigin?: StaticCssEvalSourceOrigin;
+  unsupportedReason?: StaticCssEvalSourceUnsupportedReason;
+  watchFiles?: readonly string[];
 }
 
 interface StaticCssEvalResolvedDependency {
   resolvedFile: string;
   canonicalModuleId?: string;
   normalizedPathKey?: string;
+  sourceKind?: StaticCssEvalSourceKind;
+  sourceOrigin?: StaticCssEvalSourceOrigin;
+  unsupportedReason?: StaticCssEvalSourceUnsupportedReason;
+  watchFiles?: readonly string[];
 }
 
 interface StaticCssEvalDiagnostic {
@@ -130,6 +171,13 @@ interface StaticCssEvalCacheKey {
   importerFile?: string;
   resolvedFile?: string;
   resolvedId?: string;
+  canonicalModuleId?: string;
+  normalizedPathKey?: string;
+  sourceKind?: StaticCssEvalSourceKind;
+  sourceOrigin?: StaticCssEvalSourceOrigin;
+  unsupportedReason?: StaticCssEvalSourceUnsupportedReason;
+  watchFiles?: readonly string[];
+  parserVersion?: string | number;
 }
 
 type StaticCssEvalResolutionCache = Map<
@@ -141,6 +189,10 @@ type StaticCssEvalLoadedSourceCache = Map<
   string,
   StaticCssEvalLoadedSource | null
 >;
+
+const unsupportedStaticCssEvalResolutionPrefix =
+  "virtual:mincho-static-css-eval-unsupported:";
+const esbuildStaticCssEvalModuleIdPrefix = "esbuild:";
 
 function getScriptLoader(path: string): ScriptLoader {
   if (/\.tsx$/i.test(path)) return "tsx";
@@ -203,10 +255,6 @@ async function resolveEsbuildStaticCssEvalImport(options: {
   importPath: string;
   rootRealpath: Promise<string>;
 }): Promise<StaticCssEvalSourceResolution | null> {
-  if (!isProjectLocalImportPath(options.importPath)) {
-    return createUnsupportedStaticCssEvalResolution(options.importPath);
-  }
-
   const resolved = await resolveEsbuildImport(
     options.build,
     options.importerId,
@@ -217,55 +265,24 @@ async function resolveEsbuildStaticCssEvalImport(options: {
     return null;
   }
 
+  if (resolved.external) {
+    return createExternalStaticCssEvalResolution(resolved, options.importPath);
+  }
+
   if (
-    resolved.external ||
-    (resolved.namespace !== "" && resolved.namespace !== "file") ||
+    !isEsbuildStaticCssEvalFileNamespace(resolved.namespace) ||
     isVirtualStaticCssEvalId(resolved.path)
   ) {
-    return createUnsupportedStaticCssEvalResolution(options.importPath);
+    return createUnsupportedStaticCssEvalResolution(
+      options.importPath,
+      createEsbuildStaticCssEvalCanonicalModuleId(resolved)
+    );
   }
 
-  const canonicalModuleId = normalizeStaticCssEvalFileId(resolved.path);
-  const resolvedId = canonicalModuleId;
-  const resolvedRealpath = await getExistingRealpath(resolvedId);
-
-  if (!resolvedRealpath) {
-    return null;
-  }
-
-  const rootRealpath = await options.rootRealpath;
-
-  if (
-    hasNodeModulesSegment(resolvedRealpath) ||
-    !isPathInsideRoot(rootRealpath, resolvedRealpath)
-  ) {
-    return createUnsupportedStaticCssEvalResolution(options.importPath);
-  }
-
-  let stat: fs.Stats;
-
-  try {
-    stat = await fs.promises.stat(resolvedRealpath);
-  } catch (error) {
-    if (isMissingFileSystemEntryError(error)) {
-      return null;
-    }
-
-    throw error;
-  }
-  const sourceIdentity = createStaticCssEvalSourceIdentity(stat);
-
-  return {
-    id: resolvedRealpath,
-    resolvedFile: resolvedRealpath,
-    canonicalModuleId,
-    normalizedPathKey: resolvedRealpath,
-    realpath: resolvedRealpath,
-    sourceHash: sourceIdentity.sourceHash,
-    version: sourceIdentity.version,
-    sourceIdentity,
-    resolverKind: "esbuild"
-  };
+  return createEsbuildStaticCssEvalFileResolution(
+    resolved,
+    await options.rootRealpath
+  );
 }
 
 async function resolveEsbuildImport(
@@ -318,28 +335,42 @@ async function loadEsbuildStaticCssEvalSource(options: {
       normalizedPathKey: options.ownerId,
       ...(ownerRealpath ? { realpath: ownerRealpath } : {}),
       ...(sourceIdentity ? { sourceIdentity } : {}),
+      sourceKind: "project-source",
+      sourceOrigin: "project",
+      ...(ownerRealpath ? { watchFiles: [ownerRealpath] } : {}),
       resolverKind: "esbuild"
     };
   }
 
   if (isUnsupportedStaticCssEvalResolutionId(options.id)) {
-    return { sourceText: "export {};", source: "export {};" };
+    return {
+      sourceText: "export {};",
+      source: "export {};",
+      sourceKind: "unsupported-source-shape",
+      sourceOrigin: "unsupported",
+      unsupportedReason: "unsupported-source-shape",
+      resolverKind: "esbuild"
+    };
   }
 
-  if (isVirtualStaticCssEvalId(options.id) || hasNodeModulesSegment(fileId)) {
+  if (isExternalStaticCssEvalResolutionId(options.id)) {
     return null;
   }
 
-  const realpath = await getExistingRealpath(fileId);
+  const loadId = parseEsbuildStaticCssEvalLoadId(options.id);
+
+  if (!isEsbuildStaticCssEvalFileNamespace(loadId.namespace)) {
+    return null;
+  }
+
+  const loadFileId = normalizeStaticCssEvalFileId(loadId.path);
+  const realpath = await getExistingRealpath(loadFileId);
+
+  if (!realpath) {
+    return null;
+  }
+
   const rootRealpath = await options.rootRealpath;
-
-  if (
-    !realpath ||
-    hasNodeModulesSegment(realpath) ||
-    !isPathInsideRoot(rootRealpath, realpath)
-  ) {
-    return null;
-  }
 
   let source: string;
   let stat: fs.Stats;
@@ -356,39 +387,305 @@ async function loadEsbuildStaticCssEvalSource(options: {
 
     throw error;
   }
-  const sourceIdentity = createStaticCssEvalSourceIdentity(stat);
+  const metadata = createEsbuildStaticCssEvalFileMetadata({
+    realpath,
+    rootRealpath,
+    stat,
+    suffix: loadId.suffix
+  });
+  const staticDataSource = new URLSearchParams(loadId.suffix.slice(1)).has(
+    "url"
+  )
+    ? getEsbuildStaticCssEvalUrlSource(realpath, rootRealpath)
+    : source;
+  const sourceText = prepareStaticCssEvalStaticDataSource(
+    metadata.normalizedPathKey,
+    staticDataSource
+  );
 
   return {
-    sourceText: source,
-    source,
-    resolvedFile: realpath,
-    canonicalModuleId: fileId,
-    normalizedPathKey: realpath,
+    sourceText,
+    source: sourceText,
+    ...metadata
+  };
+}
+
+function getEsbuildStaticCssEvalUrlSource(
+  realpath: string,
+  rootRealpath: string
+): string {
+  const normalizedRealpath = normalizeStaticCssEvalFileId(realpath);
+  const normalizedRootRealpath = normalizeStaticCssEvalFileId(rootRealpath);
+
+  if (isPathInsideRoot(normalizedRootRealpath, normalizedRealpath)) {
+    return `/${normalizedRealpath
+      .slice(normalizedRootRealpath.length)
+      .replace(/^\/+/, "")}`;
+  }
+
+  return `/@fs/${normalizedRealpath.replace(/^\/+/, "")}`;
+}
+
+interface EsbuildStaticCssEvalFileMetadataOptions {
+  realpath: string;
+  rootRealpath: string;
+  stat: fs.Stats;
+  suffix: string;
+}
+
+interface EsbuildStaticCssEvalLoadId {
+  namespace: string;
+  path: string;
+  suffix: string;
+}
+
+async function createEsbuildStaticCssEvalFileResolution(
+  resolved: ResolveResult,
+  rootRealpath: string
+): Promise<StaticCssEvalSourceResolution | null> {
+  const fileId = normalizeStaticCssEvalFileId(resolved.path);
+  const realpath = await getExistingRealpath(fileId);
+
+  if (!realpath) {
+    return null;
+  }
+
+  const stat = await getExistingStat(realpath);
+
+  if (!stat) {
+    return null;
+  }
+
+  const metadata = createEsbuildStaticCssEvalFileMetadata({
+    realpath,
+    rootRealpath,
+    stat,
+    suffix: getEsbuildStaticCssEvalResolveSuffix(resolved)
+  });
+
+  return {
+    id: metadata.resolvedFile,
+    ...metadata
+  };
+}
+
+function createEsbuildStaticCssEvalFileMetadata({
+  realpath,
+  rootRealpath,
+  stat,
+  suffix
+}: EsbuildStaticCssEvalFileMetadataOptions): Required<
+  Pick<
+    StaticCssEvalSourceResolution,
+    | "canonicalModuleId"
+    | "normalizedPathKey"
+    | "realpath"
+    | "resolvedFile"
+    | "resolverKind"
+    | "sourceHash"
+    | "sourceIdentity"
+    | "sourceKind"
+    | "sourceOrigin"
+    | "version"
+    | "watchFiles"
+  >
+> {
+  const sourceIdentity = createStaticCssEvalSourceIdentity(stat);
+  const sourceKind = getEsbuildStaticCssEvalFileSourceKind({
+    moduleId: `${realpath}${suffix}`,
+    realpath,
+    rootRealpath
+  });
+  const querySuffix = sourceKind === "static-data" ? suffix : "";
+  const resolvedFile = `${realpath}${querySuffix}`;
+
+  return {
+    resolvedFile,
+    canonicalModuleId: resolvedFile,
+    normalizedPathKey: resolvedFile,
     realpath,
     sourceHash: sourceIdentity.sourceHash,
     version: sourceIdentity.version,
     sourceIdentity,
+    sourceKind,
+    sourceOrigin: getStaticCssEvalSourceOrigin(sourceKind),
+    watchFiles: [realpath],
     resolverKind: "esbuild"
   };
 }
 
+function getEsbuildStaticCssEvalFileSourceKind({
+  moduleId,
+  realpath,
+  rootRealpath
+}: {
+  moduleId: string;
+  realpath: string;
+  rootRealpath: string;
+}): StaticCssEvalSourceKind {
+  if (isStaticCssEvalStaticDataFile(moduleId, realpath)) {
+    return "static-data";
+  }
+
+  return hasNodeModulesSegment(realpath) ||
+    !isPathInsideRoot(rootRealpath, realpath)
+    ? "package-source"
+    : "project-source";
+}
+
+function getStaticCssEvalSourceOrigin(
+  sourceKind: StaticCssEvalSourceKind
+): StaticCssEvalSourceOrigin {
+  switch (sourceKind) {
+    case "project-source":
+      return "project";
+    case "package-source":
+      return "package";
+    case "provider-virtual":
+      return "provider";
+    case "static-data":
+      return "data";
+    case "external-no-source":
+      return "external";
+    case "unresolved":
+      return "unresolved";
+    case "unsupported-source-shape":
+      return "unsupported";
+    default:
+      return assertNeverStaticCssEvalSourceKind(sourceKind);
+  }
+}
+
+function assertNeverStaticCssEvalSourceKind(value: never): never {
+  throw new TypeError(`Unexpected static css eval source kind: ${value}`);
+}
+
+function createEsbuildStaticCssEvalCanonicalModuleId(
+  resolved: ResolveResult
+): string {
+  return createEsbuildStaticCssEvalModuleId({
+    namespace: normalizeEsbuildStaticCssEvalNamespace(resolved.namespace),
+    path: resolved.path,
+    suffix: getEsbuildStaticCssEvalResolveSuffix(resolved)
+  });
+}
+
+function createEsbuildStaticCssEvalModuleId({
+  namespace,
+  path,
+  suffix
+}: EsbuildStaticCssEvalLoadId): string {
+  return `${esbuildStaticCssEvalModuleIdPrefix}${namespace}:${path}${suffix}`;
+}
+
+function parseEsbuildStaticCssEvalLoadId(
+  id: string
+): EsbuildStaticCssEvalLoadId {
+  if (!id.startsWith(esbuildStaticCssEvalModuleIdPrefix)) {
+    return createEsbuildStaticCssEvalLoadId("file", id);
+  }
+
+  const payload = id.slice(esbuildStaticCssEvalModuleIdPrefix.length);
+  const namespaceEnd = payload.indexOf(":");
+
+  if (namespaceEnd === -1) {
+    return createEsbuildStaticCssEvalLoadId("file", payload);
+  }
+
+  return createEsbuildStaticCssEvalLoadId(
+    payload.slice(0, namespaceEnd),
+    payload.slice(namespaceEnd + 1)
+  );
+}
+
+function createEsbuildStaticCssEvalLoadId(
+  namespace: string,
+  pathWithSuffix: string
+): EsbuildStaticCssEvalLoadId {
+  return {
+    namespace,
+    path: stripStaticCssEvalQuery(pathWithSuffix),
+    suffix: getStaticCssEvalQuerySuffix(pathWithSuffix)
+  };
+}
+
+function getEsbuildStaticCssEvalResolveSuffix(resolved: ResolveResult): string {
+  return resolved.suffix || getStaticCssEvalQuerySuffix(resolved.path);
+}
+
+function normalizeEsbuildStaticCssEvalNamespace(namespace: string): string {
+  return namespace === "" ? "file" : namespace;
+}
+
+function isEsbuildStaticCssEvalFileNamespace(namespace: string): boolean {
+  return namespace === "" || namespace === "file";
+}
+
+function getStaticCssEvalQuerySuffix(sourceId: string): string {
+  const queryIndex = sourceId.indexOf("?");
+
+  if (queryIndex === -1) {
+    return "";
+  }
+
+  const hashIndex = sourceId.indexOf("#", queryIndex);
+
+  return sourceId.slice(queryIndex, hashIndex === -1 ? undefined : hashIndex);
+}
+
+function stripStaticCssEvalQuery(sourceId: string): string {
+  const queryIndex = sourceId.search(/[?#]/);
+  return queryIndex === -1 ? sourceId : sourceId.slice(0, queryIndex);
+}
+
 function createUnsupportedStaticCssEvalResolution(
+  importPath: string,
+  canonicalModuleId?: string
+): StaticCssEvalSourceResolution {
+  const id = `${unsupportedStaticCssEvalResolutionPrefix}${encodeURIComponent(
+    importPath
+  )}`;
+
+  return {
+    id,
+    resolvedFile: id,
+    canonicalModuleId: canonicalModuleId ?? id,
+    normalizedPathKey: id,
+    sourceKind: "unsupported-source-shape",
+    sourceOrigin: "unsupported",
+    unsupportedReason: "unsupported-source-shape",
+    resolverKind: "esbuild"
+  };
+}
+
+function createExternalStaticCssEvalResolution(
+  resolved: ResolveResult,
   importPath: string
 ): StaticCssEvalSourceResolution {
-  return createSharedUnsupportedStaticCssEvalResolution(importPath);
+  const externalId = `${externalStaticCssEvalResolutionPrefix}${encodeURIComponent(
+    resolved.path || importPath
+  )}`;
+
+  return {
+    id: externalId,
+    resolvedFile: externalId,
+    canonicalModuleId: createEsbuildStaticCssEvalCanonicalModuleId(resolved),
+    normalizedPathKey: externalId,
+    sourceKind: "external-no-source",
+    sourceOrigin: "external",
+    unsupportedReason: "external-no-source",
+    resolverKind: "esbuild"
+  };
 }
 
 function isUnsupportedStaticCssEvalResolutionId(id: string): boolean {
-  return sharedIsUnsupportedStaticCssEvalResolutionId(id);
+  return id.startsWith(unsupportedStaticCssEvalResolutionPrefix);
 }
 
-function isMissingFileSystemEntryError(error: unknown): boolean {
-  return (
-    error instanceof Error &&
-    "code" in error &&
-    (error.code === "ENOENT" || error.code === "ENOTDIR")
-  );
+function isExternalStaticCssEvalResolutionId(id: string): boolean {
+  return id.startsWith(externalStaticCssEvalResolutionPrefix);
 }
+
 function getWatchableStaticCssEvalDependencyFiles(
   rootRealpath: string,
   staticCssEval: StaticCssEvalMetadata | undefined,
@@ -406,12 +703,7 @@ function getWatchableStaticCssEvalDependencyFiles(
   )) {
     const fileId = normalizeStaticCssEvalFileId(dependencyFile, rootRealpath);
 
-    if (
-      fileId === ownerFileId ||
-      isVirtualStaticCssEvalId(fileId) ||
-      hasNodeModulesSegment(fileId) ||
-      !isPathInsideRoot(rootRealpath, fileId)
-    ) {
+    if (fileId === ownerFileId || !fs.existsSync(fileId)) {
       continue;
     }
 
@@ -1163,21 +1455,6 @@ if (import.meta.vitest) {
     `;
   }
 
-  function createImportedCssPropStaticRuleEntrySource(
-    importPath = "./styles",
-    importedName = "button"
-  ): string {
-    return `
-      import { ${importedName} } from "${importPath}";
-
-      function App() {
-        return <div css={{ color: ${importedName} }} />;
-      }
-
-      export { App };
-    `;
-  }
-
   function createImportedStyleSource(color: string): string {
     return `export const button = { color: "${color}" } as const;`;
   }
@@ -1272,6 +1549,83 @@ if (import.meta.vitest) {
       srcRoot,
       stylesPath,
       styleSource
+    };
+  }
+
+  function createMappedEsbuildResolve(
+    resolutions: Record<string, ResolveResult>
+  ): PluginBuild["resolve"] {
+    return async (source, options) => {
+      const importer = options?.importer ?? "";
+      const mappedResolution =
+        resolutions[`${importer}\0${source}`] ??
+        resolutions[source] ??
+        resolutions[stripStaticCssEvalQuery(source)];
+
+      if (mappedResolution) {
+        return mappedResolution;
+      }
+
+      const resolvedPath = resolveStaticCssEvalImportFromFileSystem(
+        importer,
+        source
+      );
+
+      return resolvedPath
+        ? createStaticCssEvalResolveResult(resolvedPath)
+        : createStaticCssEvalResolveResult("");
+    };
+  }
+
+  function createSuffixedEsbuildResolveResult(
+    path: string,
+    suffix: string
+  ): ResolveResult {
+    return {
+      ...createStaticCssEvalResolveResult(path),
+      suffix
+    };
+  }
+
+  async function loadCssPropSidecarSourceFromHarness(
+    harness: ReturnType<typeof createBuildHarness>,
+    entryPath: string
+  ): Promise<{ scriptSource: string; sidecarSource: string }> {
+    const compileSpy = vi
+      .spyOn(integrationHelpers, "compile")
+      .mockResolvedValue({ source: "compiled static css" } as Awaited<
+        ReturnType<typeof compile>
+      >);
+    vi.spyOn(
+      integrationHelpers,
+      "processDefineRulesPresetRegistryFile"
+    ).mockResolvedValue(createRegistryResult("registered static css"));
+
+    const scriptLoadResult = (await harness.loadScript({
+      path: entryPath
+    })) as ScriptLoadResult;
+    const { file: sidecarFile } = extractCssPropSidecarImport(
+      scriptLoadResult.contents
+    );
+    const resolveResult = (await harness.resolveExtractedCss({
+      path: sidecarFile,
+      importer: entryPath,
+      pluginData: scriptLoadResult.pluginData
+    })) as ResolvedExtractedCssResult;
+    await harness.loadExtractedCss({
+      path: resolveResult.path,
+      pluginData: resolveResult.pluginData
+    });
+
+    const compileOptions = compileSpy.mock.calls[0]?.[0];
+
+    if (compileOptions == null) {
+      throw new Error("Expected extracted css sidecar to be compiled");
+    }
+
+    return {
+      scriptSource: scriptLoadResult.contents,
+      sidecarSource: compileOptions.contents
     };
   }
 
@@ -1739,20 +2093,27 @@ if (import.meta.vitest) {
       }
     });
 
-    it("static css eval shared helpers ignore virtual node_modules and outside-root dependencies for esbuild", async () => {
+    it("static css eval shared helpers watch real package and outside-root dependencies for esbuild", async () => {
       const fixture = await createImportedCssPropEsbuildFixture(
         "static-css-eval-shared-helper-boundary-"
       );
 
       try {
-        const rootRealpath = normalizeStaticCssEvalFileId(
-          await fs.promises.realpath(fixture.root)
-        );
         const stylesRealpath = normalizeStaticCssEvalFileId(
           await fs.promises.realpath(fixture.stylesPath)
         );
         const outsideRootFile = normalizeStaticCssEvalFileId(
           join(process.cwd(), "package.json")
+        );
+        const packagePath = join(fixture.root, "node_modules/pkg/styles.ts");
+        await fs.promises.mkdir(dirname(packagePath), { recursive: true });
+        await fs.promises.writeFile(
+          packagePath,
+          createImportedStyleSource("blue"),
+          "utf8"
+        );
+        const packageRealpath = normalizeStaticCssEvalFileId(
+          await fs.promises.realpath(packagePath)
         );
 
         vi.spyOn(integrationHelpers, "babelTransform").mockResolvedValue({
@@ -1762,7 +2123,7 @@ if (import.meta.vitest) {
             dependencyFiles: [
               stylesRealpath,
               "virtual:mincho-static-css-eval-test",
-              `${rootRealpath}/node_modules/pkg/styles.ts`,
+              packageRealpath,
               outsideRootFile
             ]
           }
@@ -1776,7 +2137,9 @@ if (import.meta.vitest) {
           path: fixture.entryPath
         })) as ScriptLoadResult;
 
-        expect(scriptLoadResult.watchFiles).toEqual([stylesRealpath]);
+        expect(new Set(scriptLoadResult.watchFiles)).toEqual(
+          new Set([stylesRealpath, packageRealpath, outsideRootFile])
+        );
       } finally {
         await fs.promises.rm(fixture.root, { force: true, recursive: true });
       }
@@ -2076,6 +2439,7 @@ if (import.meta.vitest) {
         const stylesRealpath = normalizeStaticCssEvalFileId(
           await fs.promises.realpath(fixture.stylesPath)
         );
+        const canonicalModuleId = stylesRealpath;
         const resolution = captured.resolution;
         const loadedSource = captured.loadedSource;
 
@@ -2086,10 +2450,10 @@ if (import.meta.vitest) {
         }
 
         expect(resolution).toMatchObject({
-          id: stylesRealpath,
-          resolvedFile: stylesRealpath,
-          canonicalModuleId: stylesRealpath,
-          normalizedPathKey: stylesRealpath,
+          id: canonicalModuleId,
+          resolvedFile: canonicalModuleId,
+          canonicalModuleId,
+          normalizedPathKey: canonicalModuleId,
           realpath: stylesRealpath,
           sourceIdentity: {
             sourceHash: expect.stringMatching(/^mtime:/)
@@ -2098,9 +2462,9 @@ if (import.meta.vitest) {
         });
         expect(loadedSource).toMatchObject({
           sourceText: fixture.styleSource,
-          resolvedFile: stylesRealpath,
-          canonicalModuleId: stylesRealpath,
-          normalizedPathKey: stylesRealpath,
+          resolvedFile: canonicalModuleId,
+          canonicalModuleId,
+          normalizedPathKey: canonicalModuleId,
           realpath: stylesRealpath,
           sourceIdentity: {
             sourceHash: expect.stringMatching(/^mtime:/)
@@ -2148,14 +2512,21 @@ if (import.meta.vitest) {
       const fixture = await createImportedCssPropEsbuildFixture(
         "static-css-eval-watch-files-"
       );
-      const rootRealpath = normalizeStaticCssEvalFileId(
-        await fs.promises.realpath(fixture.root)
-      );
       const stylesRealpath = normalizeStaticCssEvalFileId(
         await fs.promises.realpath(fixture.stylesPath)
       );
       const outsideRootFile = normalizeStaticCssEvalFileId(
         join(process.cwd(), "package.json")
+      );
+      const packagePath = join(fixture.root, "node_modules/pkg/styles.ts");
+      await fs.promises.mkdir(dirname(packagePath), { recursive: true });
+      await fs.promises.writeFile(
+        packagePath,
+        createImportedStyleSource("blue"),
+        "utf8"
+      );
+      const packageRealpath = normalizeStaticCssEvalFileId(
+        await fs.promises.realpath(packagePath)
       );
       let resolveCalls = 0;
       const loadedStyleSources: string[] = [];
@@ -2203,8 +2574,15 @@ if (import.meta.vitest) {
               dependencyFiles: [
                 stylesRealpath,
                 "virtual:mincho-static-css-eval-test",
-                `${rootRealpath}/node_modules/pkg/styles.ts`,
                 outsideRootFile
+              ],
+              resolvedDependencies: [
+                {
+                  resolvedFile: "virtual:mincho-static-css-eval-provider",
+                  canonicalModuleId: "virtual:mincho-static-css-eval-provider",
+                  normalizedPathKey: "virtual:mincho-static-css-eval-provider",
+                  watchFiles: [packageRealpath]
+                }
               ]
             }
           } as BabelTransformResult;
@@ -2236,7 +2614,9 @@ if (import.meta.vitest) {
           path: fixture.entryPath
         })) as ScriptLoadResult;
 
-        expect(firstLoadResult.watchFiles).toEqual([stylesRealpath]);
+        expect(new Set(firstLoadResult.watchFiles)).toEqual(
+          new Set([stylesRealpath, packageRealpath, outsideRootFile])
+        );
         expect(resolveCalls).toBe(1);
         expect(loadedStyleSources).toEqual([fixture.styleSource]);
 
@@ -2252,7 +2632,9 @@ if (import.meta.vitest) {
           path: fixture.entryPath
         })) as ScriptLoadResult;
 
-        expect(secondLoadResult.watchFiles).toEqual([stylesRealpath]);
+        expect(new Set(secondLoadResult.watchFiles)).toEqual(
+          new Set([stylesRealpath, packageRealpath, outsideRootFile])
+        );
         expect(resolveCalls).toBe(2);
         expect(loadedStyleSources).toEqual([
           fixture.styleSource,
@@ -2647,132 +3029,493 @@ if (import.meta.vitest) {
       }
     }, 20000);
 
-    it("refuses virtual, package, and node_modules static css evaluation at esbuild boundaries", async () => {
-      const fallbackFixture = await createJsxCssPropFixture(
-        "jsx-css-prop-esbuild-boundary-fallback-",
-        `
-          import { button as virtualButton } from "virtual:styles";
-          import { button as packageButton } from "pkg/styles";
-          import { button as nodeModuleButton } from "./node_modules/pkg/styles";
+    it("supports static css eval package named default and namespace imports from esbuild file namespace packages", async () => {
+      const fixture = await createImportedCssPropEsbuildFixture(
+        "static-css-eval-package-file-namespace-",
+        {
+          entrySource: `
+            import defaultButton, { button } from "@pkg/styles";
+            import * as styles from "@pkg/styles";
 
-          function App() {
-            return <>
-              <div css={virtualButton} />
-              <div css={packageButton} />
-              <div css={nodeModuleButton} />
-            </>;
-          }
-        `
+            function App() {
+              return <>
+                <div css={button} />
+                <div css={defaultButton} />
+                <div css={styles.card} />
+              </>;
+            }
+
+            export { App };
+          `
+        }
       );
-      const staticRuleFixture = await createJsxCssPropFixture(
-        "jsx-css-prop-esbuild-boundary-static-rule-",
-        createImportedCssPropStaticRuleEntrySource(
-          "./node_modules/pkg/styles",
-          "button"
+      const packageRoot = join(fixture.root, "node_modules/@pkg/styles");
+      const packageIndexPath = join(packageRoot, "index.ts");
+      await spyOnSourceBabelTransform();
+
+      try {
+        await fs.promises.mkdir(packageRoot, { recursive: true });
+        await fs.promises.writeFile(
+          packageIndexPath,
+          `
+            export const button = { color: "red" } as const;
+            export const card = { color: "green" } as const;
+            export default { color: "orange" } as const;
+          `,
+          "utf8"
+        );
+
+        const harness = createBuildHarness({
+          absWorkingDir: fixture.root,
+          plugin: minchoEsbuildPlugin({ jsxCssProp: true }),
+          resolve: createMappedEsbuildResolve({
+            "@pkg/styles": createStaticCssEvalResolveResult(packageIndexPath)
+          })
+        });
+        const { scriptSource, sidecarSource } =
+          await loadCssPropSidecarSourceFromHarness(harness, fixture.entryPath);
+
+        expect(scriptSource).not.toContain("css={button}");
+        expect(sidecarSource).toContain('color: "red"');
+        expect(sidecarSource).toContain('color: "orange"');
+        expect(sidecarSource).toContain('color: "green"');
+      } finally {
+        await fs.promises.rm(fixture.root, { force: true, recursive: true });
+      }
+    });
+
+    it("supports static css eval package export-star barrels resolved by esbuild", async () => {
+      const fixture = await createImportedCssPropEsbuildFixture(
+        "static-css-eval-package-export-star-",
+        {
+          entrySource: createImportedCssPropEntrySource("@pkg/styles")
+        }
+      );
+      const packageRoot = join(fixture.root, "node_modules/@pkg/styles");
+      const packageIndexPath = join(packageRoot, "index.ts");
+      const packageButtonPath = join(packageRoot, "button.ts");
+      await spyOnSourceBabelTransform();
+
+      try {
+        await fs.promises.mkdir(packageRoot, { recursive: true });
+        await fs.promises.writeFile(
+          packageIndexPath,
+          'export * from "./button";',
+          "utf8"
+        );
+        await fs.promises.writeFile(
+          packageButtonPath,
+          createImportedStyleSource("blue"),
+          "utf8"
+        );
+
+        const harness = createBuildHarness({
+          absWorkingDir: fixture.root,
+          plugin: minchoEsbuildPlugin({ jsxCssProp: true }),
+          resolve: createMappedEsbuildResolve({
+            "@pkg/styles": createStaticCssEvalResolveResult(packageIndexPath)
+          })
+        });
+        const { sidecarSource } = await loadCssPropSidecarSourceFromHarness(
+          harness,
+          fixture.entryPath
+        );
+
+        expect(sidecarSource).toContain('color: "blue"');
+      } finally {
+        await fs.promises.rm(fixture.root, { force: true, recursive: true });
+      }
+    });
+
+    it("supports static css eval json default and named imports from esbuild packages", async () => {
+      const fixture = await createImportedCssPropEsbuildFixture(
+        "static-css-eval-json-package-",
+        {
+          entrySource: `
+            import jsonStyles, { button } from "@pkg/styles/styles.json";
+
+            function App() {
+              return <>
+                <div css={button} />
+                <div css={jsonStyles.card} />
+              </>;
+            }
+          `
+        }
+      );
+      const packageRoot = join(fixture.root, "node_modules/@pkg/styles");
+      const packageJsonPath = join(packageRoot, "styles.json");
+      await spyOnSourceBabelTransform();
+
+      try {
+        await fs.promises.mkdir(packageRoot, { recursive: true });
+        await fs.promises.writeFile(
+          packageJsonPath,
+          JSON.stringify({
+            button: { color: "red" },
+            card: { color: "green" }
+          }),
+          "utf8"
+        );
+
+        const harness = createBuildHarness({
+          absWorkingDir: fixture.root,
+          plugin: minchoEsbuildPlugin({ jsxCssProp: true }),
+          resolve: createMappedEsbuildResolve({
+            "@pkg/styles/styles.json":
+              createStaticCssEvalResolveResult(packageJsonPath)
+          })
+        });
+        const { sidecarSource } = await loadCssPropSidecarSourceFromHarness(
+          harness,
+          fixture.entryPath
+        );
+
+        expect(sidecarSource).toContain('color: "red"');
+        expect(sidecarSource).toContain('color: "green"');
+      } finally {
+        await fs.promises.rm(fixture.root, { force: true, recursive: true });
+      }
+    });
+
+    it("supports static css eval raw string imports from esbuild package suffixes", async () => {
+      const fixture = await createImportedCssPropEsbuildFixture(
+        "static-css-eval-raw-package-",
+        {
+          entrySource: `
+            import rawColor from "@pkg/styles/color.txt?raw";
+
+            function App() {
+              return <div css={{ color: rawColor }} />;
+            }
+          `
+        }
+      );
+      const packageRoot = join(fixture.root, "node_modules/@pkg/styles");
+      const rawColorPath = join(packageRoot, "color.txt");
+      const captured: {
+        loadedSource?: StaticCssEvalLoadedSource | null;
+        resolution?: StaticCssEvalSourceResolution | null;
+      } = {};
+
+      try {
+        await fs.promises.mkdir(packageRoot, { recursive: true });
+        await fs.promises.writeFile(rawColorPath, "red", "utf8");
+        vi.spyOn(integrationHelpers, "babelTransform").mockImplementation(
+          async (
+            _path: string,
+            options: MinchoBabelOptionsWithStaticCssEval = {}
+          ) => {
+            const sourceProvider = options.staticCssEvalSourceProvider;
+
+            if (!sourceProvider) {
+              throw new Error(
+                "Expected esbuild static css eval source provider"
+              );
+            }
+
+            captured.resolution = await sourceProvider.resolve(
+              fixture.entryPath,
+              "@pkg/styles/color.txt?raw"
+            );
+
+            if (!captured.resolution?.normalizedPathKey) {
+              throw new Error("Expected raw data source resolution");
+            }
+
+            captured.loadedSource = await sourceProvider.load(
+              captured.resolution.normalizedPathKey
+            );
+
+            return {
+              code: fixture.entrySource,
+              result: ["", ""]
+            } as BabelTransformResult;
+          }
+        );
+
+        const harness = createBuildHarness({
+          absWorkingDir: fixture.root,
+          plugin: minchoEsbuildPlugin({ jsxCssProp: true }),
+          resolve: createMappedEsbuildResolve({
+            "@pkg/styles/color.txt?raw": createSuffixedEsbuildResolveResult(
+              rawColorPath,
+              "?raw"
+            )
+          })
+        });
+        await harness.loadScript({ path: fixture.entryPath });
+        const rawRealpath = normalizeStaticCssEvalFileId(
+          await fs.promises.realpath(rawColorPath)
+        );
+
+        expect(captured.resolution).toMatchObject({
+          resolvedFile: `${rawRealpath}?raw`,
+          canonicalModuleId: `${rawRealpath}?raw`,
+          normalizedPathKey: `${rawRealpath}?raw`,
+          realpath: rawRealpath,
+          sourceKind: "static-data",
+          sourceOrigin: "data",
+          watchFiles: [rawRealpath],
+          resolverKind: "esbuild"
+        });
+        expect(captured.loadedSource).toMatchObject({
+          sourceText: "red",
+          resolvedFile: `${rawRealpath}?raw`,
+          sourceKind: "static-data",
+          sourceOrigin: "data",
+          watchFiles: [rawRealpath],
+          resolverKind: "esbuild"
+        });
+      } finally {
+        await fs.promises.rm(fixture.root, { force: true, recursive: true });
+      }
+    });
+
+    it("supports static css eval wasm url string imports from esbuild package suffixes", async () => {
+      const fixture = await createImportedCssPropEsbuildFixture(
+        "static-css-eval-wasm-url-package-",
+        {
+          entrySource: `
+            import wasmUrl from "@pkg/styles/icon.wasm?url";
+
+            function App() {
+              return <div css={{ backgroundImage: wasmUrl }} />;
+            }
+          `
+        }
+      );
+      const packageRoot = join(fixture.root, "node_modules/@pkg/styles");
+      const wasmPath = join(packageRoot, "icon.wasm");
+      const captured: {
+        loadedSource?: StaticCssEvalLoadedSource | null;
+        resolution?: StaticCssEvalSourceResolution | null;
+      } = {};
+
+      try {
+        await fs.promises.mkdir(packageRoot, { recursive: true });
+        await fs.promises.writeFile(wasmPath, "wasm-init", "utf8");
+        vi.spyOn(integrationHelpers, "babelTransform").mockImplementation(
+          async (
+            _path: string,
+            options: MinchoBabelOptionsWithStaticCssEval = {}
+          ) => {
+            const sourceProvider = options.staticCssEvalSourceProvider;
+
+            if (!sourceProvider) {
+              throw new Error(
+                "Expected esbuild static css eval source provider"
+              );
+            }
+
+            captured.resolution = await sourceProvider.resolve(
+              fixture.entryPath,
+              "@pkg/styles/icon.wasm?url"
+            );
+
+            if (!captured.resolution?.normalizedPathKey) {
+              throw new Error("Expected wasm url data source resolution");
+            }
+
+            captured.loadedSource = await sourceProvider.load(
+              captured.resolution.normalizedPathKey
+            );
+
+            return {
+              code: fixture.entrySource,
+              result: ["", ""]
+            } as BabelTransformResult;
+          }
+        );
+
+        const harness = createBuildHarness({
+          absWorkingDir: fixture.root,
+          plugin: minchoEsbuildPlugin({ jsxCssProp: true }),
+          resolve: createMappedEsbuildResolve({
+            "@pkg/styles/icon.wasm?url": createSuffixedEsbuildResolveResult(
+              wasmPath,
+              "?url"
+            )
+          })
+        });
+        await harness.loadScript({ path: fixture.entryPath });
+        const wasmRealpath = normalizeStaticCssEvalFileId(
+          await fs.promises.realpath(wasmPath)
+        );
+
+        expect(captured.resolution).toMatchObject({
+          resolvedFile: `${wasmRealpath}?url`,
+          canonicalModuleId: `${wasmRealpath}?url`,
+          normalizedPathKey: `${wasmRealpath}?url`,
+          realpath: wasmRealpath,
+          sourceKind: "static-data",
+          sourceOrigin: "data",
+          watchFiles: [wasmRealpath],
+          resolverKind: "esbuild"
+        });
+        expect(captured.loadedSource).toMatchObject({
+          sourceText: "/node_modules/@pkg/styles/icon.wasm",
+          resolvedFile: `${wasmRealpath}?url`,
+          sourceKind: "static-data",
+          sourceOrigin: "data",
+          watchFiles: [wasmRealpath],
+          resolverKind: "esbuild"
+        });
+      } finally {
+        await fs.promises.rm(fixture.root, { force: true, recursive: true });
+      }
+    });
+
+    it("uses Vite-compatible /@fs URLs for static data outside root", () => {
+      expect(
+        getEsbuildStaticCssEvalUrlSource(
+          "/workspace/shared/icon.wasm",
+          "/workspace/app"
         )
+      ).toBe("/@fs/workspace/shared/icon.wasm");
+    });
+
+    it("rejects static css eval external no-source imports without filesystem fallback", async () => {
+      const fixture = await createImportedCssPropEsbuildFixture(
+        "static-css-eval-external-no-source-",
+        {
+          entrySource: createImportedCssPropEntrySource("@pkg/external")
+        }
       );
       await spyOnSourceBabelTransform();
 
       try {
-        await Promise.all([
-          fs.promises.mkdir(
-            join(fallbackFixture.root, "src/node_modules/pkg"),
-            { recursive: true }
-          ),
-          fs.promises.mkdir(
-            join(staticRuleFixture.root, "src/node_modules/pkg"),
-            { recursive: true }
-          )
-        ]);
-        await Promise.all([
-          fs.promises.writeFile(
-            join(fallbackFixture.root, "src/node_modules/pkg/styles.ts"),
-            createImportedStyleSource("red"),
-            "utf8"
-          ),
-          fs.promises.writeFile(
-            join(staticRuleFixture.root, "src/node_modules/pkg/styles.ts"),
-            createImportedStyleSource("red"),
-            "utf8"
-          )
-        ]);
+        const harness = createBuildHarness({
+          absWorkingDir: fixture.root,
+          plugin: minchoEsbuildPlugin({ jsxCssProp: true }),
+          resolve: createMappedEsbuildResolve({
+            "@pkg/external": {
+              ...createStaticCssEvalResolveResult("@pkg/external"),
+              external: true
+            }
+          })
+        });
 
+        await expect(
+          harness.loadScript({ path: fixture.entryPath })
+        ).rejects.toThrow("Cannot statically evaluate css prop value");
+      } finally {
+        await fs.promises.rm(fixture.root, { force: true, recursive: true });
+      }
+    });
+
+    it("rejects static css eval unsupported non-file namespace virtual imports", async () => {
+      const fixture = await createImportedCssPropEsbuildFixture(
+        "static-css-eval-unsupported-non-file-namespace-",
+        {
+          entrySource: createImportedCssPropEntrySource("virtual:styles")
+        }
+      );
+      await spyOnSourceBabelTransform();
+
+      try {
+        const harness = createBuildHarness({
+          absWorkingDir: fixture.root,
+          plugin: minchoEsbuildPlugin({ jsxCssProp: true }),
+          resolve: createMappedEsbuildResolve({
+            "virtual:styles": {
+              ...createStaticCssEvalResolveResult("virtual:styles"),
+              namespace: "virtual"
+            }
+          })
+        });
+
+        await expect(
+          harness.loadScript({ path: fixture.entryPath })
+        ).rejects.toThrow("Cannot statically evaluate css prop value");
+      } finally {
+        await fs.promises.rm(fixture.root, { force: true, recursive: true });
+      }
+    });
+
+    it("rejects static css eval wasm runtime and direct imports from esbuild packages", async () => {
+      const wasmCases = [
+        {
+          importPath: "@pkg/styles/icon.wasm?init",
+          localName: "initWasm",
+          prefix: "static-css-eval-wasm-runtime-package-",
+          suffix: "?init"
+        },
+        {
+          importPath: "@pkg/styles/icon.wasm",
+          localName: "directWasm",
+          prefix: "static-css-eval-wasm-direct-package-",
+          suffix: ""
+        }
+      ] as const;
+
+      for (const wasmCase of wasmCases) {
+        const fixture = await createImportedCssPropEsbuildFixture(
+          wasmCase.prefix,
+          {
+            entrySource: `
+              import ${wasmCase.localName} from "${wasmCase.importPath}";
+
+              function App() {
+                return <div css={{ color: ${wasmCase.localName} }} />;
+              }
+            `
+          }
+        );
+        const packageRoot = join(fixture.root, "node_modules/@pkg/styles");
+        const wasmPath = join(packageRoot, "icon.wasm");
+        await spyOnSourceBabelTransform();
+
+        try {
+          await fs.promises.mkdir(packageRoot, { recursive: true });
+          await fs.promises.writeFile(wasmPath, "wasm-runtime", "utf8");
+
+          const harness = createBuildHarness({
+            absWorkingDir: fixture.root,
+            plugin: minchoEsbuildPlugin({ jsxCssProp: true }),
+            resolve: createMappedEsbuildResolve({
+              [wasmCase.importPath]: createSuffixedEsbuildResolveResult(
+                wasmPath,
+                wasmCase.suffix
+              )
+            })
+          });
+
+          await expect(
+            harness.loadScript({ path: fixture.entryPath })
+          ).rejects.toThrow("Cannot statically evaluate css prop value");
+        } finally {
+          await fs.promises.rm(fixture.root, { force: true, recursive: true });
+        }
+      }
+    });
+
+    it("rejects virtual static css evaluation at esbuild boundaries", async () => {
+      const fallbackFixture = await createJsxCssPropFixture(
+        "jsx-css-prop-esbuild-boundary-fallback-",
+        `
+          import { button as virtualButton } from "virtual:styles";
+
+          function App() {
+            return <div css={virtualButton} />;
+          }
+        `
+      );
+      await spyOnSourceBabelTransform();
+
+      try {
         const fallbackHarness = createBuildHarness({
           absWorkingDir: fallbackFixture.root,
           plugin: minchoEsbuildPlugin({ jsxCssProp: true })
         });
         await expect(
           fallbackHarness.loadScript({ path: fallbackFixture.entryPath })
-        ).rejects.toThrow('package import "virtual:styles" is unsupported');
-
-        const staticRuleHarness = createBuildHarness({
-          absWorkingDir: staticRuleFixture.root,
-          plugin: minchoEsbuildPlugin({ jsxCssProp: true })
-        });
-
-        await expect(
-          staticRuleHarness.loadScript({ path: staticRuleFixture.entryPath })
-        ).rejects.toThrow("Cannot statically evaluate css prop value");
+        ).rejects.toThrow('import "virtual:styles" could not be resolved');
       } finally {
-        await Promise.all([
-          fs.promises.rm(fallbackFixture.root, {
-            force: true,
-            recursive: true
-          }),
-          fs.promises.rm(staticRuleFixture.root, {
-            force: true,
-            recursive: true
-          })
-        ]);
-      }
-    });
-
-    it("returns null when a resolved static css dependency disappears before stat", async () => {
-      const fixture = await createImportedCssPropEsbuildFixture(
-        "jsx-css-prop-esbuild-disappeared-before-stat-"
-      );
-      const originalStat = fs.promises.stat.bind(fs.promises);
-      const targetRealpath = normalizeStaticCssEvalFileId(
-        await fs.promises.realpath(fixture.stylesPath)
-      );
-      const statSpy = vi
-        .spyOn(fs.promises, "stat")
-        .mockImplementation(
-          async (...args: Parameters<typeof fs.promises.stat>) => {
-            const [path] = args;
-
-            if (String(path).replace(/\\/g, "/") === targetRealpath) {
-              const missingError = new Error(
-                `ENOENT: ${targetRealpath}`
-              ) as Error & {
-                code?: string;
-              };
-              missingError.code = "ENOENT";
-              throw missingError;
-            }
-
-            return originalStat(...args);
-          }
-        );
-
-      try {
-        const resolution = await resolveEsbuildStaticCssEvalImport({
-          build: {
-            resolve: vi
-              .fn()
-              .mockResolvedValue(
-                createStaticCssEvalResolveResult(fixture.stylesPath)
-              )
-          } as PluginBuild,
-          importerId: fixture.entryPath,
-          importPath: "./styles",
-          rootRealpath: getRealpathOrResolvedPath(fixture.root)
+        await fs.promises.rm(fallbackFixture.root, {
+          force: true,
+          recursive: true
         });
-
-        expect(resolution).toBeNull();
-      } finally {
-        statSpy.mockRestore();
-        await fs.promises.rm(fixture.root, { force: true, recursive: true });
       }
     });
 

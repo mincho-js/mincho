@@ -36,6 +36,36 @@ export interface StaticCssEvalSourceIdentity {
   version?: string | number;
 }
 
+export const STATIC_CSS_EVAL_SOURCE_KINDS = [
+  "project-source",
+  "package-source",
+  "provider-virtual",
+  "static-data",
+  "external-no-source",
+  "unresolved",
+  "unsupported-source-shape"
+] as const;
+
+export type StaticCssEvalSourceKind =
+  (typeof STATIC_CSS_EVAL_SOURCE_KINDS)[number];
+
+export const STATIC_CSS_EVAL_SOURCE_ORIGINS = [
+  "project",
+  "package",
+  "provider",
+  "data",
+  "external",
+  "unresolved",
+  "unsupported"
+] as const;
+
+export type StaticCssEvalSourceOrigin =
+  (typeof STATIC_CSS_EVAL_SOURCE_ORIGINS)[number];
+
+export type StaticCssEvalSourceUnsupportedReason = NonNullable<
+  StaticCssEvalMetadataDependency["unsupportedReason"]
+>;
+
 // Integration supplies bundler-aware identity/source freshness; Babel static
 // eval remains the only owner of css value and symbol provenance.
 export interface StaticCssEvalSourceResolution {
@@ -55,6 +85,10 @@ export interface StaticCssEvalSourceResolution {
   version?: string | number;
   /** Source identity from the bundler; loaded source identity takes precedence. */
   sourceIdentity?: StaticCssEvalSourceIdentity;
+  readonly sourceKind?: StaticCssEvalSourceKind;
+  readonly sourceOrigin?: StaticCssEvalSourceOrigin;
+  readonly unsupportedReason?: StaticCssEvalSourceUnsupportedReason;
+  readonly watchFiles?: readonly string[];
   /** Identifies which resolver produced this source for downstream cache/debug consumers. */
   resolverKind?: StaticCssEvalResolverKind;
 }
@@ -71,6 +105,10 @@ export interface StaticCssEvalLoadedSource {
   sourceHash?: string;
   version?: string | number;
   sourceIdentity?: StaticCssEvalSourceIdentity;
+  readonly sourceKind?: StaticCssEvalSourceKind;
+  readonly sourceOrigin?: StaticCssEvalSourceOrigin;
+  readonly unsupportedReason?: StaticCssEvalSourceUnsupportedReason;
+  readonly watchFiles?: readonly string[];
   resolverKind?: StaticCssEvalResolverKind;
 }
 
@@ -100,6 +138,10 @@ export interface StaticCssEvalResolvedDependency {
   resolverKind: StaticCssEvalResolverKind;
   loaded: boolean;
   sourceIdentity?: StaticCssEvalSourceIdentity;
+  readonly sourceKind?: StaticCssEvalSourceKind;
+  readonly sourceOrigin?: StaticCssEvalSourceOrigin;
+  readonly unsupportedReason?: StaticCssEvalSourceUnsupportedReason;
+  readonly watchFiles?: readonly string[];
 }
 
 export interface StaticCssEvalTransformResult
@@ -690,7 +732,10 @@ if (import.meta.vitest) {
           import { button } from "./styles";
 
           function App() {
-            return <div css={button} />;
+            return <>
+              <div css={button} />
+              <span css={button} />
+            </>;
           }
         `,
         "css-prop-metadata-dedupe"
@@ -728,14 +773,34 @@ if (import.meta.vitest) {
         resolverOptionsVersion: "test-resolver-options",
         staticEvalSupportVersion: "test-static-eval"
       } satisfies StaticCssEvalMetadataCacheKey;
+      const packageCacheKey = {
+        ...cacheKey,
+        canonicalModuleId: "pkg:@scope/styles",
+        normalizedPathKey: "pkg:@scope/styles?condition=import",
+        sourceKind: "package-source",
+        sourceOrigin: "package",
+        watchFiles: ["/project/.pnp.cjs"],
+        parserVersion: "test-parser-v1",
+        parserOptions: {
+          plugins: ["jsx", "typescript"],
+          sourceType: "module",
+          jsx: true,
+          typescript: true
+        }
+      } satisfies StaticCssEvalMetadataCacheKey;
+      const cacheKeys = [cacheKey, packageCacheKey] as const;
+      let cacheKeyIndex = 0;
       const provider: StaticCssEvalProvider = {
         getResolvedCssValue(): StaticCssEvalProviderResult {
+          const currentCacheKey = cacheKeys[cacheKeyIndex] ?? packageCacheKey;
+          cacheKeyIndex += 1;
+
           return {
             kind: "resolved",
             value: { color: "red" },
             dependencies: [dependency, { ...dependency }],
             diagnostics: [diagnostic, { ...diagnostic }],
-            cacheKey
+            cacheKey: currentCacheKey
           } as unknown as StaticCssEvalProviderResult;
         }
       };
@@ -760,8 +825,12 @@ if (import.meta.vitest) {
         staticCssEval?.diagnostics.filter((item) => item.id === diagnostic.id)
       ).toHaveLength(1);
       expect(staticCssEval?.cacheKeys).toEqual(
-        expect.arrayContaining([expect.objectContaining(cacheKey)])
+        expect.arrayContaining([
+          expect.objectContaining(cacheKey),
+          expect.objectContaining(packageCacheKey)
+        ])
       );
+      expect(staticCssEval?.cacheKeys).toHaveLength(2);
       expect(
         staticCssEval?.resolvedModuleIds.filter(
           (moduleId) => moduleId === dependency.file
@@ -897,6 +966,180 @@ if (import.meta.vitest) {
       ]);
       expect(secondTransform.staticCssEval?.resolvedModuleIds).toContain(
         stylesId
+      );
+    });
+
+    it("static css eval cache keys include source provider package data and virtual identity metadata", async () => {
+      const componentSource = `
+        import { button } from "@scope/styles";
+        import { token } from "@scope/styles/tokens.json";
+        import { virtualButton } from "virtual:mincho/styles";
+
+        function App() {
+          return <>
+            <div css={button} />
+            <div css={token} />
+            <div css={virtualButton} />
+          </>;
+        }
+      `;
+      const { filePaths } = await createBabelFixtureFiles(
+        {
+          "component.tsx": componentSource
+        },
+        "css-prop-source-provider-cache-metadata"
+      );
+      const componentId = filePaths["component.tsx"];
+      const packageId = "pkg:@scope/styles/index.ts";
+      const packageLoadId = `${packageId}?condition=import`;
+      const dataId = "pkg:@scope/styles/tokens.json?import";
+      const virtualId = "\0virtual:mincho/styles";
+      const pnpWatchFile = "/project/.pnp.cjs";
+      const dataWatchFile = "/project/node_modules/@scope/styles/tokens.json";
+      const resolutions = new Map<string, StaticCssEvalSourceResolution>([
+        [
+          `${componentId}\0@scope/styles`,
+          {
+            resolvedFile: packageId,
+            canonicalModuleId: "pkg:@scope/styles",
+            normalizedPathKey: packageLoadId,
+            sourceKind: "package-source",
+            sourceIdentity: { version: "package-resolution-v1" },
+            watchFiles: [pnpWatchFile],
+            resolverKind: "test"
+          }
+        ],
+        [
+          `${componentId}\0@scope/styles/tokens.json`,
+          {
+            resolvedFile: dataId,
+            canonicalModuleId: dataId,
+            normalizedPathKey: dataId,
+            sourceKind: "static-data",
+            watchFiles: [dataWatchFile],
+            resolverKind: "test"
+          }
+        ],
+        [
+          `${componentId}\0virtual:mincho/styles`,
+          {
+            resolvedFile: virtualId,
+            canonicalModuleId: virtualId,
+            normalizedPathKey: virtualId,
+            sourceKind: "provider-virtual",
+            sourceIdentity: { version: "virtual-resolution-v1" },
+            resolverKind: "test"
+          }
+        ]
+      ]);
+      const loadedSources = new Map<string, StaticCssEvalLoadedSource>([
+        [componentId, { source: componentSource }],
+        [
+          packageLoadId,
+          {
+            sourceText: `export const button = { color: "red" } as const;`,
+            sourceKind: "package-source",
+            sourceIdentity: { sourceHash: "package-source-v1" },
+            watchFiles: [pnpWatchFile],
+            resolverKind: "test"
+          }
+        ],
+        [
+          dataId,
+          {
+            sourceText: JSON.stringify({ token: { color: "green" } }),
+            sourceKind: "static-data",
+            sourceIdentity: { sourceHash: "data-source-v1" },
+            watchFiles: [dataWatchFile],
+            resolverKind: "test"
+          }
+        ],
+        [
+          virtualId,
+          {
+            sourceText: `export const virtualButton = { color: "blue" } as const;`,
+            sourceKind: "provider-virtual",
+            sourceIdentity: {
+              sourceHash: "virtual-source-v1",
+              version: "virtual-loaded-v1"
+            },
+            resolverKind: "test"
+          }
+        ]
+      ]);
+      const provider: StaticCssEvalSourceProvider = {
+        resolve(importerId, importPath) {
+          return resolutions.get(`${importerId}\0${importPath}`) ?? null;
+        },
+        load(id) {
+          return loadedSources.get(id) ?? null;
+        }
+      };
+
+      const { code, result, staticCssEval } = await babelTransform(
+        componentId,
+        {
+          jsxCssProp: true,
+          staticCssEvalSourceProvider: provider
+        }
+      );
+
+      expect(result[1]).toContain('color: "red"');
+      expect(result[1]).toContain('color: "green"');
+      expect(result[1]).toContain('color: "blue"');
+      expect(code).not.toContain("_cx(button)");
+      expect(staticCssEval?.cacheKeys).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            resolvedFile: packageId,
+            resolvedId: packageId,
+            canonicalModuleId: "pkg:@scope/styles",
+            normalizedPathKey: packageLoadId,
+            sourceKind: "package-source",
+            sourceOrigin: "package",
+            sourceHash: "package-source-v1",
+            sourceVersion: "package-resolution-v1",
+            watchFiles: [pnpWatchFile]
+          }),
+          expect.objectContaining({
+            resolvedFile: dataId,
+            resolvedId: dataId,
+            canonicalModuleId: dataId,
+            normalizedPathKey: dataId,
+            sourceKind: "static-data",
+            sourceOrigin: "data",
+            sourceHash: "data-source-v1",
+            watchFiles: [dataWatchFile]
+          }),
+          expect.objectContaining({
+            resolvedFile: virtualId,
+            resolvedId: virtualId,
+            canonicalModuleId: virtualId,
+            normalizedPathKey: virtualId,
+            sourceKind: "provider-virtual",
+            sourceOrigin: "provider",
+            sourceHash: "virtual-source-v1",
+            sourceVersion: "virtual-loaded-v1"
+          })
+        ])
+      );
+      expect(staticCssEval?.resolvedDependencies).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            resolvedFile: packageId,
+            sourceKind: "package-source",
+            watchFiles: [pnpWatchFile]
+          }),
+          expect.objectContaining({
+            resolvedFile: dataId,
+            sourceKind: "static-data",
+            watchFiles: [dataWatchFile]
+          }),
+          expect.objectContaining({
+            resolvedFile: virtualId,
+            sourceKind: "provider-virtual"
+          })
+        ])
       );
     });
 
@@ -1077,6 +1320,108 @@ if (import.meta.vitest) {
       expect(staticCssEval?.resolvedModuleIds).toContain(stylesId);
     });
 
+    it("reports prepared unsupported static-data reasons in transform diagnostics", async () => {
+      const cases = [
+        {
+          label: "wasm-init",
+          importPath: "@scope/styles/icon.wasm?init",
+          resolvedId: "pkg:@scope/styles/icon.wasm?init",
+          sourceText: `export default function init() {}`,
+          unsupportedReason: "runtime-wasm-init"
+        },
+        {
+          label: "invalid-json",
+          importPath: "@scope/styles/broken.json",
+          resolvedId: "pkg:@scope/styles/broken.json?import",
+          sourceText: `{ "button": `,
+          unsupportedReason: "invalid-json-data"
+        }
+      ] as const;
+
+      for (const testCase of cases) {
+        const componentSource = `
+          import unsupported from "${testCase.importPath}";
+
+          function App() {
+            return <div css={unsupported} />;
+          }
+        `;
+        const componentId = await createBabelFixture(
+          componentSource,
+          `css-prop-static-data-${testCase.label}`
+        );
+        const provider: StaticCssEvalSourceProvider = {
+          resolve(importerId, importPath) {
+            if (
+              importerId !== componentId ||
+              importPath !== testCase.importPath
+            ) {
+              return null;
+            }
+
+            return {
+              resolvedFile: testCase.resolvedId,
+              canonicalModuleId: testCase.resolvedId,
+              normalizedPathKey: testCase.resolvedId,
+              sourceKind: "static-data",
+              resolverKind: "test"
+            };
+          },
+          load(id) {
+            if (id === componentId) {
+              return { sourceText: componentSource, resolverKind: "test" };
+            }
+
+            if (id === testCase.resolvedId) {
+              return {
+                sourceText: testCase.sourceText,
+                sourceKind: "static-data",
+                sourceIdentity: { version: testCase.label },
+                resolverKind: "test"
+              };
+            }
+
+            return null;
+          }
+        };
+        let thrownError: unknown;
+
+        try {
+          await babelTransform(componentId, {
+            jsxCssProp: true,
+            staticCssEvalSourceProvider: provider
+          });
+        } catch (error) {
+          thrownError = error;
+        }
+
+        expect(thrownError).toBeInstanceOf(BabelTransformError);
+
+        if (!(thrownError instanceof BabelTransformError)) {
+          throw new Error(
+            "Expected BabelTransformError for static data source"
+          );
+        }
+
+        expect(thrownError.staticCssEval?.diagnostics[0]).toMatchObject({
+          id: "STATIC_CSS_EVAL_PROVIDER_SOURCE_UNSUPPORTED",
+          reason: testCase.unsupportedReason,
+          dependency: { file: testCase.resolvedId },
+          importPath: testCase.importPath,
+          exportName: "default"
+        });
+        expect(thrownError.staticCssEval?.resolvedDependencies).toEqual([
+          expect.objectContaining({
+            resolvedFile: testCase.resolvedId,
+            sourceKind: "unsupported-source-shape",
+            sourceOrigin: "unsupported",
+            unsupportedReason: testCase.unsupportedReason,
+            loaded: true
+          })
+        ]);
+      }
+    });
+
     it("resolves direct named reexports from the async source-provider prepass", async () => {
       const path = await import("node:path");
       const ownerSource = `
@@ -1209,13 +1554,21 @@ if (import.meta.vitest) {
         throw new Error("Expected failed dependency resolution");
       }
 
-      expect(resolution.dependencies).toEqual([stylesId]);
-      expect(resolution.diagnostic.code).toBe(
-        "failed-project-local-dependency"
-      );
-      expect(resolution.diagnostic.message).toContain(
-        `failed to load project-local dependency ${stylesId}`
-      );
+      expect(resolution.dependencies).toMatchObject([
+        {
+          file: stylesId,
+          inspected: true,
+          contributed: false,
+          sourceKind: "unsupported-source-shape",
+          unsupportedReason: "unsupported-source-shape"
+        }
+      ]);
+      expect(resolution.diagnostic).toMatchObject({
+        id: "STATIC_CSS_EVAL_PROVIDER_SOURCE_UNSUPPORTED",
+        code: "unsupported-source",
+        reason: "unsupported-source-shape",
+        dependency: { file: stylesId }
+      });
     });
 
     it("resolves namespace members from the async source-provider prepass", async () => {
@@ -1683,14 +2036,15 @@ if (import.meta.vitest) {
       }
 
       expect(calls.resolved).toEqual([
-        { importerId: fixturePath, importPath: "./barrel" }
+        { importerId: fixturePath, importPath: "./barrel" },
+        { importerId: barrelId, importPath: "@scope/styles" }
       ]);
       expect(calls.loaded).toEqual([fixturePath, barrelId]);
       expect(thrownError.staticCssEval?.dependencyFiles).toEqual([barrelId]);
       expect(thrownError.staticCssEval?.diagnostics[0]).toMatchObject({
-        id: "STATIC_CSS_EVAL_PACKAGE_IMPORT_UNSUPPORTED",
+        id: "STATIC_CSS_EVAL_UNRESOLVED_IMPORT",
         owner: { file: fixturePath },
-        dependency: { file: barrelId },
+        dependency: { file: "@scope/styles" },
         importPath: "@scope/styles",
         exportName: "button"
       });

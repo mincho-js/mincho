@@ -1,11 +1,14 @@
 import {
   createStaticCssEvalDiagnostic,
+  createStaticCssEvalProviderSourceUnsupportedDiagnostic,
   type StaticCssEvalDiagnosticContext
 } from "./diagnostics.js";
 import type {
   StaticCssEvalDependencyKind,
   StaticCssEvalDependencyMetadata,
   StaticCssEvalProjectLocalBoundaryState,
+  StaticCssEvalSourceKind,
+  StaticCssEvalSourceOrigin,
   StaticCssEvalUnsupportedReason
 } from "./types.js";
 
@@ -42,6 +45,160 @@ export interface CreateStaticCssEvalDependencyMetadataOptions extends StaticCssE
   importPath?: string;
   sourceHash?: string;
   version?: string | number;
+}
+
+export interface StaticCssEvalProviderSourcePolicyDescriptor {
+  readonly sourceKind?: StaticCssEvalSourceKind;
+  readonly sourceOrigin?: StaticCssEvalSourceOrigin;
+  readonly canonicalModuleId?: string;
+  readonly normalizedPathKey?: string;
+  readonly watchFiles?: readonly string[];
+  readonly unsupportedReason?: StaticCssEvalUnsupportedReason;
+}
+
+export interface StaticCssEvalProviderSourcePolicyCheckOptions
+  extends
+    StaticCssEvalProviderSourcePolicyDescriptor,
+    StaticCssEvalDiagnosticContext {
+  readonly sourceId: string;
+}
+
+export interface StaticCssEvalProviderSourceMetadata {
+  readonly sourceKind: StaticCssEvalSourceKind;
+  readonly sourceOrigin: StaticCssEvalSourceOrigin;
+  readonly canonicalModuleId?: string;
+  readonly normalizedPathKey?: string;
+  readonly watchFiles?: readonly string[];
+  readonly unsupportedReason?: StaticCssEvalUnsupportedReason;
+}
+
+export type StaticCssEvalProviderSourcePolicyResult =
+  | {
+      ok: true;
+      sourceMetadata: StaticCssEvalProviderSourceMetadata;
+    }
+  | {
+      ok: false;
+      sourceMetadata: StaticCssEvalProviderSourceMetadata;
+      diagnostic: ReturnType<typeof createStaticCssEvalDiagnostic>;
+    };
+
+export function createStaticCssEvalProviderSourceMetadata(
+  descriptor: StaticCssEvalProviderSourcePolicyDescriptor
+): StaticCssEvalProviderSourceMetadata {
+  const sourceKind = descriptor.sourceKind ?? "project-source";
+  const sourceOrigin =
+    descriptor.sourceOrigin ?? getStaticCssEvalSourceOrigin(sourceKind);
+
+  return {
+    sourceKind,
+    sourceOrigin,
+    ...(descriptor.canonicalModuleId !== undefined
+      ? { canonicalModuleId: descriptor.canonicalModuleId }
+      : {}),
+    ...(descriptor.normalizedPathKey !== undefined
+      ? { normalizedPathKey: descriptor.normalizedPathKey }
+      : {}),
+    ...(descriptor.watchFiles !== undefined
+      ? { watchFiles: [...descriptor.watchFiles] }
+      : {}),
+    ...(descriptor.unsupportedReason !== undefined
+      ? { unsupportedReason: descriptor.unsupportedReason }
+      : {})
+  };
+}
+
+export function enforceStaticCssEvalProviderSourcePolicy(
+  options: StaticCssEvalProviderSourcePolicyCheckOptions
+): StaticCssEvalProviderSourcePolicyResult {
+  const sourceMetadata = createStaticCssEvalProviderSourceMetadata(options);
+
+  if (
+    sourceMetadata.unsupportedReason === undefined &&
+    isStaticCssEvalProviderSourceKindAllowed(sourceMetadata.sourceKind)
+  ) {
+    return { ok: true, sourceMetadata };
+  }
+
+  return {
+    ok: false,
+    sourceMetadata,
+    diagnostic: createStaticCssEvalProviderSourceUnsupportedDiagnostic({
+      sourceId: options.sourceId,
+      sourceKind: sourceMetadata.sourceKind,
+      sourceOrigin: sourceMetadata.sourceOrigin,
+      reason:
+        sourceMetadata.unsupportedReason ??
+        getStaticCssEvalUnsupportedSourceKindReason(sourceMetadata.sourceKind),
+      owner: options.owner,
+      dependency: options.dependency ?? { file: options.sourceId },
+      importPath: options.importPath,
+      exportName: options.exportName,
+      memberPath: options.memberPath,
+      importChain: options.importChain
+    })
+  };
+}
+
+export function isStaticCssEvalProviderSourceKindAllowed(
+  sourceKind: StaticCssEvalSourceKind
+): boolean {
+  switch (sourceKind) {
+    case "project-source":
+    case "package-source":
+    case "provider-virtual":
+    case "static-data":
+      return true;
+    case "external-no-source":
+    case "unresolved":
+    case "unsupported-source-shape":
+      return false;
+    default:
+      return assertNever(sourceKind);
+  }
+}
+
+export function getStaticCssEvalSourceOrigin(
+  sourceKind: StaticCssEvalSourceKind
+): StaticCssEvalSourceOrigin {
+  switch (sourceKind) {
+    case "project-source":
+      return "project";
+    case "package-source":
+      return "package";
+    case "provider-virtual":
+      return "provider";
+    case "static-data":
+      return "data";
+    case "external-no-source":
+      return "external";
+    case "unresolved":
+      return "unresolved";
+    case "unsupported-source-shape":
+      return "unsupported";
+    default:
+      return assertNever(sourceKind);
+  }
+}
+
+function getStaticCssEvalUnsupportedSourceKindReason(
+  sourceKind: StaticCssEvalSourceKind
+): StaticCssEvalUnsupportedReason {
+  switch (sourceKind) {
+    case "external-no-source":
+      return "external-no-source";
+    case "unresolved":
+      return "unresolved";
+    case "unsupported-source-shape":
+      return "unsupported-source-shape";
+    case "project-source":
+    case "package-source":
+    case "provider-virtual":
+    case "static-data":
+      return "failed-project-local-dependency";
+    default:
+      return assertNever(sourceKind);
+  }
 }
 
 export function createStaticCssEvalProjectLocalBoundaryState(
@@ -226,6 +383,12 @@ function trimStaticCssEvalTrailingSlash(filePath: string): string {
   return filePath.length > 1 ? filePath.replace(/\/+$/g, "") : filePath;
 }
 
+function assertNever(value: never): never {
+  throw new TypeError(
+    `Unexpected static css eval provider source kind: ${value}`
+  );
+}
+
 // == Tests ====================================================================
 // Ignore errors when compiling to CommonJS.
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
@@ -236,6 +399,25 @@ if (import.meta.vitest) {
   const { describe, expect, it } = import.meta.vitest;
 
   const owner = { file: "/project/src/App.tsx", start: 11, end: 18 };
+
+  describe("static css eval provider source policy", () => {
+    it("rejects explicit unsupported reasons on otherwise allowed source kinds", () => {
+      expect(
+        enforceStaticCssEvalProviderSourcePolicy({
+          sourceId: "pkg:@scope/styles",
+          sourceKind: "package-source",
+          unsupportedReason: "unsupported-source-shape",
+          owner
+        })
+      ).toMatchObject({
+        ok: false,
+        diagnostic: {
+          reason: "unsupported-source-shape",
+          dependency: { file: "pkg:@scope/styles" }
+        }
+      });
+    });
+  });
 
   describe("static css eval project-local boundary", () => {
     it("accepts real files inside the project root", () => {
