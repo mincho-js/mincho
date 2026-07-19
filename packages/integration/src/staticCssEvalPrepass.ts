@@ -46,6 +46,44 @@ interface StaticCssEvalPrepassState {
   loadedDependencyIds: Set<string>;
 }
 
+interface StaticCssEvalPrepassContext {
+  sourceProvider: StaticCssEvalSourceProvider;
+  state: StaticCssEvalPrepassState;
+}
+
+type StaticCssEvalPrepassImportBinding =
+  ImportedStaticCssEvalModuleRecord["imports"] extends ReadonlyMap<
+    string,
+    infer ImportBinding
+  >
+    ? ImportBinding
+    : never;
+type StaticCssEvalPrepassExportName = string | null;
+type StaticCssEvalPrepassExportEntry =
+  ImportedStaticCssEvalModuleRecord["exports"] extends ReadonlyMap<
+    StaticCssEvalPrepassExportName,
+    infer ExportEntry
+  >
+    ? ExportEntry
+    : never;
+
+interface StaticCssEvalPrepassExportRequest {
+  exportName: StaticCssEvalPrepassExportName;
+  memberPath: readonly string[];
+  wholeNamespace: boolean;
+}
+
+interface StaticCssEvalPrepassExportWalk {
+  exportName: string;
+  memberPath: readonly string[];
+  seen: Set<string>;
+}
+
+interface StaticCssEvalPrepassWholeNamespaceWalk {
+  includeDefaultExport: boolean;
+  seen: Set<string>;
+}
+
 export async function createStaticCssEvalPrepass(
   ownerId: string,
   sourceProvider: StaticCssEvalSourceProvider
@@ -72,6 +110,10 @@ export async function createStaticCssEvalPrepass(
     resolvedImports: new Map(),
     loadedDependencyIds: new Set([ownerId])
   };
+  const prepassContext: StaticCssEvalPrepassContext = {
+    sourceProvider,
+    state: prepassState
+  };
 
   for (const candidate of candidates) {
     const importBinding = candidate.bindingName
@@ -85,20 +127,23 @@ export async function createStaticCssEvalPrepass(
     const moduleRecord = await loadStaticCssEvalPrepassDependency(
       ownerId,
       importBinding.importPath,
-      sourceProvider,
-      prepassState
+      prepassContext
     );
 
     if (!moduleRecord) {
       continue;
     }
 
-    if (importBinding.kind !== "namespace") {
-      await loadDirectReexportDependencies(
+    const request = createStaticCssEvalPrepassExportRequest(
+      importBinding,
+      candidate.memberPath ?? []
+    );
+
+    if (request) {
+      await loadStaticCssEvalPrepassGraphDependencies(
         moduleRecord,
-        importBinding.importedName,
-        sourceProvider,
-        prepassState
+        request,
+        prepassContext
       );
     }
   }
@@ -127,13 +172,17 @@ export async function createStaticCssEvalPrepass(
 async function loadStaticCssEvalPrepassDependency(
   importerId: string,
   importPath: string,
-  sourceProvider: StaticCssEvalSourceProvider,
-  prepassState: StaticCssEvalPrepassState
+  context: StaticCssEvalPrepassContext
 ): Promise<ImportedStaticCssEvalModuleRecord | undefined> {
-  const resolvedImportKey = `${importerId}\0${importPath}`;
-  let resolution = prepassState.resolvedImports.get(resolvedImportKey);
+  if (!isProjectLocalStaticCssEvalImportSpecifier(importPath)) {
+    return undefined;
+  }
 
-  if (!prepassState.resolvedImports.has(resolvedImportKey)) {
+  const { sourceProvider, state } = context;
+  const resolvedImportKey = `${importerId}\0${importPath}`;
+  let resolution = state.resolvedImports.get(resolvedImportKey);
+
+  if (!state.resolvedImports.has(resolvedImportKey)) {
     const sourceResolution = await sourceProvider.resolve(
       importerId,
       importPath
@@ -141,15 +190,15 @@ async function loadStaticCssEvalPrepassDependency(
     resolution = sourceResolution
       ? normalizeStaticCssEvalSourceResolution(sourceResolution)
       : null;
-    prepassState.resolvedImports.set(resolvedImportKey, resolution ?? null);
+    state.resolvedImports.set(resolvedImportKey, resolution ?? null);
 
     if (resolution) {
-      prepassState.importResolutions.push({
+      state.importResolutions.push({
         importerId,
         importPath,
         resolvedId: resolution.resolvedFile
       });
-      prepassState.resolvedDependencies.push(
+      state.resolvedDependencies.push(
         createStaticCssEvalResolvedDependency(
           importerId,
           importPath,
@@ -165,25 +214,23 @@ async function loadStaticCssEvalPrepassDependency(
   }
 
   addOwnerDependency(
-    prepassState.ownerDependencies,
-    prepassState.dependencyToOwners,
-    prepassState.loadedModules[0]?.id ?? importerId,
+    state.ownerDependencies,
+    state.dependencyToOwners,
+    state.loadedModules[0]?.id ?? importerId,
     resolution.resolvedFile
   );
 
-  const cachedRecord = prepassState.resolvedModuleCache.get(
-    resolution.resolvedFile
-  );
+  const cachedRecord = state.resolvedModuleCache.get(resolution.resolvedFile);
 
   if (cachedRecord) {
     return cachedRecord;
   }
 
-  if (prepassState.loadedDependencyIds.has(resolution.resolvedFile)) {
+  if (state.loadedDependencyIds.has(resolution.resolvedFile)) {
     return undefined;
   }
 
-  prepassState.loadedDependencyIds.add(resolution.resolvedFile);
+  state.loadedDependencyIds.add(resolution.resolvedFile);
   const loadedSource = await sourceProvider.load(resolution.normalizedPathKey);
 
   if (!loadedSource) {
@@ -191,7 +238,7 @@ async function loadStaticCssEvalPrepassDependency(
   }
 
   markResolvedDependencyLoaded(
-    prepassState.resolvedDependencies,
+    state.resolvedDependencies,
     importerId,
     importPath,
     resolution,
@@ -203,11 +250,10 @@ async function loadStaticCssEvalPrepassDependency(
     loadedSource,
     resolution
   );
-
   try {
     const moduleRecord = createImportedStaticCssEvalModuleRecord(loadedModule);
-    prepassState.resolvedModuleCache.set(moduleRecord.id, moduleRecord);
-    prepassState.loadedModules.push(loadedModule);
+    state.resolvedModuleCache.set(moduleRecord.id, moduleRecord);
+    state.loadedModules.push(loadedModule);
 
     return moduleRecord;
   } catch {
@@ -215,40 +261,217 @@ async function loadStaticCssEvalPrepassDependency(
   }
 }
 
-async function loadDirectReexportDependencies(
-  moduleRecord: ImportedStaticCssEvalModuleRecord,
-  exportName: string,
-  sourceProvider: StaticCssEvalSourceProvider,
-  prepassState: StaticCssEvalPrepassState
-): Promise<void> {
-  let currentRecord: ImportedStaticCssEvalModuleRecord | undefined =
-    moduleRecord;
-  let currentExportName = exportName;
-  const seenReexports = new Set<string>();
+function createStaticCssEvalPrepassExportRequest(
+  importBinding: StaticCssEvalPrepassImportBinding,
+  memberPath: readonly string[]
+): StaticCssEvalPrepassExportRequest | null {
+  switch (importBinding.kind) {
+    case "default":
+    case "named":
+      return {
+        exportName: importBinding.importedName,
+        memberPath: [...memberPath],
+        wholeNamespace: false
+      };
+    case "namespace": {
+      const [exportName, ...remainingMemberPath] = memberPath;
 
-  while (currentRecord) {
-    const exportEntry = currentRecord.exports.get(currentExportName);
+      if (exportName === undefined) {
+        return {
+          exportName: null,
+          memberPath: [],
+          wholeNamespace: true
+        };
+      }
 
-    if (!exportEntry || exportEntry.kind !== "reexport") {
-      return;
+      return {
+        exportName,
+        memberPath: remainingMemberPath,
+        wholeNamespace: false
+      };
     }
-
-    const reexportKey = `${currentRecord.id}\0${currentExportName}`;
-
-    if (seenReexports.has(reexportKey)) {
-      return;
-    }
-
-    seenReexports.add(reexportKey);
-
-    currentRecord = await loadStaticCssEvalPrepassDependency(
-      currentRecord.id,
-      exportEntry.source,
-      sourceProvider,
-      prepassState
-    );
-    currentExportName = exportEntry.importedName;
+    default:
+      return assertNever(importBinding);
   }
+}
+
+async function loadStaticCssEvalPrepassGraphDependencies(
+  moduleRecord: ImportedStaticCssEvalModuleRecord,
+  request: StaticCssEvalPrepassExportRequest,
+  context: StaticCssEvalPrepassContext
+): Promise<void> {
+  if (request.wholeNamespace) {
+    await loadWholeNamespacePrepassDependencies(
+      moduleRecord,
+      { includeDefaultExport: true, seen: new Set() },
+      context
+    );
+    return;
+  }
+
+  if (request.exportName === null) {
+    return;
+  }
+
+  await loadExportNamePrepassDependencies(
+    moduleRecord,
+    {
+      exportName: request.exportName,
+      memberPath: request.memberPath,
+      seen: new Set()
+    },
+    context
+  );
+}
+
+async function loadExportNamePrepassDependencies(
+  moduleRecord: ImportedStaticCssEvalModuleRecord,
+  walk: StaticCssEvalPrepassExportWalk,
+  context: StaticCssEvalPrepassContext
+): Promise<void> {
+  const walkKey = createStaticCssEvalPrepassWalkKey(
+    moduleRecord.id,
+    walk.exportName,
+    walk.memberPath
+  );
+
+  if (walk.seen.has(walkKey)) {
+    return;
+  }
+
+  walk.seen.add(walkKey);
+
+  const exportEntry = moduleRecord.exports.get(walk.exportName);
+
+  if (exportEntry) {
+    await loadExplicitExportEntryPrepassDependencies(
+      moduleRecord,
+      exportEntry,
+      walk,
+      context
+    );
+    return;
+  }
+
+  if (walk.exportName === "default") {
+    return;
+  }
+
+  for (const starEntry of moduleRecord.parsedModule.exportStarReexports) {
+    const dependencyRecord = await loadStaticCssEvalPrepassDependency(
+      moduleRecord.id,
+      starEntry.source,
+      context
+    );
+
+    if (!dependencyRecord) {
+      continue;
+    }
+
+    await loadExportNamePrepassDependencies(dependencyRecord, walk, context);
+  }
+}
+
+async function loadWholeNamespacePrepassDependencies(
+  moduleRecord: ImportedStaticCssEvalModuleRecord,
+  walk: StaticCssEvalPrepassWholeNamespaceWalk,
+  context: StaticCssEvalPrepassContext
+): Promise<void> {
+  const walkKey = createStaticCssEvalPrepassWalkKey(
+    moduleRecord.id,
+    walk.includeDefaultExport ? "<namespace-with-default>" : "<namespace>",
+    []
+  );
+
+  if (walk.seen.has(walkKey)) {
+    return;
+  }
+
+  walk.seen.add(walkKey);
+
+  for (const [exportName, exportEntry] of moduleRecord.exports) {
+    if (exportName === null) {
+      continue;
+    }
+
+    if (!walk.includeDefaultExport && exportName === "default") {
+      continue;
+    }
+
+    await loadExplicitExportEntryPrepassDependencies(
+      moduleRecord,
+      exportEntry,
+      { exportName, memberPath: [], seen: walk.seen },
+      context
+    );
+  }
+
+  for (const starEntry of moduleRecord.parsedModule.exportStarReexports) {
+    const dependencyRecord = await loadStaticCssEvalPrepassDependency(
+      moduleRecord.id,
+      starEntry.source,
+      context
+    );
+
+    if (!dependencyRecord) {
+      continue;
+    }
+
+    await loadWholeNamespacePrepassDependencies(
+      dependencyRecord,
+      { includeDefaultExport: false, seen: walk.seen },
+      context
+    );
+  }
+}
+
+async function loadExplicitExportEntryPrepassDependencies(
+  moduleRecord: ImportedStaticCssEvalModuleRecord,
+  exportEntry: StaticCssEvalPrepassExportEntry,
+  walk: StaticCssEvalPrepassExportWalk,
+  context: StaticCssEvalPrepassContext
+): Promise<void> {
+  if (exportEntry.kind !== "reexport") {
+    return;
+  }
+
+  const dependencyRecord = await loadStaticCssEvalPrepassDependency(
+    moduleRecord.id,
+    exportEntry.source,
+    context
+  );
+
+  if (!dependencyRecord) {
+    return;
+  }
+
+  await loadExportNamePrepassDependencies(
+    dependencyRecord,
+    {
+      exportName: exportEntry.importedName,
+      memberPath: walk.memberPath,
+      seen: walk.seen
+    },
+    context
+  );
+}
+
+function createStaticCssEvalPrepassWalkKey(
+  file: string,
+  exportName: string,
+  memberPath: readonly string[]
+): string {
+  return `${file}\0${exportName}\0${memberPath.join(".")}`;
+}
+
+function isProjectLocalStaticCssEvalImportSpecifier(
+  importPath: string
+): boolean {
+  return importPath.startsWith(".") || importPath.startsWith("/");
+}
+
+function assertNever(value: never): never {
+  throw new TypeError(`Unexpected static css eval prepass value: ${value}`);
 }
 
 function createLoadedModule(

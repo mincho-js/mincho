@@ -9,7 +9,7 @@ import type {
 
 export const STATIC_CSS_MODULE_CACHE_PARSER_VERSION = "babel-core-parser:v2";
 export const STATIC_CSS_MODULE_CACHE_SUPPORT_VERSION =
-  "static-css-module-export-map:v1";
+  "static-css-module-export-graph:v2";
 
 export interface StaticCssModuleSource {
   resolvedFile: string;
@@ -45,7 +45,9 @@ export interface ParsedStaticCssModule {
   importDeclarations: readonly t.ImportDeclaration[];
   exportDeclarations: readonly StaticCssModuleExportDeclaration[];
   exportMap: ReadonlyMap<StaticCssEvalExportName, ExportMapEntry>;
-  unsupportedExportStars: readonly ExportMapUnsupportedEntry[];
+  exportGraph: readonly ExportGraphEntry[];
+  exportStarReexports: readonly ExportGraphStarReexportEntry[];
+  unsupportedExportStars: readonly ExportGraphStarReexportEntry[];
   sourceVersion?: string | number;
 }
 
@@ -88,6 +90,53 @@ export interface ExportMapUnsupportedEntry {
     | t.ExportNamedDeclaration;
   diagnostic: StaticCssEvalDiagnostic;
   source?: string;
+}
+
+export type ExportGraphEntry = ExportMapEntry | ExportGraphStarReexportEntry;
+
+export interface ExportGraphStarReexportEntry {
+  readonly kind: "star-reexport";
+  readonly exportName: "*";
+  readonly source: string;
+  readonly declaration: t.ExportAllDeclaration;
+}
+
+export interface StaticCssModuleExportStarSource {
+  readonly entry: ExportGraphStarReexportEntry;
+  readonly exportNames: readonly StaticCssEvalExportName[];
+}
+
+export type StaticCssModuleExportNameTableEntry =
+  | StaticCssModuleExportNameExplicitEntry
+  | StaticCssModuleExportNameStarEntry
+  | StaticCssModuleExportNameAmbiguousStarEntry;
+
+export interface StaticCssModuleExportNameExplicitEntry {
+  readonly kind: "explicit";
+  readonly exportName: StaticCssEvalExportName;
+  readonly entry: ExportMapEntry;
+}
+
+export interface StaticCssModuleExportNameStarEntry {
+  readonly kind: "star";
+  readonly exportName: StaticCssEvalExportName;
+  readonly source: string;
+  readonly entry: ExportGraphStarReexportEntry;
+}
+
+export interface StaticCssModuleExportNameAmbiguousStarEntry {
+  readonly kind: "ambiguous-star";
+  readonly exportName: StaticCssEvalExportName;
+  readonly sources: readonly string[];
+  readonly starEntries: readonly ExportGraphStarReexportEntry[];
+}
+
+interface StaticCssModuleExportGraphBuildState {
+  file: string;
+  exportMap: Map<StaticCssEvalExportName, ExportMapEntry>;
+  exportGraph: ExportGraphEntry[];
+  exportStarReexports: ExportGraphStarReexportEntry[];
+  unsupportedExportStars: ExportGraphStarReexportEntry[];
 }
 
 export interface StaticCssModuleCache {
@@ -231,10 +280,12 @@ function parseStaticCssModule(
     }
   }
 
-  const { exportMap, unsupportedExportStars } = buildStaticCssModuleExportMap(
-    source.resolvedFile,
-    exportDeclarations
-  );
+  const {
+    exportMap,
+    exportGraph,
+    exportStarReexports,
+    unsupportedExportStars
+  } = buildStaticCssModuleExportMap(source.resolvedFile, exportDeclarations);
 
   return {
     file: source.resolvedFile,
@@ -249,6 +300,8 @@ function parseStaticCssModule(
     importDeclarations,
     exportDeclarations,
     exportMap,
+    exportGraph,
+    exportStarReexports,
     unsupportedExportStars,
     ...(source.sourceVersion !== undefined
       ? { sourceVersion: source.sourceVersion }
@@ -278,35 +331,41 @@ function buildStaticCssModuleExportMap(
   exportDeclarations: readonly StaticCssModuleExportDeclaration[]
 ): {
   exportMap: ReadonlyMap<StaticCssEvalExportName, ExportMapEntry>;
-  unsupportedExportStars: readonly ExportMapUnsupportedEntry[];
+  exportGraph: readonly ExportGraphEntry[];
+  exportStarReexports: readonly ExportGraphStarReexportEntry[];
+  unsupportedExportStars: readonly ExportGraphStarReexportEntry[];
 } {
-  const exportMap = new Map<StaticCssEvalExportName, ExportMapEntry>();
-  const unsupportedExportStars: ExportMapUnsupportedEntry[] = [];
+  const state: StaticCssModuleExportGraphBuildState = {
+    file,
+    exportMap: new Map<StaticCssEvalExportName, ExportMapEntry>(),
+    exportGraph: [],
+    exportStarReexports: [],
+    unsupportedExportStars: []
+  };
 
   for (const declaration of exportDeclarations) {
-    collectStaticCssModuleExportEntries(file, declaration, exportMap);
-
-    if (t.isExportAllDeclaration(declaration)) {
-      const entry = createExportStarUnsupportedEntry(file, declaration);
-      unsupportedExportStars.push(entry);
-      exportMap.set(entry.exportName, entry);
-    }
+    collectStaticCssModuleExportEntries(declaration, state);
   }
 
-  return { exportMap, unsupportedExportStars };
+  return {
+    exportMap: state.exportMap,
+    exportGraph: state.exportGraph,
+    exportStarReexports: state.exportStarReexports,
+    unsupportedExportStars: state.unsupportedExportStars
+  };
 }
 
 function collectStaticCssModuleExportEntries(
-  file: string,
   declaration: StaticCssModuleExportDeclaration,
-  exportMap: Map<StaticCssEvalExportName, ExportMapEntry>
+  state: StaticCssModuleExportGraphBuildState
 ): void {
   if (t.isExportAllDeclaration(declaration)) {
+    collectExportAllDeclaration(declaration, state);
     return;
   }
 
   if (t.isExportDefaultDeclaration(declaration)) {
-    collectDefaultExportEntry(file, declaration, exportMap);
+    collectDefaultExportEntry(declaration, state);
     return;
   }
 
@@ -315,25 +374,40 @@ function collectStaticCssModuleExportEntries(
   }
 
   if (declaration.source) {
-    collectDirectNamedReexportEntries(declaration, exportMap);
+    collectDirectNamedReexportEntries(declaration, state);
     return;
   }
 
   if (declaration.declaration) {
-    collectDeclaredExportEntries(declaration.declaration, exportMap);
+    collectDeclaredExportEntries(declaration.declaration, state);
     return;
   }
 
-  collectLocalSpecifierExportEntries(declaration, exportMap);
+  collectLocalSpecifierExportEntries(declaration, state);
+}
+
+function collectExportAllDeclaration(
+  declaration: t.ExportAllDeclaration,
+  state: StaticCssModuleExportGraphBuildState
+): void {
+  if (declaration.exportKind === "type") {
+    return;
+  }
+
+  addExportStarReexportEntry(state, {
+    kind: "star-reexport",
+    exportName: "*",
+    source: declaration.source.value,
+    declaration
+  });
 }
 
 function collectDefaultExportEntry(
-  file: string,
   declaration: t.ExportDefaultDeclaration,
-  exportMap: Map<StaticCssEvalExportName, ExportMapEntry>
+  state: StaticCssModuleExportGraphBuildState
 ): void {
   if (t.isExpression(declaration.declaration)) {
-    exportMap.set("default", {
+    addExportMapEntry(state, {
       kind: "expression",
       exportName: "default",
       expression: declaration.declaration,
@@ -342,14 +416,14 @@ function collectDefaultExportEntry(
     return;
   }
 
-  exportMap.set("default", {
+  addExportMapEntry(state, {
     kind: "unsupported",
     exportName: "default",
     unsupportedKind: "default-declaration",
     declaration,
     diagnostic: createUnsupportedDiagnostic({
       id: "STATIC_CSS_EVAL_DYNAMIC_EXPRESSION_UNSUPPORTED",
-      owner: { file },
+      owner: { file: state.file },
       detail: "default export declaration is not a static expression",
       exportName: "default"
     })
@@ -358,7 +432,7 @@ function collectDefaultExportEntry(
 
 function collectDeclaredExportEntries(
   declaration: t.Declaration,
-  exportMap: Map<StaticCssEvalExportName, ExportMapEntry>
+  state: StaticCssModuleExportGraphBuildState
 ): void {
   if (t.isVariableDeclaration(declaration)) {
     const declarationKind = declaration.kind;
@@ -372,7 +446,7 @@ function collectDeclaredExportEntries(
         continue;
       }
 
-      exportMap.set(declarator.id.name, {
+      addExportMapEntry(state, {
         kind: "local",
         exportName: declarator.id.name,
         localName: declarator.id.name,
@@ -388,7 +462,7 @@ function collectDeclaredExportEntries(
       t.isClassDeclaration(declaration)) &&
     declaration.id
   ) {
-    exportMap.set(declaration.id.name, {
+    addExportMapEntry(state, {
       kind: "local",
       exportName: declaration.id.name,
       localName: declaration.id.name,
@@ -402,7 +476,7 @@ function collectDeclaredExportEntries(
 
 function collectLocalSpecifierExportEntries(
   declaration: t.ExportNamedDeclaration,
-  exportMap: Map<StaticCssEvalExportName, ExportMapEntry>
+  state: StaticCssModuleExportGraphBuildState
 ): void {
   for (const specifier of declaration.specifiers) {
     if (!t.isExportSpecifier(specifier) || specifier.exportKind === "type") {
@@ -416,7 +490,7 @@ function collectLocalSpecifierExportEntries(
       continue;
     }
 
-    exportMap.set(exportName, {
+    addExportMapEntry(state, {
       kind: "local",
       exportName,
       localName,
@@ -428,7 +502,7 @@ function collectLocalSpecifierExportEntries(
 
 function collectDirectNamedReexportEntries(
   declaration: t.ExportNamedDeclaration,
-  exportMap: Map<StaticCssEvalExportName, ExportMapEntry>
+  state: StaticCssModuleExportGraphBuildState
 ): void {
   for (const specifier of declaration.specifiers) {
     if (t.isExportSpecifier(specifier) && specifier.exportKind !== "type") {
@@ -436,7 +510,7 @@ function collectDirectNamedReexportEntries(
       const exportName = getStaticCssModuleName(specifier.exported);
 
       if (importedName && exportName) {
-        exportMap.set(exportName, {
+        addExportMapEntry(state, {
           kind: "reexport",
           exportName,
           importedName,
@@ -451,7 +525,7 @@ function collectDirectNamedReexportEntries(
       const exportName = getStaticCssModuleName(specifier.exported);
 
       if (exportName) {
-        exportMap.set(exportName, {
+        addExportMapEntry(state, {
           kind: "unsupported",
           exportName,
           unsupportedKind: "export-namespace",
@@ -470,25 +544,111 @@ function collectDirectNamedReexportEntries(
   }
 }
 
-function createExportStarUnsupportedEntry(
-  file: string,
-  declaration: t.ExportAllDeclaration
-): ExportMapUnsupportedEntry {
-  return {
-    kind: "unsupported",
-    exportName: "*",
-    unsupportedKind: "export-star",
-    declaration,
-    source: declaration.source.value,
-    diagnostic: createUnsupportedDiagnostic({
-      id: "STATIC_CSS_EVAL_EXPORT_STAR_UNSUPPORTED",
-      owner: { file },
-      dependency: { file: declaration.source.value },
-      detail: `export * from "${declaration.source.value}" is unsupported`,
-      exportName: "*",
-      importPath: declaration.source.value
-    })
-  };
+function addExportMapEntry(
+  state: StaticCssModuleExportGraphBuildState,
+  entry: ExportMapEntry
+): void {
+  state.exportMap.set(entry.exportName, entry);
+  state.exportGraph.push(entry);
+}
+
+function addExportStarReexportEntry(
+  state: StaticCssModuleExportGraphBuildState,
+  entry: ExportGraphStarReexportEntry
+): void {
+  state.exportStarReexports.push(entry);
+  state.unsupportedExportStars.push(entry);
+  state.exportGraph.push(entry);
+}
+
+export function createStaticCssModuleExportNameTable(
+  explicitExportMap: ReadonlyMap<StaticCssEvalExportName, ExportMapEntry>,
+  starSources: readonly StaticCssModuleExportStarSource[]
+): ReadonlyMap<StaticCssEvalExportName, StaticCssModuleExportNameTableEntry> {
+  const exportNameTable = new Map<
+    StaticCssEvalExportName,
+    StaticCssModuleExportNameTableEntry
+  >();
+
+  for (const [exportName, entry] of explicitExportMap) {
+    exportNameTable.set(exportName, {
+      kind: "explicit",
+      exportName,
+      entry
+    });
+  }
+
+  for (const starSource of starSources) {
+    for (const exportName of starSource.exportNames) {
+      if (exportName === "default" || explicitExportMap.has(exportName)) {
+        continue;
+      }
+
+      addStarExportNameTableEntry(
+        exportNameTable,
+        exportName,
+        starSource.entry
+      );
+    }
+  }
+
+  return exportNameTable;
+}
+
+function addStarExportNameTableEntry(
+  exportNameTable: Map<
+    StaticCssEvalExportName,
+    StaticCssModuleExportNameTableEntry
+  >,
+  exportName: StaticCssEvalExportName,
+  starEntry: ExportGraphStarReexportEntry
+): void {
+  const existing = exportNameTable.get(exportName);
+
+  if (!existing) {
+    exportNameTable.set(exportName, {
+      kind: "star",
+      exportName,
+      source: starEntry.source,
+      entry: starEntry
+    });
+    return;
+  }
+
+  switch (existing.kind) {
+    case "explicit":
+      return;
+    case "star":
+      if (existing.source === starEntry.source) {
+        return;
+      }
+
+      exportNameTable.set(exportName, {
+        kind: "ambiguous-star",
+        exportName,
+        sources: [existing.source, starEntry.source],
+        starEntries: [existing.entry, starEntry]
+      });
+      return;
+    case "ambiguous-star":
+      if (existing.sources.includes(starEntry.source)) {
+        return;
+      }
+
+      exportNameTable.set(exportName, {
+        kind: "ambiguous-star",
+        exportName,
+        sources: [...existing.sources, starEntry.source],
+        starEntries: [...existing.starEntries, starEntry]
+      });
+      return;
+    default:
+      return assertNever(existing);
+  }
+}
+
+function assertNever(value: never): never {
+  throw new TypeError(`Unexpected static css export graph entry: ${value}`);
 }
 
 function createUnsupportedDiagnostic(options: {
@@ -716,31 +876,224 @@ if (import.meta.vitest) {
       );
     });
 
-    it("records export star as deterministic unsupported metadata without recursion", () => {
+    it("records distinct export graph entries for default direct and export star declarations", () => {
+      const cache = createStaticCssModuleCache();
+      const source = createSource(`
+        export const button = { color: "red" };
+        const local = { color: "blue" };
+        export { local as name };
+        export default { color: "green" };
+        export { button as buttonFromLeaf } from "./button";
+        export { default as root } from "./button";
+        export * from "./button";
+      `);
+      const parsedModule = cache.getParsedModule(source);
+
+      expect(parsedModule.exportGraph).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            kind: "local",
+            exportName: "button",
+            localName: "button",
+            declarationKind: "const"
+          }),
+          expect.objectContaining({
+            kind: "local",
+            exportName: "name",
+            localName: "local",
+            declarationKind: "specifier"
+          }),
+          expect.objectContaining({
+            kind: "expression",
+            exportName: "default"
+          }),
+          expect.objectContaining({
+            kind: "reexport",
+            exportName: "buttonFromLeaf",
+            importedName: "button",
+            source: "./button"
+          }),
+          expect.objectContaining({
+            kind: "reexport",
+            exportName: "root",
+            importedName: "default",
+            source: "./button"
+          }),
+          expect.objectContaining({
+            kind: "star-reexport",
+            exportName: "*",
+            source: "./button"
+          })
+        ])
+      );
+      expect(parsedModule.exportStarReexports).toEqual([
+        expect.objectContaining({
+          kind: "star-reexport",
+          exportName: "*",
+          source: "./button"
+        })
+      ]);
+      expect(cache.getExportMapEntry(source, "*")).toBeNull();
+    });
+
+    it("records explicit default reexports as direct graph entries", () => {
+      const cache = createStaticCssModuleCache();
+      const source = createSource(`
+        export { button } from "./button";
+        export { default } from "./button";
+      `);
+      const parsedModule = cache.getParsedModule(source);
+
+      expect(cache.getExportMapEntry(source, "button")).toMatchObject({
+        kind: "reexport",
+        exportName: "button",
+        importedName: "button",
+        source: "./button"
+      });
+      expect(cache.getExportMapEntry(source, "default")).toMatchObject({
+        kind: "reexport",
+        exportName: "default",
+        importedName: "default",
+        source: "./button"
+      });
+      expect(parsedModule.exportGraph).toEqual([
+        expect.objectContaining({
+          kind: "reexport",
+          exportName: "button",
+          importedName: "button",
+          source: "./button"
+        }),
+        expect.objectContaining({
+          kind: "reexport",
+          exportName: "default",
+          importedName: "default",
+          source: "./button"
+        })
+      ]);
+    });
+
+    it("builds export star name tables without default forwarding or ambiguity guesses", () => {
+      const cache = createStaticCssModuleCache();
+      const source = createSource(`
+        export const localButton = { color: "red" };
+        export * from "./button";
+        export * from "./theme";
+      `);
+      const parsedModule = cache.getParsedModule(source);
+      const [buttonStar, themeStar] = parsedModule.exportStarReexports;
+
+      if (!buttonStar || !themeStar) {
+        throw new TypeError("expected two export star graph entries");
+      }
+
+      expect(buttonStar).toMatchObject({ source: "./button" });
+      expect(themeStar).toMatchObject({ source: "./theme" });
+
+      const exportNameTable = createStaticCssModuleExportNameTable(
+        parsedModule.exportMap,
+        [
+          {
+            entry: buttonStar,
+            exportNames: ["localButton", "button", "default", "card"]
+          },
+          { entry: themeStar, exportNames: ["button", "color"] }
+        ]
+      );
+
+      expect(exportNameTable.get("localButton")).toMatchObject({
+        kind: "explicit",
+        exportName: "localButton",
+        entry: expect.objectContaining({ kind: "local" })
+      });
+      expect(exportNameTable.get("default")).toBeUndefined();
+      expect(exportNameTable.get("card")).toMatchObject({
+        kind: "star",
+        exportName: "card",
+        source: "./button"
+      });
+      expect(exportNameTable.get("button")).toMatchObject({
+        kind: "ambiguous-star",
+        exportName: "button",
+        sources: ["./button", "./theme"]
+      });
+    });
+
+    it("keeps namespace re-export unsupported and type-only exports out of value graph", () => {
+      const cache = createStaticCssModuleCache();
+      const source = createSource(`
+        export type { Foo } from "./types";
+        export type * from "./types";
+        export * as ns from "./button";
+      `);
+      const parsedModule = cache.getParsedModule(source);
+
+      expect(cache.getExportMapEntry(source, "Foo")).toBeNull();
+      expect(parsedModule.exportStarReexports).toHaveLength(0);
+      expect(parsedModule.exportGraph).toEqual([
+        expect.objectContaining({
+          kind: "unsupported",
+          exportName: "ns",
+          unsupportedKind: "export-namespace",
+          source: "./button",
+          diagnostic: expect.objectContaining({
+            id: "STATIC_CSS_EVAL_NAMESPACE_UNSUPPORTED",
+            code: "unsupported-source",
+            reason: "reexport-or-barrel",
+            owner: { file: "./button" },
+            importPath: "./button",
+            exportName: "ns"
+          })
+        })
+      ]);
+    });
+
+    it("records export star as deterministic graph metadata without forwarding default", () => {
       const cache = createStaticCssModuleCache();
       const source = createSource(`export * from "./button";`);
       const parsedModule = cache.getParsedModule(source);
-      const exportStarEntry = cache.getExportMapEntry(source, "*");
+      const [buttonStar] = parsedModule.exportStarReexports;
+
+      if (!buttonStar) {
+        throw new TypeError("expected one export star graph entry");
+      }
+
+      const exportNameTable = createStaticCssModuleExportNameTable(
+        parsedModule.exportMap,
+        [
+          {
+            entry: buttonStar,
+            exportNames: ["button", "default"]
+          }
+        ]
+      );
 
       expect(parsedModule.unsupportedExportStars).toHaveLength(1);
-      expect(exportStarEntry).toMatchObject({
-        kind: "unsupported",
-        exportName: "*",
-        unsupportedKind: "export-star",
-        source: "./button",
-        diagnostic: {
-          id: "STATIC_CSS_EVAL_EXPORT_STAR_UNSUPPORTED",
-          code: "unsupported-source",
-          reason: "reexport-or-barrel",
-          owner: { file: stylesId },
-          dependency: { file: "./button" },
-          importPath: "./button",
-          exportName: "*"
-        }
+      expect(parsedModule.exportStarReexports).toEqual([
+        expect.objectContaining({
+          kind: "star-reexport",
+          exportName: "*",
+          source: "./button"
+        })
+      ]);
+      expect(parsedModule.exportGraph).toEqual([
+        expect.objectContaining({
+          kind: "star-reexport",
+          exportName: "*",
+          source: "./button"
+        })
+      ]);
+      expect(cache.getExportMapEntry(source, "*")).toBeNull();
+      expect(exportNameTable.get("button")).toMatchObject({
+        kind: "star",
+        exportName: "button",
+        source: "./button"
       });
-      expect(
-        parsedModule.unsupportedExportStars[0]?.diagnostic.message
-      ).toContain(`export * from "./button" is unsupported`);
+      expect(exportNameTable.get("default")).toBeUndefined();
+      expect(parsedModule.unsupportedExportStars[0]).toMatchObject({
+        kind: "star-reexport",
+        exportName: "*",
+        source: "./button"
+      });
       expect(
         getStaticCssModuleCacheInstrumentation(cache).parseCountByFile
       ).toEqual(new Map([[stylesId, 1]]));

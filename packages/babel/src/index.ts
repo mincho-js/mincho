@@ -670,6 +670,92 @@ if (import.meta.vitest) {
       expect(result[1]).toContain('color: "red"');
     });
 
+    it("lowers whole namespace object imported css prop through static provider", () => {
+      const ownerFile = "/project/src/App.tsx";
+      const stylesFile = "/project/src/styles.ts";
+      const source = `
+        import * as styles from "./styles";
+
+        function App() {
+          return <div css={styles} />;
+        }
+      `;
+      const { result, code } = babelTransform(
+        source,
+        {
+          jsxCssProp: true,
+          staticCssEvalProvider: createImportedStaticCssEvalProvider({
+            modules: [
+              { id: ownerFile, source },
+              {
+                id: stylesFile,
+                source: `export const button = { color: "red" } as const;
+                         export const card = { color: "blue" } as const;`
+              }
+            ],
+            importResolutions: [
+              {
+                importerId: ownerFile,
+                importPath: "./styles",
+                resolvedId: stylesFile
+              }
+            ]
+          })
+        },
+        { filename: ownerFile }
+      );
+
+      expect(code).not.toContain(" css=");
+      expect(code).toMatch(/className=\{_\$mincho\$\$App\d+\}/);
+      expect(code).not.toContain("_cx(styles)");
+      expect(result[1]).toContain("button: {");
+      expect(result[1]).toContain("card: {");
+      expect(result[1]).toContain('color: "red"');
+      expect(result[1]).toContain('color: "blue"');
+    });
+
+    it("keeps local lexical shadowing ahead of whole namespace css prop resolution", () => {
+      const ownerFile = "/project/src/App.tsx";
+      const stylesFile = "/project/src/styles.ts";
+      const source = `
+        import * as styles from "./styles";
+
+        function App() {
+          const styles = { color: "blue" };
+          return <div css={styles} />;
+        }
+      `;
+      const { result, code } = babelTransform(
+        source,
+        {
+          jsxCssProp: true,
+          staticCssEvalProvider: createImportedStaticCssEvalProvider({
+            modules: [
+              { id: ownerFile, source },
+              {
+                id: stylesFile,
+                source: `export const remote = { color: "red" } as const;`
+              }
+            ],
+            importResolutions: [
+              {
+                importerId: ownerFile,
+                importPath: "./styles",
+                resolvedId: stylesFile
+              }
+            ]
+          })
+        },
+        { filename: ownerFile }
+      );
+
+      expect(code).not.toContain(" css=");
+      expect(code).toMatch(/className=\{_\$mincho\$\$App\d+\}/);
+      expect(code).not.toContain("_cx(styles)");
+      expect(result[1]).toContain('color: "blue"');
+      expect(result[1]).not.toContain('color: "red"');
+    });
+
     it("merges expression className before provider-resolved css rule class", () => {
       const { result, code } = babelTransform(
         `

@@ -326,14 +326,12 @@ export const STATIC_CSS_EVAL_GUARDRAILS = [
   "no-module-execution",
   "no-node-vm-eval-dynamic-import",
   "no-bundler-runtime-evaluation",
-  "direct-named-reexports-only-v1",
-  "limited-project-local-namespace-members-v1",
-  "no-node-modules-or-virtual-modules-v1",
+  "project-local-esm-source-provider-export-graph-v2",
+  "limited-project-local-namespace-values-v2",
+  "no-node-modules-virtual-cjs-or-outside-root-v1",
   "async-prepass-sync-babel-boundary"
 ] as const;
 
-// Keep unsupported boundaries fail-closed: dynamic/export-star/package/CJS,
-// object spread, computed paths, and runtime fallback are outside this model.
 export type StaticCssEvalSupportStatus =
   | "preserved"
   | "supported"
@@ -424,26 +422,41 @@ export const STATIC_CSS_EVAL_SUPPORT_MATRIX = [
     status: "supported"
   },
   {
-    construct: 'Direct named re-export (`export { x } from "./x"`)',
+    construct:
+      'Project-local ESM re-export graph (`export { x } from "./x"`, barrels, and transitive aliases)',
     behavior:
-      "Supported for project-local ESM source with dependency chain metadata",
+      "Supported under source-provider constraints with dependency chain metadata",
     status: "supported"
   },
   {
-    construct: "Export star (`export *`)",
-    behavior: "Unsupported",
+    construct: 'Project-local export-star barrel graph (`export * from "./x"`)',
+    behavior:
+      "Supported under source-provider constraints; explicit exports win, `default` is not forwarded, and ambiguity fails closed",
+    status: "supported"
+  },
+  {
+    construct: 'Namespace re-export (`export * as ns from "./x"`)',
+    behavior: "Unsupported; namespace re-export entries fail closed",
     status: "unsupported"
   },
   {
     construct:
       'Limited namespace member import (`import * as styles from "./style"; styles.x.y`)',
     behavior:
-      "Supported for project-local ESM source and literal member chains only",
+      "Supported for project-local ESM source-provider literal member chains, including export-star barrels",
     status: "supported"
   },
   {
-    construct: "Broad/package/computed namespace usage",
-    behavior: "Unsupported",
+    construct:
+      'Whole namespace import object (`import * as styles from "./style"; css={styles}`)',
+    behavior:
+      "Supported under source-provider constraints when every exported namespace value is statically evaluable",
+    status: "supported"
+  },
+  {
+    construct: "Computed, optional, destructured, or broad namespace access",
+    behavior:
+      "Unsupported; namespace access must resolve to literal member chains or a whole namespace object",
     status: "unsupported"
   },
   {
@@ -452,8 +465,9 @@ export const STATIC_CSS_EVAL_SUPPORT_MATRIX = [
     status: "unsupported"
   },
   {
-    construct: "`node_modules` imports",
-    behavior: "Unsupported; preserve class-value or error per candidate policy",
+    construct: "Package, `node_modules`, or outside-root imports",
+    behavior:
+      "Unsupported; preserve class-value or error per candidate policy without filesystem fallback",
     status: "unsupported"
   },
   {
@@ -677,7 +691,7 @@ if (import.meta.vitest) {
   } satisfies StaticCssEvalResult;
 
   describe("static css evaluator contracts", () => {
-    it("encodes v1 static evaluator limits and guardrails", () => {
+    it("encodes static evaluator limits and source-provider guardrails", () => {
       expect(STATIC_CSS_EVAL_LIMITS).toEqual({
         maxImportDepth: 10,
         maxEvaluatedModulesPerOwner: 100,
@@ -689,33 +703,71 @@ if (import.meta.vitest) {
       expect(STATIC_CSS_EVAL_GUARDRAILS).toContain(
         "async-prepass-sync-babel-boundary"
       );
+      expect(STATIC_CSS_EVAL_GUARDRAILS).toContain(
+        "project-local-esm-source-provider-export-graph-v2"
+      );
+      expect(STATIC_CSS_EVAL_GUARDRAILS).toContain(
+        "limited-project-local-namespace-values-v2"
+      );
+      expect(STATIC_CSS_EVAL_GUARDRAILS).toContain(
+        "no-node-modules-virtual-cjs-or-outside-root-v1"
+      );
+      expect(STATIC_CSS_EVAL_GUARDRAILS).not.toContain(
+        "direct-named-reexports-only-v1"
+      );
     });
 
-    it("keeps the v1 support matrix testable", () => {
+    it("keeps the source-provider export graph support matrix testable", () => {
+      const supportMatrixByConstruct = new Map(
+        STATIC_CSS_EVAL_SUPPORT_MATRIX.map((entry) => [entry.construct, entry])
+      );
+      const supportMatrixConstructs: readonly string[] =
+        STATIC_CSS_EVAL_SUPPORT_MATRIX.map((entry) => entry.construct);
+
       expect(
-        STATIC_CSS_EVAL_SUPPORT_MATRIX.find(
-          ({ construct }) =>
-            construct ===
-            'Limited namespace member import (`import * as styles from "./style"; styles.x.y`)'
-        )?.status
-      ).toBe("supported");
+        supportMatrixByConstruct.get(
+          'Project-local ESM re-export graph (`export { x } from "./x"`, barrels, and transitive aliases)'
+        )
+      ).toMatchObject({ status: "supported" });
       expect(
-        STATIC_CSS_EVAL_SUPPORT_MATRIX.find(
-          ({ construct }) =>
-            construct === 'Direct named re-export (`export { x } from "./x"`)'
-        )?.status
-      ).toBe("supported");
+        supportMatrixByConstruct.get(
+          'Project-local export-star barrel graph (`export * from "./x"`)'
+        )
+      ).toMatchObject({ status: "supported" });
       expect(
-        STATIC_CSS_EVAL_SUPPORT_MATRIX.find(
-          ({ construct }) => construct === "Export star (`export *`)"
-        )?.status
-      ).toBe("unsupported");
+        supportMatrixByConstruct.get(
+          'Limited namespace member import (`import * as styles from "./style"; styles.x.y`)'
+        )
+      ).toMatchObject({ status: "supported" });
       expect(
-        STATIC_CSS_EVAL_SUPPORT_MATRIX.find(
-          ({ construct }) => construct === '`import x from "./style"`'
-        )?.status
-      ).toBe("supported");
-      expect(STATIC_CSS_EVAL_SUPPORT_MATRIX).toHaveLength(32);
+        supportMatrixByConstruct.get(
+          'Whole namespace import object (`import * as styles from "./style"; css={styles}`)'
+        )
+      ).toMatchObject({ status: "supported" });
+      expect(
+        supportMatrixByConstruct.get(
+          'Namespace re-export (`export * as ns from "./x"`)'
+        )
+      ).toMatchObject({ status: "unsupported" });
+      expect(
+        supportMatrixByConstruct.get(
+          "Computed, optional, destructured, or broad namespace access"
+        )
+      ).toMatchObject({ status: "unsupported" });
+      expect(
+        supportMatrixByConstruct.get(
+          "Package, `node_modules`, or outside-root imports"
+        )
+      ).toMatchObject({ status: "unsupported" });
+      expect(
+        supportMatrixByConstruct.get("CommonJS / `require()`")
+      ).toMatchObject({ status: "unsupported" });
+      expect(
+        supportMatrixConstructs.some(
+          (construct) => construct === "Export star (`export *`)"
+        )
+      ).toBe(false);
+      expect(STATIC_CSS_EVAL_SUPPORT_MATRIX).toHaveLength(34);
     });
 
     it("accepts synchronous provider and cache key contracts", () => {

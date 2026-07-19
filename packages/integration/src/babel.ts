@@ -1297,6 +1297,405 @@ if (import.meta.vitest) {
       expect(staticCssEval?.resolvedModuleIds).toContain(stylesId);
     });
 
+    it("loads export-star namespace members from the async source-provider prepass", async () => {
+      const path = await import("node:path");
+      const ownerSource = `
+        import * as styles from "./barrel";
+
+        function App() {
+          return <div css={styles.button.primary} />;
+        }
+      `;
+      const fixturePath = await createBabelFixture(
+        ownerSource,
+        "css-prop-async-prepass-export-star-namespace-member"
+      );
+      const fixtureRoot = path.dirname(fixturePath);
+      const barrelId = path.join(fixtureRoot, "barrel.ts");
+      const stylesId = path.join(fixtureRoot, "styles.ts");
+      const { provider, calls } = createFakeStaticCssEvalSourceProvider({
+        sources: {
+          [fixturePath]: ownerSource,
+          [barrelId]: `export * from "./styles";`,
+          [stylesId]: `export const button = { primary: { color: "red" } } as const;`
+        },
+        resolutions: {
+          [`${fixturePath}\0./barrel`]: barrelId,
+          [`${barrelId}\0./styles`]: stylesId
+        }
+      });
+      const { result, code, staticCssEval } = await babelTransform(
+        fixturePath,
+        {
+          jsxCssProp: true,
+          staticCssEvalSourceProvider: provider
+        }
+      );
+      const [, sidecarSource] = result;
+
+      expect(calls.resolved).toEqual([
+        { importerId: fixturePath, importPath: "./barrel" },
+        { importerId: barrelId, importPath: "./styles" }
+      ]);
+      expect(calls.loaded).toEqual([fixturePath, barrelId, stylesId]);
+      expect(sidecarSource).toContain('color: "red"');
+      expect(code).not.toContain("_cx(styles.button.primary)");
+      expect(staticCssEval?.dependencyFiles).toEqual([barrelId, stylesId]);
+      expect(staticCssEval?.ownerToDependencies.get(fixturePath)).toEqual([
+        barrelId,
+        stylesId
+      ]);
+      expect(staticCssEval?.dependencyToOwners.get(barrelId)).toEqual([
+        fixturePath
+      ]);
+      expect(staticCssEval?.dependencyToOwners.get(stylesId)).toEqual([
+        fixturePath
+      ]);
+      expect(staticCssEval?.resolvedModuleCache.has(fixturePath)).toBe(true);
+      expect(staticCssEval?.resolvedModuleCache.has(barrelId)).toBe(true);
+      expect(staticCssEval?.resolvedModuleCache.has(stylesId)).toBe(true);
+      expect(staticCssEval?.resolvedDependencies).toEqual([
+        expect.objectContaining({
+          importerId: fixturePath,
+          specifier: "./barrel",
+          resolvedFile: barrelId,
+          loaded: true
+        }),
+        expect.objectContaining({
+          importerId: barrelId,
+          specifier: "./styles",
+          resolvedFile: stylesId,
+          loaded: true
+        })
+      ]);
+      expect(staticCssEval?.resolvedModuleIds).toEqual(
+        expect.arrayContaining([barrelId, stylesId])
+      );
+    });
+
+    it("loads whole namespace export-star graphs with explicit default reexports from the async source-provider prepass", async () => {
+      const path = await import("node:path");
+      const ownerSource = `
+        import * as styles from "./barrel";
+
+        function App() {
+          return <div css={styles} />;
+        }
+      `;
+      const fixturePath = await createBabelFixture(
+        ownerSource,
+        "css-prop-async-prepass-whole-namespace-export-star-default"
+      );
+      const fixtureRoot = path.dirname(fixturePath);
+      const barrelId = path.join(fixtureRoot, "barrel.ts");
+      const resetId = path.join(fixtureRoot, "reset.ts");
+      const stylesId = path.join(fixtureRoot, "styles.ts");
+      const { provider, calls } = createFakeStaticCssEvalSourceProvider({
+        sources: {
+          [fixturePath]: ownerSource,
+          [barrelId]: `
+            export { default } from "./reset";
+            export * from "./styles";
+          `,
+          [resetId]: `export default { margin: 0 } as const;`,
+          [stylesId]: `export const button = { color: "red" } as const;`
+        },
+        resolutions: {
+          [`${fixturePath}\0./barrel`]: barrelId,
+          [`${barrelId}\0./reset`]: resetId,
+          [`${barrelId}\0./styles`]: stylesId
+        }
+      });
+      const { result: staticCssEval } = await createStaticCssEvalPrepass(
+        fixturePath,
+        provider
+      );
+
+      expect(calls.resolved).toEqual([
+        { importerId: fixturePath, importPath: "./barrel" },
+        { importerId: barrelId, importPath: "./reset" },
+        { importerId: barrelId, importPath: "./styles" }
+      ]);
+      expect(calls.loaded).toEqual([fixturePath, barrelId, resetId, stylesId]);
+      expect(staticCssEval.dependencyFiles).toEqual([
+        barrelId,
+        resetId,
+        stylesId
+      ]);
+      expect(staticCssEval.ownerToDependencies.get(fixturePath)).toEqual([
+        barrelId,
+        resetId,
+        stylesId
+      ]);
+      expect(staticCssEval.dependencyToOwners.get(resetId)).toEqual([
+        fixturePath
+      ]);
+      expect(staticCssEval.dependencyToOwners.get(stylesId)).toEqual([
+        fixturePath
+      ]);
+      expect(staticCssEval.resolvedModuleCache.has(resetId)).toBe(true);
+      expect(staticCssEval.resolvedModuleCache.has(stylesId)).toBe(true);
+      expect(staticCssEval.resolvedDependencies).toEqual([
+        expect.objectContaining({
+          importerId: fixturePath,
+          specifier: "./barrel",
+          resolvedFile: barrelId,
+          loaded: true
+        }),
+        expect.objectContaining({
+          importerId: barrelId,
+          specifier: "./reset",
+          resolvedFile: resetId,
+          loaded: true
+        }),
+        expect.objectContaining({
+          importerId: barrelId,
+          specifier: "./styles",
+          resolvedFile: stylesId,
+          loaded: true
+        })
+      ]);
+    });
+
+    it("excludes star-only default reexports from whole namespace export-star async source-provider prepass", async () => {
+      const path = await import("node:path");
+      const ownerSource = `
+        import * as styles from "./barrel";
+
+        function App() {
+          return <div css={styles} />;
+        }
+      `;
+      const fixturePath = await createBabelFixture(
+        ownerSource,
+        "css-prop-async-prepass-star-only-default-exclusion"
+      );
+      const fixtureRoot = path.dirname(fixturePath);
+      const barrelId = path.join(fixtureRoot, "barrel.ts");
+      const defaultBarrelId = path.join(fixtureRoot, "defaultBarrel.ts");
+      const defaultLeafId = path.join(fixtureRoot, "defaultLeaf.ts");
+      const { provider, calls } = createFakeStaticCssEvalSourceProvider({
+        sources: {
+          [fixturePath]: ownerSource,
+          [barrelId]: `export * from "./defaultBarrel";`,
+          [defaultBarrelId]: `
+            export { default } from "./defaultLeaf";
+            export const button = { color: "red" } as const;
+          `,
+          [defaultLeafId]: `export default { color: "blue" } as const;`
+        },
+        resolutions: {
+          [`${fixturePath}\0./barrel`]: barrelId,
+          [`${barrelId}\0./defaultBarrel`]: defaultBarrelId,
+          [`${defaultBarrelId}\0./defaultLeaf`]: defaultLeafId
+        }
+      });
+      const { result: staticCssEval } = await createStaticCssEvalPrepass(
+        fixturePath,
+        provider
+      );
+
+      expect(calls.resolved).toEqual([
+        { importerId: fixturePath, importPath: "./barrel" },
+        { importerId: barrelId, importPath: "./defaultBarrel" }
+      ]);
+      expect(calls.loaded).toEqual([fixturePath, barrelId, defaultBarrelId]);
+      expect(staticCssEval.dependencyFiles).toEqual([
+        barrelId,
+        defaultBarrelId
+      ]);
+      expect(staticCssEval.ownerToDependencies.get(fixturePath)).toEqual([
+        barrelId,
+        defaultBarrelId
+      ]);
+      expect(staticCssEval.resolvedModuleCache.has(defaultBarrelId)).toBe(true);
+      expect(staticCssEval.resolvedModuleCache.has(defaultLeafId)).toBe(false);
+    });
+
+    it("bounds export-star cycles in namespace async source-provider prepass", async () => {
+      const path = await import("node:path");
+      const ownerSource = `
+        import * as styles from "./barrel";
+
+        function App() {
+          return <div css={styles.button} />;
+        }
+      `;
+      const fixturePath = await createBabelFixture(
+        ownerSource,
+        "css-prop-async-prepass-export-star-cycle"
+      );
+      const fixtureRoot = path.dirname(fixturePath);
+      const barrelId = path.join(fixtureRoot, "barrel.ts");
+      const loopId = path.join(fixtureRoot, "loop.ts");
+      const { provider, calls } = createFakeStaticCssEvalSourceProvider({
+        sources: {
+          [fixturePath]: ownerSource,
+          [barrelId]: `export * from "./loop";`,
+          [loopId]: `export * from "./barrel";`
+        },
+        resolutions: {
+          [`${fixturePath}\0./barrel`]: barrelId,
+          [`${barrelId}\0./loop`]: loopId,
+          [`${loopId}\0./barrel`]: barrelId
+        }
+      });
+      let thrownError: unknown;
+
+      try {
+        await babelTransform(fixturePath, {
+          jsxCssProp: true,
+          staticCssEvalSourceProvider: provider
+        });
+      } catch (error) {
+        thrownError = error;
+      }
+
+      expect(thrownError).toBeInstanceOf(BabelTransformError);
+
+      if (!(thrownError instanceof BabelTransformError)) {
+        throw new Error("Expected BabelTransformError for export-star cycle");
+      }
+
+      expect(calls.resolved).toEqual([
+        { importerId: fixturePath, importPath: "./barrel" },
+        { importerId: barrelId, importPath: "./loop" },
+        { importerId: loopId, importPath: "./barrel" }
+      ]);
+      expect(calls.loaded).toEqual([fixturePath, barrelId, loopId]);
+      expect(thrownError.staticCssEval?.dependencyFiles).toEqual([
+        barrelId,
+        loopId
+      ]);
+      expect(thrownError.staticCssEval?.diagnostics[0]).toMatchObject({
+        id: "STATIC_CSS_EVAL_IMPORT_CYCLE",
+        owner: { file: fixturePath }
+      });
+    });
+
+    it("keeps unresolved export-star namespace prepass failures bounded", async () => {
+      const path = await import("node:path");
+      const ownerSource = `
+        import * as styles from "./barrel";
+
+        function App() {
+          return <div css={styles.button} />;
+        }
+      `;
+      const fixturePath = await createBabelFixture(
+        ownerSource,
+        "css-prop-async-prepass-unresolved-export-star"
+      );
+      const fixtureRoot = path.dirname(fixturePath);
+      const barrelId = path.join(fixtureRoot, "barrel.ts");
+      const { provider, calls } = createFakeStaticCssEvalSourceProvider({
+        sources: {
+          [fixturePath]: ownerSource,
+          [barrelId]: `export * from "./missing";`
+        },
+        resolutions: {
+          [`${fixturePath}\0./barrel`]: barrelId
+        }
+      });
+      let thrownError: unknown;
+
+      try {
+        await babelTransform(fixturePath, {
+          jsxCssProp: true,
+          staticCssEvalSourceProvider: provider
+        });
+      } catch (error) {
+        thrownError = error;
+      }
+
+      expect(thrownError).toBeInstanceOf(BabelTransformError);
+
+      if (!(thrownError instanceof BabelTransformError)) {
+        throw new Error(
+          "Expected BabelTransformError for unresolved export-star"
+        );
+      }
+
+      expect(calls.resolved).toEqual([
+        { importerId: fixturePath, importPath: "./barrel" },
+        { importerId: barrelId, importPath: "./missing" }
+      ]);
+      expect(calls.loaded).toEqual([fixturePath, barrelId]);
+      expect(thrownError.staticCssEval?.dependencyFiles).toEqual([barrelId]);
+      expect(thrownError.staticCssEval?.diagnostics[0]).toMatchObject({
+        id: "STATIC_CSS_EVAL_UNRESOLVED_IMPORT",
+        owner: { file: fixturePath },
+        dependency: { file: "./missing" },
+        importPath: "./missing",
+        exportName: "button"
+      });
+      expect(thrownError.staticCssEval?.resolvedDependencies).toEqual([
+        expect.objectContaining({
+          importerId: fixturePath,
+          specifier: "./barrel",
+          resolvedFile: barrelId,
+          loaded: true
+        })
+      ]);
+    });
+
+    it("keeps package boundary export-star namespace prepass failures bounded", async () => {
+      const path = await import("node:path");
+      const ownerSource = `
+        import * as styles from "./barrel";
+
+        function App() {
+          return <div css={styles.button} />;
+        }
+      `;
+      const fixturePath = await createBabelFixture(
+        ownerSource,
+        "css-prop-async-prepass-package-boundary-export-star"
+      );
+      const fixtureRoot = path.dirname(fixturePath);
+      const barrelId = path.join(fixtureRoot, "barrel.ts");
+      const { provider, calls } = createFakeStaticCssEvalSourceProvider({
+        sources: {
+          [fixturePath]: ownerSource,
+          [barrelId]: `export * from "@scope/styles";`
+        },
+        resolutions: {
+          [`${fixturePath}\0./barrel`]: barrelId
+        }
+      });
+      let thrownError: unknown;
+
+      try {
+        await babelTransform(fixturePath, {
+          jsxCssProp: true,
+          staticCssEvalSourceProvider: provider
+        });
+      } catch (error) {
+        thrownError = error;
+      }
+
+      expect(thrownError).toBeInstanceOf(BabelTransformError);
+
+      if (!(thrownError instanceof BabelTransformError)) {
+        throw new Error(
+          "Expected BabelTransformError for package boundary export-star"
+        );
+      }
+
+      expect(calls.resolved).toEqual([
+        { importerId: fixturePath, importPath: "./barrel" }
+      ]);
+      expect(calls.loaded).toEqual([fixturePath, barrelId]);
+      expect(thrownError.staticCssEval?.dependencyFiles).toEqual([barrelId]);
+      expect(thrownError.staticCssEval?.diagnostics[0]).toMatchObject({
+        id: "STATIC_CSS_EVAL_PACKAGE_IMPORT_UNSUPPORTED",
+        owner: { file: fixturePath },
+        dependency: { file: barrelId },
+        importPath: "@scope/styles",
+        exportName: "button"
+      });
+    });
+
     it("preserves whole-expression reexport fallback but rejects reexports inside static css rules", async () => {
       const wholeExpressionPath = await createBabelFixture(
         `

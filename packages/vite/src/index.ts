@@ -1595,6 +1595,21 @@ if (import.meta.vitest) {
     `;
   }
 
+  function createNamespaceCssPropEntrySource(
+    importPath = "./barrel",
+    cssExpression = "styles.button.primary"
+  ): string {
+    return `
+      import * as styles from "${importPath}";
+
+      function App() {
+        return <div css={${cssExpression}} />;
+      }
+
+      export { App };
+    `;
+  }
+
   function createImportedCssPropStaticRuleEntrySource(
     importPath = "./styles"
   ): string {
@@ -1634,6 +1649,44 @@ if (import.meta.vitest) {
         }
       ],
       resolvedModuleIds: [`ssr:/@fs${filePath}?module#hash`]
+    };
+  }
+
+  function createExportStarStaticCssEvalMetadata({
+    barrelPath,
+    explicitDefaultPath,
+    terminalLeafPath
+  }: {
+    readonly barrelPath: string;
+    readonly explicitDefaultPath?: string;
+    readonly terminalLeafPath: string;
+  }): StaticCssEvalMetadata {
+    const dependencyPaths = [
+      barrelPath,
+      ...(explicitDefaultPath ? [explicitDefaultPath] : []),
+      terminalLeafPath
+    ];
+
+    return {
+      dependencyFiles: dependencyPaths.map(
+        (filePath) => `/@fs${filePath}?import#dep`
+      ),
+      dependencies: dependencyPaths.map((filePath) => ({
+        file: `ssr:/@fs${filePath}?dep#hash`,
+        kind: "reexported"
+      })),
+      resolvedDependencies: dependencyPaths.map((filePath) => ({
+        resolvedFile: `/@fs${filePath}?resolved#hash`,
+        canonicalModuleId: `ssr:/@fs${filePath}?canonical#hash`,
+        normalizedPathKey: `/@fs${filePath}?normalized#hash`
+      })),
+      cacheKeys: dependencyPaths.map((filePath) => ({
+        resolvedFile: `/@fs${filePath}?cache#hash`,
+        resolvedId: `ssr:/@fs${filePath}?cache-id#hash`
+      })),
+      resolvedModuleIds: dependencyPaths.map(
+        (filePath) => `ssr:/@fs${filePath}?module#hash`
+      )
     };
   }
 
@@ -2548,22 +2601,159 @@ if (import.meta.vitest) {
       }
     });
 
-    it("fails closed for export-star static css evaluation with bounded watches", async () => {
+    it("refreshes export-star namespace member watch dependencies when leaf and barrel targets change", async () => {
       const fixture = await createImportedCssPropViteFixture(
-        "jsx-css-prop-imported-export-star-",
+        "jsx-css-prop-imported-export-star-namespace-watch-",
         {
-          entrySource: createImportedCssPropEntrySource("./barrel")
+          entrySource: createNamespaceCssPropEntrySource()
         }
       );
       const barrelPath = join(fixture.srcRoot, "barrel.ts");
       const buttonPath = join(fixture.srcRoot, "button.ts");
+      const primaryButtonPath = join(fixture.srcRoot, "primaryButton.ts");
 
       try {
         await spyOnSourceBabelTransform();
         await fs.promises.writeFile(barrelPath, 'export * from "./button";');
         await fs.promises.writeFile(
           buttonPath,
+          'export const button = { primary: { color: "red" } } as const;'
+        );
+        await fs.promises.writeFile(
+          primaryButtonPath,
+          'export const button = { primary: { color: "green" } } as const;'
+        );
+
+        const harness = await createViteHarness({
+          configOverrides: {
+            command: "serve",
+            mode: "development",
+            root: fixture.root
+          },
+          pluginOptions: {
+            jsxCssProp: true
+          }
+        });
+
+        const barrelRealpath = normalizePath(
+          await fs.promises.realpath(barrelPath)
+        );
+        const buttonRealpath = normalizePath(
+          await fs.promises.realpath(buttonPath)
+        );
+        const primaryButtonRealpath = normalizePath(
+          await fs.promises.realpath(primaryButtonPath)
+        );
+        const redArtifact = await transformImportedCssPropToVirtualCss(
+          harness,
+          fixture.entryPath,
+          fixture.entrySource
+        );
+
+        expect(redArtifact.virtualCss).toContain("color: red;");
+        expect(new Set(harness.watchFiles)).toEqual(
+          new Set([barrelRealpath, buttonRealpath])
+        );
+
+        await fs.promises.writeFile(
+          buttonPath,
+          'export const button = { primary: { color: "blue" } } as const;'
+        );
+        await harness.transform(
+          buttonPath,
+          await fs.promises.readFile(buttonPath, "utf8")
+        );
+        expect(await harness.load(redArtifact.resolvedVirtualId)).toBeNull();
+        harness.watchFiles.length = 0;
+
+        const blueArtifact = await transformImportedCssPropToVirtualCss(
+          harness,
+          fixture.entryPath,
+          fixture.entrySource
+        );
+        expect(blueArtifact.virtualCss).toContain("color: blue;");
+        expect(new Set(harness.watchFiles)).toEqual(
+          new Set([barrelRealpath, buttonRealpath])
+        );
+
+        await fs.promises.writeFile(
+          barrelPath,
+          'export * from "./primaryButton";'
+        );
+        await harness.transform(
+          barrelPath,
+          await fs.promises.readFile(barrelPath, "utf8")
+        );
+        expect(await harness.load(blueArtifact.resolvedVirtualId)).toBeNull();
+
+        const greenArtifact = await transformImportedCssPropToVirtualCss(
+          harness,
+          fixture.entryPath,
+          fixture.entrySource
+        );
+        expect(greenArtifact.virtualCss).toContain("color: green;");
+        expect(new Set(harness.watchFiles)).toEqual(
+          new Set([barrelRealpath, buttonRealpath, primaryButtonRealpath])
+        );
+
+        await harness.transform(
+          buttonPath,
+          await fs.promises.readFile(buttonPath, "utf8")
+        );
+        expect(await harness.load(greenArtifact.resolvedVirtualId)).toContain(
+          "color: green;"
+        );
+      } finally {
+        await fs.promises.rm(fixture.root, { force: true, recursive: true });
+      }
+    });
+
+    it("registers whole namespace export-star watch metadata from Babel integration", async () => {
+      const fixture = await createImportedCssPropViteFixture(
+        "jsx-css-prop-whole-namespace-export-star-watch-",
+        {
+          entrySource: createNamespaceCssPropEntrySource("./barrel", "styles")
+        }
+      );
+      const barrelPath = join(fixture.srcRoot, "barrel.ts");
+      const resetPath = join(fixture.srcRoot, "reset.ts");
+      const buttonPath = join(fixture.srcRoot, "button.ts");
+
+      try {
+        const integrationModule = await import("@mincho-js/integration");
+        await fs.promises.writeFile(
+          barrelPath,
+          'export { default } from "./reset"; export * from "./button";'
+        );
+        await fs.promises.writeFile(
+          resetPath,
+          "export default { margin: 0 } as const;"
+        );
+        await fs.promises.writeFile(
+          buttonPath,
           'export const button = { color: "red" } as const;'
+        );
+
+        const barrelRealpath = normalizePath(
+          await fs.promises.realpath(barrelPath)
+        );
+        const resetRealpath = normalizePath(
+          await fs.promises.realpath(resetPath)
+        );
+        const buttonRealpath = normalizePath(
+          await fs.promises.realpath(buttonPath)
+        );
+        const transformResult: BabelTransformResult = {
+          code: fixture.entrySource,
+          result: ["", ""],
+          staticCssEval: createExportStarStaticCssEvalMetadata({
+            barrelPath: barrelRealpath,
+            explicitDefaultPath: resetRealpath,
+            terminalLeafPath: buttonRealpath
+          })
+        };
+        vi.spyOn(integrationModule, "babelTransform").mockResolvedValue(
+          transformResult
         );
 
         const harness = await createViteHarness({
@@ -2575,33 +2765,11 @@ if (import.meta.vitest) {
           }
         });
 
-        let thrownError: unknown;
+        await harness.transform(fixture.entryPath, fixture.entrySource);
 
-        try {
-          await harness.transform(fixture.entryPath, fixture.entrySource);
-        } catch (error) {
-          thrownError = error;
-        }
-
-        expect(thrownError).toBeInstanceOf(Error);
-        expect((thrownError as Error).message).toContain(
-          'export * from "./button" is unsupported'
+        expect(new Set(harness.watchFiles)).toEqual(
+          new Set([barrelRealpath, resetRealpath, buttonRealpath])
         );
-        expect(
-          getStaticCssEvalFromTransformError(thrownError)?.diagnostics?.map(
-            (diagnostic) => diagnostic.id
-          )
-        ).toContain("STATIC_CSS_EVAL_EXPORT_STAR_UNSUPPORTED");
-
-        const barrelRealpath = normalizePath(
-          await fs.promises.realpath(barrelPath)
-        );
-        const buttonRealpath = normalizePath(
-          await fs.promises.realpath(buttonPath)
-        );
-
-        expect(harness.watchFiles).toEqual([barrelRealpath]);
-        expect(harness.watchFiles).not.toContain(buttonRealpath);
       } finally {
         await fs.promises.rm(fixture.root, { force: true, recursive: true });
       }
