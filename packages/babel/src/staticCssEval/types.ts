@@ -215,6 +215,10 @@ export type StaticCssEvalDiagnosticId =
   | "STATIC_CSS_EVAL_NAMESPACE_UNSUPPORTED"
   | "STATIC_CSS_EVAL_NAMESPACE_REEXPORT_UNSUPPORTED"
   | "STATIC_CSS_EVAL_NAMESPACE_PARTIAL_UNSUPPORTED"
+  | "STATIC_CSS_EVAL_CJS_DYNAMIC_REQUIRE_UNSUPPORTED"
+  | "STATIC_CSS_EVAL_CJS_EXPORT_UNSUPPORTED"
+  | "STATIC_CSS_EVAL_CJS_HELPER_UNSUPPORTED"
+  | "STATIC_CSS_EVAL_CJS_BUNDLE_RUNTIME_UNSUPPORTED"
   | "STATIC_CSS_EVAL_CJS_UNSUPPORTED"
   | "STATIC_CSS_EVAL_IMPORT_CYCLE"
   | "STATIC_CSS_EVAL_UNRESOLVED_IMPORT"
@@ -235,6 +239,10 @@ export const STATIC_CSS_EVAL_DIAGNOSTIC_IDS = [
   "STATIC_CSS_EVAL_NAMESPACE_UNSUPPORTED",
   "STATIC_CSS_EVAL_NAMESPACE_REEXPORT_UNSUPPORTED",
   "STATIC_CSS_EVAL_NAMESPACE_PARTIAL_UNSUPPORTED",
+  "STATIC_CSS_EVAL_CJS_DYNAMIC_REQUIRE_UNSUPPORTED",
+  "STATIC_CSS_EVAL_CJS_EXPORT_UNSUPPORTED",
+  "STATIC_CSS_EVAL_CJS_HELPER_UNSUPPORTED",
+  "STATIC_CSS_EVAL_CJS_BUNDLE_RUNTIME_UNSUPPORTED",
   "STATIC_CSS_EVAL_CJS_UNSUPPORTED",
   "STATIC_CSS_EVAL_IMPORT_CYCLE",
   "STATIC_CSS_EVAL_UNRESOLVED_IMPORT",
@@ -540,8 +548,9 @@ export const STATIC_CSS_EVAL_SUPPORT_MATRIX = [
   },
   {
     construct: "CommonJS / `require()`",
-    behavior: "Unsupported",
-    status: "unsupported"
+    behavior:
+      "Supported for AST-only static forms: literal `require()` bindings, direct static CJS exports, and recognized compiler helper output; dynamic `require()` and runtime/bundler CommonJS execution remain unsupported",
+    status: "supported"
   },
   {
     construct:
@@ -665,6 +674,10 @@ if (import.meta.vitest) {
     STATIC_CSS_EVAL_NAMESPACE_UNSUPPORTED: true,
     STATIC_CSS_EVAL_NAMESPACE_REEXPORT_UNSUPPORTED: true,
     STATIC_CSS_EVAL_NAMESPACE_PARTIAL_UNSUPPORTED: true,
+    STATIC_CSS_EVAL_CJS_DYNAMIC_REQUIRE_UNSUPPORTED: true,
+    STATIC_CSS_EVAL_CJS_EXPORT_UNSUPPORTED: true,
+    STATIC_CSS_EVAL_CJS_HELPER_UNSUPPORTED: true,
+    STATIC_CSS_EVAL_CJS_BUNDLE_RUNTIME_UNSUPPORTED: true,
     STATIC_CSS_EVAL_CJS_UNSUPPORTED: true,
     STATIC_CSS_EVAL_IMPORT_CYCLE: true,
     STATIC_CSS_EVAL_UNRESOLVED_IMPORT: true,
@@ -915,7 +928,10 @@ if (import.meta.vitest) {
       );
       expect(
         supportMatrixByConstruct.get("CommonJS / `require()`")
-      ).toMatchObject({ status: "unsupported" });
+      ).toMatchObject({
+        status: "supported",
+        behavior: expect.stringContaining("dynamic `require()`")
+      });
       expect(
         supportMatrixConstructs.some(
           (construct) => construct === "Export star (`export *`)"
@@ -1023,7 +1039,7 @@ if (import.meta.vitest) {
       expect(staticCssEvalDiagnosticIds).toEqual(
         STATIC_CSS_EVAL_DIAGNOSTIC_IDS
       );
-      expect(staticCssEvalDiagnosticIds).toHaveLength(18);
+      expect(staticCssEvalDiagnosticIds).toHaveLength(22);
     });
   });
 }

@@ -241,6 +241,77 @@ export function createStaticCssEvalCjsUnsupportedDiagnostic(
   });
 }
 
+export function createStaticCssEvalCjsDynamicRequireUnsupportedDiagnostic(
+  context: StaticCssEvalDiagnosticContext
+): StaticCssEvalDiagnostic {
+  return createStaticCssEvalDiagnostic({
+    id: "STATIC_CSS_EVAL_CJS_DYNAMIC_REQUIRE_UNSUPPORTED",
+    code: "unsupported-source",
+    reason: "commonjs-require",
+    detail: "commonjs dynamic require is unsupported",
+    owner: context.owner,
+    dependency: context.dependency,
+    importPath: context.importPath,
+    exportName: context.exportName,
+    memberPath: context.memberPath,
+    importChain: context.importChain
+  });
+}
+
+export function createStaticCssEvalCjsExportUnsupportedDiagnostic(
+  context: StaticCssEvalDiagnosticContext,
+  exportMutation: string
+): StaticCssEvalDiagnostic {
+  return createStaticCssEvalDiagnostic({
+    id: "STATIC_CSS_EVAL_CJS_EXPORT_UNSUPPORTED",
+    code: "unsupported-source",
+    reason: "unsupported-source-shape",
+    detail: `commonjs export mutation is unsupported: ${exportMutation}`,
+    owner: context.owner,
+    dependency: context.dependency,
+    importPath: context.importPath,
+    exportName: context.exportName,
+    memberPath: context.memberPath,
+    importChain: context.importChain
+  });
+}
+
+export function createStaticCssEvalCjsHelperUnsupportedDiagnostic(
+  context: StaticCssEvalDiagnosticContext,
+  helperName: string
+): StaticCssEvalDiagnostic {
+  return createStaticCssEvalDiagnostic({
+    id: "STATIC_CSS_EVAL_CJS_HELPER_UNSUPPORTED",
+    code: "unsupported-source",
+    reason: "unsupported-source-shape",
+    detail: `commonjs helper is unsupported: ${helperName}`,
+    owner: context.owner,
+    dependency: context.dependency,
+    importPath: context.importPath,
+    exportName: context.exportName,
+    memberPath: context.memberPath,
+    importChain: context.importChain
+  });
+}
+
+export function createStaticCssEvalCjsBundleRuntimeUnsupportedDiagnostic(
+  context: StaticCssEvalDiagnosticContext,
+  runtimeName: string
+): StaticCssEvalDiagnostic {
+  return createStaticCssEvalDiagnostic({
+    id: "STATIC_CSS_EVAL_CJS_BUNDLE_RUNTIME_UNSUPPORTED",
+    code: "unsupported-source",
+    reason: "runtime-dynamic-value",
+    detail: `commonjs bundle runtime is unsupported: ${runtimeName}`,
+    owner: context.owner,
+    dependency: context.dependency,
+    importPath: context.importPath,
+    exportName: context.exportName,
+    memberPath: context.memberPath,
+    importChain: context.importChain
+  });
+}
+
 export function createStaticCssEvalExportStarUnsupportedDiagnostic(
   context: StaticCssEvalDiagnosticContext,
   importPath: string
@@ -674,6 +745,59 @@ if (import.meta.vitest) {
         message:
           "Cannot statically evaluate css prop value: commonjs require is unsupported",
         reason: "commonjs-require",
+        owner
+      });
+
+      expect(
+        createStaticCssEvalCjsDynamicRequireUnsupportedDiagnostic({ owner })
+      ).toEqual({
+        id: "STATIC_CSS_EVAL_CJS_DYNAMIC_REQUIRE_UNSUPPORTED",
+        code: "unsupported-source",
+        message:
+          "Cannot statically evaluate css prop value: commonjs dynamic require is unsupported",
+        reason: "commonjs-require",
+        owner
+      });
+
+      expect(
+        createStaticCssEvalCjsExportUnsupportedDiagnostic(
+          { owner },
+          "conditional module.exports assignment"
+        )
+      ).toEqual({
+        id: "STATIC_CSS_EVAL_CJS_EXPORT_UNSUPPORTED",
+        code: "unsupported-source",
+        message:
+          "Cannot statically evaluate css prop value: commonjs export mutation is unsupported: conditional module.exports assignment",
+        reason: "unsupported-source-shape",
+        owner
+      });
+
+      expect(
+        createStaticCssEvalCjsHelperUnsupportedDiagnostic(
+          { owner },
+          "__exportStar"
+        )
+      ).toEqual({
+        id: "STATIC_CSS_EVAL_CJS_HELPER_UNSUPPORTED",
+        code: "unsupported-source",
+        message:
+          "Cannot statically evaluate css prop value: commonjs helper is unsupported: __exportStar",
+        reason: "unsupported-source-shape",
+        owner
+      });
+
+      expect(
+        createStaticCssEvalCjsBundleRuntimeUnsupportedDiagnostic(
+          { owner },
+          "webpack bootstrap"
+        )
+      ).toEqual({
+        id: "STATIC_CSS_EVAL_CJS_BUNDLE_RUNTIME_UNSUPPORTED",
+        code: "unsupported-source",
+        message:
+          "Cannot statically evaluate css prop value: commonjs bundle runtime is unsupported: webpack bootstrap",
+        reason: "runtime-dynamic-value",
         owner
       });
 
