@@ -1,6 +1,9 @@
-import { transformSync, types as t } from "@babel/core";
-import type { NodePath, PluginObj } from "@babel/core";
+import { types as t } from "@babel/core";
+import type { NodePath } from "@babel/core";
+import { collectStaticCssEvalCjsExportMapOperations } from "./cjsExports.js";
+import type { StaticCssEvalCjsExportMapOperation } from "./cjsExports.js";
 import { createStaticCssEvalDiagnostic } from "./diagnostics.js";
+import { parseStaticCssModuleProgram } from "./moduleParser.js";
 import type {
   StaticCssEvalDiagnostic,
   StaticCssEvalExportName,
@@ -12,7 +15,6 @@ import type {
 export const STATIC_CSS_MODULE_CACHE_PARSER_VERSION = "babel-core-parser:v2";
 export const STATIC_CSS_MODULE_CACHE_SUPPORT_VERSION =
   "static-css-module-export-graph:v2";
-
 export interface StaticCssModuleSource {
   resolvedFile: string;
   source: string;
@@ -63,7 +65,7 @@ export interface ExportMapExpressionEntry {
   kind: "expression";
   exportName: StaticCssEvalExportName;
   expression: t.Expression;
-  declaration: t.ExportDefaultDeclaration;
+  declaration: t.ExportDefaultDeclaration | t.Statement;
 }
 
 export interface ExportMapLocalEntry {
@@ -79,19 +81,25 @@ export interface ExportMapReexportEntry {
   exportName: StaticCssEvalExportName;
   importedName: string;
   source: string;
-  declaration: t.ExportNamedDeclaration;
+  declaration: t.ExportNamedDeclaration | t.Statement;
 }
 
 export interface ExportMapUnsupportedEntry {
   kind: "unsupported";
   exportName: StaticCssEvalExportName;
-  unsupportedKind: "default-declaration" | "export-namespace" | "export-star";
-  declaration:
-    | t.ExportAllDeclaration
-    | t.ExportDefaultDeclaration
-    | t.ExportNamedDeclaration;
+  unsupportedKind:
+    | "cjs-bundle-runtime"
+    | "cjs-helper"
+    | "cjs-export"
+    | "default-declaration"
+    | "export-namespace"
+    | "export-star";
+  declaration: StaticCssModuleExportDeclaration | t.Statement;
   diagnostic: StaticCssEvalDiagnostic;
   source?: string;
+  cjsExportMutation?: string;
+  cjsHelperName?: string;
+  cjsBundleRuntimeName?: string;
 }
 
 export type ExportGraphEntry = ExportMapEntry | ExportGraphStarReexportEntry;
@@ -100,7 +108,7 @@ export interface ExportGraphStarReexportEntry {
   readonly kind: "star-reexport";
   readonly exportName: "*";
   readonly source: string;
-  readonly declaration: t.ExportAllDeclaration;
+  readonly declaration: t.ExportAllDeclaration | t.Statement;
 }
 
 export interface StaticCssModuleExportStarSource {
@@ -139,6 +147,7 @@ interface StaticCssModuleExportGraphBuildState {
   exportGraph: ExportGraphEntry[];
   exportStarReexports: ExportGraphStarReexportEntry[];
   unsupportedExportStars: ExportGraphStarReexportEntry[];
+  cjsExportNames: Set<StaticCssEvalExportName>;
 }
 
 export interface StaticCssModuleCache {
@@ -240,36 +249,11 @@ function parseStaticCssModule(
   source: StaticCssModuleSource,
   cacheKey: ExportMapCacheKey
 ): ParsedStaticCssModule {
-  const parserOptions = cacheKey.parserOptions;
-  const programPathRef: { current?: NodePath<t.Program> } = {};
-  const captureProgramPathPlugin: PluginObj = {
-    visitor: {
-      Program(path: NodePath<t.Program>) {
-        programPathRef.current = path;
-        path.stop();
-      }
-    }
-  };
-  const result = transformSync(source.source, {
-    filename: source.resolvedFile,
-    ast: true,
-    code: false,
-    sourceType: "module",
-    configFile: false,
-    babelrc: false,
-    parserOpts: {
-      plugins: [
-        ...(parserOptions.jsx ? (["jsx"] as const) : []),
-        ...(parserOptions.typescript ? (["typescript"] as const) : [])
-      ]
-    },
-    plugins: [captureProgramPathPlugin]
+  const { ast, programPath } = parseStaticCssModuleProgram({
+    resolvedFile: source.resolvedFile,
+    source: source.source,
+    parserOptions: cacheKey.parserOptions
   });
-  const programPath = programPathRef.current;
-
-  if (!programPath || !result?.ast) {
-    throw new Error(`Failed to parse static css module ${source.resolvedFile}`);
-  }
 
   const importDeclarations: t.ImportDeclaration[] = [];
   const exportDeclarations: StaticCssModuleExportDeclaration[] = [];
@@ -290,7 +274,11 @@ function parseStaticCssModule(
     exportGraph,
     exportStarReexports,
     unsupportedExportStars
-  } = buildStaticCssModuleExportMap(source.resolvedFile, exportDeclarations);
+  } = buildStaticCssModuleExportMap(
+    source.resolvedFile,
+    exportDeclarations,
+    programPath
+  );
 
   return {
     file: source.resolvedFile,
@@ -299,7 +287,7 @@ function parseStaticCssModule(
     sourceHash: source.sourceHash,
     sourceVersionHash: createSourceVersionHash(source),
     cacheKey,
-    ast: result.ast,
+    ast,
     program: programPath.node,
     programPath,
     importDeclarations,
@@ -327,7 +315,7 @@ function getStaticCssModuleParserOptions(
       ...(jsx ? (["jsx"] as const) : []),
       ...(typescript ? (["typescript"] as const) : [])
     ],
-    sourceType: "module",
+    sourceType: "unambiguous",
     jsx,
     typescript
   };
@@ -335,7 +323,8 @@ function getStaticCssModuleParserOptions(
 
 function buildStaticCssModuleExportMap(
   file: string,
-  exportDeclarations: readonly StaticCssModuleExportDeclaration[]
+  exportDeclarations: readonly StaticCssModuleExportDeclaration[],
+  programPath: NodePath<t.Program>
 ): {
   exportMap: ReadonlyMap<StaticCssEvalExportName, ExportMapEntry>;
   exportGraph: readonly ExportGraphEntry[];
@@ -347,11 +336,21 @@ function buildStaticCssModuleExportMap(
     exportMap: new Map<StaticCssEvalExportName, ExportMapEntry>(),
     exportGraph: [],
     exportStarReexports: [],
-    unsupportedExportStars: []
+    unsupportedExportStars: [],
+    cjsExportNames: new Set<StaticCssEvalExportName>()
   };
 
   for (const declaration of exportDeclarations) {
     collectStaticCssModuleExportEntries(declaration, state);
+  }
+
+  if (programPath.node.sourceType === "script") {
+    for (const operation of collectStaticCssEvalCjsExportMapOperations({
+      file,
+      programPath
+    })) {
+      applyStaticCssEvalCjsExportMapOperation(operation, state);
+    }
   }
 
   return {
@@ -561,6 +560,43 @@ function addExportMapEntry(
   state.exportGraph.push(entry);
 }
 
+function applyStaticCssEvalCjsExportMapOperation(
+  operation: StaticCssEvalCjsExportMapOperation,
+  state: StaticCssModuleExportGraphBuildState
+): void {
+  switch (operation.kind) {
+    case "clear-cjs-exports":
+      for (const exportName of state.cjsExportNames) {
+        state.exportMap.delete(exportName);
+      }
+      state.exportStarReexports = state.exportStarReexports.filter(
+        (entry) => !state.cjsExportNames.has(entry.exportName)
+      );
+      state.unsupportedExportStars = state.unsupportedExportStars.filter(
+        (entry) => !state.cjsExportNames.has(entry.exportName)
+      );
+      state.exportGraph = state.exportGraph.filter(
+        (entry) =>
+          entry.kind !== "star-reexport" ||
+          !state.cjsExportNames.has(entry.exportName)
+      );
+      state.cjsExportNames.clear();
+      return;
+    case "preserve-cjs-exports":
+      return;
+    case "set":
+      state.cjsExportNames.add(operation.entry.exportName);
+      addExportMapEntry(state, operation.entry);
+      return;
+    case "star-reexport":
+      state.cjsExportNames.add(operation.entry.exportName);
+      addExportStarReexportEntry(state, operation.entry);
+      return;
+    default:
+      return assertNever(operation);
+  }
+}
+
 function addExportStarReexportEntry(
   state: StaticCssModuleExportGraphBuildState,
   entry: ExportGraphStarReexportEntry
@@ -763,6 +799,111 @@ if (import.meta.vitest) {
     };
   }
 
+  function expectExpressionEntry(
+    entry: ExportMapEntry | null
+  ): Extract<ExportMapEntry, { kind: "expression" }> {
+    expect(entry?.kind).toBe("expression");
+
+    if (!entry || entry.kind !== "expression") {
+      throw new TypeError("expected expression export map entry");
+    }
+
+    return entry;
+  }
+
+  function expectUnsupportedEntry(
+    entry: ExportMapEntry | null
+  ): Extract<ExportMapEntry, { kind: "unsupported" }> {
+    expect(entry?.kind).toBe("unsupported");
+
+    if (!entry || entry.kind !== "unsupported") {
+      throw new TypeError("expected unsupported export map entry");
+    }
+
+    return entry;
+  }
+
+  function getObjectExpressionStringProperty(
+    expression: t.Expression,
+    propertyName: string
+  ): string | null {
+    if (!t.isObjectExpression(expression)) {
+      return null;
+    }
+
+    for (const property of expression.properties) {
+      if (!t.isObjectProperty(property) || property.computed) {
+        continue;
+      }
+
+      const keyName = t.isIdentifier(property.key)
+        ? property.key.name
+        : t.isStringLiteral(property.key)
+          ? property.key.value
+          : null;
+
+      if (keyName !== propertyName || !t.isStringLiteral(property.value)) {
+        continue;
+      }
+
+      return property.value.value;
+    }
+
+    return null;
+  }
+
+  function createTscCreateBindingHelperSource(): string {
+    return `
+      var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+        if (k2 === undefined) k2 = k;
+        var desc = Object.getOwnPropertyDescriptor(m, k);
+        if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+          desc = { enumerable: true, get: function() { return m[k]; } };
+        }
+        Object.defineProperty(o, k2, desc);
+      }) : (function(o, m, k, k2) {
+        if (k2 === undefined) k2 = k;
+        o[k2] = m[k];
+      }));
+    `;
+  }
+
+  function createTscExportStarHelperSource(): string {
+    return `
+      var __exportStar = (this && this.__exportStar) || function(m, exports) {
+        for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports, p)) __createBinding(exports, m, p);
+      };
+    `;
+  }
+
+  function createEsbuildHelperSource(copyPropsSource: string): string {
+    return `
+      var __defProp = Object.defineProperty;
+      var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
+      var __getOwnPropNames = Object.getOwnPropertyNames;
+      var __hasOwnProp = Object.prototype.hasOwnProperty;
+      var __export = (target, all) => {
+        for (var name in all)
+          __defProp(target, name, { get: all[name], enumerable: true });
+      };
+      ${copyPropsSource}
+      var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
+    `;
+  }
+
+  function createEsbuildCopyPropsHelperSource(): string {
+    return `
+      var __copyProps = (to, from, except, desc) => {
+        if (from && typeof from === "object" || typeof from === "function") {
+          for (let key of __getOwnPropNames(from))
+            if (!__hasOwnProp.call(to, key) && key !== except)
+              __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+        }
+        return to;
+      };
+    `;
+  }
+
   describe("static css module parse/export-map cache", () => {
     it("parses the same resolved file and source identity once per cache instance", () => {
       const cache = createStaticCssModuleCache();
@@ -837,6 +978,1102 @@ if (import.meta.vitest) {
       expect(parsedModule.programPath.node).toBe(parsedModule.program);
       expect(parsedModule.importDeclarations).toHaveLength(1);
       expect(parsedModule.exportDeclarations).toHaveLength(1);
+    });
+
+    it("parses CommonJS source with CJS-capable parser cache identity", () => {
+      const cache = createStaticCssModuleCache();
+      const source = createSource(`
+        const x = require("./x");
+        module.exports = x;
+      `);
+
+      const parsedModule = cache.getParsedModule(source);
+
+      expect(parsedModule.program.sourceType).toBe("script");
+      expect(parsedModule.cacheKey).toMatchObject({
+        parserVersion: "babel-core-parser:v2",
+        supportVersion: STATIC_CSS_MODULE_CACHE_SUPPORT_VERSION,
+        parserOptions: {
+          plugins: ["typescript"],
+          sourceType: "unambiguous",
+          jsx: false,
+          typescript: true
+        }
+      });
+      expect(parsedModule.importDeclarations).toHaveLength(0);
+      expect(parsedModule.exportDeclarations).toHaveLength(0);
+      expect(parsedModule.exportMap.size).toBe(1);
+      expect(
+        expectExpressionEntry(cache.getExportMapEntry(source, null)).expression
+      ).toMatchObject({
+        type: "Identifier",
+        name: "x"
+      });
+    });
+
+    it("collects literal CommonJS module-value exports into the export map", () => {
+      const cache = createStaticCssModuleCache();
+      const source = createSource(`module.exports = "theme";`);
+
+      expect(
+        expectExpressionEntry(cache.getExportMapEntry(source, null)).expression
+      ).toMatchObject({
+        type: "StringLiteral",
+        value: "theme"
+      });
+    });
+
+    it("collects literal require-call CommonJS module-value exports into the export map", () => {
+      const cache = createStaticCssModuleCache();
+      const source = createSource(`module.exports = require("./theme");`);
+
+      expect(
+        expectExpressionEntry(cache.getExportMapEntry(source, null)).expression
+      ).toMatchObject({
+        type: "CallExpression",
+        callee: {
+          type: "Identifier",
+          name: "require"
+        },
+        arguments: [{ type: "StringLiteral", value: "./theme" }]
+      });
+    });
+
+    it("collects direct CommonJS object and property exports into the export map", () => {
+      const cache = createStaticCssModuleCache();
+      const source = createSource(`
+        const card = { color: "blue" };
+        module.exports = {
+          button: { color: "red" },
+          card
+        };
+      `);
+      const buttonEntry = expectExpressionEntry(
+        cache.getExportMapEntry(source, "button")
+      );
+      const cardEntry = expectExpressionEntry(
+        cache.getExportMapEntry(source, "card")
+      );
+
+      expect(
+        getObjectExpressionStringProperty(buttonEntry.expression, "color")
+      ).toBe("red");
+      expect(cardEntry.expression).toMatchObject({
+        type: "Identifier",
+        name: "card"
+      });
+    });
+
+    it("lets last static top-level CommonJS property assignment win", () => {
+      const cache = createStaticCssModuleCache();
+      const source = createSource(`
+        exports.button = { color: "red" };
+        module.exports.card = { color: "blue" };
+        exports.default = { color: "green" };
+        exports.button = { color: "orange" };
+      `);
+      const buttonEntry = expectExpressionEntry(
+        cache.getExportMapEntry(source, "button")
+      );
+      const cardEntry = expectExpressionEntry(
+        cache.getExportMapEntry(source, "card")
+      );
+      const defaultEntry = expectExpressionEntry(
+        cache.getExportMapEntry(source, "default")
+      );
+
+      expect(
+        getObjectExpressionStringProperty(buttonEntry.expression, "color")
+      ).toBe("orange");
+      expect(
+        getObjectExpressionStringProperty(cardEntry.expression, "color")
+      ).toBe("blue");
+      expect(
+        getObjectExpressionStringProperty(defaultEntry.expression, "color")
+      ).toBe("green");
+    });
+
+    it("collects CommonJS defineProperty value and getter exports", () => {
+      const cache = createStaticCssModuleCache();
+      const source = createSource(`
+        const button = { color: "red" };
+        const source = { card: { color: "blue" } };
+        Object.defineProperty(exports, "button", {
+          value: button,
+          enumerable: true
+        });
+        Object.defineProperty(module.exports, "card", {
+          enumerable: true,
+          get: function () {
+            return source.card;
+          }
+        });
+      `);
+      const buttonEntry = expectExpressionEntry(
+        cache.getExportMapEntry(source, "button")
+      );
+      const cardEntry = expectExpressionEntry(
+        cache.getExportMapEntry(source, "card")
+      );
+
+      expect(buttonEntry.expression).toMatchObject({
+        type: "Identifier",
+        name: "button"
+      });
+      expect(cardEntry.expression).toMatchObject({
+        type: "MemberExpression"
+      });
+    });
+
+    it("collects static TypeScript helper createBinding and exportStar reexports", () => {
+      const cache = createStaticCssModuleCache();
+      const source = createSource(`
+        ${createTscCreateBindingHelperSource()}
+        ${createTscExportStarHelperSource()}
+        const styles = require("./styles");
+        __createBinding(exports, styles, "button");
+        __createBinding(exports, styles, "card", "renamedCard");
+        __exportStar(require("./theme"), exports);
+        __exportStar(require("./tokens"), exports);
+      `);
+
+      const parsedModule = cache.getParsedModule(source);
+      const buttonEntry = cache.getExportMapEntry(source, "button");
+      const renamedCardEntry = cache.getExportMapEntry(source, "renamedCard");
+
+      expect(buttonEntry).toMatchObject({
+        kind: "reexport",
+        exportName: "button",
+        importedName: "button",
+        source: "./styles"
+      });
+      expect(renamedCardEntry).toMatchObject({
+        kind: "reexport",
+        exportName: "renamedCard",
+        importedName: "card",
+        source: "./styles"
+      });
+      expect(parsedModule.exportStarReexports).toEqual([
+        expect.objectContaining({
+          kind: "star-reexport",
+          exportName: "*",
+          source: "./theme"
+        }),
+        expect.objectContaining({
+          kind: "star-reexport",
+          exportName: "*",
+          source: "./tokens"
+        })
+      ]);
+
+      const [themeStar, tokensStar] = parsedModule.exportStarReexports;
+
+      if (!themeStar || !tokensStar) {
+        throw new TypeError("expected helper export-star graph entries");
+      }
+
+      const exportNameTable = createStaticCssModuleExportNameTable(
+        parsedModule.exportMap,
+        [
+          {
+            entry: themeStar,
+            exportNames: ["button", "default", "themeOnly"]
+          },
+          { entry: tokensStar, exportNames: ["themeOnly", "token"] }
+        ]
+      );
+
+      expect(exportNameTable.get("button")).toMatchObject({
+        kind: "explicit",
+        exportName: "button",
+        entry: expect.objectContaining({ kind: "reexport" })
+      });
+      expect(exportNameTable.get("default")).toBeUndefined();
+      expect(exportNameTable.get("themeOnly")).toMatchObject({
+        kind: "ambiguous-star",
+        exportName: "themeOnly",
+        sources: ["./theme", "./tokens"]
+      });
+      expect(exportNameTable.get("token")).toMatchObject({
+        kind: "star",
+        exportName: "token",
+        source: "./tokens"
+      });
+    });
+
+    it("clears CJS star re-export metadata on module.exports replacement", () => {
+      const cache = createStaticCssModuleCache();
+      const source = createSource(`
+        ${createTscCreateBindingHelperSource()}
+        ${createTscExportStarHelperSource()}
+        __exportStar(require("./theme"), exports);
+        module.exports = { button: { color: "red" } };
+      `);
+
+      const parsedModule = cache.getParsedModule(source);
+      const buttonEntry = expectExpressionEntry(
+        cache.getExportMapEntry(source, "button")
+      );
+
+      expect(buttonEntry.expression).toMatchObject({
+        type: "ObjectExpression"
+      });
+      expect(
+        getObjectExpressionStringProperty(buttonEntry.expression, "color")
+      ).toBe("red");
+      expect(parsedModule.exportStarReexports).toHaveLength(0);
+      expect(parsedModule.unsupportedExportStars).toHaveLength(0);
+      expect(
+        parsedModule.exportGraph.some((entry) => entry.kind === "star-reexport")
+      ).toBe(false);
+    });
+
+    it("rejects TypeScript helper impostors and non-literal helper sources", () => {
+      const cache = createStaticCssModuleCache();
+      const alteredCreateBindingSource = createSource(`
+        function __createBinding() { sideEffect(); }
+        const styles = require("./styles");
+        __createBinding(exports, styles, "button");
+      `);
+      const dynamicBindingSource = createSource(
+        `
+          ${createTscCreateBindingHelperSource()}
+          const styles = loadStyles();
+          __createBinding(exports, styles, "card");
+        `,
+        "hash:styles-dynamic-helper-source"
+      );
+      const alteredExportStarSource = createSource(
+        `
+          ${createTscCreateBindingHelperSource()}
+          function __exportStar() { sideEffect(); }
+          __exportStar(require("./styles"), exports);
+        `,
+        "hash:styles-altered-export-star"
+      );
+
+      const alteredCreateBindingEntry = expectUnsupportedEntry(
+        cache.getExportMapEntry(alteredCreateBindingSource, "button")
+      );
+      const dynamicBindingEntry = expectUnsupportedEntry(
+        cache.getExportMapEntry(dynamicBindingSource, "card")
+      );
+      const alteredExportStarModule = cache.getParsedModule(
+        alteredExportStarSource
+      );
+
+      expect(alteredCreateBindingEntry).toMatchObject({
+        unsupportedKind: "cjs-helper",
+        diagnostic: {
+          id: "STATIC_CSS_EVAL_CJS_HELPER_UNSUPPORTED",
+          exportName: "button"
+        }
+      });
+      expect(dynamicBindingEntry).toMatchObject({
+        unsupportedKind: "cjs-helper",
+        diagnostic: {
+          id: "STATIC_CSS_EVAL_CJS_HELPER_UNSUPPORTED",
+          exportName: "card"
+        }
+      });
+      expect(alteredExportStarModule.exportStarReexports).toHaveLength(0);
+      expect(alteredExportStarModule.exportGraph).toEqual([
+        expect.objectContaining({
+          kind: "unsupported",
+          exportName: null,
+          unsupportedKind: "cjs-helper",
+          diagnostic: expect.objectContaining({
+            id: "STATIC_CSS_EVAL_CJS_HELPER_UNSUPPORTED"
+          })
+        })
+      ]);
+    });
+
+    it("rejects TypeScript exportStar helpers with alternate branches", () => {
+      const cache = createStaticCssModuleCache();
+      const source = createSource(`
+        ${createTscCreateBindingHelperSource()}
+        ${createTscExportStarHelperSource().replace(
+          "__createBinding(exports, m, p);",
+          "__createBinding(exports, m, p); else sideEffect();"
+        )}
+        __exportStar(require("./theme"), exports);
+      `);
+      const parsedModule = cache.getParsedModule(source);
+
+      expect(parsedModule.exportStarReexports).toHaveLength(0);
+      expect(parsedModule.exportGraph).toEqual([
+        expect.objectContaining({
+          kind: "unsupported",
+          exportName: null,
+          unsupportedKind: "cjs-helper",
+          diagnostic: expect.objectContaining({
+            id: "STATIC_CSS_EVAL_CJS_HELPER_UNSUPPORTED"
+          })
+        })
+      ]);
+    });
+
+    it("rejects TypeScript helper fingerprints when Object is shadowed", () => {
+      const cache = createStaticCssModuleCache();
+      const source = createSource(`
+        const Object = {};
+        ${createTscCreateBindingHelperSource()}
+        ${createTscExportStarHelperSource()}
+        const styles = require("./styles");
+        __createBinding(exports, styles, "button");
+        __exportStar(require("./theme"), exports);
+      `);
+      const bindingEntry = expectUnsupportedEntry(
+        cache.getExportMapEntry(source, "button")
+      );
+      const parsedModule = cache.getParsedModule(source);
+
+      expect(bindingEntry).toMatchObject({
+        unsupportedKind: "cjs-helper",
+        diagnostic: {
+          id: "STATIC_CSS_EVAL_CJS_HELPER_UNSUPPORTED",
+          exportName: "button"
+        }
+      });
+      expect(parsedModule.exportStarReexports).toHaveLength(0);
+      expect(parsedModule.exportGraph).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            kind: "unsupported",
+            exportName: null,
+            unsupportedKind: "cjs-helper",
+            diagnostic: expect.objectContaining({
+              id: "STATIC_CSS_EVAL_CJS_HELPER_UNSUPPORTED"
+            })
+          })
+        ])
+      );
+    });
+
+    it("collects esbuild static CommonJS export-object helpers into the export map", () => {
+      const cache = createStaticCssModuleCache();
+      const source = createSource(`
+        ${createEsbuildHelperSource(createEsbuildCopyPropsHelperSource())}
+        const button = { color: "red" };
+        const root = { color: "green" };
+        const styles = require("./styles");
+        __export(exports, {
+          button: () => button,
+          default: () => root,
+          themed: () => styles.button
+        });
+        module.exports = __toCommonJS(exports);
+      `);
+
+      const buttonEntry = expectExpressionEntry(
+        cache.getExportMapEntry(source, "button")
+      );
+      const defaultEntry = expectExpressionEntry(
+        cache.getExportMapEntry(source, "default")
+      );
+      const themedEntry = expectExpressionEntry(
+        cache.getExportMapEntry(source, "themed")
+      );
+
+      expect(buttonEntry.expression).toMatchObject({
+        type: "Identifier",
+        name: "button"
+      });
+      expect(defaultEntry.expression).toMatchObject({
+        type: "Identifier",
+        name: "root"
+      });
+      expect(themedEntry.expression).toMatchObject({
+        type: "MemberExpression"
+      });
+    });
+
+    it("collects esbuild export helpers targeting direct CommonJS aliases", () => {
+      const cache = createStaticCssModuleCache();
+      const sources = [
+        createSource(
+          `
+            ${createEsbuildHelperSource(createEsbuildCopyPropsHelperSource())}
+            const entry_exports = exports;
+            const button = { color: "red" };
+            __export(entry_exports, { button: () => button });
+          `,
+          "hash:esbuild-exports-alias"
+        ),
+        createSource(
+          `
+            ${createEsbuildHelperSource(createEsbuildCopyPropsHelperSource())}
+            const entry_module_exports = module.exports;
+            const button = { color: "red" };
+            __export(entry_module_exports, { button: () => button });
+          `,
+          "hash:esbuild-module-exports-alias"
+        )
+      ];
+
+      for (const source of sources) {
+        const buttonEntry = expectExpressionEntry(
+          cache.getExportMapEntry(source, "button")
+        );
+
+        expect(buttonEntry.expression).toMatchObject({
+          type: "Identifier",
+          name: "button"
+        });
+      }
+    });
+
+    it("rejects direct CommonJS aliases after nested module.exports replacement", () => {
+      const cache = createStaticCssModuleCache();
+      const sources = [
+        createSource(
+          `
+            ${createEsbuildHelperSource(createEsbuildCopyPropsHelperSource())}
+            const entry_exports = exports;
+            if (enabled) {
+              module.exports = {};
+            }
+            const button = { color: "red" };
+            __export(entry_exports, { button: () => button });
+          `,
+          "hash:esbuild-exports-alias-nested-replacement"
+        ),
+        createSource(
+          `
+            ${createEsbuildHelperSource(createEsbuildCopyPropsHelperSource())}
+            const entry_module_exports = module.exports;
+            if (enabled) {
+              module.exports = {};
+            }
+            const button = { color: "red" };
+            __export(entry_module_exports, { button: () => button });
+          `,
+          "hash:esbuild-module-exports-alias-nested-replacement"
+        )
+      ];
+
+      for (const source of sources) {
+        expect(cache.getExportMapEntry(source, "button")).toBeNull();
+        const unsupportedEntry = expectUnsupportedEntry(
+          cache.getExportMapEntry(source, null)
+        );
+
+        expect(unsupportedEntry).toMatchObject({
+          unsupportedKind: "cjs-helper",
+          diagnostic: {
+            id: "STATIC_CSS_EVAL_CJS_HELPER_UNSUPPORTED",
+            exportName: null
+          }
+        });
+      }
+    });
+
+    it("rejects esbuild export helpers with computed getter descriptor keys", () => {
+      const cache = createStaticCssModuleCache();
+      const source = createSource(`
+        ${createEsbuildHelperSource(
+          createEsbuildCopyPropsHelperSource()
+        ).replace(
+          "{ get: all[name], enumerable: true }",
+          '{ ["get"]: all[name], enumerable: true }'
+        )}
+        const button = { color: "red" };
+        __export(exports, { button: () => button });
+      `);
+      const unsupportedEntry = expectUnsupportedEntry(
+        cache.getExportMapEntry(source, null)
+      );
+
+      expect(unsupportedEntry).toMatchObject({
+        unsupportedKind: "cjs-helper",
+        diagnostic: {
+          id: "STATIC_CSS_EVAL_CJS_HELPER_UNSUPPORTED",
+          exportName: null
+        }
+      });
+      expect(cache.getExportMapEntry(source, "button")).toBeNull();
+    });
+
+    it("rejects esbuild export helpers with getter descriptor overrides", () => {
+      const cache = createStaticCssModuleCache();
+      const cases = [
+        {
+          descriptor:
+            '{ get: all[name], ["get"]: () => all[name], enumerable: true }',
+          sourceHash: "hash:esbuild-export-getter-computed-override"
+        },
+        {
+          descriptor:
+            "{ get: all[name], get: () => all[name], enumerable: true }",
+          sourceHash: "hash:esbuild-export-getter-duplicate-override"
+        }
+      ];
+
+      for (const { descriptor, sourceHash } of cases) {
+        const source = createSource(
+          `
+            ${createEsbuildHelperSource(
+              createEsbuildCopyPropsHelperSource()
+            ).replace("{ get: all[name], enumerable: true }", descriptor)}
+            const button = { color: "red" };
+            __export(exports, { button: () => button });
+          `,
+          sourceHash
+        );
+        expect(cache.getExportMapEntry(source, "button")).toBeNull();
+        const unsupportedEntry = expectUnsupportedEntry(
+          cache.getExportMapEntry(source, null)
+        );
+
+        expect(unsupportedEntry).toMatchObject({
+          unsupportedKind: "cjs-helper",
+          diagnostic: {
+            id: "STATIC_CSS_EVAL_CJS_HELPER_UNSUPPORTED",
+            exportName: null
+          }
+        });
+      }
+    });
+
+    it("rejects esbuild export helpers with unsafe targets", () => {
+      const cache = createStaticCssModuleCache();
+      const sources = [
+        createSource(
+          `
+            ${createEsbuildHelperSource(createEsbuildCopyPropsHelperSource())}
+            const target = {};
+            const button = { color: "red" };
+            __export(target, { button: () => button });
+          `,
+          "hash:esbuild-arbitrary-target"
+        ),
+        createSource(
+          `
+            ${createEsbuildHelperSource(createEsbuildCopyPropsHelperSource())}
+            const button = { color: "red" };
+            __export(unresolved, { button: () => button });
+          `,
+          "hash:esbuild-unresolved-target"
+        ),
+        createSource(
+          `
+            ${createEsbuildHelperSource(createEsbuildCopyPropsHelperSource())}
+            let entry_exports = exports;
+            entry_exports = {};
+            const button = { color: "red" };
+            __export(entry_exports, { button: () => button });
+          `,
+          "hash:esbuild-reassigned-alias"
+        ),
+        createSource(
+          `
+            ${createEsbuildHelperSource(createEsbuildCopyPropsHelperSource())}
+            const exports = {};
+            const entry_exports = exports;
+            const button = { color: "red" };
+            __export(entry_exports, { button: () => button });
+          `,
+          "hash:esbuild-shadowed-exports-alias"
+        ),
+        createSource(
+          `
+            ${createEsbuildHelperSource(createEsbuildCopyPropsHelperSource())}
+            const module = { exports: {} };
+            const entry_module_exports = module.exports;
+            const button = { color: "red" };
+            __export(entry_module_exports, { button: () => button });
+          `,
+          "hash:esbuild-shadowed-module-alias"
+        ),
+        createSource(
+          `
+            ${createEsbuildHelperSource(createEsbuildCopyPropsHelperSource())}
+            const button = { color: "red" };
+            __export(entry_exports, { button: () => button });
+            const entry_exports = exports;
+          `,
+          "hash:esbuild-use-before-alias-declaration"
+        ),
+        createSource(
+          `
+            ${createEsbuildHelperSource(createEsbuildCopyPropsHelperSource())}
+            const root_alias = exports;
+            const entry_exports = root_alias;
+            const button = { color: "red" };
+            __export(entry_exports, { button: () => button });
+          `,
+          "hash:esbuild-recursive-alias"
+        ),
+        createSource(
+          `
+            ${createEsbuildHelperSource(createEsbuildCopyPropsHelperSource())}
+            const entry_module_exports = module.exports;
+            module.exports = {};
+            const button = { color: "red" };
+            __export(entry_module_exports, { button: () => button });
+          `,
+          "hash:esbuild-module-exports-alias-replacement"
+        ),
+        createSource(
+          `
+            ${createEsbuildHelperSource(createEsbuildCopyPropsHelperSource())}
+            const button = { color: "red" };
+            module.exports = {};
+            __export(exports, { button: () => button });
+          `,
+          "hash:esbuild-unsafe-exports-alias"
+        ),
+        createSource(
+          `
+            ${createEsbuildHelperSource(createEsbuildCopyPropsHelperSource())}
+            const root = { color: "green" };
+            const button = { color: "red" };
+            module.exports = root;
+            __export(module.exports, { button: () => button });
+          `,
+          "hash:esbuild-unsafe-module-object"
+        )
+      ];
+
+      for (const source of sources) {
+        const unsupportedEntry = expectUnsupportedEntry(
+          cache.getExportMapEntry(source, null)
+        );
+
+        expect(unsupportedEntry).toMatchObject({
+          unsupportedKind: "cjs-helper",
+          diagnostic: {
+            id: "STATIC_CSS_EVAL_CJS_HELPER_UNSUPPORTED",
+            exportName: null
+          }
+        });
+        expect(cache.getExportMapEntry(source, "button")).toBeNull();
+      }
+    });
+
+    it("rejects esbuild copyProps helper definitions missing required guard pieces", () => {
+      const cache = createStaticCssModuleCache();
+      const cases: readonly string[] = [
+        `
+          var __copyProps = (to, from, except, desc) => {
+            if (from) {
+              for (let key of __getOwnPropNames(from))
+                if (!__hasOwnProp.call(to, key) && key !== except)
+                  __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+            }
+            return to;
+          };
+        `,
+        `
+          var __copyProps = (to, from, except, desc) => {
+            if (from && typeof from === "object" || typeof from === "function") {
+              for (let key of Object.keys(from))
+                if (!__hasOwnProp.call(to, key) && key !== except)
+                  __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+            }
+            return to;
+          };
+        `,
+        `
+          var __copyProps = (to, from, except, desc) => {
+            if (from && typeof from === "object" || typeof from === "function") {
+              for (let key of __getOwnPropNames(from))
+                if (key !== except)
+                  __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+            }
+            return to;
+          };
+        `,
+        `
+          var __copyProps = (to, from, except, desc) => {
+            if (from && typeof from === "object" || typeof from === "function") {
+              for (let key of __getOwnPropNames(from))
+                if (!__hasOwnProp.call(to, key))
+                  __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+            }
+            return to;
+          };
+        `,
+        `
+          var __copyProps = (to, from, except, desc) => {
+            if (from && typeof from === "object" || typeof from === "function") {
+              for (let key of __getOwnPropNames(from))
+                if (!__hasOwnProp.call(to, key) && key !== except)
+                  __defProp(to, key, { get: () => from[key], enumerable: true });
+            }
+            return to;
+          };
+        `,
+        `
+          var __copyProps = (to, from, except, desc) => {
+            if (from && typeof from === "object" || typeof from === "function") {
+              for (let key of __getOwnPropNames(from))
+                if (!__hasOwnProp.call(to, key) && key !== except)
+                  __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) });
+            }
+            return to;
+          };
+        `
+      ];
+
+      for (const copyPropsSource of cases) {
+        const source = createSource(
+          `
+            ${createEsbuildHelperSource(copyPropsSource)}
+            var entry_exports = {};
+            const button = { color: "red" };
+            __export(entry_exports, { button: () => button });
+            module.exports = __toCommonJS(entry_exports);
+          `,
+          `hash:esbuild-copy-props-negative-${cases.indexOf(copyPropsSource)}`
+        );
+        const unsupportedEntry = expectUnsupportedEntry(
+          cache.getExportMapEntry(source, null)
+        );
+
+        expect(unsupportedEntry).toMatchObject({
+          unsupportedKind: "cjs-helper",
+          diagnostic: {
+            id: "STATIC_CSS_EVAL_CJS_HELPER_UNSUPPORTED",
+            exportName: null
+          }
+        });
+        expect(cache.getExportMapEntry(source, "button")).toBeNull();
+      }
+    });
+
+    it("rejects alias-unsafe CommonJS export mutations after module.exports replacement", () => {
+      const cache = createStaticCssModuleCache();
+      const unsafeSource = createSource(`
+        const root = { color: "root" };
+        module.exports = root;
+        exports.button = { color: "red" };
+      `);
+      const safeSource = createSource(
+        `
+          module.exports = {};
+          module.exports.button = { color: "red" };
+        `,
+        "hash:styles-safe-module-exports-extension"
+      );
+      const unsafeEntry = expectUnsupportedEntry(
+        cache.getExportMapEntry(unsafeSource, "button")
+      );
+      const safeEntry = expectExpressionEntry(
+        cache.getExportMapEntry(safeSource, "button")
+      );
+
+      expect(unsafeEntry).toMatchObject({
+        unsupportedKind: "cjs-export",
+        diagnostic: {
+          id: "STATIC_CSS_EVAL_CJS_EXPORT_UNSUPPORTED"
+        }
+      });
+      expect(
+        getObjectExpressionStringProperty(safeEntry.expression, "color")
+      ).toBe("red");
+    });
+
+    it("replaces static CommonJS property exports after nested mutations", () => {
+      const cache = createStaticCssModuleCache();
+      const cases = [
+        {
+          source: createSource(
+            `
+              exports.theme = { button: { color: "red" } };
+              exports.theme.button = { color: "blue" };
+            `,
+            "hash:nested-exports-property-mutation"
+          ),
+          exportName: "theme",
+          mutation: "nested exports.theme property assignment"
+        },
+        {
+          source: createSource(
+            `
+              module.exports.a = { b: { color: "red" } };
+              module.exports.a.b = { color: "blue" };
+            `,
+            "hash:nested-module-exports-property-mutation"
+          ),
+          exportName: "a",
+          mutation: "nested module.exports.a property assignment"
+        }
+      ];
+
+      for (const { source, exportName, mutation } of cases) {
+        const unsupportedEntry = expectUnsupportedEntry(
+          cache.getExportMapEntry(source, exportName)
+        );
+
+        expect(unsupportedEntry).toMatchObject({
+          unsupportedKind: "cjs-export",
+          cjsExportMutation: mutation,
+          diagnostic: {
+            id: "STATIC_CSS_EVAL_CJS_EXPORT_UNSUPPORTED",
+            exportName
+          }
+        });
+      }
+    });
+
+    it("records unsupported entries for nested computed CommonJS property bases", () => {
+      const cache = createStaticCssModuleCache();
+      const cases = [
+        {
+          source: createSource(
+            `
+              const name = "theme";
+              exports[name].button = { color: "blue" };
+            `,
+            "hash:nested-computed-exports-property-base"
+          ),
+          mutation: "computed exports export assignment"
+        },
+        {
+          source: createSource(
+            `
+              const name = "a";
+              module.exports[name].button = { color: "blue" };
+            `,
+            "hash:nested-computed-module-exports-property-base"
+          ),
+          mutation: "computed module.exports export assignment"
+        }
+      ];
+
+      for (const { source, mutation } of cases) {
+        const unsupportedEntry = expectUnsupportedEntry(
+          cache.getExportMapEntry(source, null)
+        );
+
+        expect(unsupportedEntry).toMatchObject({
+          unsupportedKind: "cjs-export",
+          cjsExportMutation: mutation,
+          diagnostic: {
+            id: "STATIC_CSS_EVAL_CJS_EXPORT_UNSUPPORTED",
+            exportName: null
+          }
+        });
+      }
+    });
+
+    it("leaves depth-three CommonJS member mutations out of export tracking", () => {
+      const cache = createStaticCssModuleCache();
+      const source = createSource(
+        `
+          exports.theme = { button: { color: "red" } };
+          exports.theme.button.color = "blue";
+        `,
+        "hash:depth-three-exports-property-mutation"
+      );
+
+      expectExpressionEntry(cache.getExportMapEntry(source, "theme"));
+    });
+
+    it("records deterministic unsupported entries for unsafe CommonJS export descriptors", () => {
+      const cache = createStaticCssModuleCache();
+      const source = createSource(`
+        const name = "button";
+        const button = { color: "red" };
+        exports[name] = button;
+        Object.defineProperty(exports, "spread", {
+          ...descriptor,
+          value: button
+        });
+        Object.defineProperty(exports, "setter", {
+          set: function (value) {},
+          value: button
+        });
+        Object.defineProperty(exports, "getter", {
+          get: function () {
+            track();
+            return button;
+          }
+        });
+        if (enabled) {
+          exports.nested = button;
+        }
+      `);
+      const parsedModule = cache.getParsedModule(source);
+
+      const computedEntry = expectUnsupportedEntry(
+        cache.getExportMapEntry(source, null)
+      );
+
+      expect(computedEntry).toMatchObject({
+        unsupportedKind: "cjs-export",
+        diagnostic: {
+          id: "STATIC_CSS_EVAL_CJS_EXPORT_UNSUPPORTED"
+        }
+      });
+      for (const exportName of ["spread", "setter", "getter", "nested"]) {
+        const unsupportedEntry = expectUnsupportedEntry(
+          cache.getExportMapEntry(source, exportName)
+        );
+
+        expect(unsupportedEntry).toMatchObject({
+          unsupportedKind: "cjs-export",
+          diagnostic: {
+            id: "STATIC_CSS_EVAL_CJS_EXPORT_UNSUPPORTED",
+            exportName
+          }
+        });
+      }
+      expect(parsedModule.exportGraph).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            kind: "unsupported",
+            exportName: null,
+            unsupportedKind: "cjs-export"
+          }),
+          expect.objectContaining({
+            kind: "unsupported",
+            exportName: "nested",
+            unsupportedKind: "cjs-export"
+          })
+        ])
+      );
+    });
+
+    it("rejects async and generator CommonJS defineProperty getters", () => {
+      const cache = createStaticCssModuleCache();
+      const cases = [
+        {
+          source: createSource(
+            `
+              const button = { color: "red" };
+              Object.defineProperty(exports, "asyncButton", {
+                get: async function () {
+                  return button;
+                }
+              });
+            `,
+            "hash:async-define-property-getter"
+          ),
+          exportName: "asyncButton"
+        },
+        {
+          source: createSource(
+            `
+              const button = { color: "red" };
+              Object.defineProperty(exports, "generatorButton", {
+                get: function* () {
+                  return button;
+                }
+              });
+            `,
+            "hash:generator-define-property-getter"
+          ),
+          exportName: "generatorButton"
+        }
+      ];
+
+      for (const { source, exportName } of cases) {
+        const unsupportedEntry = expectUnsupportedEntry(
+          cache.getExportMapEntry(source, exportName)
+        );
+
+        expect(unsupportedEntry).toMatchObject({
+          unsupportedKind: "cjs-export",
+          cjsExportMutation: "Object.defineProperty getter is dynamic",
+          diagnostic: {
+            id: "STATIC_CSS_EVAL_CJS_EXPORT_UNSUPPORTED",
+            exportName
+          }
+        });
+      }
+    });
+
+    it("clears CommonJS export entries for chained assignments", () => {
+      const cache = createStaticCssModuleCache();
+      const source = createSource(`
+        const a = { color: "red" };
+        const b = { color: "blue" };
+        const value = { color: "green" };
+        exports.a = a;
+        exports.b = b;
+        exports.a = exports.b = value;
+      `);
+      const parsedModule = cache.getParsedModule(source);
+      const unsupportedEntries = parsedModule.exportGraph.filter(
+        (entry) => entry.kind === "unsupported" && entry.exportName === null
+      );
+
+      expect(cache.getExportMapEntry(source, "a")).toBeNull();
+      expect(cache.getExportMapEntry(source, "b")).toBeNull();
+      expect(unsupportedEntries).toEqual([
+        expect.objectContaining({
+          unsupportedKind: "cjs-export",
+          diagnostic: expect.objectContaining({
+            id: "STATIC_CSS_EVAL_CJS_EXPORT_UNSUPPORTED",
+            exportName: null
+          })
+        })
+      ]);
+    });
+
+    it("preserves ESM import and export cache behavior with CJS-capable parsing", () => {
+      const cache = createStaticCssModuleCache();
+      const source = createSource(
+        `
+          import { color } from "./tokens";
+          export const button = { color };
+        `,
+        "hash:esm-v1"
+      );
+
+      const parsedModule = cache.getParsedModule(source);
+      const cachedModule = cache.getParsedModule(source);
+
+      expect(cachedModule).toBe(parsedModule);
+      expect(parsedModule.program.sourceType).toBe("module");
+      expect(parsedModule.cacheKey.parserOptions.sourceType).toBe(
+        "unambiguous"
+      );
+      expect(parsedModule.importDeclarations).toHaveLength(1);
+      expect(parsedModule.exportDeclarations).toHaveLength(1);
+      expect(cache.getExportMapEntry(source, "button")).toMatchObject({
+        kind: "local",
+        exportName: "button",
+        localName: "button",
+        declarationKind: "const"
+      });
+
+      const instrumentation = getStaticCssModuleCacheInstrumentation(cache);
+      expect(instrumentation.misses).toBe(1);
+      expect(instrumentation.hits).toBe(2);
+      expect(instrumentation.parseCountByFile.get(stylesId)).toBe(1);
+    });
+
+    it("keeps ESM export map entries for module sources with CJS-like mutation", () => {
+      const cache = createStaticCssModuleCache();
+      const source = createSource(
+        `
+          import { color } from "./tokens";
+          export const button = { color };
+          exports.button = { color: "blue" };
+        `,
+        "hash:esm-module-cjs-mutation"
+      );
+
+      const parsedModule = cache.getParsedModule(source);
+
+      expect(parsedModule.program.sourceType).toBe("module");
+      expect(cache.getExportMapEntry(source, "button")).toMatchObject({
+        kind: "local",
+        exportName: "button",
+        localName: "button",
+        declarationKind: "const"
+      });
+      expect(
+        parsedModule.exportGraph.filter(
+          (entry) =>
+            entry.kind === "unsupported" &&
+            entry.unsupportedKind === "cjs-export"
+        )
+      ).toHaveLength(0);
     });
 
     it("recognizes supported export map entry categories", () => {

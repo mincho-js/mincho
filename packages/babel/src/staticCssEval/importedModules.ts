@@ -15,12 +15,31 @@ import {
   createStaticCssEvalProviderSourceMetadata,
   enforceStaticCssEvalProviderSourcePolicy
 } from "./boundary.js";
+import {
+  collectStaticCssEvalCjsRequireBindings,
+  getStaticCssEvalCjsRequireSource,
+  isStaticCssEvalLiteralRequireCallExpression
+} from "./cjsBindings.js";
+import type {
+  ImportedStaticCssEvalCjsBinding,
+  StaticCssEvalCjsRequireSource
+} from "./cjsBindings.js";
+import { containsStaticCssEvalRequireCallExpression } from "./cjsRequireAnalysis.js";
+import {
+  createStaticCssEvalCjsImportRequestParts,
+  createStaticCssEvalCjsReexportRequestParts
+} from "./cjsResolver.js";
+import type { StaticCssEvalCjsResolutionRequestParts } from "./cjsResolver.js";
 import type {
   StaticCssEvalProviderSourceMetadata,
   StaticCssEvalProviderSourcePolicyDescriptor
 } from "./boundary.js";
 import {
   createStaticCssEvalAmbiguousExportStarDiagnostic,
+  createStaticCssEvalCjsBundleRuntimeUnsupportedDiagnostic,
+  createStaticCssEvalCjsDynamicRequireUnsupportedDiagnostic,
+  createStaticCssEvalCjsExportUnsupportedDiagnostic,
+  createStaticCssEvalCjsHelperUnsupportedDiagnostic,
   createStaticCssEvalCjsUnsupportedDiagnostic,
   createStaticCssEvalComputedMemberUnsupportedDiagnostic,
   createStaticCssEvalDiagnostic,
@@ -71,6 +90,7 @@ import type {
   ResolutionDependencyKind,
   StaticCssEvalCacheKey,
   StaticCssEvalDiagnostic,
+  StaticCssEvalDiagnosticId,
   StaticCssEvalExportName,
   StaticCssEvalProvider,
   StaticCssEvalQuery,
@@ -99,6 +119,8 @@ export type ImportedStaticCssEvalImportBinding =
       localName: string;
       importPath: string;
     };
+
+export type { ImportedStaticCssEvalCjsBinding };
 
 export type ImportedStaticCssEvalExportBinding = ExportMapEntry;
 
@@ -194,6 +216,7 @@ export interface ImportedStaticCssEvalImportResolution extends StaticCssEvalProv
 export interface ImportedStaticCssEvalModuleRecord extends StaticCssEvalModuleRecord {
   source: string;
   imports: ReadonlyMap<string, ImportedStaticCssEvalImportBinding>;
+  cjsImports: ReadonlyMap<string, ImportedStaticCssEvalCjsBinding>;
   exports: ReadonlyMap<
     StaticCssEvalExportName,
     ImportedStaticCssEvalExportBinding
@@ -223,9 +246,6 @@ const importResolutionKeySeparator = "\0";
 export function createImportedStaticCssEvalProvider(
   options: CreateImportedStaticCssEvalProviderOptions
 ): StaticCssEvalProvider {
-  // Imported css props are resolved from parsed ESM AST/export maps only.
-  // Keep module execution, `export *`, packages, CJS, spread, computed paths,
-  // and broad namespace handling unsupported instead of adding fallbacks here.
   const resolver = new ImportedStaticCssEvalResolver(options);
 
   return {
@@ -253,6 +273,9 @@ function createImportedStaticCssEvalModuleRecordWithCache(
   );
 
   const imports = new Map<string, ImportedStaticCssEvalImportBinding>();
+  const cjsImports = collectStaticCssEvalCjsRequireBindings(
+    parsedModule.programPath
+  );
 
   for (const statement of parsedModule.program.body) {
     collectModuleImportBindings(statement, imports);
@@ -271,6 +294,7 @@ function createImportedStaticCssEvalModuleRecordWithCache(
     dependencies: [],
     source: loadedModule.source,
     imports,
+    cjsImports,
     exports: parsedModule.exportMap,
     exportAllReexportSources: parsedModule.unsupportedExportStars.flatMap(
       (entry) => (entry.source ? [entry.source] : [])
@@ -443,9 +467,17 @@ class ImportedStaticCssEvalResolver {
       return { kind: "not-candidate" };
     }
 
+    const owner = createQueryOwnerLocation(query);
+    const state = createResolutionState(owner);
     const importBinding = ownerRecord.imports.get(query.bindingName);
+    const cjsBinding = ownerRecord.cjsImports.get(query.bindingName);
+    const requestResult = importBinding
+      ? createResolutionRequest(query, importBinding)
+      : cjsBinding
+        ? createCjsResolutionRequest(query, cjsBinding)
+        : null;
 
-    if (!importBinding) {
+    if (!requestResult) {
       const cjsDiagnostic = this.#createCjsUnsupportedDiagnostic(
         ownerRecord,
         query
@@ -455,14 +487,10 @@ class ImportedStaticCssEvalResolver {
         ? createImportedStaticCssEvalErrorResult({
             query,
             diagnostic: cjsDiagnostic,
-            state: createResolutionState(createQueryOwnerLocation(query))
+            state
           })
         : { kind: "not-candidate" };
     }
-
-    const owner = createQueryOwnerLocation(query);
-    const state = createResolutionState(owner);
-    const requestResult = createResolutionRequest(query, importBinding);
 
     if (requestResult.kind === "error") {
       return createImportedStaticCssEvalErrorResult({
@@ -724,6 +752,17 @@ class ImportedStaticCssEvalResolver {
     const exportEntry = record.exports.get(request.exportName);
 
     if (!exportEntry) {
+      const cjsModuleUnsupportedEntry = getCjsModuleUnsupportedEntry(record);
+
+      if (cjsModuleUnsupportedEntry) {
+        return this.#resolveExportMapEntry(
+          record,
+          cjsModuleUnsupportedEntry,
+          request,
+          state
+        );
+      }
+
       return this.#resolveExportStarEntries(record, request, state);
     }
 
@@ -736,8 +775,12 @@ class ImportedStaticCssEvalResolver {
     request: ImportedStaticCssEvalResolutionRequest,
     state: ImportedStaticCssEvalResolutionState
   ): ImportedStaticCssEvalResolutionResult {
+    const cjsReexportSource =
+      exportEntry.kind === "reexport" || exportEntry.kind === "unsupported"
+        ? null
+        : getStaticExportEntryCjsRequireSource(record, exportEntry);
     const effectiveRequest =
-      exportEntry.kind === "reexport"
+      exportEntry.kind === "reexport" || cjsReexportSource
         ? {
             ...request,
             dependencyKind: "reexported" as const,
@@ -784,6 +827,17 @@ class ImportedStaticCssEvalResolver {
       return this.#resolveReexportEntry(
         record,
         exportEntry,
+        effectiveRequest,
+        state,
+        provenance
+      );
+    }
+
+    if (cjsReexportSource) {
+      return this.#resolveCjsReexportEntry(
+        record,
+        exportEntry,
+        cjsReexportSource,
         effectiveRequest,
         state,
         provenance
@@ -1386,6 +1440,45 @@ class ImportedStaticCssEvalResolver {
       : this.#resolveModuleExport(importResult.record, reexportRequest, state);
   }
 
+  #resolveCjsReexportEntry(
+    record: ImportedStaticCssEvalModuleRecord,
+    exportEntry: Exclude<ExportMapEntry, { kind: "reexport" | "unsupported" }>,
+    source: StaticCssEvalCjsRequireSource,
+    request: ImportedStaticCssEvalResolutionRequest,
+    state: ImportedStaticCssEvalResolutionState,
+    provenance: BindingProvenance
+  ): ImportedStaticCssEvalResolutionResult {
+    const reexportParts = createStaticCssEvalCjsReexportRequestParts({
+      source,
+      queryMemberPath: request.memberPath,
+      reexportName: formatExportName(exportEntry.exportName)
+    });
+    const reexportRequest = createResolutionRequestFromCjsParts(
+      record.id,
+      reexportParts
+    );
+    const importResult = this.#resolveProviderImport(
+      reexportRequest,
+      state.owner,
+      state
+    );
+
+    return importResult.kind === "error"
+      ? {
+          kind: "error",
+          diagnostic: importResult.diagnostic,
+          provenance,
+          cacheKey: createImportedStaticCssEvalCacheKey(
+            state.owner.file,
+            record.parsedModule,
+            request.exportName,
+            request.memberPath,
+            record
+          )
+        }
+      : this.#resolveModuleExport(importResult.record, reexportRequest, state);
+  }
+
   #createMissingExportResult(
     record: ImportedStaticCssEvalModuleRecord,
     request: ImportedStaticCssEvalResolutionRequest,
@@ -1463,17 +1556,35 @@ class ImportedStaticCssEvalResolver {
       ? getStaticCssEvalConstBindingInitExpression(binding)
       : null;
 
+    const unwrappedInit = init
+      ? unwrapTransparentCssRuleExpression(init)
+      : null;
+
     if (
-      !init ||
-      !isRequireCallExpression(unwrapTransparentCssRuleExpression(init))
+      !unwrappedInit ||
+      !containsStaticCssEvalRequireCallExpression(
+        unwrappedInit,
+        ownerRecord.programPath.scope
+      )
     ) {
       return null;
     }
 
-    return createStaticCssEvalCjsUnsupportedDiagnostic({
+    const context = {
       owner: createQueryOwnerLocation(query),
-      memberPath: query.memberPath
-    });
+      ...(query.memberPath ? { memberPath: query.memberPath } : {})
+    };
+
+    if (
+      !isStaticCssEvalLiteralRequireCallExpression(
+        unwrappedInit,
+        ownerRecord.programPath.scope
+      )
+    ) {
+      return createStaticCssEvalCjsDynamicRequireUnsupportedDiagnostic(context);
+    }
+
+    return createStaticCssEvalCjsUnsupportedDiagnostic(context);
   }
 
   #resolveImport(
@@ -1685,6 +1796,103 @@ function createResolutionRequest(
   };
 }
 
+function createCjsResolutionRequest(
+  query: StaticCssEvalQuery,
+  binding: ImportedStaticCssEvalCjsBinding
+): { kind: "resolved"; request: ImportedStaticCssEvalResolutionRequest } {
+  const requestParts = createStaticCssEvalCjsImportRequestParts({
+    binding,
+    queryMemberPath: [...(query.memberPath ?? [])]
+  });
+
+  return {
+    kind: "resolved",
+    request: createResolutionRequestFromCjsParts(query.importerId, requestParts)
+  };
+}
+
+function createResolutionRequestFromCjsParts(
+  importer: string,
+  parts: StaticCssEvalCjsResolutionRequestParts
+): ImportedStaticCssEvalResolutionRequest {
+  return {
+    importer,
+    specifier: parts.specifier,
+    exportName: parts.exportName,
+    memberPath: parts.memberPath,
+    dependencyKind: parts.dependencyKind,
+    provenanceKind: parts.provenanceKind,
+    ...(parts.reexportName !== undefined
+      ? { reexportName: parts.reexportName }
+      : {})
+  };
+}
+
+function getStaticExportEntryCjsRequireSource(
+  record: ImportedStaticCssEvalModuleRecord,
+  exportEntry: Exclude<ExportMapEntry, { kind: "reexport" | "unsupported" }>
+): StaticCssEvalCjsRequireSource | null {
+  return exportEntry.kind === "expression"
+    ? getStaticExpressionCjsRequireSource(record, exportEntry.expression)
+    : getLocalBindingCjsRequireSource(record, exportEntry.localName, []);
+}
+
+function getStaticExpressionCjsRequireSource(
+  record: ImportedStaticCssEvalModuleRecord,
+  expression: t.Expression
+): StaticCssEvalCjsRequireSource | null {
+  const unwrappedExpression = unwrapTransparentCssRuleExpression(expression);
+  const directSource = getStaticCssEvalCjsRequireSource(
+    unwrappedExpression,
+    record.programPath.scope
+  );
+
+  if (directSource) {
+    return directSource;
+  }
+
+  const reference = getStaticCssEvalMemberReference(unwrappedExpression);
+
+  return reference?.kind === "supported"
+    ? getLocalBindingCjsRequireSource(
+        record,
+        reference.bindingName,
+        reference.memberPath
+      )
+    : null;
+}
+
+function getLocalBindingCjsRequireSource(
+  record: ImportedStaticCssEvalModuleRecord,
+  localName: string,
+  memberPath: readonly string[]
+): StaticCssEvalCjsRequireSource | null {
+  const binding = record.programPath.scope.getBinding(localName);
+  const expression = binding
+    ? getStaticCssEvalConstBindingInitExpression(binding)
+    : null;
+  const source = getStaticCssEvalCjsRequireSource(
+    expression ? unwrapTransparentCssRuleExpression(expression) : null,
+    record.programPath.scope
+  );
+
+  return source
+    ? appendStaticCssEvalCjsRequireSource(source, memberPath)
+    : null;
+}
+
+function appendStaticCssEvalCjsRequireSource(
+  source: StaticCssEvalCjsRequireSource,
+  memberPath: readonly string[]
+): StaticCssEvalCjsRequireSource {
+  return memberPath.length === 0
+    ? source
+    : {
+        importPath: source.importPath,
+        propertyPath: [...source.propertyPath, ...memberPath]
+      };
+}
+
 function resolveStaticExportMapEntry(
   record: ImportedStaticCssEvalModuleRecord,
   exportEntry: Exclude<ExportMapEntry, { kind: "reexport" | "unsupported" }>,
@@ -1770,13 +1978,27 @@ function getStaticExportEntryExpression(
     const expression = unwrapTransparentCssRuleExpression(
       exportEntry.expression
     );
+    const reference = getStaticCssEvalMemberReference(expression);
 
-    if (t.isIdentifier(expression)) {
+    if (reference?.kind === "supported") {
       return getLocalBindingExpressionResult(
         record,
-        expression.name,
-        exportEntry.exportName
+        reference.bindingName,
+        exportEntry.exportName,
+        reference.memberPath
       );
+    }
+
+    if (reference?.kind === "unsupported") {
+      return {
+        kind: "error",
+        diagnostic: createStaticCssEvalComputedMemberUnsupportedDiagnostic({
+          owner: { file: record.id },
+          dependency: { file: record.id },
+          exportName: exportEntry.exportName,
+          memberPath: reference.memberPath
+        })
+      };
     }
 
     return { kind: "resolved", expression, localName: null };
@@ -1792,7 +2014,8 @@ function getStaticExportEntryExpression(
 function getLocalBindingExpressionResult(
   record: ImportedStaticCssEvalModuleRecord,
   localName: string,
-  exportName: StaticCssEvalExportName
+  exportName: StaticCssEvalExportName,
+  memberPath: readonly string[] = []
 ):
   | { kind: "resolved"; expression: t.Expression; localName: string }
   | { kind: "error"; diagnostic: StaticCssEvalDiagnostic } {
@@ -1802,9 +2025,30 @@ function getLocalBindingExpressionResult(
     : null;
 
   if (expression) {
+    const unwrappedExpression = unwrapTransparentCssRuleExpression(expression);
+    const memberExpression = resolveStaticObjectMemberPath(
+      unwrappedExpression,
+      memberPath
+    );
+
+    if (!memberExpression) {
+      return {
+        kind: "error",
+        diagnostic: createStaticCssEvalDynamicExpressionUnsupportedDiagnostic(
+          {
+            owner: { file: record.id },
+            dependency: { file: record.id },
+            exportName,
+            memberPath
+          },
+          unwrappedExpression.type
+        )
+      };
+    }
+
     return {
       kind: "resolved",
-      expression: unwrapTransparentCssRuleExpression(expression),
+      expression: memberExpression,
       localName
     };
   }
@@ -1873,10 +2117,44 @@ function createUnsupportedExportEntryDiagnostic(
     );
   }
 
+  if (exportEntry.unsupportedKind === "cjs-export") {
+    return createStaticCssEvalCjsExportUnsupportedDiagnostic(
+      context,
+      exportEntry.cjsExportMutation ?? exportEntry.declaration.type
+    );
+  }
+
+  if (exportEntry.unsupportedKind === "cjs-helper") {
+    return createStaticCssEvalCjsHelperUnsupportedDiagnostic(
+      context,
+      exportEntry.cjsHelperName ?? exportEntry.declaration.type
+    );
+  }
+
+  if (exportEntry.unsupportedKind === "cjs-bundle-runtime") {
+    return createStaticCssEvalCjsBundleRuntimeUnsupportedDiagnostic(
+      context,
+      exportEntry.cjsBundleRuntimeName ?? exportEntry.declaration.type
+    );
+  }
+
   return createStaticCssEvalDynamicExpressionUnsupportedDiagnostic(
     context,
     exportEntry.declaration.type
   );
+}
+
+function getCjsModuleUnsupportedEntry(
+  record: ImportedStaticCssEvalModuleRecord
+): Extract<ExportMapEntry, { kind: "unsupported" }> | null {
+  const entry = record.exports.get(null);
+
+  return entry?.kind === "unsupported" &&
+    (entry.unsupportedKind === "cjs-bundle-runtime" ||
+      entry.unsupportedKind === "cjs-helper" ||
+      entry.unsupportedKind === "cjs-export")
+    ? entry
+    : null;
 }
 
 function createBindingProvenance(
@@ -2225,14 +2503,6 @@ function formatStaticCssEvalQueryExpression(query: StaticCssEvalQuery): string {
     : "";
 
   return `${bindingName}${memberPath}`;
-}
-
-function isRequireCallExpression(expression: t.Expression): boolean {
-  return (
-    t.isCallExpression(expression) &&
-    t.isIdentifier(expression.callee) &&
-    expression.callee.name === "require"
-  );
 }
 
 function hasImportedStaticCssBindingMutation(
@@ -2921,6 +3191,55 @@ if (import.meta.vitest) {
     });
   }
 
+  type CjsUnsupportedFixture = {
+    readonly stylesSource: string;
+    readonly ownerSource: string;
+    readonly bindingName: string;
+    readonly expectedDiagnosticId: StaticCssEvalDiagnosticId;
+    readonly memberPath?: readonly string[];
+  };
+
+  function expectCjsUnsupportedFixture(fixture: CjsUnsupportedFixture): void {
+    expect(
+      resolveFixture(
+        createProvider(fixture.stylesSource, fixture.ownerSource),
+        fixture.bindingName,
+        [...(fixture.memberPath ?? [])]
+      )
+    ).toMatchObject({
+      kind: "error",
+      diagnostic: { id: fixture.expectedDiagnosticId }
+    });
+  }
+
+  function createEsbuildHelperSource(copyPropsSource: string): string {
+    return `
+      var __defProp = Object.defineProperty;
+      var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
+      var __getOwnPropNames = Object.getOwnPropertyNames;
+      var __hasOwnProp = Object.prototype.hasOwnProperty;
+      var __export = (target, all) => {
+        for (var name in all)
+          __defProp(target, name, { get: all[name], enumerable: true });
+      };
+      ${copyPropsSource}
+      var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
+    `;
+  }
+
+  function createEsbuildCopyPropsHelperSource(): string {
+    return `
+      var __copyProps = (to, from, except, desc) => {
+        if (from && typeof from === "object" || typeof from === "function") {
+          for (let key of __getOwnPropNames(from))
+            if (!__hasOwnProp.call(to, key) && key !== except)
+              __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+        }
+        return to;
+      };
+    `;
+  }
+
   describe("imported static css eval module records", () => {
     it("matches parser plugins to the loaded module extension", () => {
       expect(() =>
@@ -2958,6 +3277,85 @@ if (import.meta.vitest) {
       expect(red.sourceHash).toMatch(/^inline:[a-z0-9]+$/);
       expect(red.sourceHash).toBe(red.parsedModule.sourceHash);
       expect(red.sourceHash).not.toBe(sky.sourceHash);
+    });
+
+    it("collects literal CommonJS require bindings into module records", () => {
+      const record = createImportedStaticCssEvalModuleRecord({
+        id: ownerId,
+        source: `
+          import type { ThemeTokens } from "./styles";
+
+          const styles = require("./styles");
+          const memberButton = require("./styles").button;
+          const memberDefault = require("./styles").default;
+          const { button, card: cardStyle } = require("./styles");
+        `
+      });
+
+      expect(record.imports.has("ThemeTokens")).toBe(false);
+      expect([...record.cjsImports.entries()]).toEqual([
+        [
+          "styles",
+          {
+            kind: "cjs-module",
+            localName: "styles",
+            importPath: "./styles",
+            propertyPath: []
+          }
+        ],
+        [
+          "memberButton",
+          {
+            kind: "cjs-member",
+            localName: "memberButton",
+            importPath: "./styles",
+            propertyPath: ["button"]
+          }
+        ],
+        [
+          "memberDefault",
+          {
+            kind: "cjs-member",
+            localName: "memberDefault",
+            importPath: "./styles",
+            propertyPath: ["default"]
+          }
+        ],
+        [
+          "button",
+          {
+            kind: "cjs-destructured",
+            localName: "button",
+            importPath: "./styles",
+            propertyPath: ["button"]
+          }
+        ],
+        [
+          "cardStyle",
+          {
+            kind: "cjs-destructured",
+            localName: "cardStyle",
+            importPath: "./styles",
+            propertyPath: ["card"]
+          }
+        ]
+      ]);
+    });
+
+    it("ignores literal CommonJS require when require is locally bound", () => {
+      const record = createImportedStaticCssEvalModuleRecord({
+        id: ownerId,
+        source: `const require = makeRequire(); const styles = require("./styles");`
+      });
+      const provider = createProvider(
+        `export const button = { color: "red" } as const;`,
+        `const require = makeRequire(); const styles = require("./styles"); <div css={styles.button} />;`
+      );
+
+      expect(record.cjsImports.has("styles")).toBe(false);
+      expect(resolveFixture(provider, "styles", ["button"])).toEqual({
+        kind: "not-candidate"
+      });
     });
 
     it("resolves named, aliased, default object, default const, and same-module export aliases", () => {
@@ -4180,7 +4578,260 @@ if (import.meta.vitest) {
       });
     });
 
-    it("rejects missing exports, unresolved imports, cjs, and cycles with exact diagnostics", () => {
+    it("resolves static CommonJS require bindings and require-backed CJS exports", () => {
+      const cjsImportProvider = createProvider(
+        `
+          export const button = { color: "red" } as const;
+          export const card = { color: "blue" } as const;
+          export default { color: "green" } as const;
+        `,
+        `
+          const styles = require("./styles");
+          const directButton = require("./styles").button;
+          const { card: cardStyle } = require("./styles");
+        `
+      );
+
+      expect(
+        resolveFixture(cjsImportProvider, "styles", ["button"])
+      ).toMatchObject({
+        kind: "resolved",
+        value: { color: "red" },
+        provenance: {
+          kind: "imported",
+          file: stylesId,
+          exportName: "button"
+        },
+        dependencies: [
+          {
+            file: stylesId,
+            kind: "imported",
+            importer: ownerId,
+            specifier: "./styles",
+            exportName: "button",
+            memberPath: [],
+            inspected: true,
+            contributed: true
+          }
+        ]
+      });
+      expect(resolveFixture(cjsImportProvider, "directButton")).toMatchObject({
+        kind: "resolved",
+        value: { color: "red" }
+      });
+      expect(resolveFixture(cjsImportProvider, "cardStyle")).toMatchObject({
+        kind: "resolved",
+        value: { color: "blue" }
+      });
+
+      expect(
+        resolveFixture(
+          createProvider(
+            `module.exports = { button: { color: "red" }, card: { color: "blue" } };`,
+            `const styles = require("./styles"); <div css={styles} />;`
+          ),
+          "styles"
+        )
+      ).toMatchObject({
+        kind: "resolved",
+        value: {
+          button: { color: "red" },
+          card: { color: "blue" }
+        },
+        provenance: {
+          kind: "imported",
+          file: stylesId,
+          exportName: null
+        }
+      });
+
+      const cjsReexportProvider = createProvider(
+        `
+          export const button = { color: "red" } as const;
+          export const card = { color: "blue" } as const;
+        `,
+        `import { button, card } from "./barrel"; <><div css={button} /><div css={card} /></>;`,
+        `
+          const styles = require("./styles");
+          exports.button = styles.button;
+          exports.card = require("./styles").card;
+        `
+      );
+
+      expect(resolveFixture(cjsReexportProvider, "button")).toMatchObject({
+        kind: "resolved",
+        value: { color: "red" },
+        provenance: {
+          kind: "reexported",
+          file: stylesId,
+          exportName: "button",
+          reexportName: "button"
+        },
+        dependencies: [
+          {
+            file: barrelId,
+            kind: "reexported",
+            inspected: true,
+            contributed: true
+          },
+          {
+            file: stylesId,
+            kind: "reexported",
+            inspected: true,
+            contributed: true
+          }
+        ],
+        resolutionChain: [
+          { importer: ownerId, source: barrelId, exportName: "button" },
+          { importer: barrelId, source: stylesId, exportName: "button" }
+        ]
+      });
+      expect(resolveFixture(cjsReexportProvider, "card")).toMatchObject({
+        kind: "resolved",
+        value: { color: "blue" },
+        provenance: {
+          kind: "reexported",
+          file: stylesId,
+          exportName: "card",
+          reexportName: "card"
+        }
+      });
+    });
+
+    it("resolves esbuild static CommonJS helper named default and require-backed exports", () => {
+      const esbuildStylesSource = `
+        ${createEsbuildHelperSource(createEsbuildCopyPropsHelperSource())}
+        const button = { color: "red" };
+        const root = { color: "green" };
+        __export(exports, {
+          button: () => button,
+          default: () => root
+        });
+        module.exports = __toCommonJS(exports);
+      `;
+      const esbuildProvider = createProvider(
+        esbuildStylesSource,
+        `const styles = require("./styles"); <><div css={styles.button} /><div css={styles.default} /></>;`
+      );
+      const buttonResult = expectResolvedResult(
+        resolveFixture(esbuildProvider, "styles", ["button"])
+      );
+      const defaultResult = expectResolvedResult(
+        resolveFixture(esbuildProvider, "styles", ["default"])
+      );
+
+      expect(buttonResult.value).toEqual({ color: "red" });
+      expect(defaultResult.value).toEqual({ color: "green" });
+
+      const reexportProvider = createProvider(
+        `export const button = { color: "blue" } as const;`,
+        `import { button } from "./barrel"; <div css={button} />;`,
+        `
+          ${createEsbuildHelperSource(createEsbuildCopyPropsHelperSource())}
+          const styles = require("./styles");
+          __export(exports, { button: () => styles.button });
+          module.exports = __toCommonJS(exports);
+        `
+      );
+
+      expect(resolveFixture(reexportProvider, "button")).toMatchObject({
+        kind: "resolved",
+        value: { color: "blue" },
+        provenance: {
+          kind: "reexported",
+          file: stylesId,
+          exportName: "button",
+          reexportName: "button"
+        },
+        resolutionChain: [
+          { importer: ownerId, source: barrelId, exportName: "button" },
+          { importer: barrelId, source: stylesId, exportName: "button" }
+        ]
+      });
+    });
+
+    it("rejects esbuild copyProps helper definitions missing required guard pieces", () => {
+      const cases: readonly string[] = [
+        `
+          var __copyProps = (to, from, except, desc) => {
+            if (from) {
+              for (let key of __getOwnPropNames(from))
+                if (!__hasOwnProp.call(to, key) && key !== except)
+                  __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+            }
+            return to;
+          };
+        `,
+        `
+          var __copyProps = (to, from, except, desc) => {
+            if (from && typeof from === "object" || typeof from === "function") {
+              for (let key of Object.keys(from))
+                if (!__hasOwnProp.call(to, key) && key !== except)
+                  __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+            }
+            return to;
+          };
+        `,
+        `
+          var __copyProps = (to, from, except, desc) => {
+            if (from && typeof from === "object" || typeof from === "function") {
+              for (let key of __getOwnPropNames(from))
+                if (key !== except)
+                  __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+            }
+            return to;
+          };
+        `,
+        `
+          var __copyProps = (to, from, except, desc) => {
+            if (from && typeof from === "object" || typeof from === "function") {
+              for (let key of __getOwnPropNames(from))
+                if (!__hasOwnProp.call(to, key))
+                  __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+            }
+            return to;
+          };
+        `,
+        `
+          var __copyProps = (to, from, except, desc) => {
+            if (from && typeof from === "object" || typeof from === "function") {
+              for (let key of __getOwnPropNames(from))
+                if (!__hasOwnProp.call(to, key) && key !== except)
+                  __defProp(to, key, { get: () => from[key], enumerable: true });
+            }
+            return to;
+          };
+        `,
+        `
+          var __copyProps = (to, from, except, desc) => {
+            if (from && typeof from === "object" || typeof from === "function") {
+              for (let key of __getOwnPropNames(from))
+                if (!__hasOwnProp.call(to, key) && key !== except)
+                  __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) });
+            }
+            return to;
+          };
+        `
+      ];
+
+      for (const copyPropsSource of cases) {
+        expectCjsUnsupportedFixture({
+          stylesSource: `
+            ${createEsbuildHelperSource(copyPropsSource)}
+            var entry_exports = {};
+            const button = { color: "red" };
+            __export(entry_exports, { button: () => button });
+            module.exports = __toCommonJS(entry_exports);
+          `,
+          ownerSource: `const styles = require("./styles"); <div css={styles.button} />;`,
+          bindingName: "styles",
+          memberPath: ["button"],
+          expectedDiagnosticId: "STATIC_CSS_EVAL_CJS_HELPER_UNSUPPORTED"
+        });
+      }
+    });
+
+    it("rejects missing exports, unresolved imports, dynamic cjs, and cycles with exact diagnostics", () => {
       expect(
         resolveFixture(
           createProvider(
@@ -4233,17 +4884,18 @@ if (import.meta.vitest) {
         resolveFixture(
           createProvider(
             `export const button = { color: "red" } as const;`,
-            `const button = require("./styles"); <div css={button} />;`
+            `const styles = require(name); <div css={styles.button} />;`
           ),
-          "button"
+          "styles",
+          ["button"]
         )
       ).toMatchObject({
         kind: "error",
         diagnostic: {
-          id: "STATIC_CSS_EVAL_CJS_UNSUPPORTED",
+          id: "STATIC_CSS_EVAL_CJS_DYNAMIC_REQUIRE_UNSUPPORTED",
           reason: "commonjs-require",
           message:
-            "Cannot statically evaluate css prop value: commonjs require is unsupported"
+            "Cannot statically evaluate css prop value: commonjs dynamic require is unsupported"
         }
       });
 
@@ -4280,6 +4932,284 @@ if (import.meta.vitest) {
           id: "STATIC_CSS_EVAL_IMPORT_CYCLE"
         }
       });
+    });
+
+    it("rejects unsupported CommonJS require forms with narrow dynamic diagnostics", () => {
+      const cases: readonly CjsUnsupportedFixture[] = [
+        {
+          stylesSource: `export const button = { color: "red" } as const;`,
+          ownerSource: `const styles = require(name); <div css={styles.button} />;`,
+          bindingName: "styles",
+          memberPath: ["button"],
+          expectedDiagnosticId:
+            "STATIC_CSS_EVAL_CJS_DYNAMIC_REQUIRE_UNSUPPORTED"
+        },
+        {
+          stylesSource: `export const button = { color: "red" } as const;`,
+          ownerSource:
+            "const styles = require(`./${name}`); <div css={styles.button} />;",
+          bindingName: "styles",
+          memberPath: ["button"],
+          expectedDiagnosticId:
+            "STATIC_CSS_EVAL_CJS_DYNAMIC_REQUIRE_UNSUPPORTED"
+        },
+        {
+          stylesSource: `export const button = { color: "red" } as const;`,
+          ownerSource: `const styles = enabled ? require("./styles") : require("./fallback"); <div css={styles.button} />;`,
+          bindingName: "styles",
+          memberPath: ["button"],
+          expectedDiagnosticId:
+            "STATIC_CSS_EVAL_CJS_DYNAMIC_REQUIRE_UNSUPPORTED"
+        },
+        {
+          stylesSource: `export const button = { color: "red" } as const;`,
+          ownerSource:
+            "const styles = `prefix-${require(name)}`; <div css={styles.button} />;",
+          bindingName: "styles",
+          memberPath: ["button"],
+          expectedDiagnosticId:
+            "STATIC_CSS_EVAL_CJS_DYNAMIC_REQUIRE_UNSUPPORTED"
+        },
+        {
+          stylesSource: `export const button = { color: "red" } as const;`,
+          ownerSource:
+            "const styles = require(name)`styles`; <div css={styles.button} />;",
+          bindingName: "styles",
+          memberPath: ["button"],
+          expectedDiagnosticId:
+            "STATIC_CSS_EVAL_CJS_DYNAMIC_REQUIRE_UNSUPPORTED"
+        },
+        {
+          stylesSource: `export const button = { color: "red" } as const;`,
+          ownerSource:
+            "const styles = tag`styles-${require(name)}`; <div css={styles.button} />;",
+          bindingName: "styles",
+          memberPath: ["button"],
+          expectedDiagnosticId:
+            "STATIC_CSS_EVAL_CJS_DYNAMIC_REQUIRE_UNSUPPORTED"
+        },
+        {
+          stylesSource: `export const button = { color: "red" } as const;`,
+          ownerSource:
+            "const styles = new (require(name))(); <div css={styles.button} />;",
+          bindingName: "styles",
+          memberPath: ["button"],
+          expectedDiagnosticId:
+            "STATIC_CSS_EVAL_CJS_DYNAMIC_REQUIRE_UNSUPPORTED"
+        },
+        {
+          stylesSource: `export const button = { color: "red" } as const;`,
+          ownerSource:
+            "const styles = new Styles(require(name)); <div css={styles.button} />;",
+          bindingName: "styles",
+          memberPath: ["button"],
+          expectedDiagnosticId:
+            "STATIC_CSS_EVAL_CJS_DYNAMIC_REQUIRE_UNSUPPORTED"
+        },
+        {
+          stylesSource: `export const button = { color: "red" } as const;`,
+          ownerSource:
+            "const styles = await require(name); <div css={styles.button} />;",
+          bindingName: "styles",
+          memberPath: ["button"],
+          expectedDiagnosticId:
+            "STATIC_CSS_EVAL_CJS_DYNAMIC_REQUIRE_UNSUPPORTED"
+        },
+        {
+          stylesSource: `export const button = { color: "red" } as const;`,
+          ownerSource:
+            "const styles = (target = require(name)); <div css={styles.button} />;",
+          bindingName: "styles",
+          memberPath: ["button"],
+          expectedDiagnosticId:
+            "STATIC_CSS_EVAL_CJS_DYNAMIC_REQUIRE_UNSUPPORTED"
+        },
+        {
+          stylesSource: `export const button = { color: "red" } as const;`,
+          ownerSource:
+            "const styles = (target[require(name)] = fallback); <div css={styles.button} />;",
+          bindingName: "styles",
+          memberPath: ["button"],
+          expectedDiagnosticId:
+            "STATIC_CSS_EVAL_CJS_DYNAMIC_REQUIRE_UNSUPPORTED"
+        },
+        {
+          stylesSource: `export const button = { color: "red" } as const;`,
+          ownerSource:
+            "const styles = (require(name))<unknown>; <div css={styles.button} />;",
+          bindingName: "styles",
+          memberPath: ["button"],
+          expectedDiagnosticId:
+            "STATIC_CSS_EVAL_CJS_DYNAMIC_REQUIRE_UNSUPPORTED"
+        }
+      ];
+
+      for (const fixture of cases) {
+        expectCjsUnsupportedFixture(fixture);
+      }
+    });
+
+    it("fails closed when CommonJS globals are lexically shadowed", () => {
+      const shadowedRequireProvider = createProvider(
+        `export const button = { color: "red" } as const;`,
+        `const require = makeRequire(); const styles = require("./styles"); <div css={styles.button} />;`
+      );
+
+      expect(
+        resolveFixture(shadowedRequireProvider, "styles", ["button"])
+      ).toEqual({
+        kind: "not-candidate"
+      });
+      expectCjsUnsupportedFixture({
+        stylesSource: `const exports = {}; exports.button = { color: "red" };`,
+        ownerSource: `const styles = require("./styles"); <div css={styles.button} />;`,
+        bindingName: "styles",
+        memberPath: ["button"],
+        expectedDiagnosticId: "STATIC_CSS_EVAL_UNRESOLVED_EXPORT"
+      });
+      expectCjsUnsupportedFixture({
+        stylesSource: `const module = {}; module.exports = { button: { color: "red" } };`,
+        ownerSource: `const styles = require("./styles"); <div css={styles.button} />;`,
+        bindingName: "styles",
+        memberPath: ["button"],
+        expectedDiagnosticId: "STATIC_CSS_EVAL_UNRESOLVED_EXPORT"
+      });
+
+      const parameterShadowedExportsSource = `
+        function write(exports) {
+          exports.button = { color: "red" };
+        }
+        write({});
+      `;
+      const parameterShadowedExportsRecord =
+        createImportedStaticCssEvalModuleRecord({
+          id: stylesId,
+          source: parameterShadowedExportsSource
+        });
+
+      expect(parameterShadowedExportsRecord.exports.has("button")).toBe(false);
+      expectCjsUnsupportedFixture({
+        stylesSource: parameterShadowedExportsSource,
+        ownerSource: `const styles = require("./styles"); <div css={styles.button} />;`,
+        bindingName: "styles",
+        memberPath: ["button"],
+        expectedDiagnosticId: "STATIC_CSS_EVAL_UNRESOLVED_EXPORT"
+      });
+    });
+
+    it("rejects unsupported CommonJS export mutations before className compilation", () => {
+      const cases: readonly CjsUnsupportedFixture[] = [
+        {
+          stylesSource: `
+            const button = { color: "red" };
+            if (enabled) exports.button = button;
+          `,
+          ownerSource: `const styles = require("./styles"); <div css={styles.button} />;`,
+          bindingName: "styles",
+          memberPath: ["button"],
+          expectedDiagnosticId: "STATIC_CSS_EVAL_CJS_EXPORT_UNSUPPORTED"
+        },
+        {
+          stylesSource: `
+            const button = { color: "red" };
+            for (const name of ["button"]) exports.button = button;
+          `,
+          ownerSource: `const styles = require("./styles"); <div css={styles.button} />;`,
+          bindingName: "styles",
+          memberPath: ["button"],
+          expectedDiagnosticId: "STATIC_CSS_EVAL_CJS_EXPORT_UNSUPPORTED"
+        },
+        {
+          stylesSource: `
+            const root = {};
+            module.exports = root;
+            exports.button = { color: "red" };
+          `,
+          ownerSource: `const styles = require("./styles"); <div css={styles.button} />;`,
+          bindingName: "styles",
+          memberPath: ["button"],
+          expectedDiagnosticId: "STATIC_CSS_EVAL_CJS_EXPORT_UNSUPPORTED"
+        }
+      ];
+
+      for (const fixture of cases) {
+        expectCjsUnsupportedFixture(fixture);
+      }
+    });
+
+    it("rejects unsupported CommonJS helper definitions before className compilation", () => {
+      const cases: readonly CjsUnsupportedFixture[] = [
+        {
+          stylesSource: `
+            function __createBinding() { sideEffect(); }
+            const theme = require("./theme");
+            __createBinding(exports, theme, "button");
+          `,
+          ownerSource: `const styles = require("./styles"); <div css={styles.button} />;`,
+          bindingName: "styles",
+          memberPath: ["button"],
+          expectedDiagnosticId: "STATIC_CSS_EVAL_CJS_HELPER_UNSUPPORTED"
+        },
+        {
+          stylesSource: `
+            const button = { color: "red" };
+            var __export = function () { sideEffect(); };
+            __export(exports, { button: function () { return button; } });
+          `,
+          ownerSource: `const styles = require("./styles"); <div css={styles.button} />;`,
+          bindingName: "styles",
+          memberPath: ["button"],
+          expectedDiagnosticId: "STATIC_CSS_EVAL_CJS_HELPER_UNSUPPORTED"
+        }
+      ];
+
+      for (const fixture of cases) {
+        expectCjsUnsupportedFixture(fixture);
+      }
+    });
+
+    it("rejects Webpack Turbopack and Parcel CommonJS bundle runtime snippets", () => {
+      const cases: readonly CjsUnsupportedFixture[] = [
+        {
+          stylesSource: `
+            var __webpack_modules__ = {
+              "./style": function (module) {
+                module.exports = { button: { color: "red" } };
+              }
+            };
+            function __webpack_require__(id) { return __webpack_modules__[id]({ exports: {} }); }
+            module.exports = __webpack_require__("./style");
+          `,
+          ownerSource: `const styles = require("./styles"); <div css={styles.button} />;`,
+          bindingName: "styles",
+          memberPath: ["button"],
+          expectedDiagnosticId: "STATIC_CSS_EVAL_CJS_BUNDLE_RUNTIME_UNSUPPORTED"
+        },
+        {
+          stylesSource: `
+            function __turbopack_require__(id) { return id; }
+            module.exports = __turbopack_require__("[project]/style");
+          `,
+          ownerSource: `const styles = require("./styles"); <div css={styles.button} />;`,
+          bindingName: "styles",
+          memberPath: ["button"],
+          expectedDiagnosticId: "STATIC_CSS_EVAL_CJS_BUNDLE_RUNTIME_UNSUPPORTED"
+        },
+        {
+          stylesSource: `
+            var parcelRequire = function (id) { return id; };
+            module.exports = parcelRequire("style");
+          `,
+          ownerSource: `const styles = require("./styles"); <div css={styles.button} />;`,
+          bindingName: "styles",
+          memberPath: ["button"],
+          expectedDiagnosticId: "STATIC_CSS_EVAL_CJS_BUNDLE_RUNTIME_UNSUPPORTED"
+        }
+      ];
+
+      for (const fixture of cases) {
+        expectCjsUnsupportedFixture(fixture);
+      }
     });
 
     it("rejects computed namespace members and ignores type-only imports", () => {
