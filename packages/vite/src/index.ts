@@ -3441,6 +3441,69 @@ if (import.meta.vitest) {
       }
     });
 
+    it("invalidates CommonJS require css prop dependencies from integration metadata", async () => {
+      const fixture = await createImportedCssPropViteFixture(
+        "jsx-css-prop-cjs-require-watch-",
+        {
+          entrySource: `
+            const styles = require("./styles");
+
+            function App() {
+              return <div css={styles.button} />;
+            }
+
+            export { App };
+          `,
+          styleSource: `exports.button = { color: "red" };`
+        }
+      );
+
+      try {
+        await spyOnSourceBabelTransform();
+        const harness = await createViteHarness({
+          configOverrides: {
+            command: "serve",
+            mode: "development",
+            root: fixture.root
+          },
+          pluginOptions: {
+            jsxCssProp: true
+          }
+        });
+        const stylesRealpath = normalizePath(
+          await fs.promises.realpath(fixture.stylesPath)
+        );
+        const redArtifact = await transformImportedCssPropToVirtualCss(
+          harness,
+          fixture.entryPath,
+          fixture.entrySource
+        );
+
+        expect(redArtifact.virtualCss).toContain("color: red;");
+        expect(new Set(harness.watchFiles)).toEqual(new Set([stylesRealpath]));
+
+        await fs.promises.writeFile(
+          fixture.stylesPath,
+          `exports.button = { color: "blue" };`
+        );
+        await harness.transform(
+          fixture.stylesPath,
+          await fs.promises.readFile(fixture.stylesPath, "utf8")
+        );
+        expect(await harness.load(redArtifact.resolvedVirtualId)).toBeNull();
+
+        const blueArtifact = await transformImportedCssPropToVirtualCss(
+          harness,
+          fixture.entryPath,
+          fixture.entrySource
+        );
+        expect(blueArtifact.virtualCss).toContain("color: blue;");
+        expect(new Set(harness.watchFiles)).toEqual(new Set([stylesRealpath]));
+      } finally {
+        await fs.promises.rm(fixture.root, { force: true, recursive: true });
+      }
+    });
+
     it("registers whole namespace export-star watch metadata from Babel integration", async () => {
       const fixture = await createImportedCssPropViteFixture(
         "jsx-css-prop-whole-namespace-export-star-watch-",

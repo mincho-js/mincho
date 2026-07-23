@@ -16,7 +16,10 @@
       ],
       "outputs": [
         ".cache/typescript/*",
-        "dist/**"
+        "dist/**",
+        "**/package.json",
+        "!package.json",
+        "!src/**/package.json"
       ]
     },
     "lint": {

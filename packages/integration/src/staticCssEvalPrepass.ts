@@ -65,6 +65,13 @@ type StaticCssEvalPrepassImportBinding =
   >
     ? ImportBinding
     : never;
+type StaticCssEvalPrepassCjsImportBinding =
+  ImportedStaticCssEvalModuleRecord["cjsImports"] extends ReadonlyMap<
+    string,
+    infer CjsImportBinding
+  >
+    ? CjsImportBinding
+    : never;
 type StaticCssEvalPrepassExportName = string | null;
 type StaticCssEvalPrepassExportEntry =
   ImportedStaticCssEvalModuleRecord["exports"] extends ReadonlyMap<
@@ -78,6 +85,11 @@ interface StaticCssEvalPrepassExportRequest {
   exportName: StaticCssEvalPrepassExportName;
   memberPath: readonly string[];
   wholeNamespace: boolean;
+}
+
+interface StaticCssEvalPrepassDependencyRequest {
+  importPath: string;
+  exportRequest: StaticCssEvalPrepassExportRequest | null;
 }
 
 interface StaticCssEvalPrepassExportWalk {
@@ -178,17 +190,19 @@ export async function createStaticCssEvalPrepass(
   };
 
   for (const candidate of candidates) {
-    const importBinding = candidate.bindingName
-      ? ownerRecord.imports.get(candidate.bindingName)
-      : undefined;
+    const dependencyRequest = createStaticCssEvalPrepassDependencyRequest(
+      ownerRecord,
+      candidate.bindingName,
+      candidate.memberPath ?? []
+    );
 
-    if (!importBinding) {
+    if (!dependencyRequest) {
       continue;
     }
 
     const moduleRecord = await loadStaticCssEvalPrepassDependency(
       ownerId,
-      importBinding.importPath,
+      dependencyRequest.importPath,
       prepassContext
     );
 
@@ -196,15 +210,10 @@ export async function createStaticCssEvalPrepass(
       continue;
     }
 
-    const request = createStaticCssEvalPrepassExportRequest(
-      importBinding,
-      candidate.memberPath ?? []
-    );
-
-    if (request) {
+    if (dependencyRequest.exportRequest) {
       await loadStaticCssEvalPrepassGraphDependencies(
         moduleRecord,
-        request,
+        dependencyRequest.exportRequest,
         prepassContext
       );
     }
@@ -377,6 +386,40 @@ async function loadStaticCssEvalPrepassDependency(
   return moduleRecord;
 }
 
+function createStaticCssEvalPrepassDependencyRequest(
+  ownerRecord: ImportedStaticCssEvalModuleRecord,
+  bindingName: string | null | undefined,
+  memberPath: readonly string[]
+): StaticCssEvalPrepassDependencyRequest | null {
+  if (!bindingName) {
+    return null;
+  }
+
+  const importBinding = ownerRecord.imports.get(bindingName);
+
+  if (importBinding) {
+    return {
+      importPath: importBinding.importPath,
+      exportRequest: createStaticCssEvalPrepassExportRequest(
+        importBinding,
+        memberPath
+      )
+    };
+  }
+
+  const cjsBinding = ownerRecord.cjsImports.get(bindingName);
+
+  return cjsBinding
+    ? {
+        importPath: cjsBinding.importPath,
+        exportRequest: createStaticCssEvalPrepassCjsExportRequest(
+          cjsBinding,
+          memberPath
+        )
+      }
+    : null;
+}
+
 function createStaticCssEvalPrepassExportRequest(
   importBinding: StaticCssEvalPrepassImportBinding,
   memberPath: readonly string[]
@@ -409,6 +452,30 @@ function createStaticCssEvalPrepassExportRequest(
     default:
       return assertNever(importBinding);
   }
+}
+
+function createStaticCssEvalPrepassCjsExportRequest(
+  cjsBinding: StaticCssEvalPrepassCjsImportBinding,
+  memberPath: readonly string[]
+): StaticCssEvalPrepassExportRequest {
+  const [exportName, ...remainingMemberPath] = [
+    ...cjsBinding.propertyPath,
+    ...memberPath
+  ];
+
+  if (exportName === undefined) {
+    return {
+      exportName: null,
+      memberPath: [],
+      wholeNamespace: true
+    };
+  }
+
+  return {
+    exportName,
+    memberPath: remainingMemberPath,
+    wholeNamespace: false
+  };
 }
 
 async function loadStaticCssEvalPrepassGraphDependencies(
@@ -1702,6 +1769,251 @@ if (import.meta.vitest) {
         })
       ]);
       expect(result.resolvedModuleCache.has(stylesId)).toBe(true);
+    });
+
+    it("preloads direct CommonJS require dependencies from css prop candidates", async () => {
+      const ownerId = "/project/src/App.tsx";
+      const stylesId = "/project/src/styles.cjs";
+      const stylesWatchFile = "/project/src/styles.cjs";
+      const ownerSource = `
+        const styles = require("./styles");
+
+        function App() {
+          return <div css={styles.button} />;
+        }
+      `;
+      const stylesSource = `exports.button = { color: "red" };`;
+      const calls: {
+        resolved: Array<{ importerId: string; importPath: string }>;
+        loaded: string[];
+      } = { resolved: [], loaded: [] };
+      const provider: StaticCssEvalSourceProvider = {
+        resolve(importerId, importPath) {
+          calls.resolved.push({ importerId, importPath });
+
+          return importPath === "./styles"
+            ? {
+                resolvedFile: stylesId,
+                canonicalModuleId: stylesId,
+                normalizedPathKey: stylesId,
+                watchFiles: [stylesWatchFile],
+                resolverKind: "test"
+              }
+            : null;
+        },
+        load(id) {
+          calls.loaded.push(id);
+
+          if (id === ownerId) {
+            return { source: ownerSource };
+          }
+
+          return id === stylesId
+            ? {
+                source: stylesSource,
+                watchFiles: [stylesWatchFile],
+                resolverKind: "test"
+              }
+            : null;
+        }
+      };
+
+      const { result } = await createStaticCssEvalPrepass(ownerId, provider);
+
+      expect(calls.resolved).toEqual([
+        { importerId: ownerId, importPath: "./styles" }
+      ]);
+      expect(calls.loaded).toEqual([ownerId, stylesId]);
+      expect(result.dependencyFiles).toEqual([stylesId]);
+      expect(result.ownerToDependencies.get(ownerId)).toEqual([stylesId]);
+      expect(result.dependencyToOwners.get(stylesId)).toEqual([ownerId]);
+      expect(result.resolvedModuleCache.has(stylesId)).toBe(true);
+      expect(result.resolvedDependencies).toEqual([
+        expect.objectContaining({
+          importerId: ownerId,
+          specifier: "./styles",
+          resolvedFile: stylesId,
+          resolverKind: "test",
+          loaded: true,
+          watchFiles: [stylesWatchFile]
+        })
+      ]);
+    });
+
+    it("preloads CommonJS helper export-star dependencies from bare require candidates", async () => {
+      const ownerId = "/project/src/App.tsx";
+      const barrelId = "/project/src/barrel.cjs";
+      const stylesId = "/project/src/styles.cjs";
+      const sources: Record<string, string> = {
+        [ownerId]: `
+          const styles = require("./barrel");
+
+          function App() {
+            return <div css={styles} />;
+          }
+        `,
+        [barrelId]: `
+          var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+            if (k2 === undefined) k2 = k;
+            var desc = Object.getOwnPropertyDescriptor(m, k);
+            if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+              desc = { enumerable: true, get: function() { return m[k]; } };
+            }
+            Object.defineProperty(o, k2, desc);
+          }) : (function(o, m, k, k2) {
+            if (k2 === undefined) k2 = k;
+            o[k2] = m[k];
+          }));
+          var __exportStar = (this && this.__exportStar) || function(m, exports) {
+            for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports, p)) __createBinding(exports, m, p);
+          };
+          __exportStar(require("./styles"), exports);
+        `,
+        [stylesId]: `exports.button = { color: "red" };`
+      };
+      const calls: {
+        resolved: Array<{ importerId: string; importPath: string }>;
+        loaded: string[];
+      } = { resolved: [], loaded: [] };
+      const provider: StaticCssEvalSourceProvider = {
+        resolve(importerId, importPath) {
+          calls.resolved.push({ importerId, importPath });
+
+          if (importerId === ownerId && importPath === "./barrel") {
+            return { id: barrelId };
+          }
+
+          return importerId === barrelId && importPath === "./styles"
+            ? { id: stylesId }
+            : null;
+        },
+        load(id) {
+          calls.loaded.push(id);
+
+          const source = sources[id];
+
+          return source === undefined ? null : { source };
+        }
+      };
+
+      const { result } = await createStaticCssEvalPrepass(ownerId, provider);
+
+      expect(calls.resolved).toEqual([
+        { importerId: ownerId, importPath: "./barrel" },
+        { importerId: barrelId, importPath: "./styles" }
+      ]);
+      expect(calls.loaded).toEqual([ownerId, barrelId, stylesId]);
+      expect(result.dependencyFiles).toEqual([barrelId, stylesId]);
+      expect(result.resolvedModuleCache.has(barrelId)).toBe(true);
+      expect(result.resolvedModuleCache.has(stylesId)).toBe(true);
+    });
+
+    it("preloads CommonJS helper export-star dependencies from require candidates", async () => {
+      const ownerId = "/project/src/App.tsx";
+      const barrelId = "/project/src/barrel.cjs";
+      const stylesId = "/project/src/styles.cjs";
+      const ownerSource = `
+        const styles = require("./barrel");
+
+        function App() {
+          return <div css={styles.button} />;
+        }
+      `;
+      const barrelSource = `
+        var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+          if (k2 === undefined) k2 = k;
+          var desc = Object.getOwnPropertyDescriptor(m, k);
+          if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+            desc = { enumerable: true, get: function() { return m[k]; } };
+          }
+          Object.defineProperty(o, k2, desc);
+        }) : (function(o, m, k, k2) {
+          if (k2 === undefined) k2 = k;
+          o[k2] = m[k];
+        }));
+        var __exportStar = (this && this.__exportStar) || function(m, exports) {
+          for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports, p)) __createBinding(exports, m, p);
+        };
+        __exportStar(require("./styles"), exports);
+      `;
+      const stylesSource = `exports.button = { color: "red" };`;
+      const calls: {
+        resolved: Array<{ importerId: string; importPath: string }>;
+        loaded: string[];
+      } = { resolved: [], loaded: [] };
+      const provider: StaticCssEvalSourceProvider = {
+        resolve(importerId, importPath) {
+          calls.resolved.push({ importerId, importPath });
+
+          if (importerId === ownerId && importPath === "./barrel") {
+            return {
+              resolvedFile: barrelId,
+              canonicalModuleId: barrelId,
+              normalizedPathKey: barrelId,
+              watchFiles: [barrelId],
+              resolverKind: "test"
+            };
+          }
+
+          return importerId === barrelId && importPath === "./styles"
+            ? {
+                resolvedFile: stylesId,
+                canonicalModuleId: stylesId,
+                normalizedPathKey: stylesId,
+                watchFiles: [stylesId],
+                resolverKind: "test"
+              }
+            : null;
+        },
+        load(id) {
+          calls.loaded.push(id);
+
+          if (id === ownerId) {
+            return { source: ownerSource };
+          }
+
+          if (id === barrelId) {
+            return { source: barrelSource, watchFiles: [barrelId] };
+          }
+
+          return id === stylesId
+            ? { source: stylesSource, watchFiles: [stylesId] }
+            : null;
+        }
+      };
+
+      const { result } = await createStaticCssEvalPrepass(ownerId, provider);
+
+      expect(calls.resolved).toEqual([
+        { importerId: ownerId, importPath: "./barrel" },
+        { importerId: barrelId, importPath: "./styles" }
+      ]);
+      expect(calls.loaded).toEqual([ownerId, barrelId, stylesId]);
+      expect(result.dependencyFiles).toEqual([barrelId, stylesId]);
+      expect(result.ownerToDependencies.get(ownerId)).toEqual([
+        barrelId,
+        stylesId
+      ]);
+      expect(result.dependencyToOwners.get(barrelId)).toEqual([ownerId]);
+      expect(result.dependencyToOwners.get(stylesId)).toEqual([ownerId]);
+      expect(result.resolvedModuleCache.has(barrelId)).toBe(true);
+      expect(result.resolvedModuleCache.has(stylesId)).toBe(true);
+      expect(result.resolvedDependencies).toEqual([
+        expect.objectContaining({
+          importerId: ownerId,
+          specifier: "./barrel",
+          resolvedFile: barrelId,
+          loaded: true,
+          watchFiles: [barrelId]
+        }),
+        expect.objectContaining({
+          importerId: barrelId,
+          specifier: "./styles",
+          resolvedFile: stylesId,
+          loaded: true,
+          watchFiles: [stylesId]
+        })
+      ]);
     });
 
     it("records external-no-source provider metadata without filesystem fallback", async () => {

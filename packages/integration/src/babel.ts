@@ -1143,6 +1143,130 @@ if (import.meta.vitest) {
       );
     });
 
+    it("resolves CommonJS require css prop metadata through the async source-provider prepass", async () => {
+      const componentSource = `
+        const styles = require("./styles");
+
+        function App() {
+          return <div css={styles.button} />;
+        }
+      `;
+      const stylesSource = `exports.button = { color: "red" };`;
+      const { filePaths } = await createBabelFixtureFiles(
+        {
+          "component.tsx": componentSource,
+          "styles.cjs": stylesSource
+        },
+        "css-prop-cjs-require-metadata"
+      );
+      const componentId = filePaths["component.tsx"];
+      const stylesId = filePaths["styles.cjs"];
+      const provider = createFileBackedStaticCssEvalSourceProvider({
+        resolutions: {
+          [`${componentId}\0./styles`]: stylesId
+        }
+      });
+
+      const { code, result, staticCssEval } = await babelTransform(
+        componentId,
+        {
+          jsxCssProp: true,
+          staticCssEvalSourceProvider: provider
+        }
+      );
+      const [, sidecarSource] = result;
+
+      expect(sidecarSource).toContain('color: "red"');
+      expect(code).not.toContain("_cx(styles.button)");
+      expect(staticCssEval?.dependencyFiles).toEqual([stylesId]);
+      expect(staticCssEval?.ownerToDependencies.get(componentId)).toEqual([
+        stylesId
+      ]);
+      expect(staticCssEval?.dependencyToOwners.get(stylesId)).toEqual([
+        componentId
+      ]);
+      expect(staticCssEval?.resolvedDependencies).toEqual([
+        expect.objectContaining({
+          importerId: componentId,
+          specifier: "./styles",
+          resolvedFile: stylesId,
+          canonicalModuleId: `test:${stylesId}`,
+          normalizedPathKey: stylesId,
+          resolverKind: "test",
+          loaded: true,
+          sourceIdentity: createTestSourceIdentity(stylesSource)
+        })
+      ]);
+      expect(staticCssEval?.dependencies).toEqual([
+        expect.objectContaining({
+          file: stylesId,
+          kind: "imported",
+          importer: componentId,
+          specifier: "./styles",
+          exportName: "button",
+          memberPath: [],
+          inspected: true,
+          contributed: true
+        })
+      ]);
+      expect(staticCssEval?.cacheKeys[0]).toMatchObject({
+        importerFile: componentId,
+        resolvedFile: stylesId,
+        resolvedId: stylesId,
+        exportName: "button",
+        memberPath: [],
+        sourceHash: createTestSourceIdentity(stylesSource).sourceHash
+      });
+      expect(staticCssEval?.diagnostics).toEqual([]);
+      expect(staticCssEval?.resolvedModuleIds).toContain(stylesId);
+    });
+
+    it("dedupes CommonJS unsupported diagnostics observed during transform", async () => {
+      const componentSource = `
+        const source = "./styles";
+        const styles = require(source);
+
+        function App() {
+          return <>
+            <div css={styles.button} />
+            <span css={styles.button} />
+          </>;
+        }
+      `;
+      const componentId = await createBabelFixture(
+        componentSource,
+        "css-prop-cjs-diagnostic-dedupe"
+      );
+      const provider = createFileBackedStaticCssEvalSourceProvider({
+        resolutions: {}
+      });
+      let thrownError: unknown;
+
+      try {
+        await babelTransform(componentId, {
+          jsxCssProp: true,
+          staticCssEvalSourceProvider: provider
+        });
+      } catch (error) {
+        thrownError = error;
+      }
+
+      expect(thrownError).toBeInstanceOf(BabelTransformError);
+
+      if (!(thrownError instanceof BabelTransformError)) {
+        throw new Error("Expected BabelTransformError for dynamic CJS require");
+      }
+
+      expect(
+        thrownError.staticCssEval?.diagnostics.filter(
+          (diagnostic) =>
+            diagnostic.id === "STATIC_CSS_EVAL_CJS_DYNAMIC_REQUIRE_UNSUPPORTED"
+        )
+      ).toHaveLength(1);
+      expect(thrownError.staticCssEval?.dependencyFiles).toEqual([]);
+      expect(thrownError.staticCssEval?.resolvedDependencies).toEqual([]);
+    });
+
     it("does not reuse an unresolved export result after imported source content changes", async () => {
       const fs = await import("node:fs/promises");
       const componentSource = `

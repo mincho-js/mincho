@@ -2724,6 +2724,43 @@ if (import.meta.vitest) {
       }
     });
 
+    it("registers CommonJS require dependency metadata from Babel integration", async () => {
+      const fixture = await createImportedCssPropEsbuildFixture(
+        "jsx-css-prop-cjs-require-watch-",
+        {
+          entrySource: `
+            const styles = require("./styles");
+
+            function App() {
+              return <div css={styles.button} />;
+            }
+          `,
+          styleSource: `exports.button = { color: "red" };`
+        }
+      );
+
+      try {
+        await spyOnSourceBabelTransform();
+
+        const stylesRealpath = normalizeStaticCssEvalFileId(
+          await fs.promises.realpath(fixture.stylesPath)
+        );
+        const harness = createBuildHarness({
+          absWorkingDir: fixture.root,
+          plugin: minchoEsbuildPlugin({ jsxCssProp: true })
+        });
+        const scriptLoadResult = (await harness.loadScript({
+          path: fixture.entryPath
+        })) as ScriptLoadResult;
+
+        expect(new Set(scriptLoadResult.watchFiles)).toEqual(
+          new Set([stylesRealpath])
+        );
+      } finally {
+        await fs.promises.rm(fixture.root, { force: true, recursive: true });
+      }
+    });
+
     it("refreshes export-star namespace member watch files when leaf and barrel targets change", async () => {
       const realEsbuild = await import("esbuild");
       const fixture = await createImportedCssPropEsbuildFixture(
