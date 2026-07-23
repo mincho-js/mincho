@@ -489,6 +489,26 @@ import virtualStyles from 'virtual:mincho-styles';
 <div css={virtualStyles.button} />
 ```
 
+CommonJS sources are supported when the provider supplies deterministic source text. Mincho parses the CommonJS AST, then follows only static shapes: literal `require("./styles")` bindings, shallow destructuring, direct `module.exports` or `exports.name` export maps, static `Object.defineProperty` value/getter descriptors, tsc/Babel/SWC/Rollup/Vite static output, and recognized esbuild helper fingerprints. The helper body must match a known side-effect-free shape; helper names alone are not trusted.
+
+```tsx
+// styles.cjs
+const button = { color: 'red' };
+const card = { padding: 16 };
+
+module.exports = { button, card };
+
+// App.tsx
+const styles = require('./styles.cjs');
+const { card: cardStyle } = require('./styles.cjs');
+
+<div css={styles.button} />
+<div css={cardStyle} />
+<div css={styles} />
+```
+
+Unsupported CommonJS stays fail-closed. Dynamic `require(expr)`, template or conditional require paths, package runtime resolution, helper-name-only matches, Node `require()` execution, VM or child-process loading, and full Webpack/Turbopack/Parcel bundle runtime emulation are not supported.
+
 `export *` follows ESM semantics and does not forward `default`. Use an explicit default reexport when a barrel should expose a default value:
 
 ```tsx
@@ -508,9 +528,9 @@ import rootDefault, { root } from './styles';
 
 The practical literal grammar is small: string, number, boolean, `null`, unary numeric values, no-expression template literals such as `` `grid` ``, and nested object/array literals.
 
-Bundlers provide source resolution and loading only. Vite and esbuild give Mincho provider-backed project/package/data/virtual source text, literal payloads, identity metadata, and dependency edges through the source provider. Mincho then parses source, reads AST export manifests, and statically evaluates only the supported literal subset. No module execution is used. Mincho never executes user modules to obtain `css` prop values, and it does not use Node, VM, `eval`, `require()`, dynamic import, or bundler runtime execution for static evaluation.
+Bundlers provide source resolution and loading only. Vite and esbuild give Mincho provider-backed project/package/data/virtual source text, literal payloads, identity metadata, and dependency edges through the source provider. Mincho then parses source, reads AST export manifests, and statically evaluates only the supported literal subset. No module execution is used. Mincho never executes user modules to obtain `css` prop values, and it does not call Node `require()`, use VM or `eval`, evaluate dynamic imports, or run bundler runtime code for static evaluation.
 
-First-iteration exclusions are explicit: remote/http modules, CommonJS and `require()`, runtime wasm init/function exports such as `.wasm?init`, arbitrary virtual modules without provider-supplied source, dynamic import graphs, non-literal loader output, namespace reexports such as `export * as ns from './styles'`, calls/functions/mixins as CSS-rule values, object/array spreads, computed dynamic keys, optional chaining, template expressions, runtime dynamic values, SWC native integration, and webpack integration remain unsupported. Static wasm support is limited to provider-supplied raw/url string forms that arrive as literals; runtime wasm initialization is not evaluated.
+Explicit exclusions remain: remote/http modules, dynamic `require(expr)`, template or conditional require paths, full Webpack/Turbopack/Parcel bundle runtime graph parsing, runtime wasm init/function exports such as `.wasm?init`, arbitrary virtual modules without provider-supplied source, dynamic import graphs, non-literal loader output, namespace reexports such as `export * as ns from './styles'`, calls/functions/mixins as CSS-rule values, object/array spreads, computed dynamic keys, optional chaining, template expressions, runtime dynamic values, and SWC native integration remain unsupported. Static wasm support is limited to provider-supplied raw/url string forms that arrive as literals; runtime wasm initialization is not evaluated.
 
 Existing dynamic class-value identifiers keep class-value behavior when they cannot be proven static. Proven CSS-rule candidates with unsupported internals fail with `Cannot statically evaluate css prop value` diagnostics.
 

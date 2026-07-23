@@ -123,9 +123,11 @@ import panel, { card, layout } from "./styles";
 <div css={layout.stack} />
 ```
 
-Bundlers provide source resolution and loading only. Vite and esbuild give Mincho project-local source text plus dependency edges. Mincho parses that source and statically evaluates the supported AST subset. No module execution is used. Mincho never executes user modules to obtain `css` prop values, and it does not use Node, VM, `eval`, `require()`, dynamic import, or bundler runtime execution for static evaluation.
+Static CommonJS sources can also participate when the integration supplies deterministic source text. Supported shapes are narrow: literal `require("./styles")` namespace, member, and shallow destructure bindings; direct `module.exports` or `exports.name` export maps; static compiler output from tsc/Babel/SWC/Rollup/Vite; and recognized esbuild helper fingerprints. Mincho parses those files as AST only. It does not call Node `require()`, run package runtime resolution, or emulate Webpack/Turbopack/Parcel runtime bundles.
 
-V1 is project-local only. Resolved files must be real files inside the project root, outside `node_modules`, not virtual modules, and not package exports outside the root. V1 does not support namespace imports, reexports or barrels, package exports from `node_modules`, virtual modules, CommonJS, calls/functions/mixins as CSS-rule values, object/array spreads, computed dynamic keys, optional chaining, template expressions, runtime dynamic values, SWC-native integration, or webpack integration.
+Bundlers provide source resolution and loading only. Vite and esbuild give Mincho project-local source text plus dependency edges. Mincho parses that source and statically evaluates the supported AST subset. No module execution is used. Mincho never executes user modules to obtain `css` prop values, and it does not call Node `require()`, use VM or `eval`, evaluate dynamic imports, or run bundler runtime code for static evaluation.
+
+Provider-backed namespace imports, explicit/star reexports and barrels, package/node_modules/outside-root ESM sources, static-data literal payloads, and virtual modules are supported when deterministic parseable source or literal ESM payload plus source identity/dependency metadata are supplied. Namespace reexports (export * as ns), provider/external modules without loadable source, remote/http and runtime/dynamic cases remain unsupported. Mincho doesn't support dynamic CommonJS, package runtime resolution, calls/functions/mixins as CSS-rule values, object/array spreads, computed dynamic keys, optional chaining, template expressions, runtime dynamic values, SWC-native integration, or full Webpack/Turbopack/Parcel bundle runtime emulation.
 
 Failure policy:
 
