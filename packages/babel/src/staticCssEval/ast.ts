@@ -1,5 +1,21 @@
 import { types as t } from "@babel/core";
+import { unwrapTransparentCssRuleExpression } from "./candidates.js";
 import type { StaticCssEvalUnsupportedReason } from "./types.js";
+
+export function preserveDirectBooleanReferenceValue(
+  originalExpression: t.Expression,
+  resolvedExpression: t.Expression
+): t.Expression {
+  const original = unwrapTransparentCssRuleExpression(originalExpression);
+
+  return t.isBooleanLiteral(resolvedExpression) &&
+    (t.isIdentifier(original) ||
+      (t.isMemberExpression(original) &&
+        !original.computed &&
+        t.isIdentifier(original.property)))
+    ? t.cloneNode(original)
+    : t.cloneNode(resolvedExpression);
+}
 
 export function getStaticObjectMemberValue(
   expression: t.ObjectExpression,

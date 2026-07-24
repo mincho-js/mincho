@@ -5,7 +5,8 @@ import {
   getStaticMemberPropertyName,
   getStaticObjectMemberValue,
   getStaticObjectPropertyName,
-  getUnsupportedLiteralReason
+  getUnsupportedLiteralReason,
+  preserveDirectBooleanReferenceValue
 } from "./ast.js";
 import {
   getStaticCssEvalMemberReference,
@@ -86,6 +87,7 @@ type SameFileBindingResolutionResult =
   | {
       kind: "resolved";
       expression: t.Expression;
+      scope: Scope;
       metadata: SameFileStaticCssEvalMetadata;
     }
   | {
@@ -116,6 +118,30 @@ interface LiteralValidationState {
   count: number;
 }
 
+type SameFileStaticLiteralEvaluationResult =
+  | {
+      kind: "resolved";
+      expression: t.Expression;
+      metadata: SameFileStaticCssEvalMetadata;
+    }
+  | {
+      kind: "error";
+      diagnostic: StaticCssEvalDiagnostic;
+      metadata?: SameFileStaticCssEvalMetadata;
+    };
+
+interface SameFileStaticLiteralEvaluationOptions {
+  expression: t.Expression;
+  context: SameFileStaticCssEvalContext;
+  ownerFile: string;
+  programPath: NodePath<t.Program>;
+  scope: Scope;
+  stack: SameFileBindingStackFrame[];
+  state: LiteralValidationState;
+  depth: number;
+  metadata: SameFileStaticCssEvalMetadata;
+}
+
 const arrayMutationMethods = new Set([
   "copyWithin",
   "fill",
@@ -138,12 +164,57 @@ const objectMutationMethods = new Set([
 export function resolveSameFileStaticCssEvalExpression(
   options: ResolveSameFileStaticCssEvalOptions
 ): SameFileStaticCssEvalResult {
-  const reference = getStaticCssEvalMemberReference(options.expression);
-  const expressionRange = getExpressionRange(
-    unwrapTransparentCssRuleExpression(options.expression)
+  const unwrappedExpression = unwrapTransparentCssRuleExpression(
+    options.expression
   );
+  const expressionRange = getExpressionRange(unwrappedExpression);
 
-  if (!reference || !expressionRange) {
+  if (!expressionRange) {
+    return { kind: "not-candidate" };
+  }
+
+  if (isStaticCssRuleLiteral(unwrappedExpression)) {
+    const context: SameFileStaticCssEvalContext = {
+      bindingName: "<inline>",
+      memberPath: [],
+      owner: {
+        file: options.ownerFile,
+        start: expressionRange.start,
+        end: expressionRange.end
+      }
+    };
+    const normalizedLiteral = evaluateSameFileStaticLiteralExpression({
+      expression: unwrappedExpression,
+      context,
+      ownerFile: options.ownerFile,
+      programPath: options.programPath,
+      scope: options.scope,
+      stack: [],
+      state: { count: 0 },
+      depth: 1,
+      metadata: createSameFileInlineMetadata(options.ownerFile)
+    });
+
+    if (normalizedLiteral.kind === "error") {
+      return createSameFileErrorResult(
+        normalizedLiteral.diagnostic,
+        normalizedLiteral.metadata
+      );
+    }
+
+    if (!isStaticCssRuleLiteral(normalizedLiteral.expression)) {
+      return { kind: "not-candidate" };
+    }
+
+    return createSameFileResolvedResult(
+      normalizedLiteral.expression,
+      normalizedLiteral.metadata
+    );
+  }
+
+  const reference = getStaticCssEvalMemberReference(unwrappedExpression);
+
+  if (!reference) {
     return { kind: "not-candidate" };
   }
 
@@ -232,29 +303,33 @@ export function resolveSameFileStaticCssEvalExpression(
     return { kind: "not-candidate" };
   }
 
-  const validationDiagnostic = validateStaticCssLiteralExpression(
-    resolvedExpression,
+  const normalizedLiteral = evaluateSameFileStaticLiteralExpression({
+    expression: resolvedExpression,
     context,
-    { count: 0 },
-    1
-  );
+    ownerFile: options.ownerFile,
+    programPath: options.programPath,
+    scope: bindingResolution.scope,
+    stack: [{ binding, bindingName: reference.bindingName, memberPath }],
+    state: { count: 0 },
+    depth: 1,
+    metadata: bindingResolution.metadata
+  });
 
-  if (validationDiagnostic) {
+  if (normalizedLiteral.kind === "error") {
     return createSameFileErrorResult(
-      validationDiagnostic,
-      bindingResolution.metadata
+      normalizedLiteral.diagnostic,
+      normalizedLiteral.metadata
     );
   }
 
-  return {
-    kind: "resolved",
-    status: "resolved",
-    expression: normalizeStaticCssLiteralExpression(resolvedExpression),
-    provenance: bindingResolution.metadata.provenance,
-    dependencies: bindingResolution.metadata.dependencies,
-    resolutionChain: bindingResolution.metadata.resolutionChain,
-    diagnostics: []
-  };
+  if (!isStaticCssRuleLiteral(normalizedLiteral.expression)) {
+    return { kind: "not-candidate" };
+  }
+
+  return createSameFileResolvedResult(
+    normalizedLiteral.expression,
+    normalizedLiteral.metadata
+  );
 }
 
 function resolveSameFileBindingExpression(
@@ -427,6 +502,7 @@ function resolveSameFileBindingExpression(
     return {
       kind: "resolved",
       expression: resolvedExpression,
+      scope: options.binding.scope,
       metadata
     };
   }
@@ -480,6 +556,7 @@ function prependSameFileMetadata(
   return {
     kind: "resolved",
     expression: result.expression,
+    scope: result.scope,
     metadata: mergeSameFileMetadata(metadata, result.metadata)
   };
 }
@@ -531,6 +608,35 @@ function createSameFileMetadata(
         provenance
       }
     ]
+  };
+}
+
+function createSameFileInlineMetadata(
+  ownerFile: string
+): SameFileStaticCssEvalMetadata {
+  return {
+    provenance: {
+      kind: "local",
+      file: ownerFile,
+      bindingName: "<inline>"
+    },
+    dependencies: [],
+    resolutionChain: []
+  };
+}
+
+function createSameFileResolvedResult(
+  expression: t.ObjectExpression | t.ArrayExpression,
+  metadata: SameFileStaticCssEvalMetadata
+): SameFileStaticCssEvalResult {
+  return {
+    kind: "resolved",
+    status: "resolved",
+    expression,
+    provenance: metadata.provenance,
+    dependencies: metadata.dependencies,
+    resolutionChain: metadata.resolutionChain,
+    diagnostics: []
   };
 }
 
@@ -1061,159 +1167,406 @@ function pathTouchesBinding(
   return false;
 }
 
-function validateStaticCssLiteralExpression(
-  expression: t.Expression,
-  context: SameFileStaticCssEvalContext,
-  state: LiteralValidationState,
-  depth: number
-): StaticCssEvalDiagnostic | null {
-  const unwrappedExpression = unwrapTransparentCssRuleExpression(expression);
-  state.count += 1;
+function evaluateSameFileStaticLiteralExpression(
+  options: SameFileStaticLiteralEvaluationOptions
+): SameFileStaticLiteralEvaluationResult {
+  const unwrappedExpression = unwrapTransparentCssRuleExpression(
+    options.expression
+  );
+  options.state.count += 1;
 
   const countResult = enforceStaticCssEvalLiteralNodeCount({
-    owner: context.owner,
-    memberPath: context.memberPath,
-    literalNodeCount: state.count
+    owner: options.context.owner,
+    memberPath: options.context.memberPath,
+    literalNodeCount: options.state.count
   });
 
   if (!countResult.ok) {
-    return countResult.diagnostic;
+    return {
+      kind: "error",
+      diagnostic: countResult.diagnostic,
+      metadata: options.metadata
+    };
   }
 
   if (t.isObjectExpression(unwrappedExpression)) {
     const depthResult = enforceStaticCssEvalObjectArrayRecursionDepth({
-      owner: context.owner,
-      memberPath: context.memberPath,
-      recursionDepth: depth
+      owner: options.context.owner,
+      memberPath: options.context.memberPath,
+      recursionDepth: options.depth
     });
 
     if (!depthResult.ok) {
-      return depthResult.diagnostic;
+      return {
+        kind: "error",
+        diagnostic: depthResult.diagnostic,
+        metadata: options.metadata
+      };
     }
 
-    return validateStaticCssObjectExpression(
-      unwrappedExpression,
-      context,
-      state,
-      depth
-    );
+    return evaluateSameFileStaticObjectExpression({
+      ...options,
+      expression: unwrappedExpression
+    });
   }
 
   if (t.isArrayExpression(unwrappedExpression)) {
     const depthResult = enforceStaticCssEvalObjectArrayRecursionDepth({
-      owner: context.owner,
-      memberPath: context.memberPath,
-      recursionDepth: depth
+      owner: options.context.owner,
+      memberPath: options.context.memberPath,
+      recursionDepth: options.depth
     });
 
     if (!depthResult.ok) {
-      return depthResult.diagnostic;
+      return {
+        kind: "error",
+        diagnostic: depthResult.diagnostic,
+        metadata: options.metadata
+      };
     }
 
-    return validateStaticCssArrayExpression(
-      unwrappedExpression,
-      context,
-      state,
-      depth
-    );
+    return evaluateSameFileStaticArrayExpression({
+      ...options,
+      expression: unwrappedExpression
+    });
   }
 
   if (isSupportedStaticCssPrimitiveLiteral(unwrappedExpression)) {
-    return null;
+    return {
+      kind: "resolved",
+      expression:
+        normalizeSupportedStaticCssPrimitiveLiteral(unwrappedExpression),
+      metadata: options.metadata
+    };
   }
 
-  return createUnsupportedLiteralDiagnostic(context, unwrappedExpression);
+  const reference = getStaticCssEvalMemberReference(unwrappedExpression);
+
+  if (reference) {
+    return evaluateSameFileStaticLiteralReference(options, reference);
+  }
+
+  return {
+    kind: "error",
+    diagnostic: createUnsupportedLiteralDiagnostic(
+      options.context,
+      unwrappedExpression
+    ),
+    metadata: options.metadata
+  };
 }
 
-function validateStaticCssObjectExpression(
-  expression: t.ObjectExpression,
-  context: SameFileStaticCssEvalContext,
-  state: LiteralValidationState,
-  depth: number
-): StaticCssEvalDiagnostic | null {
-  for (const property of expression.properties) {
+function evaluateSameFileStaticObjectExpression(
+  options: SameFileStaticLiteralEvaluationOptions & {
+    expression: t.ObjectExpression;
+  }
+): SameFileStaticLiteralEvaluationResult {
+  const properties: t.ObjectExpression["properties"] = [];
+  let metadata = options.metadata;
+
+  for (const property of options.expression.properties) {
     if (t.isSpreadElement(property)) {
-      return createStaticCssEvalObjectSpreadUnsupportedDiagnostic(
-        createSameFileDiagnosticContext(context),
-        context.bindingName,
-        "object"
+      const spreadResult = evaluateSameFileStaticLiteralExpression({
+        ...options,
+        expression: property.argument,
+        metadata,
+        depth: options.depth + 1
+      });
+
+      if (spreadResult.kind === "error") {
+        return spreadResult;
+      }
+
+      metadata = spreadResult.metadata;
+
+      if (!t.isObjectExpression(spreadResult.expression)) {
+        return {
+          kind: "error",
+          diagnostic: createStaticCssEvalObjectSpreadUnsupportedDiagnostic(
+            createSameFileDiagnosticContext(options.context),
+            options.context.bindingName,
+            "object"
+          ),
+          metadata
+        };
+      }
+
+      properties.push(
+        ...spreadResult.expression.properties.map((spreadProperty) =>
+          t.cloneNode(spreadProperty)
+        )
       );
+      continue;
     }
 
     if (!t.isObjectProperty(property)) {
-      return createStaticCssEvalDynamicExpressionUnsupportedDiagnostic(
-        createSameFileDiagnosticContext(context),
-        property.type
-      );
+      return {
+        kind: "error",
+        diagnostic: createStaticCssEvalDynamicExpressionUnsupportedDiagnostic(
+          createSameFileDiagnosticContext(options.context),
+          property.type
+        ),
+        metadata
+      };
     }
 
     if (property.computed) {
-      return createStaticCssEvalComputedMemberUnsupportedDiagnostic(
-        createSameFileDiagnosticContext(context)
-      );
+      return {
+        kind: "error",
+        diagnostic: createStaticCssEvalComputedMemberUnsupportedDiagnostic(
+          createSameFileDiagnosticContext(options.context)
+        ),
+        metadata
+      };
     }
 
     if (!t.isExpression(property.value)) {
-      return createSameFileStaticCssEvalDiagnostic(
-        context,
-        "unsupported-syntax",
-        "unsupported-literal",
-        `same-file binding "${context.bindingName}" contains a non-expression object value`
-      );
+      return {
+        kind: "error",
+        diagnostic: createSameFileStaticCssEvalDiagnostic(
+          options.context,
+          "unsupported-syntax",
+          "unsupported-literal",
+          `same-file binding "${options.context.bindingName}" contains a non-expression object value`
+        ),
+        metadata
+      };
     }
 
-    const diagnostic = validateStaticCssLiteralExpression(
+    const valueResult = evaluateSameFileStaticLiteralExpression({
+      ...options,
+      expression: property.value,
+      metadata,
+      depth: options.depth + 1
+    });
+
+    if (valueResult.kind === "error") {
+      return valueResult;
+    }
+
+    metadata = valueResult.metadata;
+
+    const nextProperty = t.cloneNode(property);
+    nextProperty.value = preserveDirectBooleanReferenceValue(
       property.value,
-      context,
-      state,
-      depth + 1
+      valueResult.expression
     );
-
-    if (diagnostic) {
-      return diagnostic;
-    }
+    nextProperty.shorthand = false;
+    properties.push(nextProperty);
   }
 
-  return null;
+  const normalizedProperties: t.ObjectExpression["properties"] = [];
+  const propertyIndexes = new Map<string, number>();
+
+  for (const property of properties) {
+    if (!t.isObjectProperty(property) || property.computed) {
+      normalizedProperties.push(property);
+      continue;
+    }
+
+    const propertyName = getStaticObjectPropertyName(property.key);
+    const existingIndex =
+      propertyName === null ? undefined : propertyIndexes.get(propertyName);
+
+    if (existingIndex === undefined) {
+      if (propertyName !== null) {
+        propertyIndexes.set(propertyName, normalizedProperties.length);
+      }
+
+      normalizedProperties.push(property);
+      continue;
+    }
+
+    normalizedProperties[existingIndex] = property;
+  }
+
+  return {
+    kind: "resolved",
+    expression: t.objectExpression(normalizedProperties),
+    metadata
+  };
 }
 
-function validateStaticCssArrayExpression(
-  expression: t.ArrayExpression,
-  context: SameFileStaticCssEvalContext,
-  state: LiteralValidationState,
-  depth: number
-): StaticCssEvalDiagnostic | null {
-  for (const element of expression.elements) {
+function evaluateSameFileStaticArrayExpression(
+  options: SameFileStaticLiteralEvaluationOptions & {
+    expression: t.ArrayExpression;
+  }
+): SameFileStaticLiteralEvaluationResult {
+  const elements: t.ArrayExpression["elements"] = [];
+  let metadata = options.metadata;
+
+  for (const element of options.expression.elements) {
     if (!element) {
-      return createSameFileStaticCssEvalDiagnostic(
-        context,
-        "unsupported-syntax",
-        "unsupported-literal",
-        `same-file binding "${context.bindingName}" contains an array hole`
-      );
+      return {
+        kind: "error",
+        diagnostic: createSameFileArrayHoleDiagnostic(options.context),
+        metadata
+      };
     }
 
     if (t.isSpreadElement(element)) {
-      return createStaticCssEvalObjectSpreadUnsupportedDiagnostic(
-        createSameFileDiagnosticContext(context),
-        context.bindingName,
-        "array"
-      );
+      const spreadResult = evaluateSameFileStaticLiteralExpression({
+        ...options,
+        expression: element.argument,
+        metadata,
+        depth: options.depth + 1
+      });
+
+      if (spreadResult.kind === "error") {
+        return spreadResult;
+      }
+
+      metadata = spreadResult.metadata;
+
+      if (!t.isArrayExpression(spreadResult.expression)) {
+        return {
+          kind: "error",
+          diagnostic: createStaticCssEvalObjectSpreadUnsupportedDiagnostic(
+            createSameFileDiagnosticContext(options.context),
+            options.context.bindingName,
+            "array"
+          ),
+          metadata
+        };
+      }
+
+      for (const spreadElement of spreadResult.expression.elements) {
+        if (!spreadElement) {
+          return {
+            kind: "error",
+            diagnostic: createSameFileArrayHoleDiagnostic(options.context),
+            metadata
+          };
+        }
+
+        if (t.isSpreadElement(spreadElement)) {
+          return {
+            kind: "error",
+            diagnostic: createStaticCssEvalObjectSpreadUnsupportedDiagnostic(
+              createSameFileDiagnosticContext(options.context),
+              options.context.bindingName,
+              "array"
+            ),
+            metadata
+          };
+        }
+
+        elements.push(t.cloneNode(spreadElement));
+      }
+      continue;
     }
 
-    const diagnostic = validateStaticCssLiteralExpression(
-      element,
-      context,
-      state,
-      depth + 1
+    const elementResult = evaluateSameFileStaticLiteralExpression({
+      ...options,
+      expression: element,
+      metadata,
+      depth: options.depth + 1
+    });
+
+    if (elementResult.kind === "error") {
+      return elementResult;
+    }
+
+    metadata = elementResult.metadata;
+    elements.push(
+      preserveDirectBooleanReferenceValue(element, elementResult.expression)
     );
-
-    if (diagnostic) {
-      return diagnostic;
-    }
   }
 
-  return null;
+  return {
+    kind: "resolved",
+    expression: t.arrayExpression(elements),
+    metadata
+  };
+}
+
+function evaluateSameFileStaticLiteralReference(
+  options: SameFileStaticLiteralEvaluationOptions,
+  reference: StaticMemberReference
+): SameFileStaticLiteralEvaluationResult {
+  if (reference.kind === "unsupported") {
+    return {
+      kind: "error",
+      diagnostic: createUnsupportedMemberReferenceDiagnostic(
+        reference,
+        options.context
+      ),
+      metadata: options.metadata
+    };
+  }
+
+  const binding = options.scope.getBinding(reference.bindingName);
+
+  if (!binding) {
+    return {
+      kind: "error",
+      diagnostic: createUnsupportedLiteralDiagnostic(
+        options.context,
+        options.expression
+      ),
+      metadata: options.metadata
+    };
+  }
+
+  const bindingResolution = resolveSameFileBindingExpression({
+    binding,
+    bindingName: reference.bindingName,
+    memberPath: reference.memberPath,
+    ownerFile: options.ownerFile,
+    owner: options.context.owner,
+    programPath: options.programPath,
+    stack: options.stack
+  });
+
+  if (bindingResolution.kind === "error") {
+    return {
+      kind: "error",
+      diagnostic: bindingResolution.diagnostic,
+      metadata: bindingResolution.metadata
+        ? mergeSameFileMetadata(options.metadata, bindingResolution.metadata)
+        : options.metadata
+    };
+  }
+
+  if (bindingResolution.kind === "not-candidate") {
+    return {
+      kind: "error",
+      diagnostic: createUnsupportedLiteralDiagnostic(
+        options.context,
+        options.expression
+      ),
+      metadata: options.metadata
+    };
+  }
+
+  return evaluateSameFileStaticLiteralExpression({
+    ...options,
+    expression: bindingResolution.expression,
+    scope: bindingResolution.scope,
+    stack: [
+      ...options.stack,
+      {
+        binding,
+        bindingName: reference.bindingName,
+        memberPath: [...reference.memberPath]
+      }
+    ],
+    metadata: mergeSameFileMetadata(
+      options.metadata,
+      bindingResolution.metadata
+    )
+  });
+}
+
+function createSameFileArrayHoleDiagnostic(
+  context: SameFileStaticCssEvalContext
+): StaticCssEvalDiagnostic {
+  return createSameFileStaticCssEvalDiagnostic(
+    context,
+    "unsupported-syntax",
+    "unsupported-literal",
+    `same-file binding "${context.bindingName}" contains an array hole`
+  );
 }
 
 function isSupportedStaticCssPrimitiveLiteral(
@@ -1245,58 +1598,10 @@ function isNoExpressionTemplateLiteral(
   return t.isTemplateLiteral(expression) && expression.expressions.length === 0;
 }
 
-function normalizeStaticCssLiteralExpression(
-  expression: t.ObjectExpression | t.ArrayExpression
-): t.ObjectExpression | t.ArrayExpression {
-  const normalizedExpression = normalizeStaticCssLiteralValue(expression);
-
-  if (
-    !t.isObjectExpression(normalizedExpression) &&
-    !t.isArrayExpression(normalizedExpression)
-  ) {
-    throw new Error(
-      "Expected normalized static css literal to remain object/array"
-    );
-  }
-
-  return normalizedExpression;
-}
-
-function normalizeStaticCssLiteralValue(
+function normalizeSupportedStaticCssPrimitiveLiteral(
   expression: t.Expression
 ): t.Expression {
   const unwrappedExpression = unwrapTransparentCssRuleExpression(expression);
-
-  if (t.isObjectExpression(unwrappedExpression)) {
-    return t.objectExpression(
-      unwrappedExpression.properties.map((property) => {
-        const nextProperty = t.cloneNode(property);
-
-        if (
-          t.isObjectProperty(nextProperty) &&
-          t.isExpression(nextProperty.value)
-        ) {
-          nextProperty.value = normalizeStaticCssLiteralValue(
-            nextProperty.value
-          );
-        }
-
-        return nextProperty;
-      })
-    );
-  }
-
-  if (t.isArrayExpression(unwrappedExpression)) {
-    return t.arrayExpression(
-      unwrappedExpression.elements.map((element) => {
-        if (!element || t.isSpreadElement(element)) {
-          return element ? t.cloneNode(element) : null;
-        }
-
-        return normalizeStaticCssLiteralValue(element);
-      })
-    );
-  }
 
   if (isNoExpressionTemplateLiteral(unwrappedExpression)) {
     const [quasi] = unwrappedExpression.quasis;
@@ -1328,6 +1633,7 @@ function createUnsupportedLiteralDiagnostic(
     `same-file binding "${context.bindingName}" contains unsupported ${reason}: ${expression.type}`
   );
 }
+
 function createSameFileStaticCssEvalDiagnostic(
   context: SameFileStaticCssEvalContext,
   code: StaticCssEvalDiagnostic["code"],
@@ -1438,6 +1744,19 @@ if (import.meta.vitest) {
     return result;
   }
 
+  function expectSingleNotCandidate(
+    source: string
+  ): Extract<SameFileStaticCssEvalResult, { kind: "not-candidate" }> {
+    const [result] = resolveSameFileFixture(source);
+    expect(result?.kind).toBe("not-candidate");
+
+    if (!result || result.kind !== "not-candidate") {
+      throw new Error("Expected same-file fixture to remain a class value");
+    }
+
+    return result;
+  }
+
   function expectSingleDiagnosticId(
     source: string,
     diagnosticId: NonNullable<StaticCssEvalDiagnostic["id"]>
@@ -1466,11 +1785,31 @@ if (import.meta.vitest) {
     expression: t.ObjectExpression | t.ArrayExpression,
     propertyName: string
   ): string | null {
+    const value = getObjectPropertyExpression(expression, propertyName);
+
+    return value && t.isStringLiteral(value) ? value.value : null;
+  }
+
+  function getNumericObjectProperty(
+    expression: t.ObjectExpression | t.ArrayExpression,
+    propertyName: string
+  ): number | null {
+    const value = getObjectPropertyExpression(expression, propertyName);
+
+    return value && t.isNumericLiteral(value) ? value.value : null;
+  }
+
+  function getObjectPropertyExpression(
+    expression: t.ObjectExpression | t.ArrayExpression,
+    propertyName: string
+  ): t.Expression | null {
     if (!t.isObjectExpression(expression)) {
       return null;
     }
 
-    for (const property of expression.properties) {
+    for (let index = expression.properties.length - 1; index >= 0; index -= 1) {
+      const property = expression.properties[index];
+
       if (!t.isObjectProperty(property) || property.computed) {
         continue;
       }
@@ -1479,13 +1818,41 @@ if (import.meta.vitest) {
         continue;
       }
 
-      return t.isStringLiteral(property.value) ? property.value.value : null;
+      return t.isExpression(property.value) ? property.value : null;
     }
 
     return null;
   }
 
+  function expectNoSpreadElement(
+    expression: t.ObjectExpression | t.ArrayExpression
+  ): void {
+    if (t.isObjectExpression(expression)) {
+      expect(
+        expression.properties.some((property) => t.isSpreadElement(property))
+      ).toBe(false);
+      return;
+    }
+
+    expect(
+      expression.elements.some((element) =>
+        Boolean(element && t.isSpreadElement(element))
+      )
+    ).toBe(false);
+  }
+
   describe("same-file static css eval resolver", () => {
+    it("keeps top-level primitive identifiers as class values", () => {
+      const result = expectSingleNotCandidate(`
+        const className = "btn-primary";
+        function App() {
+          return <button css={className} />;
+        }
+      `);
+
+      expect(result.status).toBeUndefined();
+    });
+
     it("resolves local const objects with local provenance and dependencies", () => {
       const resolved = expectSingleResolved(`
         const button = { color: "red" };
@@ -1525,6 +1892,126 @@ if (import.meta.vitest) {
         ],
         diagnostics: []
       });
+    });
+
+    it("resolves local object spreads with last-key-wins semantics", () => {
+      const resolved = expectSingleResolved(`
+        const base = { color: "red", padding: 4 };
+        const button = { ...base, color: "blue" };
+        function App() {
+          return <button css={button} />;
+        }
+      `);
+
+      expectNoSpreadElement(resolved.expression);
+      expect(
+        t.isObjectExpression(resolved.expression)
+          ? resolved.expression.properties.filter(
+              (property) =>
+                t.isObjectProperty(property) &&
+                !property.computed &&
+                getStaticObjectPropertyName(property.key) === "color"
+            )
+          : []
+      ).toHaveLength(1);
+      expect(getStringObjectProperty(resolved.expression, "color")).toBe(
+        "blue"
+      );
+      expect(getNumericObjectProperty(resolved.expression, "padding")).toBe(4);
+    });
+
+    it("resolves direct object spreads through the same-file resolver API", () => {
+      const resolved = expectSingleResolved(`
+        const base = { color: "red", padding: 4 };
+        function App() {
+          return <button css={{ ...base, color: "blue" }} />;
+        }
+      `);
+
+      expectNoSpreadElement(resolved.expression);
+      expect(getStringObjectProperty(resolved.expression, "color")).toBe(
+        "blue"
+      );
+      expect(getNumericObjectProperty(resolved.expression, "padding")).toBe(4);
+    });
+
+    it("resolves local array spreads in order", () => {
+      const resolved = expectSingleResolved(`
+        const stack = [{ display: "grid" }];
+        const rule = [...stack, { gap: 8 }];
+        function App() {
+          return <button css={rule} />;
+        }
+      `);
+
+      expectNoSpreadElement(resolved.expression);
+      expect(t.isArrayExpression(resolved.expression)).toBe(true);
+
+      if (!t.isArrayExpression(resolved.expression)) {
+        throw new Error(
+          "Expected same-file array spread to resolve to an array"
+        );
+      }
+
+      expect(resolved.expression.elements).toHaveLength(2);
+      const [firstRule, secondRule] = resolved.expression.elements;
+      expect(
+        firstRule && t.isObjectExpression(firstRule)
+          ? getStringObjectProperty(firstRule, "display")
+          : null
+      ).toBe("grid");
+      expect(
+        secondRule && t.isObjectExpression(secondRule)
+          ? getNumericObjectProperty(secondRule, "gap")
+          : null
+      ).toBe(8);
+    });
+
+    it("resolves direct array spreads through the same-file resolver API", () => {
+      const resolved = expectSingleResolved(`
+        const stack = [{ display: "grid" }];
+        function App() {
+          return <button css={[...stack, { gap: 8 }]} />;
+        }
+      `);
+
+      expectNoSpreadElement(resolved.expression);
+      expect(t.isArrayExpression(resolved.expression)).toBe(true);
+
+      if (!t.isArrayExpression(resolved.expression)) {
+        throw new Error(
+          "Expected direct same-file array spread to resolve to an array"
+        );
+      }
+
+      expect(resolved.expression.elements).toHaveLength(2);
+      const [firstRule, secondRule] = resolved.expression.elements;
+      expect(
+        firstRule && t.isObjectExpression(firstRule)
+          ? getStringObjectProperty(firstRule, "display")
+          : null
+      ).toBe("grid");
+      expect(
+        secondRule && t.isObjectExpression(secondRule)
+          ? getNumericObjectProperty(secondRule, "gap")
+          : null
+      ).toBe(8);
+    });
+
+    it("resolves local identifier and member values inside object literals", () => {
+      const resolved = expectSingleResolved(`
+        const color = "red";
+        const tokens = { primary: "blue" };
+        const button = { color, backgroundColor: tokens.primary };
+        function App() {
+          return <button css={button} />;
+        }
+      `);
+
+      expect(getStringObjectProperty(resolved.expression, "color")).toBe("red");
+      expect(
+        getStringObjectProperty(resolved.expression, "backgroundColor")
+      ).toBe("blue");
     });
 
     it("resolves safe local aliases through transparent TypeScript wrappers", () => {
@@ -1609,16 +2096,6 @@ if (import.meta.vitest) {
       );
       expectSingleDiagnosticId(
         `
-          const base = { color: "red" };
-          const button = { ...base };
-          function App() {
-            return <button css={button} />;
-          }
-        `,
-        "STATIC_CSS_EVAL_OBJECT_SPREAD_UNSUPPORTED"
-      );
-      expectSingleDiagnosticId(
-        `
           const styles = { button: { color: "red" } };
           const variant = "button";
           function App() {
@@ -1639,6 +2116,95 @@ if (import.meta.vitest) {
       expectSingleDiagnosticId(
         `
           const button = { color: getColor() };
+          function App() {
+            return <button css={button} />;
+          }
+        `,
+        "STATIC_CSS_EVAL_DYNAMIC_EXPRESSION_UNSUPPORTED"
+      );
+    });
+
+    it("rejects unsafe spread operands deterministically", () => {
+      expectSingleDiagnosticId(
+        `
+          const base = [{ color: "red" }];
+          const button = { ...base };
+          function App() {
+            return <button css={button} />;
+          }
+        `,
+        "STATIC_CSS_EVAL_OBJECT_SPREAD_UNSUPPORTED"
+      );
+      expectSingleDiagnosticId(
+        `
+          const base = { color: "red" };
+          const rule = [...base];
+          function App() {
+            return <button css={rule} />;
+          }
+        `,
+        "STATIC_CSS_EVAL_OBJECT_SPREAD_UNSUPPORTED"
+      );
+      expectSingleDiagnosticId(
+        `
+          let base = { color: "red" };
+          const button = { ...base };
+          function App() {
+            return <button css={button} />;
+          }
+        `,
+        "STATIC_CSS_EVAL_MUTABLE_BINDING"
+      );
+      expectSingleDiagnosticId(
+        `
+          const base = { color: "red" };
+          base.color = "blue";
+          const button = { ...base };
+          function App() {
+            return <button css={button} />;
+          }
+        `,
+        "STATIC_CSS_EVAL_MUTATED_BINDING"
+      );
+    });
+
+    it("rejects computed and optional member values deterministically", () => {
+      expectSingleDiagnosticId(
+        `
+          const tokens = { primary: "red" };
+          const tokenName = "primary";
+          const button = { color: tokens[tokenName] };
+          function App() {
+            return <button css={button} />;
+          }
+        `,
+        "STATIC_CSS_EVAL_COMPUTED_MEMBER_UNSUPPORTED"
+      );
+      expectSingleDiagnosticId(
+        `
+          const tokens = { primary: "red" };
+          const button = { color: tokens?.primary };
+          function App() {
+            return <button css={button} />;
+          }
+        `,
+        "STATIC_CSS_EVAL_DYNAMIC_EXPRESSION_UNSUPPORTED"
+      );
+    });
+
+    it("rejects function values and calls deterministically", () => {
+      expectSingleDiagnosticId(
+        `
+          const button = { color: getColor() };
+          function App() {
+            return <button css={button} />;
+          }
+        `,
+        "STATIC_CSS_EVAL_DYNAMIC_EXPRESSION_UNSUPPORTED"
+      );
+      expectSingleDiagnosticId(
+        `
+          const button = { color: () => "red" };
           function App() {
             return <button css={button} />;
           }
