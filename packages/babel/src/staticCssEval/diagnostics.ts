@@ -162,7 +162,7 @@ export function createStaticCssEvalObjectSpreadUnsupportedDiagnostic(
     id: "STATIC_CSS_EVAL_OBJECT_SPREAD_UNSUPPORTED",
     code: "unsupported-syntax",
     reason: "object-or-array-spread",
-    detail: `same-file binding "${bindingName}" contains an ${collection} spread`,
+    detail: `static css-rule binding "${bindingName}" contains an unsupported ${collection} spread operand`,
     owner: context.owner,
     dependency: context.dependency,
     importPath: context.importPath,
@@ -700,7 +700,22 @@ if (import.meta.vitest) {
         id: "STATIC_CSS_EVAL_OBJECT_SPREAD_UNSUPPORTED",
         code: "unsupported-syntax",
         message:
-          'Cannot statically evaluate css prop value: same-file binding "style" contains an object spread',
+          'Cannot statically evaluate css prop value: static css-rule binding "style" contains an unsupported object spread operand',
+        reason: "object-or-array-spread",
+        owner
+      });
+
+      expect(
+        createStaticCssEvalObjectSpreadUnsupportedDiagnostic(
+          { owner },
+          "style",
+          "array"
+        )
+      ).toEqual({
+        id: "STATIC_CSS_EVAL_OBJECT_SPREAD_UNSUPPORTED",
+        code: "unsupported-syntax",
+        message:
+          'Cannot statically evaluate css prop value: static css-rule binding "style" contains an unsupported array spread operand',
         reason: "object-or-array-spread",
         owner
       });

@@ -899,6 +899,342 @@ if (import.meta.vitest) {
       expect(staticCssEval?.resolvedModuleCache.has(unusedId)).toBe(false);
     });
 
+    it("prepass loads reachable spread and identifier operands without broad import sweep", async () => {
+      const path = await import("node:path");
+      const ownerSource = `
+        import { direct } from "./direct";
+        import { button } from "./styles";
+        import { tokens } from "./tokens";
+        import { unused } from "./unused";
+
+        const localButton = { ...direct, background: tokens.accent };
+        const unusedValue = unused;
+
+        function App() {
+          return <>
+            <div css={{ ...localButton, ...button.text }} />
+            <span>{unusedValue}</span>
+          </>;
+        }
+      `;
+      const fixturePath = await createBabelFixture(
+        ownerSource,
+        "css-prop-prepass-reachable-spread-identifier"
+      );
+      const fixtureRoot = path.dirname(fixturePath);
+      const directId = path.join(fixtureRoot, "direct.ts");
+      const stylesId = path.join(fixtureRoot, "styles.ts");
+      const tokensId = path.join(fixtureRoot, "tokens.ts");
+      const unusedId = path.join(fixtureRoot, "unused.ts");
+      const baseId = path.join(fixtureRoot, "base.ts");
+      const paletteId = path.join(fixtureRoot, "palette.ts");
+      const ignoredId = path.join(fixtureRoot, "ignored.ts");
+      const { provider, calls } = createFakeStaticCssEvalSourceProvider({
+        sources: {
+          [fixturePath]: ownerSource,
+          [directId]: `export const direct = { marginTop: 1 } as const;`,
+          [stylesId]: `
+            import { base } from "./base";
+            import { palette } from "./palette";
+            import { ignored } from "./ignored";
+
+            const unusedStyle = ignored;
+
+            export const button = {
+              text: { ...base, color: palette.primary },
+              ignored
+            } as const;
+          `,
+          [tokensId]: `export const tokens = { accent: "gold" } as const;`,
+          [unusedId]: `export const unused = { color: "blue" } as const;`,
+          [baseId]: `export const base = { padding: 4 } as const;`,
+          [paletteId]: `export const palette = { primary: "red" } as const;`,
+          [ignoredId]: `export const ignored = { color: "orange" } as const;`
+        },
+        resolutions: {
+          [`${fixturePath}\0./direct`]: directId,
+          [`${fixturePath}\0./styles`]: stylesId,
+          [`${fixturePath}\0./tokens`]: tokensId,
+          [`${fixturePath}\0./unused`]: unusedId,
+          [`${stylesId}\0./base`]: baseId,
+          [`${stylesId}\0./palette`]: paletteId,
+          [`${stylesId}\0./ignored`]: ignoredId
+        }
+      });
+
+      const { staticCssEval } = await babelTransform(fixturePath, {
+        jsxCssProp: true,
+        staticCssEvalSourceProvider: provider
+      });
+
+      expect(calls.resolved).toEqual([
+        { importerId: fixturePath, importPath: "./direct" },
+        { importerId: fixturePath, importPath: "./tokens" },
+        { importerId: fixturePath, importPath: "./styles" },
+        { importerId: stylesId, importPath: "./base" },
+        { importerId: stylesId, importPath: "./palette" }
+      ]);
+      expect(calls.loaded).toEqual([
+        fixturePath,
+        directId,
+        tokensId,
+        stylesId,
+        baseId,
+        paletteId
+      ]);
+      expect(staticCssEval?.dependencyFiles).toEqual([
+        directId,
+        tokensId,
+        stylesId,
+        baseId,
+        paletteId
+      ]);
+      expect(staticCssEval?.resolvedModuleCache.has(unusedId)).toBe(false);
+      expect(staticCssEval?.resolvedModuleCache.has(ignoredId)).toBe(false);
+    });
+
+    it("prepass loads package data virtual and CommonJS static operands", async () => {
+      const ownerSource = `
+        import { packageButton } from "@scope/styles";
+        import { dataButton } from "@scope/styles/tokens.json";
+        import { virtualButton } from "virtual:mincho/styles";
+
+        const cjsStyles = require("./styles.cjs");
+
+        function App() {
+          return <div css={{
+            ...packageButton,
+            color: dataButton.color,
+            background: virtualButton.background,
+            borderColor: cjsStyles.colors.border
+          }} />;
+        }
+      `;
+      const ownerId = await createBabelFixture(
+        ownerSource,
+        "css-prop-prepass-package-data-virtual-commonjs"
+      );
+      const packageId = "pkg:@scope/styles/index.ts";
+      const packageLoadId = `${packageId}?condition=import`;
+      const dataId = "pkg:@scope/styles/tokens.json?import";
+      const virtualId = "\0virtual:mincho/styles";
+      const cjsId = "/project/src/styles.cjs";
+      const calls: FakeStaticCssEvalSourceProviderCalls = {
+        resolved: [],
+        loaded: []
+      };
+      const resolutions = new Map<string, StaticCssEvalSourceResolution>([
+        [
+          `${ownerId}\0@scope/styles`,
+          {
+            resolvedFile: packageId,
+            canonicalModuleId: "pkg:@scope/styles",
+            normalizedPathKey: packageLoadId,
+            sourceKind: "package-source",
+            resolverKind: "test"
+          }
+        ],
+        [
+          `${ownerId}\0@scope/styles/tokens.json`,
+          {
+            resolvedFile: dataId,
+            canonicalModuleId: dataId,
+            normalizedPathKey: dataId,
+            sourceKind: "static-data",
+            resolverKind: "test"
+          }
+        ],
+        [
+          `${ownerId}\0virtual:mincho/styles`,
+          {
+            resolvedFile: virtualId,
+            canonicalModuleId: virtualId,
+            normalizedPathKey: virtualId,
+            sourceKind: "provider-virtual",
+            resolverKind: "test"
+          }
+        ],
+        [
+          `${ownerId}\0./styles.cjs`,
+          {
+            resolvedFile: cjsId,
+            canonicalModuleId: cjsId,
+            normalizedPathKey: cjsId,
+            resolverKind: "test"
+          }
+        ]
+      ]);
+      const loadedSources = new Map<string, StaticCssEvalLoadedSource>([
+        [ownerId, { source: ownerSource }],
+        [
+          packageLoadId,
+          {
+            sourceText: `export const packageButton = { padding: 8 } as const;`,
+            sourceKind: "package-source",
+            sourceIdentity: { sourceHash: "package-source-v1" },
+            resolverKind: "test"
+          }
+        ],
+        [
+          dataId,
+          {
+            sourceText: JSON.stringify({ dataButton: { color: "green" } }),
+            sourceKind: "static-data",
+            sourceIdentity: { sourceHash: "data-source-v1" },
+            resolverKind: "test"
+          }
+        ],
+        [
+          virtualId,
+          {
+            sourceText: `export const virtualButton = { background: "blue" } as const;`,
+            sourceKind: "provider-virtual",
+            sourceIdentity: { sourceHash: "virtual-source-v1" },
+            resolverKind: "test"
+          }
+        ],
+        [
+          cjsId,
+          {
+            sourceText: `exports.colors = { border: "black" };`,
+            resolverKind: "test"
+          }
+        ]
+      ]);
+      const provider: StaticCssEvalSourceProvider = {
+        resolve(importerId, importPath) {
+          calls.resolved.push({ importerId, importPath });
+          return resolutions.get(`${importerId}\0${importPath}`) ?? null;
+        },
+        load(id) {
+          calls.loaded.push(id);
+          return loadedSources.get(id) ?? null;
+        }
+      };
+
+      const { staticCssEval } = await babelTransform(ownerId, {
+        jsxCssProp: true,
+        staticCssEvalSourceProvider: provider
+      });
+
+      expect(calls.resolved).toEqual([
+        { importerId: ownerId, importPath: "@scope/styles" },
+        { importerId: ownerId, importPath: "@scope/styles/tokens.json" },
+        { importerId: ownerId, importPath: "virtual:mincho/styles" },
+        { importerId: ownerId, importPath: "./styles.cjs" }
+      ]);
+      expect(calls.loaded).toEqual([
+        ownerId,
+        packageLoadId,
+        dataId,
+        virtualId,
+        cjsId
+      ]);
+      expect(staticCssEval?.resolvedDependencies).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            resolvedFile: packageId,
+            sourceKind: "package-source",
+            sourceOrigin: "package",
+            loaded: true
+          }),
+          expect.objectContaining({
+            resolvedFile: dataId,
+            sourceKind: "static-data",
+            sourceOrigin: "data",
+            loaded: true
+          }),
+          expect.objectContaining({
+            resolvedFile: virtualId,
+            sourceKind: "provider-virtual",
+            sourceOrigin: "provider",
+            loaded: true
+          }),
+          expect.objectContaining({
+            resolvedFile: cjsId,
+            sourceKind: "project-source",
+            sourceOrigin: "project",
+            loaded: true
+          })
+        ])
+      );
+    });
+
+    it("cache invalidation follows transitive spread operand source identity", async () => {
+      const fs = await import("node:fs/promises");
+      const componentSource = `
+        import { button } from "./styles";
+
+        function App() {
+          return <div css={button} />;
+        }
+      `;
+      const stylesSource = `import { base } from "./base"; export const button = { ...base } as const;`;
+      const redBaseSource = `export const base = { color: "red" } as const;`;
+      const blueBaseSource = `export const base = { color: "blue" } as const;`;
+      const { filePaths } = await createBabelFixtureFiles(
+        {
+          "component.tsx": componentSource,
+          "styles.ts": stylesSource,
+          "base.ts": redBaseSource
+        },
+        "css-prop-prepass-transitive-spread-invalidation"
+      );
+      const componentId = filePaths["component.tsx"];
+      const stylesId = filePaths["styles.ts"];
+      const baseId = filePaths["base.ts"];
+      const provider = createFileBackedStaticCssEvalSourceProvider({
+        resolutions: {
+          [`${componentId}\0./styles`]: stylesId,
+          [`${stylesId}\0./base`]: baseId
+        }
+      });
+
+      const firstPrepass = await createStaticCssEvalPrepass(
+        componentId,
+        provider
+      );
+      await fs.writeFile(baseId, blueBaseSource, "utf8");
+      const secondPrepass = await createStaticCssEvalPrepass(
+        componentId,
+        provider
+      );
+
+      expect(firstPrepass.result.dependencyFiles).toEqual([stylesId, baseId]);
+      expect(secondPrepass.result.dependencyFiles).toEqual([stylesId, baseId]);
+      expect(firstPrepass.result.resolvedDependencies).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            importerId: stylesId,
+            specifier: "./base",
+            resolvedFile: baseId,
+            loaded: true,
+            sourceIdentity: createTestSourceIdentity(redBaseSource)
+          })
+        ])
+      );
+      expect(secondPrepass.result.resolvedDependencies).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            importerId: stylesId,
+            specifier: "./base",
+            resolvedFile: baseId,
+            loaded: true,
+            sourceIdentity: createTestSourceIdentity(blueBaseSource)
+          })
+        ])
+      );
+      expect(
+        firstPrepass.result.resolvedDependencies.find(
+          (dependency) => dependency.resolvedFile === baseId
+        )?.sourceIdentity?.sourceHash
+      ).not.toBe(
+        secondPrepass.result.resolvedDependencies.find(
+          (dependency) => dependency.resolvedFile === baseId
+        )?.sourceIdentity?.sourceHash
+      );
+    });
+
     it("static css eval metadata preserves dependency files resolved dependencies cache keys and source identity", async () => {
       const fs = await import("node:fs/promises");
       const componentSource = `

@@ -1,7 +1,10 @@
+import { types as t } from "@babel/core";
 import {
   internalCollectJsxCssPropStaticCssEvalCandidates as collectJsxCssPropStaticCssEvalCandidates,
   internalCreateImportedStaticCssEvalModuleRecord as createImportedStaticCssEvalModuleRecord,
   internalCreateImportedStaticCssEvalProvider as createImportedStaticCssEvalProvider,
+  internalGetStaticCssEvalMemberReference as getStaticCssEvalMemberReference,
+  internalUnwrapTransparentCssRuleExpression as unwrapTransparentCssRuleExpression,
   type InternalImportedStaticCssEvalImportResolution as ImportedStaticCssEvalImportResolution,
   type InternalImportedStaticCssEvalLoadedModule as ImportedStaticCssEvalLoadedModule,
   type InternalImportedStaticCssEvalModuleRecord as ImportedStaticCssEvalModuleRecord,
@@ -103,6 +106,40 @@ interface StaticCssEvalPrepassWholeNamespaceWalk {
   seen: Set<string>;
 }
 
+interface StaticCssEvalPrepassReference {
+  readonly bindingName: string;
+  readonly memberPath: readonly string[];
+}
+
+interface StaticCssEvalPrepassLocalWalkFrame {
+  readonly recordId: string;
+  readonly bindingName: string;
+  readonly memberPath: readonly string[];
+}
+
+interface StaticCssEvalPrepassExpressionWalkOptions {
+  readonly moduleRecord: ImportedStaticCssEvalModuleRecord;
+  readonly expression: t.Expression;
+  readonly memberPath: readonly string[];
+  readonly context: StaticCssEvalPrepassContext;
+  readonly localStack: readonly StaticCssEvalPrepassLocalWalkFrame[];
+}
+
+interface StaticCssEvalPrepassReferenceWalkOptions {
+  readonly moduleRecord: ImportedStaticCssEvalModuleRecord;
+  readonly reference: StaticCssEvalPrepassReference;
+  readonly context: StaticCssEvalPrepassContext;
+  readonly localStack: readonly StaticCssEvalPrepassLocalWalkFrame[];
+}
+
+interface StaticCssEvalPrepassLocalBindingWalkOptions {
+  readonly moduleRecord: ImportedStaticCssEvalModuleRecord;
+  readonly bindingName: string;
+  readonly memberPath: readonly string[];
+  readonly context: StaticCssEvalPrepassContext;
+  readonly localStack: readonly StaticCssEvalPrepassLocalWalkFrame[];
+}
+
 interface CreateLoadedModuleOptions {
   resolution?: NormalizedStaticCssEvalSourceResolution;
   sourceText?: string;
@@ -197,6 +234,16 @@ export async function createStaticCssEvalPrepass(
     );
 
     if (!dependencyRequest) {
+      if (candidate.bindingName) {
+        await loadStaticCssEvalPrepassLocalBindingDependencies({
+          moduleRecord: ownerRecord,
+          bindingName: candidate.bindingName,
+          memberPath: candidate.memberPath ?? [],
+          context: prepassContext,
+          localStack: []
+        });
+      }
+
       continue;
     }
 
@@ -218,6 +265,11 @@ export async function createStaticCssEvalPrepass(
       );
     }
   }
+
+  await loadStaticCssEvalPrepassOwnerLiteralDependencies(
+    ownerRecord,
+    prepassContext
+  );
 
   const ownerToDependencies = new Map<string, string[]>([
     [ownerId, prepassState.ownerDependencies]
@@ -507,6 +559,277 @@ async function loadStaticCssEvalPrepassGraphDependencies(
   );
 }
 
+async function loadStaticCssEvalPrepassOwnerLiteralDependencies(
+  moduleRecord: ImportedStaticCssEvalModuleRecord,
+  context: StaticCssEvalPrepassContext
+): Promise<void> {
+  const expressions: t.Expression[] = [];
+
+  moduleRecord.programPath.traverse({
+    JSXAttribute(attributePath) {
+      if (!isStaticCssEvalPrepassCssAttribute(attributePath.node)) {
+        return;
+      }
+
+      const expression = getStaticCssEvalPrepassJsxExpression(
+        attributePath.node
+      );
+
+      if (!expression) {
+        return;
+      }
+
+      const unwrappedExpression =
+        unwrapTransparentCssRuleExpression(expression);
+
+      if (
+        t.isObjectExpression(unwrappedExpression) ||
+        t.isArrayExpression(unwrappedExpression)
+      ) {
+        expressions.push(unwrappedExpression);
+      }
+    }
+  });
+
+  for (const expression of expressions) {
+    await loadStaticCssEvalPrepassExpressionDependencies({
+      moduleRecord,
+      expression,
+      memberPath: [],
+      context,
+      localStack: []
+    });
+  }
+}
+
+async function loadStaticCssEvalPrepassExpressionDependencies(
+  options: StaticCssEvalPrepassExpressionWalkOptions
+): Promise<void> {
+  const expression = unwrapTransparentCssRuleExpression(options.expression);
+
+  if (t.isObjectExpression(expression)) {
+    await loadStaticCssEvalPrepassObjectExpressionDependencies({
+      ...options,
+      expression
+    });
+    return;
+  }
+
+  if (t.isArrayExpression(expression)) {
+    await loadStaticCssEvalPrepassArrayExpressionDependencies({
+      ...options,
+      expression
+    });
+    return;
+  }
+
+  const reference = getStaticCssEvalMemberReference(expression);
+
+  if (reference?.kind !== "supported") {
+    return;
+  }
+
+  await loadStaticCssEvalPrepassReferenceDependencies({
+    moduleRecord: options.moduleRecord,
+    reference: {
+      bindingName: reference.bindingName,
+      memberPath: [...reference.memberPath, ...options.memberPath]
+    },
+    context: options.context,
+    localStack: options.localStack
+  });
+}
+
+async function loadStaticCssEvalPrepassObjectExpressionDependencies(
+  options: StaticCssEvalPrepassExpressionWalkOptions & {
+    readonly expression: t.ObjectExpression;
+  }
+): Promise<void> {
+  if (options.memberPath.length > 0) {
+    await loadStaticCssEvalPrepassObjectMemberDependencies(options);
+    return;
+  }
+
+  for (const property of options.expression.properties) {
+    if (t.isSpreadElement(property)) {
+      await loadStaticCssEvalPrepassExpressionDependencies({
+        ...options,
+        expression: property.argument,
+        memberPath: []
+      });
+      continue;
+    }
+
+    if (!t.isObjectProperty(property) || !t.isExpression(property.value)) {
+      continue;
+    }
+
+    await loadStaticCssEvalPrepassExpressionDependencies({
+      ...options,
+      expression: property.value,
+      memberPath: []
+    });
+  }
+}
+
+async function loadStaticCssEvalPrepassObjectMemberDependencies(
+  options: StaticCssEvalPrepassExpressionWalkOptions & {
+    readonly expression: t.ObjectExpression;
+  }
+): Promise<void> {
+  const [memberName, ...remainingMemberPath] = options.memberPath;
+
+  if (memberName === undefined) {
+    return;
+  }
+
+  for (
+    let index = options.expression.properties.length - 1;
+    index >= 0;
+    index -= 1
+  ) {
+    const property = options.expression.properties[index];
+
+    if (!property) {
+      continue;
+    }
+
+    if (t.isSpreadElement(property)) {
+      await loadStaticCssEvalPrepassExpressionDependencies({
+        ...options,
+        expression: property.argument,
+        memberPath: options.memberPath
+      });
+      continue;
+    }
+
+    if (!t.isObjectProperty(property) || !t.isExpression(property.value)) {
+      continue;
+    }
+
+    if (getStaticCssEvalPrepassObjectPropertyName(property) !== memberName) {
+      continue;
+    }
+
+    await loadStaticCssEvalPrepassExpressionDependencies({
+      ...options,
+      expression: property.value,
+      memberPath: remainingMemberPath
+    });
+    return;
+  }
+}
+
+async function loadStaticCssEvalPrepassArrayExpressionDependencies(
+  options: StaticCssEvalPrepassExpressionWalkOptions & {
+    readonly expression: t.ArrayExpression;
+  }
+): Promise<void> {
+  for (const element of options.expression.elements) {
+    if (!element) {
+      continue;
+    }
+
+    if (t.isSpreadElement(element)) {
+      await loadStaticCssEvalPrepassExpressionDependencies({
+        ...options,
+        expression: element.argument,
+        memberPath: []
+      });
+      continue;
+    }
+
+    if (!t.isExpression(element)) {
+      continue;
+    }
+
+    await loadStaticCssEvalPrepassExpressionDependencies({
+      ...options,
+      expression: element,
+      memberPath: []
+    });
+  }
+}
+
+async function loadStaticCssEvalPrepassReferenceDependencies(
+  options: StaticCssEvalPrepassReferenceWalkOptions
+): Promise<void> {
+  const dependencyRequest = createStaticCssEvalPrepassDependencyRequest(
+    options.moduleRecord,
+    options.reference.bindingName,
+    options.reference.memberPath
+  );
+
+  if (!dependencyRequest) {
+    await loadStaticCssEvalPrepassLocalBindingDependencies({
+      moduleRecord: options.moduleRecord,
+      bindingName: options.reference.bindingName,
+      memberPath: options.reference.memberPath,
+      context: options.context,
+      localStack: options.localStack
+    });
+    return;
+  }
+
+  const dependencyRecord = await loadStaticCssEvalPrepassDependency(
+    options.moduleRecord.id,
+    dependencyRequest.importPath,
+    options.context
+  );
+
+  if (!dependencyRecord || !dependencyRequest.exportRequest) {
+    return;
+  }
+
+  await loadStaticCssEvalPrepassGraphDependencies(
+    dependencyRecord,
+    dependencyRequest.exportRequest,
+    options.context
+  );
+}
+
+async function loadStaticCssEvalPrepassLocalBindingDependencies(
+  options: StaticCssEvalPrepassLocalBindingWalkOptions
+): Promise<void> {
+  const currentFrame: StaticCssEvalPrepassLocalWalkFrame = {
+    recordId: options.moduleRecord.id,
+    bindingName: options.bindingName,
+    memberPath: [...options.memberPath]
+  };
+  const currentKey = createStaticCssEvalPrepassLocalWalkKey(currentFrame);
+
+  if (
+    options.localStack.some(
+      (frame) => createStaticCssEvalPrepassLocalWalkKey(frame) === currentKey
+    )
+  ) {
+    return;
+  }
+
+  const expression = getStaticCssEvalPrepassConstBindingInitExpression(
+    options.moduleRecord,
+    options.bindingName
+  );
+
+  if (!expression) {
+    return;
+  }
+
+  await loadStaticCssEvalPrepassExpressionDependencies({
+    moduleRecord: options.moduleRecord,
+    expression,
+    memberPath: options.memberPath,
+    context: options.context,
+    localStack: [...options.localStack, currentFrame]
+  });
+}
+
+function createStaticCssEvalPrepassLocalWalkKey(
+  frame: StaticCssEvalPrepassLocalWalkFrame
+): string {
+  return `${frame.recordId}\0${frame.bindingName}\0${frame.memberPath.join(".")}`;
+}
+
 async function loadExportNamePrepassDependencies(
   moduleRecord: ImportedStaticCssEvalModuleRecord,
   walk: StaticCssEvalPrepassExportWalk,
@@ -614,29 +937,52 @@ async function loadExplicitExportEntryPrepassDependencies(
   walk: StaticCssEvalPrepassExportWalk,
   context: StaticCssEvalPrepassContext
 ): Promise<void> {
-  if (exportEntry.kind !== "reexport") {
-    return;
+  switch (exportEntry.kind) {
+    case "expression":
+      await loadStaticCssEvalPrepassExpressionDependencies({
+        moduleRecord,
+        expression: exportEntry.expression,
+        memberPath: walk.memberPath,
+        context,
+        localStack: []
+      });
+      return;
+    case "local":
+      await loadStaticCssEvalPrepassLocalBindingDependencies({
+        moduleRecord,
+        bindingName: exportEntry.localName,
+        memberPath: walk.memberPath,
+        context,
+        localStack: []
+      });
+      return;
+    case "reexport": {
+      const dependencyRecord = await loadStaticCssEvalPrepassDependency(
+        moduleRecord.id,
+        exportEntry.source,
+        context
+      );
+
+      if (!dependencyRecord) {
+        return;
+      }
+
+      await loadExportNamePrepassDependencies(
+        dependencyRecord,
+        {
+          exportName: exportEntry.importedName,
+          memberPath: walk.memberPath,
+          seen: walk.seen
+        },
+        context
+      );
+      return;
+    }
+    case "unsupported":
+      return;
+    default:
+      return assertNever(exportEntry);
   }
-
-  const dependencyRecord = await loadStaticCssEvalPrepassDependency(
-    moduleRecord.id,
-    exportEntry.source,
-    context
-  );
-
-  if (!dependencyRecord) {
-    return;
-  }
-
-  await loadExportNamePrepassDependencies(
-    dependencyRecord,
-    {
-      exportName: exportEntry.importedName,
-      memberPath: walk.memberPath,
-      seen: walk.seen
-    },
-    context
-  );
 }
 
 function createStaticCssEvalPrepassWalkKey(
@@ -649,6 +995,68 @@ function createStaticCssEvalPrepassWalkKey(
 
 function assertNever(value: never): never {
   throw new TypeError(`Unexpected static css eval prepass value: ${value}`);
+}
+
+function isStaticCssEvalPrepassCssAttribute(
+  attribute: t.JSXAttribute
+): boolean {
+  return t.isJSXIdentifier(attribute.name) && attribute.name.name === "css";
+}
+
+function getStaticCssEvalPrepassJsxExpression(
+  attribute: t.JSXAttribute
+): t.Expression | null {
+  if (!t.isJSXExpressionContainer(attribute.value)) {
+    return null;
+  }
+
+  return t.isJSXEmptyExpression(attribute.value.expression)
+    ? null
+    : attribute.value.expression;
+}
+
+function getStaticCssEvalPrepassObjectPropertyName(
+  property: t.ObjectProperty
+): string | null {
+  const key = property.key;
+
+  if (!property.computed && t.isIdentifier(key)) {
+    return key.name;
+  }
+
+  if (t.isStringLiteral(key)) {
+    return key.value;
+  }
+
+  if (t.isNumericLiteral(key)) {
+    return String(key.value);
+  }
+
+  return null;
+}
+
+function getStaticCssEvalPrepassConstBindingInitExpression(
+  moduleRecord: ImportedStaticCssEvalModuleRecord,
+  bindingName: string
+): t.Expression | null {
+  const binding = moduleRecord.programPath.scope.getBinding(bindingName);
+  const bindingPath = binding?.path;
+
+  if (!bindingPath?.isVariableDeclarator()) {
+    return null;
+  }
+
+  if (
+    !t.isIdentifier(bindingPath.node.id) ||
+    !bindingPath.parentPath.isVariableDeclaration() ||
+    bindingPath.parentPath.node.kind !== "const"
+  ) {
+    return null;
+  }
+
+  const initPath = bindingPath.get("init");
+
+  return initPath.node && initPath.isExpression() ? initPath.node : null;
 }
 
 function createLoadedModule(
@@ -1279,6 +1687,18 @@ if (import.meta.vitest) {
   // eslint-disable-next-line @typescript-eslint/ban-ts-comment
   // @ts-ignore error TS1343: The 'import.meta' meta-property is only allowed when the '--module' option is 'es2020', 'es2022', 'esnext', 'system', 'node16', or 'nodenext'.
   const { describe, expect, it } = import.meta.vitest;
+
+  describe("static css eval prepass object property names", () => {
+    it("does not treat computed identifier keys as static names", () => {
+      const property = t.objectProperty(
+        t.identifier("dynamicKey"),
+        t.stringLiteral("value"),
+        true
+      );
+
+      expect(getStaticCssEvalPrepassObjectPropertyName(property)).toBeNull();
+    });
+  });
 
   const YARN_NODE_LINKERS = ["pnp", "pnpm", "node-modules"] as const;
 

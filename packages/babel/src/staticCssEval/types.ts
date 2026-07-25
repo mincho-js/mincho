@@ -629,8 +629,21 @@ export const STATIC_CSS_EVAL_SUPPORT_MATRIX = [
     status: "unsupported"
   },
   {
-    construct: "Object spread / array spread",
-    behavior: "Unsupported",
+    construct: "Static object/array spreads in css-rule literals",
+    behavior:
+      "Supported when every spread operand statically resolves to a same-shape object or array literal",
+    status: "supported"
+  },
+  {
+    construct: "Static identifier/member values in css-rule literals",
+    behavior:
+      "Supported when identifiers and non-computed member paths resolve to static literals through same-file or provider-backed bindings",
+    status: "supported"
+  },
+  {
+    construct: "Dynamic or wrong-shape object/array spread operands",
+    behavior:
+      "Unsupported; unresolved, mutable, computed, function/call, dynamic, or wrong collection shape operands fail closed with diagnostics",
     status: "unsupported"
   },
   {
@@ -934,10 +947,42 @@ if (import.meta.vitest) {
       });
       expect(
         supportMatrixConstructs.some(
+          (construct) => construct === "Object spread / array spread"
+        )
+      ).toBe(false);
+      expect(
+        supportMatrixByConstruct.get(
+          "Static object/array spreads in css-rule literals"
+        )
+      ).toMatchObject({
+        status: "supported",
+        behavior: expect.stringContaining("same-shape")
+      });
+      expect(
+        supportMatrixByConstruct.get(
+          "Static identifier/member values in css-rule literals"
+        )
+      ).toMatchObject({ status: "supported" });
+      expect(
+        supportMatrixByConstruct.get(
+          "Dynamic or wrong-shape object/array spread operands"
+        )
+      ).toMatchObject({
+        status: "unsupported",
+        behavior: expect.stringContaining("fail closed")
+      });
+      expect(
+        supportMatrixByConstruct.get("Calls / mixins / functions")
+      ).toMatchObject({ status: "unsupported" });
+      expect(
+        supportMatrixByConstruct.get("Runtime dynamic values")
+      ).toMatchObject({ status: "unsupported" });
+      expect(
+        supportMatrixConstructs.some(
           (construct) => construct === "Export star (`export *`)"
         )
       ).toBe(false);
-      expect(STATIC_CSS_EVAL_SUPPORT_MATRIX).toHaveLength(39);
+      expect(STATIC_CSS_EVAL_SUPPORT_MATRIX).toHaveLength(41);
     });
 
     it("accepts synchronous provider and cache key contracts", () => {

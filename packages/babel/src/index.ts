@@ -47,7 +47,11 @@ export {
   createStaticCssEvalCacheKeyMetadataKey as internalCreateStaticCssEvalCacheKeyMetadataKey,
   createStaticCssEvalDiagnosticMetadataKey as internalCreateStaticCssEvalDiagnosticMetadataKey
 } from "./jsxCssProp.js";
-export { collectJsxCssPropStaticCssEvalCandidates as internalCollectJsxCssPropStaticCssEvalCandidates } from "./staticCssEval/candidates.js";
+export {
+  collectJsxCssPropStaticCssEvalCandidates as internalCollectJsxCssPropStaticCssEvalCandidates,
+  getStaticCssEvalMemberReference as internalGetStaticCssEvalMemberReference,
+  unwrapTransparentCssRuleExpression as internalUnwrapTransparentCssRuleExpression
+} from "./staticCssEval/candidates.js";
 export {
   createImportedStaticCssEvalModuleRecord as internalCreateImportedStaticCssEvalModuleRecord,
   createImportedStaticCssEvalProvider as internalCreateImportedStaticCssEvalProvider
