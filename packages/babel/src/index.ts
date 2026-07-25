@@ -937,6 +937,416 @@ if (import.meta.vitest) {
       expect(sameFileConst.result[1]).toContain("zIndex: +2");
     });
 
+    it("normalizes direct inline object and array spreads before jsx css prop classification", () => {
+      const inlineObject = babelTransform(
+        `
+        function App() {
+          return <div css={{ display: "flex", color: "blue" }} />;
+        }
+      `,
+        { jsxCssProp: true }
+      );
+      const spreadObject = babelTransform(
+        `
+        const base = { display: "flex", color: "red" } as const;
+
+        function App() {
+          return <div css={{ ...base, color: "blue" }} />;
+        }
+      `,
+        { jsxCssProp: true }
+      );
+      const spreadArray = babelTransform(
+        `
+        const stack = [{ display: "flex" }] as const;
+
+        function App() {
+          return <div css={[...stack, { gap: 8 }]} />;
+        }
+      `,
+        { jsxCssProp: true }
+      );
+      const output = `${spreadObject.code}\n${spreadObject.result.join("\n")}\n${spreadArray.code}\n${spreadArray.result.join("\n")}`;
+
+      expect(spreadObject.result[1]).toBe(inlineObject.result[1]);
+      expect(spreadObject.code).not.toContain(" css=");
+      expect(spreadObject.code).not.toContain("...base");
+      expect(spreadObject.code).not.toContain("_cx(base)");
+      expect(spreadArray.code).not.toContain(" css=");
+      expect(spreadArray.code).not.toContain("...stack");
+      expect(spreadArray.code).not.toContain("_cx(stack)");
+      expect(spreadArray.code).not.toContain("unsupported-array-spread");
+      expect(spreadArray.result[1]).toContain("_css([{");
+      expect(spreadArray.result[1]).toContain('display: "flex"');
+      expect(spreadArray.result[1]).toContain("gap: 8");
+      expect(output).not.toContain("...base");
+      expect(output).not.toContain("...stack");
+    });
+
+    it("normalizes direct inline provider imported operands with metadata", () => {
+      const ownerFile = "/project/src/App.tsx";
+      const stylesFile = "/project/src/styles.ts";
+      const source = `
+        import { base, stack, tokens } from "./styles";
+        const isActive = true;
+
+        function App() {
+          return <>
+            <div css={{ ...base, color: tokens.color, active: isActive }} />
+            <div css={[...stack, { gap: 8 }]} />
+          </>;
+        }
+      `;
+      const { result, code, metadata } = babelTransform(
+        source,
+        {
+          jsxCssProp: true,
+          staticCssEvalProvider: createImportedStaticCssEvalProvider({
+            modules: [
+              { id: ownerFile, source },
+              {
+                id: stylesFile,
+                source: `
+                  export const base = { display: "flex", color: "red" } as const;
+                  export const stack = [{ alignItems: "center" }] as const;
+                  export const tokens = { color: "blue" } as const;
+                `
+              }
+            ],
+            importResolutions: [
+              {
+                importerId: ownerFile,
+                importPath: "./styles",
+                resolvedId: stylesFile
+              }
+            ]
+          })
+        },
+        { filename: ownerFile }
+      );
+      const staticCssEvalMetadata = metadata.minchoStaticCssEval;
+      const output = `${code}\n${result.join("\n")}`;
+
+      expect(code).not.toContain(" css=");
+      expect(code).not.toContain("...base");
+      expect(code).not.toContain("...stack");
+      expect(code).not.toContain("_cx(base)");
+      expect(code).not.toContain("_cx(stack)");
+      expect(result[1]).toContain("_css({");
+      expect(result[1]).toContain("_css([{");
+      expect(result[1]).toContain('display: "flex"');
+      expect(result[1]).toContain('color: "blue"');
+      expect(result[1]).toContain("active: isActive");
+      expect(result[1]).toContain('alignItems: "center"');
+      expect(result[1]).toContain("gap: 8");
+      expect(output).not.toContain("...base");
+      expect(output).not.toContain("...stack");
+      expect(staticCssEvalMetadata?.dependencies).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            file: stylesFile,
+            exportName: "base",
+            inspected: true,
+            contributed: true
+          }),
+          expect.objectContaining({
+            file: stylesFile,
+            exportName: "tokens",
+            memberPath: ["color"],
+            inspected: true,
+            contributed: true
+          }),
+          expect.objectContaining({
+            file: stylesFile,
+            exportName: "stack",
+            inspected: true,
+            contributed: true
+          })
+        ])
+      );
+      expect(staticCssEvalMetadata?.cacheKeys).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            resolvedId: stylesFile,
+            staticEvalSupportVersion: "static-css-module-export-graph:v3"
+          })
+        ])
+      );
+      expect(staticCssEvalMetadata?.resolvedModuleIds).toContain(stylesFile);
+    });
+
+    it("preserves inline fallback booleans without overriding spread precedence", () => {
+      const ownerFile = "/project/src/App.tsx";
+      const stylesFile = "/project/src/styles.ts";
+      const source = `
+        import { base, flags } from "./styles";
+        const isActive = true;
+
+        function App() {
+          return <>
+            <div css={{ ...base, active: isActive }} />
+            <div css={{ active: isActive, ...base }} />
+            <div css={{ nested: { active: isActive, ...base } }} />
+            <div css={[...flags, isActive]} />
+          </>;
+        }
+      `;
+      const { result, code } = babelTransform(
+        source,
+        {
+          jsxCssProp: true,
+          staticCssEvalProvider: createImportedStaticCssEvalProvider({
+            modules: [
+              { id: ownerFile, source },
+              {
+                id: stylesFile,
+                source: `
+                  export const base = { display: "flex", active: false } as const;
+                  export const flags = [false, false, { color: "red" }] as const;
+                `
+              }
+            ],
+            importResolutions: [
+              {
+                importerId: ownerFile,
+                importPath: "./styles",
+                resolvedId: stylesFile
+              }
+            ]
+          })
+        },
+        { filename: ownerFile }
+      );
+
+      expect(result[1]).toContain("active: isActive");
+      expect(result[1]).toContain("active: false");
+      expect(result[1]).toMatch(
+        /nested: \{\s+active: false,\s+display: "flex"\s+\}/
+      );
+      expect(code).toMatch(
+        /className=\{_cx\(false, false, _\$mincho\$\$App\d+, isActive\)\}/
+      );
+    });
+
+    it("does not count shallow alias hops as object recursion depth", () => {
+      const ownerFile = "/project/src/App.tsx";
+      const stylesFile = "/project/src/styles.ts";
+      const aliases = Array.from(
+        { length: 50 },
+        (_, index) => `const a${index + 1} = a${index};`
+      ).join("\n");
+      const source = `
+        import { base } from "./styles";
+        const a0 = { color: "red" };
+        ${aliases}
+
+        function App() {
+          return <div css={{ ...base, nested: a50 }} />;
+        }
+      `;
+      const { result } = babelTransform(
+        source,
+        {
+          jsxCssProp: true,
+          staticCssEvalProvider: createImportedStaticCssEvalProvider({
+            modules: [
+              { id: ownerFile, source },
+              {
+                id: stylesFile,
+                source: `export const base = { display: "flex" } as const;`
+              }
+            ],
+            importResolutions: [
+              {
+                importerId: ownerFile,
+                importPath: "./styles",
+                resolvedId: stylesFile
+              }
+            ]
+          })
+        },
+        { filename: ownerFile }
+      );
+
+      expect(result[1]).toContain('color: "red"');
+    });
+
+    it("rejects over-depth direct inline provider operands", () => {
+      const ownerFile = "/project/src/App.tsx";
+      const stylesFile = "/project/src/styles.ts";
+      const nestedRule = Array.from({ length: 51 }).reduce<string>(
+        (value) => `{ nested: ${value} }`,
+        '"leaf"'
+      );
+      const source = `
+        import { base } from "./styles";
+
+        function App() {
+          return <div css={{ ...base, nested: ${nestedRule} }} />;
+        }
+      `;
+
+      expect(() =>
+        babelTransform(
+          source,
+          {
+            jsxCssProp: true,
+            staticCssEvalProvider: createImportedStaticCssEvalProvider({
+              modules: [
+                { id: ownerFile, source },
+                {
+                  id: stylesFile,
+                  source: `export const base = { display: "flex" } as const;`
+                }
+              ],
+              importResolutions: [
+                {
+                  importerId: ownerFile,
+                  importPath: "./styles",
+                  resolvedId: stylesFile
+                }
+              ]
+            })
+          },
+          { filename: ownerFile }
+        )
+      ).toThrow("max object/array recursion depth exceeded");
+    });
+
+    it("rejects over-node-count direct inline provider operands", () => {
+      const ownerFile = "/project/src/App.tsx";
+      const stylesFile = "/project/src/styles.ts";
+      const classValues = Array.from({ length: 10_000 }, () => "true").join(
+        ", "
+      );
+      const source = `
+        import { stack } from "./styles";
+
+        function App() {
+          return <div css={[...stack, ${classValues}]} />;
+        }
+      `;
+
+      expect(() =>
+        babelTransform(
+          source,
+          {
+            jsxCssProp: true,
+            staticCssEvalProvider: createImportedStaticCssEvalProvider({
+              modules: [
+                { id: ownerFile, source },
+                {
+                  id: stylesFile,
+                  source: `export const stack = ["base"] as const;`
+                }
+              ],
+              importResolutions: [
+                {
+                  importerId: ownerFile,
+                  importPath: "./styles",
+                  resolvedId: stylesFile
+                }
+              ]
+            })
+          },
+          { filename: ownerFile }
+        )
+      ).toThrow("max static literal node count exceeded");
+    });
+
+    it("records package data and virtual provider metadata for direct inline operands", () => {
+      const ownerFile = "/project/src/App.tsx";
+      const packageBarrelFile = "pkg:@scope/styles";
+      const packageDataFile = "data:@scope/styles/tokens";
+      const virtualFile = "virtual:mincho-styles";
+      const source = `
+        import { base } from "@scope/styles";
+        import virtualTokens from "virtual:mincho-styles";
+
+        function App() {
+          return <div css={{ ...base, accent: virtualTokens.accent }} />;
+        }
+      `;
+      const { result, code, metadata } = babelTransform(
+        source,
+        {
+          jsxCssProp: true,
+          staticCssEvalProvider: createImportedStaticCssEvalProvider({
+            modules: [
+              { id: ownerFile, source },
+              {
+                id: packageBarrelFile,
+                source: `export { base } from "@scope/styles/tokens";`,
+                sourceKind: "package-source",
+                sourceOrigin: "package"
+              },
+              {
+                id: packageDataFile,
+                source: `export const base = { color: "green" } as const;`,
+                sourceKind: "static-data",
+                sourceOrigin: "data"
+              },
+              {
+                id: virtualFile,
+                source: `export default { accent: "purple" } as const;`,
+                sourceKind: "provider-virtual",
+                sourceOrigin: "provider"
+              }
+            ],
+            importResolutions: [
+              {
+                importerId: ownerFile,
+                importPath: "@scope/styles",
+                resolvedId: packageBarrelFile,
+                sourceKind: "package-source",
+                sourceOrigin: "package"
+              },
+              {
+                importerId: packageBarrelFile,
+                importPath: "@scope/styles/tokens",
+                resolvedId: packageDataFile,
+                sourceKind: "static-data",
+                sourceOrigin: "data"
+              },
+              {
+                importerId: ownerFile,
+                importPath: "virtual:mincho-styles",
+                resolvedId: virtualFile,
+                sourceKind: "provider-virtual",
+                sourceOrigin: "provider"
+              }
+            ]
+          })
+        },
+        { filename: ownerFile }
+      );
+      const staticCssEvalMetadata = metadata.minchoStaticCssEval;
+
+      expect(code).not.toContain(" css=");
+      expect(code).not.toContain("...base");
+      expect(result[1]).toContain('color: "green"');
+      expect(result[1]).toContain('accent: "purple"');
+      expect(staticCssEvalMetadata?.dependencies).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            file: packageDataFile,
+            sourceKind: "static-data",
+            sourceOrigin: "data",
+            contributed: true
+          }),
+          expect.objectContaining({
+            file: virtualFile,
+            sourceKind: "provider-virtual",
+            sourceOrigin: "provider",
+            contributed: true
+          })
+        ])
+      );
+      expect(staticCssEvalMetadata?.resolvedModuleIds).toEqual(
+        expect.arrayContaining([packageDataFile, virtualFile])
+      );
+    });
+
     it("resolves same-file const object member path grammar", () => {
       const fixtures = [
         {
@@ -992,29 +1402,9 @@ if (import.meta.vitest) {
     it("rejects unsupported same-file static css literal grammar deterministically", () => {
       const fixtures = [
         {
-          setup: `const color = "red"; const style = { color };`,
-          expression: "style",
-          reason: "identifier-object-value"
-        },
-        {
-          setup: `const theme = { color: "red" }; const style = { color: theme.color };`,
-          expression: "style",
-          reason: "member-expression-object-value"
-        },
-        {
           setup: `const color = "red"; const style = { color: \`var(\${color})\` };`,
           expression: "style",
           reason: "template-expression"
-        },
-        {
-          setup: `const base = { color: "blue" }; const style = { ...base, color: "red" };`,
-          expression: "style",
-          reason: "object spread"
-        },
-        {
-          setup: `const base = [{ color: "blue" }]; const style = [{ color: "red" }, ...base];`,
-          expression: "style",
-          reason: "array spread"
         },
         {
           setup: `const styles = { button: { color: "red" } };`,
@@ -1125,8 +1515,11 @@ if (import.meta.vitest) {
     it("preserves unresolved top-level css prop references as class values", () => {
       const { result, code } = babelTransform(
         `
+        const className = "panel";
+
         function App() {
           return <>
+            <div css={className} />
             <div css={unknownClassName} />
             <div css={externalStyles.button} />
           </>;
@@ -1139,9 +1532,61 @@ if (import.meta.vitest) {
       );
 
       expect(code).not.toContain(" css=");
+      expect(code).toContain("className={_cx(className)}");
       expect(code).toContain("className={_cx(unknownClassName)}");
       expect(code).toContain("className={_cx(externalStyles.button)}");
+      expect(code).not.toContain("_css(className)");
       expect(result[1]).not.toContain("_css(");
+    });
+
+    it("rejects direct inline css rule calls and functions through static eval diagnostics", () => {
+      const callFailure = captureJsxCssPropFailure(
+        `
+        function getColor() {
+          return "red";
+        }
+
+        function App() {
+          return <div css={{ color: getColor() }} />;
+        }
+      `,
+        { jsxCssProp: true }
+      );
+      const functionFailure = captureJsxCssPropFailure(
+        `
+        function App() {
+          return <div css={{ color: () => "red" }} />;
+        }
+      `,
+        { jsxCssProp: true }
+      );
+
+      expect(callFailure.error.message).toContain(
+        "dynamic expression is unsupported: CallExpression"
+      );
+      expect(functionFailure.error.message).toContain(
+        "dynamic expression is unsupported: ArrowFunctionExpression"
+      );
+      expect(
+        callFailure.metadata.minchoStaticCssEval?.diagnostics.map(
+          ({ id }) => id
+        )
+      ).toContain("STATIC_CSS_EVAL_DYNAMIC_EXPRESSION_UNSUPPORTED");
+      expect(
+        functionFailure.metadata.minchoStaticCssEval?.diagnostics.map(
+          ({ id }) => id
+        )
+      ).toContain("STATIC_CSS_EVAL_DYNAMIC_EXPRESSION_UNSUPPORTED");
+      expect(
+        callFailure.metadata.minchoStaticCssEval?.diagnostics.map(
+          ({ reason }) => reason
+        )
+      ).toContain("runtime-dynamic-value");
+      expect(
+        functionFailure.metadata.minchoStaticCssEval?.diagnostics.map(
+          ({ reason }) => reason
+        )
+      ).toContain("runtime-dynamic-value");
     });
 
     it("evaluates direct dynamic class-value css prop calls once", () => {
@@ -1172,22 +1617,23 @@ if (import.meta.vitest) {
       expect("css" in observed.props).toBe(false);
     });
 
-    it("rejects same-file static css rule member-expression object values", () => {
-      expect(() =>
-        babelTransform(
-          `
-          const theme = { color: "red" };
-          const style = { color: theme.color };
+    it("normalizes same-file static css rule member-expression object values", () => {
+      const { result, code } = babelTransform(
+        `
+        const theme = { color: "red" };
+        const style = { color: theme.color };
 
-          function App() {
-            return <div css={style} />;
-          }
-        `,
-          { jsxCssProp: true }
-        )
-      ).toThrow(
-        'Cannot statically evaluate css prop value: same-file binding "style" contains unsupported member-expression-object-value: MemberExpression'
+        function App() {
+          return <div css={style} />;
+        }
+      `,
+        { jsxCssProp: true }
       );
+
+      expect(code).not.toContain(" css=");
+      expect(code).toContain("className={_$mincho$$App2}");
+      expect(code).not.toContain("_cx(style)");
+      expect(result[1]).toContain('color: "red"');
     });
 
     it("keeps conditional const object css prop values in class-value mode", () => {
