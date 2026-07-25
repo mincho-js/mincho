@@ -406,34 +406,48 @@ function MyComponent() {
 }
 ```
 
-Static evaluation supports direct object/array values, mutation-free same-file `const` object/array values, and provider-backed ESM sources. Supported sources include project files, package files such as `@pkg/styles`, package barrels, static data modules, and provider-backed virtual modules when the bundler supplies deterministic source text or a literal payload. Named imports, aliased named imports, default imports/exports, selected namespace members such as `styles.button`, whole namespace objects such as `css={styles}`, direct named reexports, and `export *` barrels use the same ESM rules across all supported source kinds:
+Static evaluation supports direct object/array values, mutation-free same-file `const` values, static object/array spreads, static identifier/member operands inside proven CSS-rule literals, and provider-backed ESM sources. Supported sources include project files, package files such as `@pkg/styles`, package barrels, static data modules, and provider-backed virtual modules when the bundler supplies deterministic source text or a literal payload plus identity metadata. Named imports, aliased named imports, default imports/exports, selected namespace members such as `styles.button`, whole namespace objects such as `css={styles}`, direct named reexports, and `export *` barrels use the same ESM rules across all supported source kinds. Object spreads merge left to right, and later keys win. Array spreads inline each static array operand at the spread position:
 
 ```tsx
-const button = { color: 'blue' } as const;
-const stack = [{ display: 'flex' }, { gap: 8 }] as const;
+const color = 'blue' as const;
+const spacing = { gap: 8 } as const;
+const buttonBase = { display: 'flex', color: 'green' } as const;
+const buttonOverride = { color: 'blue' } as const;
+const stackParts = [{ alignItems: 'center' }] as const;
 const styles = {
   button: { color: 'green' },
 } as const;
 
-<div css={button} />
-<div css={stack} />
+<div css={{ ...buttonBase, ...buttonOverride, gap: spacing.gap }} />
+<div css={{ ...buttonBase, color }} />
+<div css={[...stackParts, { gap: spacing.gap }]} />
 <div css={styles.button} />
 ```
 
+Top-level primitive identifiers remain class values, so `css={activeClass}` still lowers through `cx(...)` when it is not proven to be a static CSS rule. Primitive identifiers and member values are only resolved inside object/array literals that are already proven CSS-rule candidates.
+
 ```tsx
 // styles.ts
-export const card = { padding: 16 } as const;
+export const tone = 'green' as const;
+export const cardBase = { padding: 16 } as const;
+export const stackParts = [{ display: 'flex' }] as const;
 
 const panel = { color: 'green' } as const;
+export { cardBase as surface };
 export default panel;
 
 // App.tsx
-import panel, { card } from './styles';
+import panel, { cardBase, stackParts, surface as surfaceStyle, tone } from './styles';
 import * as styles from './styles';
 
+const card = { ...cardBase, color: tone } as const;
+const stack = [...stackParts, { gap: 8 }] as const;
+
 <div css={card} />
+<div css={stack} />
+<div css={surfaceStyle} />
 <div css={panel} />
-<div css={styles.card} />
+<div css={styles.cardBase} />
 ```
 
 Whole namespace objects are supported when every exported value is a static literal CSS property object or fragment:
@@ -468,18 +482,19 @@ import * as styles from './styles';
 <div css={styles.button} />
 ```
 
-Package, data, and virtual sources are supported only through the source provider. Mincho does not resolve package exports on its own; Vite, esbuild, or another integration must provide the source/literal payload and stable identity metadata:
+Package, data, and virtual sources are supported only through the source provider. Mincho does not resolve package exports on its own; Vite, esbuild, or another integration must provide the source/literal payload and stable identity metadata before those operands can be used in static values or spreads:
 
 ```tsx
 // App.tsx
-import pkgStyles, { card as packageCard } from '@pkg/styles';
+import pkgStyles, { palette, reset as packageReset, stackParts as packageStackParts } from '@pkg/styles';
 import { button as packageButton } from '@pkg/styles/barrel';
 import tokens, { brandColor } from '@pkg/styles/tokens.json';
 import rawColor from '@pkg/styles/color.txt?raw';
 import wasmUrl from '@pkg/styles/icon.wasm?url';
 import virtualStyles from 'virtual:mincho-styles';
 
-<div css={packageCard} />
+<div css={{ ...packageReset, color: palette.primary }} />
+<div css={[...packageStackParts, { color: rawColor }]} />
 <div css={pkgStyles.root} />
 <div css={packageButton} />
 <div css={tokens.card} />
@@ -489,21 +504,25 @@ import virtualStyles from 'virtual:mincho-styles';
 <div css={virtualStyles.button} />
 ```
 
-CommonJS sources are supported when the provider supplies deterministic source text. Mincho parses the CommonJS AST, then follows only static shapes: literal `require("./styles")` bindings, shallow destructuring, direct `module.exports` or `exports.name` export maps, static `Object.defineProperty` value/getter descriptors, tsc/Babel/SWC/Rollup/Vite static output, and recognized esbuild helper fingerprints. The helper body must match a known side-effect-free shape; helper names alone are not trusted.
+CommonJS sources are supported when the provider supplies deterministic source text and stable identity metadata. Mincho parses the CommonJS AST, then follows only static shapes: literal `require("./styles")` bindings, shallow destructuring, direct `module.exports` or `exports.name` export maps, static `Object.defineProperty` value/getter descriptors, tsc/Babel/SWC/Rollup/Vite static output, and recognized esbuild helper fingerprints. The helper body must match a known side-effect-free shape; helper names alone are not trusted.
 
 ```tsx
 // styles.cjs
 const button = { color: 'red' };
 const card = { padding: 16 };
+const stack = [{ display: 'flex' }];
+const color = 'blue';
 
-module.exports = { button, card };
+module.exports = { button, card, stack, color };
 
 // App.tsx
 const styles = require('./styles.cjs');
 const { card: cardStyle } = require('./styles.cjs');
 
 <div css={styles.button} />
+<div css={{ ...styles.button, color: styles.color }} />
 <div css={cardStyle} />
+<div css={[...styles.stack, cardStyle]} />
 <div css={styles} />
 ```
 
@@ -526,30 +545,39 @@ import rootDefault, { root } from './styles';
 <div css={root} />
 ```
 
-The practical literal grammar is small: string, number, boolean, `null`, unary numeric values, no-expression template literals such as `` `grid` ``, and nested object/array literals.
+The practical literal grammar is small: string, number, boolean, `null`, unary numeric values, no-expression template literals such as `` `grid` ``, nested object/array literals, static object/array spreads, and static identifier/member operands inside proven CSS-rule literals.
 
-Bundlers provide source resolution and loading only. Vite and esbuild give Mincho provider-backed project/package/data/virtual source text, literal payloads, identity metadata, and dependency edges through the source provider. Mincho then parses source, reads AST export manifests, and statically evaluates only the supported literal subset. No module execution is used. Mincho never executes user modules to obtain `css` prop values, and it does not call Node `require()`, use VM or `eval`, evaluate dynamic imports, or run bundler runtime code for static evaluation.
+Bundlers provide source resolution and loading only. Vite and esbuild give Mincho provider-backed project/package/data/virtual/static CommonJS source text, literal payloads, identity metadata, and dependency edges through the source provider. Mincho then parses source, reads AST export manifests, and statically evaluates only the supported literal subset. No module execution is used. Mincho never executes user modules to obtain `css` prop values, and it does not call Node `require()`, use VM or `eval`, evaluate dynamic imports, or run bundler runtime code for static evaluation.
 
-Explicit exclusions remain: remote/http modules, dynamic `require(expr)`, template or conditional require paths, full Webpack/Turbopack/Parcel bundle runtime graph parsing, runtime wasm init/function exports such as `.wasm?init`, arbitrary virtual modules without provider-supplied source, dynamic import graphs, non-literal loader output, namespace reexports such as `export * as ns from './styles'`, calls/functions/mixins as CSS-rule values, object/array spreads, computed dynamic keys, optional chaining, template expressions, runtime dynamic values, and SWC native integration remain unsupported. Static wasm support is limited to provider-supplied raw/url string forms that arrive as literals; runtime wasm initialization is not evaluated.
+Explicit exclusions remain: remote/http modules, dynamic `require(expr)`, template or conditional require paths, full Webpack/Turbopack/Parcel bundle runtime graph parsing, runtime wasm init/function exports such as `.wasm?init`, arbitrary virtual modules without provider-supplied source, dynamic import graphs, non-literal loader output, namespace reexports such as `export * as ns from './styles'`, function/factory/mixin/call values as CSS-rule values, dynamic or wrong-shape object/array spread operands, computed dynamic keys, optional chaining, template expressions with expressions, runtime dynamic values, and SWC native integration. Static wasm support is limited to provider-supplied raw/url string forms that arrive as literals; runtime wasm initialization is not evaluated.
+
+Function, factory, mixin, and call evaluation all remain deferred and out of scope. Mincho never executes a factory to discover returned styles, and no module execution is used.
 
 Existing dynamic class-value identifiers keep class-value behavior when they cannot be proven static. Proven CSS-rule candidates with unsupported internals fail with `Cannot statically evaluate css prop value` diagnostics.
 
 ```tsx
-const color = 'red';
-const badIdentifierValue = { color };
-const badSpread = { ...base, color: 'red' };
+const dynamicBase = getBase();
+const wrongShape = [{ display: 'flex' }] as const;
+const runtimeColor = props.color;
+const makeRule = () => ({ color: 'red' });
 const styles = { button: { color: 'red' } } as const;
 const variant = 'button';
 const dynamicModule = import('./styles');
+const cjsPath = './styles.cjs';
+const cjsRuntime = require(cjsPath);
 
-<div css={badIdentifierValue} />
-<div css={badSpread} />
+<div css={{ ...dynamicBase, color: 'red' }} />
+<div css={{ ...wrongShape, color: 'red' }} />
+<div css={{ color: getColor() }} />
+<div css={{ ...makeRule() }} />
 <div css={styles[variant]} />
 <div css={styles?.button} />
+<div css={{ color: `${runtimeColor}` }} />
 <div css={dynamicModule} />
+<div css={cjsRuntime.card} />
 ```
 
-These examples fail because static evaluation does not evaluate identifier object values, object spreads, dynamic member paths, optional member paths, or dynamic import graphs inside static CSS-rule candidates.
+These examples fail as static CSS-rule candidates because static evaluation rejects dynamic or wrong-shape spread operands, function/factory/call values, computed dynamic member paths, optional member paths, template expressions with expressions, dynamic import graphs, unsupported dynamic CommonJS, and runtime values.
 
 Ambiguous star barrels fail instead of picking a value:
 
