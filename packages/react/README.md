@@ -85,32 +85,43 @@ Supported expression-valued primitive `css` props lower through `cx(...)`:
 
 ### Static Evaluation
 
-Static evaluation can resolve CSS-rule candidates when the value is a direct object or array, a mutation-free same-file `const`, or an import that the integration/provider can resolve to deterministic source or a literal payload. Supported provider-backed sources include project files, package files, data modules, virtual modules, and static CommonJS shapes when the provider also supplies stable identity metadata. Static member paths over those values are supported, including `styles.button`, `styles.button.primary`, `styles["button"]`, and `styles["button"].primary`.
+Static evaluation can resolve CSS-rule candidates when the value is a direct object or array, a mutation-free same-file `const`, or an import that the integration/provider can resolve to deterministic source or a literal payload. Supported provider-backed sources include project files, package files, data modules, virtual modules, and static CommonJS shapes when the provider also supplies stable identity metadata. Static member paths over those values are supported, including `styles.button`, `styles.button.primary`, `styles["button"]`, `styles["button"].primary`, static computed members such as `styles[variantKey]`, and optional members over proven non-nullish static objects or arrays such as `styles?.button`.
 
-The practical literal grammar is intentionally small: string, number, boolean, `null`, unary numeric expressions such as `-1`, no-expression template literals such as `` `grid` ``, nested object/array literals, static object/array spreads, and static identifier/member operands inside proven CSS-rule literals. Object spreads merge left to right, and later keys win. Array spreads inline each static array operand at the spread position. Supported values are reconstructed as AST literals and then use the same CSS-rule extraction path as inline `css={{ ... }}`.
+The practical literal grammar is intentionally small: string, number, boolean, `null`, unary numeric expressions such as `-1`, no-expression template literals such as `` `grid` ``, primitive-only template interpolation, nested object/array literals, static computed object keys, static object/array spreads, and static identifier/member operands inside proven CSS-rule literals. Object spreads merge left to right, and later keys win. Array spreads inline each static array operand at the spread position. Supported values are reconstructed as AST literals and then use the same CSS-rule extraction path as inline `css={{ ... }}`.
 
 Top-level primitive identifiers remain class values, so `css={activeClass}` still lowers through `cx(...)` when it is not proven to be a static CSS rule. Primitive identifiers and member values are only statically resolved inside object/array literals that are already proven CSS-rule candidates.
+
+Top-level rule calls such as `css={makeRule("red")}` are supported by handing the whole call to the existing compile-time `css(...)` extraction path. Mincho does not static-evaluate those calls as arbitrary JavaScript, inspect their return values, or execute factories. Nested calls inside static values remain unsupported.
 
 Same-file examples:
 
 ```tsx
 const color = "red" as const;
+const colorKey = "color" as const;
+const variantKey = "button" as const;
+const columns = 2 as const;
 const metrics = { gap: 8 } as const;
 const buttonBase = { display: "inline-flex", color: "blue" } as const;
 const buttonPressed = { color: "darkred" } as const;
-const button = { ...buttonBase, ...buttonPressed, gap: metrics.gap } as const;
+const button = { ...buttonBase, ...buttonPressed, [colorKey]: color, gap: metrics.gap } as const;
 const stackParts = [{ display: "flex" }] as const;
 const stack = [...stackParts, { gap: metrics.gap }] as const;
+const optionalStyles = { card: { padding: 16 } } as const;
 const styles = {
   button: { color: "blue" },
   media: { wide: { padding: 24 } }
 } as const;
+const makeRule = (tone: "red") => ({ color: tone });
 
 <div css={{ ...buttonBase, color }} />
 <div css={button} />
 <div css={stack} />
+<div css={makeRule("red")} />
 <div css={styles.button} />
 <div css={styles["media"].wide} />
+<div css={styles[variantKey]} />
+<div css={optionalStyles?.card} />
+<div css={{ [colorKey]: `${color}`, gridTemplateColumns: `repeat(${columns}, 1fr)` }} />
 ```
 
 Project-local import examples:
@@ -160,14 +171,20 @@ Static CommonJS sources can also participate when the integration supplies deter
 ```tsx
 const cjsStyles = require("./styles.cjs");
 const { base: cjsBase, stack: cjsStack } = require("./styles.cjs");
+const path = "./styles.cjs";
+const cjsFromPath = require(path);
+const templatePath = `./styles.cjs`;
+const cjsFromTemplatePath = require(templatePath);
 
 <div css={{ ...cjsBase, color: cjsStyles.color }} />
 <div css={[...cjsStack, { padding: 16 }]} />
+<div css={cjsFromPath.card} />
+<div css={cjsFromTemplatePath.card} />
 ```
 
 Bundlers provide source resolution and loading only. Vite and esbuild give Mincho provider-backed project, package, data, virtual, and static CommonJS source or literal payloads plus identity metadata and dependency edges. Mincho parses that source and statically evaluates the supported AST subset. No module execution is used. Mincho never executes user modules to obtain `css` prop values, and it does not call Node `require()`, use VM or `eval`, evaluate dynamic imports, or run bundler runtime code for static evaluation.
 
-Function, factory, mixin, and call evaluation all remain deferred and out of scope. Mincho never executes a factory to discover returned styles. Unsupported cases include remote/http modules, dynamic CommonJS, package runtime resolution, function/factory/mixin/call values as CSS-rule values, dynamic or wrong-shape object/array spread operands, computed dynamic keys, optional chaining, template expressions with expressions, dynamic imports, runtime dynamic values, SWC-native integration, and full Webpack/Turbopack/Parcel bundle runtime emulation.
+Function, factory, mixin, and nested call evaluation all remain deferred and out of scope. Mincho never executes a factory to discover returned styles. Unsupported cases include remote/http modules, dynamic CommonJS, package runtime resolution, function/factory/mixin/call values inside static CSS-rule values, optional calls, dynamic or wrong-shape object/array spread operands, computed dynamic keys, dynamic or nullish optional bases, object/call/undefined template interpolation, dynamic imports, runtime dynamic values, SWC-native integration, and full Webpack/Turbopack/Parcel bundle runtime emulation.
 
 Failure policy:
 
@@ -180,25 +197,54 @@ Unsupported examples:
 const dynamicBase = getBase();
 const wrongShape = [{ display: "flex" }] as const;
 const runtimeColor = props.color;
+const runtimeKey = props.property;
+const dynamicStyles = props.styles;
+const nullStyles = null as { button: { color: "red" } } | null;
 const makeRule = () => ({ color: "red" });
+const makeColor = () => "red";
+const makeKey = () => "button";
 const styles = { button: { color: "red" } } as const;
-const variant = "button";
+const variant = props.variant;
 const dynamicModule = import("./styles");
-const cjsPath = "./styles.cjs";
-const cjsRuntime = require(cjsPath);
+import { cjsPath as importedCjsPath } from "./paths";
+const dynamicCjsPath = props.path;
+let nonConstCjsPath = "./styles.cjs";
+nonConstCjsPath = "./other.cjs";
+const cjsPathBox = { path: "./styles.cjs" };
+cjsPathBox.path = "./other.cjs";
+const cjsDynamic = require(dynamicCjsPath);
+const cjsNonConst = require(nonConstCjsPath);
+const cjsMutated = require(cjsPathBox.path);
 
 <div css={{ ...dynamicBase, color: "red" }} />
 <div css={{ ...wrongShape, color: "red" }} />
-<div css={{ color: getColor() }} />
+<div css={{ color: makeColor() }} />
+<div css={makeRule?.()} />
 <div css={{ ...makeRule() }} />
+<div css={{ [runtimeKey]: "red" }} />
+<div css={styles[makeKey()]} />
 <div css={styles[variant]} />
-<div css={styles?.button} />
+<div css={dynamicStyles?.button} />
+<div css={nullStyles?.button} />
 <div css={{ color: `${runtimeColor}` }} />
+<div css={{ color: `${styles.button}` }} />
+<div css={{ color: `${makeColor()}` }} />
+<div css={{ color: `${undefined}` }} />
 <div css={dynamicModule} />
-<div css={cjsRuntime.card} />
+<div css={cjsDynamic.card} />
+<div css={cjsNonConst.card} />
+<div css={cjsMutated.card} />
+
+function loadShadowed(require: (path: string) => unknown) {
+  const path = "./styles.cjs";
+  return <div css={require(path)} />;
+}
+
+const cjsImported = require(importedCjsPath);
+<div css={cjsImported.card} />
 ```
 
-These examples fail as static CSS-rule candidates because static evaluation rejects dynamic or wrong-shape spread operands, function/factory/call values, computed dynamic member paths, optional member paths, template expressions with expressions, dynamic import graphs, unsupported dynamic CommonJS, and runtime values.
+These examples fail as static CSS-rule candidates because static evaluation rejects dynamic or wrong-shape spread operands, nested function/factory/call values, optional calls, dynamic and call-derived keys, dynamic or nullish optional bases, runtime/object/call/undefined template interpolation, dynamic import graphs, dynamic/non-const/imported/mutated/shadowed CommonJS require paths, and runtime values.
 
 Static JSX `css` arrays stay on the `css([...])` composition path. They are static `ComplexCSSRule` composition arrays, not recursive `ClassValue` arrays, and they do not lower to `cx(...)` just because they contain string items.
 
@@ -363,6 +409,6 @@ When `jsxCssProp: true` is enabled, unsupported css prop cases fail during the t
 | Duplicate `className` | `Mincho JSX css prop cannot merge duplicate className attributes` |
 | Shorthand or unsupported `className` value | `Mincho JSX css prop requires className to be a string literal or expression` |
 
-Static evaluation failures use diagnostics that start with `Cannot statically evaluate css prop value`, followed by the unsupported reason. Reasons include dynamic or wrong-shape spread operands, function/factory/call values, dynamic member paths, optional member paths, template expressions with expressions, dynamic import graphs, unsupported source kinds such as `external-no-source` or `provider-virtual-no-source`, and unsupported dynamic CommonJS.
+Static evaluation failures use diagnostics that start with `Cannot statically evaluate css prop value`, followed by the unsupported reason. Reasons include dynamic or wrong-shape spread operands, nested function/factory/call values, optional calls, dynamic member paths, dynamic or nullish optional member paths, runtime or non-primitive template interpolation, dynamic import graphs, unsupported source kinds such as `external-no-source` or `provider-virtual-no-source`, and unsupported dynamic CommonJS.
 
 The same `jsxCssProp: true` transform flag is exposed through `@mincho-js/babel`, `@mincho-js/integration`, `@mincho-js/vite`, and `@mincho-js/esbuild`.

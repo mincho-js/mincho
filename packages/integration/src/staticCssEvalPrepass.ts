@@ -1,4 +1,5 @@
 import { types as t } from "@babel/core";
+import type { NodePath } from "@babel/core";
 import {
   internalCollectJsxCssPropStaticCssEvalCandidates as collectJsxCssPropStaticCssEvalCandidates,
   internalCreateImportedStaticCssEvalModuleRecord as createImportedStaticCssEvalModuleRecord,
@@ -110,6 +111,10 @@ interface StaticCssEvalPrepassReference {
   readonly bindingName: string;
   readonly memberPath: readonly string[];
 }
+
+type StaticCssEvalPrepassMemberExpression =
+  | t.MemberExpression
+  | t.OptionalMemberExpression;
 
 interface StaticCssEvalPrepassLocalWalkFrame {
   readonly recordId: string;
@@ -308,29 +313,27 @@ async function loadStaticCssEvalPrepassDependency(
     );
     resolution = sourceResolution
       ? normalizeStaticCssEvalSourceResolution(sourceResolution)
-      : null;
-    state.resolvedImports.set(resolvedImportKey, resolution ?? null);
+      : createUnresolvedStaticCssEvalSourceResolution(importPath);
+    state.resolvedImports.set(resolvedImportKey, resolution);
 
-    if (resolution) {
-      state.importResolutions.push(
-        createStaticCssEvalPrepassImportResolution(
-          importerId,
-          importPath,
-          resolution
-        )
-      );
-      state.resolvedDependencies.push(
-        createStaticCssEvalResolvedDependency(
-          importerId,
-          importPath,
-          resolution,
-          false
-        )
-      );
-    }
+    state.importResolutions.push(
+      createStaticCssEvalPrepassImportResolution(
+        importerId,
+        importPath,
+        resolution
+      )
+    );
+    state.resolvedDependencies.push(
+      createStaticCssEvalResolvedDependency(
+        importerId,
+        importPath,
+        resolution,
+        false
+      )
+    );
   }
 
-  if (!resolution) {
+  if (!resolution || resolution.sourceKind === "unresolved") {
     return undefined;
   }
 
@@ -355,6 +358,21 @@ async function loadStaticCssEvalPrepassDependency(
   const loadedSource = await sourceProvider.load(resolution.normalizedPathKey);
 
   if (!loadedSource) {
+    const loadFailureResolution = createLoadFailureStaticCssEvalSourceResolution(
+      resolution
+    );
+    markPrepassImportResolutionUnloaded(
+      state.importResolutions,
+      importerId,
+      importPath,
+      loadFailureResolution
+    );
+    markResolvedDependencyUnloaded(
+      state.resolvedDependencies,
+      importerId,
+      importPath,
+      loadFailureResolution
+    );
     return undefined;
   }
 
@@ -579,15 +597,7 @@ async function loadStaticCssEvalPrepassOwnerLiteralDependencies(
         return;
       }
 
-      const unwrappedExpression =
-        unwrapTransparentCssRuleExpression(expression);
-
-      if (
-        t.isObjectExpression(unwrappedExpression) ||
-        t.isArrayExpression(unwrappedExpression)
-      ) {
-        expressions.push(unwrappedExpression);
-      }
+      expressions.push(unwrapTransparentCssRuleExpression(expression));
     }
   });
 
@@ -623,6 +633,33 @@ async function loadStaticCssEvalPrepassExpressionDependencies(
     return;
   }
 
+  if (t.isTemplateLiteral(expression)) {
+    await loadStaticCssEvalPrepassTemplateLiteralDependencies({
+      ...options,
+      expression
+    });
+    return;
+  }
+
+  if (
+    t.isMemberExpression(expression) ||
+    t.isOptionalMemberExpression(expression)
+  ) {
+    await loadStaticCssEvalPrepassMemberExpressionDependencies({
+      ...options,
+      expression
+    });
+    return;
+  }
+
+  if (t.isCallExpression(expression)) {
+    await loadStaticCssEvalPrepassCallExpressionDependencies({
+      ...options,
+      expression
+    });
+    return;
+  }
+
   const reference = getStaticCssEvalMemberReference(expression);
 
   if (reference?.kind !== "supported") {
@@ -638,6 +675,143 @@ async function loadStaticCssEvalPrepassExpressionDependencies(
     context: options.context,
     localStack: options.localStack
   });
+}
+
+async function loadStaticCssEvalPrepassTemplateLiteralDependencies(
+  options: StaticCssEvalPrepassExpressionWalkOptions & {
+    readonly expression: t.TemplateLiteral;
+  }
+): Promise<void> {
+  for (const interpolation of options.expression.expressions) {
+    if (!t.isExpression(interpolation)) {
+      continue;
+    }
+
+    await loadStaticCssEvalPrepassExpressionDependencies({
+      ...options,
+      expression: interpolation,
+      memberPath: []
+    });
+  }
+}
+
+async function loadStaticCssEvalPrepassMemberExpressionDependencies(
+  options: StaticCssEvalPrepassExpressionWalkOptions & {
+    readonly expression: StaticCssEvalPrepassMemberExpression;
+  }
+): Promise<void> {
+  if (t.isSuper(options.expression.object)) {
+    return;
+  }
+
+  await loadStaticCssEvalPrepassComputedMemberKeyDependencies(options);
+
+  const memberName = getStaticCssEvalPrepassMemberPropertyName(
+    options.expression
+  );
+
+  await loadStaticCssEvalPrepassExpressionDependencies({
+    ...options,
+    expression: options.expression.object,
+    memberPath: memberName ? [memberName, ...options.memberPath] : []
+  });
+}
+
+async function loadStaticCssEvalPrepassComputedMemberKeyDependencies(
+  options: StaticCssEvalPrepassExpressionWalkOptions & {
+    readonly expression: StaticCssEvalPrepassMemberExpression;
+  }
+): Promise<void> {
+  if (
+    !options.expression.computed ||
+    !t.isExpression(options.expression.property)
+  ) {
+    return;
+  }
+
+  await loadStaticCssEvalPrepassExpressionDependencies({
+    ...options,
+    expression: options.expression.property,
+    memberPath: []
+  });
+}
+
+async function loadStaticCssEvalPrepassCallExpressionDependencies(
+  options: StaticCssEvalPrepassExpressionWalkOptions & {
+    readonly expression: t.CallExpression;
+  }
+): Promise<void> {
+  if (
+    t.isIdentifier(options.expression.callee, { name: "require" }) &&
+    (await loadStaticCssEvalPrepassRequireCallDependencies(options))
+  ) {
+    return;
+  }
+
+  if (t.isExpression(options.expression.callee)) {
+    await loadStaticCssEvalPrepassExpressionDependencies({
+      ...options,
+      expression: options.expression.callee,
+      memberPath: []
+    });
+  }
+
+  for (const argument of options.expression.arguments) {
+    if (t.isSpreadElement(argument)) {
+      await loadStaticCssEvalPrepassExpressionDependencies({
+        ...options,
+        expression: argument.argument,
+        memberPath: []
+      });
+      continue;
+    }
+
+    if (t.isExpression(argument)) {
+      await loadStaticCssEvalPrepassExpressionDependencies({
+        ...options,
+        expression: argument,
+        memberPath: []
+      });
+    }
+  }
+}
+
+async function loadStaticCssEvalPrepassRequireCallDependencies(
+  options: StaticCssEvalPrepassExpressionWalkOptions & {
+    readonly expression: t.CallExpression;
+  }
+): Promise<boolean> {
+  const importPath = getStaticCssEvalPrepassRequireImportPath(
+    options.expression,
+    options.moduleRecord
+  );
+
+  if (!importPath) {
+    return false;
+  }
+
+  const dependencyRecord = await loadStaticCssEvalPrepassDependency(
+    options.moduleRecord.id,
+    importPath,
+    options.context
+  );
+
+  if (!dependencyRecord) {
+    return true;
+  }
+
+  const [exportName, ...memberPath] = options.memberPath;
+
+  if (exportName === undefined) {
+    return true;
+  }
+
+  await loadStaticCssEvalPrepassGraphDependencies(
+    dependencyRecord,
+    { exportName, memberPath, wholeNamespace: false },
+    options.context
+  );
+  return true;
 }
 
 async function loadStaticCssEvalPrepassObjectExpressionDependencies(
@@ -662,6 +836,14 @@ async function loadStaticCssEvalPrepassObjectExpressionDependencies(
 
     if (!t.isObjectProperty(property) || !t.isExpression(property.value)) {
       continue;
+    }
+
+    if (property.computed && t.isExpression(property.key)) {
+      await loadStaticCssEvalPrepassExpressionDependencies({
+        ...options,
+        expression: property.key,
+        memberPath: []
+      });
     }
 
     await loadStaticCssEvalPrepassExpressionDependencies({
@@ -707,7 +889,17 @@ async function loadStaticCssEvalPrepassObjectMemberDependencies(
       continue;
     }
 
-    if (getStaticCssEvalPrepassObjectPropertyName(property) !== memberName) {
+    if (property.computed && t.isExpression(property.key)) {
+      await loadStaticCssEvalPrepassExpressionDependencies({
+        ...options,
+        expression: property.key,
+        memberPath: []
+      });
+    }
+
+    const propertyName = getStaticCssEvalPrepassObjectPropertyName(property);
+
+    if (propertyName !== memberName) {
       continue;
     }
 
@@ -1018,21 +1210,120 @@ function getStaticCssEvalPrepassJsxExpression(
 function getStaticCssEvalPrepassObjectPropertyName(
   property: t.ObjectProperty
 ): string | null {
-  const key = property.key;
-
-  if (!property.computed && t.isIdentifier(key)) {
-    return key.name;
+  if (!property.computed && t.isIdentifier(property.key)) {
+    return property.key.name;
   }
 
-  if (t.isStringLiteral(key)) {
-    return key.value;
+  if (t.isStringLiteral(property.key)) {
+    return property.key.value;
   }
 
-  if (t.isNumericLiteral(key)) {
-    return String(key.value);
+  if (t.isNumericLiteral(property.key)) {
+    return String(property.key.value);
   }
 
   return null;
+}
+
+function getStaticCssEvalPrepassMemberPropertyName(
+  expression: StaticCssEvalPrepassMemberExpression
+): string | null {
+  if (!expression.computed && t.isIdentifier(expression.property)) {
+    return expression.property.name;
+  }
+
+  if (t.isStringLiteral(expression.property)) {
+    return expression.property.value;
+  }
+
+  if (t.isNumericLiteral(expression.property)) {
+    return String(expression.property.value);
+  }
+
+  return null;
+}
+
+function getStaticCssEvalPrepassRequireImportPath(
+  expression: t.CallExpression,
+  moduleRecord: ImportedStaticCssEvalModuleRecord
+): string | null {
+  const match: { path: NodePath<t.CallExpression> | null } = { path: null };
+
+  moduleRecord.programPath.traverse({
+    CallExpression(path) {
+      if (path.node === expression) {
+        match.path = path;
+        path.stop();
+      }
+    }
+  });
+  const expressionPath = match.path;
+
+  if (
+    !expressionPath ||
+    !t.isIdentifier(expression.callee) ||
+    expression.callee.name !== "require" ||
+    expression.arguments.length !== 1 ||
+    expressionPath.scope.hasBinding("require")
+  ) {
+    return null;
+  }
+
+  const [specifier] = expression.arguments;
+
+  if (t.isStringLiteral(specifier)) {
+    return specifier.value;
+  }
+
+  return t.isIdentifier(specifier)
+    ? getStaticCssEvalPrepassConstRequireSpecifierImportPath(
+        specifier,
+        expressionPath.scope
+      )
+    : null;
+}
+
+function getStaticCssEvalPrepassConstRequireSpecifierImportPath(
+  specifier: t.Identifier,
+  scope: NodePath<t.CallExpression>["scope"]
+): string | null {
+  const binding = scope.getBinding(specifier.name);
+  const bindingPath = binding?.path;
+
+  if (
+    !binding ||
+    binding.constantViolations.length > 0 ||
+    !bindingPath?.isVariableDeclarator() ||
+    !t.isIdentifier(bindingPath.node.id) ||
+    bindingPath.node.id.name !== specifier.name ||
+    !bindingPath.parentPath.isVariableDeclaration({ kind: "const" })
+  ) {
+    return null;
+  }
+
+  const initPath = bindingPath.get("init");
+
+  return initPath.node && initPath.isExpression()
+    ? getStaticCssEvalPrepassRequireSpecifierValue(
+        unwrapTransparentCssRuleExpression(initPath.node)
+      )
+    : null;
+}
+
+function getStaticCssEvalPrepassRequireSpecifierValue(
+  expression: t.Expression
+): string | null {
+  if (t.isStringLiteral(expression)) {
+    return expression.value;
+  }
+
+  if (!t.isTemplateLiteral(expression) || expression.expressions.length > 0) {
+    return null;
+  }
+
+  const [quasi] = expression.quasis;
+
+  return quasi?.value.cooked ?? quasi?.value.raw ?? "";
 }
 
 function getStaticCssEvalPrepassConstBindingInitExpression(
@@ -1113,6 +1404,66 @@ function createStaticCssEvalPrepassImportResolution(
     ...(unsupportedReason ? { unsupportedReason } : {}),
     ...(watchFiles ? { watchFiles: [...watchFiles] } : {})
   };
+}
+
+function createUnresolvedStaticCssEvalSourceResolution(
+  importPath: string
+): NormalizedStaticCssEvalSourceResolution {
+  const unresolvedId = `unresolved:${importPath}`;
+
+  return {
+    resolvedFile: importPath,
+    canonicalModuleId: unresolvedId,
+    normalizedPathKey: unresolvedId,
+    resolverKind: "source-provider",
+    sourceKind: "unresolved",
+    sourceOrigin: "unresolved",
+    unsupportedReason: "unresolved"
+  };
+}
+
+function createLoadFailureStaticCssEvalSourceResolution(
+  resolution: NormalizedStaticCssEvalSourceResolution
+): NormalizedStaticCssEvalSourceResolution {
+  if (
+    resolution.sourceKind === "external-no-source" ||
+    resolution.sourceKind === "unsupported-source-shape"
+  ) {
+    return resolution;
+  }
+
+  return {
+    ...resolution,
+    sourceKind: "unresolved",
+    sourceOrigin: "unresolved",
+    unsupportedReason: resolution.unsupportedReason ?? "unresolved"
+  };
+}
+
+function markPrepassImportResolutionUnloaded(
+  importResolutions: ImportedStaticCssEvalImportResolution[],
+  importerId: string,
+  importPath: string,
+  resolution: NormalizedStaticCssEvalSourceResolution
+): void {
+  const importResolutionIndex = importResolutions.findIndex(
+    (importResolution) =>
+      importResolution.importerId === importerId &&
+      importResolution.importPath === importPath &&
+      importResolution.resolvedId === resolution.resolvedFile
+  );
+  const unloadedImportResolution = createStaticCssEvalPrepassImportResolution(
+    importerId,
+    importPath,
+    resolution
+  );
+
+  if (importResolutionIndex === -1) {
+    importResolutions.push(unloadedImportResolution);
+    return;
+  }
+
+  importResolutions[importResolutionIndex] = unloadedImportResolution;
 }
 
 function markPrepassImportResolutionLoaded(
@@ -1645,6 +1996,33 @@ function markResolvedDependencyLoaded(
   }
 
   resolvedDependencies[resolvedDependencyIndex] = loadedDependency;
+}
+
+function markResolvedDependencyUnloaded(
+  resolvedDependencies: StaticCssEvalResolvedDependency[],
+  importerId: string,
+  specifier: string,
+  resolution: NormalizedStaticCssEvalSourceResolution
+): void {
+  const resolvedDependencyIndex = resolvedDependencies.findIndex(
+    (dependency) =>
+      dependency.importerId === importerId &&
+      dependency.specifier === specifier &&
+      dependency.resolvedFile === resolution.resolvedFile
+  );
+  const unloadedDependency = createStaticCssEvalResolvedDependency(
+    importerId,
+    specifier,
+    resolution,
+    false
+  );
+
+  if (resolvedDependencyIndex === -1) {
+    resolvedDependencies.push(unloadedDependency);
+    return;
+  }
+
+  resolvedDependencies[resolvedDependencyIndex] = unloadedDependency;
 }
 
 function createStaticCssEvalSourceTextHash(sourceText: string): string {
@@ -2326,6 +2704,355 @@ if (import.meta.vitest) {
       expect(result.dependencyFiles).toEqual([barrelId, stylesId]);
       expect(result.resolvedModuleCache.has(barrelId)).toBe(true);
       expect(result.resolvedModuleCache.has(stylesId)).toBe(true);
+    });
+
+    it("preloads css-prop-reachable computed optional template and const require operands without unused sweep", async () => {
+      const ownerId = "/project/src/App.tsx";
+      const keysId = "/project/src/keys.ts";
+      const toneId = "/project/src/tone.ts";
+      const paletteId = "/project/src/palette.ts";
+      const shadeId = "/project/src/shade.ts";
+      const optionalId = "/project/src/optional.ts";
+      const cjsId = "/project/src/cjs-styles.cjs";
+      const nestedCjsId = "/project/src/nested-styles.cjs";
+      const shadowedCjsId = "/project/src/shadowed-styles.cjs";
+      const callValueId = "/project/src/call-value.ts";
+      const shadowedCallValueId = "/project/src/shadowed-call-value.ts";
+      const unusedId = "/project/src/unused.ts";
+      const ownerSource = `
+        import { key } from "./keys";
+        import { palette } from "./palette";
+        import { toneKey } from "./tone";
+        import { optionalBase } from "./optional";
+        import { shade } from "./shade";
+        import { callValue } from "./call-value";
+        import { shadowedCallValue } from "./shadowed-call-value";
+        import { unused } from "./unused";
+
+        const cjsPath = ("./cjs-styles" as const);
+        const cjsStyles = require(cjsPath);
+        const localKey = "button";
+        const localStyles = {
+          [key]: {
+            color: \`\${palette[toneKey]}\`,
+            background: optionalBase?.[shade],
+            borderColor: cjsStyles.border
+          }
+        } as const;
+        const unusedValue = unused;
+
+        function consume(value) {
+          return value;
+        }
+
+        function App() {
+          const nestedCjsPath = "./nested-styles";
+          return <>
+            <div css={localStyles[localKey]} data-unused={unusedValue} />
+            <div css={consume({ outlineColor: callValue })} />
+            <div css={require(nestedCjsPath).button} />
+          </>;
+        }
+
+        function Shadowed(require) {
+          return <>
+            <div css={require("./shadowed-styles").button} />
+            <div css={require({ color: shadowedCallValue })} />
+          </>;
+        }
+      `;
+      const sources: Record<string, string> = {
+        [ownerId]: ownerSource,
+        [keysId]: `export const key = "button" as const;`,
+        [toneId]: `export const toneKey = "primary" as const;`,
+        [paletteId]: `export const palette = { primary: "red" } as const;`,
+        [shadeId]: `export const shade = "soft" as const;`,
+        [optionalId]: `export const optionalBase = { soft: "blue" } as const;`,
+        [cjsId]: `exports.border = "black";`,
+        [nestedCjsId]: `exports.button = { color: "purple" };`,
+        [shadowedCjsId]: `exports.button = { color: "orange" };`,
+        [callValueId]: `export const callValue = "green" as const;`,
+        [shadowedCallValueId]: `export const shadowedCallValue = "gold" as const;`,
+        [unusedId]: `export const unused = { color: "orange" } as const;`
+      };
+      const resolutions: Record<string, string> = {
+        [`${ownerId}\0./keys`]: keysId,
+        [`${ownerId}\0./tone`]: toneId,
+        [`${ownerId}\0./palette`]: paletteId,
+        [`${ownerId}\0./shade`]: shadeId,
+        [`${ownerId}\0./optional`]: optionalId,
+        [`${ownerId}\0./cjs-styles`]: cjsId,
+        [`${ownerId}\0./nested-styles`]: nestedCjsId,
+        [`${ownerId}\0./shadowed-styles`]: shadowedCjsId,
+        [`${ownerId}\0./call-value`]: callValueId,
+        [`${ownerId}\0./shadowed-call-value`]: shadowedCallValueId,
+        [`${ownerId}\0./unused`]: unusedId
+      };
+      const calls: {
+        resolved: Array<{ importerId: string; importPath: string }>;
+        loaded: string[];
+      } = { resolved: [], loaded: [] };
+      const provider: StaticCssEvalSourceProvider = {
+        resolve(importerId, importPath) {
+          calls.resolved.push({ importerId, importPath });
+          const resolvedId = resolutions[`${importerId}\0${importPath}`];
+
+          return resolvedId
+            ? {
+                resolvedFile: resolvedId,
+                canonicalModuleId: resolvedId,
+                normalizedPathKey: resolvedId,
+                resolverKind: "test"
+              }
+            : null;
+        },
+        load(id) {
+          calls.loaded.push(id);
+          const source = sources[id];
+
+          return source === undefined ? null : { source, resolverKind: "test" };
+        }
+      };
+
+      const { result } = await createStaticCssEvalPrepass(ownerId, provider);
+
+      expect(calls.resolved).toEqual([
+        { importerId: ownerId, importPath: "./keys" },
+        { importerId: ownerId, importPath: "./tone" },
+        { importerId: ownerId, importPath: "./palette" },
+        { importerId: ownerId, importPath: "./shade" },
+        { importerId: ownerId, importPath: "./optional" },
+        { importerId: ownerId, importPath: "./cjs-styles" },
+        { importerId: ownerId, importPath: "./call-value" },
+        { importerId: ownerId, importPath: "./nested-styles" },
+        { importerId: ownerId, importPath: "./shadowed-call-value" }
+      ]);
+      expect(calls.loaded).toEqual([
+        ownerId,
+        keysId,
+        toneId,
+        paletteId,
+        shadeId,
+        optionalId,
+        cjsId,
+        callValueId,
+        nestedCjsId,
+        shadowedCallValueId
+      ]);
+      expect(result.dependencyFiles).toEqual([
+        keysId,
+        toneId,
+        paletteId,
+        shadeId,
+        optionalId,
+        cjsId,
+        callValueId,
+        nestedCjsId,
+        shadowedCallValueId
+      ]);
+      expect(calls.loaded).not.toContain(shadowedCjsId);
+      expect(result.resolvedModuleCache.has(unusedId)).toBe(false);
+    });
+
+    it("records unresolved prepass dependencies and load failures", async () => {
+      const ownerId = "/project/src/App.tsx";
+      const loadFailureId = "/project/src/load-failure.ts";
+      const ownerSource = `
+        import { missingButton } from "./missing";
+        import { loadFailureButton } from "./load-failure";
+
+        function App() {
+          return <>
+            <div css={missingButton} />
+            <div css={loadFailureButton} />
+          </>;
+        }
+      `;
+      const loadedIds: string[] = [];
+      const provider: StaticCssEvalSourceProvider = {
+        resolve(importerId, importPath) {
+          if (importerId === ownerId && importPath === "./load-failure") {
+            return {
+              resolvedFile: loadFailureId,
+              canonicalModuleId: loadFailureId,
+              normalizedPathKey: loadFailureId,
+              resolverKind: "test"
+            };
+          }
+
+          return null;
+        },
+        load(id) {
+          loadedIds.push(id);
+
+          return id === ownerId ? { source: ownerSource } : null;
+        }
+      };
+
+      const { result } = await createStaticCssEvalPrepass(ownerId, provider);
+
+      expect(loadedIds).toEqual([ownerId, loadFailureId]);
+      expect(result.resolvedDependencies).toEqual([
+        expect.objectContaining({
+          importerId: ownerId,
+          specifier: "./missing",
+          resolvedFile: "./missing",
+          canonicalModuleId: "unresolved:./missing",
+          normalizedPathKey: "unresolved:./missing",
+          sourceKind: "unresolved",
+          sourceOrigin: "unresolved",
+          unsupportedReason: "unresolved",
+          loaded: false
+        }),
+        expect.objectContaining({
+          importerId: ownerId,
+          specifier: "./load-failure",
+          resolvedFile: loadFailureId,
+          sourceKind: "unresolved",
+          sourceOrigin: "unresolved",
+          unsupportedReason: "unresolved",
+          loaded: false
+        })
+      ]);
+    });
+
+    it("does not sweep unrelated values behind unknown computed object keys", async () => {
+      const ownerId = "/project/src/App.tsx";
+      const unrelatedId = "/project/src/unrelated.ts";
+      const ownerSource = `
+        import { unrelated } from "./unrelated";
+
+        const styles = {
+          button: { color: "red" },
+          [variant]: unrelated
+        } as const;
+
+        function App() {
+          return <div css={styles.button} />;
+        }
+      `;
+      const calls: {
+        resolved: Array<{ importerId: string; importPath: string }>;
+        loaded: string[];
+      } = { resolved: [], loaded: [] };
+      const provider: StaticCssEvalSourceProvider = {
+        resolve(importerId, importPath) {
+          calls.resolved.push({ importerId, importPath });
+
+          return importPath === "./unrelated"
+            ? {
+                resolvedFile: unrelatedId,
+                canonicalModuleId: unrelatedId,
+                normalizedPathKey: unrelatedId,
+                resolverKind: "test"
+              }
+            : null;
+        },
+        load(id) {
+          calls.loaded.push(id);
+
+          return id === ownerId
+            ? { source: ownerSource }
+            : { source: `export const unrelated = { color: "blue" };` };
+        }
+      };
+
+      const { result } = await createStaticCssEvalPrepass(ownerId, provider);
+
+      expect(calls.resolved).toEqual([]);
+      expect(calls.loaded).toEqual([ownerId]);
+      expect(result.resolvedModuleCache.has(unrelatedId)).toBe(false);
+    });
+
+    it("preloads transitive imported computed key and template operands from reachable exports", async () => {
+      const ownerId = "/project/src/App.tsx";
+      const stylesId = "/project/src/styles.ts";
+      const keysId = "/project/src/keys.ts";
+      const toneId = "/project/src/tone.ts";
+      const paletteId = "/project/src/palette.ts";
+      const unusedId = "/project/src/unused.ts";
+      const ownerSource = `
+        import { button } from "./styles";
+
+        function App() {
+          return <div css={button} />;
+        }
+      `;
+      const stylesSource = `
+        import { key } from "./keys";
+        import { toneKey } from "./tone";
+        import { palette } from "./palette";
+        import { unused } from "./unused";
+
+        const ignored = unused;
+
+        export const button = {
+          [key]: \`\${palette[toneKey]}\`
+        } as const;
+      `;
+      const sources: Record<string, string> = {
+        [ownerId]: ownerSource,
+        [stylesId]: stylesSource,
+        [keysId]: `export const key = "color" as const;`,
+        [toneId]: `export const toneKey = "primary" as const;`,
+        [paletteId]: `export const palette = { primary: "red" } as const;`,
+        [unusedId]: `export const unused = { color: "orange" } as const;`
+      };
+      const resolutions: Record<string, string> = {
+        [`${ownerId}\0./styles`]: stylesId,
+        [`${stylesId}\0./keys`]: keysId,
+        [`${stylesId}\0./tone`]: toneId,
+        [`${stylesId}\0./palette`]: paletteId,
+        [`${stylesId}\0./unused`]: unusedId
+      };
+      const calls: {
+        resolved: Array<{ importerId: string; importPath: string }>;
+        loaded: string[];
+      } = { resolved: [], loaded: [] };
+      const provider: StaticCssEvalSourceProvider = {
+        resolve(importerId, importPath) {
+          calls.resolved.push({ importerId, importPath });
+          const resolvedId = resolutions[`${importerId}\0${importPath}`];
+
+          return resolvedId
+            ? {
+                resolvedFile: resolvedId,
+                canonicalModuleId: resolvedId,
+                normalizedPathKey: resolvedId,
+                resolverKind: "test"
+              }
+            : null;
+        },
+        load(id) {
+          calls.loaded.push(id);
+          const source = sources[id];
+
+          return source === undefined ? null : { source, resolverKind: "test" };
+        }
+      };
+
+      const { result } = await createStaticCssEvalPrepass(ownerId, provider);
+
+      expect(calls.resolved).toEqual([
+        { importerId: ownerId, importPath: "./styles" },
+        { importerId: stylesId, importPath: "./keys" },
+        { importerId: stylesId, importPath: "./tone" },
+        { importerId: stylesId, importPath: "./palette" }
+      ]);
+      expect(calls.loaded).toEqual([
+        ownerId,
+        stylesId,
+        keysId,
+        toneId,
+        paletteId
+      ]);
+      expect(result.dependencyFiles).toEqual([
+        stylesId,
+        keysId,
+        toneId,
+        paletteId
+      ]);
+      expect(result.resolvedModuleCache.has(unusedId)).toBe(false);
     });
 
     it("preloads CommonJS helper export-star dependencies from require candidates", async () => {

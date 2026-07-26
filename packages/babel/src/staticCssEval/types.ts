@@ -327,6 +327,7 @@ export interface StaticCssEvalDiagnostic {
   code: StaticCssEvalDiagnosticCode;
   message: string;
   reason: StaticCssEvalUnsupportedReason;
+  expressionType?: string;
   owner: StaticCssEvalSourceLocation;
   dependency?: StaticCssEvalSourceLocation;
   importPath?: string;
@@ -541,16 +542,29 @@ export const STATIC_CSS_EVAL_SUPPORT_MATRIX = [
     status: "supported"
   },
   {
-    construct: "Computed, optional, destructured, or broad namespace access",
+    construct: "Dynamic, destructured, or unsupported namespace access",
     behavior:
-      "Unsupported; namespace access must resolve to literal member chains or a whole namespace object",
+      "Unsupported; namespace access must resolve to static literal member chains or a whole namespace object",
     status: "unsupported"
   },
   {
-    construct: "CommonJS / `require()`",
+    construct: "CommonJS literal `require()` bindings",
     behavior:
-      "Supported for AST-only static forms: literal `require()` bindings, direct static CJS exports, and recognized compiler helper output; dynamic `require()` and runtime/bundler CommonJS execution remain unsupported",
+      "Supported for AST-only static forms: literal `require()` bindings, direct static CJS exports, and recognized compiler helper output",
     status: "supported"
+  },
+  {
+    construct: "CommonJS const string `require(path)` bindings",
+    behavior:
+      "Supported when `path` is a same-file unmutated `const` initialized to a string literal or no-expression template literal",
+    status: "supported"
+  },
+  {
+    construct:
+      "Dynamic, non-const, shadowed, or unsafe CommonJS `require(...)` paths",
+    behavior:
+      "Unsupported; dynamic `require()`, non-const/imported/mutated path bindings, shadowed `require`, unsupported source shapes, and runtime/bundler CommonJS execution fail closed",
+    status: "unsupported"
   },
   {
     construct:
@@ -598,8 +612,16 @@ export const STATIC_CSS_EVAL_SUPPORT_MATRIX = [
     status: "unsupported"
   },
   {
-    construct: "Calls / mixins / functions",
-    behavior: "Unsupported",
+    construct: "Top-level call/factory/mixin css-rule operands",
+    behavior:
+      "Supported in css-rule positions by handing the whole call to the existing `css(...)` extraction path; calls are not static-evaluated",
+    status: "supported"
+  },
+  {
+    construct:
+      "Nested calls, functions, and optional calls in static css values",
+    behavior:
+      "Unsupported; object/array value calls, function expressions, object methods, spreads from calls, and optional calls fail closed",
     status: "unsupported"
   },
   {
@@ -613,8 +635,15 @@ export const STATIC_CSS_EVAL_SUPPORT_MATRIX = [
     status: "supported"
   },
   {
-    construct: "Template literal with expressions",
-    behavior: "Unsupported",
+    construct: "Template literal with static primitive expressions",
+    behavior:
+      "Supported when every interpolation resolves to string, number, boolean, or null through the static graph",
+    status: "supported"
+  },
+  {
+    construct: "Template interpolation with runtime or non-primitive values",
+    behavior:
+      "Unsupported for dynamic values and object, array, function, call, optional-call, `undefined`, BigInt, or unresolved interpolations",
     status: "unsupported"
   },
   {
@@ -624,8 +653,15 @@ export const STATIC_CSS_EVAL_SUPPORT_MATRIX = [
     status: "supported"
   },
   {
-    construct: "Computed object keys",
-    behavior: "Unsupported",
+    construct: "Static computed object keys",
+    behavior:
+      "Supported when the key resolves to a static string or number; later normalized keys keep JavaScript last-write-wins semantics",
+    status: "supported"
+  },
+  {
+    construct: "Dynamic computed object keys or member paths",
+    behavior:
+      "Unsupported for runtime keys, call-derived keys, BigInt/Symbol keys, and other non-static computed paths",
     status: "unsupported"
   },
   {
@@ -637,8 +673,20 @@ export const STATIC_CSS_EVAL_SUPPORT_MATRIX = [
   {
     construct: "Static identifier/member values in css-rule literals",
     behavior:
-      "Supported when identifiers and non-computed member paths resolve to static literals through same-file or provider-backed bindings",
+      "Supported when identifiers, static member paths, and static computed member paths resolve to static literals through same-file or provider-backed bindings",
     status: "supported"
+  },
+  {
+    construct: "Optional member paths over proven static objects/arrays",
+    behavior:
+      "Supported when the optional-chain base resolves to a non-nullish static object or array and the member key is static",
+    status: "supported"
+  },
+  {
+    construct: "Dynamic or nullish optional chains",
+    behavior:
+      "Unsupported when the optional-chain base is dynamic, unresolved, or statically nullish; optional calls remain unsupported",
+    status: "unsupported"
   },
   {
     construct: "Dynamic or wrong-shape object/array spread operands",
@@ -905,7 +953,7 @@ if (import.meta.vitest) {
       ).toMatchObject({ status: "unsupported" });
       expect(
         supportMatrixByConstruct.get(
-          "Computed, optional, destructured, or broad namespace access"
+          "Dynamic, destructured, or unsupported namespace access"
         )
       ).toMatchObject({ status: "unsupported" });
       expect(
@@ -940,10 +988,26 @@ if (import.meta.vitest) {
         { status: "unsupported" }
       );
       expect(
-        supportMatrixByConstruct.get("CommonJS / `require()`")
+        supportMatrixByConstruct.get("CommonJS literal `require()` bindings")
       ).toMatchObject({
         status: "supported",
-        behavior: expect.stringContaining("dynamic `require()`")
+        behavior: expect.stringContaining("literal `require()`")
+      });
+      expect(
+        supportMatrixByConstruct.get(
+          "CommonJS const string `require(path)` bindings"
+        )
+      ).toMatchObject({
+        status: "supported",
+        behavior: expect.stringContaining("same-file unmutated `const`")
+      });
+      expect(
+        supportMatrixByConstruct.get(
+          "Dynamic, non-const, shadowed, or unsafe CommonJS `require(...)` paths"
+        )
+      ).toMatchObject({
+        status: "unsupported",
+        behavior: expect.stringContaining("fail closed")
       });
       expect(
         supportMatrixConstructs.some(
@@ -962,7 +1026,21 @@ if (import.meta.vitest) {
         supportMatrixByConstruct.get(
           "Static identifier/member values in css-rule literals"
         )
+      ).toMatchObject({
+        status: "supported",
+        behavior: expect.stringContaining("static computed member paths")
+      });
+      expect(
+        supportMatrixByConstruct.get(
+          "Optional member paths over proven static objects/arrays"
+        )
       ).toMatchObject({ status: "supported" });
+      expect(
+        supportMatrixByConstruct.get("Dynamic or nullish optional chains")
+      ).toMatchObject({
+        status: "unsupported",
+        behavior: expect.stringContaining("optional calls remain unsupported")
+      });
       expect(
         supportMatrixByConstruct.get(
           "Dynamic or wrong-shape object/array spread operands"
@@ -972,17 +1050,48 @@ if (import.meta.vitest) {
         behavior: expect.stringContaining("fail closed")
       });
       expect(
-        supportMatrixByConstruct.get("Calls / mixins / functions")
+        supportMatrixByConstruct.get(
+          "Top-level call/factory/mixin css-rule operands"
+        )
+      ).toMatchObject({
+        status: "supported",
+        behavior: expect.stringContaining("existing `css(...)` extraction path")
+      });
+      expect(
+        supportMatrixByConstruct.get(
+          "Nested calls, functions, and optional calls in static css values"
+        )
       ).toMatchObject({ status: "unsupported" });
       expect(
         supportMatrixByConstruct.get("Runtime dynamic values")
+      ).toMatchObject({ status: "unsupported" });
+      expect(
+        supportMatrixByConstruct.get(
+          "Template literal with static primitive expressions"
+        )
+      ).toMatchObject({ status: "supported" });
+      expect(
+        supportMatrixByConstruct.get(
+          "Template interpolation with runtime or non-primitive values"
+        )
+      ).toMatchObject({ status: "unsupported" });
+      expect(
+        supportMatrixByConstruct.get("Static computed object keys")
+      ).toMatchObject({
+        status: "supported",
+        behavior: expect.stringContaining("last-write-wins")
+      });
+      expect(
+        supportMatrixByConstruct.get(
+          "Dynamic computed object keys or member paths"
+        )
       ).toMatchObject({ status: "unsupported" });
       expect(
         supportMatrixConstructs.some(
           (construct) => construct === "Export star (`export *`)"
         )
       ).toBe(false);
-      expect(STATIC_CSS_EVAL_SUPPORT_MATRIX).toHaveLength(41);
+      expect(STATIC_CSS_EVAL_SUPPORT_MATRIX).toHaveLength(48);
     });
 
     it("accepts synchronous provider and cache key contracts", () => {

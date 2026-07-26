@@ -605,7 +605,7 @@ if (import.meta.vitest) {
               <div css={flag && "active"} />
               <div css={providedClass || "fallback"} />
               <div css={maybeClass ?? "fallback"} />
-              <div css={getClassName()} />
+              <div css={["call-base", getClassName()]} />
             </>;
           }
         `,
@@ -674,10 +674,52 @@ if (import.meta.vitest) {
       expect(code).toMatch(
         new RegExp(
           `className=\\{${escapeRegExp(cxIdentifier)}\\(${escapeRegExp(
-            "getClassName()"
+            '"call-base", getClassName()'
           )}\\)\\}`
         )
       );
+    });
+
+    it("recognizes aliased @mincho-js/css cx calls as class values", async () => {
+      const fixturePath = await createBabelFixture(
+        `
+          import { cx as classNames } from "@mincho-js/css";
+
+          const active = true;
+
+          function App() {
+            return <div css={classNames("base", active && "active")} />;
+          }
+        `,
+        "css-prop-cx-alias"
+      );
+      const { result, code } = await babelTransform(fixturePath, {
+        jsxCssProp: true
+      });
+      const [, sidecarSource] = result;
+
+      expect(sidecarSource).not.toContain("classNames(");
+      expect(code).toContain('classNames("base", active && "active")');
+    });
+
+    it("does not treat unrelated local cx helpers as class-value escapes", async () => {
+      const fixturePath = await createBabelFixture(
+        `
+          const cx = (value) => value;
+
+          function App() {
+            return <div css={cx({ color: "red" })} />;
+          }
+        `,
+        "css-prop-local-cx"
+      );
+      const { result, code } = await babelTransform(fixturePath, {
+        jsxCssProp: true
+      });
+      const [, sidecarSource] = result;
+
+      expect(sidecarSource).toContain("cx({");
+      expect(code).not.toContain(" css=");
     });
 
     it("resolves imported named, aliased, default, and nested static css props through a provider", async () => {
@@ -1235,6 +1277,279 @@ if (import.meta.vitest) {
       );
     });
 
+    it("cache invalidation follows computed key operand source identity", async () => {
+      const fs = await import("node:fs/promises");
+      const componentSource = `
+        import { button } from "./styles";
+
+        function App() {
+          return <div css={button} />;
+        }
+      `;
+      const stylesSource = `import { colorKey } from "./keys"; export const button = { [colorKey]: "red" } as const;`;
+      const colorKeySource = `export const colorKey = "color" as const;`;
+      const backgroundKeySource = `export const colorKey = "background" as const;`;
+      const { filePaths } = await createBabelFixtureFiles(
+        {
+          "component.tsx": componentSource,
+          "styles.ts": stylesSource,
+          "keys.ts": colorKeySource
+        },
+        "css-prop-computed-key-cache-invalidation"
+      );
+      const componentId = filePaths["component.tsx"];
+      const stylesId = filePaths["styles.ts"];
+      const keysId = filePaths["keys.ts"];
+      const provider = createFileBackedStaticCssEvalSourceProvider({
+        resolutions: {
+          [`${componentId}\0./styles`]: stylesId,
+          [`${stylesId}\0./keys`]: keysId
+        }
+      });
+
+      const firstTransform = await babelTransform(componentId, {
+        jsxCssProp: true,
+        staticCssEvalSourceProvider: provider
+      });
+      await fs.writeFile(keysId, backgroundKeySource, "utf8");
+      const secondTransform = await babelTransform(componentId, {
+        jsxCssProp: true,
+        staticCssEvalSourceProvider: provider
+      });
+
+      expect(firstTransform.result[1]).toContain('color: "red"');
+      expect(firstTransform.result[1]).not.toContain('background: "red"');
+      expect(secondTransform.result[1]).toContain('background: "red"');
+      expect(secondTransform.result[1]).not.toContain('color: "red"');
+      expect(firstTransform.staticCssEval?.dependencyFiles).toEqual([
+        stylesId,
+        keysId
+      ]);
+      expect(secondTransform.staticCssEval?.dependencyFiles).toEqual([
+        stylesId,
+        keysId
+      ]);
+      expect(
+        firstTransform.staticCssEval?.resolvedDependencies.find(
+          (dependency) => dependency.resolvedFile === keysId
+        )?.sourceIdentity?.sourceHash
+      ).toBe(createTestSourceIdentity(colorKeySource).sourceHash);
+      expect(
+        secondTransform.staticCssEval?.resolvedDependencies.find(
+          (dependency) => dependency.resolvedFile === keysId
+        )?.sourceIdentity?.sourceHash
+      ).toBe(createTestSourceIdentity(backgroundKeySource).sourceHash);
+    });
+
+    it("cache invalidation follows template interpolation operand source identity", async () => {
+      const fs = await import("node:fs/promises");
+      const componentSource = `
+        import { button } from "./styles";
+
+        function App() {
+          return <div css={button} />;
+        }
+      `;
+      const stylesSource =
+        'import { brand } from "./brand"; export const button = { color: `${brand}` } as const;';
+      const redBrandSource = `export const brand = "red" as const;`;
+      const blueBrandSource = `export const brand = "blue" as const;`;
+      const { filePaths } = await createBabelFixtureFiles(
+        {
+          "component.tsx": componentSource,
+          "styles.ts": stylesSource,
+          "brand.ts": redBrandSource
+        },
+        "css-prop-template-cache-invalidation"
+      );
+      const componentId = filePaths["component.tsx"];
+      const stylesId = filePaths["styles.ts"];
+      const brandId = filePaths["brand.ts"];
+      const provider = createFileBackedStaticCssEvalSourceProvider({
+        resolutions: {
+          [`${componentId}\0./styles`]: stylesId,
+          [`${stylesId}\0./brand`]: brandId
+        }
+      });
+
+      const firstTransform = await babelTransform(componentId, {
+        jsxCssProp: true,
+        staticCssEvalSourceProvider: provider
+      });
+      await fs.writeFile(brandId, blueBrandSource, "utf8");
+      const secondTransform = await babelTransform(componentId, {
+        jsxCssProp: true,
+        staticCssEvalSourceProvider: provider
+      });
+
+      expect(firstTransform.result[1]).toContain('color: "red"');
+      expect(firstTransform.result[1]).not.toContain('color: "blue"');
+      expect(secondTransform.result[1]).toContain('color: "blue"');
+      expect(secondTransform.result[1]).not.toContain('color: "red"');
+      expect(firstTransform.staticCssEval?.dependencyFiles).toEqual([
+        stylesId,
+        brandId
+      ]);
+      expect(secondTransform.staticCssEval?.dependencyFiles).toEqual([
+        stylesId,
+        brandId
+      ]);
+      expect(
+        firstTransform.staticCssEval?.resolvedDependencies.find(
+          (dependency) => dependency.resolvedFile === brandId
+        )?.sourceIdentity?.sourceHash
+      ).not.toBe(
+        secondTransform.staticCssEval?.resolvedDependencies.find(
+          (dependency) => dependency.resolvedFile === brandId
+        )?.sourceIdentity?.sourceHash
+      );
+    });
+
+    it("cache invalidation follows optional member target source identity", async () => {
+      const fs = await import("node:fs/promises");
+      const componentSource = `
+        import { button } from "./styles";
+
+        function App() {
+          return <div css={button} />;
+        }
+      `;
+      const stylesSource = `import { palette } from "./palette"; export const button = { color: palette?.primary } as const;`;
+      const redPaletteSource = `export const palette = { primary: "red" } as const;`;
+      const bluePaletteSource = `export const palette = { primary: "blue" } as const;`;
+      const { filePaths } = await createBabelFixtureFiles(
+        {
+          "component.tsx": componentSource,
+          "styles.ts": stylesSource,
+          "palette.ts": redPaletteSource
+        },
+        "css-prop-optional-member-cache-invalidation"
+      );
+      const componentId = filePaths["component.tsx"];
+      const stylesId = filePaths["styles.ts"];
+      const paletteId = filePaths["palette.ts"];
+      const provider = createFileBackedStaticCssEvalSourceProvider({
+        resolutions: {
+          [`${componentId}\0./styles`]: stylesId,
+          [`${stylesId}\0./palette`]: paletteId
+        }
+      });
+
+      const firstTransform = await babelTransform(componentId, {
+        jsxCssProp: true,
+        staticCssEvalSourceProvider: provider
+      });
+      await fs.writeFile(paletteId, bluePaletteSource, "utf8");
+      const secondTransform = await babelTransform(componentId, {
+        jsxCssProp: true,
+        staticCssEvalSourceProvider: provider
+      });
+
+      expect(firstTransform.result[1]).toContain('color: "red"');
+      expect(firstTransform.result[1]).not.toContain('color: "blue"');
+      expect(secondTransform.result[1]).toContain('color: "blue"');
+      expect(secondTransform.result[1]).not.toContain('color: "red"');
+      expect(firstTransform.staticCssEval?.dependencyFiles).toEqual([
+        stylesId,
+        paletteId
+      ]);
+      expect(secondTransform.staticCssEval?.dependencyFiles).toEqual([
+        stylesId,
+        paletteId
+      ]);
+      expect(
+        firstTransform.staticCssEval?.resolvedDependencies.find(
+          (dependency) => dependency.resolvedFile === paletteId
+        )?.sourceIdentity?.sourceHash
+      ).not.toBe(
+        secondTransform.staticCssEval?.resolvedDependencies.find(
+          (dependency) => dependency.resolvedFile === paletteId
+        )?.sourceIdentity?.sourceHash
+      );
+    });
+
+    it("cache invalidation follows const CommonJS require path source and target changes", async () => {
+      const fs = await import("node:fs/promises");
+      const redComponentSource = `
+        const cjsPath = "./red-styles";
+        const styles = require(cjsPath);
+
+        function App() {
+          return <div css={styles.button} />;
+        }
+      `;
+      const blueComponentSource = `
+        const cjsPath = "./blue-styles";
+        const styles = require(cjsPath);
+
+        function App() {
+          return <div css={styles.button} />;
+        }
+      `;
+      const redStylesSource = `exports.button = { color: "red" };`;
+      const orangeStylesSource = `exports.button = { color: "orange" };`;
+      const blueStylesSource = `exports.button = { color: "blue" };`;
+      const { filePaths } = await createBabelFixtureFiles(
+        {
+          "component.tsx": redComponentSource,
+          "red-styles.cjs": redStylesSource,
+          "blue-styles.cjs": blueStylesSource
+        },
+        "css-prop-cjs-const-path-cache-invalidation"
+      );
+      const componentId = filePaths["component.tsx"];
+      const redStylesId = filePaths["red-styles.cjs"];
+      const blueStylesId = filePaths["blue-styles.cjs"];
+      const provider = createFileBackedStaticCssEvalSourceProvider({
+        resolutions: {
+          [`${componentId}\0./red-styles`]: redStylesId,
+          [`${componentId}\0./blue-styles`]: blueStylesId
+        }
+      });
+
+      const firstTransform = await babelTransform(componentId, {
+        jsxCssProp: true,
+        staticCssEvalSourceProvider: provider
+      });
+      await fs.writeFile(redStylesId, orangeStylesSource, "utf8");
+      const secondTransform = await babelTransform(componentId, {
+        jsxCssProp: true,
+        staticCssEvalSourceProvider: provider
+      });
+      await fs.writeFile(componentId, blueComponentSource, "utf8");
+      const thirdTransform = await babelTransform(componentId, {
+        jsxCssProp: true,
+        staticCssEvalSourceProvider: provider
+      });
+
+      expect(firstTransform.result[1]).toContain('color: "red"');
+      expect(secondTransform.result[1]).toContain('color: "orange"');
+      expect(thirdTransform.result[1]).toContain('color: "blue"');
+      expect(firstTransform.staticCssEval?.dependencyFiles).toEqual([
+        redStylesId
+      ]);
+      expect(secondTransform.staticCssEval?.dependencyFiles).toEqual([
+        redStylesId
+      ]);
+      expect(thirdTransform.staticCssEval?.dependencyFiles).toEqual([
+        blueStylesId
+      ]);
+      expect(
+        firstTransform.staticCssEval?.resolvedDependencies[0]?.sourceIdentity
+          ?.sourceHash
+      ).not.toBe(
+        secondTransform.staticCssEval?.resolvedDependencies[0]?.sourceIdentity
+          ?.sourceHash
+      );
+      expect(
+        thirdTransform.staticCssEval?.resolvedDependencies[0]
+      ).toMatchObject({
+        specifier: "./blue-styles",
+        resolvedFile: blueStylesId,
+        loaded: true
+      });
+    });
+
     it("static css eval metadata preserves dependency files resolved dependencies cache keys and source identity", async () => {
       const fs = await import("node:fs/promises");
       const componentSource = `
@@ -1559,7 +1874,7 @@ if (import.meta.vitest) {
 
     it("dedupes CommonJS unsupported diagnostics observed during transform", async () => {
       const componentSource = `
-        const source = "./styles";
+        const source = "./" + "styles";
         const styles = require(source);
 
         function App() {
@@ -2448,6 +2763,15 @@ if (import.meta.vitest) {
           specifier: "./barrel",
           resolvedFile: barrelId,
           loaded: true
+        }),
+        expect.objectContaining({
+          importerId: barrelId,
+          specifier: "./missing",
+          resolvedFile: "./missing",
+          sourceKind: "unresolved",
+          sourceOrigin: "unresolved",
+          unsupportedReason: "unresolved",
+          loaded: false
         })
       ]);
     });
@@ -2508,6 +2832,23 @@ if (import.meta.vitest) {
         importPath: "@scope/styles",
         exportName: "button"
       });
+      expect(thrownError.staticCssEval?.resolvedDependencies).toEqual([
+        expect.objectContaining({
+          importerId: fixturePath,
+          specifier: "./barrel",
+          resolvedFile: barrelId,
+          loaded: true
+        }),
+        expect.objectContaining({
+          importerId: barrelId,
+          specifier: "@scope/styles",
+          resolvedFile: "@scope/styles",
+          sourceKind: "unresolved",
+          sourceOrigin: "unresolved",
+          unsupportedReason: "unresolved",
+          loaded: false
+        })
+      ]);
     });
 
     it("preserves whole-expression reexport fallback but rejects reexports inside static css rules", async () => {

@@ -27,6 +27,7 @@ export interface CreateStaticCssEvalDiagnosticOptions extends StaticCssEvalDiagn
   id?: StaticCssEvalDiagnosticId;
   code: StaticCssEvalDiagnosticCode;
   reason: StaticCssEvalUnsupportedReason;
+  expressionType?: string;
   detail: string;
 }
 
@@ -73,6 +74,9 @@ export function createStaticCssEvalDiagnostic(
     code: options.code,
     message: formatStaticCssEvalDiagnosticMessage(options.detail),
     reason: options.reason,
+    ...(options.expressionType !== undefined
+      ? { expressionType: options.expressionType }
+      : {}),
     owner: cloneSourceLocation(options.owner)
   };
 
@@ -101,13 +105,15 @@ export function createStaticCssEvalDiagnostic(
 
 export function createStaticCssEvalDynamicExpressionUnsupportedDiagnostic(
   context: StaticCssEvalDiagnosticContext,
-  expressionType: string
+  expressionType: string,
+  detail = expressionType
 ): StaticCssEvalDiagnostic {
   return createStaticCssEvalDiagnostic({
     id: "STATIC_CSS_EVAL_DYNAMIC_EXPRESSION_UNSUPPORTED",
     code: "unsupported-source",
     reason: "runtime-dynamic-value",
-    detail: `dynamic expression is unsupported: ${expressionType}`,
+    expressionType,
+    detail: `dynamic expression is unsupported: ${detail}`,
     owner: context.owner,
     dependency: context.dependency,
     importPath: context.importPath,
@@ -654,6 +660,87 @@ if (import.meta.vitest) {
       ]);
     });
 
+    it("documents advanced static rule boundary diagnostics", () => {
+      const owner = { file: "/project/src/App.tsx", start: 30, end: 60 };
+
+      expect(
+        createStaticCssEvalComputedMemberUnsupportedDiagnostic({ owner })
+      ).toEqual({
+        id: "STATIC_CSS_EVAL_COMPUTED_MEMBER_UNSUPPORTED",
+        code: "unsupported-source",
+        message:
+          "Cannot statically evaluate css prop value: computed member access is unsupported",
+        reason: "dynamic-member-path",
+        owner
+      });
+      expect(
+        createStaticCssEvalDynamicExpressionUnsupportedDiagnostic(
+          { owner },
+          "OptionalCallExpression"
+        )
+      ).toEqual({
+        id: "STATIC_CSS_EVAL_DYNAMIC_EXPRESSION_UNSUPPORTED",
+        code: "unsupported-source",
+        message:
+          "Cannot statically evaluate css prop value: dynamic expression is unsupported: OptionalCallExpression",
+        reason: "runtime-dynamic-value",
+        expressionType: "OptionalCallExpression",
+        owner
+      });
+      expect(
+        createStaticCssEvalDynamicExpressionUnsupportedDiagnostic(
+          { owner },
+          "OptionalMemberExpression"
+        )
+      ).toEqual({
+        id: "STATIC_CSS_EVAL_DYNAMIC_EXPRESSION_UNSUPPORTED",
+        code: "unsupported-source",
+        message:
+          "Cannot statically evaluate css prop value: dynamic expression is unsupported: OptionalMemberExpression",
+        reason: "runtime-dynamic-value",
+        expressionType: "OptionalMemberExpression",
+        owner
+      });
+      expect(
+        createStaticCssEvalDynamicExpressionUnsupportedDiagnostic(
+          { owner },
+          "Identifier"
+        )
+      ).toEqual({
+        id: "STATIC_CSS_EVAL_DYNAMIC_EXPRESSION_UNSUPPORTED",
+        code: "unsupported-source",
+        message:
+          "Cannot statically evaluate css prop value: dynamic expression is unsupported: Identifier",
+        reason: "runtime-dynamic-value",
+        expressionType: "Identifier",
+        owner
+      });
+      expect(
+        createStaticCssEvalDynamicExpressionUnsupportedDiagnostic(
+          { owner },
+          "CallExpression"
+        )
+      ).toEqual({
+        id: "STATIC_CSS_EVAL_DYNAMIC_EXPRESSION_UNSUPPORTED",
+        code: "unsupported-source",
+        message:
+          "Cannot statically evaluate css prop value: dynamic expression is unsupported: CallExpression",
+        reason: "runtime-dynamic-value",
+        expressionType: "CallExpression",
+        owner
+      });
+      expect(
+        createStaticCssEvalCjsDynamicRequireUnsupportedDiagnostic({ owner })
+      ).toEqual({
+        id: "STATIC_CSS_EVAL_CJS_DYNAMIC_REQUIRE_UNSUPPORTED",
+        code: "unsupported-source",
+        message:
+          "Cannot statically evaluate css prop value: commonjs dynamic require is unsupported",
+        reason: "commonjs-require",
+        owner
+      });
+    });
+
     it("builds stable diagnostics for unsupported source cases", () => {
       const owner = { file: "/project/src/App.tsx", start: 1, end: 2 };
       const dependency = { file: "/project/src/styles.ts" };
@@ -669,6 +756,7 @@ if (import.meta.vitest) {
         message:
           "Cannot statically evaluate css prop value: dynamic expression is unsupported: CallExpression",
         reason: "runtime-dynamic-value",
+        expressionType: "CallExpression",
         owner
       });
 
