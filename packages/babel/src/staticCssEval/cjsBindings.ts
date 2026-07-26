@@ -1,5 +1,5 @@
-import { types as t } from "@babel/core";
-import type { NodePath } from "@babel/core";
+import { transformSync, types as t } from "@babel/core";
+import type { NodePath, PluginObj } from "@babel/core";
 
 type StaticCssEvalBabelScope = NodePath<t.Node>["scope"];
 
@@ -186,9 +186,66 @@ export function getStaticCssEvalLiteralRequireImportPath(
 
   const [specifier] = expression.arguments;
 
-  return expression.arguments.length === 1 && t.isStringLiteral(specifier)
-    ? specifier.value
+  return expression.arguments.length === 1
+    ? getStaticCssEvalRequireSpecifierImportPath(specifier, scope)
     : null;
+}
+
+function getStaticCssEvalRequireSpecifierImportPath(
+  specifier: t.CallExpression["arguments"][number] | undefined,
+  scope: StaticCssEvalBabelScope
+): string | null {
+  if (t.isStringLiteral(specifier)) {
+    return specifier.value;
+  }
+
+  return t.isIdentifier(specifier)
+    ? getStaticCssEvalConstRequireSpecifierImportPath(specifier, scope)
+    : null;
+}
+
+function getStaticCssEvalConstRequireSpecifierImportPath(
+  specifier: t.Identifier,
+  scope: StaticCssEvalBabelScope
+): string | null {
+  const binding = scope.getBinding(specifier.name);
+
+  if (!binding || binding.constantViolations.length > 0) {
+    return null;
+  }
+
+  const bindingPath = binding.path;
+
+  if (
+    !bindingPath.isVariableDeclarator() ||
+    !t.isIdentifier(bindingPath.node.id) ||
+    bindingPath.node.id.name !== specifier.name ||
+    !bindingPath.parentPath.isVariableDeclaration({ kind: "const" })
+  ) {
+    return null;
+  }
+
+  const { init } = bindingPath.node;
+
+  return t.isExpression(init)
+    ? getStaticCssEvalStaticRequireSpecifierValue(init)
+    : null;
+}
+
+function getStaticCssEvalStaticRequireSpecifierValue(
+  expression: t.Expression
+): string | null {
+  if (t.isStringLiteral(expression)) {
+    return expression.value;
+  }
+
+  if (!t.isTemplateLiteral(expression) || expression.expressions.length > 0) {
+    return null;
+  }
+
+  const [quasi] = expression.quasis;
+
+  return quasi?.value.cooked ?? quasi?.value.raw ?? "";
 }
 
 function getStaticCssEvalMemberPropertyName(
@@ -230,4 +287,132 @@ function hasRequireValueBinding(scope: StaticCssEvalBabelScope): boolean {
   }
 
   return true;
+}
+
+// == Tests ====================================================================
+// Ignore errors when compiling to CommonJS.
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore error TS1343: The 'import.meta' meta-property is only allowed when the '--module' option is 'es2020', 'es2022', 'esnext', 'system', 'node16', or 'nodenext'.
+if (import.meta.vitest) {
+  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+  // @ts-ignore error TS1343: The 'import.meta' meta-property is only allowed when the '--module' option is 'es2020', 'es2022', 'esnext', 'system', 'node16', or 'nodenext'.
+  const { describe, expect, it } = import.meta.vitest;
+
+  function collectBindings(
+    source: string
+  ): Map<string, ImportedStaticCssEvalCjsBinding> {
+    let cjsImports: Map<string, ImportedStaticCssEvalCjsBinding> | null = null;
+
+    transformSync(source, {
+      ast: false,
+      babelrc: false,
+      code: false,
+      configFile: false,
+      filename: "/project/src/App.tsx",
+      parserOpts: { sourceType: "module" },
+      plugins: [
+        createProgramVisitorPlugin((programPath) => {
+          cjsImports = collectStaticCssEvalCjsRequireBindings(programPath);
+        })
+      ]
+    });
+
+    if (!cjsImports) {
+      throw new Error("Expected Babel transform to visit Program");
+    }
+
+    return cjsImports;
+  }
+
+  function createProgramVisitorPlugin(
+    visit: (programPath: NodePath<t.Program>) => void
+  ): PluginObj {
+    return {
+      visitor: {
+        Program(programPath) {
+          visit(programPath);
+        }
+      }
+    };
+  }
+
+  describe("CommonJS require binding collection", () => {
+    it("collects same-file const path CommonJS require bindings", () => {
+      const bindings = collectBindings(`
+        const path = "./styles";
+        const templatePath = \`./styles\`;
+        const styles = require(path);
+        const directButton = require(path).button;
+        const templateCard = require(templatePath).card;
+        const { button, card: cardStyle } = require(path);
+      `);
+
+      expect([...bindings.entries()]).toEqual([
+        [
+          "styles",
+          {
+            kind: "cjs-module",
+            localName: "styles",
+            importPath: "./styles",
+            propertyPath: []
+          }
+        ],
+        [
+          "directButton",
+          {
+            kind: "cjs-member",
+            localName: "directButton",
+            importPath: "./styles",
+            propertyPath: ["button"]
+          }
+        ],
+        [
+          "templateCard",
+          {
+            kind: "cjs-member",
+            localName: "templateCard",
+            importPath: "./styles",
+            propertyPath: ["card"]
+          }
+        ],
+        [
+          "button",
+          {
+            kind: "cjs-destructured",
+            localName: "button",
+            importPath: "./styles",
+            propertyPath: ["button"]
+          }
+        ],
+        [
+          "cardStyle",
+          {
+            kind: "cjs-destructured",
+            localName: "cardStyle",
+            importPath: "./styles",
+            propertyPath: ["card"]
+          }
+        ]
+      ]);
+    });
+
+    it("rejects unsafe CommonJS require path bindings", () => {
+      const cases: readonly string[] = [
+        `let path = "./styles"; const styles = require(path);`,
+        `const path = "./styles"; path = "./other"; const styles = require(path);`,
+        `import { path } from "./paths"; const styles = require(path);`,
+        "const path = `./${name}`; const styles = require(path);",
+        `const path = "./" + "styles"; const styles = require(path);`,
+        `const path = enabled ? "./styles" : "./fallback"; const styles = require(path);`,
+        `const styles = require(path);`,
+        `const path = process.env.STYLES; const styles = require(path);`,
+        `const require = makeRequire(); const path = "./styles"; const styles = require(path);`,
+        `const path = "./styles"; const { [buttonKey]: button } = require(path);`
+      ];
+
+      for (const source of cases) {
+        expect([...collectBindings(source).entries()]).toEqual([]);
+      }
+    });
+  });
 }

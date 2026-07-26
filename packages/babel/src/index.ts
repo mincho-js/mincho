@@ -1072,7 +1072,7 @@ if (import.meta.vitest) {
         expect.arrayContaining([
           expect.objectContaining({
             resolvedId: stylesFile,
-            staticEvalSupportVersion: "static-css-module-export-graph:v3"
+            staticEvalSupportVersion: "static-css-module-export-graph:v4"
           })
         ])
       );
@@ -1406,24 +1406,19 @@ if (import.meta.vitest) {
     it("rejects unsupported same-file static css literal grammar deterministically", () => {
       const fixtures = [
         {
-          setup: `const color = "red"; const style = { color: \`var(\${color})\` };`,
+          setup: `const tokens = { primary: "red" }; const style = { color: \`\${tokens}\` };`,
           expression: "style",
-          reason: "template-expression"
+          reason: "dynamic expression is unsupported"
         },
         {
-          setup: `const styles = { button: { color: "red" } };`,
+          setup: `const styles = null;`,
           expression: "styles?.button",
-          reason: "optional-member-path"
+          reason: "dynamic expression is unsupported"
         },
         {
-          setup: `const key = "button"; const styles = { button: { color: "red" } };`,
-          expression: "styles[key]",
-          reason: "dynamic-member-path"
-        },
-        {
-          setup: `const styles = [{ color: "red" }];`,
-          expression: "styles[0]",
-          reason: "numeric-member-path"
+          setup: `function getKey() { return "button"; } const styles = { button: { color: "red" } };`,
+          expression: "styles[getKey()]",
+          reason: "dynamic expression is unsupported"
         }
       ] as const;
 
@@ -1457,27 +1452,31 @@ if (import.meta.vitest) {
 
     it("records static css eval metadata before unsupported css prop failures", () => {
       const source = `
-        const variant = "button";
         const styles = {
           button: { color: "red" }
         };
 
-        function App() {
+        function App(variant) {
           return <div css={styles[variant]} />;
         }
       `;
 
       expect(() => babelTransform(source, { jsxCssProp: true })).toThrow(
-        "dynamic-member-path"
+        "computed member access is unsupported"
       );
 
       const failure = captureJsxCssPropFailure(source, { jsxCssProp: true });
       const staticCssEvalMetadata = failure.metadata.minchoStaticCssEval;
 
-      expect(failure.error.message).toContain("dynamic-member-path");
+      expect(failure.error.message).toContain(
+        "computed member access is unsupported"
+      );
       expect(staticCssEvalMetadata?.diagnostics.map(({ id }) => id)).toContain(
         "STATIC_CSS_EVAL_COMPUTED_MEMBER_UNSUPPORTED"
       );
+      expect(
+        staticCssEvalMetadata?.diagnostics.map(({ reason }) => reason)
+      ).toContain("dynamic-member-path");
       expect(failure.code).not.toContain('from "@mincho-js/css"');
       expect(failure.code).not.toContain("_css(");
       expect(failure.code).not.toContain("_cx(");
@@ -1486,6 +1485,8 @@ if (import.meta.vitest) {
     it("preserves class-value fallback when static css rule candidacy is unproven", () => {
       const { result, code } = babelTransform(
         `
+        import { cx } from "@mincho-js/css";
+
         const key = "root";
         const styles = { root: "root" };
         let mutable = { button: { color: "red" } };
@@ -1500,7 +1501,7 @@ if (import.meta.vitest) {
             <div css={styles?.root} />
             <div css={styles[0]} />
             <div css={mutable.button} />
-            <div css={getClassName()} />
+            <div css={cx(getClassName())} />
           </>;
         }
       `,
@@ -1512,7 +1513,7 @@ if (import.meta.vitest) {
       expect(code).toContain("className={_cx(styles?.root)}");
       expect(code).toContain("className={_cx(styles[0])}");
       expect(code).toContain("className={_cx(mutable.button)}");
-      expect(code).toContain("className={_cx(getClassName())}");
+      expect(code).toContain("className={_cx(cx(getClassName()))}");
       expect(result[1]).not.toContain("_css(");
     });
 
@@ -1593,8 +1594,10 @@ if (import.meta.vitest) {
       ).toContain("runtime-dynamic-value");
     });
 
-    it("evaluates direct dynamic class-value css prop calls once", () => {
+    it("evaluates explicit cx class-value css prop calls once", () => {
       const source = `
+        import { cx } from "@mincho-js/css";
+
         let callCount = 0;
 
         function getClassName() {
@@ -1603,7 +1606,7 @@ if (import.meta.vitest) {
         }
 
         function App() {
-          return <div css={getClassName()} />;
+          return <div css={cx(getClassName())} />;
         }
       `;
       const { result, code } = babelTransform(source, { jsxCssProp: true });
@@ -1613,7 +1616,7 @@ if (import.meta.vitest) {
       ) as { props: Record<string, unknown>; callCount: number };
 
       expect(code).not.toContain(" css=");
-      expect(code).toContain("className={_cx(getClassName())}");
+      expect(code).toContain("className={_cx(cx(getClassName()))}");
       expect(code).not.toContain("_css(getClassName())");
       expect(result[1]).not.toContain("_css(");
       expect(observed.callCount).toBe(1);
@@ -1739,6 +1742,8 @@ if (import.meta.vitest) {
     it("keeps intrinsic expression css props in class-value mode", () => {
       const { code } = babelTransform(
         `
+        import { cx } from "@mincho-js/css";
+
         const condition = true;
         const flag = true;
         const providedClass = "provided";
@@ -1754,7 +1759,7 @@ if (import.meta.vitest) {
             <div css={flag && "active"} />
             <div css={providedClass || "fallback"} />
             <div css={maybeClass ?? "fallback"} />
-            <div css={getClassName()} />
+            <div css={cx(getClassName())} />
           </>;
         }
       `,
@@ -1767,7 +1772,7 @@ if (import.meta.vitest) {
       expect(code).toContain('className={_cx(flag && "active")}');
       expect(code).toContain('className={_cx(providedClass || "fallback")}');
       expect(code).toContain('className={_cx(maybeClass ?? "fallback")}');
-      expect(code).toContain("className={_cx(getClassName())}");
+      expect(code).toContain("className={_cx(cx(getClassName()))}");
       expect(code).not.toContain(" css=");
       expect(code).not.toContain("_css(");
       expect(code).not.toContain("_css(condition");
@@ -2613,6 +2618,8 @@ if (import.meta.vitest) {
         let fallbackCalls = 0;
         let providedCalls = 0;
 
+        import { cx } from "@mincho-js/css";
+
         function getFallback() {
           fallbackCalls += 1;
           return "fallback";
@@ -2626,7 +2633,7 @@ if (import.meta.vitest) {
         function App() {
           const orProps = <div css={{ color: "red" } || getFallback()} />;
           const nullishProps = <div css={[{ color: "green" }] ?? getFallback()} />;
-          const andProps = <div css={{ color: "blue" } && getProvided()} />;
+          const andProps = <div css={{ color: "blue" } && cx(getProvided())} />;
           return { orProps, nullishProps, andProps };
         }
       `,
@@ -2646,6 +2653,139 @@ if (import.meta.vitest) {
       expect(observed.result.orProps.className).toBe("css-rule");
       expect(observed.result.nullishProps.className).toBe("css-rule");
       expect(observed.result.andProps.className).toBe("provided");
+    });
+
+    it("lowers top-level call factory and mixin jsx css prop rules through extraction", () => {
+      const { result, code } = babelTransform(
+        `
+        function makeRule(color: string) {
+          return { color };
+        }
+
+        function getClassName() {
+          return { color: "green" };
+        }
+
+        const rules = {
+          card(variant: string) {
+            return { color: variant };
+          }
+        };
+
+        function App() {
+          return <>
+            <div css={makeRule("red")} />
+            <div css={getClassName()} />
+            <div css={rules.card("primary")} />
+          </>;
+        }
+      `,
+        { jsxCssProp: true }
+      );
+
+      expect(code).not.toContain(" css=");
+      expect(code).not.toContain('from "@mincho-js/css"');
+      expect(code).not.toContain("_css(");
+      expect(code).not.toContain("_cx(makeRule");
+      expect(code).not.toContain("_cx(getClassName");
+      expect(code).not.toContain("_cx(rules.card");
+      expect(
+        code.match(/className=\{_\$mincho\$\$App\d+\}/g) ?? []
+      ).toHaveLength(3);
+      expect(result[1].match(/_css\(/g) ?? []).toHaveLength(3);
+      expect(result[1]).toContain("function makeRule");
+      expect(result[1]).toContain("function getClassName");
+      expect(result[1]).toContain("const rules");
+      expect(result[1]).toContain('_css(makeRule("red"))');
+      expect(result[1]).toContain("_css(getClassName())");
+      expect(result[1]).toContain('_css(rules.card("primary"))');
+    });
+
+    it("lowers computed optional and template jsx css prop static rules", () => {
+      const { result, code } = babelTransform(
+        `
+        const buttonKey = "button";
+        const colorKey = "color";
+        const brand = "red";
+        const styles = {
+          button: { color: "blue" }
+        } as const;
+
+        function App() {
+          return <>
+            <div css={styles["button"]} />
+            <div css={styles[buttonKey]} />
+            <div css={styles?.button} />
+            <div css={styles?.[buttonKey]} />
+            <div css={{ ["color"]: "red" }} />
+            <div css={{ [colorKey]: \`\${brand}\` }} />
+          </>;
+        }
+      `,
+        { jsxCssProp: true }
+      );
+
+      expect(code).not.toContain(" css=");
+      expect(
+        code.match(/className=\{_\$mincho\$\$App\d+\}/g) ?? []
+      ).toHaveLength(6);
+      expect(result[1].match(/_css\(/g) ?? []).toHaveLength(6);
+      expect(result[1]).toContain('color: "red"');
+      expect(result[1]).not.toContain("[colorKey]");
+      expect(result[1]).not.toContain("`${brand}`");
+    });
+
+    it("lowers first-level call branch jsx css prop rules through extraction", () => {
+      const { result, code } = babelTransform(
+        `
+        const condition = true;
+        const providedClass = "provided";
+        const maybeClass = null;
+
+        function makeRule(color: string) {
+          return { color };
+        }
+
+        function App() {
+          return <>
+            <div css={condition ? makeRule("red") : { color: "blue" }} />
+            <div css={condition && makeRule("red")} />
+            <div css={providedClass || makeRule("red")} />
+            <div css={maybeClass ?? makeRule("red")} />
+            <div css={["base", condition && makeRule("red")]} />
+          </>;
+        }
+      `,
+        { jsxCssProp: true }
+      );
+      const output = `${code}\n${result.join("\n")}`;
+
+      expect(code).not.toContain(" css=");
+      expect(code).not.toContain("css as _css");
+      expect(code).not.toContain("_css(");
+      expect(code).not.toContain("condition ? makeRule");
+      expect(code).not.toContain("condition && makeRule");
+      expect(code).not.toContain("providedClass || makeRule");
+      expect(code).not.toContain("maybeClass ?? makeRule");
+      expect(code).toMatch(
+        /className=\{condition \? _\$mincho\$\$App\d+ : _\$mincho\$\$App\d+\}/
+      );
+      expect(code).toMatch(
+        /className=\{_cx\(condition && _\$mincho\$\$App\d+\)\}/
+      );
+      expect(code).toMatch(
+        /className=\{_cx\(providedClass \|\| _\$mincho\$\$App\d+\)\}/
+      );
+      expect(code).toMatch(
+        /className=\{_cx\(maybeClass \?\? _\$mincho\$\$App\d+\)\}/
+      );
+      expect(code).toMatch(
+        /className=\{_cx\("base", condition && _\$mincho\$\$App\d+\)\}/
+      );
+      expect(result[1].match(/_css\(/g) ?? []).toHaveLength(6);
+      expect(result[1]).toContain('_css(makeRule("red"))');
+      expect(result[1]).toContain('color: "blue"');
+      expect(output).not.toContain("_css(condition");
     });
 
     it("lowers transparent wrapped branch jsx css prop expressions", () => {
@@ -2729,6 +2869,135 @@ if (import.meta.vitest) {
       expect(code).toMatch(
         /className=\{_cx\(cx\(\["base", \{\s+active: isActive\s+\}\]\)\)\}/
       );
+      expect(result[1]).not.toContain("_css(");
+    });
+
+    it("keeps explicit cx call operands in class-value mode", () => {
+      const { result, code } = babelTransform(
+        `
+        import { cx } from "@mincho-js/css";
+
+        function makeRule(color: string) {
+          return { color };
+        }
+
+        function getClassName() {
+          return "dynamic";
+        }
+
+        function App() {
+          return <>
+            <div css={cx(makeRule("red"))} />
+            <div css={cx(getClassName())} />
+          </>;
+        }
+      `,
+        { jsxCssProp: true }
+      );
+
+      expect(code).not.toContain(" css=");
+      expect(code).toContain('className={_cx(cx(makeRule("red")))}');
+      expect(code).toContain("className={_cx(cx(getClassName()))}");
+      expect(result[1]).not.toContain("_css(");
+      expect(result[1]).not.toContain("makeRule");
+      expect(result[1]).not.toContain("getClassName");
+    });
+
+    it("keeps optional call and nested call guardrails out of rule-call lowering", () => {
+      const optionalCall = babelTransform(
+        `
+        function App() {
+          return <div css={makeRule?.("red")} />;
+        }
+      `,
+        { jsxCssProp: true }
+      );
+      const nestedCall = captureJsxCssPropFailure(
+        `
+        function makeColor() {
+          return "red";
+        }
+
+        function App() {
+          return <div css={{ color: makeColor() }} />;
+        }
+      `,
+        { jsxCssProp: true }
+      );
+
+      expect(optionalCall.code).not.toContain(" css=");
+      expect(optionalCall.code).toContain('className={_cx(makeRule?.("red"))}');
+      expect(optionalCall.result[1]).not.toContain("_css(");
+      expect(nestedCall.error.message).toContain(
+        "dynamic expression is unsupported: CallExpression"
+      );
+      expect(nestedCall.code).not.toContain("_cx(makeColor");
+      expect(
+        nestedCall.metadata.minchoStaticCssEval?.diagnostics.map(
+          ({ reason }) => reason
+        )
+      ).toContain("runtime-dynamic-value");
+    });
+
+    it("fails closed for dynamic computed optional and template expression css rules", () => {
+      const dynamicComputed = captureJsxCssPropFailure(
+        `
+        const styles = { button: { color: "red" } };
+        function App(variant) {
+          return <div css={styles[variant]} />;
+        }
+      `,
+        { jsxCssProp: true }
+      );
+      const nullishOptional = captureJsxCssPropFailure(
+        `
+        const styles = null;
+        function App() {
+          return <div css={styles?.button} />;
+        }
+      `,
+        { jsxCssProp: true }
+      );
+      const templateCall = captureJsxCssPropFailure(
+        `
+        function getColor() {
+          return "red";
+        }
+        function App() {
+          return <div css={{ color: \`\${getColor()}\` }} />;
+        }
+      `,
+        { jsxCssProp: true }
+      );
+
+      expect(dynamicComputed.error.message).toContain(
+        "computed member access is unsupported"
+      );
+      expect(nullishOptional.error.message).toContain(
+        "dynamic expression is unsupported"
+      );
+      expect(templateCall.error.message).toContain(
+        "dynamic expression is unsupported: CallExpression"
+      );
+    });
+
+    it("keeps class-value array calls out of direct rule-call lowering", () => {
+      const { result, code } = babelTransform(
+        `
+        function makeRule(color: string) {
+          return { color };
+        }
+
+        function App() {
+          return <div css={["base", makeRule("red")]} />;
+        }
+      `,
+        { jsxCssProp: true }
+      );
+
+      expect(code).not.toContain(" css=");
+      expect(code).toContain('className={_cx("base", makeRule("red"))}');
+      expect(code).not.toContain("_$mincho$$App");
       expect(result[1]).not.toContain("_css(");
     });
 

@@ -21,6 +21,8 @@ interface SupportedStaticMemberReference {
   kind: "supported";
   bindingName: string;
   memberPath: string[];
+  expressionStart: number;
+  expressionEnd: number;
 }
 
 interface UnsupportedStaticMemberReference {
@@ -160,7 +162,9 @@ export function getStaticCssEvalMemberReference(
     return {
       kind: "supported",
       bindingName: unwrappedExpression.name,
-      memberPath: []
+      memberPath: [],
+      expressionStart: unwrappedExpression.start ?? 0,
+      expressionEnd: unwrappedExpression.end ?? 0
     };
   }
 
@@ -195,13 +199,15 @@ function getMemberExpressionReference(
   const propertyName = getStaticMemberPropertyName(expression);
 
   if (!propertyName) {
-    return createUnsupportedMemberPathReference(objectReference, expression);
+    return createUnsupportedMemberPathReference(objectReference);
   }
 
   return {
     kind: "supported",
     bindingName: objectReference.bindingName,
-    memberPath: [...objectReference.memberPath, propertyName]
+    memberPath: [...objectReference.memberPath, propertyName],
+    expressionStart: expression.start ?? objectReference.expressionStart,
+    expressionEnd: expression.end ?? objectReference.expressionEnd
   };
 }
 
@@ -232,20 +238,8 @@ function getOptionalMemberExpressionReference(
 }
 
 function createUnsupportedMemberPathReference(
-  objectReference: SupportedStaticMemberReference,
-  expression: t.MemberExpression
+  objectReference: SupportedStaticMemberReference
 ): UnsupportedStaticMemberReference {
-  if (expression.computed && t.isNumericLiteral(expression.property)) {
-    return {
-      kind: "unsupported",
-      bindingName: objectReference.bindingName,
-      memberPath: objectReference.memberPath,
-      reason: "numeric-member-path",
-      detail: "numeric member paths are unsupported",
-      unsupportedPropertyName: String(expression.property.value)
-    };
-  }
-
   return {
     kind: "unsupported",
     bindingName: objectReference.bindingName,
@@ -266,6 +260,10 @@ function getStaticMemberPropertyName(
 
   if (computed && t.isStringLiteral(property)) {
     return property.value;
+  }
+
+  if (computed && t.isNumericLiteral(property)) {
+    return String(property.value);
   }
 
   return null;
@@ -328,8 +326,10 @@ if (import.meta.vitest) {
     it("collects identifier and member JSX css prop candidates", () => {
       const source = `
         const style = { color: "red" };
+        const buttonKey = "button";
         const styles = {
-          button: { color: "blue" }
+          button: { color: "blue" },
+          1: { color: "green" }
         };
 
         function App() {
@@ -337,6 +337,8 @@ if (import.meta.vitest) {
             <div css={style} />
             <Component css={styles.button} />
             <Component css={styles["button"]} />
+            <Component css={styles[buttonKey]} />
+            <Component css={styles[1]} />
           </>;
         }
       `;
@@ -370,6 +372,14 @@ if (import.meta.vitest) {
           bindingName: "styles",
           memberPath: ["button"],
           expression: 'styles["button"]'
+        },
+        {
+          importerId,
+          expressionStart: source.indexOf("styles[1]"),
+          expressionEnd: source.indexOf("styles[1]") + "styles[1]".length,
+          bindingName: "styles",
+          memberPath: ["1"],
+          expression: "styles[1]"
         }
       ]);
     });

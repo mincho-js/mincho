@@ -1,5 +1,5 @@
-import { types as t } from "@babel/core";
-import type { NodePath } from "@babel/core";
+import { transformSync, types as t } from "@babel/core";
+import type { NodePath, PluginObj } from "@babel/core";
 import { isStaticCssEvalRequireCallExpression } from "./cjsBindings.js";
 
 type StaticCssEvalBabelScope = NodePath<t.Node>["scope"];
@@ -186,4 +186,80 @@ function unwrapTransparentExpression(expression: t.Expression): t.Expression {
   }
 
   return currentExpression;
+}
+
+// == Tests ====================================================================
+// Ignore errors when compiling to CommonJS.
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore error TS1343: The 'import.meta' meta-property is only allowed when the '--module' option is 'es2020', 'es2022', 'esnext', 'system', 'node16', or 'nodenext'.
+if (import.meta.vitest) {
+  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+  // @ts-ignore error TS1343: The 'import.meta' meta-property is only allowed when the '--module' option is 'es2020', 'es2022', 'esnext', 'system', 'node16', or 'nodenext'.
+  const { describe, expect, it } = import.meta.vitest;
+
+  function analyzeInitializer(source: string, bindingName: string): boolean {
+    let result: boolean | null = null;
+
+    transformSync(source, {
+      ast: false,
+      babelrc: false,
+      code: false,
+      configFile: false,
+      filename: "/project/src/App.tsx",
+      parserOpts: { sourceType: "module" },
+      plugins: [
+        createProgramVisitorPlugin((programPath) => {
+          const binding = programPath.scope.getBinding(bindingName);
+          const initPath = binding?.path.isVariableDeclarator()
+            ? binding.path.get("init")
+            : null;
+
+          result = initPath?.isExpression()
+            ? containsStaticCssEvalRequireCallExpression(
+                initPath.node,
+                programPath.scope
+              )
+            : false;
+        })
+      ]
+    });
+
+    if (result === null) {
+      throw new Error("Expected Babel transform to visit Program");
+    }
+
+    return result;
+  }
+
+  function createProgramVisitorPlugin(
+    visit: (programPath: NodePath<t.Program>) => void
+  ): PluginObj {
+    return {
+      visitor: {
+        Program(programPath) {
+          visit(programPath);
+        }
+      }
+    };
+  }
+
+  describe("CommonJS require reachability analysis", () => {
+    it("finds require calls that use same-file const path operands", () => {
+      expect(
+        analyzeInitializer(
+          `const path = "./styles"; const styles = require(path);`,
+          "styles"
+        )
+      ).toBe(true);
+    });
+
+    it("fails closed when require is shadowed", () => {
+      expect(
+        analyzeInitializer(
+          `const require = makeRequire(); const path = "./styles"; const styles = require(path);`,
+          "styles"
+        )
+      ).toBe(false);
+    });
+  });
 }

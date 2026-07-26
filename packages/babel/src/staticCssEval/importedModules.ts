@@ -671,6 +671,25 @@ class ImportedStaticCssEvalResolver {
 
     if (!sourcePolicyResult.ok) {
       markResolutionDependencyInspected(state, resolvedImport.resolvedId);
+      if (sourceMetadata.sourceKind === "unresolved") {
+        return {
+          kind: "error",
+          diagnostic: createStaticCssEvalUnresolvedImportDiagnostic(
+            {
+              owner,
+              dependency: { file: resolvedImport.resolvedId },
+              importPath: request.specifier,
+              exportName: request.exportName,
+              memberPath: request.memberPath,
+              importChain: createResolutionImportChain(
+                state,
+                resolvedImport.resolvedId
+              )
+            },
+            request.specifier
+          )
+        };
+      }
       return { kind: "error", diagnostic: sourcePolicyResult.diagnostic };
     }
 
@@ -2103,7 +2122,15 @@ function resolveStaticExportMapEntry(
   );
 
   if (value.kind === "not-candidate") {
-    return { kind: "not-candidate" };
+    return {
+      kind: "error",
+      diagnostic: createStaticCssEvalDynamicExpressionUnsupportedDiagnostic(
+        createImportedLiteralDiagnosticContext(context),
+        selectedExpression.expression.type
+      ),
+      provenance,
+      cacheKey
+    };
   }
 
   return {
@@ -2835,7 +2862,13 @@ function resolveSameModuleStaticLiteralReference(
 
   return selectedValue.kind === "resolved"
     ? selectedValue
-    : createUnsupportedImportedLiteralResult(options, options.expression);
+    : {
+        kind: "error",
+        diagnostic: createStaticCssEvalDynamicExpressionUnsupportedDiagnostic(
+          createImportedLiteralDiagnosticContext(options.context),
+          selectedExpression.expression.type
+        )
+      };
 }
 
 function findImportedLocalAliasCycleStartIndex(
@@ -3056,6 +3089,41 @@ function getImportedStaticCssEvalVariableBindingInitExpression(
   return initPath.node;
 }
 
+function canUseImportedStaticMemberReferenceFastPath(
+  expression: t.MemberExpression
+): boolean {
+  if (t.isSuper(expression.object)) {
+    return false;
+  }
+
+  if (!isDirectStaticMemberPropertyName(expression)) {
+    return false;
+  }
+
+  const object = unwrapTransparentCssRuleExpression(expression.object);
+
+  if (t.isIdentifier(object)) {
+    return true;
+  }
+
+  return t.isMemberExpression(object)
+    ? canUseImportedStaticMemberReferenceFastPath(object)
+    : false;
+}
+
+function isDirectStaticMemberPropertyName(
+  expression: t.MemberExpression
+): boolean {
+  if (!expression.computed) {
+    return t.isIdentifier(expression.property);
+  }
+
+  return (
+    t.isStringLiteral(expression.property) ||
+    t.isNumericLiteral(expression.property)
+  );
+}
+
 function evaluateStaticCssLiteralExpression(
   options: ImportedStaticCssEvalLiteralEvaluationOptions
 ): ImportedStaticCssEvalLiteralResult {
@@ -3147,6 +3215,38 @@ function evaluateStaticCssLiteralExpression(
     };
   }
 
+  if (t.isTemplateLiteral(unwrappedExpression)) {
+    return evaluateStaticCssTemplateLiteralExpression({
+      ...options,
+      expression: unwrappedExpression
+    });
+  }
+
+  if (
+    t.isMemberExpression(unwrappedExpression) ||
+    t.isOptionalMemberExpression(unwrappedExpression)
+  ) {
+    if (
+      t.isMemberExpression(unwrappedExpression) &&
+      canUseImportedStaticMemberReferenceFastPath(unwrappedExpression)
+    ) {
+      const reference = getStaticCssEvalMemberReference(unwrappedExpression);
+
+      if (reference) {
+        return options.resolveReference({
+          ...options,
+          expression: unwrappedExpression,
+          reference
+        });
+      }
+    }
+
+    return evaluateStaticCssMemberExpression({
+      ...options,
+      expression: unwrappedExpression
+    });
+  }
+
   const reference = getStaticCssEvalMemberReference(unwrappedExpression);
 
   if (reference) {
@@ -3158,6 +3258,116 @@ function evaluateStaticCssLiteralExpression(
   }
 
   return createUnsupportedImportedLiteralResult(options, unwrappedExpression);
+}
+
+function evaluateStaticCssTemplateLiteralExpression(
+  options: ImportedStaticCssEvalLiteralEvaluationOptions & {
+    readonly expression: t.TemplateLiteral;
+  }
+): ImportedStaticCssEvalLiteralResult {
+  let value = "";
+
+  for (let index = 0; index < options.expression.quasis.length; index += 1) {
+    const quasi = options.expression.quasis[index];
+
+    if (quasi) {
+      value += quasi.value.cooked ?? quasi.value.raw;
+    }
+
+    const interpolation = options.expression.expressions[index];
+
+    if (!interpolation) {
+      continue;
+    }
+
+    if (!t.isExpression(interpolation)) {
+      return {
+        kind: "error",
+        diagnostic: createStaticCssEvalDynamicExpressionUnsupportedDiagnostic(
+          createImportedLiteralDiagnosticContext(options.context),
+          interpolation.type
+        )
+      };
+    }
+
+    const interpolationResult = evaluateStaticCssLiteralExpression({
+      ...options,
+      expression: interpolation,
+      depth: options.depth + 1
+    });
+
+    if (interpolationResult.kind === "error") {
+      return interpolationResult;
+    }
+
+    const primitiveValue = getTemplateInterpolationPrimitiveValue(
+      interpolationResult.value
+    );
+
+    if (primitiveValue === undefined) {
+      return {
+        kind: "error",
+        diagnostic: createStaticCssEvalDynamicExpressionUnsupportedDiagnostic(
+          createImportedLiteralDiagnosticContext(options.context),
+          interpolation.type
+        )
+      };
+    }
+
+    value += String(primitiveValue);
+  }
+
+  return { kind: "resolved", value };
+}
+
+function evaluateStaticCssMemberExpression(
+  options: ImportedStaticCssEvalLiteralEvaluationOptions & {
+    readonly expression: t.MemberExpression | t.OptionalMemberExpression;
+  }
+): ImportedStaticCssEvalLiteralResult {
+  if (t.isSuper(options.expression.object)) {
+    return {
+      kind: "error",
+      diagnostic: createStaticCssEvalDynamicExpressionUnsupportedDiagnostic(
+        createImportedLiteralDiagnosticContext(options.context),
+        options.expression.type
+      )
+    };
+  }
+
+  const objectResult = evaluateStaticCssLiteralExpression({
+    ...options,
+    expression: options.expression.object,
+    depth: options.depth + 1
+  });
+
+  if (objectResult.kind === "error") {
+    return objectResult;
+  }
+
+  const memberNameResult = resolveImportedStaticMemberName({
+    ...options,
+    depth: options.depth + 1
+  });
+
+  if (memberNameResult.kind === "error") {
+    return memberNameResult;
+  }
+
+  const memberValue = selectStaticCssLiteralMemberValue(
+    objectResult.value,
+    memberNameResult.memberName
+  );
+
+  return memberValue.kind === "resolved"
+    ? memberValue
+    : {
+        kind: "error",
+        diagnostic: createStaticCssEvalDynamicExpressionUnsupportedDiagnostic(
+          createImportedLiteralDiagnosticContext(options.context),
+          options.expression.type
+        )
+      };
 }
 
 function evaluateStaticCssObjectExpression(
@@ -3197,16 +3407,6 @@ function evaluateStaticCssObjectExpression(
       );
     }
 
-    if (property.computed) {
-      return createStaticCssLiteralError(
-        options.context,
-        "computed-object-key",
-        `imported export "${formatExportName(
-          options.context.exportName
-        )}" contains a computed object key`
-      );
-    }
-
     if (!t.isExpression(property.value)) {
       return createStaticCssLiteralError(
         options.context,
@@ -3217,16 +3417,14 @@ function evaluateStaticCssObjectExpression(
       );
     }
 
-    const propertyName = getStaticObjectPropertyName(property.key);
+    const keyResult = resolveImportedStaticObjectPropertyKey({
+      ...options,
+      property,
+      depth: options.depth + 1
+    });
 
-    if (!propertyName) {
-      return createStaticCssLiteralError(
-        options.context,
-        "unsupported-literal",
-        `imported export "${formatExportName(
-          options.context.exportName
-        )}" contains an unsupported object key`
-      );
+    if (keyResult.kind === "error") {
+      return keyResult;
     }
 
     const propertyResult = evaluateStaticCssLiteralExpression({
@@ -3239,10 +3437,121 @@ function evaluateStaticCssObjectExpression(
       return propertyResult;
     }
 
-    value[propertyName] = propertyResult.value;
+    value[keyResult.propertyName] = propertyResult.value;
   }
 
   return { kind: "resolved", value };
+}
+
+function resolveImportedStaticObjectPropertyKey(
+  options: ImportedStaticCssEvalLiteralEvaluationOptions & {
+    readonly property: t.ObjectProperty;
+  }
+):
+  | { kind: "resolved"; propertyName: string }
+  | { kind: "error"; diagnostic: StaticCssEvalDiagnostic } {
+  const staticName = getStaticObjectPropertyName(options.property.key);
+
+  if (!options.property.computed) {
+    return staticName
+      ? { kind: "resolved", propertyName: staticName }
+      : createStaticCssLiteralError(
+          options.context,
+          "unsupported-literal",
+          `imported export "${formatExportName(
+            options.context.exportName
+          )}" contains an unsupported object key`
+        );
+  }
+
+  if (!t.isExpression(options.property.key)) {
+    return {
+      kind: "error",
+      diagnostic: createStaticCssEvalComputedMemberUnsupportedDiagnostic(
+        createImportedLiteralDiagnosticContext(options.context)
+      )
+    };
+  }
+
+  const keyResult = evaluateStaticCssLiteralExpression({
+    ...options,
+    expression: options.property.key
+  });
+
+  if (keyResult.kind === "error") {
+    return keyResult.diagnostic.id
+      ? keyResult
+      : {
+          kind: "error",
+          diagnostic: createStaticCssEvalDynamicExpressionUnsupportedDiagnostic(
+            createImportedLiteralDiagnosticContext(options.context),
+            options.property.key.type
+          )
+        };
+  }
+
+  const propertyName = getStaticStringOrNumberLiteralValue(keyResult.value);
+
+  return propertyName === null
+    ? {
+        kind: "error",
+        diagnostic: createStaticCssEvalComputedMemberUnsupportedDiagnostic(
+          createImportedLiteralDiagnosticContext(options.context)
+        )
+      }
+    : { kind: "resolved", propertyName: String(propertyName) };
+}
+
+function resolveImportedStaticMemberName(
+  options: ImportedStaticCssEvalLiteralEvaluationOptions & {
+    readonly expression: t.MemberExpression | t.OptionalMemberExpression;
+  }
+):
+  | { kind: "resolved"; memberName: string }
+  | { kind: "error"; diagnostic: StaticCssEvalDiagnostic } {
+  if (
+    !options.expression.computed &&
+    t.isIdentifier(options.expression.property)
+  ) {
+    return { kind: "resolved", memberName: options.expression.property.name };
+  }
+
+  if (!t.isExpression(options.expression.property)) {
+    return {
+      kind: "error",
+      diagnostic: createStaticCssEvalComputedMemberUnsupportedDiagnostic(
+        createImportedLiteralDiagnosticContext(options.context)
+      )
+    };
+  }
+
+  const keyResult = evaluateStaticCssLiteralExpression({
+    ...options,
+    expression: options.expression.property
+  });
+
+  if (keyResult.kind === "error") {
+    return keyResult.diagnostic.id
+      ? keyResult
+      : {
+          kind: "error",
+          diagnostic: createStaticCssEvalDynamicExpressionUnsupportedDiagnostic(
+            createImportedLiteralDiagnosticContext(options.context),
+            options.expression.property.type
+          )
+        };
+  }
+
+  const memberName = getStaticStringOrNumberLiteralValue(keyResult.value);
+
+  return memberName === null
+    ? {
+        kind: "error",
+        diagnostic: createStaticCssEvalComputedMemberUnsupportedDiagnostic(
+          createImportedLiteralDiagnosticContext(options.context)
+        )
+      }
+    : { kind: "resolved", memberName: String(memberName) };
 }
 
 function evaluateStaticCssArrayExpression(
@@ -3296,6 +3605,33 @@ function evaluateStaticCssArrayExpression(
   }
 
   return { kind: "resolved", value };
+}
+
+function selectStaticCssLiteralMemberValue(
+  value: StaticCssLiteral,
+  memberName: string
+): { kind: "resolved"; value: StaticCssLiteral } | { kind: "not-candidate" } {
+  if (isStaticCssLiteralObject(value)) {
+    if (!Object.prototype.hasOwnProperty.call(value, memberName)) {
+      return { kind: "not-candidate" };
+    }
+
+    const memberValue = value[memberName];
+
+    return memberValue === undefined
+      ? { kind: "not-candidate" }
+      : { kind: "resolved", value: memberValue };
+  }
+
+  if (Array.isArray(value) && /^\d+$/.test(memberName)) {
+    const memberValue = value[Number(memberName)];
+
+    return memberValue === undefined
+      ? { kind: "not-candidate" }
+      : { kind: "resolved", value: memberValue };
+  }
+
+  return { kind: "not-candidate" };
 }
 
 function findUnsupportedImportedObjectReferenceDiagnostic(
@@ -3403,6 +3739,20 @@ function findUnsupportedImportedExpressionReferenceDiagnostic(
     unwrappedExpression,
     options.ownerFile
   );
+
+  if (
+    !candidate &&
+    t.isMemberExpression(unwrappedExpression) &&
+    unwrappedExpression.computed &&
+    t.isIdentifier(unwrappedExpression.property)
+  ) {
+    return createStaticCssEvalComputedMemberUnsupportedDiagnostic({
+      owner: createExpressionOwnerLocation(
+        unwrappedExpression,
+        options.ownerFile
+      )
+    });
+  }
 
   if (
     options.includeSupportedReferenceErrors !== false &&
@@ -3542,6 +3892,26 @@ function getModuleStringName(
   return null;
 }
 
+function getStaticStringOrNumberLiteralValue(
+  value: StaticCssLiteral
+): string | number | null {
+  return typeof value === "string" || typeof value === "number" ? value : null;
+}
+
+function getTemplateInterpolationPrimitiveValue(
+  value: StaticCssLiteral
+): string | number | boolean | null | undefined {
+  if (
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean" ||
+    value === null
+  ) {
+    return value;
+  }
+
+  return undefined;
+}
 function createUnsupportedLiteralDetail(
   exportName: StaticCssEvalExportName,
   expression: t.Expression
@@ -4115,6 +4485,130 @@ if (import.meta.vitest) {
       );
     });
 
+    it("resolves imported static css eval computed optional and template operands", () => {
+      const provider = createProviderFromModules({
+        modules: [
+          {
+            id: ownerId,
+            source: `import { button } from "./styles"; <div css={button} />;`
+          },
+          {
+            id: stylesId,
+            source: `
+              import {
+                backgroundKey,
+                brand,
+                enabled,
+                empty,
+                indexKey,
+                palette,
+                stateKey
+              } from "./tokens";
+
+              const colorKey = "color";
+              const styles = {
+                button: { color: "base" },
+                states: { hover: { color: "hover" } },
+                cards: [{ color: "from-array" }]
+              } as const;
+
+              export const button = {
+                [colorKey]: \`\${brand}-\${2}-\${enabled}-\${empty}\`,
+                [backgroundKey]: palette?.primary,
+                duplicate: "first",
+                ["duplicate"]: "last",
+                nested: styles["button"][colorKey],
+                state: styles?.states?.[stateKey]?.color,
+                fromArray: styles.cards?.[indexKey]?.color
+              } as const;
+            `
+          },
+          {
+            id: tokensId,
+            source: `
+              export const backgroundKey = "backgroundColor";
+              export const brand = "brand";
+              export const enabled = true;
+              export const empty = null;
+              export const indexKey = 0;
+              export const palette = { primary: "blue" } as const;
+              export const stateKey = "hover";
+            `
+          }
+        ],
+        importResolutions: [
+          { importerId: ownerId, importPath: "./styles", resolvedId: stylesId },
+          { importerId: stylesId, importPath: "./tokens", resolvedId: tokensId }
+        ]
+      });
+
+      const result = expectResolvedResult(resolveFixture(provider, "button"));
+
+      expect(result.value).toEqual({
+        color: "brand-2-true-null",
+        backgroundColor: "blue",
+        duplicate: "last",
+        nested: "base",
+        state: "hover",
+        fromArray: "from-array"
+      });
+      expect(result.dependencies).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            file: tokensId,
+            exportName: "backgroundKey",
+            contributed: true
+          }),
+          expect.objectContaining({
+            file: tokensId,
+            exportName: "palette",
+            contributed: true
+          }),
+          expect.objectContaining({
+            file: tokensId,
+            exportName: "brand",
+            contributed: true
+          })
+        ])
+      );
+    });
+
+    it("resolves namespace export-star computed optional imported static css eval operands", () => {
+      const provider = createProvider(
+        `
+          import { colorKey, palette } from "./tokens";
+          export const button = { [colorKey]: palette?.primary } as const;
+        `,
+        `import * as styles from "./barrel"; <div css={styles.button} />;`,
+        `export * from "./styles";`,
+        [
+          {
+            id: tokensId,
+            source: `
+              export const colorKey = "color";
+              export const palette = { primary: "red" } as const;
+            `
+          }
+        ],
+        [{ importerId: stylesId, importPath: "./tokens", resolvedId: tokensId }]
+      );
+
+      expect(resolveFixture(provider, "styles", ["button"])).toMatchObject({
+        kind: "resolved",
+        value: { color: "red" },
+        provenance: {
+          kind: "reexported",
+          file: stylesId,
+          exportName: "button"
+        },
+        dependencies: expect.arrayContaining([
+          expect.objectContaining({ file: barrelId, contributed: true }),
+          expect.objectContaining({ file: stylesId, contributed: true }),
+          expect.objectContaining({ file: tokensId, contributed: true })
+        ])
+      });
+    });
+
     it("resolves package data virtual and CommonJS operands through the expanded literal grammar", () => {
       const packageProvider = createProviderFromModules({
         modules: [
@@ -4131,16 +4625,25 @@ if (import.meta.vitest) {
           {
             id: packageLeafId,
             source: `
-              import { base } from "@scope/styles/tokens";
+              import { base, colorKey, tone } from "@scope/styles/tokens";
               import virtualTokens from "virtual:mincho-styles";
-              export const button = { ...base, accent: virtualTokens.accent } as const;
+              const accentKey = "accent";
+              export const button = {
+                ...base,
+                [colorKey]: \`\${tone}-\${virtualTokens?.accent}\`,
+                [accentKey]: virtualTokens?.accent
+              } as const;
             `,
             sourceKind: "package-source",
             sourceOrigin: "package"
           },
           {
             id: packageDataId,
-            source: `export const base = { color: "green" } as const;`,
+            source: `
+              export const base = { padding: 4 } as const;
+              export const colorKey = "color";
+              export const tone = "green";
+            `,
             sourceKind: "static-data",
             sourceOrigin: "data"
           },
@@ -4185,7 +4688,10 @@ if (import.meta.vitest) {
       const cjsProvider = createProvider(
         `
           const tokens = require("./tokens");
-          exports.button = { ...tokens.base, color: tokens.color };
+          exports.button = {
+            [tokens.colorKey]: \`\${tokens.color}-\${tokens.palette?.primary}\`,
+            padding: tokens.space?.[0]
+          };
         `,
         `const styles = require("./styles"); <div css={styles.button} />;`,
         `export { button } from "./styles";`,
@@ -4193,8 +4699,10 @@ if (import.meta.vitest) {
           {
             id: tokensId,
             source: `
-              export const base = { padding: 4 } as const;
+              export const colorKey = "color";
               export const color = "red";
+              export const palette = { primary: "blue" } as const;
+              export const space = [4] as const;
             `
           }
         ],
@@ -4208,7 +4716,11 @@ if (import.meta.vitest) {
         resolveFixture(cjsProvider, "styles", ["button"])
       );
 
-      expect(packageResult.value).toEqual({ color: "green", accent: "purple" });
+      expect(packageResult.value).toEqual({
+        padding: 4,
+        color: "green-purple",
+        accent: "purple"
+      });
       expect(packageResult.dependencies).toEqual(
         expect.arrayContaining([
           expect.objectContaining({ file: packageDataId, contributed: true }),
@@ -4218,7 +4730,7 @@ if (import.meta.vitest) {
           })
         ])
       );
-      expect(cjsResult.value).toEqual({ padding: 4, color: "red" });
+      expect(cjsResult.value).toEqual({ color: "red-blue", padding: 4 });
       expect(cjsResult.dependencies).toEqual(
         expect.arrayContaining([
           expect.objectContaining({ file: stylesId, contributed: true }),
@@ -4886,8 +5398,9 @@ if (import.meta.vitest) {
       expect(resolveFixture(provider, "unresolvedButton")).toMatchObject({
         kind: "error",
         diagnostic: {
+          id: "STATIC_CSS_EVAL_UNRESOLVED_IMPORT",
           code: "unsupported-source",
-          reason: "unresolved",
+          reason: "failed-project-local-dependency",
           dependency: { file: unresolvedId },
           importPath: "@scope/missing"
         }
@@ -5118,7 +5631,7 @@ if (import.meta.vitest) {
       });
     });
 
-    it("rejects imported static css eval mutated computed optional unresolved and dynamic operands", () => {
+    it("rejects imported static css eval mutated unresolved and dynamic operands", () => {
       expect(
         resolveFixture(
           createProvider(`
@@ -5148,8 +5661,24 @@ if (import.meta.vitest) {
         resolveFixture(
           createProvider(
             `
+              const tokenName = getTokenName();
+              export const button = { [tokenName]: "red" } as const;
+            `,
+            `import { button } from "./styles"; <div css={button} />;`,
+            `export { button } from "./styles";`
+          ),
+          "button"
+        )
+      ).toMatchObject({
+        kind: "error",
+        diagnostic: { id: "STATIC_CSS_EVAL_DYNAMIC_EXPRESSION_UNSUPPORTED" }
+      });
+      expect(
+        resolveFixture(
+          createProvider(
+            `
               import * as tokens from "./tokens";
-              const tokenName = "primary";
+              const tokenName = getTokenName();
               export const button = { color: tokens[tokenName] } as const;
             `,
             `import { button } from "./styles"; <div css={button} />;`,
@@ -5167,14 +5696,14 @@ if (import.meta.vitest) {
         )
       ).toMatchObject({
         kind: "error",
-        diagnostic: { id: "STATIC_CSS_EVAL_COMPUTED_MEMBER_UNSUPPORTED" }
+        diagnostic: { id: "STATIC_CSS_EVAL_DYNAMIC_EXPRESSION_UNSUPPORTED" }
       });
       expect(
         resolveFixture(
           createProvider(
             `
               import * as tokens from "./tokens";
-              export const button = { color: tokens?.primary } as const;
+              export const button = { color: tokens?.primary?.() } as const;
             `,
             `import { button } from "./styles"; <div css={button} />;`,
             `export { button } from "./styles";`,
@@ -5191,7 +5720,54 @@ if (import.meta.vitest) {
         )
       ).toMatchObject({
         kind: "error",
+        diagnostic: { reason: "function-or-call" }
+      });
+      expect(
+        resolveFixture(
+          createProvider(`
+            const maybe = null;
+            export const button = maybe?.card;
+          `),
+          "button"
+        )
+      ).toMatchObject({
+        kind: "error",
         diagnostic: { id: "STATIC_CSS_EVAL_DYNAMIC_EXPRESSION_UNSUPPORTED" }
+      });
+      expect(
+        resolveFixture(
+          createProvider(`
+            const palette = { primary: "red" } as const;
+            export const button = { color: \`\${palette}\` } as const;
+          `),
+          "button"
+        )
+      ).toMatchObject({
+        kind: "error",
+        diagnostic: { id: "STATIC_CSS_EVAL_DYNAMIC_EXPRESSION_UNSUPPORTED" }
+      });
+      expect(
+        resolveFixture(
+          createProvider(`
+            const getColor = () => "red";
+            export const button = { color: \`\${getColor}\` } as const;
+          `),
+          "button"
+        )
+      ).toMatchObject({
+        kind: "error",
+        diagnostic: { reason: "function-or-call" }
+      });
+      expect(
+        resolveFixture(
+          createProvider(
+            `export const button = { color: \`\${getColor()}\` } as const;`
+          ),
+          "button"
+        )
+      ).toMatchObject({
+        kind: "error",
+        diagnostic: { reason: "function-or-call" }
       });
       expect(
         resolveFixture(
@@ -5538,10 +6114,10 @@ if (import.meta.vitest) {
       expect(blue.value).toEqual({ color: "blue" });
       expect(missesByFile.get(tokensId)).toBe(2);
       expect(red.cacheKey.staticEvalSupportVersion).toBe(
-        "static-css-module-export-graph:v3"
+        "static-css-module-export-graph:v4"
       );
       expect(STATIC_CSS_MODULE_CACHE_SUPPORT_VERSION).toBe(
-        "static-css-module-export-graph:v3"
+        "static-css-module-export-graph:v4"
       );
       expect(
         formatExportMapCacheKey(
@@ -5551,7 +6127,7 @@ if (import.meta.vitest) {
             sourceHash: "hash:styles-v1"
           })
         )
-      ).toContain('"supportVersion":"static-css-module-export-graph:v3"');
+      ).toContain('"supportVersion":"static-css-module-export-graph:v4"');
     });
 
     it("resolves limited namespace members from project-local literal chains", () => {
@@ -5754,6 +6330,59 @@ if (import.meta.vitest) {
           exportName: "card",
           reexportName: "card"
         }
+      });
+    });
+
+    it("resolves same-file const path CommonJS require bindings", () => {
+      const provider = createProvider(
+        `
+          export const button = { color: "red" } as const;
+          export const card = { color: "blue" } as const;
+          export default { color: "green" } as const;
+        `,
+        `
+          const path = "./styles";
+          const templatePath = \`./styles\`;
+          const styles = require(path);
+          const directButton = require(path).button;
+          const templateDefault = require(templatePath).default;
+          const { card: cardStyle } = require(path);
+          <>
+            <div css={styles.button} />
+            <div css={directButton} />
+            <div css={templateDefault} />
+            <div css={cardStyle} />
+          </>;
+        `
+      );
+
+      const stylesResult = expectResolvedResult(
+        resolveFixture(provider, "styles", ["button"])
+      );
+
+      expect(stylesResult.value).toEqual({ color: "red" });
+      expect(stylesResult.dependencies).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            file: stylesId,
+            specifier: "./styles",
+            exportName: "button",
+            inspected: true,
+            contributed: true
+          })
+        ])
+      );
+      expect(resolveFixture(provider, "directButton")).toMatchObject({
+        kind: "resolved",
+        value: { color: "red" }
+      });
+      expect(resolveFixture(provider, "templateDefault")).toMatchObject({
+        kind: "resolved",
+        value: { color: "green" }
+      });
+      expect(resolveFixture(provider, "cardStyle")).toMatchObject({
+        kind: "resolved",
+        value: { color: "blue" }
       });
     });
 
@@ -5997,6 +6626,54 @@ if (import.meta.vitest) {
       const cases: readonly CjsUnsupportedFixture[] = [
         {
           stylesSource: `export const button = { color: "red" } as const;`,
+          ownerSource: `let path = "./styles"; const styles = require(path); <div css={styles.button} />;`,
+          bindingName: "styles",
+          memberPath: ["button"],
+          expectedDiagnosticId:
+            "STATIC_CSS_EVAL_CJS_DYNAMIC_REQUIRE_UNSUPPORTED"
+        },
+        {
+          stylesSource: `export const button = { color: "red" } as const;`,
+          ownerSource: `const path = "./styles"; path = "./other"; const styles = require(path); <div css={styles.button} />;`,
+          bindingName: "styles",
+          memberPath: ["button"],
+          expectedDiagnosticId:
+            "STATIC_CSS_EVAL_CJS_DYNAMIC_REQUIRE_UNSUPPORTED"
+        },
+        {
+          stylesSource: `export const button = { color: "red" } as const;`,
+          ownerSource: `import { path } from "./paths"; const styles = require(path); <div css={styles.button} />;`,
+          bindingName: "styles",
+          memberPath: ["button"],
+          expectedDiagnosticId:
+            "STATIC_CSS_EVAL_CJS_DYNAMIC_REQUIRE_UNSUPPORTED"
+        },
+        {
+          stylesSource: `export const button = { color: "red" } as const;`,
+          ownerSource: `const path = "./" + "styles"; const styles = require(path); <div css={styles.button} />;`,
+          bindingName: "styles",
+          memberPath: ["button"],
+          expectedDiagnosticId:
+            "STATIC_CSS_EVAL_CJS_DYNAMIC_REQUIRE_UNSUPPORTED"
+        },
+        {
+          stylesSource: `export const button = { color: "red" } as const;`,
+          ownerSource: `const path = enabled ? "./styles" : "./fallback"; const styles = require(path); <div css={styles.button} />;`,
+          bindingName: "styles",
+          memberPath: ["button"],
+          expectedDiagnosticId:
+            "STATIC_CSS_EVAL_CJS_DYNAMIC_REQUIRE_UNSUPPORTED"
+        },
+        {
+          stylesSource: `export const button = { color: "red" } as const;`,
+          ownerSource: `const path = process.env.STYLES; const styles = require(path); <div css={styles.button} />;`,
+          bindingName: "styles",
+          memberPath: ["button"],
+          expectedDiagnosticId:
+            "STATIC_CSS_EVAL_CJS_DYNAMIC_REQUIRE_UNSUPPORTED"
+        },
+        {
+          stylesSource: `export const button = { color: "red" } as const;`,
           ownerSource: `const styles = require(name); <div css={styles.button} />;`,
           bindingName: "styles",
           memberPath: ["button"],
@@ -6106,6 +6783,16 @@ if (import.meta.vitest) {
       for (const fixture of cases) {
         expectCjsUnsupportedFixture(fixture);
       }
+
+      expect(
+        resolveFixture(
+          createProvider(
+            `export const button = { color: "red" } as const;`,
+            `const path = "./styles"; const { [buttonKey]: button } = require(path); <div css={button} />;`
+          ),
+          "button"
+        )
+      ).toEqual({ kind: "not-candidate" });
     });
 
     it("fails closed when CommonJS globals are lexically shadowed", () => {
@@ -6300,6 +6987,40 @@ if (import.meta.vitest) {
           "button"
         )
       ).toEqual({ kind: "not-candidate" });
+    });
+
+    it("fails closed for imported member paths that miss or cross non-object values", () => {
+      expect(
+        resolveFixture(
+          createProvider(
+            `export const styles = { card: { color: "red" } } as const;`,
+            `import { styles } from "./styles"; <div css={styles.button} />;`
+          ),
+          "styles",
+          ["button"]
+        )
+      ).toMatchObject({
+        kind: "error",
+        diagnostic: {
+          id: "STATIC_CSS_EVAL_DYNAMIC_EXPRESSION_UNSUPPORTED"
+        }
+      });
+
+      expect(
+        resolveFixture(
+          createProvider(
+            `export const styles = { button: "class-name" } as const;`,
+            `import { styles } from "./styles"; <div css={styles.button.primary} />;`
+          ),
+          "styles",
+          ["button", "primary"]
+        )
+      ).toMatchObject({
+        kind: "error",
+        diagnostic: {
+          id: "STATIC_CSS_EVAL_DYNAMIC_EXPRESSION_UNSUPPORTED"
+        }
+      });
     });
 
     it("rejects unsupported namespace reexports with exact diagnostics", () => {

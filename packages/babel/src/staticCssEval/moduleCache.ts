@@ -14,7 +14,14 @@ import type {
 
 export const STATIC_CSS_MODULE_CACHE_PARSER_VERSION = "babel-core-parser:v2";
 export const STATIC_CSS_MODULE_CACHE_SUPPORT_VERSION =
-  "static-css-module-export-graph:v3";
+  "static-css-module-export-graph:v4";
+
+export const STATIC_CSS_MODULE_CACHE_PARSER_OPTIONS = {
+  plugins: ["jsx", "typescript"],
+  sourceType: "unambiguous",
+  jsx: true,
+  typescript: true
+} as const satisfies StaticCssEvalParserOptionsKey;
 export interface StaticCssModuleSource {
   resolvedFile: string;
   source: string;
@@ -92,6 +99,8 @@ export interface ExportMapUnsupportedEntry {
     | "cjs-helper"
     | "cjs-export"
     | "default-declaration"
+    | "unsupported-declaration"
+    | "unsupported-specifier"
     | "export-namespace"
     | "export-star";
   declaration: StaticCssModuleExportDeclaration | t.Statement;
@@ -148,6 +157,16 @@ interface StaticCssModuleExportGraphBuildState {
   exportStarReexports: ExportGraphStarReexportEntry[];
   unsupportedExportStars: ExportGraphStarReexportEntry[];
   cjsExportNames: Set<StaticCssEvalExportName>;
+}
+
+interface AddUnsupportedExportMapEntryOptions {
+  readonly state: StaticCssModuleExportGraphBuildState;
+  readonly exportName: StaticCssEvalExportName;
+  readonly unsupportedKind: ExportMapUnsupportedEntry["unsupportedKind"];
+  readonly declaration: StaticCssModuleExportDeclaration | t.Statement;
+  readonly detail: string;
+  readonly reason: StaticCssEvalUnsupportedReason;
+  readonly source?: string;
 }
 
 export interface StaticCssModuleCache {
@@ -450,6 +469,18 @@ function collectDeclaredExportEntries(
 
     for (const declarator of declaration.declarations) {
       if (!t.isIdentifier(declarator.id)) {
+        for (const exportName of Object.keys(
+          t.getBindingIdentifiers(declarator.id)
+        )) {
+          addUnsupportedExportMapEntry({
+            state,
+            exportName,
+            unsupportedKind: "unsupported-declaration",
+            declaration,
+            detail: `exported variable pattern "${exportName}" is unsupported`,
+            reason: "runtime-dynamic-value"
+          });
+        }
         continue;
       }
 
@@ -486,7 +517,25 @@ function collectLocalSpecifierExportEntries(
   state: StaticCssModuleExportGraphBuildState
 ): void {
   for (const specifier of declaration.specifiers) {
-    if (!t.isExportSpecifier(specifier) || specifier.exportKind === "type") {
+    if (!t.isExportSpecifier(specifier)) {
+      const exportName = t.isExportNamespaceSpecifier(specifier)
+        ? getStaticCssModuleName(specifier.exported)
+        : null;
+
+      if (exportName) {
+        addUnsupportedExportMapEntry({
+          state,
+          exportName,
+          unsupportedKind: "unsupported-specifier",
+          declaration,
+          detail: `local export specifier "${exportName}" is unsupported`,
+          reason: "runtime-dynamic-value"
+        });
+      }
+      continue;
+    }
+
+    if (specifier.exportKind === "type") {
       continue;
     }
 
@@ -494,6 +543,16 @@ function collectLocalSpecifierExportEntries(
     const exportName = getStaticCssModuleName(specifier.exported);
 
     if (!localName || !exportName) {
+      if (exportName) {
+        addUnsupportedExportMapEntry({
+          state,
+          exportName,
+          unsupportedKind: "unsupported-specifier",
+          declaration,
+          detail: `local export specifier "${exportName}" is unsupported`,
+          reason: "runtime-dynamic-value"
+        });
+      }
       continue;
     }
 
@@ -523,6 +582,16 @@ function collectDirectNamedReexportEntries(
           importedName,
           source: declaration.source?.value ?? "",
           declaration
+        });
+      } else if (exportName) {
+        addUnsupportedExportMapEntry({
+          state,
+          exportName,
+          unsupportedKind: "unsupported-specifier",
+          declaration,
+          detail: `re-export specifier "${exportName}" is unsupported`,
+          reason: "reexport-or-barrel",
+          source: declaration.source?.value
         });
       }
       continue;
@@ -558,6 +627,26 @@ function addExportMapEntry(
 ): void {
   state.exportMap.set(entry.exportName, entry);
   state.exportGraph.push(entry);
+}
+
+function addUnsupportedExportMapEntry(
+  options: AddUnsupportedExportMapEntryOptions
+): void {
+  addExportMapEntry(options.state, {
+    kind: "unsupported",
+    exportName: options.exportName,
+    unsupportedKind: options.unsupportedKind,
+    declaration: options.declaration,
+    ...(options.source ? { source: options.source } : {}),
+    diagnostic: createUnsupportedDiagnostic({
+      id: "STATIC_CSS_EVAL_DYNAMIC_EXPRESSION_UNSUPPORTED",
+      owner: { file: options.state.file },
+      detail: options.detail,
+      reason: options.reason,
+      exportName: options.exportName,
+      ...(options.source ? { importPath: options.source } : {})
+    })
+  });
 }
 
 function applyStaticCssEvalCjsExportMapOperation(
@@ -2288,6 +2377,28 @@ if (import.meta.vitest) {
           })
         })
       ]);
+    });
+
+    it("records unsupported entries for destructured exported declarations", () => {
+      const cache = createStaticCssModuleCache();
+      const source = createSource(`
+        const tokens = { button: { color: "red" } };
+        export const { button } = tokens;
+      `);
+      const buttonEntry = expectUnsupportedEntry(
+        cache.getExportMapEntry(source, "button")
+      );
+
+      expect(buttonEntry).toMatchObject({
+        exportName: "button",
+        unsupportedKind: "unsupported-declaration",
+        diagnostic: expect.objectContaining({
+          id: "STATIC_CSS_EVAL_DYNAMIC_EXPRESSION_UNSUPPORTED",
+          code: "unsupported-source",
+          reason: "runtime-dynamic-value",
+          exportName: "button"
+        })
+      });
     });
 
     it("records export star as deterministic graph metadata without forwarding default", () => {
