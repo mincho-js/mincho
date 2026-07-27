@@ -60,7 +60,7 @@ export function App() {
 }
 ```
 
-With `jsxCssProp: true`, supported values are lowered to either the existing Mincho `css(...)` extraction path or `cx(...)` class-value merging. If `className` is present, merge order is the existing `className` first and the `css` prop class value second, equivalent to `cx(existingClassName, nextCssClassName)`.
+With `jsxCssProp: true`, supported values are lowered to either the existing Mincho `css(...)` extraction path or `cx(...)` class-value merging. If an explicit `className` or pre-css spread aggregate contributes an existing class, merge order is the existing `className` first and the `css` prop class value second, equivalent to `cx(existingClassName, nextCssClassName)`. Post-css spread ordering is covered in Spread Support.
 
 ### Value Semantics
 
@@ -399,13 +399,21 @@ User-typed custom elements receive typed `css` only when their React JSX intrins
 
 ### Spread Support
 
-Spread aggregation has both ordering and context restrictions. Every spread must appear before an explicit `css` prop, and the JSX element must be the direct return argument or a direct expression statement. In that supported shape, the transform aggregates those props, removes any spread-provided `css`, and merges the aggregate `className` before the explicit `css` value.
+Spread aggregation has both ordering and context restrictions. It applies when an element has an explicit `css` prop plus pre-css spreads, post-css spreads, or both.
 
-Nested spread aggregation is unsupported in compile-away mode. This includes fragment-child JSX, expression-bodied arrows, conditional JSX, logical JSX, call arguments, unbraced control-flow consequents, and other nested expression contexts that would require expression-local runtime wrappers.
+Direct statement-list contexts keep statement-hoist lowering. A direct return argument or direct expression statement lets the transform insert aggregate declarations before the JSX statement with no arrow IIFE. Pre-css spreads aggregate props before `css`, remove any spread-provided `css` from the explicit-css element, and merge the aggregate `className` before the explicit `css` value. Post-css spreads compile the explicit `css` value first, strip spread-provided `css`, and merge the final post-spread `className` after the explicit `css` class.
 
-Spread-after-css is unsupported. Explicit `key` or `ref` on spread css-prop elements is also unsupported because the compile-away aggregation cannot preserve those React-only fields safely.
+Nested expression contexts use expression-local lowering. When statement insertion is not safe, Mincho wraps the aggregate work in a local zero-argument arrow IIFE that returns the rewritten JSX. Supported nested examples include expression-bodied arrows, conditional branches, logical and nullish operands, call arguments, fragment and element children, JSX attribute expression containers, and unbraced control-flow consequents.
 
-Spread-only css values are not transformed by Babel. If an own `css` prop reaches the production or development JSX runtime, the runtime own-`css` guard throws the missed-transform diagnostic instead of leaking, stripping, or styling it.
+ClassName order is always pre-css aggregate, explicit `css`, then post-css aggregate. Within each aggregate group, object-spread semantics apply, so only the final `className` in that group contributes. Non-class props keep JSX object-spread override order. Nested arrow IIFEs are local JavaScript evaluation for those semantics only: Mincho still compiles explicit `css` away and does not add runtime style insertion, a runtime cache, a runtime serializer, a JSX wrapper component, or a helper library.
+
+Spread-only css values, for example `<div {...{ css: styleA }} />`, are not transformed by Babel. Since there is no explicit `css` prop on the element, Mincho does not compile or strip that spread-provided `css` value. If an own `css` prop reaches the production or development JSX runtime, the runtime own-`css` guard throws the missed-transform diagnostic instead of leaking, stripping, or styling it.
+
+Nested spread aggregation rejects moved expressions containing `await` or `yield`. Mincho does not synthesize async or generator IIFEs because that would change JSX expression result types or generator control flow.
+
+Explicit `key` or `ref` on spread css-prop elements is unsupported because the compile-away aggregation cannot preserve those React-only fields safely.
+
+These spread rules are not Emotion runtime parity. Mincho compiles explicit `css` away, but it does not add runtime style insertion, a runtime cache, a runtime serializer, or full runtime spread parity for the `css` prop.
 
 ### Runtime Behavior
 
@@ -430,10 +438,11 @@ When `jsxCssProp: true` is enabled, unsupported css prop cases fail during the t
 | Fragment target | `Mincho JSX css prop does not support fragments because fragments cannot receive className` |
 | Namespaced JSX target | `Mincho JSX css prop does not support namespaced JSX elements` |
 | Unsupported JSX target | `Mincho JSX css prop only supports JSX identifiers and member expressions` |
-| Spread after `css` | `Mincho JSX css prop does not support spreads after css in compile-away mode` |
-| Pre-css spread aggregation outside a direct return argument or direct expression statement | `Mincho JSX css prop spread aggregation only supports direct return or expression statement JSX in compile-away mode` |
+| Spread aggregation outside supported statement-list, replaceable expression, JSX attribute value, or JSX child contexts | `Mincho JSX css prop spread aggregation only supports statement-list JSX, replaceable expression JSX, JSX attribute values, or JSX children in compile-away mode` |
+| Nested `await` or `yield` inside moved spread, `css`, or `className` expressions | `Mincho JSX css prop nested spread aggregation does not support await or yield expressions in compile-away mode` |
 | Explicit `key` or `ref` on a spread css-prop element | `Mincho JSX css prop does not support key/ref on spread elements in compile-away mode` |
 | Shorthand `css` | `Mincho JSX css prop requires an expression value` |
+| Unsupported `css` expression shape | `Mincho JSX css prop expects a Mincho CSS object/expression` |
 | Function value | `Mincho JSX css prop does not support function values in compile-away mode` |
 | Dynamic spread element inside a `css` array at any depth | `Mincho JSX css prop array values do not support spread elements in compile-away mode` |
 | Sequence expression object/array CSS-rule value | `Mincho JSX css prop does not support conditional, logical, or wrapped object/array CSS rule values in compile-away mode` |

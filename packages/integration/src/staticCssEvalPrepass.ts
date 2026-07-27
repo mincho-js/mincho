@@ -1426,6 +1426,7 @@ function createLoadFailureStaticCssEvalSourceResolution(
 ): NormalizedStaticCssEvalSourceResolution {
   if (
     resolution.sourceKind === "external-no-source" ||
+    resolution.sourceKind === "provider-virtual" ||
     resolution.sourceKind === "unsupported-source-shape"
   ) {
     return resolution;

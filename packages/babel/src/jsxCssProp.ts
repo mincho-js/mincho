@@ -50,12 +50,12 @@ const namespacedTargetErrorMessage =
   "Mincho JSX css prop does not support namespaced JSX elements";
 const unsupportedTargetErrorMessage =
   "Mincho JSX css prop only supports JSX identifiers and member expressions";
-const spreadAfterCssErrorMessage =
-  "Mincho JSX css prop does not support spreads after css in compile-away mode";
 const keyRefSpreadErrorMessage =
   "Mincho JSX css prop does not support key/ref on spread elements in compile-away mode";
 const spreadAggregationContextErrorMessage =
-  "Mincho JSX css prop spread aggregation only supports direct return or expression statement JSX in compile-away mode";
+  "Mincho JSX css prop spread aggregation only supports statement-list JSX, replaceable expression JSX, JSX attribute values, or JSX children in compile-away mode";
+const nestedAsyncGeneratorErrorMessage =
+  "Mincho JSX css prop nested spread aggregation does not support await or yield expressions in compile-away mode";
 const cssExpressionValueErrorMessage =
   "Mincho JSX css prop requires an expression value";
 const cssValueErrorMessage =
@@ -84,6 +84,34 @@ type CssPropValueClassification =
 type CssClassNameBaseLoweringRequest = {
   readonly path: NodePath<t.JSXOpeningElement>;
   readonly expression: t.Expression;
+};
+
+type AggregatePropsBinding = {
+  readonly declarations: t.VariableDeclaration[];
+  readonly classNameIdentifier: t.Identifier;
+  readonly restIdentifier: t.Identifier;
+};
+
+type NormalizedJsxCssPropElement = {
+  readonly cssAttribute: t.JSXAttribute;
+  readonly cssExpression: t.Expression;
+  readonly cssValueClassification: CssPropValueClassification;
+  readonly classNameAttribute: t.JSXAttribute | null;
+  readonly attributesBeforeCss: readonly (
+    | t.JSXAttribute
+    | t.JSXSpreadAttribute
+  )[];
+  readonly attributesAfterCss: readonly (
+    | t.JSXAttribute
+    | t.JSXSpreadAttribute
+  )[];
+  readonly hasSpreadBeforeCss: boolean;
+  readonly hasSpreadAfterCss: boolean;
+};
+
+type SpreadAggregatedCssPropLowering = {
+  readonly declarations: t.VariableDeclaration[];
+  readonly attributes: Array<t.JSXAttribute | t.JSXSpreadAttribute>;
 };
 
 type CssClassNameRootResultLoweringRequest = CssClassNameBaseLoweringRequest & {
@@ -211,7 +239,10 @@ export function preprocessJsxCssProp(
       }
 
       const { cssAttribute, classNameAttribute } = normalizedElement;
-      if (normalizedElement.hasSpreadBeforeCss) {
+      if (
+        normalizedElement.hasSpreadBeforeCss ||
+        normalizedElement.hasSpreadAfterCss
+      ) {
         transformSpreadAggregatedCssProp(openingElementPath, normalizedElement);
         transformed = true;
         return;
@@ -311,15 +342,7 @@ function normalizeOpeningElement(
   openingElementPath: NodePath<t.JSXOpeningElement>,
   programPath: NodePath<t.Program>,
   state: PluginState
-): {
-  cssAttribute: t.JSXAttribute;
-  cssExpression: t.Expression;
-  cssValueClassification: CssPropValueClassification;
-  classNameAttribute: t.JSXAttribute | null;
-  attributesBeforeCss: Array<t.JSXAttribute | t.JSXSpreadAttribute>;
-  attributesAfterCss: Array<t.JSXAttribute | t.JSXSpreadAttribute>;
-  hasSpreadBeforeCss: boolean;
-} | null {
+): NormalizedJsxCssPropElement | null {
   const { node: openingElement } = openingElementPath;
   const { attributes } = openingElement;
   const cssAttributes = getJsxAttributes(openingElement, cssAttributeName);
@@ -341,18 +364,17 @@ function normalizeOpeningElement(
   const hasSpreadBeforeCss = attributesBeforeCss.some((attribute) =>
     t.isJSXSpreadAttribute(attribute)
   );
+  const hasSpreadAfterCss = attributesAfterCss.some((attribute) =>
+    t.isJSXSpreadAttribute(attribute)
+  );
 
-  if (
-    attributesAfterCss.some((attribute) => t.isJSXSpreadAttribute(attribute))
-  ) {
-    throw openingElementPath.buildCodeFrameError(spreadAfterCssErrorMessage);
-  }
+  const requiresSpreadAggregation = hasSpreadBeforeCss || hasSpreadAfterCss;
 
-  if (hasSpreadBeforeCss && hasExplicitKeyOrRefAttribute(attributes)) {
+  if (requiresSpreadAggregation && hasExplicitKeyOrRefAttribute(attributes)) {
     throw openingElementPath.buildCodeFrameError(keyRefSpreadErrorMessage);
   }
 
-  if (hasSpreadBeforeCss) {
+  if (requiresSpreadAggregation) {
     assertSupportedSpreadAggregationContext(openingElementPath);
   }
 
@@ -400,7 +422,8 @@ function normalizeOpeningElement(
     classNameAttribute: classNameAttributes[0] ?? null,
     attributesBeforeCss,
     attributesAfterCss,
-    hasSpreadBeforeCss
+    hasSpreadBeforeCss,
+    hasSpreadAfterCss
   };
 }
 
@@ -1658,7 +1681,8 @@ function createClassNameExpression(
     cssExpression: t.Expression;
     cssValueClassification: CssPropValueClassification;
     classNameAttribute: t.JSXAttribute | null;
-    aggregateClassNameExpression?: t.Expression;
+    preAggregateClassNameExpression?: t.Expression;
+    postAggregateClassNameExpression?: t.Expression;
   }
 ): t.Expression {
   const cssClassNameExpressions = createCssClassNameExpressions(
@@ -1683,7 +1707,8 @@ function createClassNameExpression(
   }
 
   if (
-    !normalizedElement.aggregateClassNameExpression &&
+    !normalizedElement.preAggregateClassNameExpression &&
+    !normalizedElement.postAggregateClassNameExpression &&
     !normalizedElement.classNameAttribute &&
     canEmitDirectly
   ) {
@@ -1693,7 +1718,8 @@ function createClassNameExpression(
   const cxIdentifier = registerImportMethod(path, "cx", cssModuleName);
 
   if (
-    !normalizedElement.aggregateClassNameExpression &&
+    !normalizedElement.preAggregateClassNameExpression &&
+    !normalizedElement.postAggregateClassNameExpression &&
     !normalizedElement.classNameAttribute
   ) {
     return t.callExpression(cxIdentifier, cssClassNameExpressions);
@@ -1701,9 +1727,9 @@ function createClassNameExpression(
 
   const classNameExpressions = [];
 
-  if (normalizedElement.aggregateClassNameExpression) {
+  if (normalizedElement.preAggregateClassNameExpression) {
     classNameExpressions.push(
-      t.cloneNode(normalizedElement.aggregateClassNameExpression)
+      t.cloneNode(normalizedElement.preAggregateClassNameExpression)
     );
   }
 
@@ -1711,6 +1737,14 @@ function createClassNameExpression(
     classNameExpressions.push(
       getClassNameExpression(path, normalizedElement.classNameAttribute)
     );
+  }
+
+  if (normalizedElement.postAggregateClassNameExpression) {
+    return t.callExpression(cxIdentifier, [
+      ...classNameExpressions,
+      ...cssClassNameExpressions,
+      t.cloneNode(normalizedElement.postAggregateClassNameExpression)
+    ]);
   }
 
   return t.callExpression(cxIdentifier, [
@@ -1725,13 +1759,15 @@ function createClassNameAttributeValue(
     cssExpression: t.Expression;
     cssValueClassification: CssPropValueClassification;
     classNameAttribute: t.JSXAttribute | null;
-    aggregateClassNameExpression?: t.Expression;
+    preAggregateClassNameExpression?: t.Expression;
+    postAggregateClassNameExpression?: t.Expression;
   }
 ): t.JSXAttribute["value"] {
   if (
     normalizedElement.cssValueClassification === "class-value" &&
     t.isStringLiteral(normalizedElement.cssExpression) &&
-    !normalizedElement.aggregateClassNameExpression &&
+    !normalizedElement.preAggregateClassNameExpression &&
+    !normalizedElement.postAggregateClassNameExpression &&
     !normalizedElement.classNameAttribute
   ) {
     return createStaticStringExpression(normalizedElement.cssExpression);
@@ -1744,55 +1780,110 @@ function createClassNameAttributeValue(
 
 function transformSpreadAggregatedCssProp(
   path: NodePath<t.JSXOpeningElement>,
-  normalizedElement: {
-    cssAttribute: t.JSXAttribute;
-    cssExpression: t.Expression;
-    cssValueClassification: CssPropValueClassification;
-    classNameAttribute: t.JSXAttribute | null;
-    attributesBeforeCss: Array<t.JSXAttribute | t.JSXSpreadAttribute>;
-    attributesAfterCss: Array<t.JSXAttribute | t.JSXSpreadAttribute>;
-  }
+  normalizedElement: NormalizedJsxCssPropElement
 ): void {
-  const aggregateIdentifier = path.scope.generateUidIdentifier("minchoProps");
-  const cssPropIdentifier = path.scope.generateUidIdentifier("minchoCssProp");
-  const classNameIdentifier =
-    path.scope.generateUidIdentifier("minchoClassName");
-  const restIdentifier = path.scope.generateUidIdentifier("minchoRest");
-  const statementPath = path.getStatementParent();
+  const statementPath = getDirectSpreadAggregationStatementPath(path);
 
   if (!statementPath) {
-    throw path.buildCodeFrameError(
-      "Mincho JSX css prop could not find a statement for spread aggregation"
-    );
+    transformNestedSpreadAggregatedCssProp(path, normalizedElement);
+    return;
   }
 
-  statementPath.insertBefore([
-    t.variableDeclaration("const", [
-      t.variableDeclarator(
-        t.cloneNode(aggregateIdentifier),
-        createAggregatePropsExpression(
-          path,
-          normalizedElement.attributesBeforeCss
-        )
-      )
-    ]),
-    t.variableDeclaration("const", [
-      t.variableDeclarator(
-        t.objectPattern([
-          t.objectProperty(
-            t.identifier(cssAttributeName),
-            t.cloneNode(cssPropIdentifier)
-          ),
-          t.objectProperty(
-            t.identifier(classNameAttributeName),
-            t.cloneNode(classNameIdentifier)
-          ),
-          t.restElement(t.cloneNode(restIdentifier))
-        ]),
-        t.cloneNode(aggregateIdentifier)
-      )
-    ])
-  ]);
+  const lowering = createSpreadAggregatedCssPropLowering(
+    path,
+    normalizedElement
+  );
+  statementPath.insertBefore(lowering.declarations);
+  path.node.attributes = lowering.attributes;
+}
+
+function transformNestedSpreadAggregatedCssProp(
+  path: NodePath<t.JSXOpeningElement>,
+  normalizedElement: NormalizedJsxCssPropElement
+): void {
+  const jsxElementPath = getSpreadAggregationJsxElementPath(path);
+
+  if (
+    !jsxElementPath ||
+    !canReplaceJsxElementWithCallExpression(jsxElementPath)
+  ) {
+    throw path.buildCodeFrameError(spreadAggregationContextErrorMessage);
+  }
+
+  assertNestedSpreadAggregationIifeCompatible(jsxElementPath, path);
+
+  const lowering = createSpreadAggregatedCssPropLowering(
+    path,
+    normalizedElement
+  );
+  const nextElement = t.cloneNode(jsxElementPath.node);
+  nextElement.openingElement.attributes = lowering.attributes;
+  const iifeExpression = t.callExpression(
+    t.arrowFunctionExpression(
+      [],
+      t.blockStatement([
+        ...lowering.declarations,
+        t.returnStatement(nextElement)
+      ])
+    ),
+    []
+  );
+  const replacement = isJsxChildReplacementContext(jsxElementPath)
+    ? t.jsxExpressionContainer(iifeExpression)
+    : iifeExpression;
+
+  jsxElementPath.replaceWith(replacement);
+}
+
+function assertNestedSpreadAggregationIifeCompatible(
+  jsxElementPath: NodePath<t.JSXElement>,
+  diagnosticPath: NodePath<t.JSXOpeningElement>
+): void {
+  if (containsAwaitOrYieldExpression(jsxElementPath)) {
+    throw diagnosticPath.buildCodeFrameError(nestedAsyncGeneratorErrorMessage);
+  }
+}
+
+function containsAwaitOrYieldExpression(path: NodePath<t.Node>): boolean {
+  let hasControlFlowExpression = false;
+
+  path.traverse({
+    AwaitExpression(awaitPath) {
+      hasControlFlowExpression = true;
+      awaitPath.stop();
+    },
+    YieldExpression(yieldPath) {
+      hasControlFlowExpression = true;
+      yieldPath.stop();
+    },
+    Function(functionPath) {
+      functionPath.skip();
+    }
+  });
+
+  return hasControlFlowExpression;
+}
+
+function createSpreadAggregatedCssPropLowering(
+  path: NodePath<t.JSXOpeningElement>,
+  normalizedElement: NormalizedJsxCssPropElement
+): SpreadAggregatedCssPropLowering {
+  if (!normalizedElement.hasSpreadAfterCss) {
+    return createPreCssSpreadAggregatedCssPropLowering(path, normalizedElement);
+  }
+
+  return createPostCssSpreadAggregatedCssPropLowering(path, normalizedElement);
+}
+
+function createPreCssSpreadAggregatedCssPropLowering(
+  path: NodePath<t.JSXOpeningElement>,
+  normalizedElement: NormalizedJsxCssPropElement
+): SpreadAggregatedCssPropLowering {
+  const preCssBinding = createAggregatePropsBinding(
+    path,
+    normalizedElement.attributesBeforeCss,
+    "mincho"
+  );
 
   const classNameAttributeAfterCss = normalizedElement.attributesAfterCss.find(
     (attribute) => isNamedJsxAttribute(attribute, classNameAttributeName)
@@ -1803,76 +1894,260 @@ function transformSpreadAggregatedCssProp(
     classNameAttribute: t.isJSXAttribute(classNameAttributeAfterCss)
       ? classNameAttributeAfterCss
       : null,
-    aggregateClassNameExpression: t.cloneNode(classNameIdentifier)
-  });
-  const nextAttributes: Array<t.JSXAttribute | t.JSXSpreadAttribute> = [
-    t.jsxSpreadAttribute(t.cloneNode(restIdentifier)),
-    t.jsxAttribute(
-      t.jsxIdentifier(classNameAttributeName),
-      t.jsxExpressionContainer(nextClassNameExpression)
-    ),
-    ...normalizedElement.attributesAfterCss.filter(
-      (attribute) => !isNamedJsxAttribute(attribute, classNameAttributeName)
+    preAggregateClassNameExpression: t.cloneNode(
+      preCssBinding.classNameIdentifier
     )
+  });
+  const classNameAttribute = t.jsxAttribute(
+    t.jsxIdentifier(classNameAttributeName),
+    t.jsxExpressionContainer(nextClassNameExpression)
+  );
+
+  return {
+    declarations: preCssBinding.declarations,
+    attributes: [
+      t.jsxSpreadAttribute(t.cloneNode(preCssBinding.restIdentifier)),
+      classNameAttribute,
+      ...normalizedElement.attributesAfterCss.filter(
+        (attribute) => !isNamedJsxAttribute(attribute, classNameAttributeName)
+      )
+    ]
+  };
+}
+
+function createPostCssSpreadAggregatedCssPropLowering(
+  path: NodePath<t.JSXOpeningElement>,
+  normalizedElement: NormalizedJsxCssPropElement
+): SpreadAggregatedCssPropLowering {
+  const preCssBinding =
+    normalizedElement.attributesBeforeCss.length > 0
+      ? createAggregatePropsBinding(
+          path,
+          normalizedElement.attributesBeforeCss,
+          "minchoPre"
+        )
+      : null;
+  const postCssBinding = createAggregatePropsBinding(
+    path,
+    normalizedElement.attributesAfterCss,
+    preCssBinding ? "minchoPost" : "mincho"
+  );
+  const canInlineExplicitCssClassName =
+    t.isIdentifier(normalizedElement.cssExpression) ||
+    t.isStringLiteral(normalizedElement.cssExpression);
+  const explicitCssClassNameIdentifier = canInlineExplicitCssClassName
+    ? null
+    : path.scope.generateUidIdentifier("minchoCssClassName");
+  const explicitCssClassNameDeclarations = explicitCssClassNameIdentifier
+    ? [
+        t.variableDeclaration("const", [
+          t.variableDeclarator(
+            t.cloneNode(explicitCssClassNameIdentifier),
+            createClassNameExpression(path, {
+              cssExpression: normalizedElement.cssExpression,
+              cssValueClassification: normalizedElement.cssValueClassification,
+              classNameAttribute: null
+            })
+          )
+        ])
+      ]
+    : [];
+
+  const nextClassNameExpression = createClassNameExpression(path, {
+    cssExpression: explicitCssClassNameIdentifier
+      ? t.cloneNode(explicitCssClassNameIdentifier)
+      : normalizedElement.cssExpression,
+    cssValueClassification: explicitCssClassNameIdentifier
+      ? "class-value"
+      : normalizedElement.cssValueClassification,
+    classNameAttribute: null,
+    ...(preCssBinding
+      ? {
+          preAggregateClassNameExpression: t.cloneNode(
+            preCssBinding.classNameIdentifier
+          )
+        }
+      : {}),
+    postAggregateClassNameExpression: t.cloneNode(
+      postCssBinding.classNameIdentifier
+    )
+  });
+  const classNameAttribute = t.jsxAttribute(
+    t.jsxIdentifier(classNameAttributeName),
+    t.jsxExpressionContainer(nextClassNameExpression)
+  );
+
+  const nextAttributes: Array<t.JSXAttribute | t.JSXSpreadAttribute> = [
+    ...(preCssBinding
+      ? [t.jsxSpreadAttribute(t.cloneNode(preCssBinding.restIdentifier))]
+      : []),
+    t.jsxSpreadAttribute(t.cloneNode(postCssBinding.restIdentifier)),
+    classNameAttribute
   ];
 
-  path.node.attributes = nextAttributes;
+  return {
+    declarations: [
+      ...(preCssBinding?.declarations ?? []),
+      ...explicitCssClassNameDeclarations,
+      ...postCssBinding.declarations
+    ],
+    attributes: nextAttributes
+  };
+}
+
+function createAggregatePropsBinding(
+  path: NodePath<t.JSXOpeningElement>,
+  attributes: readonly (t.JSXAttribute | t.JSXSpreadAttribute)[],
+  uidPrefix: string
+): AggregatePropsBinding {
+  const aggregateIdentifier = path.scope.generateUidIdentifier(
+    `${uidPrefix}Props`
+  );
+  const cssPropIdentifier = path.scope.generateUidIdentifier(
+    `${uidPrefix}CssProp`
+  );
+  const classNameIdentifier = path.scope.generateUidIdentifier(
+    `${uidPrefix}ClassName`
+  );
+  const restIdentifier = path.scope.generateUidIdentifier(`${uidPrefix}Rest`);
+
+  return {
+    declarations: [
+      t.variableDeclaration("const", [
+        t.variableDeclarator(
+          t.cloneNode(aggregateIdentifier),
+          createAggregatePropsExpression(path, attributes)
+        )
+      ]),
+      t.variableDeclaration("const", [
+        t.variableDeclarator(
+          t.objectPattern([
+            t.objectProperty(
+              t.identifier(cssAttributeName),
+              t.cloneNode(cssPropIdentifier)
+            ),
+            t.objectProperty(
+              t.identifier(classNameAttributeName),
+              t.cloneNode(classNameIdentifier)
+            ),
+            t.restElement(t.cloneNode(restIdentifier))
+          ]),
+          t.cloneNode(aggregateIdentifier)
+        )
+      ])
+    ],
+    classNameIdentifier,
+    restIdentifier
+  };
 }
 
 function assertSupportedSpreadAggregationContext(
   path: NodePath<t.JSXOpeningElement>
 ): void {
-  const jsxElementPath = path.parentPath;
-
-  if (!jsxElementPath.isJSXElement()) {
-    throw path.buildCodeFrameError(spreadAggregationContextErrorMessage);
-  }
-
-  const expressionParentPath = jsxElementPath.parentPath;
-
   if (
-    expressionParentPath.isReturnStatement() &&
-    expressionParentPath.node.argument === jsxElementPath.node
+    getDirectSpreadAggregationStatementPath(path) ||
+    isNestedSpreadAggregationExpressionContext(path)
   ) {
-    assertStatementListParent(path, expressionParentPath);
-    return;
-  }
-
-  if (
-    expressionParentPath.isExpressionStatement() &&
-    expressionParentPath.node.expression === jsxElementPath.node
-  ) {
-    assertStatementListParent(path, expressionParentPath);
     return;
   }
 
   throw path.buildCodeFrameError(spreadAggregationContextErrorMessage);
 }
 
-function assertStatementListParent(
-  sourcePath: NodePath<t.JSXOpeningElement>,
-  statementPath: NodePath<t.Node>
-): void {
-  const statementParentPath = statementPath.parentPath;
+function getDirectSpreadAggregationStatementPath(
+  path: NodePath<t.JSXOpeningElement>
+): NodePath<t.ReturnStatement | t.ExpressionStatement> | null {
+  const jsxElementPath = getSpreadAggregationJsxElementPath(path);
 
-  if (!statementParentPath) {
-    throw sourcePath.buildCodeFrameError(spreadAggregationContextErrorMessage);
+  if (!jsxElementPath) {
+    return null;
+  }
+
+  const expressionParentPath = jsxElementPath.parentPath;
+
+  if (
+    expressionParentPath.isReturnStatement() &&
+    expressionParentPath.node.argument === jsxElementPath.node &&
+    hasStatementListParent(expressionParentPath)
+  ) {
+    return expressionParentPath;
   }
 
   if (
-    statementParentPath.isProgram() ||
-    statementParentPath.isBlockStatement() ||
-    statementParentPath.isSwitchCase()
+    expressionParentPath.isExpressionStatement() &&
+    expressionParentPath.node.expression === jsxElementPath.node &&
+    hasStatementListParent(expressionParentPath)
   ) {
-    return;
+    return expressionParentPath;
   }
 
-  throw sourcePath.buildCodeFrameError(spreadAggregationContextErrorMessage);
+  return null;
+}
+
+function isNestedSpreadAggregationExpressionContext(
+  path: NodePath<t.JSXOpeningElement>
+): boolean {
+  const jsxElementPath = getSpreadAggregationJsxElementPath(path);
+
+  if (!jsxElementPath) {
+    return false;
+  }
+
+  return canReplaceJsxElementWithCallExpression(jsxElementPath);
+}
+
+function getSpreadAggregationJsxElementPath(
+  path: NodePath<t.JSXOpeningElement>
+): NodePath<t.JSXElement> | null {
+  const jsxElementPath = path.parentPath;
+
+  if (!jsxElementPath.isJSXElement()) {
+    return null;
+  }
+
+  return jsxElementPath;
+}
+
+function canReplaceJsxElementWithCallExpression(
+  jsxElementPath: NodePath<t.JSXElement>
+): boolean {
+  const expressionParentPath = jsxElementPath.parentPath;
+
+  if (isJsxChildReplacementContext(jsxElementPath)) {
+    return true;
+  }
+
+  if (expressionParentPath.isJSXExpressionContainer()) {
+    return true;
+  }
+
+  return true;
+}
+
+function isJsxChildReplacementContext(
+  jsxElementPath: NodePath<t.JSXElement>
+): boolean {
+  const expressionParentPath = jsxElementPath.parentPath;
+
+  return (
+    expressionParentPath.isJSXElement() || expressionParentPath.isJSXFragment()
+  );
+}
+
+function hasStatementListParent(statementPath: NodePath<t.Node>): boolean {
+  const statementParentPath = statementPath.parentPath;
+
+  return !!(
+    statementParentPath &&
+    (statementParentPath.isProgram() ||
+      statementParentPath.isBlockStatement() ||
+      statementParentPath.isSwitchCase())
+  );
 }
 
 function createAggregatePropsExpression(
   path: NodePath<t.JSXOpeningElement>,
-  attributes: Array<t.JSXAttribute | t.JSXSpreadAttribute>
+  attributes: readonly (t.JSXAttribute | t.JSXSpreadAttribute)[]
 ): t.ObjectExpression {
   return t.objectExpression(
     attributes.map((attribute) => {
