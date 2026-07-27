@@ -66,8 +66,6 @@ const unsupportedDynamicCssRuleValueErrorMessage =
   "Mincho JSX css prop does not support conditional, logical, or wrapped object/array CSS rule values in compile-away mode";
 const unsupportedArraySpreadCssValueErrorMessage =
   "Mincho JSX css prop array values do not support spread elements in compile-away mode";
-const unsupportedFirstLevelArrayBranchCssValueErrorMessage =
-  "Mincho JSX css prop array branch extraction only supports first-level dynamic branches";
 const duplicateCssErrorMessage = "Mincho JSX css prop must appear only once";
 const duplicateClassNameErrorMessage =
   "Mincho JSX css prop cannot merge duplicate className attributes";
@@ -81,8 +79,37 @@ type CssPropValueClassification =
   | "class-value"
   | "unsupported-dynamic-css-rule"
   | "unsupported-array-spread"
-  | "unsupported-first-level-array-branch"
   | "unsupported-function";
+
+type CssClassNameBaseLoweringRequest = {
+  readonly path: NodePath<t.JSXOpeningElement>;
+  readonly expression: t.Expression;
+};
+
+type CssClassNameRootResultLoweringRequest = CssClassNameBaseLoweringRequest & {
+  readonly context: "root-result";
+  readonly classification: CssPropValueClassification;
+};
+
+type CssClassNameBranchResultLoweringRequest =
+  CssClassNameBaseLoweringRequest & {
+    readonly context: "branch-result";
+  };
+
+type CssClassNameArrayElementResultLoweringRequest =
+  CssClassNameBaseLoweringRequest & {
+    readonly context: "array-element-result";
+  };
+
+type CssClassNameGuardLoweringRequest = CssClassNameBaseLoweringRequest & {
+  readonly context: "guard";
+};
+
+type CssClassNameLoweringRequest =
+  | CssClassNameRootResultLoweringRequest
+  | CssClassNameBranchResultLoweringRequest
+  | CssClassNameArrayElementResultLoweringRequest
+  | CssClassNameGuardLoweringRequest;
 
 type StaticCssEvalMetadataSource = {
   dependencies?: readonly (ResolutionDependency | string)[];
@@ -366,12 +393,6 @@ function normalizeOpeningElement(
     );
   }
 
-  if (cssValueClassification === "unsupported-first-level-array-branch") {
-    throw openingElementPath.buildCodeFrameError(
-      unsupportedFirstLevelArrayBranchCssValueErrorMessage
-    );
-  }
-
   return {
     cssAttribute,
     cssExpression,
@@ -424,11 +445,12 @@ function getResolvedCssExpression(
     }
 
     if (inlineStaticCssEvalResult.kind === "error") {
+      if (shouldPreserveUnsupportedArraySpreadClassification(cssExpression)) {
+        return cssExpression;
+      }
+
       if (
-        shouldPreserveUnsupportedArraySpreadClassification(
-          cssExpression,
-          inlineStaticCssEvalResult.diagnostic
-        )
+        shouldPreserveUnsupportedDynamicCssRuleClassification(cssExpression)
       ) {
         return cssExpression;
       }
@@ -442,12 +464,11 @@ function getResolvedCssExpression(
       );
     }
 
-    if (
-      shouldPreserveUnsupportedArraySpreadClassification(
-        cssExpression,
-        staticCssEvalResult.diagnostic
-      )
-    ) {
+    if (shouldPreserveUnsupportedArraySpreadClassification(cssExpression)) {
+      return cssExpression;
+    }
+
+    if (shouldPreserveUnsupportedDynamicCssRuleClassification(cssExpression)) {
       return cssExpression;
     }
 
@@ -1078,17 +1099,20 @@ function createInlineStaticCssDiagnosticContext(options: {
 }
 
 function shouldPreserveUnsupportedArraySpreadClassification(
-  expression: t.Expression,
-  diagnostic: StaticCssEvalDiagnostic
+  expression: t.Expression
 ): boolean {
   const unwrappedExpression = unwrapTransparentCssRuleExpression(expression);
 
   return (
     t.isArrayExpression(unwrappedExpression) &&
-    hasArraySpreadElement(unwrappedExpression) &&
-    (diagnostic.reason === "identifier-object-value" ||
-      diagnostic.reason === "member-expression-object-value")
+    hasArraySpreadElement(unwrappedExpression)
   );
+}
+
+function shouldPreserveUnsupportedDynamicCssRuleClassification(
+  expression: t.Expression
+): boolean {
+  return containsUnsupportedSequenceCssRuleValue(expression);
 }
 
 function preserveDirectBooleanReferenceValues(
@@ -1923,27 +1947,65 @@ function createCssClassNameExpression(
   cssExpression: t.Expression,
   cssValueClassification: CssPropValueClassification
 ): t.Expression {
-  const cssRuleExpression = unwrapTransparentCssRuleExpression(cssExpression);
+  return lowerCssClassNameExpression({
+    path,
+    expression: cssExpression,
+    classification: cssValueClassification,
+    context: "root-result"
+  });
+}
 
-  if (cssValueClassification === "css-rule") {
-    return createCssRuleClassNameExpression(path, cssRuleExpression);
+function lowerCssClassNameExpression(
+  request: CssClassNameLoweringRequest
+): t.Expression {
+  switch (request.context) {
+    case "guard":
+      return t.cloneNode(request.expression);
+    case "root-result":
+      return lowerRootCssResultClassNameExpression(request);
+    case "branch-result":
+      return lowerBranchCssResultClassNameExpression(request);
+    case "array-element-result":
+      return lowerArrayElementCssResultClassNameExpression(request);
+    default: {
+      const exhaustive: never = request;
+      return exhaustive;
+    }
+  }
+}
+
+function lowerRootCssResultClassNameExpression(
+  request: CssClassNameRootResultLoweringRequest
+): t.Expression {
+  const cssRuleExpression = unwrapTransparentCssRuleExpression(
+    request.expression
+  );
+
+  if (request.classification === "css-rule") {
+    return createCssRuleClassNameExpression(request.path, cssRuleExpression);
   }
 
   if (
-    cssValueClassification === "branch-css-rule" &&
+    request.classification === "branch-css-rule" &&
     t.isConditionalExpression(cssRuleExpression)
   ) {
-    return createConditionalCssRuleClassNameExpression(path, cssRuleExpression);
+    return createConditionalCssRuleClassNameExpression(
+      request.path,
+      cssRuleExpression
+    );
   }
 
   if (
-    cssValueClassification === "branch-css-rule" &&
+    request.classification === "branch-css-rule" &&
     t.isLogicalExpression(cssRuleExpression)
   ) {
-    return createLogicalCssRuleClassNameExpression(path, cssRuleExpression);
+    return createLogicalCssRuleClassNameExpression(
+      request.path,
+      cssRuleExpression
+    );
   }
 
-  return t.cloneNode(cssExpression);
+  return t.cloneNode(request.expression);
 }
 
 function createCssClassNameExpressions(
@@ -1978,34 +2040,112 @@ function createArrayClassNameExpression(
   path: NodePath<t.JSXOpeningElement>,
   expression: t.Expression
 ): t.Expression {
-  const unwrappedExpression = unwrapTransparentCssRuleExpression(expression);
+  return lowerCssClassNameExpression({
+    path,
+    expression,
+    context: "array-element-result"
+  });
+}
+
+function createArrayClassNameCallExpression(
+  path: NodePath<t.JSXOpeningElement>,
+  expression: t.ArrayExpression
+): t.Expression {
+  const cxIdentifier = registerImportMethod(path, "cx", cssModuleName);
+  return t.callExpression(
+    cxIdentifier,
+    createArrayClassNameExpressions(path, expression)
+  );
+}
+
+function lowerArrayElementCssResultClassNameExpression(
+  request: CssClassNameArrayElementResultLoweringRequest
+): t.Expression {
+  const unwrappedExpression = unwrapTransparentCssRuleExpression(
+    request.expression
+  );
 
   if (t.isStringLiteral(unwrappedExpression)) {
     return createStaticStringExpression(unwrappedExpression);
   }
 
   if (isDirectCssRuleLiteralExpression(unwrappedExpression)) {
-    return createCssRuleClassNameExpression(path, unwrappedExpression);
+    return createCssRuleClassNameExpression(request.path, unwrappedExpression);
+  }
+
+  if (isArrayClassValueExpression(unwrappedExpression)) {
+    return createArrayClassNameCallExpression(
+      request.path,
+      unwrappedExpression
+    );
   }
 
   if (
     t.isConditionalExpression(unwrappedExpression) &&
-    isConditionalCssRuleBranchExpression(unwrappedExpression)
+    (isConditionalCssRuleBranchExpression(unwrappedExpression) ||
+      isConditionalArrayClassNameBranchExpression(unwrappedExpression))
   ) {
     return createConditionalCssRuleClassNameExpression(
-      path,
+      request.path,
       unwrappedExpression
     );
   }
 
   if (
     t.isLogicalExpression(unwrappedExpression) &&
-    isLogicalCssRuleBranchExpression(unwrappedExpression)
+    (isLogicalCssRuleBranchExpression(unwrappedExpression) ||
+      isLogicalArrayClassNameBranchExpression(unwrappedExpression))
   ) {
-    return createLogicalCssRuleClassNameExpression(path, unwrappedExpression);
+    return createLogicalCssRuleClassNameExpression(
+      request.path,
+      unwrappedExpression
+    );
   }
 
-  return t.cloneNode(expression);
+  return t.cloneNode(request.expression);
+}
+
+function lowerBranchCssResultClassNameExpression(
+  request: CssClassNameBranchResultLoweringRequest
+): t.Expression {
+  const unwrappedExpression = unwrapTransparentCssRuleExpression(
+    request.expression
+  );
+
+  if (isDirectCssRuleExpression(unwrappedExpression)) {
+    return createCssRuleClassNameExpression(request.path, unwrappedExpression);
+  }
+
+  if (isArrayClassValueExpression(unwrappedExpression)) {
+    return createArrayClassNameCallExpression(
+      request.path,
+      unwrappedExpression
+    );
+  }
+
+  if (
+    t.isConditionalExpression(unwrappedExpression) &&
+    (isConditionalCssRuleBranchExpression(unwrappedExpression) ||
+      isConditionalArrayClassNameBranchExpression(unwrappedExpression))
+  ) {
+    return createConditionalCssRuleClassNameExpression(
+      request.path,
+      unwrappedExpression
+    );
+  }
+
+  if (
+    t.isLogicalExpression(unwrappedExpression) &&
+    (isLogicalCssRuleBranchExpression(unwrappedExpression) ||
+      isLogicalArrayClassNameBranchExpression(unwrappedExpression))
+  ) {
+    return createLogicalCssRuleClassNameExpression(
+      request.path,
+      unwrappedExpression
+    );
+  }
+
+  return t.cloneNode(request.expression);
 }
 
 function createCssRuleClassNameExpression(
@@ -2022,7 +2162,11 @@ function createConditionalCssRuleClassNameExpression(
   cssExpression: t.ConditionalExpression
 ): t.Expression {
   return t.conditionalExpression(
-    t.cloneNode(cssExpression.test),
+    lowerCssClassNameExpression({
+      path,
+      expression: cssExpression.test,
+      context: "guard"
+    }),
     createConditionalBranchClassNameExpression(path, cssExpression.consequent),
     createConditionalBranchClassNameExpression(path, cssExpression.alternate)
   );
@@ -2032,11 +2176,11 @@ function createConditionalBranchClassNameExpression(
   path: NodePath<t.JSXOpeningElement>,
   expression: t.Expression
 ): t.Expression {
-  if (isDirectCssRuleExpression(expression)) {
-    return createCssRuleClassNameExpression(path, expression);
-  }
-
-  return t.cloneNode(expression);
+  return lowerCssClassNameExpression({
+    path,
+    expression,
+    context: "branch-result"
+  });
 }
 
 function createLogicalCssRuleClassNameExpression(
@@ -2047,7 +2191,11 @@ function createLogicalCssRuleClassNameExpression(
     isStaticLeftLogicalCssRuleOperator(cssExpression.operator) &&
     isDirectCssRuleExpression(cssExpression.left)
   ) {
-    return createCssRuleClassNameExpression(path, cssExpression.left);
+    return lowerCssClassNameExpression({
+      path,
+      expression: cssExpression.left,
+      context: "branch-result"
+    });
   }
 
   if (
@@ -2059,8 +2207,16 @@ function createLogicalCssRuleClassNameExpression(
 
   return t.logicalExpression(
     cssExpression.operator,
-    t.cloneNode(cssExpression.left),
-    createCssRuleClassNameExpression(path, cssExpression.right)
+    lowerCssClassNameExpression({
+      path,
+      expression: cssExpression.left,
+      context: "guard"
+    }),
+    lowerCssClassNameExpression({
+      path,
+      expression: cssExpression.right,
+      context: "branch-result"
+    })
   );
 }
 
@@ -2068,11 +2224,11 @@ function createLogicalAndRightClassNameExpression(
   path: NodePath<t.JSXOpeningElement>,
   expression: t.Expression
 ): t.Expression {
-  if (isDirectCssRuleExpression(expression)) {
-    return createCssRuleClassNameExpression(path, expression);
-  }
-
-  return t.cloneNode(expression);
+  return lowerCssClassNameExpression({
+    path,
+    expression,
+    context: "branch-result"
+  });
 }
 
 function getJsxAttributes(
@@ -2141,6 +2297,10 @@ function classifyCssPropValue(
 
   if (unsupportedArrayValueClassification) {
     return unsupportedArrayValueClassification;
+  }
+
+  if (containsUnsupportedSequenceCssRuleValue(expression)) {
+    return "unsupported-dynamic-css-rule";
   }
 
   if (isDirectCssRuleExpression(expression)) {
@@ -2251,22 +2411,11 @@ function isArrayClassValueExpression(
 
 function classifyUnsupportedCssPropArrayValue(
   expression: t.Expression
-): Extract<
-  CssPropValueClassification,
-  "unsupported-array-spread" | "unsupported-first-level-array-branch"
-> | null {
+): Extract<CssPropValueClassification, "unsupported-array-spread"> | null {
   const unwrappedExpression = unwrapTransparentCssRuleExpression(expression);
 
-  if (!t.isArrayExpression(unwrappedExpression)) {
-    return null;
-  }
-
-  if (hasArraySpreadElement(unwrappedExpression)) {
+  if (containsArraySpreadElement(unwrappedExpression)) {
     return "unsupported-array-spread";
-  }
-
-  if (hasUnsupportedNestedDynamicArray(unwrappedExpression)) {
-    return "unsupported-first-level-array-branch";
   }
 
   return null;
@@ -2316,61 +2465,46 @@ function containsArraySpreadElement(expression: t.Expression): boolean {
   return false;
 }
 
-function hasUnsupportedNestedDynamicArray(
-  expression: t.ArrayExpression
-): boolean {
-  return expression.elements.some((element) => {
-    if (!element || t.isSpreadElement(element)) {
-      return false;
-    }
-
-    return containsUnsupportedNestedDynamicArray(element, true);
-  });
-}
-
-function containsUnsupportedNestedDynamicArray(
-  expression: t.Expression,
-  isNestedArray: boolean
+function containsUnsupportedSequenceCssRuleValue(
+  expression: t.Expression
 ): boolean {
   const unwrappedExpression = unwrapTransparentCssRuleExpression(expression);
 
-  if (t.isArrayExpression(unwrappedExpression)) {
-    if (isNestedArray && !isDirectCssRuleArrayExpression(unwrappedExpression)) {
-      return true;
-    }
+  if (t.isSequenceExpression(unwrappedExpression)) {
+    return unwrappedExpression.expressions.some((sequenceExpression) => {
+      const sequenceValue =
+        unwrapTransparentCssRuleExpression(sequenceExpression);
 
-    return hasUnsupportedNestedDynamicArray(unwrappedExpression);
+      return (
+        t.isObjectExpression(sequenceValue) ||
+        (t.isArrayExpression(sequenceValue) &&
+          isDirectCssRuleArrayExpression(sequenceValue)) ||
+        containsUnsupportedSequenceCssRuleValue(sequenceValue)
+      );
+    });
   }
 
-  if (t.isSequenceExpression(unwrappedExpression)) {
-    return unwrappedExpression.expressions.some((sequenceExpression) =>
-      containsUnsupportedNestedDynamicArray(sequenceExpression, isNestedArray)
-    );
+  if (t.isArrayExpression(unwrappedExpression)) {
+    return unwrappedExpression.elements.some((element) => {
+      return (
+        !!element &&
+        !t.isSpreadElement(element) &&
+        containsUnsupportedSequenceCssRuleValue(element)
+      );
+    });
   }
 
   if (t.isConditionalExpression(unwrappedExpression)) {
     return (
-      containsUnsupportedNestedDynamicArray(
-        unwrappedExpression.consequent,
-        isNestedArray
-      ) ||
-      containsUnsupportedNestedDynamicArray(
-        unwrappedExpression.alternate,
-        isNestedArray
-      )
+      containsUnsupportedSequenceCssRuleValue(unwrappedExpression.consequent) ||
+      containsUnsupportedSequenceCssRuleValue(unwrappedExpression.alternate)
     );
   }
 
   if (t.isLogicalExpression(unwrappedExpression)) {
     return (
-      containsUnsupportedNestedDynamicArray(
-        unwrappedExpression.left,
-        isNestedArray
-      ) ||
-      containsUnsupportedNestedDynamicArray(
-        unwrappedExpression.right,
-        isNestedArray
-      )
+      containsUnsupportedSequenceCssRuleValue(unwrappedExpression.left) ||
+      containsUnsupportedSequenceCssRuleValue(unwrappedExpression.right)
     );
   }
 
@@ -2395,6 +2529,9 @@ function isFirstLevelArrayClassValueBranch(expression: t.Expression): boolean {
 }
 
 type ConditionalCssRuleBranchClassification = "css-rule" | "class-value";
+type ArrayClassNameBranchClassification =
+  | ConditionalCssRuleBranchClassification
+  | "array-class-value";
 
 function isConditionalCssRuleBranchExpression(
   expression: t.Expression
@@ -2422,6 +2559,32 @@ function isConditionalCssRuleBranchExpression(
   );
 }
 
+function isConditionalArrayClassNameBranchExpression(
+  expression: t.Expression
+): boolean {
+  const unwrappedExpression = unwrapTransparentCssRuleExpression(expression);
+
+  if (!t.isConditionalExpression(unwrappedExpression)) {
+    return false;
+  }
+
+  const consequentClassification = classifyArrayClassNameBranch(
+    unwrappedExpression.consequent
+  );
+  const alternateClassification = classifyArrayClassNameBranch(
+    unwrappedExpression.alternate
+  );
+
+  if (!consequentClassification || !alternateClassification) {
+    return false;
+  }
+
+  return (
+    consequentClassification === "array-class-value" ||
+    alternateClassification === "array-class-value"
+  );
+}
+
 function isLogicalCssRuleBranchExpression(expression: t.Expression): boolean {
   const unwrappedExpression = unwrapTransparentCssRuleExpression(expression);
 
@@ -2429,10 +2592,10 @@ function isLogicalCssRuleBranchExpression(expression: t.Expression): boolean {
     return false;
   }
 
-  const leftClassification = classifyLogicalCssRuleOperand(
+  const leftClassification = classifyLogicalCssRuleLeftOperand(
     unwrappedExpression.left
   );
-  const rightClassification = classifyLogicalCssRuleOperand(
+  const rightClassification = classifyLogicalCssRuleRightOperand(
     unwrappedExpression.right
   );
 
@@ -2461,6 +2624,47 @@ function isLogicalCssRuleBranchExpression(expression: t.Expression): boolean {
   );
 }
 
+function isLogicalArrayClassNameBranchExpression(
+  expression: t.Expression
+): boolean {
+  const unwrappedExpression = unwrapTransparentCssRuleExpression(expression);
+
+  if (!t.isLogicalExpression(unwrappedExpression)) {
+    return false;
+  }
+
+  const leftClassification = classifyArrayClassNameLogicalLeftOperand(
+    unwrappedExpression.left
+  );
+  const rightClassification = classifyArrayClassNameBranch(
+    unwrappedExpression.right
+  );
+
+  if (!leftClassification || !rightClassification) {
+    return false;
+  }
+
+  if (
+    isStaticLeftLogicalCssRuleOperator(unwrappedExpression.operator) &&
+    leftClassification === "css-rule"
+  ) {
+    return true;
+  }
+
+  if (
+    isStaticLeftLogicalCssRuleGuardOperator(unwrappedExpression.operator) &&
+    leftClassification === "css-rule"
+  ) {
+    return rightClassification === "array-class-value";
+  }
+
+  return (
+    isSupportedRightLogicalCssRuleOperator(unwrappedExpression.operator) &&
+    leftClassification === "class-value" &&
+    rightClassification === "array-class-value"
+  );
+}
+
 function isStaticLeftLogicalCssRuleOperator(
   operator: t.LogicalExpression["operator"]
 ): boolean {
@@ -2479,7 +2683,7 @@ function isSupportedRightLogicalCssRuleOperator(
   return operator === "&&" || operator === "||" || operator === "??";
 }
 
-function classifyLogicalCssRuleOperand(
+function classifyLogicalCssRuleLeftOperand(
   expression: t.Expression
 ): ConditionalCssRuleBranchClassification | null {
   const unwrappedExpression = unwrapTransparentCssRuleExpression(expression);
@@ -2488,8 +2692,117 @@ function classifyLogicalCssRuleOperand(
     return "css-rule";
   }
 
+  if (isUnsupportedDynamicCssRuleValue(unwrappedExpression, true)) {
+    return null;
+  }
+
+  return "class-value";
+}
+
+function classifyLogicalCssRuleRightOperand(
+  expression: t.Expression
+): ConditionalCssRuleBranchClassification | null {
+  const unwrappedExpression = unwrapTransparentCssRuleExpression(expression);
+
+  if (isDirectCssRuleExpression(unwrappedExpression)) {
+    return "css-rule";
+  }
+
+  if (t.isConditionalExpression(unwrappedExpression)) {
+    if (isConditionalCssRuleBranchExpression(unwrappedExpression)) {
+      return "css-rule";
+    }
+
+    if (isUnsupportedDynamicCssRuleValue(unwrappedExpression, true)) {
+      return null;
+    }
+
+    return "class-value";
+  }
+
+  if (t.isLogicalExpression(unwrappedExpression)) {
+    if (isLogicalCssRuleBranchExpression(unwrappedExpression)) {
+      return "css-rule";
+    }
+
+    if (isUnsupportedDynamicCssRuleValue(unwrappedExpression, true)) {
+      return null;
+    }
+
+    return "class-value";
+  }
+
+  if (isUnsupportedDynamicCssRuleValue(unwrappedExpression, true)) {
+    return null;
+  }
+
+  return "class-value";
+}
+
+function classifyArrayClassNameLogicalLeftOperand(
+  expression: t.Expression
+): ConditionalCssRuleBranchClassification | null {
+  const unwrappedExpression = unwrapTransparentCssRuleExpression(expression);
+
+  if (isDirectCssRuleExpression(unwrappedExpression)) {
+    return "css-rule";
+  }
+
+  if (isUnsupportedDynamicCssRuleValue(unwrappedExpression, true)) {
+    return null;
+  }
+
+  return "class-value";
+}
+
+function classifyArrayClassNameBranch(
+  expression: t.Expression
+): ArrayClassNameBranchClassification | null {
+  const unwrappedExpression = unwrapTransparentCssRuleExpression(expression);
+
+  if (isDirectCssRuleExpression(unwrappedExpression)) {
+    return "css-rule";
+  }
+
+  if (isArrayClassValueExpression(unwrappedExpression)) {
+    return "array-class-value";
+  }
+
+  if (t.isConditionalExpression(unwrappedExpression)) {
+    if (isConditionalCssRuleBranchExpression(unwrappedExpression)) {
+      return "css-rule";
+    }
+
+    if (isConditionalArrayClassNameBranchExpression(unwrappedExpression)) {
+      return "array-class-value";
+    }
+
+    if (isUnsupportedDynamicCssRuleValue(unwrappedExpression, true)) {
+      return null;
+    }
+
+    return "class-value";
+  }
+
+  if (t.isLogicalExpression(unwrappedExpression)) {
+    if (isLogicalCssRuleBranchExpression(unwrappedExpression)) {
+      return "css-rule";
+    }
+
+    if (isLogicalArrayClassNameBranchExpression(unwrappedExpression)) {
+      return "array-class-value";
+    }
+
+    if (isUnsupportedDynamicCssRuleValue(unwrappedExpression, true)) {
+      return null;
+    }
+
+    return "class-value";
+  }
+
   if (
-    t.isLogicalExpression(unwrappedExpression) ||
+    t.isFunctionExpression(unwrappedExpression) ||
+    t.isArrowFunctionExpression(unwrappedExpression) ||
     isUnsupportedDynamicCssRuleValue(unwrappedExpression, true)
   ) {
     return null;
@@ -2501,14 +2814,40 @@ function classifyLogicalCssRuleOperand(
 function classifyConditionalCssRuleBranch(
   expression: t.Expression
 ): ConditionalCssRuleBranchClassification | null {
-  if (isDirectCssRuleExpression(expression)) {
+  const unwrappedExpression = unwrapTransparentCssRuleExpression(expression);
+
+  if (isDirectCssRuleExpression(unwrappedExpression)) {
     return "css-rule";
   }
 
+  if (t.isConditionalExpression(unwrappedExpression)) {
+    if (isConditionalCssRuleBranchExpression(unwrappedExpression)) {
+      return "css-rule";
+    }
+
+    if (isUnsupportedDynamicCssRuleValue(unwrappedExpression, true)) {
+      return null;
+    }
+
+    return "class-value";
+  }
+
+  if (t.isLogicalExpression(unwrappedExpression)) {
+    if (isLogicalCssRuleBranchExpression(unwrappedExpression)) {
+      return "css-rule";
+    }
+
+    if (isUnsupportedDynamicCssRuleValue(unwrappedExpression, true)) {
+      return null;
+    }
+
+    return "class-value";
+  }
+
   if (
-    t.isFunctionExpression(expression) ||
-    t.isArrowFunctionExpression(expression) ||
-    isUnsupportedDynamicCssRuleValue(expression, true)
+    t.isFunctionExpression(unwrappedExpression) ||
+    t.isArrowFunctionExpression(unwrappedExpression) ||
+    isUnsupportedDynamicCssRuleValue(unwrappedExpression, true)
   ) {
     return null;
   }

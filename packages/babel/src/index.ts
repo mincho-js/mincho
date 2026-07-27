@@ -2065,6 +2065,101 @@ if (import.meta.vitest) {
       expect(result[1]).toContain('_css(["active", {');
     });
 
+    it("lowers nested dynamic css prop array literals", () => {
+      const { result, code } = babelTransform(
+        `
+        const condition = true;
+        const nested = true;
+        const props = {
+          className: "spread-base",
+          css: "leaked",
+          id: "root"
+        };
+
+        function App() {
+          return <>
+            <div css={["base", ["nested", condition && { color: "red" }]]} />
+            <div css={["base", condition && ["active", nested && { color: "red" }]]} />
+            <div css={["base", condition ? ["active", { color: "red" }] : ["fallback", { color: "blue" }]]} />
+            <div css={["base", ["nested", condition ? { color: "red" } : "inactive"]]} />
+            <div className="base" css={["outer", ["nested", condition && { color: "red" }]]} />
+          </>;
+        }
+
+        function SpreadApp() {
+          return <div {...props} css={["outer", ["nested", condition && { color: "red" }]]} />;
+        }
+      `,
+        { jsxCssProp: true }
+      );
+      const output = `${code}\n${result.join("\n")}`;
+
+      expect(code).not.toContain(" css=");
+      expect(code).toMatch(
+        /className=\{_cx\("base", _cx\("nested", condition && _\$mincho\$\$App\d+\)\)\}/
+      );
+      expect(code).toMatch(
+        /className=\{_cx\("base", condition && _cx\("active", nested && _\$mincho\$\$App\d+\)\)\}/
+      );
+      expect(code).toMatch(
+        /className=\{_cx\("base", condition \? _\$mincho\$\$App\d+ : _\$mincho\$\$App\d+\)\}/
+      );
+      expect(code).toMatch(
+        /className=\{_cx\("base", _cx\("nested", condition \? _\$mincho\$\$App\d+ : "inactive"\)\)\}/
+      );
+      expect(code).toMatch(
+        /className=\{_cx\("base", "outer", _cx\("nested", condition && _\$mincho\$\$App\d+\)\)\}/
+      );
+      expect(code).toContain("css: _minchoCssProp");
+      expect(code).toContain("className: _minchoClassName");
+      expect(code).toContain("..._minchoRest");
+      expect(code).toMatch(
+        /className=\{_cx\(_minchoClassName, "outer", _cx\("nested", condition && _\$mincho\$\$(?:App|SpreadApp)\d+\)\)\}/
+      );
+      expect(result[1].match(/_css\(/g) ?? []).toHaveLength(7);
+      expect(result[1].match(/_css\(\{/g) ?? []).toHaveLength(5);
+      expect(result[1].match(/_css\(\[/g) ?? []).toHaveLength(2);
+      expect(result[1].match(/color: "red"/g) ?? []).toHaveLength(6);
+      expect(result[1].match(/color: "blue"/g) ?? []).toHaveLength(1);
+      expect(result[1]).toContain('_css(["active", {');
+      expect(result[1]).toContain('_css(["fallback", {');
+      expect(output).not.toContain("_css(condition &&");
+      expect(output).not.toContain("_css(nested &&");
+      expect(output).not.toContain("_css(condition ?");
+      expect(output).not.toContain('["nested", condition && {');
+      expect(output).not.toContain('["active", nested && {');
+    });
+
+    it("preserves direct CSS-rule array branch units", () => {
+      const { result, code } = babelTransform(
+        `
+        const condition = true;
+
+        function App() {
+          return <>
+            <div css={["base", condition && ["active", { color: "red" }]]} />
+            <div css={["base", condition ? ["active", { color: "red" }] : ["fallback", { color: "blue" }]]} />
+          </>;
+        }
+      `,
+        { jsxCssProp: true }
+      );
+
+      expect(code).not.toContain(" css=");
+      expect(code).toMatch(
+        /className=\{_cx\("base", condition && _\$mincho\$\$App\d+\)\}/
+      );
+      expect(code).toMatch(
+        /className=\{_cx\("base", condition \? _\$mincho\$\$App\d+ : _\$mincho\$\$App\d+\)\}/
+      );
+      expect(code).not.toContain('["active", {');
+      expect(code).not.toContain('["fallback", {');
+      expect(result[1].match(/_css\(\[/g) ?? []).toHaveLength(3);
+      expect(result[1].match(/_css\(\{/g) ?? []).toHaveLength(0);
+      expect(result[1]).toContain('_css(["active", {');
+      expect(result[1]).toContain('_css(["fallback", {');
+    });
+
     it("evaluates first-level array call branches once", () => {
       const observed = runJsxCssPropRuntime(
         `
@@ -2299,6 +2394,119 @@ if (import.meta.vitest) {
       }
     });
 
+    it("lowers recursive conditional jsx css prop branches", () => {
+      const { result, code } = babelTransform(
+        `
+        type ComplexCSSRule = unknown;
+        const outer = true;
+        const inner = false;
+        const styleA = "style-a";
+
+        function App() {
+          return <>
+            <div css={outer ? inner ? { color: "red" } : { color: "blue" } : styleA} />
+            <div css={outer ? styleA : inner ? { color: "red" } : { color: "blue" }} />
+            <div css={outer ? inner ? [{ color: "red" }] : [{ color: "blue" }] : null} />
+            <div css={outer ? inner ? ({ color: "red" } as const) : ([{ color: "blue" }]! satisfies ComplexCSSRule) : styleA} />
+          </>;
+        }
+      `,
+        { jsxCssProp: true }
+      );
+      const output = `${code}\n${result.join("\n")}`;
+
+      expect(code).not.toContain(" css=");
+      expect(code.match(/className=\{_cx\(/g) ?? []).toHaveLength(4);
+      expect(
+        code.match(
+          /className=\{_cx\(outer \? inner \? _\$mincho\$\$App\d+ : _\$mincho\$\$App\d+ : styleA\)\}/g
+        ) ?? []
+      ).toHaveLength(2);
+      expect(code).toMatch(
+        /className=\{_cx\(outer \? styleA : inner \? _\$mincho\$\$App\d+ : _\$mincho\$\$App\d+\)\}/
+      );
+      expect(code).toMatch(
+        /className=\{_cx\(outer \? inner \? _\$mincho\$\$App\d+ : _\$mincho\$\$App\d+ : null\)\}/
+      );
+      expect(result[1].match(/_css\(/g) ?? []).toHaveLength(8);
+      expect(result[1].match(/_css\(\{/g) ?? []).toHaveLength(5);
+      expect(result[1].match(/_css\(\[/g) ?? []).toHaveLength(3);
+      expect(result[1].match(/color: "red"/g) ?? []).toHaveLength(4);
+      expect(result[1].match(/color: "blue"/g) ?? []).toHaveLength(4);
+      expect(output).not.toContain("_css(outer ?");
+      expect(output).not.toContain("_css(inner ?");
+      expect(output).not.toContain("_css(condition ?");
+      expect(output).not.toContain("_css(styleA)");
+      expect(output).not.toContain("css(styleA)");
+    });
+
+    it("does not static-evaluate branch-internal conditional identifiers", () => {
+      const { result, code, metadata } = babelTransform(
+        `
+        import { styles } from "./styles";
+
+        const outer = true;
+        const palette = { card: "card-class" };
+
+        function makeRule(color: string) {
+          return { color };
+        }
+
+        const ruleFactory = {
+          card(color: string) {
+            return { color };
+          }
+        };
+
+        function App() {
+          return <>
+            <div css={outer ? styles.red : { color: "blue" }} />
+            <div css={({ color: "red" }) ? { color: "green" } : styles.red} />
+            <div css={outer ? palette.card : { color: "purple" }} />
+            <div css={outer ? makeRule("red") : { color: "orange" }} />
+            <div css={outer ? ruleFactory.card("green") : styles.red} />
+          </>;
+        }
+      `,
+        {
+          jsxCssProp: true,
+          staticCssEvalProvider: createResolvedStaticCssEvalProvider({
+            "styles.red": { color: "red" }
+          })
+        }
+      );
+      const output = `${code}\n${result.join("\n")}`;
+
+      expect(code).not.toContain(" css=");
+      expect(code).toMatch(
+        /className=\{_cx\(outer \? styles\.red : _\$mincho\$\$App\d+\)\}/
+      );
+      expect(code).toMatch(
+        /className=\{_cx\(\{\s+color: "red"\s+\} \? _\$mincho\$\$App\d+ : styles\.red\)\}/
+      );
+      expect(code).toMatch(
+        /className=\{_cx\(outer \? palette\.card : _\$mincho\$\$App\d+\)\}/
+      );
+      expect(code).toMatch(
+        /className=\{outer \? _\$mincho\$\$App\d+ : _\$mincho\$\$App\d+\}/
+      );
+      expect(code).toMatch(
+        /className=\{_cx\(outer \? _\$mincho\$\$App\d+ : styles\.red\)\}/
+      );
+      expect(output).not.toContain("_css(styles.red)");
+      expect(output).not.toContain("css(styles.red)");
+      expect(metadata.minchoStaticCssEval?.dependencies ?? []).toEqual([]);
+      expect(metadata.minchoStaticCssEval?.resolvedModuleIds ?? []).toEqual([]);
+      expect(result[1].match(/_css\(/g) ?? []).toHaveLength(6);
+      expect(result[1]).toContain('_css(makeRule("red"))');
+      expect(result[1]).toContain('_css(ruleFactory.card("green"))');
+      expect(result[1]).not.toContain('color: "red"');
+      expect(result[1]).toContain('color: "blue"');
+      expect(result[1]).toContain('color: "green"');
+      expect(result[1]).toContain('color: "purple"');
+      expect(result[1]).toContain('color: "orange"');
+    });
+
     it("lowers logical and jsx css prop branches through css rule mode", () => {
       const fixtures = [
         {
@@ -2427,6 +2635,194 @@ if (import.meta.vitest) {
         expect(result[1]).toContain(expectedRule);
         expect(result[1].match(/color: "red"/g) ?? []).toHaveLength(1);
       }
+    });
+
+    it("lowers recursive logical jsx css prop branches", () => {
+      const fixtures = [
+        {
+          fixture: `<div css={condition && flag && { color: "red" }} />`,
+          expectedClassName:
+            /className=\{_cx\(condition && flag && _\$mincho\$\$App\d+\)\}/,
+          expectedColors: ["red"]
+        },
+        {
+          fixture: `<div css={(condition && flag) || { color: "red" }} />`,
+          expectedClassName:
+            /className=\{_cx\(\(?condition && flag\)? \|\| _\$mincho\$\$App\d+\)\}/,
+          expectedColors: ["red"]
+        },
+        {
+          fixture: `<div css={a || b || { color: "red" }} />`,
+          expectedClassName:
+            /className=\{_cx\(a \|\| b \|\| _\$mincho\$\$App\d+\)\}/,
+          expectedColors: ["red"]
+        },
+        {
+          fixture: `<div css={a ?? b ?? { color: "red" }} />`,
+          expectedClassName:
+            /className=\{_cx\(a \?\? b \?\? _\$mincho\$\$App\d+\)\}/,
+          expectedColors: ["red"]
+        },
+        {
+          fixture: `<div css={condition && (flag ? { color: "red" } : { color: "blue" })} />`,
+          expectedClassName:
+            /className=\{_cx\(condition && \(flag \? _\$mincho\$\$App\d+ : _\$mincho\$\$App\d+\)\)\}/,
+          expectedColors: ["red", "blue"]
+        },
+        {
+          fixture: `<div css={condition && (flag && { color: "red" })} />`,
+          expectedClassName:
+            /className=\{_cx\(condition && \(?flag && _\$mincho\$\$App\d+\)?\)\}/,
+          expectedColors: ["red"]
+        },
+        {
+          fixture: `<div css={outer ? condition && { color: "red" } : styleA} />`,
+          expectedClassName:
+            /className=\{_cx\(outer \? condition && _\$mincho\$\$App\d+ : styleA\)\}/,
+          expectedColors: ["red"]
+        },
+        {
+          fixture: `<div css={{ color: "red" } && (condition && { color: "blue" })} />`,
+          expectedClassName:
+            /className=\{_cx\(condition && _\$mincho\$\$App\d+\)\}/,
+          expectedColors: ["blue"],
+          forbiddenColors: ["red"]
+        },
+        {
+          fixture: `<div className="base" css={condition && flag && { color: "red" }} />`,
+          expectedClassName:
+            /className=\{_cx\("base", condition && flag && _\$mincho\$\$App\d+\)\}/,
+          expectedColors: ["red"]
+        },
+        {
+          fixture: `<div className="base" css={(condition && flag) || { color: "red" }} />`,
+          expectedClassName:
+            /className=\{_cx\("base", \(?condition && flag\)? \|\| _\$mincho\$\$App\d+\)\}/,
+          expectedColors: ["red"]
+        },
+        {
+          fixture: `<div className="base" css={a || b || { color: "red" }} />`,
+          expectedClassName:
+            /className=\{_cx\("base", a \|\| b \|\| _\$mincho\$\$App\d+\)\}/,
+          expectedColors: ["red"]
+        },
+        {
+          fixture: `<div className="base" css={a ?? b ?? { color: "red" }} />`,
+          expectedClassName:
+            /className=\{_cx\("base", a \?\? b \?\? _\$mincho\$\$App\d+\)\}/,
+          expectedColors: ["red"]
+        },
+        {
+          fixture: `<div className="base" css={condition && (flag ? { color: "red" } : { color: "blue" })} />`,
+          expectedClassName:
+            /className=\{_cx\("base", condition && \(flag \? _\$mincho\$\$App\d+ : _\$mincho\$\$App\d+\)\)\}/,
+          expectedColors: ["red", "blue"]
+        },
+        {
+          fixture: `<div className="base" css={condition && (flag && { color: "red" })} />`,
+          expectedClassName:
+            /className=\{_cx\("base", condition && \(?flag && _\$mincho\$\$App\d+\)?\)\}/,
+          expectedColors: ["red"]
+        },
+        {
+          fixture: `<div className="base" css={outer ? condition && { color: "red" } : styleA} />`,
+          expectedClassName:
+            /className=\{_cx\("base", outer \? condition && _\$mincho\$\$App\d+ : styleA\)\}/,
+          expectedColors: ["red"]
+        }
+      ] as const;
+
+      for (const fixtureCase of fixtures) {
+        const { fixture, expectedClassName, expectedColors } = fixtureCase;
+        const forbiddenColors =
+          "forbiddenColors" in fixtureCase ? fixtureCase.forbiddenColors : [];
+        const { result, code } = babelTransform(
+          `
+          const condition = true;
+          const flag = true;
+          const outer = true;
+          const a = "a";
+          const b = "b";
+          const styleA = "style-a";
+
+          function App() {
+            return ${fixture};
+          }
+        `,
+          { jsxCssProp: true }
+        );
+        const output = `${code}\n${result.join("\n")}`;
+
+        expect(code).not.toContain(" css=");
+        expect(code).toMatch(expectedClassName);
+        expect(result[1].match(/_css\(/g) ?? []).toHaveLength(
+          expectedColors.length
+        );
+        for (const color of expectedColors) {
+          expect(result[1]).toContain(`color: "${color}"`);
+        }
+        for (const color of forbiddenColors ?? []) {
+          expect(result[1]).not.toContain(`color: "${color}"`);
+        }
+        expect(code).not.toMatch(/_cx\(condition && flag, _\$mincho/);
+        expect(code).not.toMatch(/_cx\(a \|\| b, _\$mincho/);
+        expect(code).not.toMatch(/_cx\(a \?\? b, _\$mincho/);
+        expect(output).not.toContain("_css(condition &&");
+        expect(output).not.toContain("_css(condition ||");
+        expect(output).not.toContain("_css(condition ??");
+        expect(output).not.toContain("_css(a ||");
+        expect(output).not.toContain("_css(a ??");
+        expect(output).not.toContain("_css(condition ?");
+      }
+    });
+
+    it("preserves recursive logical css prop call counts", () => {
+      const observed = runJsxCssPropRuntime(
+        `
+        let conditionCalls = 0;
+        let flagCalls = 0;
+        let aCalls = 0;
+        let bCalls = 0;
+
+        function getCondition() {
+          conditionCalls += 1;
+          return true;
+        }
+
+        function getFlag() {
+          flagCalls += 1;
+          return true;
+        }
+
+        function getA() {
+          aCalls += 1;
+          return "";
+        }
+
+        function getB() {
+          bCalls += 1;
+          return "";
+        }
+
+        function App() {
+          const andProps = <div css={getCondition() && getFlag() && { color: "red" }} />;
+          const orProps = <div css={(getA() || getB()) || { color: "blue" }} />;
+          return { andProps, orProps };
+        }
+      `,
+        "return { result: App(), conditionCalls, flagCalls, aCalls, bCalls };"
+      );
+
+      expect(observed).toEqual({
+        result: {
+          andProps: { className: "css-rule" },
+          orProps: { className: "css-rule" }
+        },
+        conditionCalls: 1,
+        flagCalls: 1,
+        aCalls: 1,
+        bCalls: 1
+      });
     });
 
     it("simplifies static-left logical OR and nullish css rule operands", () => {
@@ -2877,6 +3273,8 @@ if (import.meta.vitest) {
         `
         import { cx } from "@mincho-js/css";
 
+        const condition = true;
+
         function makeRule(color: string) {
           return { color };
         }
@@ -2887,8 +3285,11 @@ if (import.meta.vitest) {
 
         function App() {
           return <>
+            <div css={cx({ color: "red" })} />
             <div css={cx(makeRule("red"))} />
             <div css={cx(getClassName())} />
+            <div css={condition ? cx({ color: "red" }) : { color: "blue" }} />
+            <div css={condition && cx([{ color: "red" }])} />
           </>;
         }
       `,
@@ -2896,9 +3297,18 @@ if (import.meta.vitest) {
       );
 
       expect(code).not.toContain(" css=");
+      expect(code).toMatch(/className=\{_cx\(cx\(\{\s+color: "red"\s+\}\)\)\}/);
       expect(code).toContain('className={_cx(cx(makeRule("red")))}');
       expect(code).toContain("className={_cx(cx(getClassName()))}");
-      expect(result[1]).not.toContain("_css(");
+      expect(code).toMatch(
+        /className=\{_cx\(condition \? cx\(\{\s+color: "red"\s+\}\) : _\$mincho\$\$App\d+\)\}/
+      );
+      expect(code).toMatch(
+        /className=\{_cx\(condition && cx\(\[\{\s+color: "red"\s+\}\]\)\)\}/
+      );
+      expect(result[1].match(/_css\(/g) ?? []).toHaveLength(1);
+      expect(result[1]).toContain('color: "blue"');
+      expect(result[1]).not.toContain('color: "red"');
       expect(result[1]).not.toContain("makeRule");
       expect(result[1]).not.toContain("getClassName");
     });
@@ -3562,26 +3972,6 @@ if (import.meta.vitest) {
         message: jsxCssPropErrorMessages.unsupportedFunction
       },
       {
-        name: "rejects chained logical object literal css rule values",
-        fixture: `<div css={condition && flag && { color: "red" }} />`,
-        message: jsxCssPropErrorMessages.unsupportedDynamicCssRule
-      },
-      {
-        name: "rejects nested logical object literal css rule fallback values",
-        fixture: `<div css={(condition && flag) || { color: "red" }} />`,
-        message: jsxCssPropErrorMessages.unsupportedDynamicCssRule
-      },
-      {
-        name: "rejects chained OR logical object literal css rule values",
-        fixture: `<div css={a || b || { color: "red" }} />`,
-        message: jsxCssPropErrorMessages.unsupportedDynamicCssRule
-      },
-      {
-        name: "rejects nested conditional object literal css rule values",
-        fixture: `<div css={outer ? inner ? { color: "red" } : { color: "blue" } : styleA} />`,
-        message: jsxCssPropErrorMessages.unsupportedDynamicCssRule
-      },
-      {
         name: "rejects sequence object literal css rule values",
         fixture: `<div css={(0, { color: "red" })} />`,
         message: jsxCssPropErrorMessages.unsupportedDynamicCssRule
@@ -3592,19 +3982,59 @@ if (import.meta.vitest) {
         message: jsxCssPropErrorMessages.unsupportedDynamicCssRule
       },
       {
+        name: "rejects sequence object literal css rule values inside arrays",
+        fixture: `<div css={["base", (0, { color: "red" })]} />`,
+        message: jsxCssPropErrorMessages.unsupportedDynamicCssRule
+      },
+      {
+        name: "rejects sequence array literal css rule values inside arrays",
+        fixture: `<div css={["base", (0, [{ color: "red" }])]} />`,
+        message: jsxCssPropErrorMessages.unsupportedDynamicCssRule
+      },
+      {
+        name: "rejects sequence object literal css rule values inside conditional branches",
+        fixture: `<div css={condition ? (0, { color: "red" }) : "fallback"} />`,
+        message: jsxCssPropErrorMessages.unsupportedDynamicCssRule
+      },
+      {
+        name: "rejects sequence array literal css rule values inside conditional branches",
+        fixture: `<div css={condition ? "active" : (0, [{ color: "red" }])} />`,
+        message: jsxCssPropErrorMessages.unsupportedDynamicCssRule
+      },
+      {
+        name: "rejects sequence object literal css rule values inside logical branches",
+        fixture: `<div css={condition && (0, { color: "red" })} />`,
+        message: jsxCssPropErrorMessages.unsupportedDynamicCssRule
+      },
+      {
+        name: "rejects sequence array literal css rule values inside logical branches",
+        fixture: `<div css={condition || (0, [{ color: "red" }])} />`,
+        message: jsxCssPropErrorMessages.unsupportedDynamicCssRule
+      },
+      {
         name: "rejects array spread css prop array values",
         fixture: `<div css={["base", ...classes]} />`,
         message: jsxCssPropErrorMessages.unsupportedArraySpread
       },
       {
-        name: "rejects unsupported first-level dynamic branches in nested css prop arrays",
-        fixture: `<div css={["base", ["nested", condition && { color: "red" }]]} />`,
-        message: jsxCssPropErrorMessages.unsupportedFirstLevelArrayBranch
+        name: "rejects array spread css prop array values inside conditional branches",
+        fixture: `<div css={condition ? ["active", ...classes] : "fallback"} />`,
+        message: jsxCssPropErrorMessages.unsupportedArraySpread
       },
       {
-        name: "rejects unsupported first-level dynamic branches inside static array branches",
-        fixture: `<div css={["base", condition && ["active", nested && { color: "red" }]]} />`,
-        message: jsxCssPropErrorMessages.unsupportedFirstLevelArrayBranch
+        name: "rejects array spread css prop array values inside logical branches",
+        fixture: `<div css={condition && ["active", ...classes]} />`,
+        message: jsxCssPropErrorMessages.unsupportedArraySpread
+      },
+      {
+        name: "rejects array spread css prop array values at nested depth",
+        fixture: `<div css={["base", ["nested", ...classes]]} />`,
+        message: jsxCssPropErrorMessages.unsupportedArraySpread
+      },
+      {
+        name: "rejects array spread css prop array values inside nested dynamic branches",
+        fixture: `<div css={["base", condition && ["active", ...classes]]} />`,
+        message: jsxCssPropErrorMessages.unsupportedArraySpread
       },
       {
         name: "rejects duplicate css attributes",

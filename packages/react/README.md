@@ -64,7 +64,7 @@ With `jsxCssProp: true`, supported values are lowered to either the existing Min
 
 ### Value Semantics
 
-The scoped React JSX types define the `css` prop value as `ComplexCSSRule | ClassPrimitive`, not the full recursive `ClassValue` type. The primitive side reuses the existing exported `ClassPrimitive` that backs `cx(...)`; React does not duplicate it with a JSX-only union. Object and array syntax belongs to CSS-rule and composition semantics.
+The scoped React JSX types define the `css` prop value as `ComplexCSSRule | ClassPrimitive` plus the supported recursive array helper, not the full recursive `ClassValue` type. The primitive side reuses the existing exported `ClassPrimitive` that backs `cx(...)`; React does not duplicate it with a JSX-only union. Object and array syntax belongs to CSS-rule and composition semantics, while nested dynamic arrays are limited to the compile-away shapes documented below.
 
 - Inline object and array expressions are CSS-rule mode through `css(...)`, so `<div css={{ color: "red" }} />` extracts a Mincho CSS rule. Transparent direct wrappers keep that mode, including `<div css={{ color: "red" }!} />`, `<div css={{ color: "red" } as const} />`, `<div css={{ color: "red" } satisfies ComplexCSSRule} />`, and `<div css={({ color: "red" })} />`.
 - Strings are class values, not raw CSS declarations. Bare string-literal class values such as `<div css="base" />` and `<div css={"base"} />` lower directly to `className="base"` without `cx(...)` when no explicit `className` or spread-derived `className` must be merged.
@@ -256,7 +256,24 @@ Static JSX `css` arrays stay on the `css([...])` composition path. They are stat
 
 These are equivalent to `css(["base", "active"])`, `css(["base", ""])`, and `css(["base", { color: "red" }])` static composition.
 
-First-level dynamic primitive array branches lower through one `cx(...)` merge. Primitive branches pass through as arguments, so the empty string stays present as a `ClassPrimitive` value in dynamic arrays.
+Dynamic `css` prop branches are recursive in result positions and guard-preserving in predicate positions. Result-vs-guard behavior means CSS-rule objects and arrays are extracted only when they are branch results, array elements, or nested array results. Conditional tests and logical guard operands are cloned as JavaScript predicates; Mincho does not extract CSS from those guards, execute them, or duplicate their side effects.
+
+Support matrix:
+
+| Shape | Support | Compile-away behavior |
+| --- | --- | --- |
+| Static direct array | Supported | Stays one `css([...])` composition rule. |
+| Dynamic primitive array item | Supported | Lowers through `cx(...)`, preserving primitive leaves such as `""`, `false`, `0`, and `1n`. |
+| Dynamic object/array CSS-rule branch | Supported | Extracts the static rule branch at build time and merges or selects the generated class. |
+| nested/chained ternary result branch | Supported | Recurses through consequent and alternate result values; the test remains a guard. |
+| Chained logical result branch | Supported | Recurses through supported right/result values without flattening guards into extra `cx(...)` arguments. |
+| nested dynamic array literal | Supported | Lowers nested literal arrays through nested `cx(...)` calls or equivalent class-value composition. |
+| Direct CSS-rule array branch | Supported as one CSS-rule unit | `condition && ["active", { color: "red" }]` extracts one generated array-rule class instead of decomposing the string and object. |
+| Dynamic spread inside a `css` array | Rejected at any depth | Use explicit array elements; dynamic spread would require runtime array expansion. |
+| Sequence expression object/array CSS-rule value | Rejected | Sequence values are not CSS-rule syntax in compile-away mode. |
+| Branch-internal static eval expansion | Not performed | Identifiers, members, imports, factories, and calls inside recursive branches remain class-value expressions unless they are direct rule calls already supported at the top level. |
+
+Dynamic primitive array branches lower through one `cx(...)` merge. Primitive branches pass through as arguments, so the empty string stays present as a `ClassPrimitive` value in dynamic arrays.
 
 ```tsx
 <div css={["base", condition && "active"]} />
@@ -279,7 +296,7 @@ First-level dynamic primitive array branches lower through one `cx(...)` merge. 
 <div css={["base", 1n]} />
 ```
 
-First-level dynamic object and array CSS-rule branches are extracted at build time, then merged or selected with `cx(...)`. Mincho extracts the static rule branch to a generated class and keeps primitive branches as written.
+Dynamic object and array CSS-rule branches are extracted at build time, then merged or selected with `cx(...)`. Mincho extracts the static rule branch to a generated class and keeps primitive branches as written.
 
 ```tsx
 <div css={["base", condition && { color: "red" }]} />
@@ -294,7 +311,7 @@ First-level dynamic object and array CSS-rule branches are extracted at build ti
 
 The first example lowers like `cx("base", condition && generatedClass)`. Direct static CSS-rule items in otherwise dynamic arrays use the same extraction path, so `<div css={["base", { color: "red" }, activeClass]} />` lowers like `cx("base", generatedClass, activeClass)`.
 
-First-level CSS-rule branches outside arrays are also supported. Mincho lowers each object or array branch with the same CSS-rule extraction path used for direct `css` rules, then composes the generated class names. It does not call `css(condition ? ...)` and does not generate CSS at runtime.
+CSS-rule branches outside arrays are also supported recursively. Mincho lowers each object or array result branch with the same CSS-rule extraction path used for direct `css` rules, then composes the generated class names. It does not call `css(condition ? ...)` and does not generate CSS at runtime.
 
 ```tsx
 <div css={condition ? { color: "red" } : { color: "blue" }} />
@@ -303,11 +320,15 @@ First-level CSS-rule branches outside arrays are also supported. Mincho lowers e
 <div css={condition && [{ color: "red" }]} />
 <div css={condition ? styleA : { color: "red" }} />
 <div css={condition ? classNameA : { color: "red" }} />
+<div css={outer ? inner ? { color: "red" } : { color: "blue" } : styleA} />
+<div css={condition && flag && { color: "red" }} />
+<div css={(condition && flag) || { color: "red" }} />
+<div css={a || b || { color: "red" }} />
 ```
 
 Pure object/object or array/array ternaries compile to a `className` conditional between generated class identifiers. Mixed class-value/object branches keep the class-value branch as written and lower only the static CSS-rule branch inside `cx(...)`. Logical `condition && { ... }` and `condition && [{ ... }]` lower the right branch and compose through `cx(condition && generatedClass)`, so `false` does not become class text.
 
-First-level `||` and `??` rule fallbacks are supported when a direct object or array rule is the right operand. The generated class stays inside one logical `_cx(...)` expression, for example `_cx(providedClass || generatedClass)`, not `_cx(providedClass, generatedClass)`.
+`||` and `??` rule fallbacks are supported when a direct object or array rule is in a recursive result position. The generated class stays inside one logical `_cx(...)` expression, for example `_cx(providedClass || generatedClass)`, not `_cx(providedClass, generatedClass)`. Chained logicals preserve JavaScript short-circuiting, so `a || b || { color: "red" }` stays one chained expression ending in a generated class.
 
 ```tsx
 <div css={providedClass || { color: "red" }} />
@@ -333,18 +354,30 @@ Static-left `&&` object and array rules are truthy guards only. The left rule is
 <div css={{ color: "red" } && { color: "blue" }} />
 ```
 
-The dynamic branch support is first-level only. Nested dynamic arrays, dynamic array spreads, chained branches, permutation-style branches, and sequence-expression object/array CSS-rule branches remain unsupported. Static array spreads inside proven CSS-rule literals remain on the static composition path described above, not recursive `ClassValue` array handling:
+Nested dynamic array literals are supported when every nested array is a literal expression and every generated CSS-rule object or array appears in a result position. Direct CSS-rule array unit preservation still applies inside recursive arrays: a branch such as `condition && ["active", { color: "red" }]` becomes one generated class for the whole array rule, not independent `"active"` and object-rule class arguments.
 
 ```tsx
 <div css={["base", ["nested", condition && { color: "red" }]]} />
 <div css={["base", condition && ["active", nested && { color: "red" }]]} />
+<div css={["base", condition ? ["active", { color: "red" }] : ["fallback", { color: "blue" }]]} />
+<div css={["base", ["nested", condition ? { color: "red" } : "inactive"]]} />
+```
+
+Dynamic spread and sequence expressions remain rejected. Static array spreads inside proven CSS-rule literals remain on the static composition path described above, not recursive `ClassValue` array handling:
+
+```tsx
 <div css={["base", ...classes]} />
-<div css={outer ? inner ? { color: "red" } : { color: "blue" } : styleA} />
-<div css={condition && flag && { color: "red" }} />
-<div css={(condition && flag) || { color: "red" }} />
-<div css={a || b || { color: "red" }} />
+<div css={["base", ["nested", ...classes]]} />
+<div css={["base", condition && ["active", ...classes]]} />
 <div css={(0, { color: "red" })} />
 <div css={(0, [{ color: "red" }])} />
+```
+
+There is no branch-internal static eval expansion. These branches may be accepted as mixed class-value/CSS-rule expressions, but Mincho does not resolve `styles.red` through static eval or execute `makeRule()` to discover returned styles inside the branch:
+
+```tsx
+<div css={outer ? styles.red : { color: "blue" }} />
+<div css={condition && makeRule()} />
 ```
 
 Class-value-only `||` and `??` still lower through `cx(...)` without CSS-rule extraction:
@@ -402,9 +435,9 @@ When `jsxCssProp: true` is enabled, unsupported css prop cases fail during the t
 | Explicit `key` or `ref` on a spread css-prop element | `Mincho JSX css prop does not support key/ref on spread elements in compile-away mode` |
 | Shorthand `css` | `Mincho JSX css prop requires an expression value` |
 | Function value | `Mincho JSX css prop does not support function values in compile-away mode` |
-| Dynamic spread element inside a `css` array | `Mincho JSX css prop array values do not support spread elements in compile-away mode` |
-| Nested dynamic array branch inside a `css` array | `Mincho JSX css prop array branch extraction only supports first-level dynamic branches` |
-| Nested, chained, sequence, unsupported logical, or dynamically resolved object/array CSS-rule value | `Mincho JSX css prop does not support conditional, logical, or wrapped object/array CSS rule values in compile-away mode` |
+| Dynamic spread element inside a `css` array at any depth | `Mincho JSX css prop array values do not support spread elements in compile-away mode` |
+| Sequence expression object/array CSS-rule value | `Mincho JSX css prop does not support conditional, logical, or wrapped object/array CSS rule values in compile-away mode` |
+| Unsupported dynamically resolved object/array CSS-rule value | `Mincho JSX css prop does not support conditional, logical, or wrapped object/array CSS rule values in compile-away mode` |
 | Duplicate `css` | `Mincho JSX css prop must appear only once` |
 | Duplicate `className` | `Mincho JSX css prop cannot merge duplicate className attributes` |
 | Shorthand or unsupported `className` value | `Mincho JSX css prop requires className to be a string literal or expression` |

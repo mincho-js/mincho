@@ -2,17 +2,18 @@ import type { ClassPrimitive, ComplexCSSRule } from "@mincho-js/css";
 import type { JSX as ReactJSX } from "react";
 
 type ComplexCSSRuleArrayItem = Extract<ComplexCSSRule, unknown[]>[number];
-type MinchoCssPropFirstLevelArrayItem =
+type MinchoCssPropRecursiveArrayItem =
   | ComplexCSSRuleArrayItem
-  | ClassPrimitive;
-type MinchoCssPropFirstLevelArray =
-  | MinchoCssPropFirstLevelArrayItem[]
-  | readonly MinchoCssPropFirstLevelArrayItem[];
+  | ClassPrimitive
+  | MinchoCssPropRecursiveArray;
+type MinchoCssPropRecursiveArray =
+  | MinchoCssPropRecursiveArrayItem[]
+  | readonly MinchoCssPropRecursiveArrayItem[];
 
 export type MinchoCssPropValue =
   | ComplexCSSRule
   | ClassPrimitive
-  | MinchoCssPropFirstLevelArray;
+  | MinchoCssPropRecursiveArray;
 
 type MinchoCssProp = {
   css?: MinchoCssPropValue;
@@ -63,6 +64,7 @@ if (import.meta.vitest) {
       const condition = true as boolean;
       const activeClass = "active-class";
       const styles = { active: "styles-active" };
+      const nested = true as boolean;
       const providedClassName: string = Math.random() > 0.5 ? "base" : "";
       const providedClass: string | undefined =
         Math.random() > 0.5 ? "base" : undefined;
@@ -71,7 +73,7 @@ if (import.meta.vitest) {
       const emptyClassName: ClassPrimitive = "";
 
       expectTypeOf<MinchoCssPropValue>().toEqualTypeOf<
-        ComplexCSSRule | ClassPrimitive | MinchoCssPropFirstLevelArray
+        ComplexCSSRule | ClassPrimitive | MinchoCssPropRecursiveArray
       >();
 
       assertType<ClassPrimitive>(emptyClassName);
@@ -140,6 +142,22 @@ if (import.meta.vitest) {
       assertType<MinchoCssPropValue>(condition && [{ color: "red" }]);
       assertType<MinchoCssPropValue>(providedClass || { color: "red" });
       assertType<MinchoCssPropValue>(maybeClass ?? [{ color: "red" }]);
+      assertType<MinchoCssPropValue>([
+        "base",
+        ["nested", condition && { color: "red" }]
+      ]);
+      assertType<MinchoCssPropValue>([
+        "base",
+        condition && ["active", nested && { color: "red" }]
+      ]);
+      assertType<MinchoCssPropValue>([
+        "base",
+        condition
+          ? ["active", { color: "red" }]
+          : ["fallback", { color: "blue" }]
+      ]);
+      assertType<MinchoCssPropValue>([["base", false]]);
+      assertType<MinchoCssPropValue>([[1]]);
 
       // ClassValue-only object dictionaries with non-CSS keys are rejected.
       // CSS-shaped objects, for example `{ color: "red" }`, are intentionally
@@ -148,10 +166,6 @@ if (import.meta.vitest) {
       assertType<MinchoCssPropValue>({ active: condition });
       // @ts-expect-error Direct class dictionaries are not css prop values.
       assertType<MinchoCssPropValue>({ "is-active": true });
-      // @ts-expect-error Recursive arrays with falsy leaves are ClassValue-only.
-      assertType<MinchoCssPropValue>([["base", false]]);
-      // @ts-expect-error Recursive arrays with numeric leaves are ClassValue-only.
-      assertType<MinchoCssPropValue>([[1]]);
       assertType<MinchoCssPropValue>(cssRule || providedClass);
       assertType<MinchoCssPropValue>(cssRule ?? providedClass);
       assertType<MinchoCssPropValue>(cssRule && providedClass);
@@ -161,6 +175,7 @@ if (import.meta.vitest) {
       const cssRule: ComplexCSSRule = { color: "red" };
       const condition = true as boolean;
       const activeClass = "active-class";
+      const nested = true as boolean;
       const providedClassName: string = Math.random() > 0.5 ? "base" : "";
       const providedClass: string | undefined =
         Math.random() > 0.5 ? "base" : undefined;
@@ -301,6 +316,23 @@ if (import.meta.vitest) {
 
       assertType<JSX.IntrinsicElements["div"]>({
         css: ["base", { color: "red" }, activeClass]
+      });
+
+      assertType<JSX.IntrinsicElements["div"]>({
+        css: ["base", ["nested", condition && { color: "red" }]]
+      });
+
+      assertType<JSX.IntrinsicElements["div"]>({
+        css: ["base", condition && ["active", nested && { color: "red" }]]
+      });
+
+      assertType<JSX.IntrinsicElements["div"]>({
+        css: [
+          "base",
+          condition
+            ? ["active", { color: "red" }]
+            : ["fallback", { color: "blue" }]
+        ]
       });
 
       assertType<JSX.IntrinsicElements["div"]>({

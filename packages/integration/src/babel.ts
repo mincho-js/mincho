@@ -2987,6 +2987,125 @@ if (import.meta.vitest) {
       expect(`${code}\n${sidecarSource}`).not.toContain('color: "purple"');
     });
 
+    it("lowers representative recursive css prop branches", async () => {
+      const fixturePath = await createBabelFixture(
+        `
+          import { styles } from "./styles";
+
+          const condition = true;
+          const flag = false;
+          const styleA = "style-a";
+
+          function App() {
+            return <>
+              <div css={condition ? flag ? { color: "red" } : { color: "blue" } : styleA} />
+              <div css={condition && flag && { color: "green" }} />
+              <div css={{ color: "yellow" } && (condition && { color: "orange" })} />
+              <div css={["base", ["nested", condition && { color: "purple" }]]} />
+              <div css={condition ? styles.red : { color: "black" }} />
+            </>;
+          }
+        `,
+        "css-prop-recursive-branches"
+      );
+      const { result, code, staticCssEval } = await babelTransform(
+        fixturePath,
+        {
+          jsxCssProp: true,
+          staticCssEvalProvider: createResolvedStaticCssEvalProvider({
+            "styles.red": { color: "magenta" }
+          })
+        }
+      );
+      const [sidecarFile, sidecarSource] = result;
+      const output = `${code}\n${sidecarSource}`;
+      const exportedDeclarations = sidecarSource.match(/export var/g) ?? [];
+      const sidecarImportMatch = new RegExp(
+        `import \\{ ([^}]+) \\} from "${escapeRegExp(sidecarFile)}";`
+      ).exec(code);
+      const sidecarRuntimeNames = [
+        ...((sidecarImportMatch?.[1] ?? "").matchAll(
+          /(?:^|, )([A-Za-z_$][\w$]*)(?: as ([A-Za-z_$][\w$]*))?/g
+        ) ?? [])
+      ].map(([, importedName, localName]) => localName ?? importedName);
+      const cxImportMatch =
+        /import \{ [^}]*\bcx(?: as ([A-Za-z_$][\w$]*))?[^}]*\} from "@mincho-js\/css";/.exec(
+          code
+        );
+      const cxIdentifier = cxImportMatch?.[1] ?? "cx";
+      const nestedConditionalMatch = new RegExp(
+        `className=\\{${escapeRegExp(
+          cxIdentifier
+        )}\\(condition \\? flag \\? ([A-Za-z_$][\\w$]*) : ([A-Za-z_$][\\w$]*) : styleA\\)\\}`
+      ).exec(code);
+      const chainedLogicalMatch = new RegExp(
+        `className=\\{${escapeRegExp(
+          cxIdentifier
+        )}\\(condition && flag && ([A-Za-z_$][\\w$]*)\\)\\}`
+      ).exec(code);
+      const staticLeftLogicalMatch = new RegExp(
+        `className=\\{${escapeRegExp(
+          cxIdentifier
+        )}\\(condition && ([A-Za-z_$][\\w$]*)\\)\\}`
+      ).exec(code);
+      const nestedArrayMatch = new RegExp(
+        `className=\\{${escapeRegExp(cxIdentifier)}\\("base", ${escapeRegExp(
+          cxIdentifier
+        )}\\("nested", condition && ([A-Za-z_$][\\w$]*)\\)\\)\\}`
+      ).exec(code);
+      const providerBranchMatch = new RegExp(
+        `className=\\{${escapeRegExp(
+          cxIdentifier
+        )}\\(condition \\? styles\\.red : ([A-Za-z_$][\\w$]*)\\)\\}`
+      ).exec(code);
+      const generatedClassNames = [
+        ...(nestedConditionalMatch?.slice(1) ?? []),
+        chainedLogicalMatch?.[1],
+        staticLeftLogicalMatch?.[1],
+        nestedArrayMatch?.[1],
+        providerBranchMatch?.[1]
+      ].filter(
+        (className): className is string => typeof className === "string"
+      );
+
+      expect(sidecarFile).toMatch(/^extracted_[a-z0-9]+\.css\.ts$/);
+      expect(sidecarSource).toContain("@mincho-js/css");
+      expect(sidecarImportMatch).not.toBeNull();
+      expect(cxImportMatch).not.toBeNull();
+      expect(exportedDeclarations).toHaveLength(6);
+      expect(generatedClassNames).toHaveLength(6);
+      expect(new Set(generatedClassNames)).toHaveLength(6);
+      for (const color of [
+        "red",
+        "blue",
+        "green",
+        "orange",
+        "purple",
+        "black"
+      ]) {
+        expect(sidecarSource).toContain(`color: "${color}"`);
+      }
+      for (const className of generatedClassNames) {
+        expect(sidecarRuntimeNames).toContain(className);
+      }
+      expect(nestedConditionalMatch).not.toBeNull();
+      expect(chainedLogicalMatch).not.toBeNull();
+      expect(staticLeftLogicalMatch).not.toBeNull();
+      expect(nestedArrayMatch).not.toBeNull();
+      expect(providerBranchMatch).not.toBeNull();
+      expect(code).not.toContain(" css=");
+      expect(code).not.toContain("css={{");
+      expect(code).not.toContain("css:");
+      expect(output).not.toContain("_css(condition ?");
+      expect(output).not.toContain("_css(condition &&");
+      expect(output).not.toContain("css(condition ?");
+      expect(output).not.toContain("css(condition &&");
+      expect(output).not.toContain('color: "yellow"');
+      expect(output).not.toContain('color: "magenta"');
+      expect(staticCssEval?.dependencies ?? []).toEqual([]);
+      expect(staticCssEval?.resolvedModuleIds ?? []).toEqual([]);
+    });
+
     it("leaves jsx css prop lowering disabled by default", async () => {
       const fixturePath = await createBabelFixture(
         `

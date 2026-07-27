@@ -358,9 +358,8 @@ async function loadStaticCssEvalPrepassDependency(
   const loadedSource = await sourceProvider.load(resolution.normalizedPathKey);
 
   if (!loadedSource) {
-    const loadFailureResolution = createLoadFailureStaticCssEvalSourceResolution(
-      resolution
-    );
+    const loadFailureResolution =
+      createLoadFailureStaticCssEvalSourceResolution(resolution);
     markPrepassImportResolutionUnloaded(
       state.importResolutions,
       importerId,
