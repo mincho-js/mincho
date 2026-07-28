@@ -458,6 +458,11 @@ export function minchoVitePlugin(
       }
 
       if (id.endsWith(virtualExt)) {
+        const exactId = normalizePath(id);
+        if (cssMap.has(exactId)) {
+          return exactId;
+        }
+
         const normalizedId = id.startsWith("/") ? id.slice(1) : id;
 
         const key = normalizePath(resolve(config.root, normalizedId));
@@ -563,8 +568,7 @@ export function minchoVitePlugin(
 
               if (server) {
                 const { moduleGraph } = server;
-                const moduleId = normalizePath(join(config.root, id));
-                const module = moduleGraph.getModuleById(moduleId);
+                const module = moduleGraph.getModuleById(cssFileId);
 
                 if (module) {
                   moduleGraph.invalidateModule(module);
@@ -575,7 +579,7 @@ export function minchoVitePlugin(
 
               setVirtualCssForSidecar(moduleInfo.filePath, cssFileId, source);
 
-              return `import "${id}";`;
+              return `import "${cssFileId}";`;
             }
           });
 
@@ -4777,6 +4781,16 @@ if (import.meta.vitest) {
         color: "mediumseagreen",
         display: "flex"
       });
+      if (
+        !("classNameByCache" in providerV2.preset) ||
+        typeof providerV2.preset.classNameByCache !== "object" ||
+        providerV2.preset.classNameByCache === null ||
+        !("classNameByCache" in consumer.preset) ||
+        typeof consumer.preset.classNameByCache !== "object" ||
+        consumer.preset.classNameByCache === null
+      ) {
+        throw new Error("Expected V4 preset class caches");
+      }
       const providerClassNameByCache = providerV2.preset.classNameByCache;
       const consumerClassNameByCache = consumer.preset.classNameByCache;
       const seededEntryCount = Object.keys(providerClassNameByCache).length;
@@ -4802,7 +4816,7 @@ if (import.meta.vitest) {
       fileScopeModule.endFileScope();
     });
 
-    it("keeps dev virtual css caching and HMR bookkeeping on the local path", async () => {
+    it("emits resolved virtual css imports while keeping dev HMR bookkeeping", async () => {
       const integrationModule = await import("@mincho-js/integration");
       const cssSource = ".shared { color: rebeccapurple; }";
       const virtualCssId = "src/extracted_rules.css.ts.vanilla.css";
@@ -4871,7 +4885,9 @@ if (import.meta.vitest) {
         throw new Error("Expected a virtual css import in dev mode");
       }
 
-      expect(transformedExtractedCss).toContain(`import "${virtualCssId}";`);
+      expect(transformedExtractedCss).toContain(
+        `import "${expectedModuleId}";`
+      );
       expect(transformedExtractedCss).not.toContain("presets");
       const resolvedVirtualId = harness.resolveId(virtualImportMatch[1]);
       expect(resolvedVirtualId).toBe(expectedModuleId);

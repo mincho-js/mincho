@@ -1610,6 +1610,30 @@ if (import.meta.vitest) {
       }
     });
 
+    it("records dynamic expression types without weakening computed member errors", () => {
+      const source = `
+        function getRule() {
+          return { color: "red" };
+        }
+        const styles = { button: getRule() };
+
+        function App() {
+          return <div css={styles["button"]} />;
+        }
+      `;
+
+      expect(() => babelTransform(source, { jsxCssProp: true })).toThrow(
+        "dynamic expression is unsupported: CallExpression"
+      );
+
+      const failure = captureJsxCssPropFailure(source, { jsxCssProp: true });
+      expect(
+        failure.metadata.minchoStaticCssEval?.diagnostics.map(
+          ({ expressionType }) => expressionType
+        )
+      ).toContain("CallExpression");
+    });
+
     it("records static css eval metadata before unsupported css prop failures", () => {
       const source = `
         const styles = {
