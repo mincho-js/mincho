@@ -97,7 +97,9 @@ export function getUnsupportedLiteralReason(
 
   if (
     t.isCallExpression(expression) ||
-    t.isOptionalCallExpression(expression)
+    t.isOptionalCallExpression(expression) ||
+    t.isFunctionExpression(expression) ||
+    t.isArrowFunctionExpression(expression)
   ) {
     return "function-or-call";
   }

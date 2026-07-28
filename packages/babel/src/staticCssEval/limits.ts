@@ -163,10 +163,10 @@ export function getStaticCssEvalSourceByteLength(source: string): number {
 // Ignore errors when compiling to CommonJS.
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore error TS1343: The 'import.meta' meta-property is only allowed when the '--module' option is 'es2020', 'es2022', 'esnext', 'system', 'node16', or 'nodenext'.
-if (import.meta.vitest) {
-  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-  // @ts-ignore error TS1343: The 'import.meta' meta-property is only allowed when the '--module' option is 'es2020', 'es2022', 'esnext', 'system', 'node16', or 'nodenext'.
-  const { describe, expect, it } = import.meta.vitest;
+const vitest = import.meta.vitest;
+
+if (vitest) {
+  const { describe, expect, it } = vitest;
 
   const owner = { file: "/project/src/App.tsx", start: 42, end: 55 };
   const dependency = { file: "/project/src/styles.ts" };
