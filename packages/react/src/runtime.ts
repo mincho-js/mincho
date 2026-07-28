@@ -24,7 +24,6 @@ export function $$styled<T extends ComponentType<unknown>>(
   type Props = ComponentProps<typeof component> & {
     as?: ElementType;
     className?: string;
-    // Add any variant props with an index signature
     [key: string]: unknown;
   };
 
@@ -40,7 +39,6 @@ export function $$styled<T extends ComponentType<unknown>>(
 
       const className = [styles(variantSelection), classNameProp].join(" ");
 
-      // Create element with proper types
       if (typeof componentToRender === "string") {
         return createElement(componentToRender, {
           ...otherProps,
@@ -63,9 +61,6 @@ export function $$styled<T extends ComponentType<unknown>>(
       );
     }
   );
-
-  // Set component static properties
-  // StyledComponent.displayName = `Mincho(${getDisplayName(component)})`;
 
   return StyledComponent;
 }
@@ -97,19 +92,13 @@ function splitVariantProps(
   return [variantSelection, otherProps];
 }
 
-// Helper function to get display name
-// function getDisplayName(component: ComponentType<unknown>): string {
-//   return component.displayName || component.name || "Component";
-// }
-
-// == Tests ====================================================================
 // Ignore errors when compiling to CommonJS.
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore error TS1343: The 'import.meta' meta-property is only allowed when the '--module' option is 'es2020', 'es2022', 'esnext', 'system', 'node16', or 'nodenext'.
-if (import.meta.vitest) {
-  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-  // @ts-ignore error TS1343: The 'import.meta' meta-property is only allowed when the '--module' option is 'es2020', 'es2022', 'esnext', 'system', 'node16', or 'nodenext'.
-  const { describe, it, expect } = import.meta.vitest;
+const vitest = import.meta.vitest;
+
+if (vitest) {
+  const { describe, it, expect } = vitest;
 
   type TestStyleFn = RuntimeFn<
     VariantGroups,
