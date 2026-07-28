@@ -11,14 +11,6 @@ type NormalizedStyledCall = {
   rest: Array<t.Expression | t.SpreadElement>;
 };
 
-/**
- * The plugin for transforming styled components
- *
- * This plugin transforms calls to `styled` from "@mincho-js/react" into runtime
- * calls with proper tree-shaking annotations.
- *
- * @returns The plugin object
- */
 export function styledComponentPlugin(): PluginObj<PluginState> {
   return {
     name: "mincho-js-babel:styled",

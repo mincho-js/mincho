@@ -434,7 +434,9 @@ if (import.meta.vitest) {
     ).toThrow(message);
   }
 
-  function expectNestedUnsupportedJsxTargetError() {
+  function expectNestedUnsupportedJsxTargetError(
+    message = jsxCssPropErrorMessages.unsupportedTarget
+  ) {
     const options: PluginOptions = { result: ["", ""], jsxCssProp: true };
     const invalidTargetPlugin: PluginObj<PluginState> = {
       visitor: {
@@ -471,7 +473,53 @@ if (import.meta.vitest) {
           filename: "invalid-jsx-target-test.tsx"
         }
       )
-    ).toThrow(jsxCssPropErrorMessages.unsupportedTarget);
+    ).toThrow(message);
+  }
+
+  function expectUnsupportedSpreadAggregationContextError(message: string) {
+    const options: PluginOptions = { result: ["", ""], jsxCssProp: true };
+    const invalidSpreadContextPlugin: PluginObj<PluginState> = {
+      visitor: {
+        Program(path) {
+          path.traverse({
+            JSXElement(jsxElementPath) {
+              const parentPath = jsxElementPath.parentPath;
+
+              if (!parentPath.isReturnStatement()) {
+                return;
+              }
+
+              Object.assign(parentPath.node, {
+                argument: jsxElementPath.node.openingElement
+              });
+              jsxElementPath.stop();
+            }
+          });
+        }
+      }
+    };
+
+    expect(() =>
+      transformSync(
+        `
+          const props = { className: "base", css: "leaked" };
+          const styleA = "style-a";
+
+          function App() {
+            return <div {...props} css={styleA} />;
+          }
+        `,
+        {
+          plugins: [
+            invalidSpreadContextPlugin,
+            [minchoBabelPlugin(), options],
+            [styledComponentPlugin()]
+          ],
+          presets: ["@babel/preset-typescript"],
+          filename: "invalid-spread-context-test.tsx"
+        }
+      )
+    ).toThrow(message);
   }
 
   function expectNestedInvalidClassNameExpressionError() {
@@ -5075,6 +5123,225 @@ if (import.meta.vitest) {
       expect(code).toContain("css: _minchoCssProp");
       expect(code).toContain("className: _minchoClassName");
       expect(code).toContain("..._minchoRest");
+    });
+
+    describe("jsx css prop split characterization", () => {
+      it("removes unused jsx css prop helper imports as whole imports and pruned specifiers", () => {
+        const wholeImport = babelTransform(
+          `
+          import { css } from "@mincho-js/css";
+
+          function makeRule(color: string) {
+            return { color };
+          }
+
+          function App() {
+            return <div css={makeRule("red")} />;
+          }
+        `,
+          { jsxCssProp: true }
+        );
+        const prunedImport = babelTransform(
+          `
+          import { css, defineRules } from "@mincho-js/css";
+
+          defineRules({
+            properties: { color: String }
+          });
+
+          function makeRule(color: string) {
+            return { color };
+          }
+
+          function App() {
+            return <div css={makeRule("red")} />;
+          }
+        `,
+          { jsxCssProp: true }
+        );
+
+        expect(wholeImport.code).not.toContain("@mincho-js/css");
+        expect(wholeImport.code).not.toContain("_css(");
+        expect(prunedImport.code).toContain(
+          'import { defineRules } from "@mincho-js/css";'
+        );
+        expect(prunedImport.code).not.toContain("css, defineRules");
+        expect(prunedImport.code).not.toContain("_css(");
+      });
+
+      it("characterizes jsx css prop spread aggregation statement-list and nested IIFE rewrites", () => {
+        const directStatementList = babelTransform(
+          `
+          const props = { className: "base", css: "leaked", id: "root" };
+          const styleA = "style-a";
+
+          function App() {
+            return <div {...props} css={styleA} />;
+          }
+        `,
+          { jsxCssProp: true }
+        );
+        const nestedIife = babelTransform(
+          `
+          const props = { className: "base", css: "leaked", id: "root" };
+          const styleA = "style-a";
+
+          function App() {
+            const renderValue = () => <div {...props} css={styleA} />;
+            return renderValue();
+          }
+        `,
+          { jsxCssProp: true }
+        );
+
+        expect(directStatementList.code).not.toContain("(() =>");
+        expect(directStatementList.code).toContain("css: _minchoCssProp");
+        expect(directStatementList.code).toContain(
+          "className={_cx(_minchoClassName, styleA)}"
+        );
+        expect(nestedIife.code).toContain("(() =>");
+        expect(nestedIife.code).toContain("css: _minchoCssProp");
+        expect(nestedIife.code).toContain(
+          "className={_cx(_minchoClassName, styleA)}"
+        );
+      });
+
+      it("leaves representative jsx css prop class-value expressions untouched except className lowering", () => {
+        const { result, code } = babelTransform(
+          `
+          const maybeClass = "dynamic";
+
+          function App() {
+            return <>
+              <div css={new String("boxed")} />
+              <div css={void maybeClass} />
+            </>;
+          }
+        `,
+          { jsxCssProp: true }
+        );
+
+        expect(code).not.toContain(" css=");
+        expect(code).toContain('className={_cx(new String("boxed"))}');
+        expect(code).toContain("className={_cx(void maybeClass)}");
+        expect(result[1]).not.toContain("_css(");
+      });
+
+      const exactJsxCssPropErrorFixtures = [
+        {
+          name: "fragment target",
+          fixture: `<React.Fragment css={{ color: "red" }} />`,
+          message:
+            "Mincho JSX css prop does not support fragments because fragments cannot receive className"
+        },
+        {
+          name: "namespaced target",
+          fixture: `<svg:path css={{ color: "red" }} />`,
+          message:
+            "Mincho JSX css prop does not support namespaced JSX elements"
+        },
+        {
+          name: "key/ref spread",
+          fixture: `<div key="x" {...props} css={styleA} />`,
+          message:
+            "Mincho JSX css prop does not support key/ref on spread elements in compile-away mode"
+        },
+        {
+          name: "missing expression value",
+          fixture: `<div css />`,
+          message: "Mincho JSX css prop requires an expression value"
+        },
+        {
+          name: "non-expression JSX value",
+          fixture: `<div css=<span /> />`,
+          message: "Mincho JSX css prop expects a Mincho CSS object/expression"
+        },
+        {
+          name: "function value",
+          fixture: `<div css={() => ({ color: "red" })} />`,
+          message:
+            "Mincho JSX css prop does not support function values in compile-away mode"
+        },
+        {
+          name: "logical arrow function value",
+          fixture: `<div css={{ color: "red" } && (() => ({ color: "blue" }))} />`,
+          message:
+            "Mincho JSX css prop does not support conditional, logical, or wrapped object/array CSS rule values in compile-away mode"
+        },
+        {
+          name: "logical function expression value",
+          fixture: `<div css={{ color: "red" } && function () { return { color: "blue" }; }} />`,
+          message:
+            "Mincho JSX css prop does not support conditional, logical, or wrapped object/array CSS rule values in compile-away mode"
+        },
+        {
+          name: "dynamic CSS rule value",
+          fixture: `<div css={(0, { color: "red" })} />`,
+          message:
+            "Mincho JSX css prop does not support conditional, logical, or wrapped object/array CSS rule values in compile-away mode"
+        },
+        {
+          name: "array spread value",
+          fixture: `<div css={["base", ...classes]} />`,
+          message:
+            "Mincho JSX css prop array values do not support spread elements in compile-away mode"
+        },
+        {
+          name: "duplicate css",
+          fixture: `<div css={{ color: "red" }} css={{ color: "blue" }} />`,
+          message: "Mincho JSX css prop must appear only once"
+        },
+        {
+          name: "duplicate className",
+          fixture: `<div className="base" className="extra" css={{ color: "red" }} />`,
+          message:
+            "Mincho JSX css prop cannot merge duplicate className attributes"
+        },
+        {
+          name: "invalid className value",
+          fixture: `<div className css={{ color: "red" }} />`,
+          message:
+            "Mincho JSX css prop requires className to be a string literal or expression"
+        }
+      ] as const;
+
+      for (const { name, fixture, message } of exactJsxCssPropErrorFixtures) {
+        it(`throws exact jsx css prop error for ${name}`, () => {
+          expectJsxCssPropError(fixture, message);
+        });
+      }
+
+      it("throws exact jsx css prop error for unsupported target", () => {
+        expectNestedUnsupportedJsxTargetError(
+          "Mincho JSX css prop only supports JSX identifiers and member expressions"
+        );
+      });
+
+      it("throws exact jsx css prop error for unsupported spread aggregation context", () => {
+        expectUnsupportedSpreadAggregationContextError(
+          "Mincho JSX css prop spread aggregation only supports statement-list JSX, replaceable expression JSX, JSX attribute values, or JSX children in compile-away mode"
+        );
+      });
+
+      it("throws exact jsx css prop error for nested await or yield spread aggregation", () => {
+        expect(() =>
+          babelTransform(
+            `
+            async function getStyle() {
+              return "style-a";
+            }
+            const props = { className: "base" };
+
+            async function App(ok) {
+              return ok ? <div css={await getStyle()} {...props} /> : null;
+            }
+          `,
+            { jsxCssProp: true }
+          )
+        ).toThrow(
+          "Mincho JSX css prop nested spread aggregation does not support await or yield expressions in compile-away mode"
+        );
+      });
     });
 
     const unsupportedJsxCssPropFixtures = [
