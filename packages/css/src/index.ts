@@ -28,6 +28,7 @@ export {
 
 export { globalCss, css, selector } from "./css/index.js";
 export type { CSSRuleWith } from "./css/types.js";
+export { getVarName } from "./utils.js";
 export { rules } from "./rules/index.js";
 export type {
   VariantStyle,
@@ -93,3 +94,24 @@ export type {
   DefineRulesShortcuts
 } from "./defineRules/types.js";
 export type { DefineRulesConditionObject } from "./defineRules/conditions.js";
+
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore error TS1343: The 'import.meta' meta-property is only allowed when the '--module' option is 'es2020', 'es2022', 'esnext', 'system', 'node16', or 'nodenext'.
+if (import.meta.vitest) {
+  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+  // @ts-ignore error TS1343: The 'import.meta' meta-property is only allowed when the '--module' option is 'es2020', 'es2022', 'esnext', 'system', 'node16', or 'nodenext'.
+  const { describe, it, expect, expectTypeOf } = import.meta.vitest;
+
+  describe("getVarName export", () => {
+    it("is available from the root barrel", async () => {
+      const { getVarName } = await import("./index.js");
+
+      expect(typeof getVarName).toBe("function");
+      expect(getVarName("var(--my-var-name, 1px)")).toBe("--my-var-name");
+      expect(getVarName("--my-var-name")).toBe("--my-var-name");
+      expectTypeOf(getVarName).returns.toEqualTypeOf<
+        import("@mincho-js/transform-to-vanilla").PureCSSVarKey
+      >();
+    });
+  });
+}
