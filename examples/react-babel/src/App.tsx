@@ -2,7 +2,7 @@ import "@examples/shared-component/style.css";
 import { SharedExampleCard } from "@examples/shared-component";
 import { css } from "@mincho-js/css";
 import { styled } from "@mincho-js/react";
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 
 import { sharedCardHostClassName } from "./App.css.ts";
 import importedDefaultStyle, { importedNamedStyle } from "./staticStyles";
@@ -14,11 +14,17 @@ const styleA = css({
 function ClassNameForwardingExample({
   children,
   className,
+  style,
 }: {
   children: ReactNode;
   className?: string;
+  style?: CSSProperties;
 }) {
-  return <section className={className}>{children}</section>;
+  return (
+    <section className={className} style={style}>
+      {children}
+    </section>
+  );
 }
 
 const BaseComponent = styled.div({

@@ -1,7 +1,7 @@
 import "@examples/shared-component/style.css";
 import { SharedExampleCard } from "@examples/shared-component";
 import { css } from "@mincho-js/css";
-import { type ReactNode, useState } from "react";
+import { type CSSProperties, type ReactNode, useState } from "react";
 import reactLogo from "./assets/react.svg";
 import importedDefaultStyle, { importedNamedStyle } from "./staticStyles";
 import viteLogo from "/vite.svg";
@@ -19,11 +19,17 @@ const sharedCardContainerClassName = `${cardClassName} shared-card-consumer`;
 function ClassNameForwardingExample({
   children,
   className,
+  style,
 }: {
   children: ReactNode;
   className?: string;
+  style?: CSSProperties;
 }) {
-  return <section className={className}>{children}</section>;
+  return (
+    <section className={className} style={style}>
+      {children}
+    </section>
+  );
 }
 
 function App() {

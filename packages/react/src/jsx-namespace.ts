@@ -1,5 +1,5 @@
 import type { ClassPrimitive, ComplexCSSRule } from "@mincho-js/css";
-import type { JSX as ReactJSX } from "react";
+import type { CSSProperties, JSX as ReactJSX } from "react";
 
 type ComplexCSSRuleArrayItem = Extract<ComplexCSSRule, unknown[]>[number];
 type MinchoCssPropRecursiveArrayItem =
@@ -21,7 +21,13 @@ type MinchoCssProp = {
 
 type WithConditionalCSSProp<Props> = "className" extends keyof Props
   ? string extends NonNullable<Props["className"]>
-    ? Props & MinchoCssProp
+    ? "style" extends keyof Props
+      ? CSSProperties extends NonNullable<Props["style"]>
+        ? NonNullable<Props["style"]> extends CSSProperties
+          ? Props & MinchoCssProp
+          : Props
+        : Props
+      : Props
     : Props
   : Props;
 
@@ -364,14 +370,27 @@ if (import.meta.vitest) {
       });
     });
 
-    it("uses the same className gate for user-augmented intrinsic props", () => {
+    it("uses the same className and style gate for user-augmented intrinsic props", () => {
       type UserAugmentedIntrinsicElements = MinchoIntrinsicElements<{
         "literal-class-element": { className?: "base" };
-        "my-element": { className?: string; id?: string };
-        "number-class-element": { className?: number };
-        "required-class-element": { className: string };
-        "undefined-class-element": { className?: string | undefined };
+        "my-element": {
+          className?: string;
+          id?: string;
+          style?: CSSProperties;
+        };
+        "number-class-element": { className?: number; style?: CSSProperties };
+        "required-class-element": { className: string; style: CSSProperties };
+        "string-style-element": { className?: string; style?: string };
+        "union-style-element": {
+          className?: string;
+          style?: CSSProperties | string;
+        };
+        "undefined-class-element": {
+          className?: string | undefined;
+          style?: CSSProperties | undefined;
+        };
         "without-class-element": { id?: string };
+        "without-style-element": { className?: string; id?: string };
       }>;
 
       assertType<UserAugmentedIntrinsicElements["my-element"]>({
@@ -381,6 +400,7 @@ if (import.meta.vitest) {
 
       assertType<UserAugmentedIntrinsicElements["required-class-element"]>({
         className: "root",
+        style: { color: "red" },
         css: false
       });
 
@@ -390,6 +410,24 @@ if (import.meta.vitest) {
 
       assertType<UserAugmentedIntrinsicElements["without-class-element"]>({
         // @ts-expect-error intrinsic props without className do not accept css.
+        css: "base"
+      });
+
+      assertType<UserAugmentedIntrinsicElements["without-style-element"]>({
+        id: "root",
+        // @ts-expect-error intrinsic props without style do not accept css.
+        css: "base"
+      });
+
+      assertType<UserAugmentedIntrinsicElements["union-style-element"]>({
+        style: { color: "red" },
+        // @ts-expect-error style unions broader than CSSProperties do not accept css.
+        css: "base"
+      });
+
+      assertType<UserAugmentedIntrinsicElements["string-style-element"]>({
+        style: "color: red",
+        // @ts-expect-error non-React style props do not accept css.
         css: "base"
       });
 
@@ -406,62 +444,78 @@ if (import.meta.vitest) {
       });
     });
 
-    it("uses the same className gate for custom component props", () => {
+    it("requires className and style-compatible custom component props", () => {
       type Component<Props> = (props: Props) => ReactJSX.Element;
       type ManagedProps<Props> = JSX.LibraryManagedAttributes<
         Component<Props>,
         Props
       >;
+      type ForwardingProps = {
+        className?: string;
+        style?: CSSProperties;
+        label: string;
+      };
 
       const functionCss = () => "base";
       const maybeClass: string | null = Math.random() > 0.5 ? null : "base";
       const getClassName = () => "base";
       const condition = true as boolean;
 
-      assertType<ManagedProps<{ className?: string; label: string }>>({
+      assertType<ManagedProps<ForwardingProps>>({
         css: "base",
         label: "Button"
       });
 
-      assertType<ManagedProps<{ className: string; label: string }>>({
+      assertType<
+        ManagedProps<{
+          className: string;
+          style: CSSProperties;
+          label: string;
+        }>
+      >({
         className: "root",
+        style: { color: "red" },
         css: false,
         label: "Button"
       });
 
       assertType<
-        ManagedProps<{ className?: string | undefined; label: string }>
+        ManagedProps<{
+          className?: string | undefined;
+          style?: CSSProperties | undefined;
+          label: string;
+        }>
       >({
         css: { color: "red" },
         label: "Button"
       });
 
-      assertType<ManagedProps<{ className?: string; label: string }>>({
+      assertType<ManagedProps<ForwardingProps>>({
         css: condition ? "base" : "fallback",
         label: "Button"
       });
 
-      assertType<ManagedProps<{ className?: string; label: string }>>({
+      assertType<ManagedProps<ForwardingProps>>({
         css: condition && "active",
         label: "Button"
       });
 
-      assertType<ManagedProps<{ className?: string; label: string }>>({
+      assertType<ManagedProps<ForwardingProps>>({
         css: condition || "fallback",
         label: "Button"
       });
 
-      assertType<ManagedProps<{ className?: string; label: string }>>({
+      assertType<ManagedProps<ForwardingProps>>({
         css: maybeClass ?? "fallback",
         label: "Button"
       });
 
-      assertType<ManagedProps<{ className?: string; label: string }>>({
+      assertType<ManagedProps<ForwardingProps>>({
         css: getClassName(),
         label: "Button"
       });
 
-      assertType<ManagedProps<{ className?: string; label: string }>>({
+      assertType<ManagedProps<ForwardingProps>>({
         label: "Button",
         // @ts-expect-error function-valued css identifiers are not valid css prop values.
         css: getClassName
@@ -473,21 +527,52 @@ if (import.meta.vitest) {
         css: "base"
       });
 
-      assertType<ManagedProps<{ className?: number; label: string }>>({
+      assertType<ManagedProps<{ className?: string; label: string }>>({
+        label: "Button",
+        // @ts-expect-error custom components without style do not accept css.
+        css: "base"
+      });
+
+      assertType<
+        ManagedProps<{
+          className?: string;
+          style?: string;
+          label: string;
+        }>
+      >({
+        style: "color: red",
+        label: "Button",
+        // @ts-expect-error non-React style props do not accept css.
+        css: "base"
+      });
+
+      assertType<
+        ManagedProps<{
+          className?: number;
+          style?: CSSProperties;
+          label: string;
+        }>
+      >({
         className: 1,
         label: "Button",
         // @ts-expect-error numeric className props do not accept css.
         css: "base"
       });
 
-      assertType<ManagedProps<{ className?: "base"; label: string }>>({
+      assertType<
+        ManagedProps<{
+          className?: "base";
+          style?: CSSProperties;
+          label: string;
+        }>
+      >({
         className: "base",
         label: "Button",
         // @ts-expect-error literal-only className props do not accept css.
         css: "base"
       });
 
-      assertType<ManagedProps<{ className?: string; label: string }>>({
+      assertType<ManagedProps<ForwardingProps>>({
         label: "Button",
         // @ts-expect-error function-valued css identifiers are not valid css prop values.
         css: functionCss

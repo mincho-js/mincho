@@ -39,14 +39,15 @@ export default defineConfig({
 ### Usage
 
 ```tsx
+import type { CSSProperties } from "react";
 import { css } from "@mincho-js/css";
 
 const styleA = css({
   display: "block"
 });
 
-function Panel(props: { className?: string; label: string }) {
-  return <section className={props.className}>{props.label}</section>;
+function Panel(props: { className?: string; style?: CSSProperties; label: string }) {
+  return <section className={props.className} style={props.style}>{props.label}</section>;
 }
 
 export function App() {
@@ -61,6 +62,16 @@ export function App() {
 ```
 
 With `jsxCssProp: true`, supported values are lowered to either the existing Mincho `css(...)` extraction path or `cx(...)` class-value merging. If an explicit `className` or pre-css spread aggregate contributes an existing class, merge order is the existing `className` first and the `css` prop class value second, equivalent to `cx(existingClassName, nextCssClassName)`. Post-css spread ordering is covered in Spread Support.
+
+### Dynamic Declaration Values
+
+Static-shape CSS rules can use dynamic declaration values. For example, `<div css={{ color: props.color }} />` keeps the `color` key static while the value comes from runtime props.
+
+Under the A안 model, the generated `.css.ts` owns `createVar`, `getVarName`, and `css`. It creates a CSS variable, uses that variable in the generated class rule, and exports the generated className plus the raw CSS-var key. Component modules only import those generated className/raw CSS-var bindings and write runtime values through inline style via the React `style` prop, for example `style={{ [colorVarKey]: props.color }}`. Component modules do not call `createVar`, `getVarName`, or `css` for this fallback.
+
+A custom component receives typed Mincho `css` only when it accepts and forwards both `className` and React-style-compatible `style`. Forward `className` to the styled element, and forward `style` to the same element so generated CSS variable values can land on the element that owns the generated class.
+
+Unsupported shapes stay unsupported: dynamic keys, computed CSS keys, dynamic object or array spreads as CSS shapes, call-return CSS shapes, branch-shaped rule objects, function-valued css props, sequence-wrapped CSS rules, and broad template interpolation. This is not Emotion-style runtime parity: Mincho does not add a runtime serializer, runtime CSS cache, runtime stylesheet insertion, wrapper component, or runtime CSS generation for the `css` prop.
 
 ### Value Semantics
 
@@ -393,9 +404,9 @@ The transform treats direct object/array syntax plus proven same-file or provide
 
 The transform accepts JSX identifiers and member-expression components, including intrinsic elements, custom React components, member-expression components such as `<motion.div />`, and custom elements.
 
-Custom components and member-expression components are supported only under a className forwarding contract: their props must accept an arbitrary string-compatible `className`, and the component must forward that `className` to the element that should receive the generated styles. The scoped JSX types add `css` through the same `className` compatibility gate.
+Custom components and member-expression components are supported only under a `className` plus `style` forwarding contract: their props must accept an arbitrary string-compatible `className` and a React-style-compatible `style`, and the component must forward both props to the element that should receive the generated styles. The scoped JSX types add `css` through the same `className` and `style` compatibility gate.
 
-User-typed custom elements receive typed `css` only when their React JSX intrinsic props include arbitrary-string-compatible `className`. Transformed custom elements emit `className`, not `class`.
+User-typed custom elements receive typed `css` only when their React JSX intrinsic props include arbitrary-string-compatible `className` and React-style-compatible `style`. Transformed custom elements emit `className`, not `class`.
 
 ### Spread Support
 
