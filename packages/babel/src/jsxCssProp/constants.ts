@@ -2,6 +2,7 @@ import type { ProgramScope } from "../types.js";
 
 export const cssAttributeName = "css";
 export const classNameAttributeName = "className";
+export const styleAttributeName = "style";
 export const cssModuleName = "@mincho-js/css";
 
 export const fragmentTargetErrorMessage =
@@ -32,4 +33,6 @@ export const duplicateClassNameErrorMessage =
   "Mincho JSX css prop cannot merge duplicate className attributes";
 export const classNameValueErrorMessage =
   "Mincho JSX css prop requires className to be a string literal or expression";
+export const styleValueErrorMessage =
+  "Mincho JSX css prop requires style to be an expression value when merging dynamic CSS variables";
 export const cssModuleHelperImportCleanupScopes = new WeakSet<ProgramScope>();

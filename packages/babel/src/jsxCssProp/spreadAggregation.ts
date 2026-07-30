@@ -3,6 +3,7 @@ import type { NodePath } from "@babel/core";
 import { invariant } from "../utils.js";
 import {
   createClassNameExpression,
+  getDynamicCssVariableRuntimeLowering,
   getClassNameExpression
 } from "./classNameLowering.js";
 import {
@@ -10,17 +11,15 @@ import {
   classNameValueErrorMessage,
   cssAttributeName,
   nestedAsyncGeneratorErrorMessage,
-  spreadAggregationContextErrorMessage
+  spreadAggregationContextErrorMessage,
+  styleAttributeName
 } from "./constants.js";
+import { getStyleExpression } from "./styleExpression.js";
 import type {
   AggregatePropsBinding,
   NormalizedJsxCssPropElement,
   SpreadAggregatedCssPropLowering
 } from "./types.js";
-
-const styleAttributeName = "style";
-const styleValueErrorMessage =
-  "Mincho JSX css prop requires style to be an expression value when merging dynamic CSS variables";
 
 export function transformSpreadAggregatedCssProp(
   path: NodePath<t.JSXOpeningElement>,
@@ -254,6 +253,14 @@ function createDynamicCssVariableSpreadAggregatedCssPropLowering(
   path: NodePath<t.JSXOpeningElement>,
   normalizedElement: NormalizedJsxCssPropElement
 ): SpreadAggregatedCssPropLowering {
+  const lowering = normalizedElement.dynamicCssVariableLowering;
+
+  invariant(
+    lowering !== null,
+    "Dynamic CSS variable spread aggregation requires dynamic lowering"
+  );
+
+  const runtimeLowering = getDynamicCssVariableRuntimeLowering(lowering);
   const preCssBinding =
     normalizedElement.attributesBeforeCss.length > 0
       ? createAggregatePropsBindingWithStyle(
@@ -294,6 +301,7 @@ function createDynamicCssVariableSpreadAggregatedCssPropLowering(
   return {
     declarations: [
       ...(preCssBinding?.declarations ?? []),
+      ...(runtimeLowering?.declarations ?? []),
       ...(postCssBinding?.declarations ?? [])
     ],
     attributes: [
@@ -349,6 +357,10 @@ function createDynamicCssVariableStyleExpression(
     "Dynamic CSS variable spread aggregation requires dynamic lowering"
   );
 
+  const runtimeLowering = getDynamicCssVariableRuntimeLowering(lowering);
+  const styleProperties =
+    runtimeLowering?.styleProperties ?? lowering.styleProperties;
+
   return t.objectExpression([
     ...(preCssBinding?.styleExpressions.map((expression) =>
       t.spreadElement(t.cloneNode(expression))
@@ -356,7 +368,7 @@ function createDynamicCssVariableStyleExpression(
     ...(postCssBinding?.styleExpressions.map((expression) =>
       t.spreadElement(t.cloneNode(expression))
     ) ?? []),
-    ...lowering.styleProperties.map((property) => t.cloneNode(property))
+    ...styleProperties.map((property) => t.cloneNode(property))
   ]);
 }
 
@@ -622,7 +634,7 @@ function createAggregatePropsExpressionWithStyle(
           t.assignmentExpression(
             "=",
             t.cloneNode(explicitStyleIdentifier),
-            getStyleExpression(path, attribute)
+            t.cloneNode(getStyleExpression(path, attribute))
           )
         )
       );
@@ -695,27 +707,6 @@ function getAggregateAttributeValue(
   }
 
   throw path.buildCodeFrameError(classNameValueErrorMessage);
-}
-
-function getStyleExpression(
-  path: NodePath<t.JSXOpeningElement>,
-  attribute: t.JSXAttribute
-): t.Expression {
-  if (attribute.value === null || t.isStringLiteral(attribute.value)) {
-    throw path.buildCodeFrameError(styleValueErrorMessage);
-  }
-
-  if (!t.isJSXExpressionContainer(attribute.value)) {
-    throw path.buildCodeFrameError(styleValueErrorMessage);
-  }
-
-  const { expression } = attribute.value;
-
-  if (t.isJSXEmptyExpression(expression) || t.isStringLiteral(expression)) {
-    throw path.buildCodeFrameError(styleValueErrorMessage);
-  }
-
-  return t.cloneNode(expression);
 }
 
 function isNamedJsxAttribute(

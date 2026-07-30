@@ -1,13 +1,20 @@
-import { type PluginObj, transformSync, types as t } from "@babel/core";
+import {
+  type NodePath,
+  type PluginObj,
+  transformSync,
+  types as t
+} from "@babel/core";
 import { transformCallExpression } from "./transforms/callExpression.js";
 import {
   preprocessJsxCssProp,
   removeUnusedJsxCssPropCssModuleImports
 } from "./jsxCssProp.js";
+import { getDynamicCssVariableRule } from "./jsxCssProp/preprocess.js";
 import { supportedJsxCssPropTags } from "./jsxCssPropTags.js";
 import { createImportedStaticCssEvalProvider } from "./staticCssEval/importedModules.js";
 import postprocess from "./transforms/postprocess.js";
 import basePreprocess from "./transforms/preprocess.js";
+import type { DynamicCssVariableRule } from "./jsxCssProp/types.js";
 import type {
   MinchoBabelFileMetadata,
   PluginOptions,
@@ -409,6 +416,96 @@ if (import.meta.vitest) {
     styleValue:
       "Mincho JSX css prop requires style to be an expression value when merging dynamic CSS variables"
   } as const;
+
+  type DynamicCssVariableRuleSnapshot = {
+    readonly kind: DynamicCssVariableRule["kind"];
+    readonly expressionType: string;
+    readonly leafProperties: readonly string[];
+    readonly branches?: readonly DynamicCssVariableRuleSnapshot[];
+  };
+
+  function collectDynamicCssVariableRuleSnapshot(
+    source: string
+  ): DynamicCssVariableRuleSnapshot | null {
+    let snapshot: DynamicCssVariableRuleSnapshot | null = null;
+    let hasVisitedCssCandidate = false;
+
+    transformSync(source, {
+      plugins: [
+        () => ({
+          visitor: {
+            JSXOpeningElement(path: NodePath<t.JSXOpeningElement>) {
+              if (hasVisitedCssCandidate) {
+                return;
+              }
+
+              const cssAttribute = path.node.attributes.find(
+                (attribute): attribute is t.JSXAttribute =>
+                  t.isJSXAttribute(attribute) &&
+                  t.isJSXIdentifier(attribute.name) &&
+                  attribute.name.name === "css"
+              );
+
+              if (
+                !cssAttribute ||
+                !t.isJSXExpressionContainer(cssAttribute.value)
+              ) {
+                return;
+              }
+
+              const { expression } = cssAttribute.value;
+
+              if (
+                t.isJSXEmptyExpression(expression) ||
+                !t.isExpression(expression)
+              ) {
+                return;
+              }
+
+              const rule = getDynamicCssVariableRule({
+                expression,
+                scope: path.scope
+              });
+              hasVisitedCssCandidate = true;
+              snapshot = rule
+                ? createDynamicCssVariableRuleSnapshot(rule)
+                : null;
+            }
+          }
+        })
+      ],
+      presets: ["@babel/preset-typescript"],
+      filename: "collector-test.tsx"
+    });
+
+    return snapshot;
+  }
+
+  function createDynamicCssVariableRuleSnapshot(
+    rule: DynamicCssVariableRule
+  ): DynamicCssVariableRuleSnapshot {
+    switch (rule.kind) {
+      case "direct":
+        return {
+          kind: rule.kind,
+          expressionType: rule.expression.type,
+          leafProperties: rule.leaves.map((leaf) => leaf.propertyName)
+        };
+      case "branch":
+        return {
+          kind: rule.kind,
+          expressionType: rule.expression.type,
+          leafProperties: rule.leaves.map((leaf) => leaf.propertyName),
+          branches: rule.branches.map(createDynamicCssVariableRuleSnapshot)
+        };
+      default: {
+        const unexpectedRule: never = rule;
+        throw new Error(
+          `Unexpected dynamic CSS variable rule: ${unexpectedRule}`
+        );
+      }
+    }
+  }
 
   function expectJsxCssPropError(fixture: string, message: string) {
     expect(() =>
@@ -3529,7 +3626,6 @@ if (import.meta.vitest) {
       );
       expect(code).not.toContain(" css=");
       expect(code).not.toContain("_css(");
-      expect(code).not.toContain('from "@mincho-js/css"');
       expect(code).not.toContain("createVar");
       expect(code).not.toContain("getVarName");
     });
@@ -3946,7 +4042,8 @@ if (import.meta.vitest) {
       const fixtures = [
         `<div style css={{ color: props.color }} />`,
         `<div style="color:red" css={{ color: props.color }} />`,
-        `<div style={"color:red"} css={{ color: props.color }} />`
+        `<div style={"color:red"} css={{ color: props.color }} />`,
+        `<div style={\`color:red\`} css={{ color: props.color }} />`
       ] as const;
 
       for (const fixture of fixtures) {
@@ -4022,7 +4119,6 @@ if (import.meta.vitest) {
       expect(code).toContain("props.outlineColor");
       expect(code).not.toContain(" css=");
       expect(code).not.toContain("_css(");
-      expect(code).not.toContain('from "@mincho-js/css"');
       expect(code).not.toContain("createVar");
       expect(code).not.toContain("getVarName");
     });
@@ -4055,6 +4151,501 @@ if (import.meta.vitest) {
       expect(result[1]).toContain('"&:hover": {');
       expect(result[1]).not.toContain("createVar(");
       expect(result[1]).not.toContain("getVarName(");
+    });
+
+    it("branch dynamic css variable evaluates once", () => {
+      const source = `
+        const events: string[] = [];
+        const reads = {
+          condition: 0,
+          active: 0,
+          inactive: 0
+        };
+        const state = {
+          get condition() {
+            reads.condition += 1;
+            events.push("condition");
+            return true;
+          }
+        };
+        const active = {
+          get color() {
+            reads.active += 1;
+            events.push("active");
+            return "tomato";
+          }
+        };
+        const inactive = {
+          get color() {
+            reads.inactive += 1;
+            events.push("inactive");
+            return "blue";
+          }
+        };
+
+        function App() {
+          return <div css={state.condition ? { color: active.color } : { color: inactive.color }} />;
+        }
+      `;
+      const { result, code } = babelTransform(source, { jsxCssProp: true });
+      const artifact = result[1];
+      const observed = runJsxCssPropRuntime(
+        source,
+        "return { props: App(), events, reads };"
+      ) as {
+        props: Record<string, unknown>;
+        events: string[];
+        reads: Record<string, number>;
+      };
+
+      expect(artifact).toContain(
+        'import { css as _css } from "@mincho-js/css";'
+      );
+      expect(artifact).toContain(
+        'import { createVar as _minchoCreateVar, getVarName as _minchoGetVarName } from "@mincho-js/css";'
+      );
+      expect(
+        artifact.match(
+          /export var _\$mincho\$\$App\w*ColorVar\d* = _minchoCreateVar\("color"\);/g
+        ) ?? []
+      ).toHaveLength(2);
+      expect(
+        artifact.match(
+          /export var _\$mincho\$\$App\w*ColorVarKey\d* = _minchoGetVarName\(_\$mincho\$\$App\w*ColorVar\d*\);/g
+        ) ?? []
+      ).toHaveLength(2);
+      expect(
+        artifact.match(
+          /export var _\$mincho\$\$App\d* = _css\(\{\s+color: _\$mincho\$\$App\w*ColorVar\d*\s+\}\);/g
+        ) ?? []
+      ).toHaveLength(2);
+      expect(code).toMatch(
+        /import \{ _\$mincho\$\$App as _\$mincho\$\$App2, _\$mincho\$\$App3 as _\$mincho\$\$App4 \} from "extracted_[^"]+\.css\.ts";/
+      );
+      expect(code).toMatch(
+        /import \{ _\$mincho\$\$App\w*ColorVarKey as _\$mincho\$\$App\w*ColorVarKey2, _\$mincho\$\$App\w*ColorVarKey3 as _\$mincho\$\$App\w*ColorVarKey4 \} from "extracted_[^"]+\.css\.ts";/
+      );
+      expect(code).toContain("const _minchoCssBranch = state.condition;");
+      expect(code).toContain("className={_minchoCssBranch ?");
+      expect(code).toContain("...(_minchoCssBranch ?");
+      expect(code).not.toContain(" css=");
+      expect(code).not.toContain("_css(");
+      expect(code).not.toContain('from "@mincho-js/css"');
+      expect(code).not.toContain("createVar");
+      expect(code).not.toContain("getVarName");
+      expect(code.match(/state\.condition/g) ?? []).toHaveLength(1);
+      expect(observed.events).toEqual(["condition", "active"]);
+      expect(observed.reads).toEqual({ condition: 1, active: 1, inactive: 0 });
+      expect(observed.props).toMatchObject({
+        className: "css-rule",
+        style: { "css-rule": "tomato" }
+      });
+    });
+
+    it("nested branch dynamic css variable decisions evaluate once", () => {
+      const source = `
+        const events: string[] = [];
+        const reads = { outer: 0, inner: 0, inactive: 0 };
+        const colors = { active: "tomato", other: "blue", fallback: "gray" };
+        let inner = false;
+        const decide = (name, value) => {
+          reads[name] += 1;
+          events.push(name);
+          return value;
+        };
+        const flip = () => {
+          events.push("flip");
+          inner = true;
+          return "flipped";
+        };
+
+        function App() {
+          return <div css={decide("outer", true) ? decide("inner", inner) ? { color: colors.active } : { color: colors.other } : decide("inactive", false) && { color: colors.fallback }} data-flip={flip()} />;
+        }
+      `;
+      const observed = runJsxCssPropRuntime(
+        source,
+        "return { props: App(), events, reads };"
+      ) as {
+        props: Record<string, unknown>;
+        events: string[];
+        reads: Record<string, number>;
+      };
+
+      expect(observed.events).toEqual(["outer", "inner", "flip"]);
+      expect(observed.reads).toEqual({
+        outer: 1,
+        inner: 1,
+        inactive: 0
+      });
+      expect(observed.props).toMatchObject({
+        className: "css-rule",
+        style: { "css-rule": "blue" },
+        "data-flip": "flipped"
+      });
+    });
+
+    it("conditional dynamic css variable style", () => {
+      const source = `
+        const events: string[] = [];
+        const state = { condition: false };
+        const primary = {
+          get color() {
+            events.push("primary");
+            return "tomato";
+          }
+        };
+        const fallback = {
+          get color() {
+            events.push("fallback");
+            return "blue";
+          }
+        };
+
+        function App() {
+          return <div style={{ opacity: 0.5 }} css={state.condition ? { color: primary.color } : { color: fallback.color }} />;
+        }
+      `;
+      const { code } = babelTransform(source, { jsxCssProp: true });
+      const observed = runJsxCssPropRuntime(
+        source,
+        `
+        const props = App();
+        return { props, events, styleKeys: Object.keys(props.style) };
+      `
+      ) as {
+        props: Record<string, unknown>;
+        events: string[];
+        styleKeys: string[];
+      };
+
+      expect(code).not.toContain(" css=");
+      expect(code).not.toContain("_css(");
+      expect(code).not.toContain("createVar");
+      expect(code).not.toContain("getVarName");
+      expect(observed.events).toEqual(["fallback"]);
+      expect(observed.styleKeys).toEqual(["opacity", "css-rule"]);
+      expect(observed.props).toMatchObject({
+        className: "css-rule",
+        style: { opacity: 0.5, "css-rule": "blue" }
+      });
+    });
+
+    it("logical dynamic css variable style", () => {
+      const source = `
+        const events: string[] = [];
+        const reads = {
+          condition: 0,
+          guarded: 0,
+          provided: 0,
+          skippedFallback: 0,
+          empty: 0,
+          fallback: 0
+        };
+        const guard = {
+          get condition() {
+            reads.condition += 1;
+            events.push("condition");
+            return false;
+          }
+        };
+        const provided = {
+          get className() {
+            reads.provided += 1;
+            events.push("provided");
+            return "provided";
+          }
+        };
+        const empty = {
+          get className() {
+            reads.empty += 1;
+            events.push("empty");
+            return "";
+          }
+        };
+        const guarded = {
+          get color() {
+            reads.guarded += 1;
+            events.push("guarded");
+            return "tomato";
+          }
+        };
+        const skippedFallback = {
+          get color() {
+            reads.skippedFallback += 1;
+            events.push("skipped-fallback");
+            return "red";
+          }
+        };
+        const fallback = {
+          get color() {
+            reads.fallback += 1;
+            events.push("fallback");
+            return "blue";
+          }
+        };
+
+        function GuardedApp() {
+          return <div css={guard.condition && { color: guarded.color }} />;
+        }
+
+        function ProvidedApp() {
+          return <div css={provided.className || { color: skippedFallback.color }} />;
+        }
+
+        function FallbackApp() {
+          return <div css={empty.className || { color: fallback.color }} />;
+        }
+      `;
+      const { code } = babelTransform(source, { jsxCssProp: true });
+      const observed = runJsxCssPropRuntime(
+        source,
+        `
+        const guardedProps = GuardedApp();
+        const providedProps = ProvidedApp();
+        const fallbackProps = FallbackApp();
+        return { guardedProps, providedProps, fallbackProps, events, reads };
+      `
+      ) as {
+        guardedProps: Record<string, unknown>;
+        providedProps: Record<string, unknown>;
+        fallbackProps: Record<string, unknown>;
+        events: string[];
+        reads: Record<string, number>;
+      };
+
+      expect(code).not.toContain(" css=");
+      expect(code).not.toContain("_css(");
+      expect(code).not.toContain("createVar");
+      expect(code).not.toContain("getVarName");
+      expect(code.match(/guard\.condition/g) ?? []).toHaveLength(1);
+      expect(code.match(/provided\.className/g) ?? []).toHaveLength(1);
+      expect(code.match(/empty\.className/g) ?? []).toHaveLength(1);
+      expect(observed.events).toEqual([
+        "condition",
+        "provided",
+        "empty",
+        "fallback"
+      ]);
+      expect(observed.reads).toEqual({
+        condition: 1,
+        guarded: 0,
+        provided: 1,
+        skippedFallback: 0,
+        empty: 1,
+        fallback: 1
+      });
+      expect(observed.guardedProps.style).toEqual({});
+      expect(observed.guardedProps.style).not.toBe(false);
+      expect(observed.providedProps).toMatchObject({
+        className: "provided",
+        style: {}
+      });
+      expect(observed.fallbackProps).toMatchObject({
+        className: "css-rule",
+        style: { "css-rule": "blue" }
+      });
+    });
+
+    it("branch dynamic css variable spread", () => {
+      const source = `
+        const events: string[] = [];
+        const pre = {
+          id: "from-pre",
+          className: "from-pre",
+          css: "leak-pre",
+          style: { padding: 4 }
+        };
+        const post = {
+          title: "from-post",
+          className: "from-post",
+          css: "leak-post",
+          style: { margin: 8 }
+        };
+        const state = {
+          get condition() {
+            events.push("condition");
+            return true;
+          }
+        };
+        const active = {
+          get color() {
+            events.push("active");
+            return "tomato";
+          }
+        };
+        const inactive = {
+          get color() {
+            events.push("inactive");
+            return "blue";
+          }
+        };
+
+        function App() {
+          const renderValue = () => <div {...pre} css={state.condition ? { color: active.color } : { color: inactive.color }} {...post} />;
+          return renderValue();
+        }
+      `;
+      const { code } = babelTransform(source, { jsxCssProp: true });
+      const observed = runJsxCssPropRuntime(
+        source,
+        `
+        const props = App();
+        return { props, events, styleKeys: Object.keys(props.style), hasCss: "css" in props };
+      `
+      ) as {
+        props: Record<string, unknown>;
+        events: string[];
+        styleKeys: string[];
+        hasCss: boolean;
+      };
+
+      expect(code).toContain("(() =>");
+      expect(code).not.toContain(" css=");
+      expect(code).not.toContain("_css(");
+      expect(code).not.toContain('from "@mincho-js/css"');
+      expect(code).not.toContain("createVar");
+      expect(code).not.toContain("getVarName");
+      expect(observed.events).toEqual(["condition", "active"]);
+      expect(observed.styleKeys).toEqual(["padding", "margin", "css-rule"]);
+      expect(observed.hasCss).toBe(false);
+      expect(observed.props).toMatchObject({
+        id: "from-pre",
+        title: "from-post",
+        className: "from-pre css-rule from-post",
+        style: { padding: 4, margin: 8, "css-rule": "tomato" }
+      });
+    });
+
+    it("collects conditional dynamic css variable branch rules at model level", () => {
+      const fixtures = [
+        {
+          source: `
+            const condition = true;
+            function App(props) {
+              return <div css={condition ? { color: props.color } : { color: "red" }} />;
+            }
+          `,
+          leafProperties: ["color"],
+          branchLeafProperties: [["color"], []]
+        },
+        {
+          source: `
+            const condition = true;
+            function App(props) {
+              return <div css={condition ? { color: props.color } : { color: props.fallbackColor }} />;
+            }
+          `,
+          leafProperties: ["color", "color"],
+          branchLeafProperties: [["color"], ["color"]]
+        }
+      ] as const;
+
+      for (const { source, leafProperties, branchLeafProperties } of fixtures) {
+        const snapshot = collectDynamicCssVariableRuleSnapshot(source);
+
+        expect(snapshot).toMatchObject({
+          kind: "branch",
+          expressionType: "ConditionalExpression",
+          leafProperties
+        });
+        expect(
+          snapshot?.branches?.map((branch) => branch.leafProperties)
+        ).toEqual(branchLeafProperties);
+      }
+    });
+
+    it("collects logical dynamic css variable branch rules at model level", () => {
+      const fixtures = [
+        `
+          const condition = true;
+          function App(props) {
+            return <div css={condition && { color: props.color }} />;
+          }
+        `,
+        `
+          const providedClass = "provided";
+          function App(props) {
+            return <div css={providedClass || { color: props.color }} />;
+          }
+        `
+      ] as const;
+
+      for (const source of fixtures) {
+        const snapshot = collectDynamicCssVariableRuleSnapshot(source);
+
+        expect(snapshot).toMatchObject({
+          kind: "branch",
+          expressionType: "LogicalExpression",
+          leafProperties: ["color"]
+        });
+        expect(
+          snapshot?.branches?.map((branch) => branch.leafProperties)
+        ).toEqual([["color"]]);
+      }
+    });
+
+    it("rejects unsupported branch dynamic css variable rules at collector level", () => {
+      const templateLiteralFixture = `
+        const condition = true;
+        function App(props) {
+          return <div css={condition ? { color: \`${"${props.color}"}\` } : { color: "red" }} />;
+        }
+      `;
+      const fixtures = [
+        `
+          const condition = true;
+          function App(props) {
+            return <div css={condition ? { [props.key]: props.color } : { color: "red" }} />;
+          }
+        `,
+        `
+          const condition = true;
+          function App(props) {
+            return <div css={condition ? { ...props.styles, color: props.color } : { color: "red" }} />;
+          }
+        `,
+        `
+          const condition = true;
+          function App(props) {
+            return <div css={condition ? [...props.styles, { color: props.color }] : [{ color: "red" }]} />;
+          }
+        `,
+        `
+          const condition = true;
+          function makeRule(color) {
+            return { color };
+          }
+          function App(props) {
+            return <div css={condition ? makeRule(props.color) : { color: "red" }} />;
+          }
+        `,
+        `
+          function App(props) {
+            return <div css={() => ({ color: props.color })} />;
+          }
+        `,
+        `
+          const condition = true;
+          function App(props) {
+            return <div css={condition ? (props.touch(), { color: props.color }) : { color: "red" }} />;
+          }
+        `,
+        templateLiteralFixture
+      ] as const;
+
+      for (const source of fixtures) {
+        expect(collectDynamicCssVariableRuleSnapshot(source)).toBeNull();
+      }
+
+      const templateLiteralFailure = captureJsxCssPropFailure(
+        templateLiteralFixture,
+        { jsxCssProp: true }
+      );
+      expect(templateLiteralFailure.error.message).toContain(
+        jsxCssPropErrorMessages.unsupportedDynamicCssRule
+      );
+      expect(templateLiteralFailure.code).not.toContain("_css(");
     });
 
     it("rejects unsupported dynamic css variable shapes with compile-away diagnostics", () => {
@@ -4117,17 +4708,6 @@ if (import.meta.vitest) {
           source: `
             function App(props) {
               return <div css={props.ruleFactory()} />;
-            }
-          `,
-          expected:
-            /conditional, logical, or wrapped object\/array CSS rule values in compile-away mode/
-        },
-        {
-          label: "branch-shaped rule objects",
-          source: `
-            const condition = true;
-            function App(props) {
-              return <div css={condition ? { color: props.color } : { color: "red" }} />;
             }
           `,
           expected:

@@ -26,8 +26,33 @@ import type {
   CssClassNameBranchResultLoweringRequest,
   CssClassNameLoweringRequest,
   CssClassNameRootResultLoweringRequest,
+  DynamicCssVariableLowering,
   CssPropValueClassification
 } from "./types.js";
+
+type DynamicCssVariableRuntimeLowering = {
+  readonly declarations: readonly t.VariableDeclaration[];
+  readonly styleProperties: readonly t.ObjectExpression["properties"][number][];
+};
+
+const dynamicCssVariableRuntimeLowerings = new WeakMap<
+  DynamicCssVariableLowering,
+  DynamicCssVariableRuntimeLowering
+>();
+
+export function registerDynamicCssVariableRuntimeLowering(
+  lowering: DynamicCssVariableLowering,
+  runtimeLowering: DynamicCssVariableRuntimeLowering
+): DynamicCssVariableLowering {
+  dynamicCssVariableRuntimeLowerings.set(lowering, runtimeLowering);
+  return lowering;
+}
+
+export function getDynamicCssVariableRuntimeLowering(
+  lowering: DynamicCssVariableLowering
+): DynamicCssVariableRuntimeLowering | null {
+  return dynamicCssVariableRuntimeLowerings.get(lowering) ?? null;
+}
 
 export function createClassNameExpression(
   path: NodePath<t.JSXOpeningElement>,

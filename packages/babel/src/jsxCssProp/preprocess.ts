@@ -20,7 +20,10 @@ import {
 } from "./classification.js";
 import {
   createClassNameAttributeValue,
-  getClassNameExpression
+  createClassNameExpression,
+  getDynamicCssVariableRuntimeLowering,
+  getClassNameExpression,
+  registerDynamicCssVariableRuntimeLowering
 } from "./classNameLowering.js";
 import {
   classNameAttributeName,
@@ -34,11 +37,13 @@ import {
   fragmentTargetErrorMessage,
   keyRefSpreadErrorMessage,
   namespacedTargetErrorMessage,
+  styleAttributeName,
   unsupportedArraySpreadCssValueErrorMessage,
   unsupportedDynamicCssRuleValueErrorMessage,
   unsupportedFunctionCssValueErrorMessage,
   unsupportedTargetErrorMessage
 } from "./constants.js";
+import { getStyleExpression } from "./styleExpression.js";
 import {
   registerImportedStaticCssEvalProviderResultMetadata,
   registerStaticCssEvalDiagnosticMetadata,
@@ -56,17 +61,16 @@ import {
   transformSpreadAggregatedCssProp
 } from "./spreadAggregation.js";
 import type {
+  DynamicCssVariableBranchRule,
+  DynamicCssVariableDirectRule,
   DynamicCssVariableLowering,
   DynamicCssVariableLeaf,
   DynamicCssVariableRule,
   NormalizedJsxCssPropElement
 } from "./types.js";
 
-const styleAttributeName = "style";
 const duplicateStyleErrorMessage =
   "Mincho JSX css prop cannot merge duplicate style attributes";
-const styleValueErrorMessage =
-  "Mincho JSX css prop requires style to be an expression value when merging dynamic CSS variables";
 type DynamicCssVariableHelperImportBindings = {
   readonly createVarIdentifier: t.Identifier;
   readonly getVarNameIdentifier: t.Identifier;
@@ -75,6 +79,7 @@ const dynamicCssVariableHelperImportBindings = new WeakMap<
   ProgramScope,
   DynamicCssVariableHelperImportBindings
 >();
+const dynamicCssVariableCssImportScopes = new WeakSet<ProgramScope>();
 
 export function preprocessJsxCssProp(
   path: NodePath<t.Program>,
@@ -111,6 +116,19 @@ export function preprocessJsxCssProp(
 
       const dynamicCssVariableLowering =
         normalizedElement.dynamicCssVariableLowering;
+      const dynamicCssVariableRuntimeLowering = dynamicCssVariableLowering
+        ? getDynamicCssVariableRuntimeLowering(dynamicCssVariableLowering)
+        : null;
+
+      if (
+        dynamicCssVariableRuntimeLowering &&
+        dynamicCssVariableRuntimeLowering.declarations.length > 0
+      ) {
+        transformSpreadAggregatedCssProp(openingElementPath, normalizedElement);
+        transformed = true;
+        return;
+      }
+
       const classNameValue = dynamicCssVariableLowering
         ? createDynamicCssVariableClassNameAttributeValue(
             openingElementPath,
@@ -138,10 +156,14 @@ export function preprocessJsxCssProp(
       attributes.splice(attributes.indexOf(cssAttribute), 1);
 
       if (dynamicCssVariableLowering) {
+        const runtimeLowering = getDynamicCssVariableRuntimeLowering(
+          dynamicCssVariableLowering
+        );
         const styleAttributeValue = createDynamicCssVariableStyleAttributeValue(
           openingElementPath,
           styleAttribute,
-          dynamicCssVariableLowering.styleProperties
+          runtimeLowering?.styleProperties ??
+            dynamicCssVariableLowering.styleProperties
         );
 
         if (styleAttribute) {
@@ -332,7 +354,10 @@ function normalizeOpeningElement(
         path: openingElementPath,
         rule: dynamicCssVariableRule,
         needsClassNameMerge:
-          classNameAttributes.length > 0 || requiresSpreadAggregation
+          classNameAttributes.length > 0 ||
+          requiresSpreadAggregation ||
+          (dynamicCssVariableRule.kind === "branch" &&
+            (attributesBeforeCss.length > 0 || attributesAfterCss.length > 0))
       })
     : null;
 
@@ -363,11 +388,6 @@ function createDynamicCssVariableLowering(options: {
     : "$mincho$$unknown";
   const classNameIdentifier =
     programParent.generateUidIdentifier(identifierBase);
-  const cssIdentifier = registerImportMethod(
-    options.path,
-    "css",
-    cssModuleName
-  );
   const cxIdentifier = options.needsClassNameMerge
     ? programParent.generateUidIdentifier(`${identifierBase}Cx`)
     : null;
@@ -392,11 +412,6 @@ function createDynamicCssVariableLowering(options: {
       )
     };
   });
-  const importedClassNameIdentifier = registerImportMethod(
-    options.path,
-    classNameIdentifier.name,
-    programParent.minchoData.cssFile
-  );
   const importedCxIdentifier = cxIdentifier
     ? registerImportMethod(
         options.path,
@@ -420,35 +435,35 @@ function createDynamicCssVariableLowering(options: {
       helperImportBindings
     );
     cssModuleHelperImportCleanupScopes.add(programParent);
-    let cssBinding = programParent.getBinding(cssIdentifier.name);
-
-    if (!cssBinding) {
-      programParent.crawl();
-      cssBinding = programParent.getBinding(cssIdentifier.name);
-    }
-
-    invariant(
-      cssBinding !== undefined,
-      "Dynamic CSS variable lowering requires a registered css import binding"
-    );
-
-    programParent.minchoData.bindings.push(cssBinding.path);
-
-    const cssImportSpecifierPath = cssBinding.path;
-
-    invariant(
-      cssImportSpecifierPath.isImportSpecifier(),
-      "Dynamic CSS variable css import binding must be an import specifier"
-    );
 
     generatedNodes.push(
-      t.importDeclaration(
-        [t.cloneNode(cssImportSpecifierPath.node)],
-        t.stringLiteral(cssModuleName)
-      ),
       createDynamicCssVariableHelperImportDeclaration(helperImportBindings)
     );
   }
+
+  invariant(
+    helperImportBindings !== undefined,
+    "Dynamic CSS variable lowering requires helper import bindings"
+  );
+
+  const stylePropertyByLeaf = new Map<DynamicCssVariableLeaf, t.ObjectProperty>(
+    preparedLeaves.map(({ leaf, importedVariableKeyIdentifier }) => [
+      leaf,
+      t.objectProperty(
+        t.cloneNode(importedVariableKeyIdentifier),
+        t.cloneNode(leaf.value),
+        true
+      )
+    ])
+  );
+  const branchLowering =
+    options.rule.kind === "branch"
+      ? createDynamicCssVariableBranchLowering({
+          path: options.path,
+          rule: options.rule,
+          stylePropertyByLeaf
+        })
+      : null;
 
   generatedNodes.push(
     ...(cxIdentifier
@@ -479,33 +494,473 @@ function createDynamicCssVariableLowering(options: {
           )
         ])
       )
-    ),
-    t.exportNamedDeclaration(
-      t.variableDeclaration("var", [
-        t.variableDeclarator(
-          classNameIdentifier,
-          t.callExpression(t.cloneNode(cssIdentifier), [
-            t.cloneNode(options.rule.expression)
-          ])
-        )
-      ])
     )
   );
 
+  if (options.rule.kind === "direct") {
+    const cssIdentifier = registerImportMethod(
+      options.path,
+      "css",
+      cssModuleName
+    );
+
+    if (!dynamicCssVariableCssImportScopes.has(programParent)) {
+      generatedNodes.unshift(
+        createDynamicCssVariableCssImportDeclaration(
+          options.path,
+          cssIdentifier
+        )
+      );
+      dynamicCssVariableCssImportScopes.add(programParent);
+    }
+
+    generatedNodes.push(
+      t.exportNamedDeclaration(
+        t.variableDeclaration("var", [
+          t.variableDeclarator(
+            classNameIdentifier,
+            t.callExpression(t.cloneNode(cssIdentifier), [
+              t.cloneNode(options.rule.expression)
+            ])
+          )
+        ])
+      )
+    );
+  }
+
   programParent.minchoData.nodes.push(...generatedNodes);
+
+  if (branchLowering) {
+    return registerDynamicCssVariableRuntimeLowering(
+      {
+        classNameExpression: branchLowering.classNameExpression,
+        cxExpression: importedCxIdentifier,
+        styleProperties: []
+      },
+      {
+        declarations: branchLowering.declarations,
+        styleProperties: branchLowering.styleProperties
+      }
+    );
+  }
+
+  const importedClassNameIdentifier = registerImportMethod(
+    options.path,
+    classNameIdentifier.name,
+    programParent.minchoData.cssFile
+  );
 
   return {
     classNameExpression: importedClassNameIdentifier,
     cxExpression: importedCxIdentifier,
-    styleProperties: preparedLeaves.map(
-      ({ leaf, importedVariableKeyIdentifier }) =>
-        t.objectProperty(
-          t.cloneNode(importedVariableKeyIdentifier),
-          t.cloneNode(leaf.value),
-          true
-        )
+    styleProperties: options.rule.leaves.map((leaf) =>
+      cloneDynamicCssVariableStyleProperty(stylePropertyByLeaf, leaf)
     )
   };
+}
+
+function createDynamicCssVariableCssImportDeclaration(
+  path: NodePath<t.JSXOpeningElement>,
+  cssIdentifier: t.Identifier
+): t.ImportDeclaration {
+  const programParent = path.scope.getProgramParent() as ProgramScope;
+  let cssBinding = programParent.getBinding(cssIdentifier.name);
+
+  if (!cssBinding) {
+    programParent.crawl();
+    cssBinding = programParent.getBinding(cssIdentifier.name);
+  }
+
+  invariant(
+    cssBinding !== undefined,
+    "Dynamic CSS variable lowering requires a registered css import binding"
+  );
+
+  programParent.minchoData.bindings.push(cssBinding.path);
+
+  const cssImportSpecifierPath = cssBinding.path;
+
+  invariant(
+    cssImportSpecifierPath.isImportSpecifier(),
+    "Dynamic CSS variable css import binding must be an import specifier"
+  );
+
+  return t.importDeclaration(
+    [t.cloneNode(cssImportSpecifierPath.node)],
+    t.stringLiteral(cssModuleName)
+  );
+}
+
+function createDynamicCssVariableBranchLowering(options: {
+  readonly path: NodePath<t.JSXOpeningElement>;
+  readonly rule: DynamicCssVariableBranchRule;
+  readonly stylePropertyByLeaf: ReadonlyMap<
+    DynamicCssVariableLeaf,
+    t.ObjectProperty
+  >;
+}): {
+  readonly declarations: readonly t.VariableDeclaration[];
+  readonly classNameExpression: t.Expression;
+  readonly styleProperties: readonly t.ObjectExpression["properties"][number][];
+} {
+  const declarations: t.VariableDeclaration[] = [];
+  const decisionIdentifierByRule = new Map<
+    DynamicCssVariableBranchRule,
+    t.Identifier
+  >();
+  const branchRules: Array<{
+    readonly rule: DynamicCssVariableBranchRule;
+    readonly activeExpression: t.Expression | null;
+  }> = [{ rule: options.rule, activeExpression: null }];
+
+  for (const { rule, activeExpression } of branchRules) {
+    const decisionIdentifier =
+      options.path.scope.generateUidIdentifier("minchoCssBranch");
+    const decisionExpression =
+      createDynamicCssVariableBranchDecisionExpression(rule);
+
+    declarations.push(
+      t.variableDeclaration("const", [
+        t.variableDeclarator(
+          t.cloneNode(decisionIdentifier),
+          activeExpression
+            ? t.conditionalExpression(
+                t.cloneNode(activeExpression),
+                t.cloneNode(decisionExpression),
+                t.unaryExpression("void", t.numericLiteral(0))
+              )
+            : t.cloneNode(decisionExpression)
+        )
+      ])
+    );
+    decisionIdentifierByRule.set(rule, decisionIdentifier);
+
+    for (const [branchIndex, branch] of rule.branches.entries()) {
+      if (branch.kind === "branch") {
+        const branchActiveExpression =
+          createDynamicCssVariableNestedBranchActiveExpression(
+            rule,
+            decisionIdentifier,
+            branchIndex
+          );
+        branchRules.push({
+          rule: branch,
+          activeExpression: activeExpression
+            ? t.logicalExpression(
+                "&&",
+                t.cloneNode(activeExpression),
+                branchActiveExpression
+              )
+            : branchActiveExpression
+        });
+      }
+    }
+  }
+
+  const decisionIdentifier = getDynamicCssVariableBranchDecisionIdentifier(
+    decisionIdentifierByRule,
+    options.rule
+  );
+  const cssExpression = createDynamicCssVariableBranchClassNameExpression({
+    rule: options.rule,
+    decisionExpression: decisionIdentifier,
+    decisionIdentifierByRule
+  });
+  const classNameExpression = createClassNameExpression(options.path, {
+    cssExpression,
+    cssValueClassification: "branch-css-rule",
+    classNameAttribute: null
+  });
+  const styleProperties = [
+    t.spreadElement(
+      createDynamicCssVariableBranchStyleExpression({
+        rule: options.rule,
+        stylePropertyByLeaf: options.stylePropertyByLeaf,
+        decisionExpression: decisionIdentifier,
+        decisionIdentifierByRule
+      })
+    )
+  ];
+
+  return { declarations, classNameExpression, styleProperties };
+}
+
+function createDynamicCssVariableBranchDecisionExpression(
+  rule: DynamicCssVariableBranchRule
+): t.Expression {
+  if (t.isConditionalExpression(rule.expression)) {
+    return t.cloneNode(rule.expression.test);
+  }
+
+  return t.cloneNode(rule.expression.left);
+}
+
+function createDynamicCssVariableNestedBranchActiveExpression(
+  rule: DynamicCssVariableBranchRule,
+  decisionIdentifier: t.Identifier,
+  branchIndex: number
+): t.Expression {
+  if (t.isConditionalExpression(rule.expression)) {
+    return branchIndex === 0
+      ? t.cloneNode(decisionIdentifier)
+      : t.unaryExpression("!", t.cloneNode(decisionIdentifier));
+  }
+
+  if (rule.expression.operator === "&&") {
+    return t.cloneNode(decisionIdentifier);
+  }
+
+  if (rule.expression.operator === "??") {
+    return createDynamicCssVariableNullishDecisionExpression(
+      decisionIdentifier
+    );
+  }
+
+  return t.unaryExpression("!", t.cloneNode(decisionIdentifier));
+}
+
+function createDynamicCssVariableNullishDecisionExpression(
+  decisionExpression: t.Expression
+): t.LogicalExpression {
+  return t.logicalExpression(
+    "||",
+    t.binaryExpression("===", t.cloneNode(decisionExpression), t.nullLiteral()),
+    t.binaryExpression(
+      "===",
+      t.cloneNode(decisionExpression),
+      t.unaryExpression("void", t.numericLiteral(0))
+    )
+  );
+}
+
+function createDynamicCssVariableBranchClassNameExpression(options: {
+  readonly rule: DynamicCssVariableBranchRule;
+  readonly decisionExpression: t.Expression;
+  readonly decisionIdentifierByRule: ReadonlyMap<
+    DynamicCssVariableBranchRule,
+    t.Identifier
+  >;
+}): t.ConditionalExpression | t.LogicalExpression {
+  if (t.isConditionalExpression(options.rule.expression)) {
+    const consequent = options.rule.branches[0];
+    const alternate = options.rule.branches[1];
+
+    invariant(
+      consequent !== undefined && alternate !== undefined,
+      "Conditional dynamic CSS variable branch requires both branches"
+    );
+
+    return t.conditionalExpression(
+      t.cloneNode(options.decisionExpression),
+      createDynamicCssVariableRuleClassNameExpression(
+        consequent,
+        options.decisionIdentifierByRule
+      ),
+      createDynamicCssVariableRuleClassNameExpression(
+        alternate,
+        options.decisionIdentifierByRule
+      )
+    );
+  }
+
+  const right = options.rule.branches[0];
+
+  invariant(
+    right !== undefined,
+    "Logical dynamic CSS variable branch requires a right branch"
+  );
+
+  return t.logicalExpression(
+    options.rule.expression.operator,
+    t.cloneNode(options.decisionExpression),
+    createDynamicCssVariableRuleClassNameExpression(
+      right,
+      options.decisionIdentifierByRule
+    )
+  );
+}
+
+function createDynamicCssVariableRuleClassNameExpression(
+  rule: DynamicCssVariableRule,
+  decisionIdentifierByRule: ReadonlyMap<
+    DynamicCssVariableBranchRule,
+    t.Identifier
+  >
+): t.Expression {
+  if (rule.kind === "direct") {
+    return t.cloneNode(rule.expression);
+  }
+
+  return createDynamicCssVariableBranchClassNameExpression({
+    rule,
+    decisionExpression: getDynamicCssVariableBranchDecisionIdentifier(
+      decisionIdentifierByRule,
+      rule
+    ),
+    decisionIdentifierByRule
+  });
+}
+
+function getDynamicCssVariableBranchDecisionIdentifier(
+  decisionIdentifierByRule: ReadonlyMap<
+    DynamicCssVariableBranchRule,
+    t.Identifier
+  >,
+  rule: DynamicCssVariableBranchRule
+): t.Identifier {
+  const identifier = decisionIdentifierByRule.get(rule);
+
+  invariant(
+    identifier !== undefined,
+    "Dynamic CSS variable branch requires a prepared decision binding"
+  );
+
+  return identifier;
+}
+
+function createDynamicCssVariableBranchStyleExpression(options: {
+  readonly rule: DynamicCssVariableBranchRule;
+  readonly stylePropertyByLeaf: ReadonlyMap<
+    DynamicCssVariableLeaf,
+    t.ObjectProperty
+  >;
+  readonly decisionExpression: t.Expression;
+  readonly decisionIdentifierByRule: ReadonlyMap<
+    DynamicCssVariableBranchRule,
+    t.Identifier
+  >;
+}): t.Expression {
+  if (t.isConditionalExpression(options.rule.expression)) {
+    const consequent = options.rule.branches[0];
+    const alternate = options.rule.branches[1];
+
+    invariant(
+      consequent !== undefined && alternate !== undefined,
+      "Conditional dynamic CSS variable style requires both branches"
+    );
+
+    return t.conditionalExpression(
+      t.cloneNode(options.decisionExpression),
+      createDynamicCssVariableStyleObjectExpression({
+        rule: consequent,
+        stylePropertyByLeaf: options.stylePropertyByLeaf,
+        decisionExpression:
+          consequent.kind === "branch"
+            ? getDynamicCssVariableBranchDecisionIdentifier(
+                options.decisionIdentifierByRule,
+                consequent
+              )
+            : null,
+        decisionIdentifierByRule: options.decisionIdentifierByRule
+      }),
+      createDynamicCssVariableStyleObjectExpression({
+        rule: alternate,
+        stylePropertyByLeaf: options.stylePropertyByLeaf,
+        decisionExpression:
+          alternate.kind === "branch"
+            ? getDynamicCssVariableBranchDecisionIdentifier(
+                options.decisionIdentifierByRule,
+                alternate
+              )
+            : null,
+        decisionIdentifierByRule: options.decisionIdentifierByRule
+      })
+    );
+  }
+
+  const right = options.rule.branches[0];
+
+  invariant(
+    right !== undefined,
+    "Logical dynamic CSS variable style requires a right branch"
+  );
+
+  const decisionExpression = t.cloneNode(options.decisionExpression);
+  const rightStyle = createDynamicCssVariableStyleObjectExpression({
+    rule: right,
+    stylePropertyByLeaf: options.stylePropertyByLeaf,
+    decisionExpression:
+      right.kind === "branch"
+        ? getDynamicCssVariableBranchDecisionIdentifier(
+            options.decisionIdentifierByRule,
+            right
+          )
+        : null,
+    decisionIdentifierByRule: options.decisionIdentifierByRule
+  });
+  const emptyStyle = t.objectExpression([]);
+
+  if (options.rule.expression.operator === "&&") {
+    return t.conditionalExpression(decisionExpression, rightStyle, emptyStyle);
+  }
+
+  if (options.rule.expression.operator === "??") {
+    return t.conditionalExpression(
+      createDynamicCssVariableNullishDecisionExpression(decisionExpression),
+      rightStyle,
+      emptyStyle
+    );
+  }
+
+  return t.conditionalExpression(decisionExpression, emptyStyle, rightStyle);
+}
+
+function createDynamicCssVariableStyleObjectExpression(options: {
+  readonly rule: DynamicCssVariableRule;
+  readonly stylePropertyByLeaf: ReadonlyMap<
+    DynamicCssVariableLeaf,
+    t.ObjectProperty
+  >;
+  readonly decisionExpression: t.Expression | null;
+  readonly decisionIdentifierByRule: ReadonlyMap<
+    DynamicCssVariableBranchRule,
+    t.Identifier
+  >;
+}): t.ObjectExpression {
+  switch (options.rule.kind) {
+    case "direct":
+      return t.objectExpression(
+        options.rule.leaves.map((leaf) =>
+          cloneDynamicCssVariableStyleProperty(
+            options.stylePropertyByLeaf,
+            leaf
+          )
+        )
+      );
+    case "branch":
+      invariant(
+        options.decisionExpression !== null,
+        "Dynamic CSS variable branch style requires a decision expression"
+      );
+      return t.objectExpression([
+        t.spreadElement(
+          createDynamicCssVariableBranchStyleExpression({
+            rule: options.rule,
+            stylePropertyByLeaf: options.stylePropertyByLeaf,
+            decisionExpression: options.decisionExpression,
+            decisionIdentifierByRule: options.decisionIdentifierByRule
+          })
+        )
+      ]);
+    default: {
+      const exhaustive: never = options.rule;
+      return exhaustive;
+    }
+  }
+}
+
+function cloneDynamicCssVariableStyleProperty(
+  stylePropertyByLeaf: ReadonlyMap<DynamicCssVariableLeaf, t.ObjectProperty>,
+  leaf: DynamicCssVariableLeaf
+): t.ObjectProperty {
+  const property = stylePropertyByLeaf.get(leaf);
+
+  invariant(
+    property !== undefined,
+    "Dynamic CSS variable style property requires a prepared leaf"
+  );
+
+  return t.cloneNode(property);
 }
 
 function createDynamicCssVariableClassNameAttributeValue(
@@ -533,7 +988,7 @@ function createDynamicCssVariableClassNameAttributeValue(
 function createDynamicCssVariableStyleAttributeValue(
   path: NodePath<t.JSXOpeningElement>,
   styleAttribute: t.JSXAttribute | null,
-  styleProperties: readonly t.ObjectProperty[]
+  styleProperties: readonly t.ObjectExpression["properties"][number][]
 ): t.JSXAttribute["value"] {
   if (!styleAttribute) {
     return t.jsxExpressionContainer(
@@ -567,27 +1022,6 @@ function assertDynamicCssVariableStyleAttributeValue(
   getStyleExpression(path, styleAttribute);
 }
 
-function getStyleExpression(
-  path: NodePath<t.JSXOpeningElement>,
-  attribute: t.JSXAttribute
-): t.Expression {
-  if (attribute.value === null || t.isStringLiteral(attribute.value)) {
-    throw path.buildCodeFrameError(styleValueErrorMessage);
-  }
-
-  if (!t.isJSXExpressionContainer(attribute.value)) {
-    throw path.buildCodeFrameError(styleValueErrorMessage);
-  }
-
-  const { expression } = attribute.value;
-
-  if (t.isJSXEmptyExpression(expression) || t.isStringLiteral(expression)) {
-    throw path.buildCodeFrameError(styleValueErrorMessage);
-  }
-
-  return expression;
-}
-
 function createDynamicCssVariableCxExportDeclaration(
   exportedIdentifier: t.Identifier
 ): t.ExportNamedDeclaration {
@@ -616,7 +1050,20 @@ function createDynamicCssVariableHelperImportDeclaration(
   );
 }
 
-function getDynamicCssVariableRule(options: {
+export function getDynamicCssVariableRule(options: {
+  readonly expression: t.Expression;
+  readonly scope: NodePath<t.JSXOpeningElement>["scope"];
+}): DynamicCssVariableRule | null {
+  const rule = collectDynamicCssVariableRule(options);
+
+  if (!rule || rule.leaves.length === 0) {
+    return null;
+  }
+
+  return rule;
+}
+
+function collectDynamicCssVariableRule(options: {
   readonly expression: t.Expression;
   readonly scope: NodePath<t.JSXOpeningElement>["scope"];
 }): DynamicCssVariableRule | null {
@@ -624,24 +1071,105 @@ function getDynamicCssVariableRule(options: {
     options.expression
   );
 
-  const result = t.isObjectExpression(unwrappedExpression)
+  if (
+    t.isObjectExpression(unwrappedExpression) ||
+    t.isArrayExpression(unwrappedExpression)
+  ) {
+    return collectDirectDynamicCssVariableRule({
+      expression: unwrappedExpression,
+      scope: options.scope
+    });
+  }
+
+  if (t.isConditionalExpression(unwrappedExpression)) {
+    return collectConditionalDynamicCssVariableRule({
+      expression: unwrappedExpression,
+      scope: options.scope
+    });
+  }
+
+  if (t.isLogicalExpression(unwrappedExpression)) {
+    return collectLogicalDynamicCssVariableRule({
+      expression: unwrappedExpression,
+      scope: options.scope
+    });
+  }
+
+  return null;
+}
+
+function collectDirectDynamicCssVariableRule(options: {
+  readonly expression: t.ObjectExpression | t.ArrayExpression;
+  readonly scope: NodePath<t.JSXOpeningElement>["scope"];
+}): DynamicCssVariableDirectRule | null {
+  const result = t.isObjectExpression(options.expression)
     ? collectDynamicCssVariableObjectExpression({
-        expression: unwrappedExpression,
+        expression: options.expression,
         declarationName: null,
         scope: options.scope
       })
-    : t.isArrayExpression(unwrappedExpression)
-      ? collectDynamicCssVariableArrayExpression({
-          expression: unwrappedExpression,
-          scope: options.scope
-        })
-      : null;
+    : collectDynamicCssVariableArrayExpression({
+        expression: options.expression,
+        scope: options.scope
+      });
 
-  if (!result || result.leaves.length === 0) {
+  return result
+    ? { kind: "direct", expression: result.expression, leaves: result.leaves }
+    : null;
+}
+
+function collectConditionalDynamicCssVariableRule(options: {
+  readonly expression: t.ConditionalExpression;
+  readonly scope: NodePath<t.JSXOpeningElement>["scope"];
+}): DynamicCssVariableRule | null {
+  const consequent = collectDynamicCssVariableRule({
+    expression: options.expression.consequent,
+    scope: options.scope
+  });
+  const alternate = collectDynamicCssVariableRule({
+    expression: options.expression.alternate,
+    scope: options.scope
+  });
+
+  if (!consequent || !alternate) {
     return null;
   }
 
-  return result;
+  return {
+    kind: "branch",
+    expression: t.conditionalExpression(
+      t.cloneNode(options.expression.test),
+      t.cloneNode(consequent.expression),
+      t.cloneNode(alternate.expression)
+    ),
+    leaves: [...consequent.leaves, ...alternate.leaves],
+    branches: [consequent, alternate]
+  };
+}
+
+function collectLogicalDynamicCssVariableRule(options: {
+  readonly expression: t.LogicalExpression;
+  readonly scope: NodePath<t.JSXOpeningElement>["scope"];
+}): DynamicCssVariableRule | null {
+  const right = collectDynamicCssVariableRule({
+    expression: options.expression.right,
+    scope: options.scope
+  });
+
+  if (!right) {
+    return null;
+  }
+
+  return {
+    kind: "branch",
+    expression: t.logicalExpression(
+      options.expression.operator,
+      t.cloneNode(options.expression.left),
+      t.cloneNode(right.expression)
+    ),
+    leaves: right.leaves,
+    branches: [right]
+  };
 }
 
 type DynamicCssVariableObjectWalkResult = {
@@ -1155,7 +1683,7 @@ function isUnsupportedDynamicCssRuleCallExpression(options: {
 
   if (
     !t.isCallExpression(unwrappedExpression) ||
-    !isTopLevelCssRuleCallExpression(unwrappedExpression)
+    !isTopLevelCssRuleCallExpression(unwrappedExpression, options.scope)
   ) {
     return false;
   }
@@ -1189,7 +1717,16 @@ function containsDynamicCssVariableRuleBranch(options: {
 }): boolean {
   const expression = unwrapTransparentCssRuleExpression(options.expression);
 
-  if (t.isObjectExpression(expression) || t.isArrayExpression(expression)) {
+  if (t.isObjectExpression(expression)) {
+    return (
+      getDynamicCssVariableRule({
+        expression,
+        scope: options.scope
+      }) !== null || !isStaticCssShapeExpression(expression)
+    );
+  }
+
+  if (t.isArrayExpression(expression)) {
     return (
       getDynamicCssVariableRule({
         expression,

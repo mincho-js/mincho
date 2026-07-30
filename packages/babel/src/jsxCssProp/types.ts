@@ -58,10 +58,22 @@ export type DynamicCssVariableLeaf = {
   readonly variableIdentifier: t.Identifier;
 };
 
-export type DynamicCssVariableRule = {
+export type DynamicCssVariableDirectRule = {
+  readonly kind: "direct";
   readonly expression: t.ObjectExpression | t.ArrayExpression;
   readonly leaves: readonly DynamicCssVariableLeaf[];
 };
+
+export type DynamicCssVariableBranchRule = {
+  readonly kind: "branch";
+  readonly expression: t.ConditionalExpression | t.LogicalExpression;
+  readonly leaves: readonly DynamicCssVariableLeaf[];
+  readonly branches: readonly DynamicCssVariableRule[];
+};
+
+export type DynamicCssVariableRule =
+  | DynamicCssVariableDirectRule
+  | DynamicCssVariableBranchRule;
 
 export type SpreadAggregatedCssPropLowering = {
   readonly declarations: t.VariableDeclaration[];
