@@ -21,7 +21,7 @@ import {
   runDefineRulesPresetRegistryStep
 } from "@mincho-js/integration";
 import { normalizePath } from "@rollup/pluginutils";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import * as fs from "node:fs";
 import { fileURLToPath } from "node:url";
 
@@ -517,7 +517,9 @@ export function minchoVitePlugin(
     async transform(this: PluginContext, code: string, id: string) {
       if (id.startsWith("\0")) return;
       const fileId = normalizeStaticCssEvalFileId(id, rootRealpath);
-      invalidateStaticCssEvalDependency(fileId);
+      if (config.command === "serve" || config.build.watch) {
+        invalidateStaticCssEvalDependency(fileId);
+      }
 
       const moduleInfo = idToPluginData.get(id);
 
@@ -565,6 +567,15 @@ export function minchoVitePlugin(
             }) => {
               const id: string = `${fileScope.filePath}${virtualExt}`;
               const cssFileId = normalizePath(resolve(config.root, id));
+              const normalizedId = normalizePath(id);
+              const normalizedRoot = normalizePath(config.root);
+              const relativeId = normalizePath(
+                relative(normalizedRoot, normalizedId)
+              );
+              const importId =
+                relativeId === ".." || relativeId.startsWith("../")
+                  ? customNormalize(normalizedId)
+                  : relativeId;
 
               if (server) {
                 const { moduleGraph } = server;
@@ -579,7 +590,7 @@ export function minchoVitePlugin(
 
               setVirtualCssForSidecar(moduleInfo.filePath, cssFileId, source);
 
-              return `import "${cssFileId}";`;
+              return `import "/${importId}";`;
             }
           });
 
@@ -2554,6 +2565,62 @@ if (import.meta.vitest) {
         );
         expectCssSourceToContainClassNames(virtualCss, generatedClassName);
         expect(virtualCss).toContain("color: red;");
+      } finally {
+        await fs.promises.rm(fixture.root, { force: true, recursive: true });
+      }
+    });
+
+    it("retains imported static css prop virtual CSS during builds", async () => {
+      const fixture = await createImportedCssPropViteFixture(
+        "jsx-css-prop-imported-build-retention-"
+      );
+
+      try {
+        // Given
+        await spyOnSourceBabelTransform();
+        const harness = await createViteHarness({
+          configOverrides: {
+            command: "build",
+            mode: "production",
+            root: fixture.root
+          },
+          pluginOptions: {
+            jsxCssProp: true
+          }
+        });
+        const redArtifact = await transformImportedCssPropToVirtualCss(
+          harness,
+          fixture.entryPath,
+          fixture.entrySource
+        );
+        const virtualImportMatch = redArtifact.transformedExtractedCss.match(
+          /import\s+"([^"]+\.vanilla\.css)";/
+        );
+
+        if (virtualImportMatch?.[1] == null) {
+          throw new Error(
+            "Expected imported css-prop output to import virtual CSS"
+          );
+        }
+
+        // When
+        await harness.transform(
+          fixture.stylesPath,
+          await fs.promises.readFile(fixture.stylesPath, "utf8")
+        );
+
+        // Then
+        const resolvedVirtualId = harness.resolveId(virtualImportMatch[1]);
+        assertString(
+          resolvedVirtualId,
+          "Expected build-mode virtual CSS id to remain resolvable after dependency transform"
+        );
+        const virtualCss = await harness.load(resolvedVirtualId);
+        assertString(
+          virtualCss,
+          "Expected build-mode virtual CSS to remain loadable after dependency transform"
+        );
+        expect(virtualCss).toBe(redArtifact.virtualCss);
       } finally {
         await fs.promises.rm(fixture.root, { force: true, recursive: true });
       }
@@ -4823,6 +4890,7 @@ if (import.meta.vitest) {
       const expectedModuleId = normalizePath(
         join(viteConsumerRootPath, virtualCssId)
       );
+      const fileScopePath = expectedModuleId.slice(0, -".vanilla.css".length);
       const hmrModule: Module = {
         lastInvalidationTimestamp: 123
       };
@@ -4847,7 +4915,7 @@ if (import.meta.vitest) {
               (await serializeVirtualCssPath?.({
                 fileName: "src/extracted_rules.css.ts",
                 fileScope: {
-                  filePath: "src/extracted_rules.css.ts"
+                  filePath: fileScopePath
                 },
                 source: cssSource
               })) ?? ""
@@ -4885,9 +4953,7 @@ if (import.meta.vitest) {
         throw new Error("Expected a virtual css import in dev mode");
       }
 
-      expect(transformedExtractedCss).toContain(
-        `import "${expectedModuleId}";`
-      );
+      expect(transformedExtractedCss).toContain(`import "/${virtualCssId}";`);
       expect(transformedExtractedCss).not.toContain("presets");
       const resolvedVirtualId = harness.resolveId(virtualImportMatch[1]);
       expect(resolvedVirtualId).toBe(expectedModuleId);
@@ -4904,6 +4970,66 @@ if (import.meta.vitest) {
         })
       );
       expect(registrySpy).toHaveBeenCalledTimes(1);
+    });
+
+    it("emits root-relative virtual css imports for Windows file scopes", async () => {
+      const integrationModule = await import("@mincho-js/integration");
+      const cssSource = ".shared { color: rebeccapurple; }";
+      const windowsRootPath = "C:\\workspace\\mincho";
+      const windowsFileScopePath =
+        "C:\\workspace\\mincho\\src\\extracted_rules.css.ts";
+
+      vi.spyOn(integrationModule, "babelTransform").mockResolvedValue({
+        code: 'import "extracted_rules.css.ts";\nexport { css, shared };',
+        result: ["extracted_rules.css.ts", "resolver contents"]
+      });
+      vi.spyOn(integrationModule, "compile").mockResolvedValue({
+        source: "compiled source",
+        watchFiles: []
+      } as Awaited<ReturnType<typeof compile>>);
+      vi.spyOn(
+        integrationModule,
+        "processDefineRulesPresetRegistryFile"
+      ).mockImplementation(
+        async ({
+          serializeVirtualCssPath
+        }: Parameters<typeof processDefineRulesPresetRegistryFile>[0]) => {
+          return createRegistryResult(
+            (await serializeVirtualCssPath?.({
+              fileName: "src/extracted_rules.css.ts",
+              fileScope: {
+                filePath: windowsFileScopePath
+              },
+              source: cssSource
+            })) ?? ""
+          );
+        }
+      );
+
+      const harness = await createViteHarness({
+        configOverrides: {
+          command: "serve",
+          mode: "development",
+          root: windowsRootPath
+        }
+      });
+      const { extractedId, extractedSource } =
+        await createExtractedCssFixture(harness);
+      const transformedExtractedCss = await harness.transform(
+        extractedId,
+        extractedSource
+      );
+      assertString(
+        transformedExtractedCss,
+        "Expected Windows virtual css transform to return source text"
+      );
+
+      expect(transformedExtractedCss).toContain(
+        'import "/src/extracted_rules.css.ts.vanilla.css";'
+      );
+      expect(transformedExtractedCss).not.toMatch(
+        /import\s+"(?:\/\/|\/[A-Z]:)/
+      );
     });
   });
 }

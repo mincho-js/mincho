@@ -1,5 +1,6 @@
 import { types as t } from "@babel/core";
 import type { NodePath } from "@babel/core";
+import { invariant } from "../utils.js";
 import {
   createClassNameExpression,
   getClassNameExpression
@@ -16,6 +17,10 @@ import type {
   NormalizedJsxCssPropElement,
   SpreadAggregatedCssPropLowering
 } from "./types.js";
+
+const styleAttributeName = "style";
+const styleValueErrorMessage =
+  "Mincho JSX css prop requires style to be an expression value when merging dynamic CSS variables";
 
 export function transformSpreadAggregatedCssProp(
   path: NodePath<t.JSXOpeningElement>,
@@ -115,6 +120,13 @@ function createPreCssSpreadAggregatedCssPropLowering(
   path: NodePath<t.JSXOpeningElement>,
   normalizedElement: NormalizedJsxCssPropElement
 ): SpreadAggregatedCssPropLowering {
+  if (normalizedElement.dynamicCssVariableLowering) {
+    return createDynamicCssVariableSpreadAggregatedCssPropLowering(
+      path,
+      normalizedElement
+    );
+  }
+
   const preCssBinding = createAggregatePropsBinding(
     path,
     normalizedElement.attributesBeforeCss,
@@ -155,6 +167,13 @@ function createPostCssSpreadAggregatedCssPropLowering(
   path: NodePath<t.JSXOpeningElement>,
   normalizedElement: NormalizedJsxCssPropElement
 ): SpreadAggregatedCssPropLowering {
+  if (normalizedElement.dynamicCssVariableLowering) {
+    return createDynamicCssVariableSpreadAggregatedCssPropLowering(
+      path,
+      normalizedElement
+    );
+  }
+
   const preCssBinding =
     normalizedElement.attributesBeforeCss.length > 0
       ? createAggregatePropsBinding(
@@ -231,6 +250,116 @@ function createPostCssSpreadAggregatedCssPropLowering(
   };
 }
 
+function createDynamicCssVariableSpreadAggregatedCssPropLowering(
+  path: NodePath<t.JSXOpeningElement>,
+  normalizedElement: NormalizedJsxCssPropElement
+): SpreadAggregatedCssPropLowering {
+  const preCssBinding =
+    normalizedElement.attributesBeforeCss.length > 0
+      ? createAggregatePropsBindingWithStyle(
+          path,
+          normalizedElement.attributesBeforeCss,
+          "minchoPre"
+        )
+      : null;
+  const postCssBinding =
+    normalizedElement.attributesAfterCss.length > 0
+      ? createAggregatePropsBindingWithStyle(
+          path,
+          normalizedElement.attributesAfterCss,
+          preCssBinding ? "minchoPost" : "mincho"
+        )
+      : null;
+  const classNameAttribute = t.jsxAttribute(
+    t.jsxIdentifier(classNameAttributeName),
+    t.jsxExpressionContainer(
+      createDynamicCssVariableClassNameExpression(
+        normalizedElement,
+        preCssBinding,
+        postCssBinding
+      )
+    )
+  );
+  const styleAttribute = t.jsxAttribute(
+    t.jsxIdentifier(styleAttributeName),
+    t.jsxExpressionContainer(
+      createDynamicCssVariableStyleExpression(
+        normalizedElement,
+        preCssBinding,
+        postCssBinding
+      )
+    )
+  );
+
+  return {
+    declarations: [
+      ...(preCssBinding?.declarations ?? []),
+      ...(postCssBinding?.declarations ?? [])
+    ],
+    attributes: [
+      ...(preCssBinding
+        ? [t.jsxSpreadAttribute(t.cloneNode(preCssBinding.restIdentifier))]
+        : []),
+      ...(postCssBinding
+        ? [t.jsxSpreadAttribute(t.cloneNode(postCssBinding.restIdentifier))]
+        : []),
+      classNameAttribute,
+      styleAttribute
+    ]
+  };
+}
+
+function createDynamicCssVariableClassNameExpression(
+  normalizedElement: NormalizedJsxCssPropElement,
+  preCssBinding: AggregatePropsBinding | null,
+  postCssBinding: AggregatePropsBinding | null
+): t.Expression {
+  const lowering = normalizedElement.dynamicCssVariableLowering;
+
+  invariant(
+    lowering !== null,
+    "Dynamic CSS variable spread aggregation requires dynamic lowering"
+  );
+
+  if (!preCssBinding && !postCssBinding) {
+    return t.cloneNode(lowering.classNameExpression);
+  }
+
+  invariant(
+    lowering.cxExpression !== null,
+    "Dynamic CSS variable spread aggregation requires generated cx"
+  );
+
+  return t.callExpression(t.cloneNode(lowering.cxExpression), [
+    ...(preCssBinding ? [t.cloneNode(preCssBinding.classNameIdentifier)] : []),
+    t.cloneNode(lowering.classNameExpression),
+    ...(postCssBinding ? [t.cloneNode(postCssBinding.classNameIdentifier)] : [])
+  ]);
+}
+
+function createDynamicCssVariableStyleExpression(
+  normalizedElement: NormalizedJsxCssPropElement,
+  preCssBinding: AggregatePropsBinding | null,
+  postCssBinding: AggregatePropsBinding | null
+): t.ObjectExpression {
+  const lowering = normalizedElement.dynamicCssVariableLowering;
+
+  invariant(
+    lowering !== null,
+    "Dynamic CSS variable spread aggregation requires dynamic lowering"
+  );
+
+  return t.objectExpression([
+    ...(preCssBinding?.styleExpressions.map((expression) =>
+      t.spreadElement(t.cloneNode(expression))
+    ) ?? []),
+    ...(postCssBinding?.styleExpressions.map((expression) =>
+      t.spreadElement(t.cloneNode(expression))
+    ) ?? []),
+    ...lowering.styleProperties.map((property) => t.cloneNode(property))
+  ]);
+}
+
 export function createAggregatePropsBinding(
   path: NodePath<t.JSXOpeningElement>,
   attributes: readonly (t.JSXAttribute | t.JSXSpreadAttribute)[],
@@ -273,7 +402,66 @@ export function createAggregatePropsBinding(
       ])
     ],
     classNameIdentifier,
-    restIdentifier
+    restIdentifier,
+    styleExpressions: []
+  };
+}
+
+function createAggregatePropsBindingWithStyle(
+  path: NodePath<t.JSXOpeningElement>,
+  attributes: readonly (t.JSXAttribute | t.JSXSpreadAttribute)[],
+  uidPrefix: string
+): AggregatePropsBinding {
+  const aggregateIdentifier = path.scope.generateUidIdentifier(
+    `${uidPrefix}Props`
+  );
+  const cssPropIdentifier = path.scope.generateUidIdentifier(
+    `${uidPrefix}CssProp`
+  );
+  const classNameIdentifier = path.scope.generateUidIdentifier(
+    `${uidPrefix}ClassName`
+  );
+  const styleIdentifier = path.scope.generateUidIdentifier(`${uidPrefix}Style`);
+  const restIdentifier = path.scope.generateUidIdentifier(`${uidPrefix}Rest`);
+  const aggregateExpression = createAggregatePropsExpressionWithStyle(
+    path,
+    attributes,
+    uidPrefix
+  );
+
+  return {
+    declarations: [
+      ...aggregateExpression.declarations,
+      t.variableDeclaration("const", [
+        t.variableDeclarator(
+          t.cloneNode(aggregateIdentifier),
+          aggregateExpression.expression
+        )
+      ]),
+      t.variableDeclaration("const", [
+        t.variableDeclarator(
+          t.objectPattern([
+            t.objectProperty(
+              t.identifier(cssAttributeName),
+              t.cloneNode(cssPropIdentifier)
+            ),
+            t.objectProperty(
+              t.identifier(classNameAttributeName),
+              t.cloneNode(classNameIdentifier)
+            ),
+            t.objectProperty(
+              t.identifier(styleAttributeName),
+              t.cloneNode(styleIdentifier)
+            ),
+            t.restElement(t.cloneNode(restIdentifier))
+          ]),
+          t.cloneNode(aggregateIdentifier)
+        )
+      ])
+    ],
+    classNameIdentifier,
+    restIdentifier,
+    styleExpressions: aggregateExpression.styleExpressions
   };
 }
 
@@ -374,6 +562,84 @@ export function createAggregatePropsExpression(
   );
 }
 
+type AggregatePropsExpressionWithStyle = {
+  readonly declarations: t.VariableDeclaration[];
+  readonly expression: t.ObjectExpression;
+  readonly styleExpressions: readonly t.Expression[];
+};
+
+function createAggregatePropsExpressionWithStyle(
+  path: NodePath<t.JSXOpeningElement>,
+  attributes: readonly (t.JSXAttribute | t.JSXSpreadAttribute)[],
+  uidPrefix: string
+): AggregatePropsExpressionWithStyle {
+  const declarations: t.VariableDeclaration[] = [];
+  const properties: t.ObjectExpression["properties"] = [];
+  const styleExpressions: t.Expression[] = [];
+
+  for (const attribute of attributes) {
+    if (t.isJSXSpreadAttribute(attribute)) {
+      const spreadIdentifier = path.scope.generateUidIdentifier(
+        `${uidPrefix}Spread`
+      );
+      declarations.push(
+        t.variableDeclaration("let", [
+          t.variableDeclarator(t.cloneNode(spreadIdentifier))
+        ])
+      );
+      properties.push(
+        t.spreadElement(
+          t.assignmentExpression(
+            "=",
+            t.cloneNode(spreadIdentifier),
+            t.objectExpression([
+              t.spreadElement(t.cloneNode(attribute.argument))
+            ])
+          )
+        )
+      );
+      styleExpressions.push(
+        t.memberExpression(
+          t.cloneNode(spreadIdentifier),
+          t.identifier(styleAttributeName)
+        )
+      );
+      continue;
+    }
+
+    if (isNamedJsxAttribute(attribute, styleAttributeName)) {
+      const explicitStyleIdentifier = path.scope.generateUidIdentifier(
+        `${uidPrefix}Style`
+      );
+      declarations.push(
+        t.variableDeclaration("let", [
+          t.variableDeclarator(t.cloneNode(explicitStyleIdentifier))
+        ])
+      );
+      properties.push(
+        t.objectProperty(
+          t.identifier(styleAttributeName),
+          t.assignmentExpression(
+            "=",
+            t.cloneNode(explicitStyleIdentifier),
+            getStyleExpression(path, attribute)
+          )
+        )
+      );
+      styleExpressions.push(t.cloneNode(explicitStyleIdentifier));
+      continue;
+    }
+
+    properties.push(createAggregateObjectProperty(path, attribute));
+  }
+
+  return {
+    declarations,
+    expression: t.objectExpression(properties),
+    styleExpressions
+  };
+}
+
 function createAggregateObjectProperty(
   path: NodePath<t.JSXOpeningElement>,
   attribute: t.JSXAttribute
@@ -429,6 +695,27 @@ function getAggregateAttributeValue(
   }
 
   throw path.buildCodeFrameError(classNameValueErrorMessage);
+}
+
+function getStyleExpression(
+  path: NodePath<t.JSXOpeningElement>,
+  attribute: t.JSXAttribute
+): t.Expression {
+  if (attribute.value === null || t.isStringLiteral(attribute.value)) {
+    throw path.buildCodeFrameError(styleValueErrorMessage);
+  }
+
+  if (!t.isJSXExpressionContainer(attribute.value)) {
+    throw path.buildCodeFrameError(styleValueErrorMessage);
+  }
+
+  const { expression } = attribute.value;
+
+  if (t.isJSXEmptyExpression(expression) || t.isStringLiteral(expression)) {
+    throw path.buildCodeFrameError(styleValueErrorMessage);
+  }
+
+  return t.cloneNode(expression);
 }
 
 function isNamedJsxAttribute(

@@ -23,13 +23,23 @@ export type AggregatePropsBinding = {
   readonly declarations: t.VariableDeclaration[];
   readonly classNameIdentifier: t.Identifier;
   readonly restIdentifier: t.Identifier;
+  readonly styleExpressions: readonly t.Expression[];
+};
+
+export type DynamicCssVariableLowering = {
+  readonly classNameExpression: t.Expression;
+  readonly cxExpression: t.Expression | null;
+  readonly styleProperties: readonly t.ObjectProperty[];
 };
 
 export type NormalizedJsxCssPropElement = {
   readonly cssAttribute: t.JSXAttribute;
   readonly cssExpression: t.Expression;
   readonly cssValueClassification: CssPropValueClassification;
+  readonly dynamicCssVariableRule: DynamicCssVariableRule | null;
+  readonly dynamicCssVariableLowering: DynamicCssVariableLowering | null;
   readonly classNameAttribute: t.JSXAttribute | null;
+  readonly styleAttribute: t.JSXAttribute | null;
   readonly attributesBeforeCss: readonly (
     | t.JSXAttribute
     | t.JSXSpreadAttribute
@@ -40,6 +50,17 @@ export type NormalizedJsxCssPropElement = {
   )[];
   readonly hasSpreadBeforeCss: boolean;
   readonly hasSpreadAfterCss: boolean;
+};
+
+export type DynamicCssVariableLeaf = {
+  readonly propertyName: string;
+  readonly value: t.Expression;
+  readonly variableIdentifier: t.Identifier;
+};
+
+export type DynamicCssVariableRule = {
+  readonly expression: t.ObjectExpression | t.ArrayExpression;
+  readonly leaves: readonly DynamicCssVariableLeaf[];
 };
 
 export type SpreadAggregatedCssPropLowering = {

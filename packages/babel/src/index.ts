@@ -217,7 +217,9 @@ if (import.meta.vitest) {
                 return t.variableDeclaration("const", [
                   t.variableDeclarator(
                     t.cloneNode(specifier.local),
-                    t.stringLiteral("css-rule")
+                    isGeneratedCxImportSpecifier(specifier)
+                      ? t.identifier("__minchoCx")
+                      : t.stringLiteral("css-rule")
                   )
                 ]);
               }
@@ -291,6 +293,13 @@ if (import.meta.vitest) {
     }
 
     return null;
+  }
+
+  function isGeneratedCxImportSpecifier(specifier: t.ImportSpecifier): boolean {
+    return (
+      t.isIdentifier(specifier.imported) &&
+      /Cx\d*$/.test(specifier.imported.name)
+    );
   }
 
   function createRuntimeJsxTagExpression(
@@ -396,7 +405,9 @@ if (import.meta.vitest) {
     duplicateClassName:
       "Mincho JSX css prop cannot merge duplicate className attributes",
     classNameValue:
-      "Mincho JSX css prop requires className to be a string literal or expression"
+      "Mincho JSX css prop requires className to be a string literal or expression",
+    styleValue:
+      "Mincho JSX css prop requires style to be an expression value when merging dynamic CSS variables"
   } as const;
 
   function expectJsxCssPropError(fixture: string, message: string) {
@@ -3495,6 +3506,678 @@ if (import.meta.vitest) {
       expect(result[1]).not.toContain('color: "red"');
       expect(result[1]).not.toContain("makeRule");
       expect(result[1]).not.toContain("getClassName");
+    });
+
+    it("lowers simple dynamic css variable leaf into generated artifact and inline style", () => {
+      const { result, code } = babelTransform(
+        `
+        function App(props) {
+          return <div css={{ color: props.color }} />;
+        }
+      `,
+        { jsxCssProp: true }
+      );
+
+      expect(result[1]).toMatch(/_minchoCreateVar\d*\(/);
+      expect(result[1]).toMatch(/_minchoGetVarName\d*\(/);
+      expect(result[1]).toContain("_css({");
+      expect(result[1]).toMatch(/color: _\$mincho\$\$App\w*ColorVar/);
+      expect(code).toMatch(/from "extracted_[^"]+\.css\.ts"/);
+      expect(code).toContain("className=");
+      expect(code).toMatch(
+        /style=\{\{\s+\[_\$mincho\$\$App\w*ColorVarKey\d*\]: props\.color\s+\}\}/
+      );
+      expect(code).not.toContain(" css=");
+      expect(code).not.toContain("_css(");
+      expect(code).not.toContain('from "@mincho-js/css"');
+      expect(code).not.toContain("createVar");
+      expect(code).not.toContain("getVarName");
+    });
+
+    it("lowers dynamic css variable and static css prop without duplicate css helper aliases", () => {
+      const { result, code } = babelTransform(
+        `
+        function App(props) {
+          return <>
+            <div css={{ color: "red" }} />
+            <section css={{ color: props.color }} />
+          </>;
+        }
+      `,
+        { jsxCssProp: true }
+      );
+      const artifact = result[1];
+
+      expect(artifact.match(/css as _css/g) ?? []).toHaveLength(1);
+      expect(artifact).toMatch(/_minchoCreateVar\d*\(/);
+      expect(artifact).toMatch(/_minchoGetVarName\d*\(/);
+      expect(artifact).toContain('color: "red"');
+      expect(artifact).toMatch(/color: _\$mincho\$\$App\w*ColorVar/);
+      expect(code).not.toContain('from "@mincho-js/css"');
+      expect(code).not.toContain("_css(");
+      expect(code).not.toContain("createVar");
+      expect(code).not.toContain("getVarName");
+    });
+
+    it("lowers dynamic css variable source helper imports without duplicate helper declarations", () => {
+      const createVarCase = babelTransform(
+        `
+        import { createVar } from "@mincho-js/css";
+
+        const external = createVar("external");
+
+        function App(props) {
+          return <div data-var={external} css={{ color: props.color }} />;
+        }
+      `,
+        { jsxCssProp: true }
+      );
+      const getVarNameCase = babelTransform(
+        `
+        import { getVarName } from "@mincho-js/css";
+
+        const external = getVarName("external");
+
+        function App(props) {
+          return <div data-var={external} css={{ color: props.color }} />;
+        }
+      `,
+        { jsxCssProp: true }
+      );
+
+      expect(createVarCase.result[1].match(/css as _css/g) ?? []).toHaveLength(
+        1
+      );
+      expect(createVarCase.result[1]).toContain('createVar("external")');
+      expect(createVarCase.result[1]).toMatch(
+        /createVar as _minchoCreateVar\d*/
+      );
+      expect(createVarCase.result[1]).toMatch(
+        /getVarName as _minchoGetVarName\d*/
+      );
+      expect(createVarCase.result[1]).toMatch(
+        /color: _\$mincho\$\$App\w*ColorVar/
+      );
+      expect(createVarCase.code).not.toContain("_css(");
+      expect(createVarCase.code).not.toContain("createVar(");
+      expect(createVarCase.code).not.toContain("getVarName(");
+
+      expect(getVarNameCase.result[1].match(/css as _css/g) ?? []).toHaveLength(
+        1
+      );
+      expect(getVarNameCase.result[1]).toMatch(
+        /createVar as _minchoCreateVar\d*/
+      );
+      expect(getVarNameCase.result[1]).toMatch(
+        /getVarName as _minchoGetVarName\d*/
+      );
+      expect(getVarNameCase.result[1]).toMatch(
+        /color: _\$mincho\$\$App\w*ColorVar/
+      );
+      expect(getVarNameCase.code).toContain('getVarName("external")');
+      expect(getVarNameCase.code).not.toContain("_css(");
+    });
+
+    it("emits dynamic css variable style merge without existing style", () => {
+      const { code } = babelTransform(
+        `
+        function App(props) {
+          return <div css={{ color: props.color }} />;
+        }
+      `,
+        { jsxCssProp: true }
+      );
+
+      expect(code).toMatch(
+        /style=\{\{\s+\[_\$mincho\$\$App\w*ColorVarKey\d*\]: props\.color\s+\}\}/
+      );
+      expect(code).not.toContain(" css=");
+      expect(code).not.toContain('from "@mincho-js/css"');
+      expect(code).not.toContain("createVar");
+      expect(code).not.toContain("getVarName");
+      expect(code).not.toContain("_css(");
+    });
+
+    it("merges dynamic css variable style merge after object and expression styles", () => {
+      const objectStyle = babelTransform(
+        `
+        function App(props) {
+          const baseStyle = props.baseStyle;
+          return <div
+            style={{ ...baseStyle, opacity: props.opacity }}
+            css={{ color: props.color, backgroundColor: props.backgroundColor }}
+          />;
+        }
+      `,
+        { jsxCssProp: true }
+      ).code;
+      const expressionStyle = babelTransform(
+        `
+        function App(props) {
+          return <section
+            style={props.style}
+            css={{ borderColor: props.borderColor }}
+          />;
+        }
+      `,
+        { jsxCssProp: true }
+      ).code;
+
+      expect(objectStyle).toMatch(
+        /style=\{\{\s+\.\.\.baseStyle,\s+opacity: props\.opacity,\s+\[_\$mincho\$\$App\w*ColorVarKey\d*\]: props\.color,\s+\[_\$mincho\$\$App\w*BackgroundColorVarKey\d*\]: props\.backgroundColor\s+\}\}/
+      );
+      expect(expressionStyle).toMatch(
+        /style=\{\{\s+\.\.\.props\.style,\s+\[_\$mincho\$\$App\w*BorderColorVarKey\d*\]: props\.borderColor\s+\}\}/
+      );
+
+      for (const output of [objectStyle, expressionStyle]) {
+        expect(output).not.toContain(" css=");
+        expect(output).not.toContain('from "@mincho-js/css"');
+        expect(output).not.toContain("createVar");
+        expect(output).not.toContain("getVarName");
+        expect(output).not.toContain("_css(");
+      }
+    });
+
+    it("merges dynamic css variable style merge after existing className", () => {
+      const { code } = babelTransform(
+        `
+        function App(props) {
+          return <div className={props.className} css={{ color: props.color }} />;
+        }
+      `,
+        { jsxCssProp: true }
+      );
+
+      expect(code).toMatch(
+        /className=\{_\$mincho\$\$App\w*Cx\d*\(props\.className, _\$mincho\$\$App\d*\)\}/
+      );
+      expect(code).toMatch(
+        /style=\{\{\s+\[_\$mincho\$\$App\w*ColorVarKey\d*\]: props\.color\s+\}\}/
+      );
+      expect(code).not.toContain(" css=");
+      expect(code).not.toContain('from "@mincho-js/css"');
+      expect(code).not.toContain("createVar");
+      expect(code).not.toContain("getVarName");
+      expect(code).not.toContain("_css(");
+    });
+
+    it("dynamic css variable spread aggregates pre and post styles before generated vars", () => {
+      const source = `
+        const pre = {
+          className: "from-pre",
+          css: "leak-pre",
+          id: "from-pre",
+          style: { color: "pre" }
+        };
+        const post = {
+          className: "from-post",
+          css: "leak-post",
+          title: "from-post",
+          style: { backgroundColor: "post" }
+        };
+
+        function App() {
+          const props = { color: "tomato" };
+          return <div {...pre} css={{ color: props.color }} {...post} />;
+        }
+      `;
+      const { result, code } = babelTransform(source, { jsxCssProp: true });
+      const observed = runJsxCssPropRuntime(
+        source,
+        `
+        const props = App();
+        return {
+          props,
+          styleKeys: Object.keys(props.style),
+          hasCss: "css" in props
+        };
+      `
+      );
+
+      expect(result[1]).toMatch(/_minchoCreateVar\d*\(/);
+      expect(result[1]).toMatch(/_minchoGetVarName\d*\(/);
+      expect(result[1]).toContain("_css({");
+      expect(result[1]).toContain("cx as");
+      expect(code).not.toContain('from "@mincho-js/css"');
+      expect(code).not.toContain("createVar");
+      expect(code).not.toContain("getVarName");
+      expect(code).not.toContain("_css(");
+      expect(code).not.toContain(" css=");
+      expect(observed).toEqual({
+        hasCss: false,
+        styleKeys: ["color", "backgroundColor", "css-rule"],
+        props: expect.objectContaining({
+          className: "from-pre css-rule from-post",
+          id: "from-pre",
+          title: "from-post",
+          style: {
+            color: "pre",
+            backgroundColor: "post",
+            "css-rule": "tomato"
+          }
+        })
+      });
+    });
+
+    it("dynamic css variable spread preserves explicit style before and after css", () => {
+      const beforeCssStyle = runJsxCssPropRuntime(
+        `
+        const pre = {
+          className: "from-pre",
+          css: "leak-pre",
+          style: { padding: 4 }
+        };
+
+        function App() {
+          const props = { color: "tomato" };
+          return <div {...pre} style={{ opacity: 0.5 }} css={{ color: props.color }} />;
+        }
+      `,
+        `
+        const props = App();
+        return {
+          props,
+          styleKeys: Object.keys(props.style),
+          hasCss: "css" in props
+        };
+      `
+      );
+      const afterCssStyle = runJsxCssPropRuntime(
+        `
+        const post = {
+          className: "from-post",
+          css: "leak-post",
+          style: { margin: 8 }
+        };
+
+        function App() {
+          const props = { color: "tomato" };
+          return <div css={{ color: props.color }} style={{ opacity: 0.75 }} {...post} />;
+        }
+      `,
+        `
+        const props = App();
+        return {
+          props,
+          styleKeys: Object.keys(props.style),
+          hasCss: "css" in props
+        };
+      `
+      );
+
+      expect(beforeCssStyle).toEqual({
+        hasCss: false,
+        styleKeys: ["padding", "opacity", "css-rule"],
+        props: expect.objectContaining({
+          className: "from-pre css-rule",
+          style: { padding: 4, opacity: 0.5, "css-rule": "tomato" }
+        })
+      });
+      expect(afterCssStyle).toEqual({
+        hasCss: false,
+        styleKeys: ["opacity", "margin", "css-rule"],
+        props: expect.objectContaining({
+          className: "css-rule from-post",
+          style: { opacity: 0.75, margin: 8, "css-rule": "tomato" }
+        })
+      });
+    });
+
+    it("style getter source order for dynamic css variable spread reads each contribution once", () => {
+      const observed = runJsxCssPropRuntime(
+        `
+        const events: string[] = [];
+        const reads = {
+          preStyle: 0,
+          preClassName: 0,
+          preCss: 0,
+          explicitStyle: 0,
+          postStyle: 0,
+          postClassName: 0,
+          postCss: 0,
+          dynamic: 0
+        };
+        const pre = {
+          id: "from-pre",
+          get style() {
+            reads.preStyle += 1;
+            events.push("pre.style");
+            return { color: "pre" };
+          },
+          get className() {
+            reads.preClassName += 1;
+            events.push("pre.className");
+            return "from-pre";
+          },
+          get css() {
+            reads.preCss += 1;
+            events.push("pre.css");
+            return "leak-pre";
+          }
+        };
+        const explicitStyle = {
+          get value() {
+            reads.explicitStyle += 1;
+            events.push("explicit.style");
+            return { opacity: 0.5 };
+          }
+        };
+        const post = {
+          title: "from-post",
+          get style() {
+            reads.postStyle += 1;
+            events.push("post.style");
+            return { backgroundColor: "post" };
+          },
+          get className() {
+            reads.postClassName += 1;
+            events.push("post.className");
+            return "from-post";
+          },
+          get css() {
+            reads.postCss += 1;
+            events.push("post.css");
+            return "leak-post";
+          }
+        };
+        const model = {
+          get color() {
+            reads.dynamic += 1;
+            events.push("dynamic");
+            return "tomato";
+          }
+        };
+
+        function App(props) {
+          return <div {...pre} style={explicitStyle.value} css={{ color: props.color }} {...post} />;
+        }
+      `,
+        `
+        const props = App(model);
+        return {
+          props,
+          events,
+          reads,
+          styleKeys: Object.keys(props.style),
+          hasCss: "css" in props
+        };
+      `
+      );
+
+      expect(observed).toEqual({
+        events: [
+          "pre.style",
+          "pre.className",
+          "pre.css",
+          "explicit.style",
+          "post.style",
+          "post.className",
+          "post.css",
+          "dynamic"
+        ],
+        reads: {
+          preStyle: 1,
+          preClassName: 1,
+          preCss: 1,
+          explicitStyle: 1,
+          postStyle: 1,
+          postClassName: 1,
+          postCss: 1,
+          dynamic: 1
+        },
+        styleKeys: ["color", "opacity", "backgroundColor", "css-rule"],
+        hasCss: false,
+        props: expect.objectContaining({
+          className: "from-pre css-rule from-post",
+          id: "from-pre",
+          title: "from-post",
+          style: {
+            color: "pre",
+            opacity: 0.5,
+            backgroundColor: "post",
+            "css-rule": "tomato"
+          }
+        })
+      });
+    });
+
+    it("rejects invalid dynamic css variable style merge values", () => {
+      const fixtures = [
+        `<div style css={{ color: props.color }} />`,
+        `<div style="color:red" css={{ color: props.color }} />`,
+        `<div style={"color:red"} css={{ color: props.color }} />`
+      ] as const;
+
+      for (const fixture of fixtures) {
+        const failure = captureJsxCssPropFailure(
+          `
+          function App(props) {
+            return ${fixture};
+          }
+        `,
+          { jsxCssProp: true }
+        );
+
+        expect(failure.error.message).toContain(
+          jsxCssPropErrorMessages.styleValue
+        );
+        expect(failure.code).not.toContain("_css(");
+      }
+    });
+
+    it("lowers dynamic css variable leaves across static object and array shapes", () => {
+      const { result, code } = babelTransform(
+        `
+        function App(props) {
+          return <>
+            <div css={{
+              color: props.color,
+              backgroundColor: "white",
+              borderColor: props.borderColor,
+              selectors: {
+                "&:hover": {
+                  color: props.hoverColor
+                }
+              },
+              "@media": {
+                "screen and (min-width: 700px)": {
+                  color: props.mediaColor
+                }
+              },
+              opacity: {
+                $disabled: props.disabledOpacity
+              }
+            }} />
+            <section css={[
+              { display: "block", color: props.sectionColor },
+              { selectors: { "&:focus": { outlineColor: props.outlineColor } } }
+            ]} />
+          </>;
+        }
+      `,
+        { jsxCssProp: true }
+      );
+      const artifact = result[1];
+
+      expect(artifact.match(/_minchoCreateVar\d*\(/g) ?? []).toHaveLength(7);
+      expect(artifact.match(/_minchoGetVarName\d*\(/g) ?? []).toHaveLength(7);
+      expect(artifact).toContain("_css({");
+      expect(artifact).toContain("_css([");
+      expect(artifact).toContain('backgroundColor: "white"');
+      expect(artifact).toContain('display: "block"');
+      expect(artifact).toContain("selectors: {");
+      expect(artifact).toContain('"@media": {');
+      expect(artifact).toContain('"&:hover": {');
+      expect(artifact).toContain("$disabled: ");
+      expect(artifact).not.toContain("props.");
+      expect(code).toMatch(/from "extracted_[^"]+\.css\.ts"/);
+      expect(code.match(/style=\{\{/g) ?? []).toHaveLength(2);
+      expect(code).toContain("props.color");
+      expect(code).toContain("props.borderColor");
+      expect(code).toContain("props.hoverColor");
+      expect(code).toContain("props.mediaColor");
+      expect(code).toContain("props.disabledOpacity");
+      expect(code).toContain("props.sectionColor");
+      expect(code).toContain("props.outlineColor");
+      expect(code).not.toContain(" css=");
+      expect(code).not.toContain("_css(");
+      expect(code).not.toContain('from "@mincho-js/css"');
+      expect(code).not.toContain("createVar");
+      expect(code).not.toContain("getVarName");
+    });
+
+    it("keeps static css prop still unchanged without dynamic style emission", () => {
+      const { result, code } = babelTransform(
+        `
+        function App() {
+          return <>
+            <div css={{
+              color: "red",
+              selectors: {
+                "&:hover": {
+                  color: "blue"
+                }
+              }
+            }} />
+            <section css={[{ display: "block" }, { color: "green" }]} />
+          </>;
+        }
+      `,
+        { jsxCssProp: true }
+      );
+
+      expect(code).not.toContain(" css=");
+      expect(code).not.toContain("style=");
+      expect(result[1]).toContain("_css({");
+      expect(result[1]).toContain("_css([");
+      expect(result[1]).toContain('color: "red"');
+      expect(result[1]).toContain('"&:hover": {');
+      expect(result[1]).not.toContain("createVar(");
+      expect(result[1]).not.toContain("getVarName(");
+    });
+
+    it("rejects unsupported dynamic css variable shapes with compile-away diagnostics", () => {
+      const fixtures = [
+        {
+          label: "dynamic keys",
+          source: `
+            function App(props) {
+              return <div css={{ [props.key]: props.color }} />;
+            }
+          `,
+          expected:
+            /computed member access is unsupported|dynamic expression is unsupported/
+        },
+        {
+          label: "computed keys",
+          source: `
+            function App(props) {
+              return <div css={{ ["color"]: props.color }} />;
+            }
+          `,
+          expected:
+            /dynamic expression is unsupported|unsupported identifier-object-value/
+        },
+        {
+          label: "dynamic object spreads",
+          source: `
+            function App(props) {
+              return <div css={{ ...props.styles, color: props.color }} />;
+            }
+          `,
+          expected:
+            /dynamic expression is unsupported|object spread is unsupported|unsupported identifier-object-value/
+        },
+        {
+          label: "dynamic array spreads",
+          source: `
+            function App(props) {
+              return <div css={[...props.styles, { color: props.color }]} />;
+            }
+          `,
+          expected:
+            /array values do not support spread elements in compile-away mode/
+        },
+        {
+          label: "call-return CSS shapes",
+          source: `
+            function makeRule(color) {
+              return { color };
+            }
+            function App(props) {
+              return <div css={makeRule(props.color)} />;
+            }
+          `,
+          expected:
+            /conditional, logical, or wrapped object\/array CSS rule values in compile-away mode/
+        },
+        {
+          label: "member call-return CSS shapes",
+          source: `
+            function App(props) {
+              return <div css={props.ruleFactory()} />;
+            }
+          `,
+          expected:
+            /conditional, logical, or wrapped object\/array CSS rule values in compile-away mode/
+        },
+        {
+          label: "branch-shaped rule objects",
+          source: `
+            const condition = true;
+            function App(props) {
+              return <div css={condition ? { color: props.color } : { color: "red" }} />;
+            }
+          `,
+          expected:
+            /conditional, logical, or wrapped object\/array CSS rule values in compile-away mode/
+        },
+        {
+          label: "function values",
+          source: `
+            function App(props) {
+              return <div css={{ color: () => props.color }} />;
+            }
+          `,
+          expected: /dynamic expression is unsupported: ArrowFunctionExpression/
+        },
+        {
+          label: "sequence-wrapped CSS rules",
+          source: `
+            function App(props) {
+              return <div css={(0, { color: props.color })} />;
+            }
+          `,
+          expected:
+            /conditional, logical, or wrapped object\/array CSS rule values in compile-away mode/
+        },
+        {
+          label: "broad template interpolation",
+          source: `
+            function App(props) {
+              return <div css={{ color: \`${"${props.color}"}\` }} />;
+            }
+          `,
+          expected:
+            /dynamic expression is unsupported|unsupported identifier-object-value/
+        }
+      ] as const;
+
+      for (const { label, source, expected } of fixtures) {
+        let failure: ReturnType<typeof captureJsxCssPropFailure>;
+
+        try {
+          failure = captureJsxCssPropFailure(source, { jsxCssProp: true });
+        } catch (error) {
+          throw new Error(
+            `${label}: ${error instanceof Error ? error.message : String(error)}`
+          );
+        }
+
+        expect(failure.error.message).toMatch(expected);
+        expect(failure.code).not.toContain("_css(");
+      }
     });
 
     it("keeps optional call and nested call guardrails out of rule-call lowering", () => {
