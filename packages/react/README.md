@@ -67,11 +67,24 @@ With `jsxCssProp: true`, supported values are lowered to either the existing Min
 
 Static-shape CSS rules can use dynamic declaration values. For example, `<div css={{ color: props.color }} />` keeps the `color` key static while the value comes from runtime props.
 
-Under the A안 model, the generated `.css.ts` owns `createVar`, `getVarName`, and `css`. It creates a CSS variable, uses that variable in the generated class rule, and exports the generated className plus the raw CSS-var key. Component modules only import those generated className/raw CSS-var bindings and write runtime values through inline style via the React `style` prop, for example `style={{ [colorVarKey]: props.color }}`. Component modules do not call `createVar`, `getVarName`, or `css` for this fallback.
+Static-shape CSS rule branches can also use branch-local dynamic declarations when each CSS branch is a literal object or array shape:
+
+```tsx
+<div css={condition ? { color: props.color } : { color: "red" }} />
+<div css={condition ? { color: props.color } : { color: props.fallbackColor }} />
+<div css={condition && { color: props.color }} />
+<div css={providedClass || { color: props.color }} />
+```
+
+For conditional and logical branches, the branch predicate or logical left operand is evaluated once and reused for both `className` and `style`. Inactive branch dynamic declaration values are not read.
+
+Generated branch artifacts may export separate CSS variables per branch even when declaration keys match; treat the raw keys as opaque implementation details.
+
+Under this model, the generated `.css.ts` owns `createVar`, `getVarName`, and `css`. It creates a CSS variable, uses that variable in the generated class rule, and exports the generated className plus the raw CSS-var key. Component modules only import those generated className/raw CSS-var bindings and write runtime values through inline style via the React `style` prop, for example `style={{ [colorVarKey]: props.color }}`. Component modules do not call `createVar`, `getVarName`, or `css` for this fallback.
 
 A custom component receives typed Mincho `css` only when it accepts and forwards both `className` and React-style-compatible `style`. Forward `className` to the styled element, and forward `style` to the same element so generated CSS variable values can land on the element that owns the generated class.
 
-Unsupported shapes stay unsupported: dynamic keys, computed CSS keys, dynamic object or array spreads as CSS shapes, call-return CSS shapes, branch-shaped rule objects, function-valued css props, sequence-wrapped CSS rules, and broad template interpolation. This is not Emotion-style runtime parity: Mincho does not add a runtime serializer, runtime CSS cache, runtime stylesheet insertion, wrapper component, or runtime CSS generation for the `css` prop.
+Unsupported dynamic CSS shapes stay unsupported: dynamic keys, computed runtime CSS keys, object or array spreads as branch shapes, call-returned branch objects, function-valued css props, sequence-wrapped branch rules, broad template interpolation, and other dynamic CSS shapes. Static-shape branch rule objects and arrays are supported only when their keys, spreads, and branch shapes are statically analyzable. This is not Emotion-style runtime parity: Mincho does not add a runtime serializer, runtime CSS cache, runtime stylesheet insertion, wrapper component, or runtime CSS generation for the `css` prop.
 
 ### Value Semantics
 
