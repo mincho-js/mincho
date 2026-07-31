@@ -14,6 +14,48 @@ export type CssPropValueClassification =
   | "unsupported-array-spread"
   | "unsupported-function";
 
+export type CssRuleLoweringClassification = Extract<
+  CssPropValueClassification,
+  "css-rule" | "branch-css-rule"
+>;
+
+export type UnsupportedCssPropValueClassification = Extract<
+  CssPropValueClassification,
+  | "unsupported-dynamic-css-rule"
+  | "unsupported-array-spread"
+  | "unsupported-function"
+>;
+
+export type CssPropSidecarHoistability =
+  | {
+      readonly kind: "hoistable";
+      readonly cssValueClassification: CssRuleLoweringClassification;
+    }
+  | { readonly kind: "unsafe" }
+  | { readonly kind: "not-candidate" };
+
+export type CssPropLoweringMode =
+  | {
+      readonly kind: "ast-static-rule";
+      readonly cssValueClassification: CssRuleLoweringClassification;
+    }
+  | {
+      readonly kind: "sidecar-build-time-rule";
+      readonly cssValueClassification: CssRuleLoweringClassification;
+    }
+  | {
+      readonly kind: "dynamic-leaf-rule";
+      readonly cssValueClassification: CssRuleLoweringClassification;
+    }
+  | {
+      readonly kind: "class-value";
+      readonly cssValueClassification: "class-value";
+    }
+  | {
+      readonly kind: "unsupported";
+      readonly cssValueClassification: UnsupportedCssPropValueClassification;
+    };
+
 export type CssClassNameBaseLoweringRequest = {
   readonly path: NodePath<t.JSXOpeningElement>;
   readonly expression: t.Expression;
@@ -36,6 +78,7 @@ export type NormalizedJsxCssPropElement = {
   readonly cssAttribute: t.JSXAttribute;
   readonly cssExpression: t.Expression;
   readonly cssValueClassification: CssPropValueClassification;
+  readonly cssLoweringMode: CssPropLoweringMode;
   readonly dynamicCssVariableRule: DynamicCssVariableRule | null;
   readonly dynamicCssVariableLowering: DynamicCssVariableLowering | null;
   readonly classNameAttribute: t.JSXAttribute | null;
