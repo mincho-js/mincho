@@ -61,7 +61,48 @@ export function App() {
 }
 ```
 
-With `jsxCssProp: true`, supported values are lowered to either the existing Mincho `css(...)` extraction path or `cx(...)` class-value merging. If an explicit `className` or pre-css spread aggregate contributes an existing class, merge order is the existing `className` first and the `css` prop class value second, equivalent to `cx(existingClassName, nextCssClassName)`. Post-css spread ordering is covered in Spread Support.
+With `jsxCssProp: true`, supported values lower through the three CSS-rule paths below, or through `cx(...)` class-value merging. If an explicit `className` or pre-css spread aggregate contributes an existing class, merge order is the existing `className` first and the `css` prop class value second, equivalent to `cx(existingClassName, nextCssClassName)`. Post-css spread ordering is covered in Spread Support.
+
+### CSS Rule Lowering Paths
+
+Mincho picks the narrowest compile-away path that matches the `css` prop shape:
+
+1. AST/static CSS-rule extraction handles inline literals, mutation-free same-file `const` values, import-backed static objects or arrays, and static object or array spreads.
+2. Sidecar build-time whole-rule lowering preserves a whole rule expression and lets the generated `.css.ts` call `css(expression)`. Babel does not execute user modules or factories to discover returned styles.
+3. Render-time dynamic declaration leaf lowering keeps the CSS shape static, extracts a class that reads CSS variables, and writes only the dynamic declaration values through React-compatible `style`.
+
+Supported examples:
+
+```tsx
+const colorKey = "color" as const;
+const base = { display: "block" } as const;
+const button = { ...base, [colorKey]: "red" } as const;
+
+<div css={{ color: "red" }} />
+<div css={button} />
+<div css={{ ...base, padding: 8 }} />
+
+<div css={makeRule()} />
+<div css={{ ...getBase(), color: "red" }} />
+<div css={{ [getKey()]: "red" }} />
+
+<div css={{ color: props.color }} />
+<div css={condition ? { color: props.color } : { color: "red" }} />
+<div css={condition ? styleA : { color: props.color }} />
+```
+
+Unsupported or deferred examples:
+
+```tsx
+<div css={{ [props.key]: "red" }} />
+<div css={props.styles} />
+<div css={props.makeRule()} />
+<div css={dynamicStyles?.button} />
+<div {...{ css: styleA }} />
+<div css={styles[props.variant]} />
+```
+
+Those shapes would need runtime keys, runtime object or array spreads, runtime whole-rule objects, optional runtime rule-map lookup, or spread-only `css` prop handling. They are intentionally deferred. Use an explicit `css` prop with a static rule shape, a sidecar-safe whole-rule expression, a dynamic declaration leaf, or a class value instead.
 
 ### Dynamic Declaration Values
 
@@ -115,7 +156,7 @@ The practical literal grammar is intentionally small: string, number, boolean, `
 
 Top-level primitive identifiers remain class values, so `css={activeClass}` still lowers through `cx(...)` when it is not proven to be a static CSS rule. Primitive identifiers and member values are only statically resolved inside object/array literals that are already proven CSS-rule candidates.
 
-Top-level rule calls such as `css={makeRule("red")}` are supported by handing the whole call to the existing compile-time `css(...)` extraction path. Mincho does not static-evaluate those calls as arbitrary JavaScript, inspect their return values, or execute factories. Nested calls inside static values remain unsupported.
+Top-level rule calls such as `css={makeRule("red")}` use sidecar build-time lowering: the generated `.css.ts` receives the whole expression and calls `css(...)` there. Mincho does not static-evaluate those calls as arbitrary JavaScript, inspect their return values, or execute factories. Nested call values inside otherwise static declarations remain unsupported unless the whole rule qualifies for the sidecar path.
 
 Same-file examples:
 
@@ -208,7 +249,7 @@ const cjsFromTemplatePath = require(templatePath);
 
 Bundlers provide source resolution and loading only. Vite and esbuild give Mincho provider-backed project, package, data, virtual, and static CommonJS source or literal payloads plus identity metadata and dependency edges. Mincho parses that source and statically evaluates the supported AST subset. No module execution is used. Mincho never executes user modules to obtain `css` prop values, and it does not call Node `require()`, use VM or `eval`, evaluate dynamic imports, or run bundler runtime code for static evaluation.
 
-Function, factory, mixin, and nested call evaluation all remain deferred and out of scope. Mincho never executes a factory to discover returned styles. Unsupported cases include remote/http modules, dynamic CommonJS, package runtime resolution, function/factory/mixin/call values inside static CSS-rule values, optional calls, dynamic or wrong-shape object/array spread operands, computed dynamic keys, dynamic or nullish optional bases, object/call/undefined template interpolation, dynamic imports, runtime dynamic values, SWC-native integration, and full Webpack/Turbopack/Parcel bundle runtime emulation.
+Call execution remains deferred and out of scope. Mincho never executes a factory to discover returned styles. Sidecar-safe whole-rule calls, object spread helper calls, and computed-key helper calls are supported by preserving the expression for generated `.css.ts`; dynamic declaration leaves under a static shape may use CSS variables. Unsupported cases include remote/http modules, dynamic CommonJS, package runtime resolution, runtime or unhoistable whole-rule calls/spreads/keys, optional calls, dynamic or wrong-shape object/array spread operands, dynamic or nullish optional bases, object/call/undefined template interpolation, dynamic imports, SWC-native integration, and full Webpack/Turbopack/Parcel bundle runtime emulation.
 
 Failure policy:
 
@@ -218,17 +259,15 @@ Failure policy:
 Unsupported examples:
 
 ```tsx
-const dynamicBase = getBase();
+const dynamicBase = props.base;
 const wrongShape = [{ display: "flex" }] as const;
 const runtimeColor = props.color;
 const runtimeKey = props.property;
 const dynamicStyles = props.styles;
 const nullStyles = null as { button: { color: "red" } } | null;
-const makeRule = () => ({ color: "red" });
-const makeColor = () => "red";
-const makeKey = () => "button";
 const styles = { button: { color: "red" } } as const;
 const variant = props.variant;
+const spreadOnly = { css: styleA };
 const dynamicModule = import("./styles");
 import { cjsPath as importedCjsPath } from "./paths";
 const dynamicCjsPath = props.path;
@@ -242,17 +281,22 @@ const cjsMutated = require(cjsPathBox.path);
 
 <div css={{ ...dynamicBase, color: "red" }} />
 <div css={{ ...wrongShape, color: "red" }} />
-<div css={{ color: makeColor() }} />
-<div css={makeRule?.()} />
-<div css={{ ...makeRule() }} />
+<div css={{ color: props.makeColor() }} />
+<div css={props.makeRule?.()} />
+<div css={{ ...props.getBase() }} />
+<div css={{ [props.key]: "red" }} />
 <div css={{ [runtimeKey]: "red" }} />
-<div css={styles[makeKey()]} />
+<div css={props.styles} />
+<div css={props.makeRule()} />
+<div css={styles[props.makeKey()]} />
+<div css={styles[props.variant]} />
 <div css={styles[variant]} />
 <div css={dynamicStyles?.button} />
 <div css={nullStyles?.button} />
+<div {...spreadOnly} />
 <div css={{ color: `${runtimeColor}` }} />
 <div css={{ color: `${styles.button}` }} />
-<div css={{ color: `${makeColor()}` }} />
+<div css={{ color: `${props.makeColor()}` }} />
 <div css={{ color: `${undefined}` }} />
 <div css={dynamicModule} />
 <div css={cjsDynamic.card} />
@@ -268,7 +312,7 @@ const cjsImported = require(importedCjsPath);
 <div css={cjsImported.card} />
 ```
 
-These examples fail as static CSS-rule candidates because static evaluation rejects dynamic or wrong-shape spread operands, nested function/factory/call values, optional calls, dynamic and call-derived keys, dynamic or nullish optional bases, runtime/object/call/undefined template interpolation, dynamic import graphs, dynamic/non-const/imported/mutated/shadowed CommonJS require paths, and runtime values.
+These examples fail as CSS-rule candidates because Mincho rejects runtime or wrong-shape spread operands, runtime/unhoistable helper calls, optional calls, dynamic and call-derived keys, runtime whole-rule objects or calls, dynamic or nullish optional bases, spread-only `css` props, runtime/object/call/undefined template interpolation, dynamic import graphs, dynamic/non-const/imported/mutated/shadowed CommonJS require paths, and runtime values.
 
 Static JSX `css` arrays stay on the `css([...])` composition path. They are static `ComplexCSSRule` composition arrays, not recursive `ClassValue` arrays, and they do not lower to `cx(...)` just because they contain string items.
 
