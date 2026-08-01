@@ -441,11 +441,6 @@ function getStyles(color) {
     color
   };
 }
-function getStyles(color) {
-  return {
-    color
-  };
-}
 export var _$mincho$$red = style({
   ...getStyles('red')
 });

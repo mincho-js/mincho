@@ -1341,6 +1341,91 @@ if (import.meta.vitest) {
       ).toBe(createTestSourceIdentity(backgroundKeySource).sourceHash);
     });
 
+    it("cache invalidation follows sidecar build-time factory spread helper source identity", async () => {
+      const fs = await import("node:fs/promises");
+      const componentSource = `
+        import { makeButton } from "./factory";
+
+        function App() {
+          return <div css={makeButton()} />;
+        }
+      `;
+      const factorySource = `
+        import { base } from "./base";
+        import { propertyKey } from "./keys";
+        import { unused } from "./unused";
+
+        const ignored = unused;
+
+        export function makeButton() {
+          return { ...base, [propertyKey]: "solid" } as const;
+        }
+      `;
+      const redBaseSource = `export const base = { color: "red" } as const;`;
+      const blueBaseSource = `export const base = { color: "blue" } as const;`;
+      const keySource = `export const propertyKey = "borderColor" as const;`;
+      const unusedSource = `export const unused = { color: "orange" } as const;`;
+      const { filePaths } = await createBabelFixtureFiles(
+        {
+          "component.tsx": componentSource,
+          "factory.ts": factorySource,
+          "base.ts": redBaseSource,
+          "keys.ts": keySource,
+          "unused.ts": unusedSource
+        },
+        "css-prop-sidecar-factory-cache-invalidation"
+      );
+      const componentId = filePaths["component.tsx"];
+      const factoryId = filePaths["factory.ts"];
+      const baseId = filePaths["base.ts"];
+      const keysId = filePaths["keys.ts"];
+      const unusedId = filePaths["unused.ts"];
+      const provider = createFileBackedStaticCssEvalSourceProvider({
+        resolutions: {
+          [`${componentId}\0./factory`]: factoryId,
+          [`${factoryId}\0./base`]: baseId,
+          [`${factoryId}\0./keys`]: keysId,
+          [`${factoryId}\0./unused`]: unusedId
+        }
+      });
+
+      const firstTransform = await babelTransform(componentId, {
+        jsxCssProp: true,
+        staticCssEvalSourceProvider: provider
+      });
+      await fs.writeFile(baseId, blueBaseSource, "utf8");
+      const secondTransform = await babelTransform(componentId, {
+        jsxCssProp: true,
+        staticCssEvalSourceProvider: provider
+      });
+
+      expect(firstTransform.result[1]).toContain("makeButton()");
+      expect(secondTransform.result[1]).toContain("makeButton()");
+      expect(firstTransform.staticCssEval?.dependencyFiles).toEqual([
+        factoryId,
+        baseId,
+        keysId
+      ]);
+      expect(secondTransform.staticCssEval?.dependencyFiles).toEqual([
+        factoryId,
+        baseId,
+        keysId
+      ]);
+      expect(
+        firstTransform.staticCssEval?.resolvedModuleCache.has(unusedId)
+      ).toBe(false);
+      expect(
+        firstTransform.staticCssEval?.resolvedDependencies.find(
+          (dependency) => dependency.resolvedFile === baseId
+        )?.sourceIdentity?.sourceHash
+      ).toBe(createTestSourceIdentity(redBaseSource).sourceHash);
+      expect(
+        secondTransform.staticCssEval?.resolvedDependencies.find(
+          (dependency) => dependency.resolvedFile === baseId
+        )?.sourceIdentity?.sourceHash
+      ).toBe(createTestSourceIdentity(blueBaseSource).sourceHash);
+    });
+
     it("cache invalidation follows template interpolation operand source identity", async () => {
       const fs = await import("node:fs/promises");
       const componentSource = `

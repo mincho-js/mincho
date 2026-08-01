@@ -112,19 +112,21 @@ function getBindings(path: NodePath<t.Node>) {
 
       const binding = path.scope.getBinding(expressionPath.node.name);
 
+      if (!binding || processedBindings.has(binding.identifier.name)) {
+        return;
+      }
+
+      const rootBinding = findRootBinding(binding.path);
+
       if (
-        !binding ||
-        processedBindings.has(binding.identifier.name) ||
         programParent.minchoData.bindings.some(
-          (b) => b.node === binding.path.node
+          (storedBinding) => findRootBinding(storedBinding).node === rootBinding.node
         )
       ) {
         return;
       }
 
       processedBindings.add(binding.identifier.name);
-
-      const rootBinding = findRootBinding(binding.path);
 
       // Prevents infinite loop in cases like having arguments in a function declaration
       // If the path being checked is the same as the latest path, then the bindings will be the same
@@ -138,7 +140,19 @@ function getBindings(path: NodePath<t.Node>) {
     }
   });
 
-  programParent.minchoData.bindings.push(...bindings);
+  const processedRootNodes = new Set<t.Node>();
+  const uniqueBindings = bindings.filter((binding) => {
+    const rootNode = findRootBinding(binding).node;
 
-  return bindings;
+    if (processedRootNodes.has(rootNode)) {
+      return false;
+    }
+
+    processedRootNodes.add(rootNode);
+    return true;
+  });
+
+  programParent.minchoData.bindings.push(...uniqueBindings);
+
+  return uniqueBindings;
 }

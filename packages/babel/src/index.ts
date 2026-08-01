@@ -1836,8 +1836,8 @@ if (import.meta.vitest) {
       expect(result[1]).not.toContain("_css(");
     });
 
-    it("rejects direct inline css rule calls and functions through static eval diagnostics", () => {
-      const callFailure = captureJsxCssPropFailure(
+    it("lowers direct inline css rule calls and rejects functions through static eval diagnostics", () => {
+      const callRule = babelTransform(
         `
         function getColor() {
           return "red";
@@ -1858,27 +1858,19 @@ if (import.meta.vitest) {
         { jsxCssProp: true }
       );
 
-      expect(callFailure.error.message).toContain(
-        "dynamic expression is unsupported: CallExpression"
-      );
+      expect(callRule.code).not.toContain(" css=");
+      expect(callRule.code).not.toContain("style=");
+      expect(callRule.code).not.toContain("_css(");
+      expect(callRule.result[1]).toContain("_css({");
+      expect(callRule.result[1]).toContain("color: getColor()");
       expect(functionFailure.error.message).toContain(
         "dynamic expression is unsupported: ArrowFunctionExpression"
       );
-      expect(
-        callFailure.metadata.minchoStaticCssEval?.diagnostics.map(
-          ({ id }) => id
-        )
-      ).toContain("STATIC_CSS_EVAL_DYNAMIC_EXPRESSION_UNSUPPORTED");
       expect(
         functionFailure.metadata.minchoStaticCssEval?.diagnostics.map(
           ({ id }) => id
         )
       ).toContain("STATIC_CSS_EVAL_DYNAMIC_EXPRESSION_UNSUPPORTED");
-      expect(
-        callFailure.metadata.minchoStaticCssEval?.diagnostics.map(
-          ({ reason }) => reason
-        )
-      ).toContain("runtime-dynamic-value");
       expect(
         functionFailure.metadata.minchoStaticCssEval?.diagnostics.map(
           ({ reason }) => reason
@@ -3389,6 +3381,182 @@ if (import.meta.vitest) {
       expect(result[1]).toContain('_css(rules.card("primary"))');
     });
 
+    it("emits parseable sidecar output without duplicate local factory declarations", () => {
+      const { result } = babelTransform(
+        `
+        function makeRule(color: string) {
+          return { color };
+        }
+
+        function App() {
+          return <div css={makeRule("green")} />;
+        }
+      `,
+        { jsxCssProp: true }
+      );
+
+      expect(() =>
+        transformSync(result[1], {
+          presets: ["@babel/preset-typescript"],
+          filename: "generated.css.ts"
+        })
+      ).not.toThrow();
+      expect(result[1].match(/function makeRule/g) ?? []).toHaveLength(1);
+    });
+
+    it("emits parseable sidecar output with sibling factories using one root dedupe", () => {
+      const { result } = babelTransform(
+        `
+        const makeColor = (color: string) => ({ color }),
+          makeBackground = (background: string) => ({ background });
+
+        function App() {
+          return <>
+            <div css={makeColor("green")} />
+            <div css={makeBackground("black")} />
+          </>;
+        }
+      `,
+        { jsxCssProp: true }
+      );
+
+      expect(() =>
+        transformSync(result[1], {
+          presets: ["@babel/preset-typescript"],
+          filename: "generated.css.ts"
+        })
+      ).not.toThrow();
+      expect(result[1].match(/const makeColor/g) ?? []).toHaveLength(1);
+      expect(result[1]).toContain('_css(makeColor("green"))');
+      expect(result[1]).toContain('_css(makeBackground("black"))');
+    });
+
+    it("routes hoistable build-time css prop shapes through sidecar mode", () => {
+      const { result, code } = babelTransform(
+        `
+        const base = { padding: 4 };
+
+        function getBase() {
+          return base;
+        }
+
+        function getKey() {
+          return "color";
+        }
+
+        function getStack() {
+          return [{ display: "grid" }];
+        }
+
+        function makeColor() {
+          return "teal";
+        }
+
+        function makeRule(color: string) {
+          return { color };
+        }
+
+        function App(condition: boolean) {
+          return <>
+            <div css={{ ...getBase(), color: "red" }} />
+            <div css={[...getStack(), { gap: 8 }]} />
+            <div css={{ [getKey()]: "blue" }} />
+            <div css={{ color: makeColor() }} />
+            <div css={makeRule("green")} />
+            <div css={condition ? makeRule("purple") : { color: "orange" }} />
+          </>;
+        }
+      `,
+        { jsxCssProp: true }
+      );
+      const output = `${code}\n${result.join("\n")}`;
+
+      expect(code).not.toContain(" css=");
+      expect(code).not.toContain("style=");
+      expect(
+        code.match(/className=\{_\$mincho\$\$App\d+\}/g) ?? []
+      ).toHaveLength(5);
+      expect(code).toMatch(
+        /className=\{condition \? _\$mincho\$\$App\d+ : _\$mincho\$\$App\d+\}/
+      );
+      expect(result[1].match(/_css\(/g) ?? []).toHaveLength(7);
+      expect(result[1]).toMatch(
+        /_css\(\{\s+\.\.\.getBase\(\),\s+color: "red"\s+\}\)/
+      );
+      expect(result[1]).toMatch(
+        /_css\(\[\s*\.\.\.getStack\(\),\s+\{\s+gap: 8\s+\}\s*\]\)/
+      );
+      expect(result[1]).toMatch(/_css\(\{\s+\[getKey\(\)\]: "blue"\s+\}\)/);
+      expect(result[1]).toMatch(/_css\(\{\s+color: makeColor\(\)\s+\}\)/);
+      expect(result[1]).toContain('_css(makeRule("green"))');
+      expect(result[1]).toContain('_css(makeRule("purple"))');
+      expect(output).not.toContain("padding: 4, color");
+    });
+
+    it("keeps nested rule returns with branch locals and stable globals on the sidecar path", () => {
+      const { result, code } = babelTransform(
+        `
+        function makeRule(condition: boolean) {
+          if (condition) {
+            const color = String(Math.max(1, 2));
+            return { color };
+          }
+          return "fallback";
+        }
+
+        function App() {
+          return <div css={makeRule(true)} />;
+        }
+      `,
+        { jsxCssProp: true }
+      );
+
+      expect(code).not.toContain(" css=");
+      expect(result[1]).toContain("_css(makeRule(true))");
+    });
+
+    it("rejects unresolved browser globals from sidecar evaluation", () => {
+      const failure = captureJsxCssPropFailure(
+        `
+        function makeRule(color: string) {
+          return { color };
+        }
+
+        function App() {
+          return <div css={makeRule(window.location.href)} />;
+        }
+      `,
+        { jsxCssProp: true }
+      );
+
+      expect(failure.error.message).toContain(
+        "call expressions are not evaluated by Babel"
+      );
+      expect(failure.code).not.toContain("_css(makeRule(");
+    });
+    it("rejects sidecar candidate css props with render-scope declaration leaves", () => {
+      const failure = captureJsxCssPropFailure(
+        `
+        const base = { padding: 4 };
+
+        function getBase() {
+          return base;
+        }
+
+        function App(props: { color: string }) {
+          return <div css={{ ...getBase(), color: props.color }} />;
+        }
+      `,
+        { jsxCssProp: true }
+      );
+
+      expect(failure.error.message).toContain(
+        "Mincho JSX css prop does not support conditional, logical, or wrapped object/array CSS rule values in compile-away mode"
+      );
+      expect(failure.code).not.toContain("_css(");
+      expect(failure.code).not.toContain("style={{");
+    });
+
     it("lowers computed optional and template jsx css prop static rules", () => {
       const { result, code } = babelTransform(
         `
@@ -3628,6 +3796,68 @@ if (import.meta.vitest) {
       expect(code).not.toContain("_css(");
       expect(code).not.toContain("createVar");
       expect(code).not.toContain("getVarName");
+    });
+
+    it("routes static-key render values through dynamic-leaf mode", () => {
+      const { result, code } = babelTransform(
+        `
+        function App(props: { color: string }) {
+          return <div css={{ color: props.color }} />;
+        }
+      `,
+        { jsxCssProp: true }
+      );
+
+      expect(result[1]).toMatch(/_minchoCreateVar\d*\(/);
+      expect(result[1]).toContain("_css({");
+      expect(result[1]).toMatch(/color: _\$mincho\$\$App\w*ColorVar/);
+      expect(code).not.toContain(" css=");
+      expect(code).not.toContain("_css(");
+      expect(code).not.toContain("style={{ color: props.color }}");
+      expect(code).toMatch(
+        /style=\{\{\s+\[_\$mincho\$\$App\w*ColorVarKey\d*\]: props\.color\s+\}\}/
+      );
+    });
+
+    it("dynamic CSS variable style custom property supports props.color and render-scope makeColor", () => {
+      const { result, code } = babelTransform(
+        `
+        function App(props: {
+          color: string;
+          hoverColor: string;
+          background: string;
+        }) {
+          function makeColor() {
+            return props.color;
+          }
+
+          return <>
+            <div css={{ _hover: { color: props.hoverColor } }} />
+            <section css={[
+              { color: makeColor() },
+              { background: props.background }
+            ]} />
+          </>;
+        }
+      `,
+        { jsxCssProp: true }
+      );
+      const artifact = result[1];
+
+      expect(artifact).toContain("_css({");
+      expect(artifact).toContain("_css([");
+      expect(artifact).toContain("_hover: {");
+      expect(artifact).toMatch(/color: _\$mincho\$\$App\w*ColorVar/);
+      expect(artifact).toMatch(/background: _\$mincho\$\$App\w*BackgroundVar/);
+      expect(code).toContain("props.hoverColor");
+      expect(code).toContain("makeColor()");
+      expect(code).toContain("props.background");
+      expect(code).not.toContain(" css=");
+      expect(code).not.toContain("_css(");
+      expect(code).not.toContain("createVar");
+      expect(code).not.toContain("getVarName");
+      expect(code).not.toContain("style={{ color:");
+      expect(code.match(/style=\{\{/g) ?? []).toHaveLength(2);
     });
 
     it("lowers dynamic css variable and static css prop without duplicate css helper aliases", () => {
@@ -4658,7 +4888,7 @@ if (import.meta.vitest) {
             }
           `,
           expected:
-            /computed member access is unsupported|dynamic expression is unsupported/
+            /computed member access is unsupported|dynamic expression is unsupported|conditional, logical, or wrapped object\/array CSS rule values/
         },
         {
           label: "computed keys",
@@ -4678,7 +4908,7 @@ if (import.meta.vitest) {
             }
           `,
           expected:
-            /dynamic expression is unsupported|object spread is unsupported|unsupported identifier-object-value/
+            /dynamic expression is unsupported|object spread is unsupported|unsupported identifier-object-value|conditional, logical, or wrapped object\/array CSS rule values/
         },
         {
           label: "dynamic array spreads",
@@ -4760,7 +4990,7 @@ if (import.meta.vitest) {
       }
     });
 
-    it("keeps optional call and nested call guardrails out of rule-call lowering", () => {
+    it("keeps optional calls out of rule-call lowering and lowers nested build-time calls", () => {
       const optionalCall = babelTransform(
         `
         function App() {
@@ -4769,7 +4999,7 @@ if (import.meta.vitest) {
       `,
         { jsxCssProp: true }
       );
-      const nestedCall = captureJsxCssPropFailure(
+      const nestedCall = babelTransform(
         `
         function makeColor() {
           return "red";
@@ -4785,15 +5015,55 @@ if (import.meta.vitest) {
       expect(optionalCall.code).not.toContain(" css=");
       expect(optionalCall.code).toContain('className={_cx(makeRule?.("red"))}');
       expect(optionalCall.result[1]).not.toContain("_css(");
-      expect(nestedCall.error.message).toContain(
-        "dynamic expression is unsupported: CallExpression"
-      );
+      expect(nestedCall.code).not.toContain(" css=");
+      expect(nestedCall.code).not.toContain("style=");
       expect(nestedCall.code).not.toContain("_cx(makeColor");
-      expect(
-        nestedCall.metadata.minchoStaticCssEval?.diagnostics.map(
-          ({ reason }) => reason
-        )
-      ).toContain("runtime-dynamic-value");
+      expect(nestedCall.code).not.toContain("_css(");
+      expect(nestedCall.result[1]).toContain("_css({");
+      expect(nestedCall.result[1]).toContain("color: makeColor()");
+    });
+
+    it("rejects dynamic key dynamic spread runtime rule shape before emission", () => {
+      const fixtures = [
+        {
+          label: "render computed key",
+          expected:
+            "Cannot statically evaluate css prop value: computed member access is unsupported",
+          source: `
+            function App(props: { key: string }) {
+              return <div css={{ [props.key]: "red" }} />;
+            }
+          `
+        },
+        {
+          label: "render spread object",
+          expected:
+            'Cannot statically evaluate css prop value: same-file binding "<inline>" contains unsupported identifier-object-value: Identifier',
+          source: `
+            function App(props: { styles: Record<string, string> }) {
+              return <div css={{ ...props.styles, color: "red" }} />;
+            }
+          `
+        },
+        {
+          label: "render whole-rule call",
+          expected:
+            "Mincho JSX css prop does not support conditional, logical, or wrapped object/array CSS rule values in compile-away mode",
+          source: `
+            function App(props: { makeRule: () => Record<string, string> }) {
+              return <div css={props.makeRule()} />;
+            }
+          `
+        }
+      ] as const;
+
+      for (const { label, source, expected } of fixtures) {
+        const failure = captureJsxCssPropFailure(source, { jsxCssProp: true });
+
+        expect(failure.error.message.split("\n")[0], label).toBe(expected);
+        expect(failure.code, label).not.toContain("_css(");
+        expect(failure.code, label).not.toContain("style={{");
+      }
     });
 
     it("fails closed for dynamic computed optional and template expression css rules", () => {
@@ -4855,6 +5125,31 @@ if (import.meta.vitest) {
       expect(code).not.toContain(" css=");
       expect(code).toContain('className={_cx("base", makeRule("red"))}');
       expect(code).not.toContain("_$mincho$$App");
+      expect(result[1]).not.toContain("_css(");
+    });
+
+    it("keeps activeClass primitive and cx css props in class-value mode", () => {
+      const { result, code } = babelTransform(
+        `
+        import { cx } from "@mincho-js/css";
+
+        const activeClass = "active";
+
+        function App() {
+          return <>
+            <div css={activeClass} />
+            <div css={0} />
+            <div css={cx(activeClass)} />
+          </>;
+        }
+      `,
+        { jsxCssProp: true }
+      );
+
+      expect(code).not.toContain(" css=");
+      expect(code).toContain("className={_cx(activeClass)}");
+      expect(code).toContain("className={_cx(0)}");
+      expect(code).toContain("className={_cx(cx(activeClass))}");
       expect(result[1]).not.toContain("_css(");
     });
 

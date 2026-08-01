@@ -1,5 +1,6 @@
 import { types as t } from "@babel/core";
 import type { NodePath } from "@babel/core";
+import type { Scope } from "@babel/traverse";
 import { unwrapTransparentCssRuleExpression } from "../staticCssEval/candidates.js";
 import {
   findUnsupportedImportedStaticCssEvalReferenceDiagnostic,
@@ -49,6 +50,8 @@ import {
   registerStaticCssEvalDiagnosticMetadata,
   registerStaticCssEvalResultMetadata
 } from "./metadata.js";
+import { analyzeCssPropSidecarHoistability } from "./modeAnalysis.js";
+import { isSidecarSafeCssRuleExpression } from "./sidecarSafety.js";
 import {
   normalizeResolvedCssRuleExpression,
   preserveDirectBooleanReferenceValues,
@@ -66,6 +69,9 @@ import type {
   DynamicCssVariableLowering,
   DynamicCssVariableLeaf,
   DynamicCssVariableRule,
+  CssPropLoweringMode,
+  CssPropSidecarHoistability,
+  CssPropValueClassification,
   NormalizedJsxCssPropElement
 } from "./types.js";
 
@@ -306,6 +312,12 @@ function normalizeOpeningElement(
     expression: unresolvedCssExpression,
     scope: openingElementPath.scope
   });
+  const sidecarHoistability = dynamicCssVariableRule
+    ? ({ kind: "not-candidate" } satisfies CssPropSidecarHoistability)
+    : analyzeCssPropSidecarHoistability({
+        expression: unresolvedCssExpression,
+        scope: openingElementPath.scope
+      });
 
   if (dynamicCssVariableRule && styleAttributes.length > 1) {
     throw openingElementPath.buildCodeFrameError(duplicateStyleErrorMessage);
@@ -320,34 +332,27 @@ function normalizeOpeningElement(
 
   const cssExpression = dynamicCssVariableRule
     ? dynamicCssVariableRule.expression
-    : getResolvedCssExpression(
-        openingElementPath,
-        programPath,
-        state,
-        cssAttribute
-      );
-  const cssValueClassification = classifyCssPropValue(
-    cssExpression,
-    openingElementPath.scope
-  );
+    : sidecarHoistability.kind === "hoistable" ||
+        sidecarHoistability.kind === "unsafe"
+      ? unresolvedCssExpression
+      : getResolvedCssExpression(
+          openingElementPath,
+          programPath,
+          state,
+          cssAttribute
+        );
+  const cssValueClassification = getCssValueClassification({
+    expression: cssExpression,
+    sidecarHoistability,
+    scope: openingElementPath.scope
+  });
+  const cssLoweringMode = getCssPropLoweringMode({
+    cssValueClassification,
+    dynamicCssVariableRule,
+    sidecarHoistability
+  });
 
-  if (cssValueClassification === "unsupported-function") {
-    throw openingElementPath.buildCodeFrameError(
-      unsupportedFunctionCssValueErrorMessage
-    );
-  }
-
-  if (cssValueClassification === "unsupported-dynamic-css-rule") {
-    throw openingElementPath.buildCodeFrameError(
-      unsupportedDynamicCssRuleValueErrorMessage
-    );
-  }
-
-  if (cssValueClassification === "unsupported-array-spread") {
-    throw openingElementPath.buildCodeFrameError(
-      unsupportedArraySpreadCssValueErrorMessage
-    );
-  }
+  assertSupportedCssPropLoweringMode(openingElementPath, cssLoweringMode);
 
   const dynamicCssVariableLowering = dynamicCssVariableRule
     ? createDynamicCssVariableLowering({
@@ -365,6 +370,7 @@ function normalizeOpeningElement(
     cssAttribute,
     cssExpression,
     cssValueClassification,
+    cssLoweringMode,
     dynamicCssVariableRule,
     dynamicCssVariableLowering,
     classNameAttribute: classNameAttributes[0] ?? null,
@@ -374,6 +380,108 @@ function normalizeOpeningElement(
     hasSpreadBeforeCss,
     hasSpreadAfterCss
   };
+}
+
+function getCssValueClassification(options: {
+  readonly expression: t.Expression;
+  readonly sidecarHoistability: CssPropSidecarHoistability;
+  readonly scope: Scope;
+}): CssPropValueClassification {
+  if (options.sidecarHoistability.kind === "hoistable") {
+    return options.sidecarHoistability.cssValueClassification;
+  }
+
+  if (options.sidecarHoistability.kind === "unsafe") {
+    return containsArraySpreadElement(options.expression)
+      ? "unsupported-array-spread"
+      : "unsupported-dynamic-css-rule";
+  }
+
+  return classifyCssPropValue(options.expression, options.scope);
+}
+
+function getCssPropLoweringMode(options: {
+  readonly cssValueClassification: CssPropValueClassification;
+  readonly dynamicCssVariableRule: DynamicCssVariableRule | null;
+  readonly sidecarHoistability: CssPropSidecarHoistability;
+}): CssPropLoweringMode {
+  if (options.dynamicCssVariableRule) {
+    return {
+      kind: "dynamic-leaf-rule",
+      cssValueClassification: "css-rule"
+    };
+  }
+
+  if (options.sidecarHoistability.kind === "hoistable") {
+    return {
+      kind: "sidecar-build-time-rule",
+      cssValueClassification: options.sidecarHoistability.cssValueClassification
+    };
+  }
+
+  switch (options.cssValueClassification) {
+    case "css-rule":
+    case "branch-css-rule":
+      return {
+        kind: "ast-static-rule",
+        cssValueClassification: options.cssValueClassification
+      };
+    case "class-value":
+      return { kind: "class-value", cssValueClassification: "class-value" };
+    case "unsupported-array-spread":
+    case "unsupported-dynamic-css-rule":
+    case "unsupported-function":
+      return {
+        kind: "unsupported",
+        cssValueClassification: options.cssValueClassification
+      };
+    default: {
+      const exhaustive: never = options.cssValueClassification;
+      return exhaustive;
+    }
+  }
+}
+
+function assertSupportedCssPropLoweringMode(
+  path: NodePath<t.JSXOpeningElement>,
+  mode: CssPropLoweringMode
+): void {
+  switch (mode.kind) {
+    case "ast-static-rule":
+    case "sidecar-build-time-rule":
+    case "dynamic-leaf-rule":
+    case "class-value":
+      return;
+    case "unsupported":
+      throwUnsupportedCssPropLoweringMode(path, mode.cssValueClassification);
+      return;
+    default: {
+      const exhaustive: never = mode;
+      return exhaustive;
+    }
+  }
+}
+
+function throwUnsupportedCssPropLoweringMode(
+  path: NodePath<t.JSXOpeningElement>,
+  classification: Extract<CssPropValueClassification, `unsupported-${string}`>
+): never {
+  switch (classification) {
+    case "unsupported-function":
+      throw path.buildCodeFrameError(unsupportedFunctionCssValueErrorMessage);
+    case "unsupported-dynamic-css-rule":
+      throw path.buildCodeFrameError(
+        unsupportedDynamicCssRuleValueErrorMessage
+      );
+    case "unsupported-array-spread":
+      throw path.buildCodeFrameError(
+        unsupportedArraySpreadCssValueErrorMessage
+      );
+    default: {
+      const exhaustive: never = classification;
+      return exhaustive;
+    }
+  }
 }
 
 function createDynamicCssVariableLowering(options: {
@@ -1351,15 +1459,38 @@ function isSupportedDynamicCssVariableValueExpression(options: {
 }): boolean {
   const expression = unwrapTransparentCssRuleExpression(options.expression);
 
-  if (!isDirectMemberReferenceExpression(expression)) {
+  if (isDirectMemberReferenceExpression(expression)) {
+    const rootIdentifier = getDirectReferenceRootIdentifier(expression.object);
+
+    return rootIdentifier
+      ? !isImportedBindingIdentifier(options.scope, rootIdentifier)
+      : true;
+  }
+
+  if (!t.isCallExpression(expression)) {
     return false;
   }
 
-  const rootIdentifier = getDirectReferenceRootIdentifier(expression.object);
+  return !isSidecarSafeDynamicCssVariableCallExpression({
+    expression,
+    scope: options.scope
+  });
+}
 
-  return rootIdentifier
-    ? !isImportedBindingIdentifier(options.scope, rootIdentifier)
-    : true;
+function isSidecarSafeDynamicCssVariableCallExpression(options: {
+  readonly expression: t.CallExpression;
+  readonly scope: NodePath<t.JSXOpeningElement>["scope"];
+}): boolean {
+  return isSidecarSafeCssRuleExpression({
+    expression: t.objectExpression([
+      t.objectProperty(t.identifier("value"), t.cloneNode(options.expression))
+    ]),
+    state: {
+      scope: options.scope,
+      visiting: new Set(),
+      localNames: new Set()
+    }
+  });
 }
 
 function isDirectMemberReferenceExpression(

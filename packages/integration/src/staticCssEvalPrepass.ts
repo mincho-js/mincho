@@ -659,6 +659,61 @@ async function loadStaticCssEvalPrepassExpressionDependencies(
     return;
   }
 
+  if (t.isConditionalExpression(expression)) {
+    await loadStaticCssEvalPrepassExpressionDependencies({
+      ...options,
+      expression: expression.test,
+      memberPath: []
+    });
+    await loadStaticCssEvalPrepassExpressionDependencies({
+      ...options,
+      expression: expression.consequent,
+      memberPath: []
+    });
+    await loadStaticCssEvalPrepassExpressionDependencies({
+      ...options,
+      expression: expression.alternate,
+      memberPath: []
+    });
+    return;
+  }
+
+  if (t.isLogicalExpression(expression)) {
+    await loadStaticCssEvalPrepassExpressionDependencies({
+      ...options,
+      expression: expression.left,
+      memberPath: []
+    });
+    await loadStaticCssEvalPrepassExpressionDependencies({
+      ...options,
+      expression: expression.right,
+      memberPath: []
+    });
+    return;
+  }
+
+  if (t.isUnaryExpression(expression)) {
+    await loadStaticCssEvalPrepassExpressionDependencies({
+      ...options,
+      expression: expression.argument,
+      memberPath: []
+    });
+    return;
+  }
+
+  if (
+    t.isFunctionExpression(expression) ||
+    t.isArrowFunctionExpression(expression)
+  ) {
+    await loadStaticCssEvalPrepassFunctionDependencies({
+      moduleRecord: options.moduleRecord,
+      node: expression,
+      context: options.context,
+      localStack: options.localStack
+    });
+    return;
+  }
+
   const reference = getStaticCssEvalMemberReference(expression);
 
   if (reference?.kind !== "supported") {
@@ -705,9 +760,15 @@ async function loadStaticCssEvalPrepassMemberExpressionDependencies(
 
   await loadStaticCssEvalPrepassComputedMemberKeyDependencies(options);
 
-  const memberName = getStaticCssEvalPrepassMemberPropertyName(
-    options.expression
-  );
+  const { computed, property } = options.expression;
+  const memberName =
+    !computed && t.isIdentifier(property)
+      ? property.name
+      : computed && t.isStringLiteral(property)
+        ? property.value
+        : computed && t.isNumericLiteral(property)
+          ? String(property.value)
+          : null;
 
   await loadStaticCssEvalPrepassExpressionDependencies({
     ...options,
@@ -997,6 +1058,21 @@ async function loadStaticCssEvalPrepassLocalBindingDependencies(
     return;
   }
 
+  const binding = options.moduleRecord.programPath.scope.getBinding(
+    options.bindingName
+  );
+  const bindingPath = binding?.path;
+
+  if (bindingPath?.isFunctionDeclaration()) {
+    await loadStaticCssEvalPrepassFunctionDependencies({
+      moduleRecord: options.moduleRecord,
+      node: bindingPath.node,
+      context: options.context,
+      localStack: [...options.localStack, currentFrame]
+    });
+    return;
+  }
+
   const expression = getStaticCssEvalPrepassConstBindingInitExpression(
     options.moduleRecord,
     options.bindingName
@@ -1013,6 +1089,106 @@ async function loadStaticCssEvalPrepassLocalBindingDependencies(
     context: options.context,
     localStack: [...options.localStack, currentFrame]
   });
+}
+
+async function loadStaticCssEvalPrepassFunctionDependencies(options: {
+  readonly moduleRecord: ImportedStaticCssEvalModuleRecord;
+  readonly node: t.Function | t.ArrowFunctionExpression;
+  readonly context: StaticCssEvalPrepassContext;
+  readonly localStack: readonly StaticCssEvalPrepassLocalWalkFrame[];
+}): Promise<void> {
+  if (t.isBlockStatement(options.node.body)) {
+    for (const statement of options.node.body.body) {
+      await loadStaticCssEvalPrepassStatementDependencies({
+        ...options,
+        statement
+      });
+    }
+    return;
+  }
+
+  await loadStaticCssEvalPrepassExpressionDependencies({
+    moduleRecord: options.moduleRecord,
+    expression: options.node.body,
+    memberPath: [],
+    context: options.context,
+    localStack: options.localStack
+  });
+}
+
+async function loadStaticCssEvalPrepassStatementDependencies(options: {
+  readonly moduleRecord: ImportedStaticCssEvalModuleRecord;
+  readonly statement: t.Statement;
+  readonly context: StaticCssEvalPrepassContext;
+  readonly localStack: readonly StaticCssEvalPrepassLocalWalkFrame[];
+}): Promise<void> {
+  if (t.isBlockStatement(options.statement)) {
+    for (const statement of options.statement.body) {
+      await loadStaticCssEvalPrepassStatementDependencies({
+        ...options,
+        statement
+      });
+    }
+    return;
+  }
+
+  if (t.isReturnStatement(options.statement) && options.statement.argument) {
+    await loadStaticCssEvalPrepassExpressionDependencies({
+      moduleRecord: options.moduleRecord,
+      expression: options.statement.argument,
+      memberPath: [],
+      context: options.context,
+      localStack: options.localStack
+    });
+    return;
+  }
+
+  if (t.isVariableDeclaration(options.statement)) {
+    for (const declaration of options.statement.declarations) {
+      if (declaration.init && t.isExpression(declaration.init)) {
+        await loadStaticCssEvalPrepassExpressionDependencies({
+          moduleRecord: options.moduleRecord,
+          expression: declaration.init,
+          memberPath: [],
+          context: options.context,
+          localStack: options.localStack
+        });
+      }
+    }
+    return;
+  }
+
+  if (t.isExpressionStatement(options.statement)) {
+    await loadStaticCssEvalPrepassExpressionDependencies({
+      moduleRecord: options.moduleRecord,
+      expression: options.statement.expression,
+      memberPath: [],
+      context: options.context,
+      localStack: options.localStack
+    });
+    return;
+  }
+
+  if (t.isIfStatement(options.statement)) {
+    await loadStaticCssEvalPrepassExpressionDependencies({
+      moduleRecord: options.moduleRecord,
+      expression: options.statement.test,
+      memberPath: [],
+      context: options.context,
+      localStack: options.localStack
+    });
+    await loadStaticCssEvalPrepassStatementDependencies({
+      ...options,
+      statement: options.statement.consequent
+    });
+
+    if (options.statement.alternate) {
+      await loadStaticCssEvalPrepassStatementDependencies({
+        ...options,
+        statement: options.statement.alternate
+      });
+    }
+  }
 }
 
 function createStaticCssEvalPrepassLocalWalkKey(
