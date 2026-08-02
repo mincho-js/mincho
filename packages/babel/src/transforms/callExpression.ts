@@ -120,7 +120,8 @@ function getBindings(path: NodePath<t.Node>) {
 
       if (
         programParent.minchoData.bindings.some(
-          (storedBinding) => findRootBinding(storedBinding).node === rootBinding.node
+          (storedBinding) =>
+            findRootBinding(storedBinding).node === rootBinding.node
         )
       ) {
         return;

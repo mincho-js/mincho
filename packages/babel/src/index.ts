@@ -12,6 +12,7 @@ import {
 import { getDynamicCssVariableRule } from "./jsxCssProp/preprocess.js";
 import { supportedJsxCssPropTags } from "./jsxCssPropTags.js";
 import { createImportedStaticCssEvalProvider } from "./staticCssEval/importedModules.js";
+import { STATIC_CSS_EVAL_LIMITS } from "./staticCssEval/types.js";
 import postprocess from "./transforms/postprocess.js";
 import basePreprocess from "./transforms/preprocess.js";
 import type { DynamicCssVariableRule } from "./jsxCssProp/types.js";
@@ -1206,7 +1207,7 @@ if (import.meta.vitest) {
       expect(sameFileConst.result[1]).toBe(inline.result[1]);
       expect(sameFileConst.result[1]).toContain('color: "red"');
       expect(sameFileConst.result[1]).toContain("opacity: -1");
-      expect(sameFileConst.result[1]).toContain("zIndex: +2");
+      expect(sameFileConst.result[1]).toContain("zIndex: 2");
     });
 
     it("normalizes direct inline object and array spreads before jsx css prop classification", () => {
@@ -3534,6 +3535,55 @@ if (import.meta.vitest) {
       );
       expect(failure.code).not.toContain("_css(makeRule(");
     });
+
+    it("routes sidecar-safe partial-reduced factories, computed keys, and object spreads", () => {
+      const { result, code } = babelTransform(
+        `
+          const baseRule = getBase();
+          const computedRule = { [getKey()]: "blue" };
+          const moduleRule = makeRule("green");
+          const spreadRule = { ...getBase(), color: "red" };
+
+          function getBase() {
+            return { padding: 4 };
+          }
+
+          function getKey() {
+            return "color";
+          }
+
+          function makeRule(color: string) {
+            return { color };
+          }
+
+          function App(condition: boolean) {
+            const branchRule = condition ? makeRule("purple") : { color: "orange" };
+
+            return <>
+              <div css={baseRule} />
+              <div css={computedRule} />
+              <div css={moduleRule} />
+              <div css={spreadRule} />
+              <div css={branchRule} />
+            </>;
+          }
+        `,
+        { jsxCssProp: true }
+      );
+
+      expect(code).not.toContain(" css=");
+      expect(code).not.toContain("style=");
+      expect(result[1].match(/_css\(/g) ?? []).toHaveLength(6);
+      expect(result[1]).toContain("_css(getBase())");
+      expect(result[1]).toMatch(/_css\(\{\s+\[getKey\(\)\]: "blue"\s+\}\)/);
+      expect(result[1]).toContain('_css(makeRule("green"))');
+      expect(result[1]).toMatch(
+        /_css\(\{\s+\.\.\.getBase\(\),\s+color: "red"\s+\}\)/
+      );
+      expect(result[1]).toContain('_css(makeRule("purple"))');
+      expect(result[1]).toContain('color: "orange"');
+    });
+
     it("rejects sidecar candidate css props with render-scope declaration leaves", () => {
       const failure = captureJsxCssPropFailure(
         `
@@ -3589,6 +3639,321 @@ if (import.meta.vitest) {
       expect(result[1]).toContain('color: "red"');
       expect(result[1]).not.toContain("[colorKey]");
       expect(result[1]).not.toContain("`${brand}`");
+    });
+
+    describe("css prop partial evaluator red baseline", () => {
+      type PartialEvalTransformOutcome =
+        | {
+            readonly kind: "ok";
+            readonly transform: ReturnType<typeof babelTransform>;
+          }
+        | { readonly kind: "error"; readonly message: string };
+
+      function tryPartialEvalTransform(
+        source: string
+      ): PartialEvalTransformOutcome {
+        try {
+          return {
+            kind: "ok",
+            transform: babelTransform(source, { jsxCssProp: true })
+          };
+        } catch (error) {
+          return {
+            kind: "error",
+            message: error instanceof Error ? error.message : String(error)
+          };
+        }
+      }
+
+      function expectPartialEvalTransformOk(
+        label: string,
+        source: string
+      ): ReturnType<typeof babelTransform> {
+        const outcome = tryPartialEvalTransform(source);
+
+        if (outcome.kind === "error") {
+          expect(outcome.message, label).not.toContain("BABEL_EXECUTED_");
+        }
+
+        expect(
+          outcome.kind,
+          outcome.kind === "error"
+            ? `${label}: ${outcome.message.split("\n")[0]}`
+            : label
+        ).toBe("ok");
+
+        if (outcome.kind === "error") {
+          throw new Error(`${label}: expected transform success`);
+        }
+
+        return outcome.transform;
+      }
+
+      it("routes static computed keys through css prop partial evaluator dynamic-leaf mode", () => {
+        const { result, code } = expectPartialEvalTransformOk(
+          "static computed key dynamic leaf",
+          `
+          const keys = { foreground: "color" } as const;
+          const colorKey = keys.foreground;
+
+          function App(props: { color: string }) {
+            return <div css={{ [colorKey]: props.color }} />;
+          }
+        `
+        );
+
+        expect(result[1]).toMatch(/_minchoCreateVar\d*\(/);
+        expect(result[1]).toMatch(/color: _\$mincho\$\$App\w*ColorVar/);
+        expect(code).not.toContain(" css=");
+        expect(code).not.toContain("_css(");
+        expect(code).toMatch(
+          /style=\{\{\s+\[_\$mincho\$\$App\w*ColorVarKey\d*\]: props\.color\s+\}\}/
+        );
+      });
+
+      it("routes static object spreads through css prop partial evaluator dynamic-leaf mode", () => {
+        const { result, code } = expectPartialEvalTransformOk(
+          "static object spread dynamic leaf",
+          `
+          const base = { display: "grid" } as const;
+
+          function App(props: { color: string }) {
+            return <div css={{ ...base, color: props.color }} />;
+          }
+        `
+        );
+
+        expect(result[1]).toContain('display: "grid"');
+        expect(result[1]).toMatch(/color: _\$mincho\$\$App\w*ColorVar/);
+        expect(code).not.toContain(" css=");
+        expect(code).not.toContain("...base");
+        expect(code).not.toContain("style={{ color: props.color }}");
+        expect(code).toMatch(
+          /style=\{\{\s+\[_\$mincho\$\$App\w*ColorVarKey\d*\]: props\.color\s+\}\}/
+        );
+      });
+
+      it("routes static spread before static key through dynamic-leaf mode", () => {
+        const { result, code } = expectPartialEvalTransformOk(
+          "static object spread before computed key dynamic leaf",
+          `
+          const base = { display: "grid" } as const;
+          const keys = { foreground: "color" } as const;
+
+          function App(props: { color: string }) {
+            return <div css={{ ...base, [keys.foreground]: props.color }} />;
+          }
+        `
+        );
+
+        expect(result[1]).toContain('display: "grid"');
+        expect(result[1]).toMatch(/color: _\$mincho\$\$App\w*ColorVar/);
+        expect(code).not.toContain(" css=");
+        expect(code).not.toContain("...base");
+        expect(code).not.toContain("[keys.foreground]");
+        expect(code).not.toContain("style={{ color: props.color }}");
+        expect(code).toMatch(
+          /style=\{\{\s+\[_\$mincho\$\$App\w*ColorVarKey\d*\]: props\.color\s+\}\}/
+        );
+      });
+
+      it("routes same-file member paths, sidecar-safe whole-rule calls, and class-value fallback in the css prop partial evaluator matrix", () => {
+        const { result, code } = expectPartialEvalTransformOk(
+          "same-file member sidecar class-value matrix",
+          `
+          const activeClass = "active";
+          const styles = {
+            button: { color: "red" }
+          } as const;
+
+          function makeRule(color: string) {
+            return { color };
+          }
+
+          function App() {
+            return <>
+              <div css={styles.button} />
+              <div css={makeRule("blue")} />
+              <div css={activeClass} />
+            </>;
+          }
+        `
+        );
+
+        expect(code).not.toContain(" css=");
+        expect(code).toContain("className={_cx(activeClass)}");
+        expect(code).not.toContain("_cx(styles.button)");
+        expect(result[1]).toContain('color: "red"');
+        expect(result[1]).toContain('_css(makeRule("blue"))');
+        expect(result[1]).not.toContain("activeClass");
+      });
+
+      it("keeps mutated bindings, runtime keys, runtime spreads, and props member calls unsupported in the css prop partial evaluator matrix", () => {
+        const fixtures = [
+          {
+            label: "mutated binding",
+            source: `
+            const style = { color: "red" };
+            style.color = "blue";
+
+            function App() {
+              return <div css={style} />;
+            }
+          `,
+            expected:
+              'Cannot statically evaluate css prop value: same-file binding "style" is mutated'
+          },
+          {
+            label: "runtime key",
+            source: `
+            function App(props: { key: string }) {
+              return <div css={{ [props.key]: "red" }} />;
+            }
+          `,
+            expected:
+              /computed member access is unsupported|dynamic expression is unsupported/
+          },
+          {
+            label: "runtime spread",
+            source: `
+            function App(props: { styles: Record<string, string> }) {
+              return <div css={{ ...props.styles, color: "red" }} />;
+            }
+          `,
+            expected:
+              /unsupported identifier-object-value|object spread is unsupported|conditional, logical, or wrapped object\/array CSS rule values/
+          },
+          {
+            label: "props member call",
+            source: `
+            function App(props: { makeRule: () => Record<string, string> }) {
+              return <div css={props.makeRule()} />;
+            }
+          `,
+            expected:
+              /conditional, logical, or wrapped object\/array CSS rule values/
+          }
+        ] as const;
+
+        for (const { label, source, expected } of fixtures) {
+          const failure = captureJsxCssPropFailure(source, {
+            jsxCssProp: true
+          });
+
+          expect(failure.error.message.split("\n")[0], label).toBe(expected);
+          expect(failure.code, label).not.toContain("_css(");
+          expect(failure.code, label).not.toContain("style={{");
+        }
+      });
+
+      it("keeps partial-reduced props member call aliases unsupported sidecar", () => {
+        const fixtures = [
+          {
+            label: "aliased props member call",
+            expected:
+              "Cannot statically evaluate css prop value: call expressions are not evaluated by Babel",
+            source: `
+            function App(props: { makeRule: () => Record<string, string> }) {
+              const rule = props.makeRule();
+
+              return <div css={rule} />;
+            }
+          `
+          },
+          {
+            label: "aliased props computed key",
+            expected:
+              "Cannot statically evaluate css prop value: computed member access is unsupported",
+            source: `
+            function App(props: { key: string }) {
+              const rule = { [props.key]: "red" };
+
+              return <div css={rule} />;
+            }
+          `
+          },
+          {
+            label: "aliased props object spread",
+            expected: "Mincho `css` requires statically known CSS shape",
+            source: `
+            function App(props: { styles: Record<string, string> }) {
+              const rule = { ...props.styles, color: "red" };
+
+              return <div css={rule} />;
+            }
+          `
+          }
+        ] as const;
+
+        for (const { label, source, expected } of fixtures) {
+          const failure = captureJsxCssPropFailure(source, {
+            jsxCssProp: true
+          });
+
+          expect(failure.error.message, label).toMatch(
+            /Cannot statically evaluate|Mincho JSX css prop/
+          );
+          expect(failure.code, label).not.toContain("_css(");
+          expect(failure.code, label).not.toContain("style={{");
+        }
+      });
+
+      it("keeps no Babel-time execution for throwing function getter class css prop fixtures", () => {
+        const outcome = tryPartialEvalTransform(`
+          const colorKey = "color";
+
+          function throwingRule() {
+            throw new Error("BABEL_EXECUTED_FUNCTION");
+          }
+
+          const throwingGetter = {
+            get color() {
+              throw new Error("BABEL_EXECUTED_GETTER");
+            }
+          };
+
+          class ThrowingClass {
+            constructor() {
+              throw new Error("BABEL_EXECUTED_CLASS");
+            }
+          }
+
+          function App(props: { color: string }) {
+            return <>
+              <div css={{ [colorKey]: props.color, background: throwingGetter.color }} />
+              <div css={throwingRule()} />
+              <div css={ThrowingClass} />
+            </>;
+          }
+        `);
+
+        if (outcome.kind === "error") {
+          expect(outcome.message).not.toContain("BABEL_EXECUTED_");
+          expect(outcome.message).toMatch(
+            /Cannot statically evaluate|Mincho JSX css prop/
+          );
+        }
+
+        expect(
+          outcome.kind,
+          outcome.kind === "error"
+            ? `no-execution failure stayed in Mincho diagnostics: ${outcome.message.split("\n")[0]}`
+            : "transform succeeded"
+        ).toBe("ok");
+
+        if (outcome.kind === "error") {
+          return;
+        }
+
+        const { result, code } = outcome.transform;
+
+        expect(code).not.toContain(" css=");
+        expect(code).not.toContain("_css(");
+        expect(code).toContain("props.color");
+        expect(code).toContain("throwingGetter.color");
+        expect(code).toContain("className={_cx(ThrowingClass)}");
+        expect(result[1]).toContain("_css(throwingRule())");
+      });
     });
 
     it("lowers first-level call branch jsx css prop rules through extraction", () => {
@@ -4888,17 +5253,7 @@ if (import.meta.vitest) {
             }
           `,
           expected:
-            /computed member access is unsupported|dynamic expression is unsupported|conditional, logical, or wrapped object\/array CSS rule values/
-        },
-        {
-          label: "computed keys",
-          source: `
-            function App(props) {
-              return <div css={{ ["color"]: props.color }} />;
-            }
-          `,
-          expected:
-            /dynamic expression is unsupported|unsupported identifier-object-value/
+            /object key is not statically known|computed member access is unsupported|dynamic expression is unsupported|conditional, logical, or wrapped object\/array CSS rule values/
         },
         {
           label: "dynamic object spreads",
@@ -4908,7 +5263,7 @@ if (import.meta.vitest) {
             }
           `,
           expected:
-            /dynamic expression is unsupported|object spread is unsupported|unsupported identifier-object-value|conditional, logical, or wrapped object\/array CSS rule values/
+            /spread operand is not statically reducible|dynamic expression is unsupported|object spread is unsupported|unsupported identifier-object-value|conditional, logical, or wrapped object\/array CSS rule values/
         },
         {
           label: "dynamic array spreads",
@@ -4918,7 +5273,7 @@ if (import.meta.vitest) {
             }
           `,
           expected:
-            /array values do not support spread elements in compile-away mode/
+            /spread operand is not statically reducible|array values do not support spread elements in compile-away mode/
         },
         {
           label: "call-return CSS shapes",
@@ -4931,7 +5286,7 @@ if (import.meta.vitest) {
             }
           `,
           expected:
-            /conditional, logical, or wrapped object\/array CSS rule values in compile-away mode/
+            /call expressions are not evaluated by Babel|conditional, logical, or wrapped object\/array CSS rule values in compile-away mode/
         },
         {
           label: "member call-return CSS shapes",
@@ -4941,7 +5296,7 @@ if (import.meta.vitest) {
             }
           `,
           expected:
-            /conditional, logical, or wrapped object\/array CSS rule values in compile-away mode/
+            /call expressions are not evaluated by Babel|conditional, logical, or wrapped object\/array CSS rule values in compile-away mode/
         },
         {
           label: "function values",
@@ -4970,7 +5325,7 @@ if (import.meta.vitest) {
             }
           `,
           expected:
-            /dynamic expression is unsupported|unsupported identifier-object-value/
+            /template interpolation is not a static primitive|dynamic expression is unsupported|unsupported identifier-object-value/
         }
       ] as const;
 
@@ -5066,6 +5421,175 @@ if (import.meta.vitest) {
       }
     });
 
+    it("maps partial evaluator deopt diagnostics and preserves unchanged diagnostics", () => {
+      const depthBindingCount =
+        STATIC_CSS_EVAL_LIMITS.maxObjectArrayRecursionDepth + 1;
+      const depthBindings = Array.from(
+        { length: depthBindingCount },
+        (_, index) => {
+          const next =
+            index === depthBindingCount - 1
+              ? `{ color: "red" }`
+              : `style${index + 1}`;
+          return `const style${index} = ${next};`;
+        }
+      ).join("\n");
+      const largeStylePropertyCount =
+        STATIC_CSS_EVAL_LIMITS.maxStaticLiteralNodeCount + 1;
+      const largeStyle = Array.from(
+        { length: largeStylePropertyCount },
+        (_, index) => `p${index}: "${index}"`
+      ).join(",");
+      const fixtures = [
+        {
+          reason: "mutated-binding",
+          expected:
+            'Cannot statically evaluate css prop value: same-file binding "style" is mutated',
+          source: `
+            const style = { color: "red" };
+            style.color = "blue";
+            function App() {
+              return <div css={style} />;
+            }
+          `
+        },
+        {
+          reason: "unsupported-call-expression",
+          expected:
+            "Mincho JSX css prop does not support conditional, logical, or wrapped object/array CSS rule values in compile-away mode",
+          source: `
+            function App(props: { makeRule: () => Record<string, string> }) {
+              return <div css={props.makeRule()} />;
+            }
+          `
+        },
+        {
+          reason: "non-static-object-key",
+          expected:
+            "Cannot statically evaluate css prop value: computed member access is unsupported",
+          source: `
+            function App(props: { key: string }) {
+              return <div css={{ [props.key]: "red" }} />;
+            }
+          `
+        },
+        {
+          reason: "unsupported-spread",
+          expected:
+            'Cannot statically evaluate css prop value: same-file binding "<inline>" contains unsupported identifier-object-value: Identifier',
+          source: `
+            function App(props: { styles: Record<string, string> }) {
+              return <div css={{ ...props.styles, color: "red" }} />;
+            }
+          `
+        },
+        {
+          reason: "unsupported-computed-member",
+          expected:
+            "Cannot statically evaluate css prop value: computed member access is unsupported",
+          source: `
+            const styles = { button: { color: "red" } };
+            function App(variant: string) {
+              return <div css={styles[variant]} />;
+            }
+          `
+        },
+        {
+          reason: "runtime-css-shape",
+          expected:
+            "Cannot statically evaluate css prop value: dynamic expression is unsupported: ObjectMethod",
+          source: `
+            function App() {
+              return <div css={{ color() { return "red"; } }} />;
+            }
+          `
+        },
+        {
+          reason: "unsupported-template-interpolation",
+          expected:
+            'Cannot statically evaluate css prop value: same-file binding "<inline>" contains unsupported identifier-object-value: Identifier',
+          source: `
+            function App(props: { color: string }) {
+              return <div css={{ color: \`${"${props.color}"}\` }} />;
+            }
+          `
+        },
+        {
+          reason: "cycle-detected",
+          expected:
+            'Cannot statically evaluate css prop value: binding cycle detected while resolving "styleA"',
+          source: `
+            const styleA = styleB;
+            const styleB = styleA;
+            function App() {
+              return <div css={styleA} />;
+            }
+          `
+        },
+        {
+          reason: "depth-limit",
+          expected:
+            "Cannot statically evaluate css prop value: partial evaluator depth limit exceeded",
+          source: `
+            ${depthBindings}
+            function App() {
+              return <div css={style0} />;
+            }
+          `
+        },
+        {
+          reason: "node-count-limit",
+          expected:
+            "Cannot statically evaluate css prop value: partial evaluator node count limit exceeded",
+          source: `
+            function App() {
+              return <div css={{ ${largeStyle} }} />;
+            }
+          `
+        }
+      ] as const;
+
+      for (const { reason, source, expected } of fixtures) {
+        let failure: ReturnType<typeof captureJsxCssPropFailure>;
+
+        try {
+          failure = captureJsxCssPropFailure(source, { jsxCssProp: true });
+        } catch (error) {
+          throw new Error(
+            `${reason}: ${error instanceof Error ? error.message : String(error)}`
+          );
+        }
+
+        expect(failure.error.message.split("\n")[0], reason).toBe(expected);
+        expect(failure.code, reason).not.toContain("_css(");
+        expect(failure.code, reason).not.toContain("style={{");
+      }
+    });
+
+    it("preserves provider reexport diagnostic over partial evaluator deopt", () => {
+      const failure = captureJsxCssPropFailure(
+        `
+          import { button } from "./barrel";
+          function App() {
+            return <div css={{ color: button }} />;
+          }
+        `,
+        {
+          jsxCssProp: true,
+          staticCssEvalProvider:
+            createUnsupportedReexportStaticCssEvalProvider()
+        }
+      );
+
+      expect(failure.error.message).toContain(
+        'Cannot statically evaluate css prop value: export "button" uses unsupported reexport/barrel syntax'
+      );
+      expect(failure.error.message).not.toContain(
+        "imported binding must be resolved by the static css provider"
+      );
+      expect(failure.code).not.toContain("_css(");
+    });
+
     it("fails closed for dynamic computed optional and template expression css rules", () => {
       const dynamicComputed = captureJsxCssPropFailure(
         `
@@ -5101,7 +5625,7 @@ if (import.meta.vitest) {
         "computed member access is unsupported"
       );
       expect(nullishOptional.error.message).toContain(
-        "dynamic expression is unsupported"
+        "dynamic expression is unsupported: OptionalMemberExpression"
       );
       expect(templateCall.error.message).toContain(
         "dynamic expression is unsupported: CallExpression"

@@ -65,7 +65,9 @@ With `jsxCssProp: true`, supported values lower through the three CSS-rule paths
 
 ### CSS Rule Lowering Paths
 
-Mincho picks the narrowest compile-away path that matches the `css` prop shape:
+Three layers split the work. The integration provider resolves project, package, data, virtual, and static CommonJS sources, cache identity, dependency metadata, and invalidation. The partial evaluator reduces only safe visible AST syntax into fresh AST values. The `css` prop router then chooses ast-static extraction, sidecar whole-rule lowering, dynamic declaration leaves, class-value fallback, or an unsupported diagnostic.
+
+Mincho picks the narrowest compile-away path that matches the reduced `css` prop shape:
 
 1. AST/static CSS-rule extraction handles inline literals, mutation-free same-file `const` values, import-backed static objects or arrays, and static object or array spreads.
 2. Sidecar build-time whole-rule lowering preserves a whole rule expression and lets the generated `.css.ts` call `css(expression)`. Babel does not execute user modules or factories to discover returned styles.
@@ -77,29 +79,41 @@ Supported examples:
 const colorKey = "color" as const;
 const base = { display: "block" } as const;
 const button = { ...base, [colorKey]: "red" } as const;
+const makeRule = (tone: "red") => ({ color: tone });
+const makeBase = () => ({ display: "block" });
 
 <div css={{ color: "red" }} />
 <div css={button} />
 <div css={{ ...base, padding: 8 }} />
+<div css={{ [colorKey]: "red" }} />
 
 <div css={makeRule()} />
-<div css={{ ...getBase(), color: "red" }} />
-<div css={{ [getKey()]: "red" }} />
+<div css={{ ...makeBase(), color: "red" }} />
 
 <div css={{ color: props.color }} />
 <div css={condition ? { color: props.color } : { color: "red" }} />
 <div css={condition ? styleA : { color: props.color }} />
+<div css={activeClass} />
+<div css={styles.activeClass} />
 ```
+
+The `makeRule()` and `makeBase()` examples are sidecar-safe only when the whole expression can be preserved for the generated `.css.ts`; Babel does not call them. The `activeClass` examples are class values unless they are proven to be CSS-rule-shaped.
 
 Unsupported or deferred examples:
 
 ```tsx
+const runtimeKey = props.property;
+
 <div css={{ [props.key]: "red" }} />
+<div css={{ [runtimeKey]: "red" }} />
+<div css={{ ...props.base, color: "red" }} />
 <div css={props.styles} />
 <div css={props.makeRule()} />
 <div css={dynamicStyles?.button} />
 <div {...{ css: styleA }} />
 <div css={styles[props.variant]} />
+<div css={{ ...getBase(), color: props.color }} />
+<div css={{ [getKey()]: "red" }} />
 ```
 
 Those shapes would need runtime keys, runtime object or array spreads, runtime whole-rule objects, optional runtime rule-map lookup, or spread-only `css` prop handling. They are intentionally deferred. Use an explicit `css` prop with a static rule shape, a sidecar-safe whole-rule expression, a dynamic declaration leaf, or a class value instead.
@@ -150,7 +164,7 @@ Supported expression-valued primitive `css` props lower through `cx(...)`:
 
 ### Static Evaluation
 
-Static evaluation can resolve CSS-rule candidates when the value is a direct object or array, a mutation-free same-file `const`, or an import that the integration/provider can resolve to deterministic source or a literal payload. Supported provider-backed sources include project files, package files, data modules, virtual modules, and static CommonJS shapes when the provider also supplies stable identity metadata. Static member paths over those values are supported, including `styles.button`, `styles.button.primary`, `styles["button"]`, `styles["button"].primary`, static computed members such as `styles[variantKey]`, and optional members over proven non-nullish static objects or arrays such as `styles?.button`.
+Static evaluation is compile-time AST and syntax reduction for `css` prop routing, not runtime CSS generation. It can resolve CSS-rule candidates when the value is a direct object or array, a mutation-free same-file `const`, or an import that the integration/provider can resolve to deterministic source or a literal payload. Supported provider-backed sources include project files, package files, data modules, virtual modules, and static CommonJS shapes when the provider also supplies stable identity metadata. Static member paths over those values are supported, including `styles.button`, `styles.button.primary`, `styles["button"]`, `styles["button"].primary`, static computed members such as `styles[variantKey]`, and optional members over proven non-nullish static objects or arrays such as `styles?.button`.
 
 The practical literal grammar is intentionally small: string, number, boolean, `null`, unary numeric expressions such as `-1`, no-expression template literals such as `` `grid` ``, primitive-only template interpolation, nested object/array literals, static computed object keys, static object/array spreads, and static identifier/member operands inside proven CSS-rule literals. Object spreads merge left to right, and later keys win. Array spreads inline each static array operand at the spread position. Supported values are reconstructed as AST literals and then use the same CSS-rule extraction path as inline `css={{ ... }}`.
 
@@ -249,7 +263,7 @@ const cjsFromTemplatePath = require(templatePath);
 
 Bundlers provide source resolution and loading only. Vite and esbuild give Mincho provider-backed project, package, data, virtual, and static CommonJS source or literal payloads plus identity metadata and dependency edges. Mincho parses that source and statically evaluates the supported AST subset. No module execution is used. Mincho never executes user modules to obtain `css` prop values, and it does not call Node `require()`, use VM or `eval`, evaluate dynamic imports, or run bundler runtime code for static evaluation.
 
-Call execution remains deferred and out of scope. Mincho never executes a factory to discover returned styles. Sidecar-safe whole-rule calls, object spread helper calls, and computed-key helper calls are supported by preserving the expression for generated `.css.ts`; dynamic declaration leaves under a static shape may use CSS variables. Unsupported cases include remote/http modules, dynamic CommonJS, package runtime resolution, runtime or unhoistable whole-rule calls/spreads/keys, optional calls, dynamic or wrong-shape object/array spread operands, dynamic or nullish optional bases, object/call/undefined template interpolation, dynamic imports, SWC-native integration, and full Webpack/Turbopack/Parcel bundle runtime emulation.
+Call execution remains deferred and out of scope. Mincho never executes a factory to discover returned styles. Sidecar-safe whole-rule expressions can preserve module-scope helper calls for generated `.css.ts`; dynamic declaration leaves under a static shape may use CSS variables. Unsupported cases include remote/http modules, dynamic CommonJS, package runtime resolution, runtime or unhoistable whole-rule calls/spreads/keys, optional calls, dynamic or wrong-shape object/array spread operands, dynamic or nullish optional bases, object/call/undefined template interpolation, dynamic imports, SWC-native integration, and full Webpack/Turbopack/Parcel bundle runtime emulation.
 
 Failure policy:
 
@@ -330,6 +344,14 @@ Support matrix:
 
 | Shape | Support | Compile-away behavior |
 | --- | --- | --- |
+| Static computed object key | Supported | Reduces the key through visible AST syntax, then extracts the rule like an inline object. |
+| Static object or array spread | Supported | Reduces and inlines static spread operands before extraction. |
+| Runtime computed object key | Rejected | Dynamic keys fail closed instead of creating runtime CSS keys. |
+| Runtime object or array spread | Rejected | Dynamic spreads fail closed instead of expanding rule objects or arrays at runtime. |
+| Runtime whole-rule object | Rejected as CSS rule | Use a static shape, a sidecar-safe whole-rule expression, a dynamic declaration leaf, or a class value. |
+| Unresolved primitive identifier/member/call | Class-value fallback | Lowers through `cx(...)` unless the expression is proven CSS-rule-shaped or unsupported. |
+| Sidecar-safe module-scope call/factory | Supported through sidecar | Preserves the whole expression for generated `.css.ts`; Babel does not execute the call. |
+| Static shape with dynamic declaration leaves | Supported | Extracts the static rule and writes only generated CSS variable values through `style`. |
 | Static direct array | Supported | Stays one `css([...])` composition rule. |
 | Dynamic primitive array item | Supported | Lowers through `cx(...)`, preserving primitive leaves such as `""`, `false`, `0`, and `1n`. |
 | Dynamic object/array CSS-rule branch | Supported | Extracts the static rule branch at build time and merges or selects the generated class. |

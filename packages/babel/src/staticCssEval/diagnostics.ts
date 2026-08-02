@@ -1,4 +1,8 @@
 import type {
+  PartialEvalDeoptReason,
+  PartialEvalDiagnostic
+} from "./partialEvaluator/index.js";
+import type {
   StaticCssEvalDiagnostic,
   StaticCssEvalDiagnosticCode,
   StaticCssEvalDiagnosticId,
@@ -101,6 +105,18 @@ export function createStaticCssEvalDiagnostic(
   }
 
   return diagnostic;
+}
+
+export function createStaticCssEvalPartialEvalDeoptDiagnostic(
+  diagnostic: PartialEvalDiagnostic
+): StaticCssEvalDiagnostic {
+  return createStaticCssEvalDiagnostic({
+    code: getStaticCssEvalPartialEvalDeoptDiagnosticCode(diagnostic.reason),
+    reason: getStaticCssEvalPartialEvalUnsupportedReason(diagnostic.reason),
+    detail: getStaticCssEvalPartialEvalDeoptDetail(diagnostic),
+    owner: diagnostic.owner,
+    memberPath: diagnostic.memberPath
+  });
 }
 
 export function createStaticCssEvalDynamicExpressionUnsupportedDiagnostic(
@@ -570,6 +586,103 @@ function formatStaticCssEvalProviderSourceUnsupportedDetail(
       return `module "${options.sourceId}" could not be resolved by the provider`;
     default:
       return `provider source kind "${options.sourceKind}" from origin "${options.sourceOrigin}" is unsupported`;
+  }
+}
+
+function getStaticCssEvalPartialEvalDeoptDiagnosticCode(
+  reason: PartialEvalDeoptReason
+): StaticCssEvalDiagnosticCode {
+  switch (reason) {
+    case "mutated-binding":
+      return "mutation-detected";
+    case "unsupported-import":
+      return "unsupported-source";
+    case "unsupported-call-expression":
+    case "non-static-object-key":
+    case "unsupported-spread":
+    case "unsupported-computed-member":
+    case "runtime-css-shape":
+    case "unsupported-template-interpolation":
+      return "unsupported-syntax";
+    case "cycle-detected":
+      return "cycle-detected";
+    case "depth-limit":
+    case "node-count-limit":
+      return "limit-exceeded";
+    default: {
+      const exhaustive: never = reason;
+      return exhaustive;
+    }
+  }
+}
+
+function getStaticCssEvalPartialEvalUnsupportedReason(
+  reason: PartialEvalDeoptReason
+): StaticCssEvalUnsupportedReason {
+  switch (reason) {
+    case "mutated-binding":
+      return "mutated-binding";
+    case "unsupported-import":
+      return "failed-project-local-dependency";
+    case "unsupported-call-expression":
+      return "function-or-call";
+    case "non-static-object-key":
+      return "computed-object-key";
+    case "unsupported-spread":
+      return "object-or-array-spread";
+    case "unsupported-computed-member":
+      return "dynamic-member-path";
+    case "runtime-css-shape":
+    case "cycle-detected":
+      return "runtime-dynamic-value";
+    case "unsupported-template-interpolation":
+      return "template-expression";
+    case "depth-limit":
+    case "node-count-limit":
+      return "failed-project-local-dependency";
+    default: {
+      const exhaustive: never = reason;
+      return exhaustive;
+    }
+  }
+}
+
+function getStaticCssEvalPartialEvalDeoptDetail(
+  diagnostic: PartialEvalDiagnostic
+): string {
+  switch (diagnostic.reason) {
+    case "mutated-binding":
+      return diagnostic.bindingName
+        ? `same-file binding "${diagnostic.bindingName}" is mutated`
+        : "same-file binding is mutated";
+    case "unsupported-import":
+      return diagnostic.bindingName
+        ? `imported binding "${diagnostic.bindingName}" must be resolved by the static css provider`
+        : "imported binding must be resolved by the static css provider";
+    case "unsupported-call-expression":
+      return "call expressions are not evaluated by Babel";
+    case "non-static-object-key":
+      return "object key is not statically known";
+    case "unsupported-spread":
+      return "spread operand is not statically reducible";
+    case "unsupported-computed-member":
+      return "computed member access is unsupported";
+    case "runtime-css-shape":
+      return "runtime CSS object shape is unsupported";
+    case "unsupported-template-interpolation":
+      return "template interpolation is not a static primitive";
+    case "cycle-detected":
+      return diagnostic.bindingName
+        ? `binding cycle detected while resolving "${diagnostic.bindingName}"`
+        : "binding cycle detected";
+    case "depth-limit":
+      return "partial evaluator depth limit exceeded";
+    case "node-count-limit":
+      return "partial evaluator node count limit exceeded";
+    default: {
+      const exhaustive: never = diagnostic.reason;
+      return exhaustive;
+    }
   }
 }
 

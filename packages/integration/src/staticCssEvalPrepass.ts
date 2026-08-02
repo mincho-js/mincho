@@ -692,6 +692,31 @@ async function loadStaticCssEvalPrepassExpressionDependencies(
     return;
   }
 
+  if (t.isAssignmentExpression(expression)) {
+    if (t.isExpression(expression.left)) {
+      await loadStaticCssEvalPrepassExpressionDependencies({
+        ...options,
+        expression: expression.left,
+        memberPath: []
+      });
+    }
+    await loadStaticCssEvalPrepassExpressionDependencies({
+      ...options,
+      expression: expression.right,
+      memberPath: []
+    });
+    return;
+  }
+
+  if (t.isUpdateExpression(expression)) {
+    await loadStaticCssEvalPrepassExpressionDependencies({
+      ...options,
+      expression: expression.argument,
+      memberPath: []
+    });
+    return;
+  }
+
   if (t.isUnaryExpression(expression)) {
     await loadStaticCssEvalPrepassExpressionDependencies({
       ...options,
@@ -1188,6 +1213,138 @@ async function loadStaticCssEvalPrepassStatementDependencies(options: {
         statement: options.statement.alternate
       });
     }
+    return;
+  }
+
+  if (
+    t.isWhileStatement(options.statement) ||
+    t.isDoWhileStatement(options.statement)
+  ) {
+    await loadStaticCssEvalPrepassExpressionDependencies({
+      moduleRecord: options.moduleRecord,
+      expression: options.statement.test,
+      memberPath: [],
+      context: options.context,
+      localStack: options.localStack
+    });
+    await loadStaticCssEvalPrepassStatementDependencies({
+      ...options,
+      statement: options.statement.body
+    });
+    return;
+  }
+
+  if (t.isForStatement(options.statement)) {
+    if (t.isVariableDeclaration(options.statement.init)) {
+      await loadStaticCssEvalPrepassStatementDependencies({
+        ...options,
+        statement: options.statement.init
+      });
+    } else if (options.statement.init) {
+      await loadStaticCssEvalPrepassExpressionDependencies({
+        moduleRecord: options.moduleRecord,
+        expression: options.statement.init,
+        memberPath: [],
+        context: options.context,
+        localStack: options.localStack
+      });
+    }
+
+    for (const expression of [
+      options.statement.test,
+      options.statement.update
+    ]) {
+      if (!expression) continue;
+      await loadStaticCssEvalPrepassExpressionDependencies({
+        moduleRecord: options.moduleRecord,
+        expression,
+        memberPath: [],
+        context: options.context,
+        localStack: options.localStack
+      });
+    }
+
+    await loadStaticCssEvalPrepassStatementDependencies({
+      ...options,
+      statement: options.statement.body
+    });
+    return;
+  }
+
+  if (
+    t.isForInStatement(options.statement) ||
+    t.isForOfStatement(options.statement)
+  ) {
+    await loadStaticCssEvalPrepassExpressionDependencies({
+      moduleRecord: options.moduleRecord,
+      expression: options.statement.right,
+      memberPath: [],
+      context: options.context,
+      localStack: options.localStack
+    });
+    await loadStaticCssEvalPrepassStatementDependencies({
+      ...options,
+      statement: options.statement.body
+    });
+    return;
+  }
+
+  if (t.isTryStatement(options.statement)) {
+    await loadStaticCssEvalPrepassStatementDependencies({
+      ...options,
+      statement: options.statement.block
+    });
+    if (options.statement.handler) {
+      await loadStaticCssEvalPrepassStatementDependencies({
+        ...options,
+        statement: options.statement.handler.body
+      });
+    }
+    if (options.statement.finalizer) {
+      await loadStaticCssEvalPrepassStatementDependencies({
+        ...options,
+        statement: options.statement.finalizer
+      });
+    }
+    return;
+  }
+
+  if (t.isSwitchStatement(options.statement)) {
+    await loadStaticCssEvalPrepassExpressionDependencies({
+      moduleRecord: options.moduleRecord,
+      expression: options.statement.discriminant,
+      memberPath: [],
+      context: options.context,
+      localStack: options.localStack
+    });
+    for (const switchCase of options.statement.cases) {
+      if (switchCase.test) {
+        await loadStaticCssEvalPrepassExpressionDependencies({
+          moduleRecord: options.moduleRecord,
+          expression: switchCase.test,
+          memberPath: [],
+          context: options.context,
+          localStack: options.localStack
+        });
+      }
+      for (const statement of switchCase.consequent) {
+        await loadStaticCssEvalPrepassStatementDependencies({
+          ...options,
+          statement
+        });
+      }
+    }
+    return;
+  }
+
+  if (t.isThrowStatement(options.statement)) {
+    await loadStaticCssEvalPrepassExpressionDependencies({
+      moduleRecord: options.moduleRecord,
+      expression: options.statement.argument,
+      memberPath: [],
+      context: options.context,
+      localStack: options.localStack
+    });
   }
 }
 
@@ -3027,6 +3184,155 @@ if (import.meta.vitest) {
         shadowedCallValueId
       ]);
       expect(calls.loaded).not.toContain(shadowedCjsId);
+      expect(result.resolvedModuleCache.has(unusedId)).toBe(false);
+    });
+
+    it("prepass loads partial evaluator helper body computed key and object spread dependencies", async () => {
+      const ownerId = "/project/src/App.tsx";
+      const baseId = "/project/src/base.ts";
+      const keysId = "/project/src/keys.ts";
+      const loopTestId = "/project/src/loop-test.ts";
+      const loopUpdateId = "/project/src/loop-update.ts";
+      const loopBodyId = "/project/src/loop-body.ts";
+      const tryValueId = "/project/src/try-value.ts";
+      const throwValueId = "/project/src/throw-value.ts";
+      const finallyValueId = "/project/src/finally-value.ts";
+      const switchValueId = "/project/src/switch-value.ts";
+      const caseValueId = "/project/src/case-value.ts";
+      const unusedId = "/project/src/unused.ts";
+      const ownerSource = `
+        import { base } from "./base";
+        import { propertyKey } from "./keys";
+        import { loopTest } from "./loop-test";
+        import { loopUpdate } from "./loop-update";
+        import { loopBody } from "./loop-body";
+        import { tryValue } from "./try-value";
+        import { throwValue } from "./throw-value";
+        import { finallyValue } from "./finally-value";
+        import { switchValue } from "./switch-value";
+        import { caseValue } from "./case-value";
+        import { unused } from "./unused";
+
+        function makeButton() {
+          const helper = { ...base, [propertyKey]: "solid" } as const;
+          for (let index = 0; loopTest; index += loopUpdate) {
+            consume(loopBody);
+          }
+          try {
+            consume(tryValue);
+          } catch {
+            throw throwValue;
+          } finally {
+            consume(finallyValue);
+          }
+          switch (switchValue) {
+            case caseValue:
+              return { ...helper } as const;
+            default:
+              return helper;
+          }
+        }
+
+        function consume(value) { return value; }
+
+        function App() {
+          return <div css={makeButton()} data-unused={unused} />;
+        }
+      `;
+      const sources: Record<string, string> = {
+        [ownerId]: ownerSource,
+        [baseId]: `export const base = { color: "red" } as const;`,
+        [keysId]: `export const propertyKey = "borderColor" as const;`,
+        [loopTestId]: `export const loopTest = false;`,
+        [loopUpdateId]: `export const loopUpdate = 1;`,
+        [loopBodyId]: `export const loopBody = "loop";`,
+        [tryValueId]: `export const tryValue = "try";`,
+        [throwValueId]: `export const throwValue = new Error("stop");`,
+        [finallyValueId]: `export const finallyValue = "finally";`,
+        [switchValueId]: `export const switchValue = "case";`,
+        [caseValueId]: `export const caseValue = "case";`,
+        [unusedId]: `export const unused = { color: "orange" } as const;`
+      };
+      const resolutions: Record<string, string> = {
+        [`${ownerId}\0./base`]: baseId,
+        [`${ownerId}\0./keys`]: keysId,
+        [`${ownerId}\0./loop-test`]: loopTestId,
+        [`${ownerId}\0./loop-update`]: loopUpdateId,
+        [`${ownerId}\0./loop-body`]: loopBodyId,
+        [`${ownerId}\0./try-value`]: tryValueId,
+        [`${ownerId}\0./throw-value`]: throwValueId,
+        [`${ownerId}\0./finally-value`]: finallyValueId,
+        [`${ownerId}\0./switch-value`]: switchValueId,
+        [`${ownerId}\0./case-value`]: caseValueId,
+        [`${ownerId}\0./unused`]: unusedId
+      };
+      const calls: {
+        resolved: Array<{ importerId: string; importPath: string }>;
+        loaded: string[];
+      } = { resolved: [], loaded: [] };
+      const provider: StaticCssEvalSourceProvider = {
+        resolve(importerId, importPath) {
+          calls.resolved.push({ importerId, importPath });
+          const resolvedId = resolutions[`${importerId}\0${importPath}`];
+
+          return resolvedId
+            ? {
+                resolvedFile: resolvedId,
+                canonicalModuleId: resolvedId,
+                normalizedPathKey: resolvedId,
+                resolverKind: "test"
+              }
+            : null;
+        },
+        load(id) {
+          calls.loaded.push(id);
+          const source = sources[id];
+
+          return source === undefined ? null : { source, resolverKind: "test" };
+        }
+      };
+
+      const { result } = await createStaticCssEvalPrepass(ownerId, provider);
+
+      expect(calls.resolved).toEqual([
+        { importerId: ownerId, importPath: "./base" },
+        { importerId: ownerId, importPath: "./keys" },
+        { importerId: ownerId, importPath: "./loop-test" },
+        { importerId: ownerId, importPath: "./loop-update" },
+        { importerId: ownerId, importPath: "./loop-body" },
+        { importerId: ownerId, importPath: "./try-value" },
+        { importerId: ownerId, importPath: "./throw-value" },
+        { importerId: ownerId, importPath: "./finally-value" },
+        { importerId: ownerId, importPath: "./switch-value" },
+        { importerId: ownerId, importPath: "./case-value" }
+      ]);
+      expect(calls.loaded).toEqual([
+        ownerId,
+        baseId,
+        keysId,
+        loopTestId,
+        loopUpdateId,
+        loopBodyId,
+        tryValueId,
+        throwValueId,
+        finallyValueId,
+        switchValueId,
+        caseValueId
+      ]);
+      expect(result.dependencyFiles).toEqual([
+        baseId,
+        keysId,
+        loopTestId,
+        loopUpdateId,
+        loopBodyId,
+        tryValueId,
+        throwValueId,
+        finallyValueId,
+        switchValueId,
+        caseValueId
+      ]);
+      expect(result.resolvedModuleCache.has(baseId)).toBe(true);
+      expect(result.resolvedModuleCache.has(keysId)).toBe(true);
       expect(result.resolvedModuleCache.has(unusedId)).toBe(false);
     });
 

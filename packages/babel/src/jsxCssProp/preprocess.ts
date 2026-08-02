@@ -3,6 +3,15 @@ import type { NodePath } from "@babel/core";
 import type { Scope } from "@babel/traverse";
 import { unwrapTransparentCssRuleExpression } from "../staticCssEval/candidates.js";
 import {
+  createPartialEvalContext,
+  getPartialEvalResultExpression,
+  reducePartialEvalExpression,
+  type PartialEvalDiagnostic,
+  type PartialEvalDeoptReason,
+  type PartialEvalResult
+} from "../staticCssEval/partialEvaluator/index.js";
+import { createStaticCssEvalPartialEvalDeoptDiagnostic } from "../staticCssEval/diagnostics.js";
+import {
   findUnsupportedImportedStaticCssEvalReferenceDiagnostic,
   resolveImportedStaticCssEvalExpression
 } from "../staticCssEval/importedModules.js";
@@ -50,7 +59,10 @@ import {
   registerStaticCssEvalDiagnosticMetadata,
   registerStaticCssEvalResultMetadata
 } from "./metadata.js";
-import { analyzeCssPropSidecarHoistability } from "./modeAnalysis.js";
+import {
+  analyzeCssPropSidecarHoistability,
+  getSidecarCssRuleClassification
+} from "./modeAnalysis.js";
 import { isSidecarSafeCssRuleExpression } from "./sidecarSafety.js";
 import {
   normalizeResolvedCssRuleExpression,
@@ -86,6 +98,13 @@ const dynamicCssVariableHelperImportBindings = new WeakMap<
   DynamicCssVariableHelperImportBindings
 >();
 const dynamicCssVariableCssImportScopes = new WeakSet<ProgramScope>();
+type CssPropPartialEvalPolicyResult = {
+  readonly rawExpression: t.Expression;
+  readonly reducedExpression: t.Expression;
+  readonly metadata: PartialEvalResult["metadata"];
+  readonly diagnostics: readonly PartialEvalDiagnostic[];
+  readonly deoptReasons: readonly PartialEvalDeoptReason[];
+};
 
 export function preprocessJsxCssProp(
   path: NodePath<t.Program>,
@@ -304,18 +323,29 @@ function normalizeOpeningElement(
     );
   }
 
-  const unresolvedCssExpression = getCssExpression(
+  const rawCssExpression = getCssExpression(openingElementPath, cssAttribute);
+  const partialEvalResult = evaluateCssPropPartialEvalPolicy({
+    expression: rawCssExpression,
+    ownerFile: getStaticCssEvalOwnerFile(state),
+    programPath,
+    scope: openingElementPath.scope
+  });
+
+  throwHardPartialEvalDeoptIfNeeded(
     openingElementPath,
-    cssAttribute
+    state,
+    partialEvalResult
   );
+
+  const cssShapeExpression = getCssPropShapeExpression(partialEvalResult);
   const dynamicCssVariableRule = getDynamicCssVariableRule({
-    expression: unresolvedCssExpression,
+    expression: cssShapeExpression,
     scope: openingElementPath.scope
   });
   const sidecarHoistability = dynamicCssVariableRule
     ? ({ kind: "not-candidate" } satisfies CssPropSidecarHoistability)
-    : analyzeCssPropSidecarHoistability({
-        expression: unresolvedCssExpression,
+    : analyzeCssPropSidecarHoistabilityForRouting({
+        partialEvalResult,
         scope: openingElementPath.scope
       });
 
@@ -330,21 +360,26 @@ function normalizeOpeningElement(
     );
   }
 
-  const cssExpression = dynamicCssVariableRule
+  const routedCssExpression = dynamicCssVariableRule
     ? dynamicCssVariableRule.expression
     : sidecarHoistability.kind === "hoistable" ||
         sidecarHoistability.kind === "unsafe"
-      ? unresolvedCssExpression
+      ? getCssPropSidecarExpression(partialEvalResult)
       : getResolvedCssExpression(
           openingElementPath,
           programPath,
           state,
-          cssAttribute
+          partialEvalResult
         );
   const cssValueClassification = getCssValueClassification({
-    expression: cssExpression,
+    expression: routedCssExpression,
     sidecarHoistability,
     scope: openingElementPath.scope
+  });
+  const cssExpression = getCssPropLoweringExpression({
+    classification: cssValueClassification,
+    partialEvalResult,
+    routedExpression: routedCssExpression
   });
   const cssLoweringMode = getCssPropLoweringMode({
     cssValueClassification,
@@ -352,7 +387,12 @@ function normalizeOpeningElement(
     sidecarHoistability
   });
 
-  assertSupportedCssPropLoweringMode(openingElementPath, cssLoweringMode);
+  assertSupportedCssPropLoweringMode(
+    openingElementPath,
+    state,
+    cssLoweringMode,
+    partialEvalResult
+  );
 
   const dynamicCssVariableLowering = dynamicCssVariableRule
     ? createDynamicCssVariableLowering({
@@ -380,6 +420,511 @@ function normalizeOpeningElement(
     hasSpreadBeforeCss,
     hasSpreadAfterCss
   };
+}
+
+function evaluateCssPropPartialEvalPolicy(options: {
+  readonly expression: t.Expression;
+  readonly ownerFile: string;
+  readonly programPath: NodePath<t.Program>;
+  readonly scope: NodePath<t.JSXOpeningElement>["scope"];
+}): CssPropPartialEvalPolicyResult {
+  const result = reducePartialEvalExpression({
+    expression: options.expression,
+    context: createPartialEvalContext({
+      owner: createCssPropPartialEvalOwner({
+        expression: options.expression,
+        ownerFile: options.ownerFile
+      })
+    }),
+    programPath: options.programPath,
+    scope: options.scope
+  });
+
+  return {
+    rawExpression: options.expression,
+    reducedExpression: getPartialEvalResultExpression(result),
+    metadata: result.metadata,
+    diagnostics: result.diagnostics,
+    deoptReasons: result.diagnostics.map(({ reason }) => reason)
+  };
+}
+
+function createCssPropPartialEvalOwner(options: {
+  readonly expression: t.Expression;
+  readonly ownerFile: string;
+}) {
+  return {
+    file: options.ownerFile,
+    ...(typeof options.expression.start === "number"
+      ? { start: options.expression.start }
+      : {}),
+    ...(typeof options.expression.end === "number"
+      ? { end: options.expression.end }
+      : {})
+  };
+}
+
+function createPreferredStaticCssEvalDeoptDiagnostic(
+  result: CssPropPartialEvalPolicyResult
+) {
+  const diagnostic = result.diagnostics[0];
+
+  if (
+    !diagnostic ||
+    !shouldPreferPartialEvalDeoptDiagnostic(diagnostic.reason)
+  ) {
+    return null;
+  }
+
+  return createStaticCssEvalPartialEvalDeoptDiagnostic(diagnostic);
+}
+
+function throwHardPartialEvalDeoptIfNeeded(
+  path: NodePath<t.JSXOpeningElement>,
+  state: PluginState,
+  result: CssPropPartialEvalPolicyResult
+): void {
+  const diagnostic = result.diagnostics.find(({ reason }) => {
+    return isHardPartialEvalDeoptReason(reason);
+  });
+
+  if (!diagnostic) {
+    return;
+  }
+
+  const staticDiagnostic =
+    createStaticCssEvalPartialEvalDeoptDiagnostic(diagnostic);
+  registerStaticCssEvalDiagnosticMetadata(state, staticDiagnostic);
+  throw path.buildCodeFrameError(staticDiagnostic.message);
+}
+
+function isHardPartialEvalDeoptReason(reason: PartialEvalDeoptReason): boolean {
+  switch (reason) {
+    case "cycle-detected":
+    case "depth-limit":
+    case "node-count-limit":
+      return true;
+    case "mutated-binding":
+    case "unsupported-import":
+    case "unsupported-call-expression":
+    case "non-static-object-key":
+    case "unsupported-spread":
+    case "unsupported-computed-member":
+    case "runtime-css-shape":
+    case "unsupported-template-interpolation":
+      return false;
+    default: {
+      const exhaustive: never = reason;
+      return exhaustive;
+    }
+  }
+}
+
+function shouldPreferPartialEvalDeoptDiagnostic(
+  reason: PartialEvalDeoptReason
+): boolean {
+  switch (reason) {
+    case "mutated-binding":
+    case "unsupported-import":
+    case "unsupported-call-expression":
+    case "non-static-object-key":
+    case "unsupported-spread":
+    case "unsupported-computed-member":
+    case "unsupported-template-interpolation":
+    case "runtime-css-shape":
+      return false;
+    case "cycle-detected":
+    case "depth-limit":
+    case "node-count-limit":
+      return true;
+    default: {
+      const exhaustive: never = reason;
+      return exhaustive;
+    }
+  }
+}
+
+function getCssPropShapeExpression(
+  result: CssPropPartialEvalPolicyResult
+): t.Expression {
+  return result.deoptReasons.some(isFailClosedShapeDeoptReason)
+    ? result.rawExpression
+    : preserveDynamicLeafValues(result.rawExpression, result.reducedExpression);
+}
+
+function getCssPropStaticEvalExpression(
+  result: CssPropPartialEvalPolicyResult
+): t.Expression {
+  if (result.deoptReasons.length > 0) {
+    return result.rawExpression;
+  }
+
+  if (isRawArrayClassValueExpression(result.rawExpression)) {
+    return result.rawExpression;
+  }
+
+  const rawExpression = unwrapTransparentCssRuleExpression(
+    result.rawExpression
+  );
+  const reducedExpression = unwrapTransparentCssRuleExpression(
+    result.reducedExpression
+  );
+
+  if (
+    (t.isObjectExpression(rawExpression) &&
+      t.isObjectExpression(reducedExpression)) ||
+    (t.isArrayExpression(rawExpression) &&
+      t.isArrayExpression(reducedExpression))
+  ) {
+    return preserveDirectBooleanReferenceValues(
+      rawExpression,
+      reducedExpression
+    );
+  }
+
+  return result.reducedExpression;
+}
+
+function getBooleanPreservationExpression(
+  result: CssPropPartialEvalPolicyResult,
+  cssExpression: t.Expression
+): t.Expression {
+  return t.isObjectExpression(
+    unwrapTransparentCssRuleExpression(result.rawExpression)
+  )
+    ? result.rawExpression
+    : cssExpression;
+}
+
+function isRawArrayClassValueExpression(expression: t.Expression): boolean {
+  return isArrayClassValueExpression(
+    unwrapTransparentCssRuleExpression(expression)
+  );
+}
+
+function isFailClosedShapeDeoptReason(reason: PartialEvalDeoptReason): boolean {
+  return reason === "non-static-object-key" || reason === "unsupported-spread";
+}
+
+function preserveDynamicLeafValues(
+  rawExpression: t.Expression,
+  reducedExpression: t.Expression
+): t.Expression {
+  const raw = unwrapTransparentCssRuleExpression(rawExpression);
+  const reduced = unwrapTransparentCssRuleExpression(reducedExpression);
+
+  if (t.isObjectExpression(raw) && t.isObjectExpression(reduced)) {
+    return preserveObjectDynamicLeafValues(raw, reduced);
+  }
+
+  if (t.isArrayExpression(raw) && t.isArrayExpression(reduced)) {
+    return preserveArrayDynamicLeafValues(raw, reduced);
+  }
+
+  if (t.isConditionalExpression(raw) && t.isConditionalExpression(reduced)) {
+    return t.conditionalExpression(
+      t.cloneNode(raw.test),
+      preserveDynamicLeafValues(raw.consequent, reduced.consequent),
+      preserveDynamicLeafValues(raw.alternate, reduced.alternate)
+    );
+  }
+
+  if (t.isLogicalExpression(raw) && t.isLogicalExpression(reduced)) {
+    return t.logicalExpression(
+      raw.operator,
+      preserveDynamicLeafValues(raw.left, reduced.left),
+      preserveDynamicLeafValues(raw.right, reduced.right)
+    );
+  }
+
+  return t.cloneNode(rawExpression);
+}
+
+function preserveObjectDynamicLeafValues(
+  rawExpression: t.ObjectExpression,
+  reducedExpression: t.ObjectExpression
+): t.ObjectExpression {
+  const properties: t.ObjectExpression["properties"] = [];
+  let reducedIndex = 0;
+
+  for (
+    let rawIndex = 0;
+    rawIndex < rawExpression.properties.length;
+    rawIndex += 1
+  ) {
+    const rawProperty = rawExpression.properties[rawIndex];
+
+    if (!rawProperty) {
+      continue;
+    }
+
+    if (t.isSpreadElement(rawProperty)) {
+      const nextRawKey = getNextRawObjectPropertyKeyName(
+        rawExpression.properties,
+        rawIndex + 1
+      );
+
+      if (!nextRawKey) {
+        const spreadPropertyCount = Math.max(
+          0,
+          reducedExpression.properties.length -
+            reducedIndex -
+            countRemainingRawObjectProperties(
+              rawExpression.properties,
+              rawIndex + 1
+            )
+        );
+
+        for (let index = 0; index < spreadPropertyCount; index += 1) {
+          const reducedProperty = reducedExpression.properties[reducedIndex];
+
+          if (reducedProperty) {
+            properties.push(t.cloneNode(reducedProperty));
+          }
+
+          reducedIndex += 1;
+        }
+
+        continue;
+      }
+
+      while (reducedIndex < reducedExpression.properties.length) {
+        const reducedProperty = reducedExpression.properties[reducedIndex];
+
+        if (
+          reducedProperty &&
+          t.isObjectProperty(reducedProperty) &&
+          getStaticObjectPropertyKeyName(reducedProperty.key) === nextRawKey
+        ) {
+          break;
+        }
+
+        if (reducedProperty) {
+          properties.push(t.cloneNode(reducedProperty));
+        }
+
+        reducedIndex += 1;
+      }
+
+      continue;
+    }
+
+    const reducedProperty = reducedExpression.properties[reducedIndex];
+
+    if (
+      !t.isObjectProperty(rawProperty) ||
+      !t.isExpression(rawProperty.value) ||
+      !reducedProperty ||
+      !t.isObjectProperty(reducedProperty) ||
+      !t.isExpression(reducedProperty.value)
+    ) {
+      properties.push(t.cloneNode(rawProperty));
+      reducedIndex += 1;
+      continue;
+    }
+
+    const nextProperty = t.cloneNode(reducedProperty);
+    nextProperty.value = preserveDynamicLeafValues(
+      rawProperty.value,
+      reducedProperty.value
+    );
+    properties.push(nextProperty);
+    reducedIndex += 1;
+  }
+
+  for (
+    ;
+    reducedIndex < reducedExpression.properties.length;
+    reducedIndex += 1
+  ) {
+    const reducedProperty = reducedExpression.properties[reducedIndex];
+
+    if (reducedProperty) {
+      properties.push(t.cloneNode(reducedProperty));
+    }
+  }
+
+  return t.objectExpression(properties);
+}
+
+function preserveArrayDynamicLeafValues(
+  rawExpression: t.ArrayExpression,
+  reducedExpression: t.ArrayExpression
+): t.ArrayExpression {
+  const elements: t.ArrayExpression["elements"] = [];
+  let reducedIndex = 0;
+
+  for (
+    let rawIndex = 0;
+    rawIndex < rawExpression.elements.length;
+    rawIndex += 1
+  ) {
+    const rawElement = rawExpression.elements[rawIndex];
+
+    if (!rawElement) {
+      elements.push(null);
+      continue;
+    }
+
+    if (t.isSpreadElement(rawElement)) {
+      const remainingRawElements = countRemainingRawArrayElements(
+        rawExpression.elements,
+        rawIndex + 1
+      );
+      const spreadElementCount = Math.max(
+        0,
+        reducedExpression.elements.length - reducedIndex - remainingRawElements
+      );
+
+      for (let index = 0; index < spreadElementCount; index += 1) {
+        const reducedElement = reducedExpression.elements[reducedIndex];
+
+        if (reducedElement) {
+          elements.push(t.cloneNode(reducedElement));
+        } else {
+          elements.push(null);
+        }
+
+        reducedIndex += 1;
+      }
+
+      continue;
+    }
+
+    const reducedElement = reducedExpression.elements[reducedIndex];
+
+    if (!reducedElement || t.isSpreadElement(reducedElement)) {
+      elements.push(t.cloneNode(rawElement));
+      reducedIndex += 1;
+      continue;
+    }
+
+    elements.push(preserveDynamicLeafValues(rawElement, reducedElement));
+    reducedIndex += 1;
+  }
+
+  for (; reducedIndex < reducedExpression.elements.length; reducedIndex += 1) {
+    const reducedElement = reducedExpression.elements[reducedIndex];
+
+    if (reducedElement) {
+      elements.push(t.cloneNode(reducedElement));
+    } else {
+      elements.push(null);
+    }
+  }
+
+  return t.arrayExpression(elements);
+}
+
+function getNextRawObjectPropertyKeyName(
+  properties: t.ObjectExpression["properties"],
+  startIndex: number
+): string | null {
+  for (let index = startIndex; index < properties.length; index += 1) {
+    const property = properties[index];
+
+    if (property && t.isObjectProperty(property) && !property.computed) {
+      return getStaticObjectPropertyKeyName(property.key);
+    }
+  }
+
+  return null;
+}
+
+function countRemainingRawObjectProperties(
+  properties: t.ObjectExpression["properties"],
+  startIndex: number
+): number {
+  let count = 0;
+
+  for (let index = startIndex; index < properties.length; index += 1) {
+    const property = properties[index];
+
+    if (property && !t.isSpreadElement(property)) {
+      count += 1;
+    }
+  }
+
+  return count;
+}
+
+function countRemainingRawArrayElements(
+  elements: t.ArrayExpression["elements"],
+  startIndex: number
+): number {
+  let count = 0;
+
+  for (let index = startIndex; index < elements.length; index += 1) {
+    const element = elements[index];
+
+    if (element && !t.isSpreadElement(element)) {
+      count += 1;
+    }
+  }
+
+  return count;
+}
+
+function analyzeCssPropSidecarHoistabilityForRouting(options: {
+  readonly partialEvalResult: CssPropPartialEvalPolicyResult;
+  readonly scope: NodePath<t.JSXOpeningElement>["scope"];
+}): CssPropSidecarHoistability {
+  const hoistability = analyzeCssPropSidecarHoistability({
+    expression: options.partialEvalResult.rawExpression,
+    reducedExpression: options.partialEvalResult.reducedExpression,
+    scope: options.scope
+  });
+
+  if (
+    hoistability.kind === "unsafe" &&
+    shouldRouteUnsafeSidecarCallThroughAstStatic(options.partialEvalResult)
+  ) {
+    return { kind: "not-candidate" };
+  }
+
+  return hoistability;
+}
+
+function getCssPropSidecarExpression(
+  result: CssPropPartialEvalPolicyResult
+): t.Expression {
+  return getSidecarCssRuleClassification(result.reducedExpression)
+    ? result.reducedExpression
+    : result.rawExpression;
+}
+
+function shouldRouteUnsafeSidecarCallThroughAstStatic(
+  result: CssPropPartialEvalPolicyResult
+): boolean {
+  if (!result.deoptReasons.includes("unsupported-call-expression")) {
+    return false;
+  }
+
+  const expression = unwrapTransparentCssRuleExpression(
+    getCssPropSidecarExpression(result)
+  );
+
+  return (
+    t.isCallExpression(expression) &&
+    t.isIdentifier(expression.callee) &&
+    expression.arguments.length === 0
+  );
+}
+
+function getCssPropLoweringExpression(options: {
+  readonly classification: CssPropValueClassification;
+  readonly partialEvalResult: CssPropPartialEvalPolicyResult;
+  readonly routedExpression: t.Expression;
+}): t.Expression {
+  if (
+    options.classification === "class-value" &&
+    (!containsArraySpreadElement(options.partialEvalResult.rawExpression) ||
+      containsArraySpreadElement(options.routedExpression))
+  ) {
+    return options.partialEvalResult.rawExpression;
+  }
+
+  return options.routedExpression;
 }
 
 function getCssValueClassification(options: {
@@ -444,7 +989,9 @@ function getCssPropLoweringMode(options: {
 
 function assertSupportedCssPropLoweringMode(
   path: NodePath<t.JSXOpeningElement>,
-  mode: CssPropLoweringMode
+  state: PluginState,
+  mode: CssPropLoweringMode,
+  partialEvalResult: CssPropPartialEvalPolicyResult
 ): void {
   switch (mode.kind) {
     case "ast-static-rule":
@@ -453,8 +1000,12 @@ function assertSupportedCssPropLoweringMode(
     case "class-value":
       return;
     case "unsupported":
-      throwUnsupportedCssPropLoweringMode(path, mode.cssValueClassification);
-      return;
+      return throwUnsupportedCssPropLoweringMode(
+        path,
+        state,
+        mode.cssValueClassification,
+        partialEvalResult
+      );
     default: {
       const exhaustive: never = mode;
       return exhaustive;
@@ -464,8 +1015,18 @@ function assertSupportedCssPropLoweringMode(
 
 function throwUnsupportedCssPropLoweringMode(
   path: NodePath<t.JSXOpeningElement>,
-  classification: Extract<CssPropValueClassification, `unsupported-${string}`>
+  state: PluginState,
+  classification: Extract<CssPropValueClassification, `unsupported-${string}`>,
+  partialEvalResult: CssPropPartialEvalPolicyResult
 ): never {
+  const partialEvalDiagnostic =
+    createPreferredStaticCssEvalDeoptDiagnostic(partialEvalResult);
+
+  if (partialEvalDiagnostic) {
+    registerStaticCssEvalDiagnosticMetadata(state, partialEvalDiagnostic);
+    throw path.buildCodeFrameError(partialEvalDiagnostic.message);
+  }
+
   switch (classification) {
     case "unsupported-function":
       throw path.buildCodeFrameError(unsupportedFunctionCssValueErrorMessage);
@@ -1650,10 +2211,16 @@ function getResolvedCssExpression(
   path: NodePath<t.JSXOpeningElement>,
   programPath: NodePath<t.Program>,
   state: PluginState,
-  attribute: t.JSXAttribute
+  partialEvalResult: CssPropPartialEvalPolicyResult
 ): t.Expression {
-  const cssExpression = getCssExpression(path, attribute);
+  if (isStaticCssPrimitiveExpression(partialEvalResult.reducedExpression)) {
+    return partialEvalResult.rawExpression;
+  }
+
   const ownerFile = getStaticCssEvalOwnerFile(state);
+  const cssExpression = getCssPropStaticEvalExpression(partialEvalResult);
+  const partialEvalDiagnostic =
+    createPreferredStaticCssEvalDeoptDiagnostic(partialEvalResult);
   const staticCssEvalResult = shouldResolveSameFileCssExpression(cssExpression)
     ? resolveSameFileStaticCssEvalExpression({
         expression: cssExpression,
@@ -1711,6 +2278,11 @@ function getResolvedCssExpression(
         registerStaticCssEvalResultMetadata(state, metadata);
       }
 
+      if (partialEvalDiagnostic) {
+        registerStaticCssEvalDiagnosticMetadata(state, partialEvalDiagnostic);
+        throw path.buildCodeFrameError(partialEvalDiagnostic.message);
+      }
+
       throw path.buildCodeFrameError(
         inlineStaticCssEvalResult.diagnostic.message
       );
@@ -1725,13 +2297,18 @@ function getResolvedCssExpression(
     }
 
     registerStaticCssEvalResultMetadata(state, staticCssEvalResult);
+    if (partialEvalDiagnostic) {
+      registerStaticCssEvalDiagnosticMetadata(state, partialEvalDiagnostic);
+      throw path.buildCodeFrameError(partialEvalDiagnostic.message);
+    }
+
     throw path.buildCodeFrameError(staticCssEvalResult.diagnostic.message);
   }
 
   if (staticCssEvalResult.kind === "resolved") {
     registerStaticCssEvalResultMetadata(state, staticCssEvalResult);
     return preserveDirectBooleanReferenceValues(
-      cssExpression,
+      getBooleanPreservationExpression(partialEvalResult, cssExpression),
       normalizeResolvedCssRuleExpression(staticCssEvalResult.expression)
     );
   }
@@ -1789,6 +2366,11 @@ function getResolvedCssExpression(
       scope: path.scope
     })
   ) {
+    if (partialEvalDiagnostic) {
+      registerStaticCssEvalDiagnosticMetadata(state, partialEvalDiagnostic);
+      throw path.buildCodeFrameError(partialEvalDiagnostic.message);
+    }
+
     throw path.buildCodeFrameError(unsupportedDynamicCssRuleValueErrorMessage);
   }
 
@@ -1798,6 +2380,11 @@ function getResolvedCssExpression(
       scope: path.scope
     })
   ) {
+    if (partialEvalDiagnostic) {
+      registerStaticCssEvalDiagnosticMetadata(state, partialEvalDiagnostic);
+      throw path.buildCodeFrameError(partialEvalDiagnostic.message);
+    }
+
     throw path.buildCodeFrameError(unsupportedDynamicCssRuleValueErrorMessage);
   }
 

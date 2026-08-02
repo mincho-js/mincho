@@ -396,6 +396,9 @@ if (import.meta.vitest) {
   type StaticCssEvalProviderResult = ReturnType<
     StaticCssEvalProvider["getResolvedCssValue"]
   >;
+  type StaticCssEvalProviderQuery = Parameters<
+    StaticCssEvalProvider["getResolvedCssValue"]
+  >[0];
   type StaticCssEvalValue = Extract<
     StaticCssEvalProviderResult,
     { kind: "resolved" }
@@ -766,6 +769,49 @@ if (import.meta.vitest) {
       expect(code).not.toContain("_cx(defaultObject)");
       expect(code).not.toContain("_cx(defaultConst)");
       expect(code).not.toContain("_cx(styles.button.primary)");
+    });
+
+    it("partial evaluator leaves reachable imports on the static css eval provider contract", async () => {
+      const fixturePath = await createBabelFixture(
+        `
+          import { button, tokens } from "./styles";
+
+          function App() {
+            return <>
+              <div css={button} />
+              <div css={tokens.button.primary} />
+            </>;
+          }
+        `,
+        "css-prop-partial-evaluator-provider-boundary"
+      );
+      const queries: StaticCssEvalProviderQuery[] = [];
+      const provider = createResolvedStaticCssEvalProvider({
+        button: { color: "red" },
+        "tokens.button.primary": { color: "purple" }
+      });
+      const observingProvider: StaticCssEvalProvider = {
+        getResolvedCssValue(query): StaticCssEvalProviderResult {
+          queries.push(query);
+          return provider.getResolvedCssValue(query);
+        }
+      };
+      const { result, code } = await babelTransform(fixturePath, {
+        jsxCssProp: true,
+        staticCssEvalProvider: observingProvider
+      });
+      const queryKeys = queries.map(({ bindingName, memberPath }) =>
+        memberPath?.length
+          ? `${bindingName}.${memberPath.join(".")}`
+          : bindingName
+      );
+
+      expect(result[1]).toContain('color: "red"');
+      expect(result[1]).toContain('color: "purple"');
+      expect(code).not.toContain(" css=");
+      expect(queryKeys).toEqual(
+        expect.arrayContaining(["button", "tokens.button.primary"])
+      );
     });
 
     it("static css eval metadata dedupes dependency diagnostics and resolved module ids", async () => {
@@ -1334,6 +1380,96 @@ if (import.meta.vitest) {
           (dependency) => dependency.resolvedFile === keysId
         )?.sourceIdentity?.sourceHash
       ).toBe(createTestSourceIdentity(colorKeySource).sourceHash);
+      expect(
+        secondTransform.staticCssEval?.resolvedDependencies.find(
+          (dependency) => dependency.resolvedFile === keysId
+        )?.sourceIdentity?.sourceHash
+      ).toBe(createTestSourceIdentity(backgroundKeySource).sourceHash);
+    });
+
+    it("partial evaluator cache invalidation recomputes helper object spread and computed key outputs", async () => {
+      const fs = await import("node:fs/promises");
+      const componentSource = `
+        import { button } from "./styles";
+
+        function App() {
+          return <div css={button} />;
+        }
+      `;
+      const stylesSource = `
+        import { base } from "./base";
+        import { propertyKey } from "./keys";
+
+        const helper = { ...base, [propertyKey]: "solid" } as const;
+        export const button = { ...helper } as const;
+      `;
+      const redBaseSource = `export const base = { color: "red" } as const;`;
+      const blueBaseSource = `export const base = { color: "blue" } as const;`;
+      const borderKeySource = `export const propertyKey = "borderColor" as const;`;
+      const backgroundKeySource = `export const propertyKey = "background" as const;`;
+      const { filePaths } = await createBabelFixtureFiles(
+        {
+          "component.tsx": componentSource,
+          "styles.ts": stylesSource,
+          "base.ts": redBaseSource,
+          "keys.ts": borderKeySource
+        },
+        "css-prop-partial-evaluator-cache-invalidation"
+      );
+      const componentId = filePaths["component.tsx"];
+      const stylesId = filePaths["styles.ts"];
+      const baseId = filePaths["base.ts"];
+      const keysId = filePaths["keys.ts"];
+      const provider = createFileBackedStaticCssEvalSourceProvider({
+        resolutions: {
+          [`${componentId}\0./styles`]: stylesId,
+          [`${stylesId}\0./base`]: baseId,
+          [`${stylesId}\0./keys`]: keysId
+        }
+      });
+
+      const firstTransform = await babelTransform(componentId, {
+        jsxCssProp: true,
+        staticCssEvalSourceProvider: provider
+      });
+      await fs.writeFile(baseId, blueBaseSource, "utf8");
+      await fs.writeFile(keysId, backgroundKeySource, "utf8");
+      const secondTransform = await babelTransform(componentId, {
+        jsxCssProp: true,
+        staticCssEvalSourceProvider: provider
+      });
+
+      expect(firstTransform.result[1]).toContain('color: "red"');
+      expect(firstTransform.result[1]).toContain('borderColor: "solid"');
+      expect(firstTransform.result[1]).not.toContain('background: "solid"');
+      expect(secondTransform.result[1]).toContain('color: "blue"');
+      expect(secondTransform.result[1]).toContain('background: "solid"');
+      expect(secondTransform.result[1]).not.toContain('borderColor: "solid"');
+      expect(firstTransform.staticCssEval?.dependencyFiles).toEqual([
+        stylesId,
+        baseId,
+        keysId
+      ]);
+      expect(secondTransform.staticCssEval?.dependencyFiles).toEqual([
+        stylesId,
+        baseId,
+        keysId
+      ]);
+      expect(
+        firstTransform.staticCssEval?.resolvedDependencies.find(
+          (dependency) => dependency.resolvedFile === baseId
+        )?.sourceIdentity?.sourceHash
+      ).toBe(createTestSourceIdentity(redBaseSource).sourceHash);
+      expect(
+        secondTransform.staticCssEval?.resolvedDependencies.find(
+          (dependency) => dependency.resolvedFile === baseId
+        )?.sourceIdentity?.sourceHash
+      ).toBe(createTestSourceIdentity(blueBaseSource).sourceHash);
+      expect(
+        firstTransform.staticCssEval?.resolvedDependencies.find(
+          (dependency) => dependency.resolvedFile === keysId
+        )?.sourceIdentity?.sourceHash
+      ).toBe(createTestSourceIdentity(borderKeySource).sourceHash);
       expect(
         secondTransform.staticCssEval?.resolvedDependencies.find(
           (dependency) => dependency.resolvedFile === keysId
@@ -2948,10 +3084,25 @@ if (import.meta.vitest) {
         "css-prop-reexport-whole-expression"
       );
       const provider = createUnsupportedReexportStaticCssEvalProvider();
-      const { result, code } = await babelTransform(wholeExpressionPath, {
-        jsxCssProp: true,
-        staticCssEvalProvider: provider
-      });
+      const { result, code, staticCssEval } = await babelTransform(
+        wholeExpressionPath,
+        {
+          jsxCssProp: true,
+          staticCssEvalProvider: provider
+        }
+      );
+
+      expect(staticCssEval?.diagnostics).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            code: "unsupported-source",
+            reason: "reexport-or-barrel",
+            importPath: "./barrel",
+            exportName: "button",
+            dependency: { file: "/provider/barrel.ts" }
+          })
+        ])
+      );
 
       expect(result[1]).toBe("");
       expect(code).not.toContain(" css=");
@@ -2973,9 +3124,22 @@ if (import.meta.vitest) {
           jsxCssProp: true,
           staticCssEvalProvider: provider
         })
-      ).rejects.toThrow(
-        'Cannot statically evaluate css prop value: export "button" uses unsupported reexport/barrel syntax'
-      );
+      ).rejects.toMatchObject({
+        message: expect.stringContaining(
+          'Cannot statically evaluate css prop value: export "button" uses unsupported reexport/barrel syntax'
+        ),
+        staticCssEval: expect.objectContaining({
+          diagnostics: expect.arrayContaining([
+            expect.objectContaining({
+              code: "unsupported-source",
+              reason: "reexport-or-barrel",
+              importPath: "./barrel",
+              exportName: "button",
+              dependency: { file: "/provider/barrel.ts" }
+            })
+          ])
+        })
+      });
     });
 
     it("lowers representative logical css rule branches", async () => {

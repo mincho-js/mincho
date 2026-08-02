@@ -31,79 +31,108 @@ export type SidecarSafetyState = {
 
 export function isSidecarSafeCssRuleExpression(options: {
   readonly expression: t.Expression;
+  readonly rawExpression?: t.Expression;
   readonly state: SidecarSafetyState;
 }): boolean {
   const expression = unwrapTransparentCssRuleExpression(options.expression);
+  const rawExpression = options.rawExpression
+    ? unwrapTransparentCssRuleExpression(options.rawExpression)
+    : null;
 
-  if (isSidecarRuleCallExpression(expression, options.state.scope)) {
+  if (
+    rawExpression &&
+    !isSidecarSafePreservedRawCssRuleExpression(
+      rawExpression,
+      expression,
+      options.state
+    )
+  ) {
+    return false;
+  }
+
+  return isSidecarSafeCssRuleExpressionNode(expression, options.state);
+}
+
+function isSidecarSafeCssRuleExpressionNode(
+  expression: t.Expression,
+  state: SidecarSafetyState
+): boolean {
+  if (isSidecarRuleCallExpression(expression, state.scope)) {
     return (
       t.isExpression(expression.callee) &&
-      isSidecarSafeExpression(expression.callee, options.state) &&
+      isSidecarSafeExpression(expression.callee, state) &&
       expression.arguments.every((argument) =>
         t.isSpreadElement(argument)
-          ? isSidecarSafeExpression(argument.argument, options.state)
-          : t.isExpression(argument) &&
-            isSidecarSafeExpression(argument, options.state)
+          ? isSidecarSafeExpression(argument.argument, state)
+          : t.isExpression(argument) && isSidecarSafeExpression(argument, state)
       )
     );
   }
 
   if (t.isObjectExpression(expression)) {
-    return expression.properties.every((property) => {
-      if (t.isSpreadElement(property)) {
-        return isSidecarSafeExpression(property.argument, options.state);
-      }
-
-      if (t.isObjectMethod(property)) {
-        return isSidecarSafeFunctionLike(
-          property,
-          options.state,
-          isSidecarSafeExpression
-        );
-      }
-
-      if (!t.isObjectProperty(property) || !t.isExpression(property.value)) {
-        return false;
-      }
-
-      if (
-        property.computed &&
-        (!t.isExpression(property.key) ||
-          !isSidecarSafeExpression(property.key, options.state))
-      ) {
-        return false;
-      }
-
-      return isSidecarSafeExpression(property.value, options.state);
-    });
+    return isSidecarSafeObjectExpression(expression, state);
   }
 
   if (t.isArrayExpression(expression)) {
-    return expression.elements.every((element) => {
-      if (!element) {
-        return false;
-      }
-
-      if (t.isSpreadElement(element)) {
-        return isSidecarSafeExpression(element.argument, options.state);
-      }
-
-      return isSidecarSafeExpression(element, options.state);
-    });
+    return isSidecarSafeArrayExpression(expression, state);
   }
 
   if (t.isConditionalExpression(expression)) {
     return (
-      isSidecarSafeCssRuleBranch(expression.consequent, options.state) &&
-      isSidecarSafeCssRuleBranch(expression.alternate, options.state)
+      isSidecarSafeCssRuleBranch(expression.consequent, state) &&
+      isSidecarSafeCssRuleBranch(expression.alternate, state)
     );
   }
 
   if (t.isLogicalExpression(expression)) {
     return (
-      isSidecarSafeCssRuleBranch(expression.left, options.state) &&
-      isSidecarSafeCssRuleBranch(expression.right, options.state)
+      isSidecarSafeCssRuleBranch(expression.left, state) &&
+      isSidecarSafeCssRuleBranch(expression.right, state)
     );
+  }
+
+  return true;
+}
+
+function isSidecarSafePreservedRawCssRuleExpression(
+  rawExpression: t.Expression,
+  expression: t.Expression,
+  state: SidecarSafetyState
+): boolean {
+  if (t.isObjectExpression(rawExpression) && t.isObjectExpression(expression)) {
+    return isSidecarSafeObjectExpression(rawExpression, state);
+  }
+
+  if (t.isArrayExpression(rawExpression) && t.isArrayExpression(expression)) {
+    return isSidecarSafeArrayExpression(rawExpression, state);
+  }
+
+  if (
+    t.isConditionalExpression(rawExpression) &&
+    t.isConditionalExpression(expression)
+  ) {
+    return (
+      isSidecarSafeCssRuleBranch(rawExpression.consequent, state) &&
+      isSidecarSafeCssRuleBranch(rawExpression.alternate, state)
+    );
+  }
+
+  if (
+    t.isLogicalExpression(rawExpression) &&
+    t.isLogicalExpression(expression)
+  ) {
+    return (
+      isSidecarSafeCssRuleBranch(rawExpression.left, state) &&
+      isSidecarSafeCssRuleBranch(rawExpression.right, state)
+    );
+  }
+
+  if (
+    (t.isCallExpression(rawExpression) ||
+      t.isOptionalCallExpression(rawExpression)) &&
+    (t.isCallExpression(expression) || t.isOptionalCallExpression(expression))
+  ) {
+    return isSidecarSafeExpression(rawExpression, state);
   }
 
   return true;
@@ -251,6 +280,21 @@ function isSidecarSafeObjectExpression(
           isSidecarSafeExpression(property.key, state))) &&
       isSidecarSafeExpression(property.value, state)
     );
+  });
+}
+
+function isSidecarSafeArrayExpression(
+  expression: t.ArrayExpression,
+  state: SidecarSafetyState
+): boolean {
+  return expression.elements.every((element) => {
+    if (!element) {
+      return false;
+    }
+
+    return t.isSpreadElement(element)
+      ? isSidecarSafeExpression(element.argument, state)
+      : isSidecarSafeExpression(element, state);
   });
 }
 
