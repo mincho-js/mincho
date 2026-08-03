@@ -10,11 +10,15 @@ import {
   type PartialEvalDeoptReason,
   type PartialEvalResult
 } from "../staticCssEval/partialEvaluator/index.js";
+import { PARTIAL_EVAL_DEOPT_TAXONOMY } from "../staticCssEval/deopt.js";
+import type { PartialEvalDeoptTaxonomyEntry } from "../staticCssEval/deopt.js";
 import { createStaticCssEvalPartialEvalDeoptDiagnostic } from "../staticCssEval/diagnostics.js";
 import {
   findUnsupportedImportedStaticCssEvalReferenceDiagnostic,
   resolveImportedStaticCssEvalExpression
 } from "../staticCssEval/importedModules.js";
+import { STATIC_CSS_API_POLICIES } from "../staticCssEval/policy.js";
+import type { StaticCssApiPolicy } from "../staticCssEval/policy.js";
 import { resolveSameFileStaticCssEvalExpression } from "../staticCssEval/sameFile.js";
 import type { PluginState, ProgramScope } from "../types.js";
 import {
@@ -99,12 +103,21 @@ const dynamicCssVariableHelperImportBindings = new WeakMap<
 >();
 const dynamicCssVariableCssImportScopes = new WeakSet<ProgramScope>();
 type CssPropPartialEvalPolicyResult = {
+  readonly policy: StaticCssApiPolicy;
+  readonly result: PartialEvalResult;
   readonly rawExpression: t.Expression;
   readonly reducedExpression: t.Expression;
   readonly metadata: PartialEvalResult["metadata"];
   readonly diagnostics: readonly PartialEvalDiagnostic[];
   readonly deoptReasons: readonly PartialEvalDeoptReason[];
+  readonly deopts: readonly PartialEvalDeoptTaxonomyEntry[];
 };
+type CssPropLoweringRouteResult = {
+  readonly cssExpression: t.Expression;
+  readonly cssValueClassification: CssPropValueClassification;
+  readonly cssLoweringMode: CssPropLoweringMode;
+};
+const jsxCssPropStaticEvalPolicy = STATIC_CSS_API_POLICIES["jsx-css-prop"];
 
 export function preprocessJsxCssProp(
   path: NodePath<t.Program>,
@@ -337,14 +350,13 @@ function normalizeOpeningElement(
     partialEvalResult
   );
 
-  const cssShapeExpression = getCssPropShapeExpression(partialEvalResult);
-  const dynamicCssVariableRule = getDynamicCssVariableRule({
-    expression: cssShapeExpression,
+  const dynamicCssVariableRule = getCssPropDynamicCssVariableRule({
+    partialEvalResult,
     scope: openingElementPath.scope
   });
   const sidecarHoistability = dynamicCssVariableRule
     ? ({ kind: "not-candidate" } satisfies CssPropSidecarHoistability)
-    : analyzeCssPropSidecarHoistabilityForRouting({
+    : getCssPropSidecarHoistabilityRoute({
         partialEvalResult,
         scope: openingElementPath.scope
       });
@@ -360,37 +372,19 @@ function normalizeOpeningElement(
     );
   }
 
-  const routedCssExpression = dynamicCssVariableRule
-    ? dynamicCssVariableRule.expression
-    : sidecarHoistability.kind === "hoistable" ||
-        sidecarHoistability.kind === "unsafe"
-      ? getCssPropSidecarExpression(partialEvalResult)
-      : getResolvedCssExpression(
-          openingElementPath,
-          programPath,
-          state,
-          partialEvalResult
-        );
-  const cssValueClassification = getCssValueClassification({
-    expression: routedCssExpression,
-    sidecarHoistability,
-    scope: openingElementPath.scope
-  });
-  const cssExpression = getCssPropLoweringExpression({
-    classification: cssValueClassification,
-    partialEvalResult,
-    routedExpression: routedCssExpression
-  });
-  const cssLoweringMode = getCssPropLoweringMode({
-    cssValueClassification,
+  const route = routeCssPropLowering({
     dynamicCssVariableRule,
-    sidecarHoistability
+    openingElementPath,
+    partialEvalResult,
+    programPath,
+    sidecarHoistability,
+    state
   });
 
   assertSupportedCssPropLoweringMode(
     openingElementPath,
     state,
-    cssLoweringMode,
+    route.cssLoweringMode,
     partialEvalResult
   );
 
@@ -408,9 +402,9 @@ function normalizeOpeningElement(
 
   return {
     cssAttribute,
-    cssExpression,
-    cssValueClassification,
-    cssLoweringMode,
+    cssExpression: route.cssExpression,
+    cssValueClassification: route.cssValueClassification,
+    cssLoweringMode: route.cssLoweringMode,
     dynamicCssVariableRule,
     dynamicCssVariableLowering,
     classNameAttribute: classNameAttributes[0] ?? null,
@@ -428,6 +422,7 @@ function evaluateCssPropPartialEvalPolicy(options: {
   readonly programPath: NodePath<t.Program>;
   readonly scope: NodePath<t.JSXOpeningElement>["scope"];
 }): CssPropPartialEvalPolicyResult {
+  const policy = jsxCssPropStaticEvalPolicy;
   const result = reducePartialEvalExpression({
     expression: options.expression,
     context: createPartialEvalContext({
@@ -440,12 +435,29 @@ function evaluateCssPropPartialEvalPolicy(options: {
     scope: options.scope
   });
 
-  return {
+  return adaptCssPropPartialEvalPolicyResult({
+    policy,
     rawExpression: options.expression,
-    reducedExpression: getPartialEvalResultExpression(result),
-    metadata: result.metadata,
-    diagnostics: result.diagnostics,
-    deoptReasons: result.diagnostics.map(({ reason }) => reason)
+    result
+  });
+}
+
+function adaptCssPropPartialEvalPolicyResult(options: {
+  readonly policy: StaticCssApiPolicy;
+  readonly rawExpression: t.Expression;
+  readonly result: PartialEvalResult;
+}): CssPropPartialEvalPolicyResult {
+  const diagnostics = options.result.diagnostics;
+
+  return {
+    policy: options.policy,
+    result: options.result,
+    rawExpression: options.rawExpression,
+    reducedExpression: getPartialEvalResultExpression(options.result),
+    metadata: options.result.metadata,
+    diagnostics,
+    deoptReasons: diagnostics.map(({ reason }) => reason),
+    deopts: diagnostics.map(({ reason }) => PARTIAL_EVAL_DEOPT_TAXONOMY[reason])
   };
 }
 
@@ -526,13 +538,13 @@ function shouldPreferPartialEvalDeoptDiagnostic(
   switch (reason) {
     case "mutated-binding":
     case "unsupported-import":
-    case "unsupported-call-expression":
     case "non-static-object-key":
     case "unsupported-spread":
     case "unsupported-computed-member":
     case "unsupported-template-interpolation":
     case "runtime-css-shape":
       return false;
+    case "unsupported-call-expression":
     case "cycle-detected":
     case "depth-limit":
     case "node-count-limit":
@@ -550,6 +562,20 @@ function getCssPropShapeExpression(
   return result.deoptReasons.some(isFailClosedShapeDeoptReason)
     ? result.rawExpression
     : preserveDynamicLeafValues(result.rawExpression, result.reducedExpression);
+}
+
+function getCssPropDynamicCssVariableRule(options: {
+  readonly partialEvalResult: CssPropPartialEvalPolicyResult;
+  readonly scope: NodePath<t.JSXOpeningElement>["scope"];
+}): DynamicCssVariableRule | null {
+  if (!options.partialEvalResult.policy.dynamicLeaves.cssVariables) {
+    return null;
+  }
+
+  return getDynamicCssVariableRule({
+    expression: getCssPropShapeExpression(options.partialEvalResult),
+    scope: options.scope
+  });
 }
 
 function getCssPropStaticEvalExpression(
@@ -865,10 +891,14 @@ function countRemainingRawArrayElements(
   return count;
 }
 
-function analyzeCssPropSidecarHoistabilityForRouting(options: {
+function getCssPropSidecarHoistabilityRoute(options: {
   readonly partialEvalResult: CssPropPartialEvalPolicyResult;
   readonly scope: NodePath<t.JSXOpeningElement>["scope"];
 }): CssPropSidecarHoistability {
+  if (!options.partialEvalResult.policy.sidecarDelegation.enabled) {
+    return { kind: "not-candidate" };
+  }
+
   const hoistability = analyzeCssPropSidecarHoistability({
     expression: options.partialEvalResult.rawExpression,
     reducedExpression: options.partialEvalResult.reducedExpression,
@@ -877,7 +907,10 @@ function analyzeCssPropSidecarHoistabilityForRouting(options: {
 
   if (
     hoistability.kind === "unsafe" &&
-    shouldRouteUnsafeSidecarCallThroughAstStatic(options.partialEvalResult)
+    shouldRouteUnsafeSidecarCallThroughAstStatic(
+      options.partialEvalResult,
+      options.scope
+    )
   ) {
     return { kind: "not-candidate" };
   }
@@ -885,23 +918,68 @@ function analyzeCssPropSidecarHoistabilityForRouting(options: {
   return hoistability;
 }
 
+function routeCssPropLowering(options: {
+  readonly dynamicCssVariableRule: DynamicCssVariableRule | null;
+  readonly openingElementPath: NodePath<t.JSXOpeningElement>;
+  readonly partialEvalResult: CssPropPartialEvalPolicyResult;
+  readonly programPath: NodePath<t.Program>;
+  readonly sidecarHoistability: CssPropSidecarHoistability;
+  readonly state: PluginState;
+}): CssPropLoweringRouteResult {
+  const routedCssExpression = options.dynamicCssVariableRule
+    ? options.dynamicCssVariableRule.expression
+    : options.sidecarHoistability.kind === "hoistable" ||
+        options.sidecarHoistability.kind === "unsafe"
+      ? getCssPropSidecarExpression(
+          options.partialEvalResult,
+          options.openingElementPath.scope
+        )
+      : getResolvedCssExpression(
+          options.openingElementPath,
+          options.programPath,
+          options.state,
+          options.partialEvalResult
+        );
+  const cssValueClassification = getCssValueClassification({
+    expression: routedCssExpression,
+    sidecarHoistability: options.sidecarHoistability,
+    scope: options.openingElementPath.scope
+  });
+
+  return {
+    cssExpression: getCssPropLoweringExpression({
+      classification: cssValueClassification,
+      partialEvalResult: options.partialEvalResult,
+      routedExpression: routedCssExpression
+    }),
+    cssValueClassification,
+    cssLoweringMode: getCssPropLoweringMode({
+      cssValueClassification,
+      dynamicCssVariableRule: options.dynamicCssVariableRule,
+      sidecarHoistability: options.sidecarHoistability
+    })
+  };
+}
+
 function getCssPropSidecarExpression(
-  result: CssPropPartialEvalPolicyResult
+  result: CssPropPartialEvalPolicyResult,
+  scope: Scope
 ): t.Expression {
-  return getSidecarCssRuleClassification(result.reducedExpression)
+  return getSidecarCssRuleClassification(result.reducedExpression, scope)
     ? result.reducedExpression
     : result.rawExpression;
 }
 
 function shouldRouteUnsafeSidecarCallThroughAstStatic(
-  result: CssPropPartialEvalPolicyResult
+  result: CssPropPartialEvalPolicyResult,
+  scope: Scope
 ): boolean {
   if (!result.deoptReasons.includes("unsupported-call-expression")) {
     return false;
   }
 
   const expression = unwrapTransparentCssRuleExpression(
-    getCssPropSidecarExpression(result)
+    getCssPropSidecarExpression(result, scope)
   );
 
   return (
@@ -942,7 +1020,65 @@ function getCssValueClassification(options: {
       : "unsupported-dynamic-css-rule";
   }
 
+  if (containsOptionalCallExpression(options.expression)) {
+    return "unsupported-dynamic-css-rule";
+  }
+
   return classifyCssPropValue(options.expression, options.scope);
+}
+
+function containsOptionalCallExpression(expression: t.Expression): boolean {
+  const unwrappedExpression = unwrapTransparentCssRuleExpression(expression);
+
+  if (t.isOptionalCallExpression(unwrappedExpression)) {
+    return true;
+  }
+
+  if (t.isObjectExpression(unwrappedExpression)) {
+    return unwrappedExpression.properties.some((property) => {
+      if (t.isSpreadElement(property)) {
+        return containsOptionalCallExpression(property.argument);
+      }
+
+      return (
+        t.isObjectProperty(property) &&
+        ((property.computed &&
+          t.isExpression(property.key) &&
+          containsOptionalCallExpression(property.key)) ||
+          (t.isExpression(property.value) &&
+            containsOptionalCallExpression(property.value)))
+      );
+    });
+  }
+
+  if (t.isArrayExpression(unwrappedExpression)) {
+    return unwrappedExpression.elements.some((element) => {
+      if (!element) {
+        return false;
+      }
+
+      return t.isSpreadElement(element)
+        ? containsOptionalCallExpression(element.argument)
+        : containsOptionalCallExpression(element);
+    });
+  }
+
+  if (t.isConditionalExpression(unwrappedExpression)) {
+    return (
+      containsOptionalCallExpression(unwrappedExpression.test) ||
+      containsOptionalCallExpression(unwrappedExpression.consequent) ||
+      containsOptionalCallExpression(unwrappedExpression.alternate)
+    );
+  }
+
+  if (t.isLogicalExpression(unwrappedExpression)) {
+    return (
+      containsOptionalCallExpression(unwrappedExpression.left) ||
+      containsOptionalCallExpression(unwrappedExpression.right)
+    );
+  }
+
+  return false;
 }
 
 function getCssPropLoweringMode(options: {
@@ -2297,7 +2433,10 @@ function getResolvedCssExpression(
     }
 
     registerStaticCssEvalResultMetadata(state, staticCssEvalResult);
-    if (partialEvalDiagnostic) {
+    if (
+      partialEvalDiagnostic &&
+      partialEvalResult.deoptReasons[0] !== "unsupported-call-expression"
+    ) {
       registerStaticCssEvalDiagnosticMetadata(state, partialEvalDiagnostic);
       throw path.buildCodeFrameError(partialEvalDiagnostic.message);
     }

@@ -52,6 +52,10 @@ export interface StaticCssEvalProviderSourcePolicyDescriptor {
   readonly sourceOrigin?: StaticCssEvalSourceOrigin;
   readonly canonicalModuleId?: string;
   readonly normalizedPathKey?: string;
+  readonly sourceHash?: string;
+  readonly sourceVersion?: string | number;
+  readonly version?: string | number;
+  readonly resolverKind?: string;
   readonly watchFiles?: readonly string[];
   readonly unsupportedReason?: StaticCssEvalUnsupportedReason;
 }
@@ -68,6 +72,9 @@ export interface StaticCssEvalProviderSourceMetadata {
   readonly sourceOrigin: StaticCssEvalSourceOrigin;
   readonly canonicalModuleId?: string;
   readonly normalizedPathKey?: string;
+  readonly sourceHash?: string;
+  readonly sourceVersion?: string | number;
+  readonly resolverKind?: string;
   readonly watchFiles?: readonly string[];
   readonly unsupportedReason?: StaticCssEvalUnsupportedReason;
 }
@@ -98,6 +105,16 @@ export function createStaticCssEvalProviderSourceMetadata(
       : {}),
     ...(descriptor.normalizedPathKey !== undefined
       ? { normalizedPathKey: descriptor.normalizedPathKey }
+      : {}),
+    ...(descriptor.sourceHash !== undefined
+      ? { sourceHash: descriptor.sourceHash }
+      : {}),
+    ...(descriptor.sourceVersion !== undefined ||
+    descriptor.version !== undefined
+      ? { sourceVersion: descriptor.sourceVersion ?? descriptor.version }
+      : {}),
+    ...(descriptor.resolverKind !== undefined
+      ? { resolverKind: descriptor.resolverKind }
       : {}),
     ...(descriptor.watchFiles !== undefined
       ? { watchFiles: [...descriptor.watchFiles] }

@@ -25,6 +25,10 @@ export {
   unsupportedStaticCssEvalResolutionPrefix
 } from "./staticCssEval.js";
 export {
+  MinchoProjectEngine as internalMinchoProjectEngine,
+  type StaticEvalProjectEngine as InternalStaticEvalProjectEngine
+} from "./staticCssEvalProjectEngine.js";
+export {
   internalCollectStaticCssEvalDependencyIds,
   internalCreateStaticCssEvalSourceHash,
   internalCreateStaticCssEvalSourceIdentity,

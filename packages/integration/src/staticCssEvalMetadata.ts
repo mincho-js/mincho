@@ -19,11 +19,17 @@ type StaticCssEvalProviderResult = ReturnType<
   StaticCssEvalProvider["getResolvedCssValue"]
 >;
 type StaticCssEvalMetadataDependency =
-  MinchoStaticCssEvalMetadata["dependencies"][number];
+  MinchoStaticCssEvalMetadata["dependencies"][number] & {
+    readonly sourceHash?: string;
+    readonly sourceVersion?: string | number;
+    readonly resolverKind?: string;
+  };
 type StaticCssEvalMetadataDiagnostic =
   MinchoStaticCssEvalMetadata["diagnostics"][number];
 type StaticCssEvalMetadataCacheKey =
-  MinchoStaticCssEvalMetadata["cacheKeys"][number];
+  MinchoStaticCssEvalMetadata["cacheKeys"][number] & {
+    readonly resolverKind?: string;
+  };
 type StaticCssEvalProviderMetadataSource = {
   dependencies?: readonly unknown[];
   diagnostics?: readonly StaticCssEvalMetadataDiagnostic[];

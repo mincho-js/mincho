@@ -170,8 +170,6 @@ export interface ImportedStaticCssEvalLoadedModule extends StaticCssEvalProvider
   id: string;
   source: string;
   realpath?: string;
-  sourceHash?: string;
-  version?: string | number;
 }
 
 export interface ImportedStaticCssEvalImportResolution extends StaticCssEvalProviderSourcePolicyDescriptor {

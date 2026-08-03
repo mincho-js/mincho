@@ -577,10 +577,24 @@ export function createImportedStaticCssEvalCacheKey(
     staticEvalSupportVersion: STATIC_CSS_MODULE_CACHE_SUPPORT_VERSION,
     resolvedId: parsedModule.resolvedFile,
     ...(sourceMetadata
-      ? createStaticCssEvalProviderSourceMetadata(sourceMetadata)
+      ? omitCacheKeySourceIdentity(
+          createStaticCssEvalProviderSourceMetadata(sourceMetadata)
+        )
       : {}),
     parserOptions: parsedModule.cacheKey.parserOptions
   };
+}
+
+function omitCacheKeySourceIdentity(
+  sourceMetadata: ReturnType<typeof createStaticCssEvalProviderSourceMetadata>
+): Omit<typeof sourceMetadata, "sourceHash" | "sourceVersion"> {
+  const {
+    sourceHash: _sourceHash,
+    sourceVersion: _sourceVersion,
+    ...metadata
+  } = sourceMetadata;
+
+  return metadata;
 }
 
 export function createImportedStaticCssEvalResolvedResult(options: {

@@ -14,6 +14,7 @@ import {
   internalIsStaticCssEvalStaticDataFile as isStaticCssEvalStaticDataFile,
   internalIsStaticCssEvalPathInsideRoot as isPathInsideRoot,
   internalIsVirtualStaticCssEvalId as isVirtualStaticCssEvalId,
+  internalMinchoProjectEngine,
   internalNormalizeStaticCssEvalFileId as normalizeStaticCssEvalFileId,
   internalPrepareStaticCssEvalStaticDataSource as prepareStaticCssEvalStaticDataSource,
   internalStaticCssEvalExternalResolutionPrefix as externalStaticCssEvalResolutionPrefix,
@@ -273,8 +274,7 @@ export function minchoVitePlugin(
   const resolverCache = new Map<string, string>();
   const resolvers = new Map<string, string>();
   const idToPluginData = new Map<string, Record<string, string>>();
-  const ownerToStaticCssEvalDependencies = new Map<string, Set<string>>();
-  const dependencyToStaticCssEvalOwners = new Map<string, Set<string>>();
+  const staticCssEvalProjectEngine = new internalMinchoProjectEngine();
   const ownerToCssPaths = new Map<string, Set<string>>();
   const cssPathToVirtualCssIds = new Map<string, Set<string>>();
   const virtualExt = ".vanilla.css";
@@ -352,73 +352,51 @@ export function minchoVitePlugin(
     ownerToCssPaths.delete(ownerId);
   }
 
-  function removeStaticCssEvalDependenciesForOwner(ownerId: string): void {
-    const dependencies = ownerToStaticCssEvalDependencies.get(ownerId);
-    if (!dependencies) {
-      return;
-    }
-
-    for (const dependency of dependencies) {
-      const owners = dependencyToStaticCssEvalOwners.get(dependency);
-      if (!owners) {
-        continue;
-      }
-
-      owners.delete(ownerId);
-      if (owners.size === 0) {
-        dependencyToStaticCssEvalOwners.delete(dependency);
-      }
-    }
-
-    ownerToStaticCssEvalDependencies.delete(ownerId);
-  }
-
-  function replaceStaticCssEvalDependenciesForOwner(
+  function addStaticCssEvalWatchFilesForOwner(
     pluginContext: PluginContext,
-    ownerId: string,
-    staticCssEval: StaticCssEvalMetadata | undefined
+    ownerId: string
   ): void {
-    // Vite invalidation consumes shared Babel/integration metadata as truth.
-    // This layer normalizes watch ids; it does not infer css symbol provenance.
-    removeStaticCssEvalDependenciesForOwner(ownerId);
-
-    const dependencyIds = collectStaticCssEvalDependencyIds(
-      staticCssEval
-    ) as Array<string>;
-    const dependencies = new Set<string>(
-      dependencyIds
-        .map((dependency) =>
-          normalizeStaticCssEvalFileId(dependency, rootRealpath)
-        )
-        .filter(
-          (dependency) =>
-            dependency !== ownerId &&
-            isWatchableStaticCssEvalDependency(dependency)
-        )
+    const fileResult = staticCssEvalProjectEngine.getFileResult(ownerId);
+    const dependencies = new Set(
+      fileResult
+        ? fileResult.dependencyFiles
+            .map((dependency) =>
+              normalizeStaticCssEvalFileId(dependency, rootRealpath)
+            )
+            .filter(
+              (dependency) =>
+                dependency !== ownerId &&
+                isWatchableStaticCssEvalDependency(dependency)
+            )
+        : []
     );
 
-    if (dependencies.size === 0) {
-      return;
-    }
-
-    ownerToStaticCssEvalDependencies.set(ownerId, dependencies);
-
     for (const dependency of dependencies) {
-      const owners =
-        dependencyToStaticCssEvalOwners.get(dependency) ?? new Set<string>();
-      owners.add(ownerId);
-      dependencyToStaticCssEvalOwners.set(dependency, owners);
       pluginContext.addWatchFile(dependency);
     }
   }
 
-  function invalidateStaticCssEvalDependency(dependencyId: string): void {
-    const owners = dependencyToStaticCssEvalOwners.get(dependencyId);
-    if (!owners) {
-      return;
+  function refreshStaticCssEvalProjectEngineFromAdapterResult(
+    ownerId: string,
+    staticCssEval: StaticCssEvalMetadata | undefined
+  ): void {
+    const fileResult = staticCssEvalProjectEngine.getFileResult(ownerId);
+    if (staticCssEval && !fileResult) {
+      staticCssEvalProjectEngine.refreshFile({
+        fileId: ownerId,
+        result: {
+          dependencyFiles: collectStaticCssEvalDependencyIds(staticCssEval)
+        }
+      });
+    } else if (!staticCssEval && fileResult) {
+      staticCssEvalProjectEngine.refreshFile({ fileId: ownerId });
     }
+  }
 
-    for (const ownerId of owners) {
+  function invalidateStaticCssEvalDependency(dependencyId: string): void {
+    for (const ownerId of staticCssEvalProjectEngine.invalidateByDependency(
+      dependencyId
+    )) {
       clearGeneratedCssForOwner(ownerId);
       invalidateViteModule(ownerId);
     }
@@ -623,6 +601,7 @@ export function minchoVitePlugin(
           babelOptions?.jsxCssProp === true
             ? {
                 ...babelOptions,
+                staticCssEvalProjectEngine,
                 staticCssEvalSourceProvider:
                   createViteStaticCssEvalSourceProvider(
                     this,
@@ -641,11 +620,7 @@ export function minchoVitePlugin(
             transformBabelOptions
           )) as BabelTransformResult;
         } catch (error) {
-          replaceStaticCssEvalDependenciesForOwner(
-            this,
-            fileId,
-            getStaticCssEvalFromTransformError(error)
-          );
+          addStaticCssEvalWatchFilesForOwner(this, fileId);
           throw error;
         }
         const {
@@ -655,7 +630,11 @@ export function minchoVitePlugin(
           staticCssEval
         } = transformResult;
 
-        replaceStaticCssEvalDependenciesForOwner(this, fileId, staticCssEval);
+        refreshStaticCssEvalProjectEngineFromAdapterResult(
+          fileId,
+          staticCssEval
+        );
+        addStaticCssEvalWatchFilesForOwner(this, fileId);
 
         if (!cssExtract || !file) {
           if (
@@ -1142,13 +1121,6 @@ function isExternalStaticCssEvalResolutionId(id: string): boolean {
 
 function assertNeverStaticCssEvalSourceKind(value: never): never {
   throw new TypeError(`Unexpected static css eval source kind: ${value}`);
-}
-
-function getStaticCssEvalFromTransformError(
-  error: unknown
-): StaticCssEvalMetadata | undefined {
-  return (error as { staticCssEval?: StaticCssEvalMetadata } | null)
-    ?.staticCssEval;
 }
 
 // == Tests ====================================================================

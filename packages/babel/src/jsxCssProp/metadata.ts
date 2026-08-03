@@ -177,6 +177,9 @@ export function createResolutionDependencyMetadataKey(
     dependency.sourceOrigin,
     dependency.canonicalModuleId,
     dependency.normalizedPathKey,
+    dependency.sourceHash,
+    dependency.sourceVersion,
+    dependency.resolverKind,
     dependency.watchFiles,
     dependency.unsupportedReason
   ]);
@@ -220,6 +223,7 @@ export function createStaticCssEvalCacheKeyMetadataKey(
     cacheKey.sourceOrigin,
     cacheKey.canonicalModuleId,
     cacheKey.normalizedPathKey,
+    cacheKey.resolverKind,
     cacheKey.watchFiles,
     cacheKey.unsupportedReason,
     cacheKey.parserOptions,

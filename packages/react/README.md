@@ -61,17 +61,28 @@ export function App() {
 }
 ```
 
-With `jsxCssProp: true`, supported values lower through the three CSS-rule paths below, or through `cx(...)` class-value merging. If an explicit `className` or pre-css spread aggregate contributes an existing class, merge order is the existing `className` first and the `css` prop class value second, equivalent to `cx(existingClassName, nextCssClassName)`. Post-css spread ordering is covered in Spread Support.
+With `jsxCssProp: true`, supported values lower through one of four compile-away paths documented below: three CSS-rule paths (AST static reduction, generated `.css.ts` sidecar, dynamic declaration leaf) plus `cx(...)` class-value fallback. If an explicit `className` or pre-css spread aggregate contributes an existing class, merge order is the existing `className` first and the `css` prop class value second, equivalent to `cx(existingClassName, nextCssClassName)`. Post-css spread ordering is covered in Spread Support.
 
 ### CSS Rule Lowering Paths
 
-Three layers split the work. The integration provider resolves project, package, data, virtual, and static CommonJS sources, cache identity, dependency metadata, and invalidation. The partial evaluator reduces only safe visible AST syntax into fresh AST values. The `css` prop router then chooses ast-static extraction, sidecar whole-rule lowering, dynamic declaration leaves, class-value fallback, or an unsupported diagnostic.
+Three layers split the work: integration provider, partial evaluator, and `css` prop router. The integration provider resolves project, package, data, virtual, and static CommonJS sources, cache identity, dependency metadata, and invalidation. The partial evaluator reduces only safe visible AST syntax into fresh AST values. The `css` prop router then chooses one of the four compile-away paths below, or emits a `Cannot statically evaluate css prop value` diagnostic when none applies.
 
-Mincho picks the narrowest compile-away path that matches the reduced `css` prop shape:
+Mincho picks the narrowest compile-away path that matches the reduced `css` prop shape. The four paths, in match order, are:
 
-1. AST/static CSS-rule extraction handles inline literals, mutation-free same-file `const` values, import-backed static objects or arrays, and static object or array spreads.
-2. Sidecar build-time whole-rule lowering preserves a whole rule expression and lets the generated `.css.ts` call `css(expression)`. Babel does not execute user modules or factories to discover returned styles.
-3. Render-time dynamic declaration leaf lowering keeps the CSS shape static, extracts a class that reads CSS variables, and writes only the dynamic declaration values through React-compatible `style`.
+1. AST static reduction handles inline literals, mutation-free same-file `const` values, import-backed static objects or arrays, and static object or array spreads. Reduced values are reconstructed as AST literals and extracted as a generated Mincho class.
+2. Generated `.css.ts` sidecar build-time execution delegation preserves a whole rule expression (or a nested call/spread inside an otherwise hoistable object) and lets the generated `.css.ts` call `css(<expression>)`. The build-time call runs inside vanilla-extract when the generated sidecar is compiled; Babel itself does not execute user modules, factories, getters, methods, or constructors to discover returned styles.
+3. Dynamic declaration leaf CSS-var lowering keeps the CSS shape static, extracts a class that reads generated CSS variables, and writes only the dynamic declaration values through the React-compatible `style` prop.
+4. Class-value fallback lowers primitive `css` values that are not proven CSS-rule-shaped (identifiers, members, calls, conditionals, logicals, non-string primitives, template literals, string literals) through `cx(...)` merge. When the expression is neither a proven CSS rule nor a class value, the router emits an unsupported diagnostic instead of guessing.
+
+Shape-to-path quick reference:
+
+| `css` shape | Path | Notes |
+| --- | --- | --- |
+| `{ color: "red" }`, `{ ...staticBase, color: "red" }`, proven same-file/import static object or array | AST static reduction | Reduced AST literals fold into one generated Mincho class. |
+| `makeRule()`, `{ color: makeColor() }`, `{ ...makeRule() }` where the whole expression is hoistable | Generated `.css.ts` sidecar (build-time execution delegation) | Whole expression is preserved and emitted as `css(<expression>)` inside the generated sidecar; vanilla-extract runs the call at build time, not Babel. |
+| `{ color: props.color }`, `condition ? { color: props.color } : { color: "red" }` | Dynamic declaration leaf CSS-var lowering | Class rule reads a generated CSS variable; the component writes only the leaf value via inline `style`. |
+| `activeClass`, `styles.activeClass`, `getClassName()`, `condition ? "a" : "b"` | Class-value fallback | Lowers through `cx(...)`; no CSS rule extraction. |
+| `{ ...makeRule(props.variant) }`, `{ [runtimeKey]: value }`, `styles[props.variant]`, `{ ...props.base, color: "red" }` | Unsupported | Runtime values would change rule shape; router emits a static-eval diagnostic. |
 
 Supported examples:
 
@@ -264,6 +275,13 @@ const cjsFromTemplatePath = require(templatePath);
 Bundlers provide source resolution and loading only. Vite and esbuild give Mincho provider-backed project, package, data, virtual, and static CommonJS source or literal payloads plus identity metadata and dependency edges. Mincho parses that source and statically evaluates the supported AST subset. No module execution is used. Mincho never executes user modules to obtain `css` prop values, and it does not call Node `require()`, use VM or `eval`, evaluate dynamic imports, or run bundler runtime code for static evaluation.
 
 Call execution remains deferred and out of scope. Mincho never executes a factory to discover returned styles. Sidecar-safe whole-rule expressions can preserve module-scope helper calls for generated `.css.ts`; dynamic declaration leaves under a static shape may use CSS variables. Unsupported cases include remote/http modules, dynamic CommonJS, package runtime resolution, runtime or unhoistable whole-rule calls/spreads/keys, optional calls, dynamic or wrong-shape object/array spread operands, dynamic or nullish optional bases, object/call/undefined template interpolation, dynamic imports, SWC-native integration, and full Webpack/Turbopack/Parcel bundle runtime emulation.
+
+Architecture non-goals. The following are deliberately deferred and are not offered by this transform:
+
+- Babel function inlining: Babel and static eval never execute user functions, module top-level code, getters, methods, or constructors, and they do not inline factory bodies to synthesize a returned style. Sidecar delegation is the only path where a module-scope factory contributes to CSS output, and that call runs at build time inside the generated `.css.ts`, not inside Babel.
+- VM/eval/native execution: Mincho does not use Node `vm`, `eval`, dynamic `import()`, `require` hooks, child-process loaders, or a native binary extractor to discover CSS values.
+- Public project-engine exposure: the internal `MinchoProjectEngine`/`StaticEvalProjectEngine` is shared adapter infrastructure used by `@mincho-js/babel`, `@mincho-js/integration`, `@mincho-js/vite`, and `@mincho-js/esbuild`. It is not a public API, plugin option, or user-facing extractor, and this transform does not expose it as one.
+- Route-aware CSS emission: Mincho does not split, tag, or scope generated CSS by route, framework page, or request. Route-based CSS emission is out of scope for this transform.
 
 Failure policy:
 

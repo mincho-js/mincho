@@ -1,3 +1,17 @@
+import {
+  INERT_STATIC_CSS_API_KINDS,
+  STATIC_CSS_API_KINDS,
+  STATIC_CSS_API_POLICIES
+} from "./policy.js";
+import {
+  PARTIAL_EVAL_DEOPT_REASONS_BY_POLICY_ORDER,
+  PARTIAL_EVAL_DEOPT_TAXONOMY,
+  STATIC_CSS_DEOPT_GROUPS
+} from "./deopt.js";
+
+export * from "./deopt.js";
+export * from "./policy.js";
+
 export interface StaticCssEvalProvider {
   getResolvedCssValue(query: StaticCssEvalQuery): StaticCssEvalResult;
 }
@@ -161,6 +175,9 @@ export interface ResolutionDependency {
   readonly sourceOrigin?: StaticCssEvalSourceOrigin;
   readonly canonicalModuleId?: string;
   readonly normalizedPathKey?: string;
+  readonly sourceHash?: string;
+  readonly sourceVersion?: string | number;
+  readonly resolverKind?: string;
   readonly watchFiles?: readonly string[];
   readonly unsupportedReason?: StaticCssEvalUnsupportedReason;
 }
@@ -175,6 +192,9 @@ export interface ResolutionChainEntry {
   readonly sourceOrigin?: StaticCssEvalSourceOrigin;
   readonly canonicalModuleId?: string;
   readonly normalizedPathKey?: string;
+  readonly sourceHash?: string;
+  readonly sourceVersion?: string | number;
+  readonly resolverKind?: string;
   readonly watchFiles?: readonly string[];
   readonly unsupportedReason?: StaticCssEvalUnsupportedReason;
 }
@@ -195,6 +215,7 @@ export interface StaticCssEvalCacheKey {
   readonly sourceOrigin?: StaticCssEvalSourceOrigin;
   readonly canonicalModuleId?: string;
   readonly normalizedPathKey?: string;
+  readonly resolverKind?: string;
   readonly watchFiles?: readonly string[];
   readonly unsupportedReason?: StaticCssEvalUnsupportedReason;
   parserOptions?: StaticCssEvalParserOptionsKey;
@@ -205,6 +226,14 @@ export type StaticCssEvalDiagnosticId =
   | "STATIC_CSS_EVAL_LOCAL_ALIAS_CYCLE"
   | "STATIC_CSS_EVAL_MUTABLE_BINDING"
   | "STATIC_CSS_EVAL_MUTATED_BINDING"
+  | "STATIC_CSS_EVAL_UNSUPPORTED_CALL_EXPRESSION"
+  | "STATIC_CSS_EVAL_NON_STATIC_OBJECT_KEY"
+  | "STATIC_CSS_EVAL_UNSUPPORTED_SPREAD"
+  | "STATIC_CSS_EVAL_UNSUPPORTED_COMPUTED_MEMBER"
+  | "STATIC_CSS_EVAL_RUNTIME_CSS_SHAPE_UNSUPPORTED"
+  | "STATIC_CSS_EVAL_TEMPLATE_INTERPOLATION_UNSUPPORTED"
+  | "STATIC_CSS_EVAL_PARTIAL_EVAL_DEPTH_EXCEEDED"
+  | "STATIC_CSS_EVAL_PARTIAL_EVAL_NODE_COUNT_EXCEEDED"
   | "STATIC_CSS_EVAL_UNSUPPORTED_ARRAY_ELEMENT"
   | "STATIC_CSS_EVAL_OBJECT_SPREAD_UNSUPPORTED"
   | "STATIC_CSS_EVAL_COMPUTED_MEMBER_UNSUPPORTED"
@@ -229,6 +258,14 @@ export const STATIC_CSS_EVAL_DIAGNOSTIC_IDS = [
   "STATIC_CSS_EVAL_LOCAL_ALIAS_CYCLE",
   "STATIC_CSS_EVAL_MUTABLE_BINDING",
   "STATIC_CSS_EVAL_MUTATED_BINDING",
+  "STATIC_CSS_EVAL_UNSUPPORTED_CALL_EXPRESSION",
+  "STATIC_CSS_EVAL_NON_STATIC_OBJECT_KEY",
+  "STATIC_CSS_EVAL_UNSUPPORTED_SPREAD",
+  "STATIC_CSS_EVAL_UNSUPPORTED_COMPUTED_MEMBER",
+  "STATIC_CSS_EVAL_RUNTIME_CSS_SHAPE_UNSUPPORTED",
+  "STATIC_CSS_EVAL_TEMPLATE_INTERPOLATION_UNSUPPORTED",
+  "STATIC_CSS_EVAL_PARTIAL_EVAL_DEPTH_EXCEEDED",
+  "STATIC_CSS_EVAL_PARTIAL_EVAL_NODE_COUNT_EXCEEDED",
   "STATIC_CSS_EVAL_UNSUPPORTED_ARRAY_ELEMENT",
   "STATIC_CSS_EVAL_OBJECT_SPREAD_UNSUPPORTED",
   "STATIC_CSS_EVAL_COMPUTED_MEMBER_UNSUPPORTED",
@@ -322,10 +359,23 @@ export const STATIC_CSS_EVAL_UNSUPPORTED_REASONS = [
 export type StaticCssEvalUnsupportedReason =
   (typeof STATIC_CSS_EVAL_UNSUPPORTED_REASONS)[number];
 
+export type StaticCssEvalDiagnosticSeverity = "error";
+
+export type StaticCssEvalDiagnosticCategory =
+  | "policy"
+  | "syntax-reducer"
+  | "binding-provenance"
+  | "dependency-source"
+  | "sidecar-hoistability"
+  | "project-cache";
+
 export interface StaticCssEvalDiagnostic {
   id?: StaticCssEvalDiagnosticId;
   code: StaticCssEvalDiagnosticCode;
+  category?: StaticCssEvalDiagnosticCategory;
+  severity?: StaticCssEvalDiagnosticSeverity;
   message: string;
+  help?: string;
   reason: StaticCssEvalUnsupportedReason;
   expressionType?: string;
   owner: StaticCssEvalSourceLocation;
@@ -334,6 +384,7 @@ export interface StaticCssEvalDiagnostic {
   exportName?: StaticCssEvalExportName;
   memberPath?: string[];
   importChain?: string[];
+  supportMatrix?: StaticCssEvalSupportMatrixEntry;
 }
 
 export type StaticCssEvalDependencyKind = "owner" | "project-local-import";
@@ -725,6 +776,14 @@ if (import.meta.vitest) {
     STATIC_CSS_EVAL_LOCAL_ALIAS_CYCLE: true,
     STATIC_CSS_EVAL_MUTABLE_BINDING: true,
     STATIC_CSS_EVAL_MUTATED_BINDING: true,
+    STATIC_CSS_EVAL_UNSUPPORTED_CALL_EXPRESSION: true,
+    STATIC_CSS_EVAL_NON_STATIC_OBJECT_KEY: true,
+    STATIC_CSS_EVAL_UNSUPPORTED_SPREAD: true,
+    STATIC_CSS_EVAL_UNSUPPORTED_COMPUTED_MEMBER: true,
+    STATIC_CSS_EVAL_RUNTIME_CSS_SHAPE_UNSUPPORTED: true,
+    STATIC_CSS_EVAL_TEMPLATE_INTERPOLATION_UNSUPPORTED: true,
+    STATIC_CSS_EVAL_PARTIAL_EVAL_DEPTH_EXCEEDED: true,
+    STATIC_CSS_EVAL_PARTIAL_EVAL_NODE_COUNT_EXCEEDED: true,
     STATIC_CSS_EVAL_UNSUPPORTED_ARRAY_ELEMENT: true,
     STATIC_CSS_EVAL_OBJECT_SPREAD_UNSUPPORTED: true,
     STATIC_CSS_EVAL_COMPUTED_MEMBER_UNSUPPORTED: true,
@@ -881,6 +940,80 @@ if (import.meta.vitest) {
   } satisfies StaticCssEvalResult;
 
   describe("static css evaluator contracts", () => {
+    it("keeps jsx css prop policy enabled while css authoring and rules authoring stay inert", () => {
+      expect(STATIC_CSS_API_KINDS).toEqual([
+        "jsx-css-prop",
+        "css-authoring",
+        "rules-authoring",
+        "theme-token",
+        "styled-variant"
+      ]);
+
+      expect(STATIC_CSS_API_POLICIES["jsx-css-prop"]).toMatchObject({
+        state: "enabled",
+        imports: {
+          mode: "provider-result-only",
+          staticBindings: true,
+          providerResultOnly: true
+        },
+        calls: { mode: "deopt", evaluate: false, deoptInReducer: true },
+        memberPaths: { mode: "static-only", staticMembers: true },
+        computedKeys: { mode: "static-only", dynamicObjectKeys: false },
+        spreads: { mode: "static-only", dynamicObjectArray: false },
+        templateInterpolation: {
+          mode: "static-primitive-only",
+          runtimeValues: false
+        },
+        dynamicLeaves: { mode: "css-variable", runtimeCssObjects: false },
+        sidecarDelegation: { mode: "whole-rule", enabled: true }
+      });
+
+      for (const kind of INERT_STATIC_CSS_API_KINDS) {
+        const policy = STATIC_CSS_API_POLICIES[kind];
+
+        expect(policy.state).toBe("inert");
+        expect(policy.imports.staticBindings).toBe(false);
+        expect(policy.calls.evaluate).toBe(false);
+        expect(policy.memberPaths.staticMembers).toBe(false);
+        expect(policy.computedKeys.staticObjectKeys).toBe(false);
+        expect(policy.spreads.staticObjectArray).toBe(false);
+        expect(policy.templateInterpolation.staticPrimitives).toBe(false);
+        expect(policy.dynamicLeaves.cssVariables).toBe(false);
+        expect(policy.sidecarDelegation.enabled).toBe(false);
+      }
+    });
+
+    it("keeps partial evaluator deopt taxonomy exhaustive", () => {
+      const mappedReasons = Object.keys(PARTIAL_EVAL_DEOPT_TAXONOMY);
+      const taxonomyEntries = Object.values(PARTIAL_EVAL_DEOPT_TAXONOMY);
+
+      expect(mappedReasons).toEqual(PARTIAL_EVAL_DEOPT_REASONS_BY_POLICY_ORDER);
+      expect(new Set(mappedReasons).size).toBe(
+        PARTIAL_EVAL_DEOPT_REASONS_BY_POLICY_ORDER.length
+      );
+      expect(taxonomyEntries.map((entry) => entry.reason)).toEqual(
+        PARTIAL_EVAL_DEOPT_REASONS_BY_POLICY_ORDER
+      );
+      expect(new Set(taxonomyEntries.map((entry) => entry.group))).toEqual(
+        new Set(STATIC_CSS_DEOPT_GROUPS)
+      );
+      expect(PARTIAL_EVAL_DEOPT_TAXONOMY["mutated-binding"].group).toBe(
+        "binding-provenance"
+      );
+      expect(PARTIAL_EVAL_DEOPT_TAXONOMY["unsupported-import"].group).toBe(
+        "dependency-source"
+      );
+      expect(
+        PARTIAL_EVAL_DEOPT_TAXONOMY["unsupported-call-expression"].group
+      ).toBe("sidecar-hoistability");
+      expect(PARTIAL_EVAL_DEOPT_TAXONOMY["runtime-css-shape"].group).toBe(
+        "policy"
+      );
+      expect(PARTIAL_EVAL_DEOPT_TAXONOMY["depth-limit"].group).toBe(
+        "project-cache"
+      );
+    });
+
     it("encodes static evaluator limits and source-provider guardrails", () => {
       expect(STATIC_CSS_EVAL_LIMITS).toEqual({
         maxImportDepth: 10,
@@ -1193,7 +1326,7 @@ if (import.meta.vitest) {
       expect(staticCssEvalDiagnosticIds).toEqual(
         STATIC_CSS_EVAL_DIAGNOSTIC_IDS
       );
-      expect(staticCssEvalDiagnosticIds).toHaveLength(22);
+      expect(staticCssEvalDiagnosticIds).toHaveLength(30);
     });
   });
 }

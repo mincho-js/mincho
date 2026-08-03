@@ -21,6 +21,7 @@ import {
   internalIsStaticCssEvalStaticDataFile as isStaticCssEvalStaticDataFile,
   internalIsStaticCssEvalPathInsideRoot as isPathInsideRoot,
   internalIsVirtualStaticCssEvalId as isVirtualStaticCssEvalId,
+  internalMinchoProjectEngine,
   internalNormalizeStaticCssEvalFileId as normalizeStaticCssEvalFileId,
   internalPrepareStaticCssEvalStaticDataSource as prepareStaticCssEvalStaticDataSource,
   internalStaticCssEvalExternalResolutionPrefix as externalStaticCssEvalResolutionPrefix,
@@ -688,19 +689,15 @@ function isExternalStaticCssEvalResolutionId(id: string): boolean {
 
 function getWatchableStaticCssEvalDependencyFiles(
   rootRealpath: string,
-  staticCssEval: StaticCssEvalMetadata | undefined,
+  staticCssEval: { readonly dependencyFiles?: readonly string[] } | undefined,
   ownerId?: string
 ): string[] {
-  // esbuild watch files come from shared static css eval metadata.
-  // Normalize ids for watchFiles, but do not re-derive symbol provenance here.
   const watchFiles = new Set<string>();
   const ownerFileId = ownerId
     ? normalizeStaticCssEvalFileId(ownerId, rootRealpath)
     : "";
 
-  for (const dependencyFile of collectStaticCssEvalDependencyIds(
-    staticCssEval
-  )) {
+  for (const dependencyFile of staticCssEval?.dependencyFiles ?? []) {
     const fileId = normalizeStaticCssEvalFileId(dependencyFile, rootRealpath);
 
     if (fileId === ownerFileId || !fs.existsSync(fileId)) {
@@ -793,6 +790,7 @@ export function minchoEsbuildPlugin({
         new Map();
       const staticCssEvalLoadedSourceCache: StaticCssEvalLoadedSourceCache =
         new Map();
+      const staticCssEvalProjectEngine = new internalMinchoProjectEngine();
       const rootRealpath = getRealpathOrResolvedPath(
         build.initialOptions.absWorkingDir ?? process.cwd()
       );
@@ -886,6 +884,7 @@ export function minchoEsbuildPlugin({
           babelOptions?.jsxCssProp === true
             ? {
                 ...babelOptions,
+                staticCssEvalProjectEngine,
                 staticCssEvalSourceProvider:
                   createEsbuildStaticCssEvalSourceProvider({
                     build,
@@ -905,6 +904,8 @@ export function minchoEsbuildPlugin({
           args.path,
           transformBabelOptions
         )) as BabelTransformResult;
+        const staticCssEvalFileResult =
+          staticCssEvalProjectEngine.getFileResult(args.path);
 
         // the extracted code and original are the same -> no css extracted
         if (file && cssExtract && cssExtract != code) {
@@ -920,7 +921,9 @@ export function minchoEsbuildPlugin({
           },
           watchFiles: getWatchableStaticCssEvalDependencyFiles(
             await rootRealpath,
-            staticCssEval,
+            staticCssEvalFileResult ?? {
+              dependencyFiles: collectStaticCssEvalDependencyIds(staticCssEval)
+            },
             args.path
           )
         };

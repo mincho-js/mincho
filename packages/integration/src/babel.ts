@@ -14,6 +14,11 @@ import {
   mergeStaticCssEvalMetadata
 } from "./staticCssEvalMetadata.js";
 import { createStaticCssEvalPrepass } from "./staticCssEvalPrepass.js";
+import {
+  MinchoProjectEngine,
+  type StaticEvalProjectEngine,
+  type StaticEvalProjectEngineGeneratedArtifact
+} from "./staticCssEvalProjectEngine.js";
 
 type MaybePromise<T> = T | Promise<T>;
 
@@ -178,6 +183,7 @@ export type BabelOptions = Omit<
   staticCssEvalProvider?: PluginOptions["staticCssEvalProvider"];
   /** @internal Async source provider used to prepare imported css eval data. */
   staticCssEvalSourceProvider?: StaticCssEvalSourceProvider;
+  staticCssEvalProjectEngine?: StaticEvalProjectEngine;
 };
 
 export type BabelTransformResult = {
@@ -195,11 +201,20 @@ export async function babelTransform(
     jsxCssProp = false,
     staticCssEvalProvider,
     staticCssEvalSourceProvider,
+    staticCssEvalProjectEngine,
     ...babelCoreOptions
   } = babel;
+  const projectEngine = staticCssEvalProjectEngine;
+  const prepassSourceProvider =
+    projectEngine && staticCssEvalSourceProvider
+      ? projectEngine.getBabelStaticEvalProvider(
+          path,
+          staticCssEvalSourceProvider
+        )
+      : staticCssEvalSourceProvider;
   const staticCssEvalPrepass =
-    jsxCssProp === true && staticCssEvalSourceProvider
-      ? await createStaticCssEvalPrepass(path, staticCssEvalSourceProvider)
+    jsxCssProp === true && prepassSourceProvider
+      ? await createStaticCssEvalPrepass(path, prepassSourceProvider)
       : undefined;
   const observedStaticCssEvalMetadata = createEmptyStaticCssEvalMetadata();
   const preparedStaticCssEvalProvider =
@@ -243,11 +258,12 @@ export async function babelTransform(
       observedStaticCssEvalMetadata
     );
 
-    if (staticCssEval) {
-      throw new BabelTransformError(path, error, staticCssEval);
-    }
-
-    throw error;
+    projectEngine?.refreshFile({
+      fileId: path,
+      ...(staticCssEval ? { result: staticCssEval } : {}),
+      preserveProviderRecords: true
+    });
+    throw new BabelTransformError(path, error, staticCssEval);
   }
 
   if (result === null || result.code == null) {
@@ -262,6 +278,15 @@ export async function babelTransform(
     staticCssEvalPrepass?.result,
     staticCssEvalMetadata
   );
+  projectEngine?.refreshFile({
+    fileId: path,
+    ...(staticCssEval ? { result: staticCssEval } : {}),
+    generatedArtifacts: createStaticCssEvalGeneratedArtifacts(
+      path,
+      options.result
+    ),
+    preserveProviderRecords: true
+  });
 
   return {
     result: options.result,
@@ -269,6 +294,15 @@ export async function babelTransform(
     jsxCssPropTransformed: options.jsxCssPropTransformed === true,
     ...(staticCssEval ? { staticCssEval } : {})
   };
+}
+
+function createStaticCssEvalGeneratedArtifacts(
+  ownerFile: string,
+  [artifactFile, source]: readonly [string, string]
+): StaticEvalProjectEngineGeneratedArtifact[] {
+  return artifactFile && source
+    ? [{ ownerFile, artifactFile, source, kind: "sidecar-css-ts" }]
+    : [];
 }
 
 // == Tests ====================================================================
@@ -495,6 +529,69 @@ if (import.meta.vitest) {
   }
 
   describe("babelTransform", () => {
+    it("does not start a prepass for a project engine without a source provider", async () => {
+      const fixturePath = await createBabelFixture(
+        `
+          function App() {
+            return <div css={{ color: "red" }} />;
+          }
+        `,
+        "css-prop-engine-without-provider"
+      );
+      const engine = new MinchoProjectEngine();
+
+      await expect(
+        babelTransform(fixturePath, {
+          jsxCssProp: true,
+          staticCssEvalProjectEngine: engine
+        })
+      ).resolves.toMatchObject({ jsxCssPropTransformed: true });
+    });
+
+    it("refreshes the project engine when a transform fails without static css eval", async () => {
+      const fixturePath = await createBabelFixture(
+        "const broken =",
+        "transform-failure-without-static-css-eval"
+      );
+      const engine = new MinchoProjectEngine();
+      engine.refreshFile({
+        fileId: fixturePath,
+        result: { dependencyFiles: ["/stale-dependency.ts"] },
+        generatedArtifacts: [
+          {
+            ownerFile: fixturePath,
+            artifactFile: "stale.css.ts",
+            source: "stale",
+            kind: "sidecar-css-ts"
+          }
+        ]
+      });
+      const provider = engine.getBabelStaticEvalProvider(fixturePath);
+      await provider.resolve(fixturePath, "./current-dependency");
+      let thrownError: unknown;
+
+      try {
+        await babelTransform(fixturePath, {
+          staticCssEvalProjectEngine: engine
+        });
+      } catch (error) {
+        thrownError = error;
+      }
+
+      expect(thrownError).toBeInstanceOf(BabelTransformError);
+
+      if (!(thrownError instanceof BabelTransformError)) {
+        throw new Error("Expected BabelTransformError for failed transform");
+      }
+
+      expect(thrownError.staticCssEval).toBeUndefined();
+      expect(engine.getFileResult(fixturePath)).toMatchObject({
+        dependencyFiles: [],
+        generatedArtifacts: [],
+        providerSnapshot: [expect.objectContaining({ kind: "resolve" })]
+      });
+    });
+
     it("extracts css prop generated css calls into sidecar output", async () => {
       const fixturePath = await createBabelFixture(
         `
@@ -545,6 +642,43 @@ if (import.meta.vitest) {
       expect(code).not.toContain(" css=");
       expect(code).not.toContain("css={{");
       expect(code).not.toContain('color: "red"');
+    });
+
+    it("emits sidecar build-time call-valued leaf and spread call css prop rules", async () => {
+      const fixturePath = await createBabelFixture(
+        `
+          function makeRule(color = "red") {
+            return { color };
+          }
+
+          function makeColor() {
+            return "blue";
+          }
+
+          function App() {
+            return <>
+              <div css={makeRule("red")} />
+              <div css={{ color: makeColor() }} />
+              <div css={{ ...makeRule("green") }} />
+            </>;
+          }
+        `,
+        "css-prop-sidecar-build-time-calls"
+      );
+      const { result, code } = await babelTransform(fixturePath, {
+        jsxCssProp: true
+      });
+      const [, sidecarSource] = result;
+
+      expect(code).not.toContain(" css=");
+      expect(code).not.toMatch(/\bcss\(/);
+      expect(code).not.toContain("_cx(makeRule");
+      expect(code).not.toContain("_cx(makeColor");
+      expect(sidecarSource).toContain('_css(makeRule("red"))');
+      expect(sidecarSource).toMatch(/_css\(\{\s+color: makeColor\(\)\s+\}\)/);
+      expect(sidecarSource).toMatch(
+        /_css\(\{\s+\.\.\.makeRule\("green"\)\s+\}\)/
+      );
     });
 
     it("preserves direct object and class-value css props without a static source provider", async () => {
@@ -926,7 +1060,7 @@ if (import.meta.vitest) {
       ).toHaveLength(1);
     });
 
-    it("runs async prepass only for css-prop-reachable imports", async () => {
+    it("dependency pruning keeps unused import out of async prepass", async () => {
       const path = await import("node:path");
       const ownerSource = `
         import { button } from "./styles";
@@ -1477,7 +1611,7 @@ if (import.meta.vitest) {
       ).toBe(createTestSourceIdentity(backgroundKeySource).sourceHash);
     });
 
-    it("cache invalidation follows sidecar build-time factory spread helper source identity", async () => {
+    it("cache invalidation follows sidecar build-time factory spread helper source identity without unused helper", async () => {
       const fs = await import("node:fs/promises");
       const componentSource = `
         import { makeButton } from "./factory";
@@ -1560,6 +1694,78 @@ if (import.meta.vitest) {
           (dependency) => dependency.resolvedFile === baseId
         )?.sourceIdentity?.sourceHash
       ).toBe(createTestSourceIdentity(blueBaseSource).sourceHash);
+    });
+
+    it("routes vite and esbuild style static css eval adapters through the project engine", async () => {
+      const componentSource = `
+        import { button } from "./styles";
+
+        function App() {
+          return <div css={button} />;
+        }
+      `;
+      const stylesSource = `import { token } from "./tokens"; export const button = { color: token } as const;`;
+      const tokenSource = `export const token = "red" as const;`;
+      const { filePaths } = await createBabelFixtureFiles(
+        {
+          "component.tsx": componentSource,
+          "styles.ts": stylesSource,
+          "tokens.ts": tokenSource
+        },
+        "css-prop-project-engine-adapter-routes"
+      );
+      const componentId = filePaths["component.tsx"];
+      const stylesId = filePaths["styles.ts"];
+      const tokensId = filePaths["tokens.ts"];
+      const engine = new MinchoProjectEngine();
+      const createAdapterProvider = (resolverKind: StaticCssEvalResolverKind) =>
+        createFileBackedStaticCssEvalSourceProvider({
+          resolverKind,
+          resolutions: {
+            [`${componentId}\0./styles`]: stylesId,
+            [`${stylesId}\0./tokens`]: tokensId
+          }
+        });
+
+      const viteTransform = await babelTransform(componentId, {
+        jsxCssProp: true,
+        staticCssEvalProjectEngine: engine,
+        staticCssEvalSourceProvider: createAdapterProvider("vite")
+      });
+      const viteFileResult = engine.getFileResult(componentId);
+      const invalidatedOwners = engine.invalidateByDependency(tokensId);
+      const invalidatedFileResult = engine.getFileResult(componentId);
+      const esbuildTransform = await babelTransform(componentId, {
+        jsxCssProp: true,
+        staticCssEvalProjectEngine: engine,
+        staticCssEvalSourceProvider: createAdapterProvider("esbuild")
+      });
+      const esbuildFileResult = engine.getFileResult(componentId);
+
+      expect(viteTransform.result[1]).toContain('color: "red"');
+      expect(viteFileResult?.dependencyFiles).toEqual(
+        expect.arrayContaining([stylesId, tokensId])
+      );
+      expect(viteFileResult?.generatedArtifacts).toHaveLength(1);
+      expect(viteFileResult?.cacheKeys.length).toBeGreaterThan(0);
+      expect(
+        viteFileResult?.providerSnapshot.map((record) => record.kind)
+      ).toEqual(expect.arrayContaining(["load", "resolve"]));
+      expect(
+        viteFileResult?.providerSnapshot.some(
+          (record) => record.result?.resolverKind === "vite"
+        )
+      ).toBe(true);
+      expect(invalidatedOwners).toEqual([componentId]);
+      expect(invalidatedFileResult?.generatedArtifacts).toEqual([]);
+      expect(esbuildTransform.result[1]).toContain('color: "red"');
+      expect(esbuildFileResult?.invalidated).toBe(false);
+      expect(esbuildFileResult?.generatedArtifacts).toHaveLength(1);
+      expect(
+        esbuildFileResult?.providerSnapshot.some(
+          (record) => record.result?.resolverKind === "esbuild"
+        )
+      ).toBe(true);
     });
 
     it("cache invalidation follows template interpolation operand source identity", async () => {
@@ -2000,16 +2206,29 @@ if (import.meta.vitest) {
           expect.objectContaining({
             resolvedFile: packageId,
             sourceKind: "package-source",
+            sourceIdentity: expect.objectContaining({
+              sourceHash: "package-source-v1"
+            }),
+            resolverKind: "test",
             watchFiles: [pnpWatchFile]
           }),
           expect.objectContaining({
             resolvedFile: dataId,
             sourceKind: "static-data",
+            sourceIdentity: expect.objectContaining({
+              sourceHash: "data-source-v1"
+            }),
+            resolverKind: "test",
             watchFiles: [dataWatchFile]
           }),
           expect.objectContaining({
             resolvedFile: virtualId,
-            sourceKind: "provider-virtual"
+            sourceKind: "provider-virtual",
+            sourceIdentity: {
+              sourceHash: "virtual-source-v1",
+              version: "virtual-loaded-v1"
+            },
+            resolverKind: "test"
           })
         ])
       );
@@ -2078,7 +2297,9 @@ if (import.meta.vitest) {
           exportName: "button",
           memberPath: [],
           inspected: true,
-          contributed: true
+          contributed: true,
+          sourceHash: createTestSourceIdentity(stylesSource).sourceHash,
+          resolverKind: "test"
         })
       ]);
       expect(staticCssEval?.cacheKeys[0]).toMatchObject({
@@ -2139,7 +2360,7 @@ if (import.meta.vitest) {
       expect(thrownError.staticCssEval?.resolvedDependencies).toEqual([]);
     });
 
-    it("does not reuse an unresolved export result after imported source content changes", async () => {
+    it("does not reuse a negative dependency unresolved export result after imported source content changes", async () => {
       const fs = await import("node:fs/promises");
       const componentSource = `
         import { button } from "./styles";
@@ -2372,7 +2593,11 @@ if (import.meta.vitest) {
               return {
                 sourceText: testCase.sourceText,
                 sourceKind: "static-data",
-                sourceIdentity: { version: testCase.label },
+                sourceIdentity: {
+                  sourceHash: createTestSourceIdentity(testCase.sourceText)
+                    .sourceHash,
+                  version: testCase.label
+                },
                 resolverKind: "test"
               };
             }
@@ -2412,6 +2637,12 @@ if (import.meta.vitest) {
             sourceKind: "unsupported-source-shape",
             sourceOrigin: "unsupported",
             unsupportedReason: testCase.unsupportedReason,
+            sourceIdentity: {
+              sourceHash: createTestSourceIdentity(testCase.sourceText)
+                .sourceHash,
+              version: testCase.label
+            },
+            resolverKind: "test",
             loaded: true
           })
         ]);
@@ -3145,11 +3376,9 @@ if (import.meta.vitest) {
     it("lowers representative logical css rule branches", async () => {
       const fixturePath = await createBabelFixture(
         `
-          const providedClass = "provided";
-          const maybeClass = null;
           const andClass = "and-class";
 
-          function App() {
+          function App(providedClass: string, maybeClass: string | null) {
             return <>
               <div css={providedClass || { color: "red" }} />
               <div css={maybeClass ?? [{ color: "green" }]} />

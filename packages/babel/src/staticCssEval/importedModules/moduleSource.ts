@@ -137,6 +137,9 @@ export function mergeImportedStaticCssEvalSourceMetadata(
       loadedModule.canonicalModuleId ?? resolutionMetadata.canonicalModuleId,
     normalizedPathKey:
       loadedModule.normalizedPathKey ?? resolutionMetadata.normalizedPathKey,
+    sourceHash: loadedModule.sourceHash ?? resolutionMetadata.sourceHash,
+    sourceVersion: loadedModule.version ?? resolutionMetadata.sourceVersion,
+    resolverKind: loadedModule.resolverKind ?? resolutionMetadata.resolverKind,
     watchFiles: loadedModule.watchFiles ?? resolutionMetadata.watchFiles,
     unsupportedReason:
       loadedModule.unsupportedReason ?? resolutionMetadata.unsupportedReason

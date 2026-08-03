@@ -6,8 +6,8 @@ import {
   internalCreateImportedStaticCssEvalProvider as createImportedStaticCssEvalProvider,
   internalGetStaticCssEvalMemberReference as getStaticCssEvalMemberReference,
   internalUnwrapTransparentCssRuleExpression as unwrapTransparentCssRuleExpression,
-  type InternalImportedStaticCssEvalImportResolution as ImportedStaticCssEvalImportResolution,
-  type InternalImportedStaticCssEvalLoadedModule as ImportedStaticCssEvalLoadedModule,
+  type InternalImportedStaticCssEvalImportResolution as BabelImportedStaticCssEvalImportResolution,
+  type InternalImportedStaticCssEvalLoadedModule as BabelImportedStaticCssEvalLoadedModule,
   type InternalImportedStaticCssEvalModuleRecord as ImportedStaticCssEvalModuleRecord,
   type PluginOptions
 } from "@mincho-js/babel";
@@ -27,6 +27,19 @@ import type {
 type StaticCssEvalProvider = NonNullable<
   PluginOptions["staticCssEvalProvider"]
 >;
+
+type ImportedStaticCssEvalLoadedModule =
+  BabelImportedStaticCssEvalLoadedModule & {
+    readonly sourceHash?: string;
+    readonly version?: string | number;
+    readonly resolverKind?: string;
+  };
+
+type ImportedStaticCssEvalImportResolution =
+  BabelImportedStaticCssEvalImportResolution & {
+    readonly sourceHash?: string;
+    readonly resolverKind?: string;
+  };
 
 interface NormalizedStaticCssEvalSourceResolution {
   resolvedFile: string;
@@ -1557,24 +1570,6 @@ function getStaticCssEvalPrepassObjectPropertyName(
   return null;
 }
 
-function getStaticCssEvalPrepassMemberPropertyName(
-  expression: StaticCssEvalPrepassMemberExpression
-): string | null {
-  if (!expression.computed && t.isIdentifier(expression.property)) {
-    return expression.property.name;
-  }
-
-  if (t.isStringLiteral(expression.property)) {
-    return expression.property.value;
-  }
-
-  if (t.isNumericLiteral(expression.property)) {
-    return String(expression.property.value);
-  }
-
-  return null;
-}
-
 function getStaticCssEvalPrepassRequireImportPath(
   expression: t.CallExpression,
   moduleRecord: ImportedStaticCssEvalModuleRecord
@@ -1724,6 +1719,19 @@ function createStaticCssEvalPrepassImportResolution(
   const unsupportedReason =
     loadedSource?.unsupportedReason ?? resolution.unsupportedReason;
   const watchFiles = loadedSource?.watchFiles ?? resolution.watchFiles;
+  const loadedSourceText = loadedSource
+    ? (loadedSource.sourceText ?? loadedSource.source)
+    : undefined;
+  const sourceIdentity = loadedSource
+    ? loadedSourceText === undefined
+      ? (normalizeStaticCssEvalSourceIdentity(
+          loadedSource.sourceIdentity,
+          loadedSource.sourceHash,
+          loadedSource.version
+        ) ?? resolution.sourceIdentity)
+      : createLoadedSourceIdentity(loadedSourceText, loadedSource, resolution)
+    : resolution.sourceIdentity;
+  const resolverKind = loadedSource?.resolverKind ?? resolution.resolverKind;
 
   return {
     importerId,
@@ -1733,6 +1741,13 @@ function createStaticCssEvalPrepassImportResolution(
     normalizedPathKey,
     sourceKind,
     sourceOrigin,
+    ...(sourceIdentity?.sourceHash
+      ? { sourceHash: sourceIdentity.sourceHash }
+      : {}),
+    ...(sourceIdentity?.version !== undefined
+      ? { version: sourceIdentity.version }
+      : {}),
+    resolverKind,
     ...(unsupportedReason ? { unsupportedReason } : {}),
     ...(watchFiles ? { watchFiles: [...watchFiles] } : {})
   };
@@ -1837,6 +1852,9 @@ function createLoadedModuleSourceMetadata(
   | "sourceKind"
   | "sourceOrigin"
   | "unsupportedReason"
+  | "sourceHash"
+  | "version"
+  | "resolverKind"
   | "watchFiles"
 > {
   const sourceKind = loadedSource.sourceKind ?? resolution?.sourceKind;
@@ -1852,6 +1870,16 @@ function createLoadedModuleSourceMetadata(
   const unsupportedReason =
     loadedSource.unsupportedReason ?? resolution?.unsupportedReason;
   const watchFiles = loadedSource.watchFiles ?? resolution?.watchFiles;
+  const sourceIdentity = normalizeStaticCssEvalSourceIdentity(
+    loadedSource.sourceIdentity,
+    loadedSource.sourceHash,
+    loadedSource.version
+  );
+  const sourceHash =
+    sourceIdentity?.sourceHash ?? resolution?.sourceIdentity?.sourceHash;
+  const version =
+    sourceIdentity?.version ?? resolution?.sourceIdentity?.version;
+  const resolverKind = loadedSource.resolverKind ?? resolution?.resolverKind;
 
   return {
     ...(canonicalModuleId ? { canonicalModuleId } : {}),
@@ -1859,6 +1887,9 @@ function createLoadedModuleSourceMetadata(
     ...(sourceKind ? { sourceKind } : {}),
     ...(sourceOrigin ? { sourceOrigin } : {}),
     ...(unsupportedReason ? { unsupportedReason } : {}),
+    ...(sourceHash ? { sourceHash } : {}),
+    ...(version !== undefined ? { version } : {}),
+    ...(resolverKind ? { resolverKind } : {}),
     ...(watchFiles ? { watchFiles: [...watchFiles] } : {})
   };
 }
@@ -3187,7 +3218,7 @@ if (import.meta.vitest) {
       expect(result.resolvedModuleCache.has(unusedId)).toBe(false);
     });
 
-    it("prepass loads partial evaluator helper body computed key and object spread dependencies", async () => {
+    it("prepass loads used helper body dependencies without unused helper sweep", async () => {
       const ownerId = "/project/src/App.tsx";
       const baseId = "/project/src/base.ts";
       const keysId = "/project/src/keys.ts";
@@ -3336,7 +3367,7 @@ if (import.meta.vitest) {
       expect(result.resolvedModuleCache.has(unusedId)).toBe(false);
     });
 
-    it("records unresolved prepass dependencies and load failures", async () => {
+    it("records negative dependency metadata for unresolved prepass dependencies and load failures", async () => {
       const ownerId = "/project/src/App.tsx";
       const loadFailureId = "/project/src/load-failure.ts";
       const ownerSource = `
