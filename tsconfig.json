@@ -30,6 +30,9 @@
       "path": "packages/transform-to-vanilla"
     },
     {
+      "path": "packages/transform-runtime"
+    },
+    {
       "path": "packages/vite"
     },
     {

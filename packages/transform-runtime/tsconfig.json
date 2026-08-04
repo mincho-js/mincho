@@ -5,9 +5,6 @@
       "path": "../../configs/vite-config-custom"
     },
     {
-      "path": "../transform-runtime"
-    },
-    {
       "path": "./tsconfig.lib.json"
     },
     {

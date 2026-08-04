@@ -2236,6 +2236,7 @@ __metadata:
     "@babel/preset-typescript": "npm:^7.28.5"
     "@babel/traverse": "npm:^7.29.0"
     "@emotion/hash": "npm:^0.9.2"
+    "@mincho-js/transform-runtime": "workspace:^"
     "@types/babel__core": "npm:^7.20.5"
     "@types/babel__generator": "npm:^7.27.0"
     "@types/babel__traverse": "npm:^7.28.0"
@@ -2363,6 +2364,17 @@ __metadata:
   peerDependencies:
     react: ">=16.8.0"
     react-dom: ">=16.8.0"
+  languageName: unknown
+  linkType: soft
+
+"@mincho-js/transform-runtime@workspace:^, @mincho-js/transform-runtime@workspace:packages/transform-runtime":
+  version: 0.0.0-use.local
+  resolution: "@mincho-js/transform-runtime@workspace:packages/transform-runtime"
+  dependencies:
+    eslint-config-custom: "workspace:^"
+    prettier-config-custom: "workspace:^"
+    tsconfig-custom: "workspace:^"
+    vite-config-custom: "workspace:^"
   languageName: unknown
   linkType: soft
 

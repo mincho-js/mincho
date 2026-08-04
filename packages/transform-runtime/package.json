@@ -1,7 +1,7 @@
 {
   "$schema": "https://json.schemastore.org/package.json",
-  "name": "@mincho-js/babel",
-  "description": "Babel configuration for Mincho.js",
+  "name": "@mincho-js/transform-runtime",
+  "description": "Dependency-free helpers emitted by Mincho transforms",
   "version": "0.1.0",
   "sideEffects": false,
   "type": "module",
@@ -9,15 +9,8 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/mincho-js/mincho.git",
-    "directory": "packages/babel"
+    "directory": "packages/transform-runtime"
   },
-  "keywords": [
-    "babel"
-  ],
-  "bugs": {
-    "url": "https://github.com/mincho-js/mincho/issues"
-  },
-  "homepage": "https://github.com/mincho-js/mincho/tree/main/packages/babel#readme",
   "typings": "./dist/esm/index.d.ts",
   "main": "./dist/cjs/index.cjs",
   "module": "./dist/esm/index.mjs",
@@ -37,8 +30,8 @@
     "directory": "_release/package"
   },
   "files": [
-    "dist",
-    "src",
+    "README.md",
+    "dist/",
     "**/package.json"
   ],
   "scripts": {
@@ -46,25 +39,12 @@
     "build": "yarn g:build",
     "build:watch": "yarn g:build-watch",
     "test": "yarn g:test",
-    "test:watch": "yarn g:test-watch",
-    "coverage": "yarn g:coverage",
     "lint": "yarn g:lint",
     "fix": "yarn g:fix",
     "check": "yarn g:check"
   },
   "prettier": "prettier-config-custom",
-  "dependencies": {
-    "@babel/core": "^7.29.0",
-    "@babel/helper-module-imports": "^7.28.6",
-    "@babel/preset-typescript": "^7.28.5",
-    "@babel/traverse": "^7.29.0",
-    "@emotion/hash": "^0.9.2",
-    "@mincho-js/transform-runtime": "workspace:^"
-  },
   "devDependencies": {
-    "@types/babel__core": "^7.20.5",
-    "@types/babel__generator": "^7.27.0",
-    "@types/babel__traverse": "^7.28.0",
     "eslint-config-custom": "workspace:^",
     "prettier-config-custom": "workspace:^",
     "tsconfig-custom": "workspace:^",
