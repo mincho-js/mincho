@@ -21,6 +21,8 @@ import type {
   SpreadAggregatedCssPropLowering
 } from "./types.js";
 
+const keyAttributeName = "key";
+const refAttributeName = "ref";
 export function transformSpreadAggregatedCssProp(
   path: NodePath<t.JSXOpeningElement>,
   normalizedElement: NormalizedJsxCssPropElement
@@ -126,9 +128,12 @@ function createPreCssSpreadAggregatedCssPropLowering(
     );
   }
 
+  const explicitKeyRefAttributesBeforeCss = getExplicitKeyRefAttributes(
+    normalizedElement.attributesBeforeCss
+  );
   const preCssBinding = createAggregatePropsBinding(
     path,
-    normalizedElement.attributesBeforeCss,
+    getAggregateAttributes(normalizedElement.attributesBeforeCss),
     "mincho"
   );
 
@@ -153,7 +158,9 @@ function createPreCssSpreadAggregatedCssPropLowering(
   return {
     declarations: preCssBinding.declarations,
     attributes: [
+      ...explicitKeyRefAttributesBeforeCss.beforeSpread,
       t.jsxSpreadAttribute(t.cloneNode(preCssBinding.restIdentifier)),
+      ...explicitKeyRefAttributesBeforeCss.afterSpread,
       classNameAttribute,
       ...normalizedElement.attributesAfterCss.filter(
         (attribute) => !isNamedJsxAttribute(attribute, classNameAttributeName)
@@ -173,17 +180,23 @@ function createPostCssSpreadAggregatedCssPropLowering(
     );
   }
 
+  const explicitKeyRefAttributesBeforeCss = getExplicitKeyRefAttributes(
+    normalizedElement.attributesBeforeCss
+  );
+  const explicitKeyRefAttributesAfterCss = getExplicitKeyRefAttributes(
+    normalizedElement.attributesAfterCss
+  );
   const preCssBinding =
     normalizedElement.attributesBeforeCss.length > 0
       ? createAggregatePropsBinding(
           path,
-          normalizedElement.attributesBeforeCss,
+          getAggregateAttributes(normalizedElement.attributesBeforeCss),
           "minchoPre"
         )
       : null;
   const postCssBinding = createAggregatePropsBinding(
     path,
-    normalizedElement.attributesAfterCss,
+    getAggregateAttributes(normalizedElement.attributesAfterCss),
     preCssBinding ? "minchoPost" : "mincho"
   );
   const canInlineExplicitCssClassName =
@@ -232,10 +245,14 @@ function createPostCssSpreadAggregatedCssPropLowering(
   );
 
   const nextAttributes: Array<t.JSXAttribute | t.JSXSpreadAttribute> = [
+    ...explicitKeyRefAttributesBeforeCss.beforeSpread,
     ...(preCssBinding
       ? [t.jsxSpreadAttribute(t.cloneNode(preCssBinding.restIdentifier))]
       : []),
+    ...explicitKeyRefAttributesBeforeCss.afterSpread,
+    ...explicitKeyRefAttributesAfterCss.beforeSpread,
     t.jsxSpreadAttribute(t.cloneNode(postCssBinding.restIdentifier)),
+    ...explicitKeyRefAttributesAfterCss.afterSpread,
     classNameAttribute
   ];
 
@@ -261,11 +278,17 @@ function createDynamicCssVariableSpreadAggregatedCssPropLowering(
   );
 
   const runtimeLowering = getDynamicCssVariableRuntimeLowering(lowering);
+  const explicitKeyRefAttributesBeforeCss = getExplicitKeyRefAttributes(
+    normalizedElement.attributesBeforeCss
+  );
+  const explicitKeyRefAttributesAfterCss = getExplicitKeyRefAttributes(
+    normalizedElement.attributesAfterCss
+  );
   const preCssBinding =
     normalizedElement.attributesBeforeCss.length > 0
       ? createAggregatePropsBindingWithStyle(
           path,
-          normalizedElement.attributesBeforeCss,
+          getAggregateAttributes(normalizedElement.attributesBeforeCss),
           "minchoPre"
         )
       : null;
@@ -273,7 +296,7 @@ function createDynamicCssVariableSpreadAggregatedCssPropLowering(
     normalizedElement.attributesAfterCss.length > 0
       ? createAggregatePropsBindingWithStyle(
           path,
-          normalizedElement.attributesAfterCss,
+          getAggregateAttributes(normalizedElement.attributesAfterCss),
           preCssBinding ? "minchoPost" : "mincho"
         )
       : null;
@@ -305,12 +328,16 @@ function createDynamicCssVariableSpreadAggregatedCssPropLowering(
       ...(postCssBinding?.declarations ?? [])
     ],
     attributes: [
+      ...explicitKeyRefAttributesBeforeCss.beforeSpread,
       ...(preCssBinding
         ? [t.jsxSpreadAttribute(t.cloneNode(preCssBinding.restIdentifier))]
         : []),
+      ...explicitKeyRefAttributesBeforeCss.afterSpread,
+      ...explicitKeyRefAttributesAfterCss.beforeSpread,
       ...(postCssBinding
         ? [t.jsxSpreadAttribute(t.cloneNode(postCssBinding.restIdentifier))]
         : []),
+      ...explicitKeyRefAttributesAfterCss.afterSpread,
       classNameAttribute,
       styleAttribute
     ]
@@ -574,6 +601,38 @@ export function createAggregatePropsExpression(
   );
 }
 
+function getAggregateAttributes(
+  attributes: readonly (t.JSXAttribute | t.JSXSpreadAttribute)[]
+): readonly (t.JSXAttribute | t.JSXSpreadAttribute)[] {
+  return attributes.filter((attribute) => !isKeyOrRefAttribute(attribute));
+}
+
+function getExplicitKeyRefAttributes(
+  attributes: readonly (t.JSXAttribute | t.JSXSpreadAttribute)[]
+): {
+  readonly beforeSpread: t.JSXAttribute[];
+  readonly afterSpread: t.JSXAttribute[];
+} {
+  const firstSpreadIndex = attributes.findIndex((attribute) =>
+    t.isJSXSpreadAttribute(attribute)
+  );
+  const beforeSpread: t.JSXAttribute[] = [];
+  const afterSpread: t.JSXAttribute[] = [];
+
+  attributes.forEach((attribute, index) => {
+    if (!isKeyOrRefAttribute(attribute)) {
+      return;
+    }
+
+    (firstSpreadIndex === -1 || index < firstSpreadIndex
+      ? beforeSpread
+      : afterSpread
+    ).push(t.cloneNode(attribute));
+  });
+
+  return { beforeSpread, afterSpread };
+}
+
 type AggregatePropsExpressionWithStyle = {
   readonly declarations: t.VariableDeclaration[];
   readonly expression: t.ObjectExpression;
@@ -717,5 +776,14 @@ function isNamedJsxAttribute(
     t.isJSXAttribute(attribute) &&
     t.isJSXIdentifier(attribute.name) &&
     attribute.name.name === attributeName
+  );
+}
+
+function isKeyOrRefAttribute(
+  attribute: t.JSXAttribute | t.JSXSpreadAttribute
+): attribute is t.JSXAttribute {
+  return (
+    isNamedJsxAttribute(attribute, keyAttributeName) ||
+    isNamedJsxAttribute(attribute, refAttributeName)
   );
 }

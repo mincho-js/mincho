@@ -115,6 +115,10 @@ if (import.meta.vitest) {
   ) => Record<string, unknown>;
   type RuntimeCx = (...values: unknown[]) => string;
   type RuntimeCss = (styles: unknown) => string;
+  type RuntimeVx = (
+    value: string | number | boolean | null | undefined,
+    suffix?: string | null
+  ) => string | number;
   type StaticCssEvalProvider = NonNullable<
     PluginOptions["staticCssEvalProvider"]
   >;
@@ -201,13 +205,30 @@ if (import.meta.vitest) {
       "__minchoJsx",
       "__minchoCx",
       "__minchoCss",
+      "__minchoVx",
       `${runtimeCode}\n${returnStatement}`
-    ) as (jsx: RuntimeJsx, cx: RuntimeCx, css: RuntimeCss) => unknown;
+    ) as (
+      jsx: RuntimeJsx,
+      cx: RuntimeCx,
+      css: RuntimeCss,
+      vx: RuntimeVx
+    ) => unknown;
 
     return execute(
       (_tag, props = {}) => props,
       (...values) => values.filter(Boolean).join(" "),
-      () => "css-rule"
+      () => "css-rule",
+      (value, suffix) => {
+        if (
+          value === null ||
+          value === undefined ||
+          typeof value === "boolean"
+        ) {
+          return "var(--c-, )";
+        }
+
+        return suffix ? `${value}${suffix}` : value;
+      }
     );
   }
 
@@ -228,6 +249,35 @@ if (import.meta.vitest) {
                     isGeneratedCxImportSpecifier(specifier)
                       ? t.identifier("__minchoCx")
                       : t.stringLiteral("css-rule")
+                  )
+                ]);
+              }
+            );
+
+            if (declarations.length === 0) {
+              importPath.remove();
+              return;
+            }
+
+            importPath.replaceWithMultiple(declarations);
+            return;
+          }
+
+          if (importPath.node.source.value === "@mincho-js/transform-runtime") {
+            const declarations = importPath.node.specifiers.flatMap(
+              (specifier) => {
+                if (
+                  !t.isImportSpecifier(specifier) ||
+                  !t.isIdentifier(specifier.imported) ||
+                  specifier.imported.name !== "vx"
+                ) {
+                  return [];
+                }
+
+                return t.variableDeclaration("const", [
+                  t.variableDeclarator(
+                    t.cloneNode(specifier.local),
+                    t.identifier("__minchoVx")
                   )
                 ]);
               }
@@ -489,14 +539,14 @@ if (import.meta.vitest) {
       case "direct":
         return {
           kind: rule.kind,
-          expressionType: rule.expression.type,
-          leafProperties: rule.leaves.map((leaf) => leaf.propertyName)
+          expressionType: rule.fragment.expression.type,
+          leafProperties: rule.fragment.leaves.map((leaf) => leaf.propertyName)
         };
       case "branch":
         return {
           kind: rule.kind,
-          expressionType: rule.expression.type,
-          leafProperties: rule.leaves.map((leaf) => leaf.propertyName),
+          expressionType: rule.fragment.expression.type,
+          leafProperties: rule.fragment.leaves.map((leaf) => leaf.propertyName),
           branches: rule.branches.map(createDynamicCssVariableRuleSnapshot)
         };
       default: {
@@ -678,6 +728,10 @@ if (import.meta.vitest) {
       )
     ).toThrow(jsxCssPropErrorMessages.classNameValue);
   }
+
+  const staticShapeDiagnosticPattern =
+    /Mincho `css` requires statically known CSS shape/;
+  const reactStyleGuidancePattern = /React `style=\{\.\.\.\}`/;
 
   function captureJsxCssPropFailure(
     code: string,
@@ -2835,10 +2889,9 @@ if (import.meta.vitest) {
       for (const { fixture, expectedClassName, expectedRule } of fixtures) {
         const { result, code } = babelTransform(
           `
-          const condition = true;
           const props = { className: "base" };
 
-          function App() {
+          function App(condition: boolean) {
             return ${fixture};
           }
         `,
@@ -2899,10 +2952,8 @@ if (import.meta.vitest) {
         const { result, code } = babelTransform(
           `
           type ComplexCSSRule = unknown;
-          const providedClass = "provided";
-          const maybeClass = null;
 
-          function App() {
+          function App(providedClass: string, maybeClass: string | null) {
             return ${fixture};
           }
         `,
@@ -3023,14 +3074,15 @@ if (import.meta.vitest) {
           "forbiddenColors" in fixtureCase ? fixtureCase.forbiddenColors : [];
         const { result, code } = babelTransform(
           `
-          const condition = true;
-          const flag = true;
-          const outer = true;
-          const a = "a";
-          const b = "b";
           const styleA = "style-a";
 
-          function App() {
+          function App(
+            condition: boolean,
+            flag: boolean,
+            outer: boolean,
+            a: string | null,
+            b: string | null
+          ) {
             return ${fixture};
           }
         `,
@@ -3600,9 +3652,8 @@ if (import.meta.vitest) {
         { jsxCssProp: true }
       );
 
-      expect(failure.error.message).toContain(
-        "Mincho JSX css prop does not support conditional, logical, or wrapped object/array CSS rule values in compile-away mode"
-      );
+      expect(failure.error.message).toMatch(staticShapeDiagnosticPattern);
+      expect(failure.error.message).toMatch(reactStyleGuidancePattern);
       expect(failure.code).not.toContain("_css(");
       expect(failure.code).not.toContain("style={{");
     });
@@ -3707,7 +3758,7 @@ if (import.meta.vitest) {
         expect(code).not.toContain(" css=");
         expect(code).not.toContain("_css(");
         expect(code).toMatch(
-          /style=\{\{\s+\[_\$mincho\$\$App\w*ColorVarKey\d*\]: props\.color\s+\}\}/
+          /style=\{\{\s+\[_\$mincho\$\$App\w*ColorVarKey\d*\]: _vx\(props\.color\)\s+\}\}/
         );
       });
 
@@ -3729,7 +3780,7 @@ if (import.meta.vitest) {
         expect(code).not.toContain("...base");
         expect(code).not.toContain("style={{ color: props.color }}");
         expect(code).toMatch(
-          /style=\{\{\s+\[_\$mincho\$\$App\w*ColorVarKey\d*\]: props\.color\s+\}\}/
+          /style=\{\{\s+\[_\$mincho\$\$App\w*ColorVarKey\d*\]: _vx\(props\.color\)\s+\}\}/
         );
       });
 
@@ -3753,7 +3804,7 @@ if (import.meta.vitest) {
         expect(code).not.toContain("[keys.foreground]");
         expect(code).not.toContain("style={{ color: props.color }}");
         expect(code).toMatch(
-          /style=\{\{\s+\[_\$mincho\$\$App\w*ColorVarKey\d*\]: props\.color\s+\}\}/
+          /style=\{\{\s+\[_\$mincho\$\$App\w*ColorVarKey\d*\]: _vx\(props\.color\)\s+\}\}/
         );
       });
 
@@ -3818,7 +3869,7 @@ if (import.meta.vitest) {
         expect(code).toContain("className={_cx(activeClass)}");
         expect(code).toContain("css: _minchoCssProp");
         expect(code).toMatch(
-          /style=\{\{\s+\[_\$mincho\$\$App\w*ColorVarKey\d*\]: propsInput\.color\s+\}\}/
+          /style=\{\{\s+\[_\$mincho\$\$App\w*ColorVarKey\d*\]: _vx\(propsInput\.color\)\s+\}\}/
         );
         expect(result[1]).toContain('color: "red"');
         expect(result[1]).toContain('_css(makeRule("blue"))');
@@ -3861,7 +3912,7 @@ if (import.meta.vitest) {
             }
           `,
             expected:
-              /unsupported identifier-object-value|object spread is unsupported|conditional, logical, or wrapped object\/array CSS rule values/
+              "Mincho `css` requires statically known CSS shape. Plain runtime declaration objects belong in React `style={...}`."
           },
           {
             label: "props member call",
@@ -3930,9 +3981,7 @@ if (import.meta.vitest) {
             jsxCssProp: true
           });
 
-          expect(failure.error.message, label).toMatch(
-            /Cannot statically evaluate|Mincho JSX css prop/
-          );
+          expect(failure.error.message.split("\n")[0], label).toBe(expected);
           expect(failure.code, label).not.toContain("_css(");
           expect(failure.code, label).not.toContain("style={{");
         }
@@ -3999,15 +4048,15 @@ if (import.meta.vitest) {
     it("lowers first-level call branch jsx css prop rules through extraction", () => {
       const { result, code } = babelTransform(
         `
-        const condition = true;
-        const providedClass = "provided";
-        const maybeClass = null;
-
         function makeRule(color: string) {
           return { color };
         }
 
-        function App() {
+        function App(
+          condition: boolean,
+          providedClass: string,
+          maybeClass: string | null
+        ) {
           return <>
             <div css={condition ? makeRule("red") : { color: "blue" }} />
             <div css={condition && makeRule("red")} />
@@ -4075,9 +4124,7 @@ if (import.meta.vitest) {
       } of fixtures) {
         const { result, code } = babelTransform(
           `
-          const condition = true;
-
-          function App() {
+          function App(condition: boolean) {
             return ${fixture};
           }
         `,
@@ -4193,14 +4240,705 @@ if (import.meta.vitest) {
       expect(result[1]).toContain("_css({");
       expect(result[1]).toMatch(/color: _\$mincho\$\$App\w*ColorVar/);
       expect(code).toMatch(/from "extracted_[^"]+\.css\.ts"/);
+      expect(code).toContain(
+        'import { vx as _vx } from "@mincho-js/transform-runtime";'
+      );
       expect(code).toContain("className=");
       expect(code).toMatch(
-        /style=\{\{\s+\[_\$mincho\$\$App\w*ColorVarKey\d*\]: props\.color\s+\}\}/
+        /style=\{\{\s+\[_\$mincho\$\$App\w*ColorVarKey\d*\]: _vx\(props\.color\)\s+\}\}/
       );
       expect(code).not.toContain(" css=");
       expect(code).not.toContain("_css(");
       expect(code).not.toContain("createVar");
       expect(code).not.toContain("getVarName");
+      expect(code).not.toContain("ix");
+      expect(code).not.toMatch(/vx[^\n]+from "@mincho-js\/css"/);
+    });
+
+    it("lowers dynamic css variable expression matrix into vx values", () => {
+      const { result, code } = babelTransform(
+        `
+        function getValue(value: number) {
+          return value;
+        }
+
+        class Card {
+          size = 12;
+
+          render() {
+            return <div css={{ borderWidth: this.size }} />;
+          }
+        }
+
+        function App(props: {
+          enabled: boolean;
+          fallback: number;
+          gap: number;
+          offset: number;
+          percent: number;
+          root?: { gap: number };
+          size: number;
+          value: number | null;
+        }) {
+          const enabled = props.enabled;
+          const fallback = props.fallback;
+          const gap = props.gap;
+          const offset = props.offset;
+          const percent = props.percent;
+          const root = props.root;
+          const size = props.size;
+          const value = props.value;
+
+          return <>
+            <div css={{ width: size + 100 }} />
+            <div css={{ margin: \`${"${gap}"}px\` }} />
+            <div css={{ inset: \`${"${percent}"}%\` }} />
+            <div css={{ padding: \`${"${root?.gap}"}rem\` }} />
+            <div css={{ color: enabled ? "red" : "blue" }} />
+            <div css={{ opacity: value ?? fallback }} />
+            <div css={{ height: +size }} />
+            <div css={{ top: -offset }} />
+            <div css={{ lineHeight: getValue(size) }} />
+          </>;
+        }
+      `,
+        { jsxCssProp: true }
+      );
+
+      expect(result[1]).toMatch(/_minchoCreateVar\d*\(/);
+      expect(result[1].match(/_css\(/g) ?? []).toHaveLength(11);
+      expect(code).not.toContain(" css=");
+      expect(code).not.toContain("_css(");
+      expect(code).toContain(
+        'import { vx as _vx } from "@mincho-js/transform-runtime";'
+      );
+      expect(code).toContain("_vx(size + 100)");
+      expect(code).toContain('_vx(gap, "px")');
+      expect(code).toContain('_vx(percent, "%")');
+      expect(code).toContain('_vx(root?.gap, "rem")');
+      expect(code).not.toContain('enabled ? _vx("red") : _vx("blue")');
+      expect(code).toContain("_vx(value ?? fallback)");
+      expect(code).toContain("_vx(+size)");
+      expect(code).toContain("_vx(-offset)");
+      expect(code).toContain("_vx(getValue(size))");
+      expect(code).toContain("_vx(this.size)");
+    });
+
+    it("lowers static conditional declaration leaves to conditional class fragments", () => {
+      const { result, code } = babelTransform(
+        `
+        function App(active: boolean) {
+          return <div css={{ color: active ? "red" : "blue" }} />;
+        }
+      `,
+        { jsxCssProp: true }
+      );
+
+      expect(result[1].match(/_css\(/g) ?? []).toHaveLength(2);
+      expect(result[1]).toContain('color: "red"');
+      expect(result[1]).toContain('color: "blue"');
+      expect(result[1]).not.toContain("createVar");
+      expect(result[1]).not.toContain("getVarName");
+      expect(code).toContain("className={active ?");
+      expect(code).not.toContain(" css=");
+      expect(code).not.toContain("style=");
+      expect(code).not.toContain("_vx(");
+      expect(code).not.toContain("@mincho-js/transform-runtime");
+    });
+
+    it("lowers mixed and dynamic conditional declaration leaves through lazy branch fragments", () => {
+      const source = `
+        const events: string[] = [];
+        const state = { active: true };
+        const activeColor = {
+          get value() {
+            events.push("active");
+            return "tomato";
+          }
+        };
+        const inactiveColor = {
+          get value() {
+            events.push("inactive");
+            throw new Error("inactive branch evaluated");
+          }
+        };
+
+        function MixedApp() {
+          return <div css={{ color: state.active ? "red" : inactiveColor.value }} />;
+        }
+
+        function DynamicApp() {
+          return <section css={{ color: state.active ? activeColor.value : inactiveColor.value }} />;
+        }
+      `;
+      const { code } = babelTransform(source, { jsxCssProp: true });
+      const observed = runJsxCssPropRuntime(
+        source,
+        `
+        const mixed = MixedApp();
+        const dynamic = DynamicApp();
+        return { mixed, dynamic, events };
+      `
+      );
+
+      expect(code).toContain(
+        'import { vx as _vx } from "@mincho-js/transform-runtime";'
+      );
+      expect(code).toContain("const _minchoCssBranch = state.active;");
+      expect(code).toContain("...(_minchoCssBranch ?");
+      expect(code).not.toContain(" css=");
+      expect(code).not.toContain('_vx("red")');
+      expect(observed).toEqual({
+        mixed: { className: "css-rule", style: {} },
+        dynamic: { className: "css-rule", style: { "css-rule": "tomato" } },
+        events: ["active"]
+      });
+    });
+
+    it("lowers nested conditional and logical declaration leaves without inactive style entries", () => {
+      const source = `
+        const events: string[] = [];
+        const state = { active: true, primary: false };
+        const guard = { enabled: false };
+        const nested = {
+          get value() {
+            events.push("nested");
+            return "purple";
+          }
+        };
+        const guarded = {
+          get value() {
+            events.push("guarded");
+            throw new Error("logical branch evaluated");
+          }
+        };
+        const fallback = {
+          get value() {
+            events.push("fallback");
+            return "blue";
+          }
+        };
+
+        function NestedApp() {
+          return <div css={{ color: state.active ? (state.primary ? "red" : nested.value) : "gray" }} />;
+        }
+
+        function LogicalApp() {
+          return <section css={{ color: guard.enabled && guarded.value }} />;
+        }
+
+        function NullishApp(value: string | null | undefined) {
+          return <article css={{ color: value ?? fallback.value }} />;
+        }
+      `;
+      const { code } = babelTransform(source, { jsxCssProp: true });
+      const observed = runJsxCssPropRuntime(
+        source,
+        `
+        const nestedProps = NestedApp();
+        const logicalProps = LogicalApp();
+        const nullishProps = NullishApp(null);
+        return { nestedProps, logicalProps, nullishProps, events };
+      `
+      );
+
+      expect(code).not.toContain(" css=");
+      expect(code).toMatch(/const _minchoCssBranch\d* = guard\.enabled;/);
+      expect(code).toContain("...(_minchoCssBranch");
+      expect(observed).toEqual({
+        nestedProps: {
+          className: "css-rule",
+          style: { "css-rule": "purple" }
+        },
+        logicalProps: { className: "", style: {} },
+        nullishProps: {
+          className: "css-rule",
+          style: { "css-rule": "blue" }
+        },
+        events: ["nested", "fallback"]
+      });
+    });
+
+    it("lowers static conditional object fragments through branch classes", () => {
+      const { result, code } = babelTransform(
+        `
+        function App(active: boolean, fallback: boolean) {
+          return <div css={{
+            display: "block",
+            ...active && { color: "red" },
+            ...fallback || { backgroundColor: "blue" }
+          }} />;
+        }
+      `,
+        { jsxCssProp: true }
+      );
+
+      expect(result[1].match(/_css\(/g) ?? []).toHaveLength(4);
+      expect(result[1]).toContain('display: "block"');
+      expect(result[1]).toContain('color: "red"');
+      expect(result[1]).toContain('backgroundColor: "blue"');
+      expect(result[1]).not.toContain("createVar");
+      expect(code).not.toContain(" css=");
+      expect(code).not.toContain("style=");
+      expect(code).toContain("className={_cx(active ?");
+      expect(code).toContain("fallback ?");
+    });
+
+    it("lowers mixed conditional object fragments without inactive getter reads", () => {
+      const source = `
+        const events: string[] = [];
+        const state = { active: true, fallback: false, tone: true };
+        const activeColor = {
+          get value() {
+            events.push("active");
+            return "tomato";
+          }
+        };
+        const inactiveColor = {
+          get value() {
+            events.push("inactive");
+            throw new Error("inactive object fragment evaluated");
+          }
+        };
+        const fallbackColor = {
+          get value() {
+            events.push("fallback");
+            return "gold";
+          }
+        };
+
+        function App() {
+          return <div css={{
+            padding: 4,
+            ...state.active && { color: activeColor.value },
+            borderColor: state.tone ? "black" : inactiveColor.value,
+            ...state.fallback || { backgroundColor: fallbackColor.value },
+            margin: 8
+          }} />;
+        }
+      `;
+      const { code } = babelTransform(source, { jsxCssProp: true });
+      const observed = runJsxCssPropRuntime(
+        source,
+        `
+        const props = App();
+        return { props, events, styleKeys: Object.keys(props.style) };
+      `
+      ) as {
+        props: Record<string, unknown>;
+        events: string[];
+        styleKeys: string[];
+      };
+
+      expect(code).not.toContain(" css=");
+      expect(code).not.toContain("_css(");
+      expect(code).not.toContain("createVar");
+      expect(code).not.toContain("getVarName");
+      expect(code).toContain("const _minchoCssBranch = state.active;");
+      expect(code).toMatch(
+        /const _minchoCssBranch\d* = .* \? state\.fallback : void 0;/
+      );
+      expect(code).toContain("...(_minchoCssBranch ?");
+      expect(observed.events).toEqual(["active", "fallback"]);
+      expect(observed.styleKeys).toEqual(["css-rule"]);
+      expect(observed.props).toMatchObject({
+        className: "css-rule",
+        style: { "css-rule": "gold" }
+      });
+    });
+
+    it("lowers ternary conditional object fragments when both branches are statically shaped", () => {
+      const source = `
+        const events: string[] = [];
+        const state = { active: false };
+        const activeColor = {
+          get value() {
+            events.push("active");
+            throw new Error("active object fragment evaluated");
+          }
+        };
+        const inactiveColor = {
+          get value() {
+            events.push("inactive");
+            return "blue";
+          }
+        };
+
+        function App() {
+          return <div css={{
+            ...(state.active ? { color: activeColor.value } : { backgroundColor: inactiveColor.value })
+          }} />;
+        }
+      `;
+      const { code } = babelTransform(source, { jsxCssProp: true });
+      const observed = runJsxCssPropRuntime(
+        source,
+        `
+        const props = App();
+        return { props, events };
+      `
+      ) as { props: Record<string, unknown>; events: string[] };
+
+      expect(code).not.toContain(" css=");
+      expect(code).not.toContain("_css(");
+      expect(code).toContain("className={_minchoCssBranch ?");
+      expect(code).toContain("...(_minchoCssBranch ?");
+      expect(observed.events).toEqual(["inactive"]);
+      expect(observed.props).toMatchObject({
+        className: "css-rule",
+        style: { "css-rule": "blue" }
+      });
+    });
+
+    it("rejects unsupported arbitrary spread conditional object fragments", () => {
+      const fixtures = [
+        {
+          label: "logical arbitrary object spread",
+          source: `
+            function App(active: boolean, props: { styles: Record<string, string> }) {
+              return <div css={{ ...active && props.styles, color: "red" }} />;
+            }
+          `
+        },
+        {
+          label: "ternary arbitrary object spread",
+          source: `
+            function App(active: boolean, props: { styles: Record<string, string> }) {
+              return <div css={{ ...(active ? props.styles : { color: "red" }) }} />;
+            }
+          `
+        },
+        {
+          label: "direct arbitrary object spread remains rejected",
+          source: `
+            function App(active: boolean, props: { styles: Record<string, string> }) {
+              return <div css={{ ...props.styles, color: "red" }} />;
+            }
+          `
+        }
+      ] as const;
+
+      for (const { label, source } of fixtures) {
+        const failure = captureJsxCssPropFailure(source, { jsxCssProp: true });
+
+        expect(failure.error.message, label).toMatch(
+          /Cannot statically evaluate|Mincho JSX css prop|Mincho `css` requires statically known CSS shape|Complex conditions are supported only when branch CSS shape is static/
+        );
+        expect(failure.code, label).not.toContain("_css(");
+        expect(failure.code, label).not.toContain("style={{");
+      }
+    });
+
+    it("rejects runtime-shape conditionals before CSS emission", () => {
+      const failure = captureJsxCssPropFailure(
+        `
+        function App(active: boolean, props: { key: string }) {
+          return <div css={active ? { [props.key]: "red" } : { color: "blue" }} />;
+        }
+      `,
+        { jsxCssProp: true }
+      );
+
+      expect(failure.error.message).toMatch(
+        /dynamic expression is unsupported|unsupported identifier-object-value|Mincho JSX css prop|Complex conditions are supported only when branch CSS shape is static/
+      );
+      expect(failure.code).not.toContain("_css(");
+      expect(failure.code).not.toContain("style={{");
+    });
+
+    it("blocks inherited generated custom property values for nullish and boolean dynamic leaves without @property output", () => {
+      const source = `
+        function Parent(value: string) {
+          return <div css={{ color: value }} />;
+        }
+
+        function Child(value: string | null | undefined | boolean) {
+          return <div css={{ color: value }} />;
+        }
+      `;
+      const { result, code } = babelTransform(source, { jsxCssProp: true });
+      const observed = runJsxCssPropRuntime(
+        source,
+        `
+        const parent = Parent("parent-color");
+        const generatedKey = Object.keys(parent.style)[0];
+        const parentValue = parent.style[generatedKey];
+        const cases = [
+          ["undefined", undefined],
+          ["null", null],
+          ["false", false],
+          ["true", true]
+        ];
+        const resolveGeneratedColor = (childStyle) => {
+          const childValue = childStyle[generatedKey];
+
+          if (
+            childValue === undefined ||
+            childValue === null ||
+            typeof childValue === "boolean"
+          ) {
+            return parentValue;
+          }
+
+          if (childValue === "var(--c-, )") {
+            return null;
+          }
+
+          return childValue;
+        };
+
+        return cases.map(([label, value]) => {
+          const child = Child(value);
+
+          return {
+            label,
+            childCustomPropertyValue: child.style[generatedKey],
+            inheritedParentValue:
+              resolveGeneratedColor(child.style) === parentValue
+          };
+        });
+      `
+      );
+
+      expect(
+        result[1],
+        "Mincho has no approved output-layer plan for StyleX @property generation; vx fallback is this scope's inheritance guard."
+      ).not.toContain("@property");
+      expect(code).not.toContain("@property");
+      expect(code).toContain(
+        'import { vx as _vx } from "@mincho-js/transform-runtime";'
+      );
+      expect(code).toContain("_vx(value)");
+      expect(observed).toEqual([
+        {
+          label: "undefined",
+          childCustomPropertyValue: "var(--c-, )",
+          inheritedParentValue: false
+        },
+        {
+          label: "null",
+          childCustomPropertyValue: "var(--c-, )",
+          inheritedParentValue: false
+        },
+        {
+          label: "false",
+          childCustomPropertyValue: "var(--c-, )",
+          inheritedParentValue: false
+        },
+        {
+          label: "true",
+          childCustomPropertyValue: "var(--c-, )",
+          inheritedParentValue: false
+        }
+      ]);
+    });
+
+    it("rejects unsupported dynamic css variable value expressions", () => {
+      const fixtures = [
+        {
+          label: "assignment",
+          source: `
+            let size = 1;
+            function App() {
+              return <div css={{ width: (size = 2) }} />;
+            }
+          `
+        },
+        {
+          label: "update",
+          source: `
+            let size = 1;
+            function App() {
+              return <div css={{ width: size++ }} />;
+            }
+          `
+        },
+        {
+          label: "sequence",
+          source: `
+            function App(size: number, fallback: number) {
+              return <div css={{ width: (size, fallback) }} />;
+            }
+          `
+        },
+        {
+          label: "await",
+          source: `
+            async function App(size: Promise<number>) {
+              return <div css={{ width: await size }} />;
+            }
+          `
+        },
+        {
+          label: "yield",
+          source: `
+            function* App(size: number) {
+              return <div css={{ width: yield size }} />;
+            }
+          `
+        },
+        {
+          label: "new",
+          source: `
+            class Size {}
+            function App() {
+              return <div css={{ width: new Size() }} />;
+            }
+          `
+        },
+        {
+          label: "array value",
+          source: `
+            function App(size: number) {
+              return <div css={{ width: [size] }} />;
+            }
+          `
+        },
+        {
+          label: "function value",
+          source: `
+            function App(size: number) {
+              return <div css={{ width: () => size }} />;
+            }
+          `
+        },
+        {
+          label: "class value",
+          source: `
+            function App() {
+              return <div css={{ width: class Size {} }} />;
+            }
+          `
+        },
+        {
+          label: "jsx value",
+          source: `
+            function App() {
+              return <div css={{ width: <span /> }} />;
+            }
+          `
+        },
+        {
+          label: "tagged template",
+          source: `
+            function unit(strings: TemplateStringsArray, value: number) {
+              return value;
+            }
+            function App(size: number) {
+              return <div css={{ width: unit\`${"${size}"}px\` }} />;
+            }
+          `
+        },
+        {
+          label: "multi-hole template",
+          source: `
+            function App(size: number, unit: string) {
+              return <div css={{ width: \`${"${size}"}${"${unit}"}\` }} />;
+            }
+          `
+        },
+        {
+          label: "unsafe template affix",
+          source: `
+            function App(size: number) {
+              return <div css={{ width: \`calc(${"${size}"}px)\` }} />;
+            }
+          `
+        },
+        {
+          label: "comparison",
+          source: `
+            function App(size: number) {
+              return <div css={{ width: size > 1 }} />;
+            }
+          `
+        },
+        {
+          label: "bitwise",
+          source: `
+            function App(size: number) {
+              return <div css={{ width: size | 1 }} />;
+            }
+          `
+        },
+        {
+          label: "in operator",
+          source: `
+            function App(props: Record<string, unknown>) {
+              return <div css={{ width: "size" in props }} />;
+            }
+          `
+        },
+        {
+          label: "instanceof operator",
+          source: `
+            class Size {}
+            function App(value: unknown) {
+              return <div css={{ width: value instanceof Size }} />;
+            }
+          `
+        },
+        {
+          label: "dynamic key",
+          source: `
+            function App(props: { key: string }) {
+              return <div css={{ [props.key]: "red" }} />;
+            }
+          `
+        }
+      ] as const;
+
+      for (const { label, source } of fixtures) {
+        const failure = captureJsxCssPropFailure(source, { jsxCssProp: true });
+
+        expect(failure.error.message, label).toMatch(
+          /Cannot statically evaluate|Mincho JSX css prop/
+        );
+        expect(failure.code, label).not.toContain("_css(");
+        expect(failure.code, label).not.toContain("style={{");
+      }
+    });
+
+    it("rejects dynamic arrays in direct, conditional leaf, and conditional fragment contexts", () => {
+      const fixtures = [
+        {
+          label: "direct dynamic property array",
+          source: `
+            function App(props: { gap: number }) {
+              return <div css={{ margin: [props.gap, "auto"] }} />;
+            }
+          `
+        },
+        {
+          label: "conditional dynamic property array",
+          source: `
+            function App(props: { compact: boolean; gap: number }) {
+              return <div css={{ margin: props.compact ? [props.gap] : ["auto"] }} />;
+            }
+          `
+        },
+        {
+          label: "conditional object fragment dynamic property array",
+          source: `
+            function App(props: { active: boolean; gap: number }) {
+              return <div css={{ ...props.active && { margin: [props.gap, "auto"] } }} />;
+            }
+          `
+        }
+      ] as const;
+
+      for (const { label, source } of fixtures) {
+        const failure = captureJsxCssPropFailure(source, { jsxCssProp: true });
+
+        expect(failure.error.message, label).toMatch(
+          /Cannot statically evaluate|Mincho JSX css prop|Mincho `css` requires statically known CSS shape/
+        );
+        expect(failure.error.message, label).not.toMatch(
+          reactStyleGuidancePattern
+        );
+        expect(failure.code, label).not.toContain("_css(");
+        expect(failure.code, label).not.toContain("style={{");
+      }
     });
 
     it("routes static-key render values through dynamic-leaf mode", () => {
@@ -4220,8 +4958,32 @@ if (import.meta.vitest) {
       expect(code).not.toContain("_css(");
       expect(code).not.toContain("style={{ color: props.color }}");
       expect(code).toMatch(
-        /style=\{\{\s+\[_\$mincho\$\$App\w*ColorVarKey\d*\]: props\.color\s+\}\}/
+        /style=\{\{\s+\[_\$mincho\$\$App\w*ColorVarKey\d*\]: _vx\(props\.color\)\s+\}\}/
       );
+    });
+
+    it("routes uncommon static keys through dynamic-leaf mode without a property allowlist", () => {
+      const { result, code } = babelTransform(
+        `
+        function App(props: { accent: string; scrollbar: string }) {
+          return <div css={{ "--brand-accent": props.accent, scrollbarColor: props.scrollbar }} />;
+        }
+      `,
+        { jsxCssProp: true }
+      );
+
+      expect(result[1]).toContain('_minchoCreateVar("--brand-accent")');
+      expect(result[1]).toContain('_minchoCreateVar("scrollbarColor")');
+      expect(result[1]).toContain(
+        '"--brand-accent": _$mincho$$AppBrandAccentVar'
+      );
+      expect(result[1]).toContain(
+        "scrollbarColor: _$mincho$$AppScrollbarColorVar"
+      );
+      expect(code).toContain("_vx(props.accent)");
+      expect(code).toContain("_vx(props.scrollbar)");
+      expect(code).not.toContain(" css=");
+      expect(code).not.toContain('style={{ "--brand-accent": props.accent');
     });
 
     it("dynamic CSS variable style custom property supports props.color and render-scope makeColor", () => {
@@ -4360,7 +5122,7 @@ if (import.meta.vitest) {
       );
 
       expect(code).toMatch(
-        /style=\{\{\s+\[_\$mincho\$\$App\w*ColorVarKey\d*\]: props\.color\s+\}\}/
+        /style=\{\{\s+\[_\$mincho\$\$App\w*ColorVarKey\d*\]: _vx\(props\.color\)\s+\}\}/
       );
       expect(code).not.toContain(" css=");
       expect(code).not.toContain('from "@mincho-js/css"');
@@ -4395,10 +5157,10 @@ if (import.meta.vitest) {
       ).code;
 
       expect(objectStyle).toMatch(
-        /style=\{\{\s+\.\.\.baseStyle,\s+opacity: props\.opacity,\s+\[_\$mincho\$\$App\w*ColorVarKey\d*\]: props\.color,\s+\[_\$mincho\$\$App\w*BackgroundColorVarKey\d*\]: props\.backgroundColor\s+\}\}/
+        /style=\{\{\s+\.\.\.baseStyle,\s+opacity: props\.opacity,\s+\[_\$mincho\$\$App\w*ColorVarKey\d*\]: _vx\(props\.color\),\s+\[_\$mincho\$\$App\w*BackgroundColorVarKey\d*\]: _vx\(props\.backgroundColor\)\s+\}\}/
       );
       expect(expressionStyle).toMatch(
-        /style=\{\{\s+\.\.\.props\.style,\s+\[_\$mincho\$\$App\w*BorderColorVarKey\d*\]: props\.borderColor\s+\}\}/
+        /style=\{\{\s+\.\.\.props\.style,\s+\[_\$mincho\$\$App\w*BorderColorVarKey\d*\]: _vx\(props\.borderColor\)\s+\}\}/
       );
 
       for (const output of [objectStyle, expressionStyle]) {
@@ -4424,7 +5186,7 @@ if (import.meta.vitest) {
         /className=\{_\$mincho\$\$App\w*Cx\d*\(props\.className, _\$mincho\$\$App\d*\)\}/
       );
       expect(code).toMatch(
-        /style=\{\{\s+\[_\$mincho\$\$App\w*ColorVarKey\d*\]: props\.color\s+\}\}/
+        /style=\{\{\s+\[_\$mincho\$\$App\w*ColorVarKey\d*\]: _vx\(props\.color\)\s+\}\}/
       );
       expect(code).not.toContain(" css=");
       expect(code).not.toContain('from "@mincho-js/css"');
@@ -5303,7 +6065,7 @@ if (import.meta.vitest) {
             }
           `,
           expected:
-            /spread operand is not statically reducible|dynamic expression is unsupported|object spread is unsupported|unsupported identifier-object-value|conditional, logical, or wrapped object\/array CSS rule values/
+            /Mincho `css` requires statically known CSS shape|spread operand is not statically reducible|dynamic expression is unsupported|object spread is unsupported|unsupported identifier-object-value|conditional, logical, or wrapped object\/array CSS rule values/
         },
         {
           label: "dynamic array spreads",
@@ -5313,7 +6075,7 @@ if (import.meta.vitest) {
             }
           `,
           expected:
-            /spread operand is not statically reducible|array values do not support spread elements in compile-away mode/
+            /Mincho `css` requires statically known CSS shape|spread operand is not statically reducible|array values do not support spread elements in compile-away mode/
         },
         {
           label: "call-return CSS shapes",
@@ -5385,6 +6147,143 @@ if (import.meta.vitest) {
       }
     });
 
+    it("explains runtime CSS object spreads require statically known CSS shape", () => {
+      const fixtures = [
+        {
+          label: "identifier object spread",
+          source: `
+            function App(someRuntimeObject: Record<string, string>) {
+              return <div css={{ ...someRuntimeObject, color: "red" }} />;
+            }
+          `
+        },
+        {
+          label: "call object spread",
+          source: `
+            function App(getStyles: () => Record<string, string>) {
+              return <div css={{ ...getStyles(), color: "red" }} />;
+            }
+          `
+        },
+        {
+          label: "array-shaped object spread",
+          source: `
+            function App(arrayOfStyles: ReadonlyArray<Record<string, string>>) {
+              return <div css={{ ...arrayOfStyles, color: "red" }} />;
+            }
+          `
+        },
+        {
+          label: "member object spread",
+          source: `
+            function App(props: { styles: Record<string, string> }) {
+              return <div css={{ ...props.styles, color: "red" }} />;
+            }
+          `
+        }
+      ] as const;
+
+      for (const { label, source } of fixtures) {
+        const failure = captureJsxCssPropFailure(source, { jsxCssProp: true });
+
+        expect(failure.error.message, label).toMatch(
+          staticShapeDiagnosticPattern
+        );
+        expect(failure.error.message, label).toMatch(reactStyleGuidancePattern);
+        expect(failure.code, label).not.toContain("_css(");
+        expect(failure.code, label).not.toContain("style={{");
+      }
+    });
+
+    it("omits React style guidance for non-plain static-shape diagnostics", () => {
+      const fixtures = [
+        {
+          label: "selector composition",
+          source: `
+            function App(props: { styles: Record<string, string> }) {
+              return <div css={{ selectors: { "&:hover": { ...props.styles } } }} />;
+            }
+          `
+        },
+        {
+          label: "media composition",
+          source: `
+            function App(props: { styles: Record<string, string> }) {
+              return <div css={{ "@media": { "screen and (min-width: 700px)": { ...props.styles } } }} />;
+            }
+          `
+        },
+        {
+          label: "token composition",
+          source: `
+            function App(props: { vars: Record<string, string> }) {
+              return <div css={{ vars: { ...props.vars } }} />;
+            }
+          `
+        },
+        {
+          label: "condition composition",
+          source: `
+            function App(props: { styles: Record<string, string> }) {
+              return <div css={{ color: { $dark: { ...props.styles } } }} />;
+            }
+          `
+        },
+        {
+          label: "class composition",
+          source: `
+            function App(props: { styles: Record<string, string> }) {
+              return <div css={[{ ...props.styles }, "extra"]} />;
+            }
+          `
+        }
+      ] as const;
+
+      for (const { label, source } of fixtures) {
+        const failure = captureJsxCssPropFailure(source, { jsxCssProp: true });
+
+        expect(failure.error.message, label).toMatch(
+          staticShapeDiagnosticPattern
+        );
+        expect(failure.error.message, label).not.toMatch(
+          reactStyleGuidancePattern
+        );
+        expect(failure.code, label).not.toContain("_css(");
+        expect(failure.code, label).not.toContain("style={{");
+      }
+    });
+
+    it("explains runtime-shape conditionals require static branch CSS shape", () => {
+      const fixtures = [
+        {
+          label: "computed-key runtime branch",
+          source: `
+            function App(active: boolean, props: { key: string }) {
+              return <div css={active ? { [props.key]: "red" } : { color: "blue" }} />;
+            }
+          `
+        },
+        {
+          label: "object-fragment runtime branch",
+          source: `
+            function App(active: boolean, props: { styles: Record<string, string> }) {
+              return <div css={{ ...(active ? props.styles : { color: "red" }) }} />;
+            }
+          `
+        }
+      ] as const;
+
+      for (const { label, source } of fixtures) {
+        const failure = captureJsxCssPropFailure(source, { jsxCssProp: true });
+
+        expect(failure.error.message, label).toMatch(
+          /Complex conditions are supported only when branch CSS shape is static/
+        );
+        expect(failure.code, label).not.toContain("_css(");
+        expect(failure.code, label).not.toContain("style={{");
+      }
+    });
+
     it("rejects optional calls that can be undefined and lowers nested build-time calls", () => {
       const optionalCall = captureJsxCssPropFailure(
         `
@@ -5434,7 +6333,7 @@ if (import.meta.vitest) {
         {
           label: "render spread object",
           expected:
-            'Cannot statically evaluate css prop value: same-file binding "<inline>" contains unsupported identifier-object-value: Identifier',
+            "Mincho `css` requires statically known CSS shape. Plain runtime declaration objects belong in React `style={...}`.",
           source: `
             function App(props: { styles: Record<string, string> }) {
               return <div css={{ ...props.styles, color: "red" }} />;
@@ -5460,6 +6359,220 @@ if (import.meta.vitest) {
         expect(failure.code, label).not.toContain("_css(");
         expect(failure.code, label).not.toContain("style={{");
       }
+    });
+
+    describe("Compiled/StyleX/Devup JSX css prop parity integration", () => {
+      it("covers Compiled suffix/fallback/css variables and StyleX inheritance guards without the forbidden runtime helper", () => {
+        const source = `
+          const events: string[] = [];
+          const activeColor = {
+            get value() {
+              events.push("active");
+              return "tomato";
+            }
+          };
+          const inactiveColor = {
+            get value() {
+              events.push("inactive");
+              throw new Error("inactive branch evaluated");
+            }
+          };
+
+          function CompiledSuffixApp(props: {
+            gap: number;
+            percent: number;
+            size: number;
+          }) {
+            return <div css={{
+              width: \`${"${props.size}"}px\`,
+              inset: \`${"${props.percent}"}%\`,
+              margin: \`${"${props.gap}"}rem\`
+            }} />;
+          }
+
+          function StyleXChild(value: string | null | undefined | boolean) {
+            return <span css={{ color: value }} />;
+          }
+
+          function DevupConditionalApp(active: boolean) {
+            return <section css={{ color: active ? activeColor.value : inactiveColor.value }} />;
+          }
+        `;
+        const { result, code } = babelTransform(source, { jsxCssProp: true });
+        const observed = runJsxCssPropRuntime(
+          source,
+          `
+          const child = StyleXChild(null);
+          const conditional = DevupConditionalApp(true);
+          return {
+            child,
+            conditional,
+            events
+          };
+        `
+        );
+        // Assembled so the bare-token assertion below cannot match its own fixture.
+        const forbiddenRuntimeHelper = ["i", "x"].join("");
+
+        expect(result[1]).toContain('from "@mincho-js/css"');
+        expect(result[1]).toContain("css as _css");
+        expect(result[1]).toMatch(/createVar as _minchoCreateVar\d*/);
+        expect(result[1]).toMatch(/getVarName as _minchoGetVarName\d*/);
+        expect(result[1]).toMatch(/_css\(\{/);
+        expect(code).toContain(
+          'import { vx as _vx } from "@mincho-js/transform-runtime";'
+        );
+        expect(code).toContain('_vx(props.size, "px")');
+        expect(code).toContain('_vx(props.percent, "%")');
+        expect(code).toContain('_vx(props.gap, "rem")');
+        expect(code).toContain("_vx(value)");
+        expect(code).not.toContain(" css=");
+        expect(code).not.toContain("_css(");
+        expect(code).not.toMatch(new RegExp(`\\b${forbiddenRuntimeHelper}\\b`));
+        expect(code).not.toMatch(/vx[^\n]+from "@mincho-js\/css"/);
+        expect(observed).toEqual({
+          child: {
+            className: "css-rule",
+            style: { "css-rule": "var(--c-, )" }
+          },
+          conditional: {
+            className: "css-rule",
+            style: { "css-rule": "tomato" }
+          },
+          events: ["active"]
+        });
+      });
+
+      it("covers Compiled conditional spreads and Devup lazy class/style merge order with key/ref", () => {
+        const source = `
+          const events: string[] = [];
+          const explicitRef = "explicit-ref";
+          const state = { active: true, fallback: false };
+          const pre = {
+            className: "from-pre",
+            css: "leak-pre",
+            id: "from-pre",
+            style: { padding: 4 }
+          };
+          const post = {
+            className: "from-post",
+            css: "leak-post",
+            title: "from-post",
+            style: { margin: 8 }
+          };
+          const activeColor = {
+            get value() {
+              events.push("active-fragment");
+              return "tomato";
+            }
+          };
+          const fallbackColor = {
+            get value() {
+              events.push("fallback-fragment");
+              return "gold";
+            }
+          };
+          const inactiveColor = {
+            get value() {
+              events.push("inactive-fragment");
+              throw new Error("inactive object fragment evaluated");
+            }
+          };
+
+          function App() {
+            return <div
+              key="compiled-key"
+              ref={explicitRef}
+              {...pre}
+              css={{
+                display: "block",
+                ...state.active && { color: activeColor.value },
+                borderColor: state.active ? "black" : inactiveColor.value,
+                ...state.fallback || { backgroundColor: fallbackColor.value }
+              }}
+              style={{ opacity: 0.5 }}
+              {...post}
+            />;
+          }
+        `;
+        const { code } = babelTransform(source, { jsxCssProp: true });
+        const observed = runJsxCssPropRuntime(
+          source,
+          `
+          const props = App();
+          return {
+            props,
+            events,
+            hasCss: "css" in props,
+            styleKeys: Object.keys(props.style)
+          };
+        `
+        );
+
+        expect(code).not.toContain(" css=");
+        expect(code).not.toContain("_css(");
+        expect(code).toContain('key="compiled-key"');
+        expect(code).toContain("ref={explicitRef}");
+        expect(code).not.toContain('key: "compiled-key"');
+        expect(code).toContain("...(_minchoCssBranch ?");
+        expect(code).toMatch(
+          /const _minchoCssBranch\d* = .* \? state\.fallback : void 0;/
+        );
+        expect(observed).toEqual({
+          hasCss: false,
+          styleKeys: ["padding", "opacity", "margin", "css-rule"],
+          events: ["active-fragment", "fallback-fragment"],
+          props: expect.objectContaining({
+            key: "compiled-key",
+            ref: "explicit-ref",
+            id: "from-pre",
+            title: "from-post",
+            className: expect.stringMatching(
+              /^from-pre .*css-rule.* from-post$/
+            ),
+            style: expect.objectContaining({
+              padding: 4,
+              opacity: 0.5,
+              margin: 8,
+              "css-rule": "gold"
+            })
+          })
+        });
+      });
+
+      it("covers Compiled/StyleX/Devup unsupported static-shape and dynamic-array diagnostics", () => {
+        const fixtures = [
+          {
+            label: "StyleX static-shape boundary object spread",
+            source: `
+              function App(props: { styles: Record<string, string> }) {
+                return <div css={{ ...props.styles, color: "red" }} />;
+              }
+            `,
+            expected: staticShapeDiagnosticPattern
+          },
+          {
+            label: "Compiled/Devup dynamic array remains unsupported",
+            source: `
+              function App(props: { gap: number }) {
+                return <div css={{ margin: [props.gap, "auto"] }} />;
+              }
+            `,
+            expected:
+              /Cannot statically evaluate|Mincho JSX css prop|Mincho `css` requires statically known CSS shape/
+          }
+        ] as const;
+
+        for (const { label, source, expected } of fixtures) {
+          const failure = captureJsxCssPropFailure(source, {
+            jsxCssProp: true
+          });
+
+          expect(failure.error.message, label).toMatch(expected);
+          expect(failure.code, label).not.toContain("_css(");
+          expect(failure.code, label).not.toContain("style={{");
+        }
+      });
     });
 
     it("maps partial evaluator deopt diagnostics and preserves unchanged diagnostics", () => {
@@ -5517,7 +6630,7 @@ if (import.meta.vitest) {
         {
           reason: "unsupported-spread",
           expected:
-            'Cannot statically evaluate css prop value: same-file binding "<inline>" contains unsupported identifier-object-value: Identifier',
+            "Mincho `css` requires statically known CSS shape. Plain runtime declaration objects belong in React `style={...}`.",
           source: `
             function App(props: { styles: Record<string, string> }) {
               return <div css={{ ...props.styles, color: "red" }} />;
@@ -6515,6 +7628,118 @@ if (import.meta.vitest) {
       expect("css" in observed.props).toBe(false);
     });
 
+    it("preserves explicit key/ref attributes during spread aggregation", () => {
+      const source = `
+        const styleA = "style-a";
+        const explicitRef = "explicit-ref";
+        const pre = { className: "from-pre", css: "leak-pre", id: "from-pre" };
+        const post = { className: "from-post", css: "leak-post", title: "from-post" };
+        const keyedPre = { key: "spread-pre-key", ref: "spread-pre-ref" };
+        const keyedPost = { key: "spread-post-key", ref: "spread-post-ref" };
+
+        function BeforeApp() {
+          return <div key="before-key" ref={explicitRef} {...pre} css={styleA} />;
+        }
+
+        function AfterApp() {
+          return <section {...pre} css={styleA} key="after-key" ref={explicitRef} {...post} />;
+        }
+
+        function LateBeforeApp() {
+          return <aside {...keyedPre} key="late-before-key" ref={explicitRef} css={styleA} />;
+        }
+
+        function LateAfterApp() {
+          return <main css={styleA} {...keyedPost} key="late-after-key" ref={explicitRef} />;
+        }
+
+        function DynamicApp(color: string) {
+          return <article css={{ color }} {...keyedPost} key="dynamic-key" ref={explicitRef} />;
+        }
+      `;
+      const { code } = babelTransform(source, { jsxCssProp: true });
+      const observed = runJsxCssPropRuntime(
+        source,
+        `
+        return {
+          before: BeforeApp(),
+          after: AfterApp(),
+          lateBefore: LateBeforeApp(),
+          lateAfter: LateAfterApp(),
+          dynamic: DynamicApp("red")
+        };
+      `
+      ) as {
+        before: Record<string, unknown>;
+        after: Record<string, unknown>;
+        lateBefore: Record<string, unknown>;
+        lateAfter: Record<string, unknown>;
+        dynamic: Record<string, unknown>;
+      };
+
+      expect(code).not.toContain(" css=");
+      expect(code).toContain('key="before-key"');
+      expect(code).toContain("ref={explicitRef}");
+      expect(code).toContain('key="after-key"');
+      expect(code).not.toContain('key: "before-key"');
+      expect(code).not.toContain('key: "after-key"');
+      expect(observed.before).toMatchObject({
+        key: "before-key",
+        ref: "explicit-ref",
+        id: "from-pre",
+        className: "from-pre style-a"
+      });
+      expect(observed.after).toMatchObject({
+        key: "after-key",
+        ref: "explicit-ref",
+        id: "from-pre",
+        title: "from-post",
+        className: "from-pre style-a from-post"
+      });
+      expect(observed.lateBefore).toMatchObject({
+        key: "late-before-key",
+        ref: "explicit-ref"
+      });
+      expect(observed.lateAfter).toMatchObject({
+        key: "late-after-key",
+        ref: "explicit-ref"
+      });
+      expect(observed.dynamic).toMatchObject({
+        key: "dynamic-key",
+        ref: "explicit-ref"
+      });
+      expect(observed.before).not.toHaveProperty("css");
+      expect(observed.after).not.toHaveProperty("css");
+    });
+
+    it("keeps spread-contained key/ref semantics during spread aggregation", () => {
+      const observed = runJsxCssPropRuntime(
+        `
+        const styleA = "style-a";
+        const props = {
+          className: "from-spread",
+          css: "leak",
+          id: "root",
+          key: "spread-key",
+          ref: "spread-ref"
+        };
+
+        function App() {
+          return <div {...props} css={styleA} />;
+        }
+      `,
+        "return App();"
+      ) as Record<string, unknown>;
+
+      expect(observed).toMatchObject({
+        key: "spread-key",
+        ref: "spread-ref",
+        id: "root",
+        className: "from-spread style-a"
+      });
+      expect(observed).not.toHaveProperty("css");
+    });
+
     it("reads nested mixed pre css post aggregation once in source order", () => {
       const source = `
         import { cx } from "@mincho-js/css";
@@ -7388,12 +8613,6 @@ if (import.meta.vitest) {
             "Mincho JSX css prop does not support namespaced JSX elements"
         },
         {
-          name: "key/ref spread",
-          fixture: `<div key="x" {...props} css={styleA} />`,
-          message:
-            "Mincho JSX css prop does not support key/ref on spread elements in compile-away mode"
-        },
-        {
           name: "missing expression value",
           fixture: `<div css />`,
           message: "Mincho JSX css prop requires an expression value"
@@ -7506,26 +8725,6 @@ if (import.meta.vitest) {
         name: "rejects namespaced JSX css prop targets",
         fixture: `<svg:path css={{ color: "red" }} />`,
         message: jsxCssPropErrorMessages.namespacedTarget
-      },
-      {
-        name: "rejects explicit key on spread-aggregated css-prop elements",
-        fixture: `<div key="x" {...props} css={styleA} />`,
-        message: jsxCssPropErrorMessages.keyRefSpread
-      },
-      {
-        name: "rejects explicit ref on spread-aggregated css-prop components",
-        fixture: `<Component ref={ref} {...props} css={styleA} />`,
-        message: jsxCssPropErrorMessages.keyRefSpread
-      },
-      {
-        name: "rejects explicit key after css before post-css spread",
-        fixture: `<div css={styleA} key="x" {...props} />`,
-        message: jsxCssPropErrorMessages.keyRefSpread
-      },
-      {
-        name: "rejects explicit ref after css before post-css spread",
-        fixture: `<Component css={styleA} ref={ref} {...props} />`,
-        message: jsxCssPropErrorMessages.keyRefSpread
       },
       {
         name: "rejects shorthand css",
@@ -7650,26 +8849,6 @@ if (import.meta.vitest) {
         name: "rejects nested unsupported JSX css prop targets",
         fixture: null,
         message: jsxCssPropErrorMessages.unsupportedTarget
-      },
-      {
-        name: "rejects nested explicit key on spread-aggregated css-prop elements",
-        fixture: `<div key="x" {...props} css={styleA} />`,
-        message: jsxCssPropErrorMessages.keyRefSpread
-      },
-      {
-        name: "rejects nested explicit ref on spread-aggregated css-prop components",
-        fixture: `<Component ref={ref} {...props} css={styleA} />`,
-        message: jsxCssPropErrorMessages.keyRefSpread
-      },
-      {
-        name: "rejects nested explicit key after css before post-css spread",
-        fixture: `<div css={styleA} key="x" {...props} />`,
-        message: jsxCssPropErrorMessages.keyRefSpread
-      },
-      {
-        name: "rejects nested explicit ref after css before post-css spread",
-        fixture: `<Component css={styleA} ref={ref} {...props} />`,
-        message: jsxCssPropErrorMessages.keyRefSpread
       },
       {
         name: "rejects nested shorthand css on spread-aggregated elements",

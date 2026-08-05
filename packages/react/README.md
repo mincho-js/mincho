@@ -2,9 +2,11 @@
 
 React bindings for Mincho. The package exposes the `styled` API and scoped JSX runtime entries for optional JSX `css` prop support.
 
-## JSX css Prop
+## JSX CSS Prop
 
 Mincho JSX `css` props are opt-in and compile away. This is not Emotion parity: Mincho does not add runtime style insertion, a runtime cache, or a runtime serializer for the `css` prop.
+
+The dynamic leaf behavior follows the same broad compile-away direction as Compiled, StyleX, and Devup UI: static CSS shape becomes generated classes, while runtime declaration values are passed through generated inline `style` entries. Mincho keeps its own contract instead of copying their public APIs: generated code imports `vx(value, suffix?)` from `@mincho-js/transform-runtime`, not from `@mincho-js/css`, and bundlers must resolve that package for transformed component modules and generated `.css.ts` sidecars.
 
 Enable both opt-ins:
 
@@ -133,6 +135,10 @@ Those shapes would need runtime keys, runtime object or array spreads, runtime w
 
 Static-shape CSS rules can use dynamic declaration values. For example, `<div css={{ color: props.color }} />` keeps the `color` key static while the value comes from runtime props.
 
+Dynamic declaration leaves support direct runtime values, conditional leaves, and compiler-recognized one-hole suffix templates for `px`, `%`, and `rem`, such as `` `${props.gap}px` ``, `` `${props.width}%` ``, and `` `${props.size}rem` ``. The transform emits generated `style` entries that call `vx(value, suffix?)`; `vx` is generated-code support from `@mincho-js/transform-runtime`, not a user-facing CSS API.
+
+When a dynamic leaf is `null`, `undefined`, or boolean, generated code writes the `vx` fallback value so a child declaration does not inherit an older parent CSS custom property. This matches the inheritance-safety intent used by Compiled and StyleX, but Mincho does not claim or emit StyleX-style `@property` generation for this path.
+
 Static-shape CSS rule branches can also use branch-local dynamic declarations when each CSS branch is a literal object or array shape:
 
 ```tsx
@@ -141,6 +147,8 @@ Static-shape CSS rule branches can also use branch-local dynamic declarations wh
 <div css={condition && { color: props.color }} />
 <div css={providedClass || { color: props.color }} />
 ```
+
+Statically shaped conditional object fragments are also valid when each possible fragment has a visible static shape, for example `{ ...(active && { color: props.color }) }` or `{ ...(tone === "danger" ? { color: props.color } : { backgroundColor: props.background }) }`. This follows Devup UI-style branch splitting while preserving Mincho's static-shape gate.
 
 For conditional and logical branches, the branch predicate or logical left operand is evaluated once and reused for both `className` and `style`. Inactive branch dynamic declaration values are not read.
 
@@ -151,6 +159,8 @@ Under this model, the generated `.css.ts` owns `createVar`, `getVarName`, and `c
 A custom component receives typed Mincho `css` only when it accepts and forwards both `className` and React-style-compatible `style`. Forward `className` to the styled element, and forward `style` to the same element so generated CSS variable values can land on the element that owns the generated class.
 
 Unsupported dynamic CSS shapes stay unsupported: dynamic keys, computed runtime CSS keys, object or array spreads as branch shapes, call-returned branch objects, function-valued css props, sequence-wrapped branch rules, broad template interpolation, and other dynamic CSS shapes. Static-shape branch rule objects and arrays are supported only when their keys, spreads, and branch shapes are statically analyzable. This is not Emotion-style runtime parity: Mincho does not add a runtime serializer, runtime CSS cache, runtime stylesheet insertion, wrapper component, or runtime CSS generation for the `css` prop.
+
+Unsupported cases include dynamic arrays that would require runtime expansion, dynamic responsive arrays, arbitrary runtime object spreads, dynamic runtime CSS shapes, dynamic keys, whole-rule runtime returns, function-valued CSS, and runtime stylesheet engines. If you already have a plain React-compatible inline declaration object at runtime, pass it to React directly as `style={runtimeStyle}`; do not route selectors, media queries, token rules, or runtime CSS objects through `style`.
 
 ### Value Semantics
 

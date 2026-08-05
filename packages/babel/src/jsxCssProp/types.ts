@@ -95,23 +95,55 @@ export type NormalizedJsxCssPropElement = {
   readonly hasSpreadAfterCss: boolean;
 };
 
+export type DynamicCssVariableValueFragment =
+  | {
+      readonly kind: "direct-value";
+      readonly expression: t.Expression;
+    }
+  | {
+      readonly kind: "suffix-value";
+      readonly expression: t.Expression;
+      readonly suffix: string;
+    }
+  | {
+      readonly kind: "conditional-leaf";
+      readonly test: t.Expression;
+      readonly consequent: DynamicCssVariableValueFragment;
+      readonly alternate: DynamicCssVariableValueFragment;
+    };
+
 export type DynamicCssVariableLeaf = {
   readonly propertyName: string;
-  readonly value: t.Expression;
+  readonly valueFragment: DynamicCssVariableValueFragment;
   readonly variableIdentifier: t.Identifier;
 };
 
-export type DynamicCssVariableDirectRule = {
-  readonly kind: "direct";
+export type DynamicCssVariableStaticFragment = {
+  readonly kind: "static-fragment";
   readonly expression: t.ObjectExpression | t.ArrayExpression;
   readonly leaves: readonly DynamicCssVariableLeaf[];
 };
 
-export type DynamicCssVariableBranchRule = {
-  readonly kind: "branch";
+export type DynamicCssVariableBranchFragment = {
+  readonly kind: "dynamic-branch-fragment";
   readonly expression: t.ConditionalExpression | t.LogicalExpression;
   readonly leaves: readonly DynamicCssVariableLeaf[];
+  readonly branches: readonly DynamicCssVariableFragment[];
+};
+
+export type DynamicCssVariableFragment =
+  | DynamicCssVariableStaticFragment
+  | DynamicCssVariableBranchFragment;
+
+export type DynamicCssVariableDirectRule = {
+  readonly kind: "direct";
+  readonly fragment: DynamicCssVariableStaticFragment;
+};
+
+export type DynamicCssVariableBranchRule = {
+  readonly kind: "branch";
   readonly branches: readonly DynamicCssVariableRule[];
+  readonly fragment: DynamicCssVariableBranchFragment;
 };
 
 export type DynamicCssVariableRule =
