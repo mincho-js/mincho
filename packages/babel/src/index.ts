@@ -336,6 +336,14 @@ if (import.meta.vitest) {
               createRuntimeJsxPropsExpression(jsxPath.node.openingElement)
             ])
           );
+        },
+        JSXFragment(jsxPath) {
+          jsxPath.replaceWith(
+            t.callExpression(t.identifier("__minchoJsx"), [
+              t.stringLiteral("Fragment"),
+              t.objectExpression([])
+            ])
+          );
         }
       }
     };
@@ -1264,7 +1272,7 @@ if (import.meta.vitest) {
       expect(sameFileConst.result[1]).toContain("zIndex: 2");
     });
 
-    it("normalizes direct inline object and array spreads before jsx css prop classification", () => {
+    it("normalizes direct inline object spreads and extracts static array spreads before jsx css prop classification", () => {
       const inlineObject = babelTransform(
         `
         function App() {
@@ -1293,7 +1301,7 @@ if (import.meta.vitest) {
       `,
         { jsxCssProp: true }
       );
-      const output = `${spreadObject.code}\n${spreadObject.result.join("\n")}\n${spreadArray.code}\n${spreadArray.result.join("\n")}`;
+      const objectOutput = `${spreadObject.code}\n${spreadObject.result.join("\n")}`;
 
       expect(spreadObject.result[1]).toBe(inlineObject.result[1]);
       expect(spreadObject.code).not.toContain(" css=");
@@ -1303,11 +1311,11 @@ if (import.meta.vitest) {
       expect(spreadArray.code).not.toContain("...stack");
       expect(spreadArray.code).not.toContain("_cx(stack)");
       expect(spreadArray.code).not.toContain("unsupported-array-spread");
-      expect(spreadArray.result[1]).toContain("_css([{");
+      expect(spreadArray.result[1]).toContain("_css([...stack,");
       expect(spreadArray.result[1]).toContain('display: "flex"');
       expect(spreadArray.result[1]).toContain("gap: 8");
-      expect(output).not.toContain("...base");
-      expect(output).not.toContain("...stack");
+      expect(objectOutput).not.toContain("...base");
+      expect(spreadArray.result[1]).toContain("...stack");
     });
 
     it("normalizes direct inline provider imported operands with metadata", () => {
@@ -3588,6 +3596,32 @@ if (import.meta.vitest) {
       expect(failure.code).not.toContain("_css(makeRule(");
     });
 
+    it("locks hoistable static array spread on the extracted css path", () => {
+      const { result, code } = babelTransform(
+        `
+        const base = [{ display: "grid" }];
+        const extra = { gap: 8 };
+
+        function App() {
+          return <div css={[...base, extra]} />;
+        }
+      `,
+        { jsxCssProp: true }
+      );
+
+      expect(code).not.toContain(" css=");
+      expect(code).toMatch(
+        /import\s+\{\s*_\$mincho\$\$App\d*(?:\s+as\s+_\$mincho\$\$App\d+)?\s*\}\s+from "(?:\.\/)?extracted_[^"]+\.css\.ts";/
+      );
+      expect(code).toMatch(/className=\{_\$mincho\$\$App\d+\}/);
+      expect(result[1].match(/_css\(/g) ?? []).toHaveLength(1);
+      expect(result[1]).toContain("const base");
+      expect(result[1]).toContain("const extra");
+      expect(result[1]).toMatch(
+        /export var _\$mincho\$\$App\d* = _css\(\[\s*\.\.\.base,\s+extra\s*\]\);/
+      );
+    });
+
     it("routes sidecar-safe partial-reduced factories, computed keys, and object spreads", () => {
       const { result, code } = babelTransform(
         `
@@ -3762,6 +3796,64 @@ if (import.meta.vitest) {
         );
       });
 
+      it("normalizes same-file const object spreads, static computed keys, and shorthand on the extraction path", () => {
+        const { result, code } = expectPartialEvalTransformOk(
+          "same-file const object spread static normalization",
+          `
+          const color = "gold";
+          const display = "grid";
+          const colorKey = "color";
+          const numericKey = 1;
+          const base = { color: "red", margin: 1 } as const;
+          const override = { color: "blue", [numericKey]: "one" } as const;
+
+          function App() {
+            return <div css={{ ...base, [colorKey]: "green", ...override, color, display }} />;
+          }
+        `
+        );
+
+        expect(code).not.toContain(" css=");
+        expect(code).not.toContain("...base");
+        expect(code).not.toContain("...override");
+        expect(code).not.toContain("[colorKey]");
+        expect(result[1]).toContain("margin: 1");
+        expect(result[1]).toContain('"1": "one"');
+        expect(result[1]).toContain('color: "gold"');
+        expect(result[1]).toContain('display: "grid"');
+        expect(result[1]).not.toMatch(/color: "(?:red|blue|green)"/);
+      });
+
+      it("normalizes object spread override order and shorthand before dynamic-leaf lowering", () => {
+        const { result, code } = expectPartialEvalTransformOk(
+          "same-file object spread last-wins dynamic leaf",
+          `
+          const colorKey = "color";
+          const opacity = 1;
+          const base = { color: "red", display: "grid" } as const;
+          const override = { color: "blue", gap: 4 } as const;
+
+          function App(props: { color: string; margin: number }) {
+            return <div css={{ color: "green", ...base, ...override, [colorKey]: props.color, opacity, margin: props.margin }} />;
+          }
+        `
+        );
+
+        expect(result[1]).toContain('display: "grid"');
+        expect(result[1]).toContain("gap: 4");
+        expect(result[1]).toContain("opacity: 1");
+        expect(result[1]).toMatch(/color: _\$mincho\$\$App\w*ColorVar/);
+        expect(result[1]).toMatch(/margin: _\$mincho\$\$App\w*MarginVar/);
+        expect(result[1]).not.toMatch(/color: "(?:red|blue|green)"/);
+        expect(code).not.toContain(" css=");
+        expect(code).not.toContain("...base");
+        expect(code).not.toContain("...override");
+        expect(code).not.toContain("[colorKey]");
+        expect(code).not.toContain("_css(");
+        expect(code).toContain("_vx(props.color)");
+        expect(code).toContain("_vx(props.margin)");
+      });
+
       it("routes static object spreads through css prop partial evaluator dynamic-leaf mode", () => {
         const { result, code } = expectPartialEvalTransformOk(
           "static object spread dynamic leaf",
@@ -3902,7 +3994,17 @@ if (import.meta.vitest) {
             }
           `,
             expected:
-              /computed member access is unsupported|dynamic expression is unsupported/
+              "Cannot statically evaluate css prop value: computed member access is unsupported"
+          },
+          {
+            label: "runtime computed key dynamic value",
+            source: `
+            function App(props: { key: string; value: string }) {
+              return <div css={{ [props.key]: props.value }} />;
+            }
+          `,
+            expected:
+              "Cannot statically evaluate css prop value: computed member access is unsupported"
           },
           {
             label: "runtime spread",
@@ -4253,6 +4355,50 @@ if (import.meta.vitest) {
       expect(code).not.toContain("getVarName");
       expect(code).not.toContain("ix");
       expect(code).not.toMatch(/vx[^\n]+from "@mincho-js\/css"/);
+    });
+
+    it("lowers static-shape array spread dynamic leaves through CSS variables and rejects runtime spreads", () => {
+      const source = `
+        const base = [{ display: "flex" }];
+
+        function App(props: { gap: number }) {
+          return <div css={[...base, { gap: props.gap }]} />;
+        }
+      `;
+      const { result, code } = babelTransform(source, { jsxCssProp: true });
+      const observed = runJsxCssPropRuntime(
+        source,
+        `
+        const props = App({ gap: 12 });
+        return { props, hasCss: "css" in props };
+      `
+      );
+      const runtimeSpreadFailure = captureJsxCssPropFailure(
+        `
+        function App(props: { styles: readonly Record<string, string>[]; color: string }) {
+          return <div css={[...props.styles, { color: props.color }]} />;
+        }
+      `,
+        { jsxCssProp: true }
+      );
+
+      expect(result[1]).toContain("_css([");
+      expect(result[1]).toContain('display: "flex"');
+      expect(result[1]).toMatch(/gap: _\$mincho\$\$App\w*GapVar/);
+      expect(code).toContain(
+        'import { vx as _vx } from "@mincho-js/transform-runtime";'
+      );
+      expect(code).toContain("_vx(props.gap)");
+      expect(code).not.toContain(" css=");
+      expect(code).not.toContain("_css(");
+      expect(observed).toEqual({
+        hasCss: false,
+        props: { className: "css-rule", style: { "css-rule": 12 } }
+      });
+      expect(runtimeSpreadFailure.error.message).toMatch(
+        /Mincho `css` requires statically known CSS shape|array values do not support spread elements|spread operand is not statically reducible/
+      );
+      expect(runtimeSpreadFailure.code).not.toContain("_css(");
     });
 
     it("lowers dynamic css variable expression matrix into vx values", () => {
@@ -6045,7 +6191,7 @@ if (import.meta.vitest) {
       expect(templateLiteralFailure.code).not.toContain("_css(");
     });
 
-    it("rejects unsupported dynamic css variable shapes with compile-away diagnostics", () => {
+    it("rejects unsupported dynamic css variable shapes with exact compile-away diagnostics", () => {
       const fixtures = [
         {
           label: "dynamic keys",
@@ -6054,8 +6200,8 @@ if (import.meta.vitest) {
               return <div css={{ [props.key]: props.color }} />;
             }
           `,
-          expected:
-            /object key is not statically known|computed member access is unsupported|dynamic expression is unsupported|conditional, logical, or wrapped object\/array CSS rule values/
+          expectedFirstLine:
+            "Cannot statically evaluate css prop value: computed member access is unsupported"
         },
         {
           label: "dynamic object spreads",
@@ -6064,8 +6210,8 @@ if (import.meta.vitest) {
               return <div css={{ ...props.styles, color: props.color }} />;
             }
           `,
-          expected:
-            /Mincho `css` requires statically known CSS shape|spread operand is not statically reducible|dynamic expression is unsupported|object spread is unsupported|unsupported identifier-object-value|conditional, logical, or wrapped object\/array CSS rule values/
+          expectedFirstLine:
+            "Mincho `css` requires statically known CSS shape. Plain runtime declaration objects belong in React `style={...}`."
         },
         {
           label: "dynamic array spreads",
@@ -6074,8 +6220,8 @@ if (import.meta.vitest) {
               return <div css={[...props.styles, { color: props.color }]} />;
             }
           `,
-          expected:
-            /Mincho `css` requires statically known CSS shape|spread operand is not statically reducible|array values do not support spread elements in compile-away mode/
+          expectedFirstLine:
+            "Mincho JSX css prop array values do not support spread elements in compile-away mode"
         },
         {
           label: "call-return CSS shapes",
@@ -6087,8 +6233,8 @@ if (import.meta.vitest) {
               return <div css={makeRule(props.color)} />;
             }
           `,
-          expected:
-            /call expressions are not evaluated by Babel|conditional, logical, or wrapped object\/array CSS rule values in compile-away mode/
+          expectedFirstLine:
+            "Cannot statically evaluate css prop value: call expressions are not evaluated by Babel"
         },
         {
           label: "member call-return CSS shapes",
@@ -6097,8 +6243,19 @@ if (import.meta.vitest) {
               return <div css={props.ruleFactory()} />;
             }
           `,
-          expected:
-            /call expressions are not evaluated by Babel|conditional, logical, or wrapped object\/array CSS rule values in compile-away mode/
+          expectedFirstLine:
+            "Cannot statically evaluate css prop value: call expressions are not evaluated by Babel"
+        },
+        {
+          label: "optional dynamic member CSS shapes",
+          source: `
+            const styles = null;
+            function App() {
+              return <div css={styles?.button} />;
+            }
+          `,
+          expectedFirstLine:
+            "Cannot statically evaluate css prop value: dynamic expression is unsupported: OptionalMemberExpression"
         },
         {
           label: "function values",
@@ -6107,7 +6264,8 @@ if (import.meta.vitest) {
               return <div css={{ color: () => props.color }} />;
             }
           `,
-          expected: /dynamic expression is unsupported: ArrowFunctionExpression/
+          expectedFirstLine:
+            "Cannot statically evaluate css prop value: dynamic expression is unsupported: ArrowFunctionExpression"
         },
         {
           label: "sequence-wrapped CSS rules",
@@ -6116,22 +6274,45 @@ if (import.meta.vitest) {
               return <div css={(0, { color: props.color })} />;
             }
           `,
-          expected:
-            /conditional, logical, or wrapped object\/array CSS rule values in compile-away mode/
+          expectedFirstLine:
+            "Mincho JSX css prop does not support conditional, logical, or wrapped object/array CSS rule values in compile-away mode"
         },
         {
-          label: "broad template interpolation",
+          label: "template runtime property values",
           source: `
             function App(props) {
               return <div css={{ color: \`${"${props.color}"}\` }} />;
             }
           `,
-          expected:
-            /template interpolation is not a static primitive|dynamic expression is unsupported|unsupported identifier-object-value/
+          expectedFirstLine:
+            "Cannot statically evaluate css prop value: template interpolation references a render-scope member"
+        },
+        {
+          label: "template optional-member runtime property values",
+          source: `
+            function App(props) {
+              return <div css={{ color: \`${"${props?.color}"}\` }} />;
+            }
+          `,
+          expectedFirstLine:
+            "Cannot statically evaluate css prop value: template interpolation references a render-scope member"
+        },
+        {
+          label: "template call property values",
+          source: `
+            function getColor() {
+              return "red";
+            }
+            function App() {
+              return <div css={{ color: \`${"${getColor()}"}\` }} />;
+            }
+          `,
+          expectedFirstLine:
+            "Cannot statically evaluate css prop value: call expressions are not evaluated by Babel"
         }
       ] as const;
 
-      for (const { label, source, expected } of fixtures) {
+      for (const { label, source, expectedFirstLine } of fixtures) {
         let failure: ReturnType<typeof captureJsxCssPropFailure>;
 
         try {
@@ -6142,8 +6323,11 @@ if (import.meta.vitest) {
           );
         }
 
-        expect(failure.error.message).toMatch(expected);
-        expect(failure.code).not.toContain("_css(");
+        expect(failure.error.message.split("\n")[0], label).toBe(
+          expectedFirstLine
+        );
+        expect(failure.code, label).not.toContain("_css(");
+        expect(failure.code, label).not.toContain("style={{");
       }
     });
 
@@ -6661,7 +6845,7 @@ if (import.meta.vitest) {
         {
           reason: "unsupported-template-interpolation",
           expected:
-            'Cannot statically evaluate css prop value: same-file binding "<inline>" contains unsupported identifier-object-value: Identifier',
+            "Cannot statically evaluate css prop value: template interpolation references a render-scope member",
           source: `
             function App(props: { color: string }) {
               return <div css={{ color: \`${"${props.color}"}\` }} />;
@@ -6745,45 +6929,53 @@ if (import.meta.vitest) {
     });
 
     it("fails closed for dynamic computed optional and template expression css rules", () => {
-      const dynamicComputed = captureJsxCssPropFailure(
-        `
-        const styles = { button: { color: "red" } };
-        function App(variant) {
-          return <div css={styles[variant]} />;
+      const fixtures = [
+        {
+          label: "computed member rule",
+          source: `
+            const styles = { button: { color: "red" } };
+            function App(variant) {
+              return <div css={styles[variant]} />;
+            }
+          `,
+          expectedFirstLine:
+            "Cannot statically evaluate css prop value: computed member access is unsupported"
+        },
+        {
+          label: "optional member rule",
+          source: `
+            const styles = null;
+            function App() {
+              return <div css={styles?.button} />;
+            }
+          `,
+          expectedFirstLine:
+            "Cannot statically evaluate css prop value: dynamic expression is unsupported: OptionalMemberExpression"
+        },
+        {
+          label: "template call property value",
+          source: `
+            function getColor() {
+              return "red";
+            }
+            function App() {
+              return <div css={{ color: \`\${getColor()}\` }} />;
+            }
+          `,
+          expectedFirstLine:
+            "Cannot statically evaluate css prop value: call expressions are not evaluated by Babel"
         }
-      `,
-        { jsxCssProp: true }
-      );
-      const nullishOptional = captureJsxCssPropFailure(
-        `
-        const styles = null;
-        function App() {
-          return <div css={styles?.button} />;
-        }
-      `,
-        { jsxCssProp: true }
-      );
-      const templateCall = captureJsxCssPropFailure(
-        `
-        function getColor() {
-          return "red";
-        }
-        function App() {
-          return <div css={{ color: \`\${getColor()}\` }} />;
-        }
-      `,
-        { jsxCssProp: true }
-      );
+      ] as const;
 
-      expect(dynamicComputed.error.message).toContain(
-        "computed member access is unsupported"
-      );
-      expect(nullishOptional.error.message).toContain(
-        "dynamic expression is unsupported: OptionalMemberExpression"
-      );
-      expect(templateCall.error.message).toContain(
-        "call expressions are not evaluated by Babel"
-      );
+      for (const { label, source, expectedFirstLine } of fixtures) {
+        const failure = captureJsxCssPropFailure(source, { jsxCssProp: true });
+
+        expect(failure.error.message.split("\n")[0], label).toBe(
+          expectedFirstLine
+        );
+        expect(failure.code, label).not.toContain("_css(");
+        expect(failure.code, label).not.toContain("style={{");
+      }
     });
 
     it("keeps class-value array calls out of direct rule-call lowering", () => {
@@ -8383,6 +8575,19 @@ if (import.meta.vitest) {
         expect(observed).not.toHaveProperty("css");
       });
     }
+
+    it("executes fragment-wrapped JSX css prop output", () => {
+      expect(
+        runJsxCssPropRuntime(
+          `
+            function App() {
+              return <><div css="base" /></>;
+            }
+          `,
+          "return App();"
+        )
+      ).toEqual({});
+    });
 
     const nestedSpreadAggregationCodeFixtures = [
       {

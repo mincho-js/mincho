@@ -578,6 +578,30 @@ function evaluateSameFileStaticTemplateLiteral(
     });
 
     if (interpolationResult.kind === "error") {
+      const reference =
+        t.isMemberExpression(interpolation) ||
+        t.isOptionalMemberExpression(interpolation)
+          ? getStaticCssEvalMemberReference(interpolation)
+          : null;
+
+      if (
+        reference &&
+        options.scope
+          .getBinding(reference.bindingName)
+          ?.scope.path.isProgram() === false
+      ) {
+        return {
+          kind: "error",
+          diagnostic: createSameFileStaticCssEvalDiagnostic(
+            options.context,
+            "unsupported-syntax",
+            "identifier-object-value",
+            "template interpolation references a render-scope member"
+          ),
+          metadata: interpolationResult.metadata
+        };
+      }
+
       return interpolationResult;
     }
 

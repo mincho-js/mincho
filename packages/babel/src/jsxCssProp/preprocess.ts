@@ -696,6 +696,12 @@ function preserveObjectDynamicLeafValues(
   rawExpression: t.ObjectExpression,
   reducedExpression: t.ObjectExpression
 ): t.ObjectExpression {
+  if (
+    rawExpression.properties.some((property) => t.isSpreadElement(property))
+  ) {
+    return t.cloneNode(reducedExpression);
+  }
+
   const properties: t.ObjectExpression["properties"] = [];
   let reducedIndex = 0;
 

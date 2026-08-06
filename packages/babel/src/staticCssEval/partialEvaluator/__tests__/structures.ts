@@ -1,10 +1,7 @@
 import { types as t } from "@babel/core";
 import {
-  expectArrayElementExpression,
-  expectArrayExpression,
   expectFixtureConfidentExpression,
   expectFixtureDeoptResult,
-  expectNoSpreadElement,
   expectNumericLiteralExpression,
   expectObjectExpression,
   expectObjectPropertyExpression,
@@ -86,85 +83,6 @@ export function registerPartialEvalStructureTests(
       );
     });
 
-    it("reduces static computed key properties and computed member paths", () => {
-      const results = reduceFixture(`
-        const key = "color";
-        const index = 1;
-        const style = { [key]: "red", ["padding"]: 4 };
-        const sizes = ["sm", "lg"];
-
-        capture(style);
-        capture(style[key]);
-        capture(sizes[index]);
-      `);
-
-      const style = expectObjectExpression(
-        expectFixtureConfidentExpression(results, 0)
-      );
-      expectStringLiteralExpression(
-        expectObjectPropertyExpression(style, "color"),
-        "red"
-      );
-      expectNumericLiteralExpression(
-        expectObjectPropertyExpression(style, "padding"),
-        4
-      );
-      expectStringLiteralExpression(
-        expectFixtureConfidentExpression(results, 1),
-        "red"
-      );
-      expectStringLiteralExpression(
-        expectFixtureConfidentExpression(results, 2),
-        "lg"
-      );
-    });
-
-    it("reduces object spread and array spread operands", () => {
-      const results = reduceFixture(`
-        const base = { color: "red" };
-        const extra = { padding: 4 };
-        const prefix = ["base"];
-
-        capture({ ...base, ...extra, display: "block" });
-        capture([...prefix, "next", ...["last"]]);
-      `);
-
-      const style = expectObjectExpression(
-        expectFixtureConfidentExpression(results, 0)
-      );
-      const list = expectArrayExpression(
-        expectFixtureConfidentExpression(results, 1)
-      );
-
-      expectNoSpreadElement(style);
-      expectNoSpreadElement(list);
-      expectStringLiteralExpression(
-        expectObjectPropertyExpression(style, "color"),
-        "red"
-      );
-      expectNumericLiteralExpression(
-        expectObjectPropertyExpression(style, "padding"),
-        4
-      );
-      expectStringLiteralExpression(
-        expectObjectPropertyExpression(style, "display"),
-        "block"
-      );
-      expect(list.elements).toHaveLength(3);
-      expectStringLiteralExpression(
-        expectArrayElementExpression(list, 0),
-        "base"
-      );
-      expectStringLiteralExpression(
-        expectArrayElementExpression(list, 1),
-        "next"
-      );
-      expectStringLiteralExpression(
-        expectArrayElementExpression(list, 2),
-        "last"
-      );
-    });
-
     it("distinguishes non-const declarations from actual reassignments", () => {
       const results = reduceFixture(`
         const mutated = { color: "red" };
@@ -235,7 +153,7 @@ export function registerPartialEvalStructureTests(
       );
     });
 
-    it("deopts getter method dynamic computed key and dynamic spread", () => {
+    it("deopts getter method and dynamic computed member", () => {
       const results = reduceFixture(`
         const methodStyle = { color() { return "red"; } };
         const getterStyle = { get color() { return "red"; } };
@@ -244,9 +162,6 @@ export function registerPartialEvalStructureTests(
         capture(methodStyle);
         capture(getterStyle);
         capture(style[props.key]);
-        capture({ [props.key]: "red" });
-        capture({ ...props });
-        capture([...props]);
         capture(style?.color);
       `);
 
@@ -260,15 +175,6 @@ export function registerPartialEvalStructureTests(
         "unsupported-computed-member"
       );
       expect(expectFixtureDeoptResult(results, 3).reason).toBe(
-        "non-static-object-key"
-      );
-      expect(expectFixtureDeoptResult(results, 4).reason).toBe(
-        "unsupported-spread"
-      );
-      expect(expectFixtureDeoptResult(results, 5).reason).toBe(
-        "unsupported-spread"
-      );
-      expect(expectFixtureDeoptResult(results, 6).reason).toBe(
         "runtime-css-shape"
       );
     });

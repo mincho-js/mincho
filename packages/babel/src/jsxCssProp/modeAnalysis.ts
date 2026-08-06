@@ -1,10 +1,15 @@
 import { types as t } from "@babel/core";
 import type { NodePath } from "@babel/core";
+import {
+  containsArraySpreadElement,
+  isDirectCssRuleLiteralExpression
+} from "./classification.js";
 import { isSidecarSafeCssRuleExpression } from "./sidecarSafety.js";
 import {
   getSidecarCssRuleClassification,
   hasSidecarBranch
 } from "./sidecarShape.js";
+import { unwrapTransparentCssRuleExpression } from "../staticCssEval/candidates.js";
 import type { CssPropSidecarHoistability } from "./types.js";
 
 type AnalysisScope = NodePath<t.JSXOpeningElement>["scope"];
@@ -24,6 +29,12 @@ export function analyzeCssPropSidecarHoistability(options: {
     options.expression,
     options.scope
   );
+  const preservedRawArraySpreadClassification =
+    getPreservedRawArraySpreadCssRuleClassification({
+      expression: options.expression,
+      reducedExpression,
+      scope: options.scope
+    });
 
   if (
     reducedCssValueClassification &&
@@ -34,7 +45,9 @@ export function analyzeCssPropSidecarHoistability(options: {
   }
 
   const cssValueClassification =
-    reducedCssValueClassification ?? rawCssValueClassification;
+    reducedCssValueClassification ??
+    rawCssValueClassification ??
+    preservedRawArraySpreadClassification;
 
   if (!cssValueClassification) {
     return { kind: "not-candidate" };
@@ -55,6 +68,76 @@ export function analyzeCssPropSidecarHoistability(options: {
   return safe
     ? { kind: "hoistable", cssValueClassification }
     : { kind: "unsafe" };
+}
+
+function getPreservedRawArraySpreadCssRuleClassification(options: {
+  readonly expression: t.Expression;
+  readonly reducedExpression: t.Expression;
+  readonly scope: AnalysisScope;
+}): "css-rule" | null {
+  const expression = unwrapTransparentCssRuleExpression(options.expression);
+  const reducedExpression = unwrapTransparentCssRuleExpression(
+    options.reducedExpression
+  );
+
+  return t.isArrayExpression(expression) &&
+    containsArraySpreadElement(expression) &&
+    !containsImportedTopLevelArrayReference(expression, options.scope) &&
+    t.isArrayExpression(reducedExpression) &&
+    containsObjectArrayElement(reducedExpression) &&
+    isDirectCssRuleLiteralExpression(reducedExpression)
+    ? "css-rule"
+    : null;
+}
+
+function containsObjectArrayElement(expression: t.ArrayExpression): boolean {
+  return expression.elements.some((element) => {
+    if (!element || t.isSpreadElement(element)) {
+      return false;
+    }
+
+    const unwrappedElement = unwrapTransparentCssRuleExpression(element);
+
+    if (t.isObjectExpression(unwrappedElement)) {
+      return true;
+    }
+
+    return t.isArrayExpression(unwrappedElement)
+      ? containsObjectArrayElement(unwrappedElement)
+      : false;
+  });
+}
+
+export function containsImportedTopLevelArrayReference(
+  expression: t.ArrayExpression,
+  scope: AnalysisScope
+): boolean {
+  return expression.elements.some((element) => {
+    if (!element) {
+      return false;
+    }
+
+    const candidate = t.isSpreadElement(element) ? element.argument : element;
+    const unwrappedCandidate = t.isExpression(candidate)
+      ? unwrapTransparentCssRuleExpression(candidate)
+      : candidate;
+
+    if (t.isArrayExpression(unwrappedCandidate)) {
+      return containsImportedTopLevelArrayReference(unwrappedCandidate, scope);
+    }
+
+    if (!t.isIdentifier(unwrappedCandidate)) {
+      return false;
+    }
+
+    const binding = scope.getBinding(unwrappedCandidate.name);
+
+    return Boolean(
+      binding?.path.isImportSpecifier() ||
+      binding?.path.isImportDefaultSpecifier() ||
+      binding?.path.isImportNamespaceSpecifier()
+    );
+  });
 }
 
 function isKnownPrimitiveSidecarCallAlias(

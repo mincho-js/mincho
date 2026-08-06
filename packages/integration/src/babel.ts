@@ -2649,6 +2649,175 @@ if (import.meta.vitest) {
       }
     });
 
+    it("keeps provider-declared unsupported reexport sources fail-closed without filesystem traversal", async () => {
+      const componentSource = `
+        import { button } from "./barrel";
+
+        function App() {
+          return <div css={button} />;
+        }
+      `;
+      const barrelSource = `export { button } from "./styles";`;
+      const stylesSource = `export const button = { color: "red" } as const;`;
+      const { filePaths } = await createBabelFixtureFiles(
+        {
+          "component.tsx": componentSource,
+          "barrel.ts": barrelSource,
+          "styles.ts": stylesSource
+        },
+        "css-prop-provider-unsupported-barrel-no-fallback"
+      );
+      const componentId = filePaths["component.tsx"];
+      const barrelId = filePaths["barrel.ts"];
+      const stylesId = filePaths["styles.ts"];
+      const loadedIds: string[] = [];
+      const provider: StaticCssEvalSourceProvider = {
+        resolve(importerId, importPath) {
+          if (importerId !== componentId || importPath !== "./barrel") {
+            return null;
+          }
+
+          return {
+            resolvedFile: barrelId,
+            canonicalModuleId: `test:${barrelId}`,
+            normalizedPathKey: barrelId,
+            sourceKind: "unsupported-source-shape",
+            unsupportedReason: "reexport-or-barrel",
+            resolverKind: "test"
+          };
+        },
+        load(id) {
+          loadedIds.push(id);
+
+          if (id === componentId) {
+            return { sourceText: componentSource, resolverKind: "test" };
+          }
+
+          if (id === barrelId) {
+            return {
+              sourceText: barrelSource,
+              sourceKind: "unsupported-source-shape",
+              unsupportedReason: "reexport-or-barrel",
+              resolverKind: "test"
+            };
+          }
+
+          if (id === stylesId) {
+            return { sourceText: stylesSource, resolverKind: "test" };
+          }
+
+          return null;
+        }
+      };
+      let thrownError: unknown;
+
+      try {
+        await babelTransform(componentId, {
+          jsxCssProp: true,
+          staticCssEvalSourceProvider: provider
+        });
+      } catch (error) {
+        thrownError = error;
+      }
+
+      expect(thrownError).toBeInstanceOf(BabelTransformError);
+
+      if (!(thrownError instanceof BabelTransformError)) {
+        throw new Error("Expected BabelTransformError for unsupported barrel");
+      }
+
+      expect(thrownError.staticCssEval?.diagnostics[0]).toMatchObject({
+        id: "STATIC_CSS_EVAL_PROVIDER_SOURCE_UNSUPPORTED",
+        reason: "reexport-or-barrel",
+        dependency: { file: barrelId },
+        importPath: "./barrel",
+        exportName: "button"
+      });
+      expect(thrownError.staticCssEval?.resolvedDependencies).toEqual([
+        expect.objectContaining({
+          importerId: componentId,
+          specifier: "./barrel",
+          resolvedFile: barrelId,
+          sourceKind: "unsupported-source-shape",
+          sourceOrigin: "unsupported",
+          unsupportedReason: "reexport-or-barrel",
+          resolverKind: "test",
+          loaded: true
+        })
+      ]);
+      expect(loadedIds).not.toContain(stylesId);
+    });
+
+    it("keeps unresolved provider imports fail-closed even when the imported file exists", async () => {
+      const componentSource = `
+        import { button } from "./styles";
+
+        function App() {
+          return <div css={button} />;
+        }
+      `;
+      const stylesSource = `export const button = { color: "red" } as const;`;
+      const { filePaths } = await createBabelFixtureFiles(
+        {
+          "component.tsx": componentSource,
+          "styles.ts": stylesSource
+        },
+        "css-prop-provider-unresolved-no-fallback"
+      );
+      const componentId = filePaths["component.tsx"];
+      const provider = createFileBackedStaticCssEvalSourceProvider({
+        resolutions: {}
+      });
+      let thrownError: unknown;
+
+      try {
+        await babelTransform(componentId, {
+          jsxCssProp: true,
+          staticCssEvalSourceProvider: provider
+        });
+      } catch (error) {
+        thrownError = error;
+      }
+
+      expect(thrownError).toBeInstanceOf(BabelTransformError);
+
+      if (!(thrownError instanceof BabelTransformError)) {
+        throw new Error("Expected BabelTransformError for unresolved import");
+      }
+
+      expect(thrownError.staticCssEval?.diagnostics[0]).toMatchObject({
+        id: "STATIC_CSS_EVAL_UNRESOLVED_IMPORT",
+        dependency: { file: "./styles" },
+        importPath: "./styles",
+        exportName: "button"
+      });
+      expect(thrownError.staticCssEval?.dependencyFiles).toEqual([]);
+      expect(thrownError.staticCssEval?.resolvedDependencies).toEqual([
+        expect.objectContaining({
+          importerId: componentId,
+          specifier: "./styles",
+          resolvedFile: "./styles",
+          canonicalModuleId: "unresolved:./styles",
+          normalizedPathKey: "unresolved:./styles",
+          resolverKind: "source-provider",
+          sourceKind: "unresolved",
+          sourceOrigin: "unresolved",
+          unsupportedReason: "unresolved",
+          loaded: false
+        })
+      ]);
+      expect(thrownError.staticCssEval?.dependencies[0]).toMatchObject({
+        file: "./styles",
+        kind: "imported",
+        importer: componentId,
+        specifier: "./styles",
+        exportName: "button",
+        memberPath: [],
+        inspected: true,
+        contributed: false
+      });
+    });
+
     it("resolves direct named reexports from the async source-provider prepass", async () => {
       const path = await import("node:path");
       const ownerSource = `
@@ -2874,6 +3043,139 @@ if (import.meta.vitest) {
         exportName: "button",
         memberPath: ["primary"]
       });
+      expect(staticCssEval?.resolvedModuleIds).toContain(stylesId);
+    });
+
+    it("resolves imported static-shape spreads computed keys and member paths from the async source-provider prepass", async () => {
+      const componentSource = `
+        import { button, card } from "./styles";
+
+        function App() {
+          return <>
+            <div css={button.primary} />
+            <section css={card} />
+          </>;
+        }
+      `;
+      const stylesSource = `
+        const backgroundKey = "backgroundColor";
+        const base = { color: "red" } as const;
+        const hover = { _hover: { color: "blue" } } as const;
+        const row = [{ display: "flex" }] as const;
+        const spacing = { gap: "8px" } as const;
+
+        export const button = {
+          primary: [
+            ...row,
+            { ...base, [backgroundKey]: "white" },
+            { ...hover },
+            spacing
+          ]
+        } as const;
+
+        export const card = {
+          ...base,
+          [backgroundKey]: "black",
+          ...hover
+        } as const;
+      `;
+      const { filePaths } = await createBabelFixtureFiles(
+        {
+          "component.tsx": componentSource,
+          "styles.ts": stylesSource
+        },
+        "css-prop-provider-static-shape-spreads"
+      );
+      const componentId = filePaths["component.tsx"];
+      const stylesId = filePaths["styles.ts"];
+      const provider = createFileBackedStaticCssEvalSourceProvider({
+        resolutions: {
+          [`${componentId}\0./styles`]: stylesId
+        }
+      });
+      const { code, result, staticCssEval } = await babelTransform(
+        componentId,
+        {
+          jsxCssProp: true,
+          staticCssEvalSourceProvider: provider
+        }
+      );
+      const [sidecarFile, sidecarSource] = result;
+
+      expect(sidecarFile).toMatch(/^extracted_[a-z0-9]+\.css\.ts$/);
+      expect(code).toMatch(
+        new RegExp(`import \\{ [^}]+ \\} from "${escapeRegExp(sidecarFile)}";`)
+      );
+      expect(code).not.toContain(" css=");
+      expect(code).not.toContain("_cx(button.primary)");
+      expect(code).not.toContain("_cx(card)");
+      expect(sidecarSource).toContain('display: "flex"');
+      expect(sidecarSource).toContain('gap: "8px"');
+      expect(sidecarSource).toContain('backgroundColor: "white"');
+      expect(sidecarSource).toContain('backgroundColor: "black"');
+      expect(staticCssEval?.dependencyFiles).toEqual([stylesId]);
+      expect(staticCssEval?.ownerToDependencies.get(componentId)).toEqual([
+        stylesId
+      ]);
+      expect(staticCssEval?.dependencyToOwners.get(stylesId)).toEqual([
+        componentId
+      ]);
+      expect(staticCssEval?.resolvedDependencies).toEqual([
+        expect.objectContaining({
+          importerId: componentId,
+          specifier: "./styles",
+          resolvedFile: stylesId,
+          canonicalModuleId: `test:${stylesId}`,
+          normalizedPathKey: stylesId,
+          resolverKind: "test",
+          loaded: true,
+          sourceIdentity: createTestSourceIdentity(stylesSource)
+        })
+      ]);
+      expect(staticCssEval?.dependencies).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            file: stylesId,
+            kind: "imported",
+            importer: componentId,
+            specifier: "./styles",
+            exportName: "button",
+            memberPath: ["primary"],
+            inspected: true,
+            contributed: true
+          }),
+          expect.objectContaining({
+            file: stylesId,
+            kind: "imported",
+            importer: componentId,
+            specifier: "./styles",
+            exportName: "card",
+            memberPath: [],
+            inspected: true,
+            contributed: true
+          })
+        ])
+      );
+      expect(staticCssEval?.cacheKeys).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            importerFile: componentId,
+            resolvedFile: stylesId,
+            resolvedId: stylesId,
+            exportName: "button",
+            memberPath: ["primary"],
+            sourceHash: createTestSourceIdentity(stylesSource).sourceHash
+          }),
+          expect.objectContaining({
+            importerFile: componentId,
+            resolvedFile: stylesId,
+            resolvedId: stylesId,
+            exportName: "card",
+            memberPath: [],
+            sourceHash: createTestSourceIdentity(stylesSource).sourceHash
+          })
+        ])
+      );
       expect(staticCssEval?.resolvedModuleIds).toContain(stylesId);
     });
 

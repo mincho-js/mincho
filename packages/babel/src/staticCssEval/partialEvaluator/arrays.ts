@@ -107,12 +107,18 @@ function pushArraySpreadElements(
   element: t.SpreadElement,
   spreadExpression: t.ArrayExpression
 ): boolean {
+  const reducedElements: t.Expression[] = [];
+
   for (const spreadElement of spreadExpression.elements) {
     if (!spreadElement || t.isSpreadElement(spreadElement)) {
       elements.push(t.cloneNode(element));
       return true;
     }
-    elements.push(t.cloneNode(spreadElement));
+    reducedElements.push(spreadElement);
   }
+
+  elements.push(
+    ...reducedElements.map((spreadElement) => t.cloneNode(spreadElement))
+  );
   return false;
 }

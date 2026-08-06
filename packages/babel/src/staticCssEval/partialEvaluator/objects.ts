@@ -29,9 +29,13 @@ export function reduceObjectExpression(
             "unsupported-spread"
           )
         });
-        properties.push(
-          t.spreadElement(t.cloneNode(spreadResult.fallbackExpression))
-        );
+        pushObjectPropertyWithOverride({
+          properties,
+          property: t.spreadElement(
+            t.cloneNode(spreadResult.fallbackExpression)
+          ),
+          propertyKeyIndexes
+        });
         continue;
       }
 
@@ -42,7 +46,11 @@ export function reduceObjectExpression(
           reason: "unsupported-spread",
           details: { deoptPath: [{ kind: "spread" }] }
         };
-        properties.push(t.cloneNode(property));
+        pushObjectPropertyWithOverride({
+          properties,
+          property: t.cloneNode(property),
+          propertyKeyIndexes
+        });
         continue;
       }
 
@@ -64,7 +72,11 @@ export function reduceObjectExpression(
 
     if (!t.isObjectProperty(property) || !t.isExpression(property.value)) {
       pendingDeopt ??= { reason: "runtime-css-shape", details: {} };
-      properties.push(t.cloneNode(property));
+      pushObjectPropertyWithOverride({
+        properties,
+        property: t.cloneNode(property),
+        propertyKeyIndexes
+      });
       continue;
     }
 
@@ -74,7 +86,11 @@ export function reduceObjectExpression(
       pendingDeopt ??= options.runtime.createPendingDeoptFromChild({
         result: keyResult.result
       });
-      properties.push(t.cloneNode(property));
+      pushObjectPropertyWithOverride({
+        properties,
+        property: t.cloneNode(property),
+        propertyKeyIndexes
+      });
       continue;
     }
 
@@ -93,7 +109,11 @@ export function reduceObjectExpression(
         result: valueResult
       });
       nextProperty.value = t.cloneNode(valueResult.fallbackExpression);
-      properties.push(nextProperty);
+      pushObjectPropertyWithOverride({
+        properties,
+        property: nextProperty,
+        propertyKeyIndexes
+      });
       continue;
     }
 
@@ -238,7 +258,11 @@ function pushObjectSpreadProperties(
 ): boolean {
   for (const spreadProperty of options.spreadExpression.properties) {
     if (t.isSpreadElement(spreadProperty)) {
-      options.properties.push(t.cloneNode(options.property));
+      pushObjectPropertyWithOverride({
+        properties: options.properties,
+        property: t.cloneNode(options.property),
+        propertyKeyIndexes: options.propertyKeyIndexes
+      });
       return true;
     }
     pushObjectPropertyWithOverride({
@@ -255,9 +279,10 @@ function pushObjectPropertyWithOverride(options: {
   readonly property: t.ObjectExpression["properties"][number];
   readonly propertyKeyIndexes: Map<string, number>;
 }): void {
-  const keyName = t.isObjectProperty(options.property)
-    ? getStaticObjectPropertyName(options.property.key)
-    : null;
+  const keyName =
+    t.isObjectProperty(options.property) || t.isObjectMethod(options.property)
+      ? getStaticObjectPropertyName(options.property.key)
+      : null;
 
   if (keyName) {
     const existingIndex = options.propertyKeyIndexes.get(keyName);

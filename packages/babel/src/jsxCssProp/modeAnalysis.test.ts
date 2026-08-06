@@ -1,6 +1,14 @@
-import { parseSync, types as t } from "@babel/core";
+import {
+  type NodePath,
+  parseSync,
+  transformSync,
+  types as t
+} from "@babel/core";
 import { describe, expect, it } from "vitest";
-import { functionReturnsOnlyStaticPrimitive } from "./modeAnalysis.js";
+import {
+  containsImportedTopLevelArrayReference,
+  functionReturnsOnlyStaticPrimitive
+} from "./modeAnalysis.js";
 
 function parseFunction(source: string): t.FunctionDeclaration {
   const statement = parseSync(source)?.program.body[0];
@@ -10,6 +18,37 @@ function parseFunction(source: string): t.FunctionDeclaration {
   }
 
   return statement;
+}
+
+function hasImportedArrayReference(source: string): boolean {
+  let result: boolean | undefined;
+
+  transformSync(source, {
+    parserOpts: { plugins: ["jsx"] },
+    plugins: [
+      () => ({
+        visitor: {
+          JSXAttribute(path: NodePath<t.JSXAttribute>) {
+            if (!t.isJSXIdentifier(path.node.name, { name: "css" })) return;
+
+            const value = path.node.value;
+            if (
+              t.isJSXExpressionContainer(value) &&
+              t.isArrayExpression(value.expression)
+            ) {
+              result = containsImportedTopLevelArrayReference(
+                value.expression,
+                path.scope
+              );
+            }
+          }
+        }
+      })
+    ]
+  });
+
+  if (result === undefined) throw new TypeError("expected css array fixture");
+  return result;
 }
 
 describe("sidecar primitive return analysis", () => {
@@ -38,6 +77,30 @@ describe("sidecar primitive return analysis", () => {
           }
         `)
       )
+    ).toBe(false);
+  });
+});
+
+describe("sidecar array import analysis", () => {
+  it("finds imported references inside nested arrays", () => {
+    expect(
+      hasImportedArrayReference(`
+        import { rules } from "./rules";
+        function App() {
+          return <div css={[[...rules], { gap: 8 }]} />;
+        }
+      `)
+    ).toBe(true);
+  });
+
+  it("ignores local bindings inside nested arrays", () => {
+    expect(
+      hasImportedArrayReference(`
+        const rules = [{ color: "red" }];
+        function App() {
+          return <div css={[[...rules], { gap: 8 }]} />;
+        }
+      `)
     ).toBe(false);
   });
 });

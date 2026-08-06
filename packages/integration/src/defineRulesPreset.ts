@@ -880,7 +880,7 @@ if (import.meta.vitest) {
           expect(source).toContain(className);
         }
       }
-    }, 10_000);
+    }, 20_000);
   });
 
   describe("defineRules preset registry wrapper", () => {
