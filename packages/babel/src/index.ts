@@ -4419,18 +4419,24 @@ if (import.meta.vitest) {
         function App(props: {
           enabled: boolean;
           fallback: number;
+          frequency: number;
           gap: number;
           offset: number;
           percent: number;
+          ratio: number;
+          resolution: number;
           root?: { gap: number };
           size: number;
           value: number | null;
         }) {
           const enabled = props.enabled;
           const fallback = props.fallback;
+          const frequency = props.frequency;
           const gap = props.gap;
           const offset = props.offset;
           const percent = props.percent;
+          const ratio = props.ratio;
+          const resolution = props.resolution;
           const root = props.root;
           const size = props.size;
           const value = props.value;
@@ -4440,6 +4446,17 @@ if (import.meta.vitest) {
             <div css={{ margin: \`${"${gap}"}px\` }} />
             <div css={{ inset: \`${"${percent}"}%\` }} />
             <div css={{ padding: \`${"${root?.gap}"}rem\` }} />
+            <div css={{ marginBlock: \`${"${size}"}em\` }} />
+            <div css={{ letterSpacing: \`${"${size}"}Q\` }} />
+            <div css={{ blockSize: \`${"${size}"}svh\` }} />
+            <div css={{ inlineSize: \`${"${size}"}cqw\` }} />
+            <div css={{ rotate: \`${"${offset}"}deg\` }} />
+            <div css={{ transitionDuration: \`${"${size}"}ms\` }} />
+            <div css={{ pitch: \`${"${frequency}"}Hz\` }} />
+            <div css={{ pitch: \`${"${frequency}"}KHz\` }} />
+            <div css={{ gridTemplateColumns: \`${"${ratio}"}fr\` }} />
+            <div css={{ imageResolution: \`${"${resolution}"}dpi\` }} />
+            <div css={{ imageResolution: \`${"${resolution}"}x\` }} />
             <div css={{ color: enabled ? "red" : "blue" }} />
             <div css={{ opacity: value ?? fallback }} />
             <div css={{ height: +size }} />
@@ -4452,7 +4469,7 @@ if (import.meta.vitest) {
       );
 
       expect(result[1]).toMatch(/_minchoCreateVar\d*\(/);
-      expect(result[1].match(/_css\(/g) ?? []).toHaveLength(11);
+      expect(result[1].match(/_css\(/g) ?? []).toHaveLength(22);
       expect(code).not.toContain(" css=");
       expect(code).not.toContain("_css(");
       expect(code).toContain(
@@ -4462,6 +4479,17 @@ if (import.meta.vitest) {
       expect(code).toContain('_vx(gap, "px")');
       expect(code).toContain('_vx(percent, "%")');
       expect(code).toContain('_vx(root?.gap, "rem")');
+      expect(code).toContain('_vx(size, "em")');
+      expect(code).toContain('_vx(size, "Q")');
+      expect(code).toContain('_vx(size, "svh")');
+      expect(code).toContain('_vx(size, "cqw")');
+      expect(code).toContain('_vx(offset, "deg")');
+      expect(code).toContain('_vx(size, "ms")');
+      expect(code).toContain('_vx(frequency, "Hz")');
+      expect(code).toContain('_vx(frequency, "KHz")');
+      expect(code).toContain('_vx(ratio, "fr")');
+      expect(code).toContain('_vx(resolution, "dpi")');
+      expect(code).toContain('_vx(resolution, "x")');
       expect(code).not.toContain('enabled ? _vx("red") : _vx("blue")');
       expect(code).toContain("_vx(value ?? fallback)");
       expect(code).toContain("_vx(+size)");
@@ -4988,6 +5016,14 @@ if (import.meta.vitest) {
           source: `
             function App(size: number) {
               return <div css={{ width: \`calc(${"${size}"}px)\` }} />;
+            }
+          `
+        },
+        {
+          label: "unicode-folded template suffix",
+          source: `
+            function App(frequency: number) {
+              return <div css={{ pitch: \`${"${frequency}"}KHz\` }} />;
             }
           `
         },

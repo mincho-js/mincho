@@ -46,6 +46,7 @@ if (vitest) {
       expect(vx(8, "px")).toBe("8px");
       expect(vx(50, "%")).toBe("50%");
       expect(vx("1.5", "rem")).toBe("1.5rem");
+      expect(vx(2, "x")).toBe("2x");
     });
   });
 }

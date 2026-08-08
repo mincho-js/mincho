@@ -2826,15 +2826,98 @@ function collectDynamicCssVariableSuffixValueFragment(options: {
   };
 }
 
+// CSS unit suffixes accepted by one-hole dynamic templates such as `${gap}px`.
+// MDN Reference: https://developer.mozilla.org/en-US/docs/Web/CSS/CSS_values_and_units
+// Container query units: https://developer.mozilla.org/en-US/docs/Web/CSS/CSS_container_queries#container_query_length_units
+// Keep entries lowercase; matching is case-insensitive and preserves input suffix casing.
+const supportedDynamicCssVariableTemplateSuffixes = new Set([
+  "%",
+
+  // Font/root-relative lengths.
+  "cap",
+  "ch",
+  "em",
+  "ex",
+  "ic",
+  "lh",
+  "rcap",
+  "rch",
+  "rem",
+  "rex",
+  "ric",
+  "rlh",
+
+  // Viewport lengths.
+  "dvb",
+  "dvh",
+  "dvi",
+  "dvmax",
+  "dvmin",
+  "dvw",
+  "lvb",
+  "lvh",
+  "lvi",
+  "lvmax",
+  "lvmin",
+  "lvw",
+  "svb",
+  "svh",
+  "svi",
+  "svmax",
+  "svmin",
+  "svw",
+  "vb",
+  "vh",
+  "vi",
+  "vmax",
+  "vmin",
+  "vw",
+
+  // Container query lengths.
+  "cqb",
+  "cqh",
+  "cqi",
+  "cqmax",
+  "cqmin",
+  "cqw",
+
+  // Absolute lengths.
+  "cm",
+  "in",
+  "mm",
+  "pc",
+  "pt",
+  "px",
+  "q",
+
+  // Grid flex.
+  "fr",
+
+  // Angle.
+  "deg",
+  "grad",
+  "rad",
+  "turn",
+
+  // Time.
+  "ms",
+  "s",
+
+  // Frequency.
+  "hz",
+  "khz",
+
+  // Resolution.
+  "dpcm",
+  "dpi",
+  "dppx",
+  "x"
+]);
+
 function isSupportedDynamicCssVariableTemplateSuffix(suffix: string): boolean {
-  switch (suffix) {
-    case "px":
-    case "%":
-    case "rem":
-      return true;
-    default:
-      return false;
-  }
+  return supportedDynamicCssVariableTemplateSuffixes.has(
+    suffix.replace(/[A-Z]/g, (character) => character.toLowerCase())
+  );
 }
 
 function isSupportedDynamicCssVariableDirectValueExpression(options: {
