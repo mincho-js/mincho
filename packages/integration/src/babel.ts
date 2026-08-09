@@ -180,6 +180,7 @@ export type BabelOptions = Omit<
   | "inputSourceMap"
 > & {
   jsxCssProp?: boolean;
+  optimize?: PluginOptions["optimize"];
   staticCssEvalProvider?: PluginOptions["staticCssEvalProvider"];
   /** @internal Async source provider used to prepare imported css eval data. */
   staticCssEvalSourceProvider?: StaticCssEvalSourceProvider;
@@ -199,6 +200,7 @@ export async function babelTransform(
 ): Promise<BabelTransformResult> {
   const {
     jsxCssProp = false,
+    optimize,
     staticCssEvalProvider,
     staticCssEvalSourceProvider,
     staticCssEvalProjectEngine,
@@ -225,11 +227,10 @@ export async function babelTransform(
         observedStaticCssEvalMetadata
       )
     : undefined;
-  const options: PluginOptions & {
-    jsxCssProp?: boolean;
-  } = {
+  const options: PluginOptions = {
     result: ["", ""],
     jsxCssProp,
+    ...(optimize ? { optimize } : {}),
     staticCssEvalProvider: observedStaticCssEvalProvider
   };
   let result;
@@ -592,6 +593,42 @@ if (import.meta.vitest) {
       });
     });
 
+    it("leaves output unchanged when defineRules cx optimization is inactive", async () => {
+      const fixturePath = await createBabelFixture(
+        `
+          import { defineRules } from "@mincho-js/css";
+
+          const { css, cx } = defineRules({
+            properties: { color: true }
+          });
+          const idleClass = css({ color: "blue" });
+          const activeClass = css({ color: "red" });
+
+          export function button(active: boolean) {
+            return cx(idleClass, active && activeClass);
+          }
+        `,
+        "define-rules-cx-optimize-option"
+      );
+      const omitted = await babelTransform(fixturePath);
+      const emptyOptimize = await babelTransform(fixturePath, { optimize: {} });
+      const disabledOptimize = await babelTransform(fixturePath, {
+        optimize: { defineRulesCxConditions: false }
+      });
+      const enabledOptimize = await babelTransform(fixturePath, {
+        jsxCssProp: false,
+        optimize: { defineRulesCxConditions: true }
+      });
+
+      expect(emptyOptimize.result).toEqual(omitted.result);
+      expect(emptyOptimize.code).toBe(omitted.code);
+      expect(disabledOptimize.result).toEqual(omitted.result);
+      expect(disabledOptimize.code).toBe(omitted.code);
+      expect(enabledOptimize.result).toEqual(omitted.result);
+      expect(enabledOptimize.code).toContain("const _minchoDefineRulesCx = [");
+      expect(enabledOptimize.code).toContain("return _minchoDefineRulesCx[");
+    });
+
     it("extracts css prop generated css calls into sidecar output", async () => {
       const fixturePath = await createBabelFixture(
         `
@@ -642,6 +679,69 @@ if (import.meta.vitest) {
       expect(code).not.toContain(" css=");
       expect(code).not.toContain("css={{");
       expect(code).not.toContain('color: "red"');
+    });
+
+    it("emits dynamic declaration leaves as merged inline style vars", async () => {
+      const fixturePath = await createBabelFixture(
+        `
+          type Props = {
+            readonly color: string;
+            readonly gap: number;
+            readonly style?: { readonly opacity?: number };
+          };
+
+          function App(props: Props) {
+            return <div className="base" style={props.style} css={{ color: props.color, marginTop: \`\${props.gap}px\` }} />;
+          }
+        `,
+        "dynamic-css-var-style"
+      );
+      const { result, code } = await babelTransform(fixturePath, {
+        jsxCssProp: true
+      });
+      const [sidecarFile, sidecarSource] = result;
+
+      expect(sidecarFile).toMatch(/^extracted_[a-z0-9]+\.css\.ts$/);
+      expect(code).not.toContain(" css=");
+      expect(code).toContain('from "@mincho-js/transform-runtime"');
+      expect(code).toMatch(
+        /className=\{[A-Za-z_$][\w$]*\("base", [A-Za-z_$][\w$]*\)\}/
+      );
+      expect(code).toMatch(
+        /style=\{\{\s*\.\.\.props\.style,\s*\[[A-Za-z_$][\w$]*\]: [A-Za-z_$][\w$]*\(props\.color\),\s*\[[A-Za-z_$][\w$]*\]: [A-Za-z_$][\w$]*\(props\.gap, "px"\)\s*\}\}/s
+      );
+      expect(sidecarSource).toMatch(/[A-Za-z_$][\w$]*\("color"\)/);
+      expect(sidecarSource).toMatch(/[A-Za-z_$][\w$]*\("marginTop"\)/);
+      expect(sidecarSource).toMatch(/[A-Za-z_$][\w$]*\([A-Za-z_$][\w$]*\)/);
+      expect(sidecarSource).toMatch(
+        /[A-Za-z_$][\w$]*\(\{\s*color: [A-Za-z_$][\w$]*,\s*marginTop: [A-Za-z_$][\w$]*\s*\}\)/s
+      );
+    });
+
+    it("merges pre and post spread className around explicit css output", async () => {
+      const fixturePath = await createBabelFixture(
+        `
+          const preProps = { className: "pre", css: "ignored-pre", id: "root" };
+          const postProps = { className: "post", css: "ignored-post", title: "done" };
+
+          function App() {
+            return <div {...preProps} css={{ color: "red" }} {...postProps} />;
+          }
+        `,
+        "pre-post-spread-merge"
+      );
+      const { result, code } = await babelTransform(fixturePath, {
+        jsxCssProp: true
+      });
+      const [, sidecarSource] = result;
+
+      expect(code).not.toContain(" css=");
+      expect(code).toContain("const _minchoPreProps = {");
+      expect(code).toContain("const _minchoPostProps = {");
+      expect(code).toMatch(
+        /<div \{\.\.\._minchoPreRest\} \{\.\.\._minchoPostRest\} className=\{[A-Za-z_$][\w$]*\(_minchoPreClassName, _minchoCssClassName, _minchoPostClassName\)\} \/>/
+      );
+      expect(sidecarSource).toContain('color: "red"');
     });
 
     it("emits sidecar build-time call-valued leaf and spread call css prop rules", async () => {

@@ -330,6 +330,27 @@ if (import.meta.vitest) {
     return source.replace(/\s+/g, " ").trim();
   }
 
+  function expectSerializedMarkerClassName(
+    source: string,
+    bindingName: string,
+    expectedClassName: string
+  ): void {
+    const match = new RegExp(`\\b${bindingName} = '([^']*)'`).exec(source);
+
+    if (match === null || match[1] === undefined) {
+      throw new Error(`Missing serialized class binding ${bindingName}`);
+    }
+
+    const tokens = match[1].split(/\s+/).filter(Boolean);
+    const markers = tokens.filter((token) => token.startsWith("__mincho_seg_"));
+    const classNames = tokens.filter(
+      (token) => !token.startsWith("__mincho_seg_")
+    );
+
+    expect(markers).toHaveLength(1);
+    expect(classNames.join(" ")).toBe(expectedClassName);
+  }
+
   function expectSourceToContainSnippet(source: string, snippet: string): void {
     expect(normalizeRegistryFixtureSource(source)).toContain(
       normalizeRegistryFixtureSource(snippet)
@@ -968,8 +989,8 @@ if (import.meta.vitest) {
 
       expect(providerClassNames.length).toBeGreaterThan(0);
       expect(consumerClassNames).toEqual(providerClassNames);
-      expect(source).toContain(`providerClass = '${reusedClassName}'`);
-      expect(source).toContain(`consumerClass = '${reusedClassName}'`);
+      expectSerializedMarkerClassName(source, "providerClass", reusedClassName);
+      expectSerializedMarkerClassName(source, "consumerClass", reusedClassName);
     });
 
     it("reuses conditional provider preset metadata across package fixture boundaries", async () => {
@@ -1026,9 +1047,15 @@ if (import.meta.vitest) {
 
         expect(consumerTabletClass).toBe(providerTabletClass);
         expect(consumerDesktopClass).toBe(providerDesktopClass);
-        expect(source).toContain(`consumerClass = '${reusedClassName}'`);
-        expect(source).toContain(
-          `importedProviderClass = '${reusedClassName}'`
+        expectSerializedMarkerClassName(
+          source,
+          "consumerClass",
+          reusedClassName
+        );
+        expectSerializedMarkerClassName(
+          source,
+          "importedProviderClass",
+          reusedClassName
         );
         expect(countV4PresetArtifacts(source)).toBe(2);
         expect(emittedCss).toMatch(/@media\s+screen and \(min-width: 768px\)/);
@@ -1093,24 +1120,31 @@ if (import.meta.vitest) {
           }
         );
 
-        expect(source).toContain(
-          `importedProviderClass = '${providerTabletClass} ${providerDesktopClass}'`
+        expectSerializedMarkerClassName(
+          source,
+          "importedProviderClass",
+          `${providerTabletClass} ${providerDesktopClass}`
         );
         expect(countV4PresetArtifacts(source)).toBe(2);
-        expect(source).toContain(
-          `consumerDesktopOverride = '${consumerDesktopOverride}'`
+        expectSerializedMarkerClassName(
+          source,
+          "consumerDesktopOverride",
+          consumerDesktopOverride
         );
-        expect(source).toContain(
-          `consumerTabletOverride = '${consumerTabletOverride}'`
+        expectSerializedMarkerClassName(
+          source,
+          "consumerTabletOverride",
+          consumerTabletOverride
         );
-        expect(source).toContain(
-          `mergedSameCondition = '${providerTabletClass} ${consumerDesktopOverride}'`
+        expectSerializedMarkerClassName(
+          source,
+          "mergedSameCondition",
+          `${providerTabletClass} ${consumerDesktopOverride}`
         );
-        expect(source).not.toContain(
-          `mergedSameCondition = '${providerTabletClass} ${providerDesktopClass} ${consumerDesktopOverride}'`
-        );
-        expect(source).toContain(
-          `mergedDifferentCondition = '${providerDesktopClass} ${consumerTabletOverride}'`
+        expectSerializedMarkerClassName(
+          source,
+          "mergedDifferentCondition",
+          `${providerDesktopClass} ${consumerTabletOverride}`
         );
         expect(emittedCss).toMatch(/font-size:\s*18(?:px)?/);
         expect(emittedCss).toMatch(/font-size:\s*24(?:px)?/);

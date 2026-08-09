@@ -21,6 +21,7 @@ import { STATIC_CSS_API_POLICIES } from "../staticCssEval/policy.js";
 import type { StaticCssApiPolicy } from "../staticCssEval/policy.js";
 import { resolveSameFileStaticCssEvalExpression } from "../staticCssEval/sameFile.js";
 import type { PluginState, ProgramScope } from "../types.js";
+import { isNestedCssObjectKey } from "../cssProperty.js";
 import {
   getNearestIdentifier,
   invariant,
@@ -2722,19 +2723,6 @@ function getLeafDeclarationName(options: {
   return (
     options.declarationName ??
     (isNestedCssObjectKey(options.propertyName) ? null : options.propertyName)
-  );
-}
-
-function isNestedCssObjectKey(propertyName: string): boolean {
-  return (
-    propertyName === "selectors" ||
-    propertyName === "vars" ||
-    propertyName.startsWith("@") ||
-    propertyName.startsWith("_") ||
-    propertyName.startsWith("$") ||
-    propertyName.includes("&") ||
-    propertyName.includes(":") ||
-    propertyName.includes(" ")
   );
 }
 

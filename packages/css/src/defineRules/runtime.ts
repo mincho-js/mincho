@@ -9,7 +9,6 @@ import {
   hasFileScope,
   setFileScope
 } from "@vanilla-extract/css/fileScope";
-import { cx as rootCx } from "../classname/cx.js";
 import type {
   ClassMultipleInput,
   ClassMultipleResult,
@@ -25,8 +24,8 @@ import { isUnSafeObjectKey } from "../utils.js";
 import { registerDefineRulesRegistryInstance } from "./registry.js";
 import { normalizeDefineRulesConditions } from "./conditions.js";
 import { createCanonicalStyleCache } from "./utils.js";
-import { createEngineMetadata } from "./metadata.js";
-import type { EngineMetadata } from "./metadata.js";
+import { createEngineMetadata, SEGMENT_MARKER_PREFIX } from "./metadata.js";
+import type { CompiledSegment, EngineMetadata } from "./metadata.js";
 import type {
   DefineRulesCss,
   DefineRulesComplexCssInput,
@@ -172,16 +171,18 @@ export function createDefineRulesRuntime<
     }
 
     const className = entries.map((entry) => entry.className).join(" ");
-    metadata.registerSegment(className, {
+    const marker = metadata.registerSegment(className, {
       entries,
       hasKnownAtomicClass: entries.length > 0
     });
+    const markedClassName =
+      marker === undefined ? className : `${marker} ${className}`;
 
     if (didAddAtomicCacheEntry) {
       syncPresetArtifact(presetArtifact, metadata.exportArtifact());
     }
 
-    return className;
+    return markedClassName;
   }
 
   const css = Object.assign(cssImpl, {
@@ -193,8 +194,9 @@ export function createDefineRulesRuntime<
 
 function createDefineRulesCx(metadata: EngineMetadata): DefineRulesRuntimeCx {
   const cxImpl = ((...inputs: ClassValue[]) => {
-    const className = rootCx(...inputs);
-    return metadata.mergeClassList(className);
+    return metadata.mergeCompiledSegments(
+      collectClassValueSegments(metadata, inputs)
+    );
   }) as (...inputs: ClassValue[]) => string;
 
   function cxMultiple<T extends ClassMultipleInput>(
@@ -254,6 +256,138 @@ function createDefineRulesCx(metadata: EngineMetadata): DefineRulesRuntimeCx {
     multiple: cxMultiple,
     with: cxWith
   }) as DefineRulesRuntimeCx;
+}
+
+function collectClassValueSegments(
+  metadata: EngineMetadata,
+  inputs: readonly ClassValue[]
+): CompiledSegment[] {
+  const segments: CompiledSegment[] = [];
+
+  for (const input of inputs) {
+    pushClassValueSegments(metadata, segments, input);
+  }
+
+  return segments;
+}
+
+function pushClassValueSegments(
+  metadata: EngineMetadata,
+  segments: CompiledSegment[],
+  input: ClassValue
+): void {
+  if (typeof input === "string") {
+    pushClassStringSegments(metadata, segments, input);
+    return;
+  }
+
+  if (typeof input === "number") {
+    if (input) {
+      segments.push(metadata.getCompiledSegment(String(input)));
+    }
+    return;
+  }
+
+  if (typeof input === "bigint") {
+    if (input !== 0n) {
+      segments.push(metadata.getCompiledSegment(String(input)));
+    }
+    return;
+  }
+
+  if (
+    input === null ||
+    input === undefined ||
+    input === false ||
+    input === true
+  ) {
+    return;
+  }
+
+  if (Array.isArray(input)) {
+    for (const item of input) {
+      pushClassValueSegments(metadata, segments, item);
+    }
+    return;
+  }
+
+  for (const className in input) {
+    if (input[className]) {
+      pushClassStringSegments(metadata, segments, className);
+    }
+  }
+}
+
+function pushClassStringSegments(
+  metadata: EngineMetadata,
+  segments: CompiledSegment[],
+  className: string
+): void {
+  if (className.length === 0) {
+    return;
+  }
+
+  const registeredSegment = metadata.getRegisteredSegment(className);
+
+  if (registeredSegment !== undefined) {
+    segments.push(registeredSegment);
+    return;
+  }
+
+  const tokens = className.trim().split(/\s+/);
+  const externalTokens: string[] = [];
+
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+
+    if (token === undefined || token.length === 0) {
+      continue;
+    }
+
+    const markedSegment = metadata.getSegmentByMarkerToken(token);
+
+    if (markedSegment === undefined) {
+      externalTokens.push(token);
+      continue;
+    }
+
+    flushClassTokens(metadata, segments, externalTokens);
+    segments.push(markedSegment);
+    index = skipSegmentPayload(tokens, index + 1, markedSegment) - 1;
+  }
+
+  flushClassTokens(metadata, segments, externalTokens);
+}
+
+function flushClassTokens(
+  metadata: EngineMetadata,
+  segments: CompiledSegment[],
+  tokens: string[]
+): void {
+  if (tokens.length === 0) {
+    return;
+  }
+
+  segments.push(metadata.getCompiledSegment(tokens.join(" ")));
+  tokens.length = 0;
+}
+
+function skipSegmentPayload(
+  tokens: readonly string[],
+  startIndex: number,
+  segment: CompiledSegment
+): number {
+  let index = startIndex;
+
+  for (const entry of segment.entries) {
+    if (tokens[index] !== entry.className) {
+      return startIndex;
+    }
+
+    index += 1;
+  }
+
+  return index;
 }
 
 // == Define Rules Impl ========================================================
@@ -975,7 +1109,22 @@ if (import.meta.vitest) {
     return clonePresetArtifact(artifact);
   }
 
+  function withoutSegmentMarkers(className: string): string {
+    return className
+      .split(/\s+/)
+      .filter(
+        (token) => token.length > 0 && !token.startsWith(SEGMENT_MARKER_PREFIX)
+      )
+      .join(" ");
+  }
+
   describe("defineRules runtime presets", () => {
+    it("keeps truthy bigint class values and ignores zero bigint", () => {
+      const runtime = createDefineRulesRuntime({ properties: {} });
+
+      expect(runtime.cx(0n, 42n)).toBe("42");
+    });
+
     it("skips unsafe object keys while merging style fragments", () => {
       const objectPrototype = Object.prototype as Record<string, unknown>;
       const source: Record<string, unknown> = { color: "red" };
@@ -1039,7 +1188,9 @@ if (import.meta.vitest) {
       expect(artifact).not.toHaveProperty("cx");
       expect(artifact).not.toHaveProperty("atomicClassByClassName");
       expect(artifact.version).toBe(4);
-      expect(Object.values(artifact.classNameByCache)).toEqual([className]);
+      expect(Object.values(artifact.classNameByCache)).toEqual([
+        withoutSegmentMarkers(className)
+      ]);
       expect(Object.keys(artifact.writeKeyByCacheKey)).toEqual(
         Object.keys(artifact.classNameByCache)
       );
@@ -1050,7 +1201,7 @@ if (import.meta.vitest) {
           propertyById: artifact.propertyById,
           writeKeyById: artifact.writeKeyById
         })
-      ).not.toContain(className);
+      ).not.toContain(withoutSegmentMarkers(className));
     });
 
     it("remaps colliding artifact-local IDs from imported v4 presets", () => {
@@ -1121,9 +1272,17 @@ if (import.meta.vitest) {
       consumer.preset.conditionById = {};
       consumer.preset.propertyById = {};
       consumer.preset.writeKeyById = {};
-      expect(
-        consumer.cx(colorClassName, backgroundClassName, colorClassName)
-      ).toBe(`${backgroundClassName} ${colorClassName}`);
+      const result = consumer.cx(
+        colorClassName,
+        backgroundClassName,
+        colorClassName
+      );
+
+      expect(withoutSegmentMarkers(result)).toBe(
+        `${withoutSegmentMarkers(backgroundClassName)} ${withoutSegmentMarkers(
+          colorClassName
+        )}`
+      );
     });
   });
 }

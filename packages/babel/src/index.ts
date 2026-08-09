@@ -9,6 +9,11 @@ import {
   preprocessJsxCssProp,
   removeUnusedJsxCssPropCssModuleImports
 } from "./jsxCssProp.js";
+import {
+  analyzeDefineRulesCxConditionsCallExpression,
+  defineRulesCxConditionsOptimizationMetadataKey,
+  isDefineRulesCxConditionsEnabled
+} from "./defineRulesCxConditions.js";
 import { getDynamicCssVariableRule } from "./jsxCssProp/preprocess.js";
 import { supportedJsxCssPropTags } from "./jsxCssPropTags.js";
 import { createImportedStaticCssEvalProvider } from "./staticCssEval/importedModules.js";
@@ -34,6 +39,11 @@ export function minchoBabelPlugin(): PluginObj<PluginState> {
     visitor: {
       Program: {
         enter(path, state) {
+          if (isDefineRulesCxConditionsEnabled(state)) {
+            state.file.metadata[
+              defineRulesCxConditionsOptimizationMetadataKey
+            ] = true;
+          }
           preprocess(path, state);
           state.opts.jsxCssPropTransformed = preprocessJsxCssProp(path, state);
         },
@@ -42,7 +52,13 @@ export function minchoBabelPlugin(): PluginObj<PluginState> {
           postprocess(path, state);
         }
       },
-      CallExpression: transformCallExpression
+      CallExpression(path, state) {
+        analyzeDefineRulesCxConditionsCallExpression(path, state);
+
+        if (path.isCallExpression()) {
+          transformCallExpression(path);
+        }
+      }
     }
   };
 }
@@ -87,7 +103,7 @@ if (import.meta.vitest) {
   function babelTransform(
     code: string,
     pluginOptions: Partial<
-      Pick<PluginOptions, "jsxCssProp" | "staticCssEvalProvider">
+      Pick<PluginOptions, "jsxCssProp" | "staticCssEvalProvider" | "optimize">
     > = {},
     transformOptions: { filename?: string } = {}
   ) {
@@ -115,6 +131,7 @@ if (import.meta.vitest) {
   ) => Record<string, unknown>;
   type RuntimeCx = (...values: unknown[]) => string;
   type RuntimeCss = (styles: unknown) => string;
+  type DefineRulesCxRuntimeButton = (...args: unknown[]) => string;
   type RuntimeVx = (
     value: string | number | boolean | null | undefined,
     suffix?: string | null
@@ -151,6 +168,520 @@ if (import.meta.vitest) {
         };
       }
     };
+  }
+
+  function createDefineRulesCxRuntimeRecipeValue(): StaticCssEvalValue {
+    return {
+      importPath: "@mincho-js/css/defineRules/createDefineRulesCxRuntime",
+      importName: "createDefineRulesCxRuntime",
+      args: [{ properties: { color: true } }]
+    };
+  }
+
+  function createDefineRulesCxPermutationSource(
+    conditionCount: number
+  ): string {
+    const classImports = Array.from(
+      { length: conditionCount },
+      (_, index) => `class${index}`
+    );
+    const parameters = Array.from(
+      { length: conditionCount },
+      (_, index) => `flag${index}: boolean`
+    );
+    const operands = Array.from({ length: conditionCount }, (_, index) =>
+      index % 2 === 0
+        ? `flag${index} && class${index}`
+        : `flag${index} ? class${index} : base`
+    );
+
+    return `
+      import { cx, base, ${classImports.join(", ")} } from "./styles";
+
+      export function button(${parameters.join(", ")}) {
+        return cx(base, ${operands.join(", ")});
+      }
+    `;
+  }
+
+  function createLocalDefineRulesCxFallbackSource(
+    conditionCount: number
+  ): string {
+    const colorValues = ["red", "blue", "green", "purple", "orange", "pink"];
+    const classDeclarations = Array.from(
+      { length: conditionCount },
+      (_, index) =>
+        `const color${index} = css({ color: "${colorValues[index] ?? `color-${index}`}" });`
+    ).join("\n");
+    const parameters = Array.from(
+      { length: conditionCount },
+      (_, index) => `flag${index}: boolean`
+    );
+    const operands = Array.from({ length: conditionCount }, (_, index) => {
+      if (index % 3 === 1) {
+        return `flag${index} ? color${index} : base`;
+      }
+      if (index % 3 === 2) {
+        return `[flag${index} && color${index}]`;
+      }
+      return `flag${index} && color${index}`;
+    });
+
+    return `
+      import { defineRules } from "@mincho-js/css";
+
+      const { css, cx } = defineRules({
+        properties: { color: true }
+      });
+      const base = css({ color: "black" });
+      ${classDeclarations}
+
+      export function button(${parameters.join(", ")}) {
+        return cx(base, ${operands.join(", ")});
+      }
+    `;
+  }
+
+  function createDefineRulesCxRuntimeClasses(
+    conditionCount: number
+  ): Record<string, string> {
+    const classes: Record<string, string> = {
+      base: "__mincho_seg_base base"
+    };
+
+    for (let index = 0; index < conditionCount; index += 1) {
+      classes[`class${index}`] = `__mincho_seg_class_${index} class-${index}`;
+    }
+
+    return classes;
+  }
+
+  function createJoiningCx(onCall?: () => void): RuntimeCx {
+    return (...values) => {
+      onCall?.();
+      const strings = values.filter((value): value is string => {
+        if (typeof value !== "string") {
+          return false;
+        }
+
+        return value.length > 0;
+      });
+
+      return strings.join(" ");
+    };
+  }
+
+  function forEachBooleanPermutation(
+    conditionCount: number,
+    callback: (flags: readonly boolean[]) => void
+  ): void {
+    for (let mask = 0; mask < 1 << conditionCount; mask += 1) {
+      callback(
+        Array.from(
+          { length: conditionCount },
+          (_, index) => (mask & (1 << index)) !== 0
+        )
+      );
+    }
+  }
+
+  function runDefineRulesCxModule(
+    code: string,
+    classes: Readonly<Record<string, string>>,
+    cx: RuntimeCx
+  ): DefineRulesCxRuntimeButton {
+    const result = transformSync(code, {
+      plugins: [defineRulesCxRuntimeTransformPlugin()],
+      presets: ["@babel/preset-typescript"],
+      filename: "runtime-test.ts"
+    });
+
+    if (result === null || result.code == null) {
+      throw new Error("Failed to transform defineRules cx runtime test code");
+    }
+
+    const execute = new Function(
+      "__minchoCx",
+      "__minchoClasses",
+      `${result.code}\nreturn button;`
+    ) as (
+      runtimeCx: RuntimeCx,
+      runtimeClasses: Readonly<Record<string, string>>
+    ) => unknown;
+    const button = execute(cx, classes);
+
+    if (typeof button !== "function") {
+      throw new Error("Runtime test did not produce a button function");
+    }
+
+    return (...args) => {
+      const value: unknown = button(...args);
+
+      if (typeof value !== "string") {
+        throw new Error("Runtime test button did not return a string");
+      }
+
+      return value;
+    };
+  }
+
+  type RuntimeDefineRules = (config: unknown) => {
+    readonly css: RuntimeCss;
+    readonly cx: RuntimeCx;
+  };
+
+  interface InspectableDefineRulesRuntime {
+    readonly defineRules: RuntimeDefineRules;
+    computeClassNameStyle(className: string): Readonly<Record<string, string>>;
+  }
+
+  interface InspectableClassStyle {
+    readonly order: number;
+    readonly style: Readonly<Record<string, string>>;
+  }
+
+  function runLocalDefineRulesCxModule(
+    code: string,
+    defineRules: RuntimeDefineRules
+  ): DefineRulesCxRuntimeButton {
+    const result = transformSync(code, {
+      plugins: [localDefineRulesCxRuntimeTransformPlugin()],
+      presets: ["@babel/preset-typescript"],
+      filename: "runtime-test.ts"
+    });
+
+    if (result === null || result.code == null) {
+      throw new Error(
+        "Failed to transform local defineRules cx runtime test code"
+      );
+    }
+
+    const execute = new Function(
+      "__minchoDefineRules",
+      `${result.code}\nreturn button;`
+    ) as (runtimeDefineRules: RuntimeDefineRules) => unknown;
+    const button = execute(defineRules);
+
+    if (typeof button !== "function") {
+      throw new Error("Runtime test did not produce a button function");
+    }
+
+    return (...args) => {
+      const value: unknown = button(...args);
+
+      if (typeof value !== "string") {
+        throw new Error("Runtime test button did not return a string");
+      }
+
+      return value;
+    };
+  }
+
+  function localDefineRulesCxRuntimeTransformPlugin(): PluginObj {
+    return {
+      visitor: {
+        ImportDeclaration(importPath) {
+          if (importPath.node.source.value !== "@mincho-js/css") {
+            return;
+          }
+
+          const declarations = importPath.node.specifiers.flatMap(
+            (specifier) => {
+              if (
+                !t.isImportSpecifier(specifier) ||
+                !t.isIdentifier(specifier.imported) ||
+                !t.isIdentifier(specifier.local) ||
+                specifier.imported.name !== "defineRules"
+              ) {
+                return [];
+              }
+
+              return t.variableDeclaration("const", [
+                t.variableDeclarator(
+                  t.cloneNode(specifier.local),
+                  t.identifier("__minchoDefineRules")
+                )
+              ]);
+            }
+          );
+
+          if (declarations.length === 0) {
+            importPath.remove();
+            return;
+          }
+
+          importPath.replaceWithMultiple(declarations);
+        },
+        ExportNamedDeclaration(exportPath) {
+          const { declaration } = exportPath.node;
+
+          if (declaration !== null && declaration !== undefined) {
+            exportPath.replaceWith(declaration);
+          }
+        }
+      }
+    };
+  }
+
+  function createInspectableDefineRulesRuntime(): InspectableDefineRulesRuntime {
+    let nextClassId = 0;
+    const styles = new Map<string, InspectableClassStyle>();
+    const css: RuntimeCss = (styleInput) => {
+      if (!isInspectableStyle(styleInput)) {
+        throw new Error("Inspectable css() only accepts string-valued styles");
+      }
+
+      const className = `class-${nextClassId}`;
+      nextClassId += 1;
+      styles.set(className, { order: nextClassId, style: styleInput });
+      return className;
+    };
+    const cx: RuntimeCx = (...values) =>
+      mergeInspectableClassValues(styles, values).join(" ");
+
+    return {
+      defineRules: () => ({ css, cx }),
+      computeClassNameStyle(className) {
+        return computeInspectableClassNameStyle(styles, className);
+      }
+    };
+  }
+
+  function isInspectableStyle(
+    value: unknown
+  ): value is Readonly<Record<string, string>> {
+    return (
+      typeof value === "object" &&
+      value !== null &&
+      !Array.isArray(value) &&
+      Object.values(value).every((entry) => typeof entry === "string")
+    );
+  }
+
+  function flattenInspectableClassValues(values: readonly unknown[]): string[] {
+    const classNames: string[] = [];
+
+    for (const value of values) {
+      if (typeof value === "string") {
+        if (value.length > 0) {
+          classNames.push(value);
+        }
+        continue;
+      }
+
+      if (typeof value === "number") {
+        if (value !== 0) {
+          classNames.push(String(value));
+        }
+        continue;
+      }
+
+      if (Array.isArray(value)) {
+        classNames.push(...flattenInspectableClassValues(value));
+        continue;
+      }
+
+      if (typeof value === "object" && value !== null) {
+        for (const [className, enabled] of Object.entries(value)) {
+          if (enabled) {
+            classNames.push(className);
+          }
+        }
+      }
+    }
+
+    return classNames;
+  }
+
+  function mergeInspectableClassValues(
+    styles: ReadonlyMap<string, InspectableClassStyle>,
+    values: readonly unknown[]
+  ): string[] {
+    const classNames = flattenInspectableClassValues(values);
+    const keptClassNames: string[] = [];
+    const seenProperties = new Set<string>();
+
+    for (let index = classNames.length - 1; index >= 0; index -= 1) {
+      const className = classNames[index];
+      const style = className === undefined ? undefined : styles.get(className);
+
+      if (className === undefined || style === undefined) {
+        continue;
+      }
+
+      const properties = Object.keys(style.style);
+
+      if (properties.every((property) => seenProperties.has(property))) {
+        continue;
+      }
+
+      keptClassNames.push(className);
+      for (const property of properties) {
+        seenProperties.add(property);
+      }
+    }
+
+    return keptClassNames.reverse();
+  }
+
+  function computeInspectableClassNameStyle(
+    styles: ReadonlyMap<string, InspectableClassStyle>,
+    className: string
+  ): Readonly<Record<string, string>> {
+    const selectedTokens = new Set(
+      className.trim().split(/\s+/).filter(Boolean)
+    );
+    const selectedStyles = [...styles]
+      .filter(([token]) => selectedTokens.has(token))
+      .map(([, style]) => style)
+      .sort((left, right) => left.order - right.order);
+    const customProperties: Record<string, string> = {};
+    const properties: Record<string, string> = {};
+
+    for (const { style } of selectedStyles) {
+      for (const [property, value] of Object.entries(style)) {
+        if (property.startsWith("--")) {
+          customProperties[property] = value;
+          continue;
+        }
+
+        properties[property] = value;
+      }
+    }
+
+    for (const [property, value] of Object.entries(properties)) {
+      properties[property] = resolveInspectableCssValue(
+        value,
+        customProperties
+      );
+    }
+
+    return properties;
+  }
+
+  function resolveInspectableCssValue(
+    value: string,
+    customProperties: Readonly<Record<string, string>>
+  ): string {
+    let output = "";
+    let index = 0;
+
+    while (index < value.length) {
+      if (!value.startsWith("var(", index)) {
+        output += value[index] ?? "";
+        index += 1;
+        continue;
+      }
+
+      const parsed = parseInspectableVar(value, index);
+
+      if (parsed === null) {
+        output += value.slice(index);
+        break;
+      }
+
+      const customValue = customProperties[parsed.name];
+      output +=
+        customValue === undefined || customValue === "initial"
+          ? resolveInspectableCssValue(parsed.fallback, customProperties)
+          : customValue;
+      index = parsed.end;
+    }
+
+    return output.trim().replace(/\s+/g, " ");
+  }
+
+  function parseInspectableVar(
+    value: string,
+    start: number
+  ): {
+    readonly name: string;
+    readonly fallback: string;
+    readonly end: number;
+  } | null {
+    let depth = 1;
+    let comma = -1;
+
+    for (let index = start + 4; index < value.length; index += 1) {
+      const char = value[index];
+
+      if (char === "(") {
+        depth += 1;
+        continue;
+      }
+
+      if (char === ")") {
+        depth -= 1;
+
+        if (depth === 0) {
+          return comma === -1
+            ? null
+            : {
+                name: value.slice(start + 4, comma).trim(),
+                fallback: value.slice(comma + 1, index).trim(),
+                end: index + 1
+              };
+        }
+        continue;
+      }
+
+      if (char === "," && depth === 1 && comma === -1) {
+        comma = index;
+      }
+    }
+
+    return null;
+  }
+
+  function defineRulesCxRuntimeTransformPlugin(): PluginObj {
+    return {
+      visitor: {
+        ImportDeclaration(importPath) {
+          if (importPath.node.source.value !== "./styles") {
+            return;
+          }
+
+          const declarations = importPath.node.specifiers.flatMap(
+            (specifier) => {
+              if (
+                !t.isImportSpecifier(specifier) ||
+                !t.isIdentifier(specifier.imported) ||
+                !t.isIdentifier(specifier.local)
+              ) {
+                return [];
+              }
+
+              const importedName = specifier.imported.name;
+              const init =
+                importedName === "cx"
+                  ? t.identifier("__minchoCx")
+                  : t.memberExpression(
+                      t.identifier("__minchoClasses"),
+                      t.stringLiteral(importedName),
+                      true
+                    );
+
+              return t.variableDeclaration("const", [
+                t.variableDeclarator(t.cloneNode(specifier.local), init)
+              ]);
+            }
+          );
+
+          importPath.replaceWithMultiple(declarations);
+        },
+        ExportNamedDeclaration(exportPath) {
+          const { declaration } = exportPath.node;
+
+          if (declaration !== null && declaration !== undefined) {
+            exportPath.replaceWith(declaration);
+          }
+        }
+      }
+    };
+  }
+
+  function getDefineRulesCxConditionCalls(metadata: MinchoBabelFileMetadata) {
+    return metadata.minchoDefineRulesCxConditions?.calls ?? [];
   }
 
   function createUnsupportedReexportStaticCssEvalProvider(): StaticCssEvalProvider {
@@ -744,7 +1275,7 @@ if (import.meta.vitest) {
   function captureJsxCssPropFailure(
     code: string,
     pluginOptions: Partial<
-      Pick<PluginOptions, "jsxCssProp" | "staticCssEvalProvider">
+      Pick<PluginOptions, "jsxCssProp" | "staticCssEvalProvider" | "optimize">
     > = {},
     transformOptions: { filename?: string } = {}
   ): {
@@ -837,6 +1368,508 @@ if (import.meta.vitest) {
       expect(explicitFalse.code).toBe(omitted.code);
     });
 
+    it("leaves output unchanged when defineRules cx optimization is inactive", () => {
+      const source = `
+        import { defineRules } from '@mincho-js/css';
+
+        const rules = defineRules({
+          active: { color: "red" },
+          idle: { color: "blue" }
+        });
+
+        export function button(active: boolean) {
+          return rules.cx(rules.css("idle"), active && rules.css("active"));
+        }
+      `;
+      const omitted = babelTransform(source);
+      const emptyOptimize = babelTransform(source, { optimize: {} });
+      const disabledOptimize = babelTransform(source, {
+        optimize: { defineRulesCxConditions: false }
+      });
+
+      expect(emptyOptimize.result).toEqual(omitted.result);
+      expect(emptyOptimize.code).toBe(omitted.code);
+      expect(
+        emptyOptimize.metadata[defineRulesCxConditionsOptimizationMetadataKey]
+      ).toBeUndefined();
+      expect(disabledOptimize.result).toEqual(omitted.result);
+      expect(disabledOptimize.code).toBe(omitted.code);
+      expect(
+        disabledOptimize.metadata[
+          defineRulesCxConditionsOptimizationMetadataKey
+        ]
+      ).toBeUndefined();
+    });
+
+    it("accepts defineRules cx optimization independently from jsx css prop", () => {
+      const source = `
+        import { defineRules } from '@mincho-js/css';
+
+        const rules = defineRules({
+          active: { color: "red" },
+          idle: { color: "blue" }
+        });
+
+        export function button(active: boolean) {
+          return rules.cx(rules.css("idle"), active && rules.css("active"));
+        }
+      `;
+      const disabled = babelTransform(source, { jsxCssProp: false });
+      const enabled = babelTransform(source, {
+        jsxCssProp: false,
+        optimize: { defineRulesCxConditions: true }
+      });
+
+      expect(enabled.result).toEqual(disabled.result);
+      expect(enabled.code).toBe(disabled.code);
+      expect(
+        disabled.metadata[defineRulesCxConditionsOptimizationMetadataKey]
+      ).toBeUndefined();
+      expect(
+        enabled.metadata[defineRulesCxConditionsOptimizationMetadataKey]
+      ).toBe(true);
+    });
+
+    it("marks and precomputes safe in-file defineRules cx condition operands", () => {
+      const source = `
+        import { defineRules } from '@mincho-js/css';
+
+        const { css, cx } = defineRules({
+          properties: { color: true }
+        });
+        const base = css({ color: "blue" });
+        const activeClass = css({ color: "red" });
+
+        export function button(active: boolean, danger: boolean) {
+          return cx(base, active && activeClass, [danger ? activeClass : base]);
+        }
+      `;
+      const disabled = babelTransform(source, {
+        optimize: { defineRulesCxConditions: false }
+      });
+      const enabled = babelTransform(source, {
+        optimize: { defineRulesCxConditions: true }
+      });
+
+      expect(enabled.result).toEqual(disabled.result);
+      expect(disabled.code).toContain("return cx(");
+      expect(enabled.code).toContain("const _minchoDefineRulesCx = [");
+      expect(enabled.code).toContain("return _minchoDefineRulesCx[");
+      expect(getDefineRulesCxConditionCalls(enabled.metadata)).toMatchObject([
+        {
+          callee: "local-defineRules",
+          operandCount: 3,
+          conditionCount: 2,
+          classOperandCount: 4,
+          operands: [
+            { kind: "class", source: "local-css-call" },
+            {
+              kind: "condition",
+              operator: "&&",
+              classOperand: { kind: "class", source: "local-css-call" }
+            },
+            {
+              kind: "array",
+              operands: [
+                {
+                  kind: "ternary",
+                  consequent: { kind: "class", source: "local-css-call" },
+                  alternate: { kind: "class", source: "local-css-call" }
+                }
+              ]
+            }
+          ]
+        }
+      ]);
+    });
+
+    it("marks and precomputes provider-backed serialized defineRules cx calls and marker operands", () => {
+      const source = `
+        import { cx, base, activeClass } from "./styles";
+
+        export function button(active: boolean) {
+          return cx(base, active ? activeClass : base);
+        }
+      `;
+      const disabled = babelTransform(source, {
+        staticCssEvalProvider: createResolvedStaticCssEvalProvider({
+          cx: createDefineRulesCxRuntimeRecipeValue(),
+          base: "__mincho_seg_base base",
+          activeClass: "__mincho_seg_active active"
+        }),
+        optimize: { defineRulesCxConditions: false }
+      });
+      const enabled = babelTransform(source, {
+        staticCssEvalProvider: createResolvedStaticCssEvalProvider({
+          cx: createDefineRulesCxRuntimeRecipeValue(),
+          base: "__mincho_seg_base base",
+          activeClass: "__mincho_seg_active active"
+        }),
+        optimize: { defineRulesCxConditions: true }
+      });
+
+      expect(enabled.result).toEqual(disabled.result);
+      expect(disabled.code).toContain("return cx(");
+      expect(enabled.code).toContain("const _minchoDefineRulesCx = [");
+      expect(enabled.code).toContain("return _minchoDefineRulesCx[");
+      expect(getDefineRulesCxConditionCalls(enabled.metadata)).toMatchObject([
+        {
+          callee: "provider-createDefineRulesCxRuntime",
+          operandCount: 2,
+          conditionCount: 1,
+          classOperandCount: 3,
+          operands: [
+            { kind: "class", source: "provider-marker" },
+            {
+              kind: "ternary",
+              consequent: { kind: "class", source: "provider-marker" },
+              alternate: { kind: "class", source: "provider-marker" }
+            }
+          ]
+        }
+      ]);
+    });
+
+    it("bails out unchanged for unsupported defineRules cx condition shapes", () => {
+      const unsupportedReturns = [
+        "return cx(base || activeClass);",
+        "return cx(...classes);",
+        "return cx({ [base]: active });",
+        "return cx((active || activeClass) && base);",
+        "return cx(active.valueOf?.() && base);",
+        "return cx(String.raw`active` && base);"
+      ];
+
+      for (const returnStatement of unsupportedReturns) {
+        const source = `
+          import { defineRules } from '@mincho-js/css';
+
+          const { css, cx } = defineRules({
+            properties: { color: true }
+          });
+          const base = css({ color: "blue" });
+          const activeClass = css({ color: "red" });
+          const classes = [base, activeClass];
+
+          export function button(active: boolean) {
+            ${returnStatement}
+          }
+        `;
+        const disabled = babelTransform(source, {
+          optimize: { defineRulesCxConditions: false }
+        });
+        const enabled = babelTransform(source, {
+          optimize: { defineRulesCxConditions: true }
+        });
+
+        expect(enabled.result).toEqual(disabled.result);
+        expect(enabled.code).toBe(disabled.code);
+        expect(getDefineRulesCxConditionCalls(enabled.metadata)).toEqual([]);
+        expect(enabled.metadata.minchoStaticCssEval?.diagnostics ?? []).toEqual(
+          []
+        );
+      }
+    });
+
+    it("leaves provider-backed external class operands on the runtime path", () => {
+      const source = `
+        import { cx, base, externalClass } from "./styles";
+
+        export function button(active: boolean) {
+          return cx(base, active && externalClass);
+        }
+      `;
+      const staticCssEvalProvider = createResolvedStaticCssEvalProvider({
+        cx: createDefineRulesCxRuntimeRecipeValue(),
+        base: "__mincho_seg_base base",
+        externalClass: "external-class"
+      });
+      const disabled = babelTransform(source, {
+        staticCssEvalProvider,
+        optimize: { defineRulesCxConditions: false }
+      });
+      const enabled = babelTransform(source, {
+        staticCssEvalProvider,
+        optimize: { defineRulesCxConditions: true }
+      });
+
+      expect(enabled.code).toBe(disabled.code);
+      expect(getDefineRulesCxConditionCalls(enabled.metadata)).toEqual([]);
+    });
+
+    it("bails out without evaluating inactive function-call class operands", () => {
+      const source = `
+        import { defineRules } from '@mincho-js/css';
+
+        const { cx } = defineRules({
+          properties: { color: true }
+        });
+
+        function makeClass(): string {
+          throw new Error("inactive branch evaluated");
+        }
+
+        export function button(active: boolean) {
+          return cx(active && makeClass());
+        }
+      `;
+      const disabled = babelTransform(source, {
+        optimize: { defineRulesCxConditions: false }
+      });
+      const enabled = babelTransform(source, {
+        optimize: { defineRulesCxConditions: true }
+      });
+
+      expect(enabled.result).toEqual(disabled.result);
+      expect(enabled.code).toBe(disabled.code);
+      expect(enabled.code).toContain("active && makeClass()");
+      expect(getDefineRulesCxConditionCalls(enabled.metadata)).toEqual([]);
+      expect(enabled.metadata.minchoStaticCssEval?.diagnostics ?? []).toEqual(
+        []
+      );
+    });
+
+    it("precomputes 1-4 condition defineRules cx tables that match runtime cx", () => {
+      for (let conditionCount = 1; conditionCount <= 4; conditionCount += 1) {
+        const source = createDefineRulesCxPermutationSource(conditionCount);
+        const staticCssEvalProvider = createResolvedStaticCssEvalProvider({
+          cx: createDefineRulesCxRuntimeRecipeValue(),
+          ...createDefineRulesCxRuntimeClasses(conditionCount)
+        });
+        const disabled = babelTransform(source, {
+          staticCssEvalProvider,
+          optimize: { defineRulesCxConditions: false }
+        });
+        const enabled = babelTransform(source, {
+          staticCssEvalProvider,
+          optimize: { defineRulesCxConditions: true }
+        });
+        const classes = createDefineRulesCxRuntimeClasses(conditionCount);
+        let optimizedCxCalls = 0;
+        const optimizedButton = runDefineRulesCxModule(
+          enabled.code,
+          classes,
+          createJoiningCx(() => {
+            optimizedCxCalls += 1;
+          })
+        );
+        const optimizedCxCallsAfterInit = optimizedCxCalls;
+        const referenceButton = runDefineRulesCxModule(
+          disabled.code,
+          classes,
+          createJoiningCx()
+        );
+
+        expect(getDefineRulesCxConditionCalls(enabled.metadata)).toMatchObject([
+          { conditionCount }
+        ]);
+        expect(enabled.code).toContain("const _minchoDefineRulesCx = [");
+        expect(enabled.code).toContain("return _minchoDefineRulesCx[");
+        expect(enabled.code).not.toContain("return cx(");
+        expect(optimizedCxCallsAfterInit).toBe(1 << conditionCount);
+
+        forEachBooleanPermutation(conditionCount, (flags) => {
+          expect(optimizedButton(...flags)).toBe(referenceButton(...flags));
+        });
+        expect(optimizedCxCalls).toBe(optimizedCxCallsAfterInit);
+      }
+    });
+
+    it("preserves condition evaluation count and order for optimized tables", () => {
+      const source = `
+        import { cx, base, class0, class1 } from "./styles";
+
+        export function button(probe: { first: boolean; second: boolean }) {
+          return cx(base, probe.first && class0, probe.second && class1);
+        }
+      `;
+      const staticCssEvalProvider = createResolvedStaticCssEvalProvider({
+        cx: createDefineRulesCxRuntimeRecipeValue(),
+        base: "__mincho_seg_base base",
+        class0: "__mincho_seg_class_0 class-0",
+        class1: "__mincho_seg_class_1 class-1"
+      });
+      const enabled = babelTransform(source, {
+        staticCssEvalProvider,
+        optimize: { defineRulesCxConditions: true }
+      });
+      const events: string[] = [];
+      let optimizedCxCalls = 0;
+      const button = runDefineRulesCxModule(
+        enabled.code,
+        createDefineRulesCxRuntimeClasses(2),
+        createJoiningCx(() => {
+          optimizedCxCalls += 1;
+        })
+      );
+      const optimizedCxCallsAfterInit = optimizedCxCalls;
+      const probe = {
+        get first() {
+          events.push("first");
+          return true;
+        },
+        get second() {
+          events.push("second");
+          return false;
+        }
+      };
+
+      expect(button(probe)).toBe(
+        "__mincho_seg_base base __mincho_seg_class_0 class-0"
+      );
+      expect(events).toEqual(["first", "second"]);
+      expect(optimizedCxCalls).toBe(optimizedCxCallsAfterInit);
+    });
+
+    it("leaves more than 4 defineRules cx conditions on the runtime path", () => {
+      const source = createDefineRulesCxPermutationSource(5);
+      const staticCssEvalProvider = createResolvedStaticCssEvalProvider({
+        cx: createDefineRulesCxRuntimeRecipeValue(),
+        ...createDefineRulesCxRuntimeClasses(5)
+      });
+      const disabled = babelTransform(source, {
+        staticCssEvalProvider,
+        optimize: { defineRulesCxConditions: false }
+      });
+      const enabled = babelTransform(source, {
+        staticCssEvalProvider,
+        optimize: { defineRulesCxConditions: true }
+      });
+
+      expect(getDefineRulesCxConditionCalls(enabled.metadata)).toMatchObject([
+        { conditionCount: 5 }
+      ]);
+      expect(enabled.code).toBe(disabled.code);
+      expect(enabled.code).toContain("return cx(");
+      expect(enabled.code).not.toContain("_minchoDefineRulesCx");
+    });
+
+    it("folds 5+ local defineRules cx conflicts with fallback chains", () => {
+      const conditionCount = 5;
+      const source = createLocalDefineRulesCxFallbackSource(conditionCount);
+      const disabled = babelTransform(source, {
+        optimize: { defineRulesCxConditions: false }
+      });
+      const enabled = babelTransform(source, {
+        optimize: { defineRulesCxConditions: true }
+      });
+      const referenceRuntime = createInspectableDefineRulesRuntime();
+      const optimizedRuntime = createInspectableDefineRulesRuntime();
+      const referenceButton = runLocalDefineRulesCxModule(
+        disabled.code,
+        referenceRuntime.defineRules
+      );
+      const optimizedButton = runLocalDefineRulesCxModule(
+        enabled.code,
+        optimizedRuntime.defineRules
+      );
+      const cssCallCount = enabled.code.match(/css\(\{/g)?.length ?? 0;
+
+      expect(getDefineRulesCxConditionCalls(enabled.metadata)).toMatchObject([
+        { conditionCount }
+      ]);
+      expect(disabled.code).toContain("return cx(");
+      expect(enabled.code).not.toContain("const _minchoDefineRulesCx = [");
+      expect(enabled.code).not.toContain("return cx(");
+      expect(enabled.code).toContain('.filter(Boolean).join(" ")');
+      expect(cssCallCount).toBeLessThanOrEqual(conditionCount * 2 + 2);
+
+      forEachBooleanPermutation(conditionCount, (flags) => {
+        expect(
+          optimizedRuntime.computeClassNameStyle(optimizedButton(...flags)),
+          `flags: ${flags.join(",")}`
+        ).toEqual(
+          referenceRuntime.computeClassNameStyle(referenceButton(...flags))
+        );
+      });
+    });
+
+    it("bails out fallback chains for explicit shorthand conflicts", () => {
+      const propertyPairs = [
+        ["all", "color"],
+        ["inset", "top"],
+        ["placeItems", "alignItems"],
+        ["font", "fontFamily"],
+        ["border", "borderTopColor"]
+      ] as const;
+
+      for (const [shorthand, longhand] of propertyPairs) {
+        const source = `
+          import { defineRules } from "@mincho-js/css";
+
+          const { css, cx } = defineRules({
+            properties: { ${shorthand}: true, ${longhand}: true }
+          });
+          const base = css({ ${shorthand}: "initial", ${longhand}: "initial" });
+
+          export function button(
+            flag0: boolean,
+            flag1: boolean,
+            flag2: boolean,
+            flag3: boolean,
+            flag4: boolean
+          ) {
+            return cx(base, ${Array.from(
+              { length: 5 },
+              (_, index) => `flag${index} && base`
+            ).join(", ")});
+          }
+        `;
+        const disabled = babelTransform(source, {
+          optimize: { defineRulesCxConditions: false }
+        });
+        const enabled = babelTransform(source, {
+          optimize: { defineRulesCxConditions: true }
+        });
+
+        expect(enabled.code).toBe(disabled.code);
+      }
+    });
+
+    it("bails out fallback chains for missing-declaration branches", () => {
+      const source = `
+        import { defineRules } from "@mincho-js/css";
+
+        const { css, cx } = defineRules({
+          properties: { color: true }
+        });
+        const color0 = css({ color: "red" });
+        const color1 = css({ color: "blue" });
+        const color2 = css({ color: "green" });
+        const color3 = css({ color: "purple" });
+        const color4 = css({ color: "orange" });
+
+        export function button(
+          flag0: boolean,
+          flag1: boolean,
+          flag2: boolean,
+          flag3: boolean,
+          flag4: boolean
+        ) {
+          return cx(
+            flag0 && color0,
+            flag1 && color1,
+            flag2 && color2,
+            flag3 && color3,
+            flag4 && color4
+          );
+        }
+      `;
+      const disabled = babelTransform(source, {
+        optimize: { defineRulesCxConditions: false }
+      });
+      const enabled = babelTransform(source, {
+        optimize: { defineRulesCxConditions: true }
+      });
+
+      expect(getDefineRulesCxConditionCalls(enabled.metadata)).toMatchObject([
+        { conditionCount: 5 }
+      ]);
+      expect(enabled.code).toBe(disabled.code);
+      expect(enabled.code).toContain("return cx(");
+      expect(enabled.code).not.toContain("_minchoDefineRulesCx");
+    });
+
     it("accepts enabled jsx css prop mode when JSX has no css prop", () => {
       const source = `
         import { style } from '@mincho-js/css';
@@ -915,6 +1948,36 @@ if (import.meta.vitest) {
       expect(code).not.toContain("_cx(styles.button)");
       expect(result[1]).toContain("_css({");
       expect(result[1]).toContain('color: "red"');
+    });
+
+    it("lowers static computed keys and optional members like inline css rules", () => {
+      const { result, code } = babelTransform(
+        `
+        const colorKey = "color" as const;
+        const variantKey = "button" as const;
+        const styles = {
+          button: { color: "blue" },
+          optional: { card: { padding: 16 } }
+        } as const;
+
+        function App() {
+          return <>
+            <div css={{ [colorKey]: "red" }} />
+            <div css={styles[variantKey]} />
+            <div css={styles.optional?.card} />
+          </>;
+        }
+      `,
+        { jsxCssProp: true }
+      );
+
+      expect(code).not.toContain(" css=");
+      expect(code).not.toContain("_cx(");
+      expect(code.match(/className=\{_\$mincho\$\$App\d+\}/g)).toHaveLength(3);
+      expect(result[1].match(/_css\(/g) ?? []).toHaveLength(3);
+      expect(result[1]).toContain('color: "red"');
+      expect(result[1]).toContain('color: "blue"');
+      expect(result[1]).toContain("padding: 16");
     });
 
     it("lowers provider-resolved imported css props like inline object and array literals", () => {

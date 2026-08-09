@@ -110,7 +110,7 @@ function extractedCssFileFilter(filePath: string) {
   return true;
 }
 
-type MinchoBabelOptions = BabelOptions & { jsxCssProp?: boolean };
+type MinchoBabelOptions = BabelOptions;
 
 interface StaticCssEvalSourceResolution {
   id: string;
@@ -1407,11 +1407,15 @@ if (import.meta.vitest) {
     className: string
   ): void {
     expectSourceToContainV4PresetArtifact(source);
-    expect(source).toMatch(
-      new RegExp(
-        `["']?classNameByCache["']?\\s*:\\s*\\{[\\s\\S]*["']${escapeRegExp(className)}["']`
-      )
-    );
+    for (const atomicClassName of splitClassNames(className).filter(
+      (token) => !isSegmentMarker(token)
+    )) {
+      expect(source).toMatch(
+        new RegExp(
+          `["']?classNameByCache["']?\\s*:\\s*\\{[\\s\\S]*["']${escapeRegExp(atomicClassName)}["']`
+        )
+      );
+    }
   }
 
   function createLivePresetSmokeEntrySource(): string {
@@ -2257,11 +2261,17 @@ if (import.meta.vitest) {
     return className.split(/\s+/).filter(Boolean);
   }
 
+  function isSegmentMarker(className: string): boolean {
+    return className.startsWith("__mincho_seg_");
+  }
+
   function expectCssSourceToContainClassNames(
     source: string,
     className: string
   ): void {
-    for (const fragmentClassName of splitClassNames(className)) {
+    for (const fragmentClassName of splitClassNames(className).filter(
+      (token) => !isSegmentMarker(token)
+    )) {
       expect(source).toContain(`.${fragmentClassName}`);
     }
   }
@@ -3826,9 +3836,37 @@ if (import.meta.vitest) {
       const disabledCases: {
         label: string;
         pluginOptions?: MinchoVitePluginOptions;
+        expectedOptions?: MinchoBabelOptions;
       }[] = [
         { label: "default" },
-        { label: "explicit false", pluginOptions: { jsxCssProp: false } }
+        {
+          label: "empty optimize",
+          pluginOptions: { babel: { optimize: {} } },
+          expectedOptions: { optimize: {} }
+        },
+        {
+          label: "inactive optimize",
+          pluginOptions: {
+            babel: { optimize: { defineRulesCxConditions: false } }
+          },
+          expectedOptions: { optimize: { defineRulesCxConditions: false } }
+        },
+        {
+          label: "explicit false",
+          pluginOptions: { jsxCssProp: false },
+          expectedOptions: { jsxCssProp: false }
+        },
+        {
+          label: "explicit false with optimize",
+          pluginOptions: {
+            babel: { optimize: { defineRulesCxConditions: true } },
+            jsxCssProp: false
+          },
+          expectedOptions: {
+            jsxCssProp: false,
+            optimize: { defineRulesCxConditions: true }
+          }
+        }
       ];
 
       try {
@@ -3848,18 +3886,13 @@ if (import.meta.vitest) {
           ).resolves.toBeNull();
         }
 
-        expect(babelTransformSpy).toHaveBeenNthCalledWith(
-          1,
-          fixture.entryPath,
-          undefined
-        );
-        expect(babelTransformSpy).toHaveBeenNthCalledWith(
-          2,
-          fixture.entryPath,
-          {
-            jsxCssProp: false
-          }
-        );
+        for (const [index, disabledCase] of disabledCases.entries()) {
+          expect(babelTransformSpy).toHaveBeenNthCalledWith(
+            index + 1,
+            fixture.entryPath,
+            disabledCase.expectedOptions
+          );
+        }
         expect(fixture.source).toContain(
           '<div className="base" css={{ color: "red" }} />'
         );
@@ -4093,7 +4126,7 @@ if (import.meta.vitest) {
         const fillBlueClassName = extractFillBlueClassName(jsOutput.code);
         expectSourceToContainV4RuntimePresetSeed(jsOutput.code);
         expect(jsOutput.code).not.toContain('background: "blue"');
-        expect(cssOutput.source).toContain(`.${fillBlueClassName}`);
+        expectCssSourceToContainClassNames(cssOutput.source, fillBlueClassName);
         expect(cssOutput.source).toContain("background: blue;");
       } finally {
         await fs.promises.rm(root, { force: true, recursive: true });
@@ -4208,7 +4241,11 @@ if (import.meta.vitest) {
         transformedExtractedCss,
         fillBlueClassName
       );
-      expect(fillBlueClassName.split(/\s+/)).toHaveLength(1);
+      const fillBlueClassNames = splitClassNames(fillBlueClassName);
+      expect(fillBlueClassNames.filter(isSegmentMarker)).toHaveLength(1);
+      expect(
+        fillBlueClassNames.filter((token) => !isSegmentMarker(token))
+      ).toHaveLength(1);
       expect(fillBlueInitializer).not.toMatch(/\bcss\s*\(/);
       expect(
         hasCssCallWithStringProperty(

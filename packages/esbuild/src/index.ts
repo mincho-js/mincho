@@ -1320,11 +1320,15 @@ if (import.meta.vitest) {
     className: string
   ): void {
     expectSourceToContainV4PresetArtifact(source);
-    expect(source).toMatch(
-      new RegExp(
-        `["']?classNameByCache["']?\\s*:\\s*\\{[\\s\\S]*["']${escapeRegExp(className)}["']`
-      )
-    );
+    for (const atomicClassName of splitClassNames(className).filter(
+      (token) => !isSegmentMarker(token)
+    )) {
+      expect(source).toMatch(
+        new RegExp(
+          `["']?classNameByCache["']?\\s*:\\s*\\{[\\s\\S]*["']${escapeRegExp(atomicClassName)}["']`
+        )
+      );
+    }
   }
 
   function countV4PresetArtifacts(source: string): number {
@@ -1904,11 +1908,17 @@ if (import.meta.vitest) {
     return className.split(/\s+/).filter(Boolean);
   }
 
+  function isSegmentMarker(className: string): boolean {
+    return className.startsWith("__mincho_seg_");
+  }
+
   function expectCssSourceToContainClassNames(
     source: string,
     className: string
   ): void {
-    for (const fragmentClassName of splitClassNames(className)) {
+    for (const fragmentClassName of splitClassNames(className).filter(
+      (token) => !isSegmentMarker(token)
+    )) {
       expect(source).toContain(`.${fragmentClassName}`);
     }
   }
@@ -3815,7 +3825,11 @@ if (import.meta.vitest) {
       expect(loadResult.loader).toBe("js");
       expect(loadResult.resolveDir).toBe(dirname(resolveResult.path));
       expect(fillBlueInit).toMatch(/^(?:"[^"]+"|'[^']+')$/);
-      expect(fillBlueClassName.split(/\s+/)).toHaveLength(1);
+      const fillBlueClassNames = splitClassNames(fillBlueClassName);
+      expect(fillBlueClassNames.filter(isSegmentMarker)).toHaveLength(1);
+      expect(
+        fillBlueClassNames.filter((token) => !isSegmentMarker(token))
+      ).toHaveLength(1);
       expect(
         hasCssCallWithStringProperty(loadResult.contents, "background", "blue")
       ).toBe(false);

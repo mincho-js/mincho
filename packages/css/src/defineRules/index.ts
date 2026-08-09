@@ -10,7 +10,9 @@ import { identifierName } from "../utils.js";
 import { createDefineRulesRuntime } from "./runtime.js";
 import { defineRulesPropertyValues } from "./propertyValues.js";
 import { cx } from "../classname/cx.js";
+import { css as rootCss } from "../css/index.js";
 import type { DefineRulesRuntimeResult } from "./runtime.js";
+import { SEGMENT_MARKER_PREFIX } from "./metadata.js";
 import {
   normalizeDefineRulesConditions,
   normalizeDefineRulesConditionValue
@@ -370,6 +372,42 @@ if (import.meta.vitest) {
   const debugId = "myCSS";
   setFileScope("test");
 
+  const segmentMarkerPattern = new RegExp(
+    `^${SEGMENT_MARKER_PREFIX}[A-Za-z0-9_-]+$`
+  );
+  const splitClassNames = (className: string) =>
+    className.split(/\s+/).filter(Boolean);
+  const getSegmentMarkers = (className: string) =>
+    splitClassNames(className).filter((token) =>
+      segmentMarkerPattern.test(token)
+    );
+  const getAtomicClassNames = (className: string) =>
+    splitClassNames(className).filter(
+      (token) => !segmentMarkerPattern.test(token)
+    );
+  const withoutSegmentMarkers = (className: string) =>
+    getAtomicClassNames(className).join(" ");
+  const expectSingleSegmentMarker = (className: string) => {
+    const markers = getSegmentMarkers(className);
+    expect(markers).toHaveLength(1);
+    const marker = markers[0];
+
+    if (marker == null) {
+      throw new Error("Expected one Mincho segment marker");
+    }
+
+    return marker;
+  };
+  const expectFirstAtomicClassName = (className: string) => {
+    const atomicClassName = getAtomicClassNames(className)[0];
+
+    if (atomicClassName == null) {
+      throw new Error("Expected one atomic class name");
+    }
+
+    return atomicClassName;
+  };
+
   afterEach(() => {
     while (getActiveDefineRulesRegistrySession() != null) {
       endDefineRulesRegistrySession();
@@ -422,14 +460,16 @@ if (import.meta.vitest) {
     );
     const className = bindings.css({ display: "flex" });
 
-    expect(bindings.cx(className, "external")).toBe(`${className} external`);
+    expect(bindings.cx(className, "external")).toBe(
+      `${withoutSegmentMarkers(className)} external`
+    );
     expect(bindings.css.raw({ display: "flex" })).toEqual({
       display: "flex"
     });
 
-    expect(Object.values(bindings.preset.classNameByCache)).toEqual([
-      className
-    ]);
+    expect(Object.values(bindings.preset.classNameByCache)).toEqual(
+      getAtomicClassNames(className)
+    );
   }
 
   describe("defineRules", () => {
@@ -728,15 +768,17 @@ if (import.meta.vitest) {
         expect({ ...helperProperties }).toEqual(manualProperties);
         expect(helperCss.raw(input)).toEqual(manualCss.raw(input));
         expect(helperCss.raw(input)).toEqual(input);
-        expect(helperCss({ color: themeVars.colors.text.muted })).toMatch(
-          identifierName("propertyValuesLeafHelper")
-        );
+        expect(
+          expectFirstAtomicClassName(
+            helperCss({ color: themeVars.colors.text.muted })
+          )
+        ).toMatch(identifierName("propertyValuesLeafHelper"));
         expect(helperCss.raw(missingArrayValueInput)).toEqual({
           color: missingArrayValue
         });
-        expect(helperCss(missingArrayValueInput)).toMatch(
-          identifierName("propertyValuesLeafHelper")
-        );
+        expect(
+          expectFirstAtomicClassName(helperCss(missingArrayValueInput))
+        ).toMatch(identifierName("propertyValuesLeafHelper"));
       });
 
       it("matches hand-written properties for object maps", async () => {
@@ -771,7 +813,7 @@ if (import.meta.vitest) {
         expect(helperCss.raw(input)).toEqual({
           color: themeVars.colors.text.muted
         });
-        expect(helperCss(input)).toMatch(
+        expect(expectFirstAtomicClassName(helperCss(input))).toMatch(
           identifierName("propertyValuesObjectMapHelper")
         );
       });
@@ -813,7 +855,7 @@ if (import.meta.vitest) {
         expect({ ...helperProperties }).toEqual(manualProperties);
         expect(helperCss.raw(input)).toEqual(manualCss.raw(input));
         expect(helperCss.raw(input)).toEqual(input);
-        expect(helperCss(input).split(" ")).toEqual([
+        expect(getAtomicClassNames(helperCss(input))).toEqual([
           expect.stringMatching(identifierName("propertyValuesSpacingHelper")),
           expect.stringMatching(identifierName("propertyValuesSpacingHelper"))
         ]);
@@ -882,7 +924,7 @@ if (import.meta.vitest) {
 
         assertType<DefineRulesAuthoringShapeOwner>(presetOwner);
         expect(presetOwner.cx(className, "external")).toBe(
-          `${className} external`
+          `${withoutSegmentMarkers(className)} external`
         );
         expectDefineRulesAuthoringShapeBindings(presetOwner);
       });
@@ -896,7 +938,9 @@ if (import.meta.vitest) {
         assertType<DefineRulesAuthoringShapeOwner["css"]>(css);
         assertType<DefineRulesAuthoringShapeOwner["cx"]>(cx);
         assertType<DefineRulesPresetArtifactV4>(preset);
-        expect(cx(className, "external")).toBe(`${className} external`);
+        expect(cx(className, "external")).toBe(
+          `${withoutSegmentMarkers(className)} external`
+        );
         expectDefineRulesAuthoringShapeBindings({ css, cx, preset });
       });
 
@@ -911,7 +955,9 @@ if (import.meta.vitest) {
         assertType<DefineRulesAuthoringShapeOwner["css"]>(sharedCss);
         assertType<DefineRulesAuthoringShapeOwner["cx"]>(compose);
         assertType<DefineRulesPresetArtifactV4>(sharedPreset);
-        expect(compose(className, "external")).toBe(`${className} external`);
+        expect(compose(className, "external")).toBe(
+          `${withoutSegmentMarkers(className)} external`
+        );
         expectDefineRulesAuthoringShapeBindings({
           css: sharedCss,
           cx: compose,
@@ -1187,12 +1233,12 @@ if (import.meta.vitest) {
         const inverseColorClass = css({ color: themeVars.colors.text.inverse });
 
         expect(cardClass).not.toBe("");
-        expect(cardClass.split(" ").filter(Boolean).length).toBeGreaterThan(0);
+        expect(getAtomicClassNames(cardClass).length).toBeGreaterThan(0);
         expect(scopedCx(themeClass, cardClass)).toBe(
-          `${themeClass} ${cardClass}`
+          `${themeClass} ${withoutSegmentMarkers(cardClass)}`
         );
         expect(scopedCx(themeClass, baseColorClass, inverseColorClass)).toBe(
-          `${themeClass} ${inverseColorClass}`
+          `${themeClass} ${withoutSegmentMarkers(inverseColorClass)}`
         );
         expect(
           Object.getOwnPropertyDescriptor(themeVars, "fallbackVar")
@@ -1403,7 +1449,7 @@ if (import.meta.vitest) {
             }
           }
         });
-        expect(className.split(" ")).toHaveLength(5);
+        expect(getAtomicClassNames(className)).toHaveLength(5);
         expect(Object.values(preset.conditionById)).toEqual(
           expect.arrayContaining([
             {
@@ -1505,7 +1551,12 @@ if (import.meta.vitest) {
         const desktopPrimary = css({ _desktop: { color: "primary" } });
         const desktopInverse = css({ _desktop: { color: "inverse" } });
 
-        expect(scopedCx(desktopPrimary, desktopInverse)).toBe(desktopInverse);
+        const result = scopedCx(desktopPrimary, desktopInverse);
+
+        expect(withoutSegmentMarkers(result)).toBe(
+          withoutSegmentMarkers(desktopInverse)
+        );
+        expectSingleSegmentMarker(result);
       });
 
       it("keeps known classes for different conditions", () => {
@@ -1524,9 +1575,14 @@ if (import.meta.vitest) {
         const mobileMuted = css({ _mobile: { color: "muted" } });
         const desktopInverse = css({ _desktop: { color: "inverse" } });
 
-        expect(scopedCx(mobileMuted, desktopInverse)).toBe(
-          `${mobileMuted} ${desktopInverse}`
+        const result = scopedCx(mobileMuted, desktopInverse);
+
+        expect(withoutSegmentMarkers(result)).toBe(
+          `${withoutSegmentMarkers(mobileMuted)} ${withoutSegmentMarkers(
+            desktopInverse
+          )}`
         );
+        expectSingleSegmentMarker(result);
       });
 
       it("preserves unknown duplicate strings in order around known classes", () => {
@@ -1539,7 +1595,7 @@ if (import.meta.vitest) {
         const colorRed = owner.css({ color: "red" });
 
         expect(owner.cx("external external", colorRed, "external")).toBe(
-          `external external ${colorRed} external`
+          `external external ${withoutSegmentMarkers(colorRed)} external`
         );
       });
 
@@ -1571,10 +1627,23 @@ if (import.meta.vitest) {
           }
         });
 
-        expect(consumer.cx(providerColor, providerColor)).toBe(providerColor);
-        expect(
-          consumer.cx(providerColor, providerBackground, providerColor)
-        ).toBe(`${providerBackground} ${providerColor}`);
+        const deduped = consumer.cx(providerColor, providerColor);
+        const merged = consumer.cx(
+          providerColor,
+          providerBackground,
+          providerColor
+        );
+
+        expect(withoutSegmentMarkers(deduped)).toBe(
+          withoutSegmentMarkers(providerColor)
+        );
+        expectSingleSegmentMarker(deduped);
+        expect(withoutSegmentMarkers(merged)).toBe(
+          `${withoutSegmentMarkers(providerBackground)} ${withoutSegmentMarkers(
+            providerColor
+          )}`
+        );
+        expectSingleSegmentMarker(merged);
       });
 
       it("filters falsy values like root cx", () => {
@@ -1594,7 +1663,14 @@ if (import.meta.vitest) {
           active: [displayNone, displayFlex]
         });
 
-        expect(result).toEqual({ base: displayNone, active: displayFlex });
+        expect(withoutSegmentMarkers(result.base)).toBe(
+          withoutSegmentMarkers(displayNone)
+        );
+        expect(withoutSegmentMarkers(result.active)).toBe(
+          withoutSegmentMarkers(displayFlex)
+        );
+        expectSingleSegmentMarker(result.base);
+        expectSingleSegmentMarker(result.active);
       });
 
       it("merges known atomic classes through cx.with() and with().multiple()", () => {
@@ -1607,16 +1683,238 @@ if (import.meta.vitest) {
         ]);
         const composed = owner.cx.with(callback);
 
-        expect(composed(displayNone, displayFlex)).toBe(displayFlex);
+        const composedResult = composed(displayNone, displayFlex);
+        const composedMultiple = composed.multiple({
+          inactive: [displayNone],
+          active: [displayNone, displayFlex]
+        } as const);
+
+        expect(withoutSegmentMarkers(composedResult)).toBe(
+          withoutSegmentMarkers(displayFlex)
+        );
+        expectSingleSegmentMarker(composedResult);
         expect(callback).toHaveBeenNthCalledWith(1, displayNone, displayFlex);
-        expect(
-          composed.multiple({
-            inactive: [displayNone],
-            active: [displayNone, displayFlex]
-          } as const)
-        ).toEqual({ inactive: displayNone, active: displayFlex });
+        expect(withoutSegmentMarkers(composedMultiple.inactive)).toBe(
+          withoutSegmentMarkers(displayNone)
+        );
+        expect(withoutSegmentMarkers(composedMultiple.active)).toBe(
+          withoutSegmentMarkers(displayFlex)
+        );
+        expectSingleSegmentMarker(composedMultiple.inactive);
+        expectSingleSegmentMarker(composedMultiple.active);
         expect(callback).toHaveBeenNthCalledWith(2, displayNone);
         expect(callback).toHaveBeenNthCalledWith(3, displayNone, displayFlex);
+      });
+
+      describe("aggressive marker contract", () => {
+        it("returns marker-bearing css() strings while keeping atomic classes", () => {
+          const owner = defineRules({
+            debugId: "cxMarkerCssOutput",
+            properties: {
+              color: true,
+              display: ["none", "flex"]
+            }
+          });
+          const className = owner.css({ color: "red", display: "flex" });
+          const tokens = splitClassNames(className);
+
+          expectSingleSegmentMarker(className);
+          for (const atomicClassName of Object.values(
+            owner.preset.classNameByCache
+          )) {
+            expect(tokens).toContain(atomicClassName);
+          }
+        });
+
+        it("keeps marker tokens inert outside the atomic class artifact", () => {
+          const owner = defineRules({
+            debugId: "cxMarkerInert",
+            properties: {
+              color: true
+            }
+          });
+          const className = owner.css({ color: "red" });
+          const marker = expectSingleSegmentMarker(className);
+
+          expect(Object.values(owner.preset.classNameByCache)).not.toContain(
+            marker
+          );
+          expect(owner.css.raw({ color: "red" })).toEqual({ color: "red" });
+        });
+
+        it("keeps empty custom-property declarations available to scoped css", () => {
+          const owner = defineRules({
+            debugId: "cxEmptyCustomPropertyHook",
+            properties: {
+              "--mincho-cx-hook": {
+                "": { vars: { "--mincho-cx-hook": "" } }
+              }
+            }
+          });
+
+          expect(owner.css.raw({ "--mincho-cx-hook": "" })).toEqual({
+            vars: { "--mincho-cx-hook": "" }
+          });
+          expectSingleSegmentMarker(owner.css({ "--mincho-cx-hook": "" }));
+        });
+
+        it("keeps ordinary css() output marker-free", () => {
+          const className = rootCss({ color: "red" });
+
+          expect(getSegmentMarkers(className)).toEqual([]);
+        });
+
+        it("derives the same marker for equivalent hydrated preset segments", () => {
+          const provider = defineRules({
+            debugId: "cxMarkerStableProvider",
+            properties: {
+              color: true,
+              display: ["none", "flex"]
+            }
+          });
+          const providerClassName = provider.css({
+            color: "red",
+            display: "flex"
+          });
+          const consumerA = defineRules({
+            debugId: "cxMarkerStableConsumerA",
+            presets: provider.preset,
+            properties: {
+              color: true,
+              display: ["none", "flex"]
+            }
+          });
+          const consumerB = defineRules({
+            debugId: "cxMarkerStableConsumerB",
+            presets: [provider.preset],
+            properties: {
+              color: true,
+              display: ["none", "flex"]
+            }
+          });
+
+          expect(
+            expectSingleSegmentMarker(
+              consumerA.css({ color: "red", display: "flex" })
+            )
+          ).toBe(expectSingleSegmentMarker(providerClassName));
+          expect(
+            expectSingleSegmentMarker(
+              consumerB.css({ color: "red", display: "flex" })
+            )
+          ).toBe(expectSingleSegmentMarker(providerClassName));
+        });
+
+        it("dedupes cx(cssA, cssB) with a single marker-bearing result", () => {
+          const owner = createDefineRulesAuthoringShapeOwner("cxMarkerDedupe");
+          const displayNone = owner.css({ display: "none" });
+          const displayFlex = owner.css({ display: "flex" });
+          const result = owner.cx(displayNone, displayFlex);
+
+          expectSingleSegmentMarker(result);
+          expect(result).not.toContain(expectFirstAtomicClassName(displayNone));
+          expect(result).toContain(expectFirstAtomicClassName(displayFlex));
+          expect(result).not.toContain(expectSingleSegmentMarker(displayNone));
+        });
+
+        it("keeps nested cx(cx(a, b), c) equal to flat cx(a, b, c)", () => {
+          const owner = defineRules({
+            debugId: "cxNestedMarker",
+            properties: {
+              background: true,
+              color: true
+            }
+          });
+          const colorRed = owner.css({ color: "red" });
+          const backgroundBlue = owner.css({ background: "blue" });
+          const colorGreen = owner.css({ color: "green" });
+          const flat = owner.cx(colorRed, backgroundBlue, colorGreen);
+          const nested = owner.cx(
+            owner.cx(colorRed, backgroundBlue),
+            colorGreen
+          );
+
+          expect(nested).toBe(flat);
+          expectSingleSegmentMarker(nested);
+        });
+
+        it("uses a marker segment inside interpolated class strings", () => {
+          const owner = createDefineRulesAuthoringShapeOwner(
+            "cxInterpolatedMarker"
+          );
+          const colorRed = owner.css({ color: "red" });
+          const result = owner.cx(`before ${colorRed} external`);
+          const tokens = splitClassNames(result);
+          const colorClassName = expectFirstAtomicClassName(colorRed);
+          const marker = expectSingleSegmentMarker(colorRed);
+          const beforeIndex = tokens.indexOf("before");
+          const colorIndex = tokens.indexOf(colorClassName);
+          const externalIndex = tokens.indexOf("external");
+
+          expect(getSegmentMarkers(result)).toEqual([]);
+          expect(result).not.toContain(marker);
+          expect(beforeIndex).toBeGreaterThanOrEqual(0);
+          expect(colorIndex).toBeGreaterThanOrEqual(0);
+          expect(colorIndex).toBeGreaterThan(beforeIndex);
+          expect(externalIndex).toBeGreaterThan(colorIndex);
+        });
+
+        it("keeps unknown-only input compatible without a fake marker", () => {
+          const owner = createDefineRulesAuthoringShapeOwner(
+            "cxMarkerUnknownOnly"
+          );
+          const result = owner.cx("external", ["external"], { active: true });
+
+          expect(result).toBe(cx("external", ["external"], { active: true }));
+          expect(getSegmentMarkers(result)).toEqual([]);
+        });
+
+        it("preserves unregistered marker-looking user class tokens safely", () => {
+          const owner =
+            createDefineRulesAuthoringShapeOwner("cxMarkerCollision");
+          const markerLikeClassName = "__mincho_seg_user_supplied";
+          const displayNone = owner.css({ display: "none" });
+          const displayFlex = owner.css({ display: "flex" });
+          const result = owner.cx(
+            markerLikeClassName,
+            displayNone,
+            displayFlex
+          );
+          const tokens = splitClassNames(result);
+
+          expect(tokens).toContain(markerLikeClassName);
+          expect(result).not.toContain(expectFirstAtomicClassName(displayNone));
+          expect(result).toContain(expectFirstAtomicClassName(displayFlex));
+        });
+
+        it("keeps cx.multiple() and cx.with() marker-bearing", () => {
+          const owner = createDefineRulesAuthoringShapeOwner(
+            "cxMarkerMultipleWith"
+          );
+          const displayNone = owner.css({ display: "none" });
+          const displayFlex = owner.css({ display: "flex" });
+          const composed = owner.cx.with((base: string, override?: string) => [
+            base,
+            override
+          ]);
+          const multiple = owner.cx.multiple({
+            base: displayNone,
+            active: [displayNone, displayFlex]
+          });
+          const composedResult = composed(displayNone, displayFlex);
+          const composedMultiple = composed.multiple({
+            base: [displayNone],
+            active: [displayNone, displayFlex]
+          } as const);
+
+          expectSingleSegmentMarker(multiple.base);
+          expectSingleSegmentMarker(multiple.active);
+          expectSingleSegmentMarker(composedResult);
+          expectSingleSegmentMarker(composedMultiple.base);
+          expectSingleSegmentMarker(composedMultiple.active);
+          expect(multiple.active).toBe(composedResult);
+          expect(composedMultiple.active).toBe(composedResult);
+        });
       });
 
       it("preserves repeated full cx inputs while using the private full-result cache", () => {
@@ -1630,7 +1928,9 @@ if (import.meta.vitest) {
         const colorRed = owner.css({ color: "red" });
         const colorBlue = owner.css({ color: "blue" });
         const backgroundBlue = owner.css({ background: "blue" });
-        const expected = `external external ${backgroundBlue} ${colorBlue} external`;
+        const expected = `external external ${withoutSegmentMarkers(
+          backgroundBlue
+        )} ${withoutSegmentMarkers(colorBlue)} external`;
 
         expect(
           owner.cx(
@@ -1724,13 +2024,13 @@ if (import.meta.vitest) {
             consumer.preset
           );
           expect(Object.values(provider.preset.classNameByCache)).toEqual([
-            providerColor
+            expectFirstAtomicClassName(providerColor)
           ]);
           expect(Object.values(middle.preset.classNameByCache)).toEqual([
-            middleColor
+            expectFirstAtomicClassName(middleColor)
           ]);
           expect(Object.values(consumer.preset.classNameByCache)).toEqual([
-            consumerBackground
+            expectFirstAtomicClassName(consumerBackground)
           ]);
         } finally {
           expect(endDefineRulesRegistrySession()).toBe(session);
@@ -1896,12 +2196,16 @@ if (import.meta.vitest) {
         const repeatedClassName = css({ background: "blue" });
 
         expect(repeatedClassName).toBe(className);
-        expect(Object.values(preset.classNameByCache)).toContain(className);
+        expect(Object.values(preset.classNameByCache)).toContain(
+          expectFirstAtomicClassName(className)
+        );
         expect(Object.values(preset.classNameByCache)).toHaveLength(1);
         expect(Object.keys(preset.writeKeyByCacheKey)).toEqual(
           Object.keys(preset.classNameByCache)
         );
-        expect(JSON.stringify(preset).split(className)).toHaveLength(2);
+        expect(
+          JSON.stringify(preset).split(expectFirstAtomicClassName(className))
+        ).toHaveLength(2);
       });
 
       it("serializes an empty v4 preset object without static calls", () => {
@@ -1934,7 +2238,9 @@ if (import.meta.vitest) {
 
         const className = css({ background: "blue" });
 
-        expect(Object.values(preset.classNameByCache)).toEqual([className]);
+        expect(Object.values(preset.classNameByCache)).toEqual(
+          getAtomicClassNames(className)
+        );
         expect(Object.keys(preset.writeKeyByCacheKey)).toEqual(
           Object.keys(preset.classNameByCache)
         );
@@ -2011,9 +2317,14 @@ if (import.meta.vitest) {
         const reconstructedCx = createDefineRulesCxRuntime(recipeConfig);
 
         expect(reconstructedCx).not.toBe(cx);
-        expect(reconstructedCx(red, blue)).toBe(blue);
+        const reconstructedResult = reconstructedCx(red, blue);
+
+        expect(withoutSegmentMarkers(reconstructedResult)).toBe(
+          withoutSegmentMarkers(blue)
+        );
+        expectSingleSegmentMarker(reconstructedResult);
         expect(reconstructedCx("external external", red, "external")).toBe(
-          `external external ${red} external`
+          `external external ${withoutSegmentMarkers(red)} external`
         );
       });
 
@@ -2316,7 +2627,10 @@ if (import.meta.vitest) {
         const consumerBackground = consumer.css({ background: "blue" });
 
         expect(Object.values(consumer.preset.classNameByCache)).toEqual(
-          expect.arrayContaining([providerColor, consumerBackground])
+          expect.arrayContaining([
+            expectFirstAtomicClassName(providerColor),
+            expectFirstAtomicClassName(consumerBackground)
+          ])
         );
         expect(Object.values(consumer.preset.classNameByCache)).toHaveLength(2);
         expect(artifact).toEqual(artifactSnapshot);
@@ -2357,14 +2671,14 @@ if (import.meta.vitest) {
 
         expect(Object.values(consumer.preset.classNameByCache)).toEqual(
           expect.arrayContaining([
-            colorClassName,
-            displayClassName,
-            consumerBackground
+            expectFirstAtomicClassName(colorClassName),
+            expectFirstAtomicClassName(displayClassName),
+            expectFirstAtomicClassName(consumerBackground)
           ])
         );
         expect(Object.values(consumer.preset.classNameByCache)).toHaveLength(3);
         expect(Object.values(colorProvider.preset.classNameByCache)).toEqual([
-          colorClassName
+          expectFirstAtomicClassName(colorClassName)
         ]);
         expect(displayArtifact).toEqual(displayArtifactSnapshot);
       });
@@ -2396,10 +2710,13 @@ if (import.meta.vitest) {
         expect(reusedBackground).toBe(providerBackground);
         expect(reusedBackground).not.toMatch(identifierName("consumer"));
         expect(presetHandle).toEqual(importedSnapshot.classNameByCache);
-        expect(Object.values(presetHandle)).toEqual([providerBackground]);
+        expect(Object.values(presetHandle)).toEqual([
+          expectFirstAtomicClassName(providerBackground)
+        ]);
         expect(
           Object.values(presetHandle).filter(
-            (className) => className === reusedBackground
+            (className) =>
+              className === expectFirstAtomicClassName(reusedBackground)
           )
         ).toHaveLength(1);
         expect(presetHandle).toBe(consumer.preset.classNameByCache);
@@ -2440,23 +2757,29 @@ if (import.meta.vitest) {
         const consumerABackground = consumerA.css({ background: "blue" });
 
         expect(Object.values(consumerA.preset.classNameByCache)).toEqual(
-          expect.arrayContaining([providerColor, consumerABackground])
+          expect.arrayContaining([
+            expectFirstAtomicClassName(providerColor),
+            expectFirstAtomicClassName(consumerABackground)
+          ])
         );
         expect(Object.values(consumerA.preset.classNameByCache)).toHaveLength(
           2
         );
         expect(Object.values(consumerB.preset.classNameByCache)).toEqual([
-          providerColor
+          expectFirstAtomicClassName(providerColor)
         ]);
 
         const consumerBBackground = consumerB.css({ background: "blue" });
 
         expect(consumerABackground).not.toBe(consumerBBackground);
         expect(Object.values(consumerB.preset.classNameByCache)).toEqual(
-          expect.arrayContaining([providerColor, consumerBBackground])
+          expect.arrayContaining([
+            expectFirstAtomicClassName(providerColor),
+            expectFirstAtomicClassName(consumerBBackground)
+          ])
         );
         expect(Object.values(consumerB.preset.classNameByCache)).not.toContain(
-          consumerABackground
+          expectFirstAtomicClassName(consumerABackground)
         );
         expect(sharedPreset).toEqual(sharedSnapshot);
       });
@@ -2674,12 +2997,20 @@ if (import.meta.vitest) {
         const combined = css({ color: "red", background: "blue" });
         const reversedCombined = css({ background: "blue", color: "red" });
 
-        expect(colorRed).toMatch(identifierName(debugId));
+        expect(expectFirstAtomicClassName(colorRed)).toMatch(
+          identifierName(debugId)
+        );
 
         expect(colorRed).toBe(css({ color: "red" }));
         expect(backgroundBlue).toBe(css({ background: "blue" }));
-        expect(combined).toBe(`${colorRed} ${backgroundBlue}`);
-        expect(reversedCombined).toBe(`${backgroundBlue} ${colorRed}`);
+        expect(getAtomicClassNames(combined)).toEqual([
+          ...getAtomicClassNames(colorRed),
+          ...getAtomicClassNames(backgroundBlue)
+        ]);
+        expect(getAtomicClassNames(reversedCombined)).toEqual([
+          ...getAtomicClassNames(backgroundBlue),
+          ...getAtomicClassNames(colorRed)
+        ]);
       });
 
       it("preserves surviving class source order instead of lexicographic order", () => {
@@ -2715,9 +3046,14 @@ if (import.meta.vitest) {
         if (sourceFirst == null || lexicographicFirst == null) return;
         expect(sourceFirst.className > lexicographicFirst.className).toBe(true);
 
-        expect(css([sourceFirst.input, lexicographicFirst.input])).toBe(
-          `${sourceFirst.className} ${lexicographicFirst.className}`
-        );
+        expect(
+          getAtomicClassNames(
+            css([sourceFirst.input, lexicographicFirst.input])
+          )
+        ).toEqual([
+          ...getAtomicClassNames(sourceFirst.className),
+          ...getAtomicClassNames(lexicographicFirst.className)
+        ]);
       });
 
       it("css() reuses equivalent atomic fragments when object key order differs", () => {
@@ -2742,12 +3078,16 @@ if (import.meta.vitest) {
           }
         });
 
-        const redFirstClassNames = css({
-          background: { red: 255, blue: 255 }
-        }).split(" ");
-        const blueFirstClassNames = css({
-          background: { blue: 255, red: 255 }
-        }).split(" ");
+        const redFirstClassNames = getAtomicClassNames(
+          css({
+            background: { red: 255, blue: 255 }
+          })
+        );
+        const blueFirstClassNames = getAtomicClassNames(
+          css({
+            background: { blue: 255, red: 255 }
+          })
+        );
 
         expect(new Set(redFirstClassNames)).toEqual(
           new Set(blueFirstClassNames)
@@ -2794,24 +3134,26 @@ if (import.meta.vitest) {
         });
 
         const cssFullFirst = createCss();
-        const fullRed = cssFullFirst({ background: "red" }).split(" ");
+        const fullRed = getAtomicClassNames(
+          cssFullFirst({ background: "red" })
+        );
         const prunedAfterFull = cssFullFirst([
           { background: "red" },
           { background: "blue" }
-        ]).split(" ");
+        ]);
+        const prunedAfterFullClassNames = getAtomicClassNames(prunedAfterFull);
 
         expect(fullRed).toHaveLength(2);
-        expect(prunedAfterFull).toHaveLength(2);
-        expect(prunedAfterFull[0]).toBe(fullRed[0]);
-        expect(prunedAfterFull[1]).not.toBe(fullRed[1]);
+        expect(prunedAfterFullClassNames).toHaveLength(2);
+        expect(prunedAfterFullClassNames[0]).toBe(fullRed[0]);
+        expect(prunedAfterFullClassNames[1]).not.toBe(fullRed[1]);
 
         const cssPrunedFirst = createCss();
-        const prunedBeforeFull = cssPrunedFirst([
-          { background: "red" },
-          { background: "blue" }
-        ]).split(" ");
-        const fullAfterPruned = cssPrunedFirst({ background: "red" }).split(
-          " "
+        const prunedBeforeFull = getAtomicClassNames(
+          cssPrunedFirst([{ background: "red" }, { background: "blue" }])
+        );
+        const fullAfterPruned = getAtomicClassNames(
+          cssPrunedFirst({ background: "red" })
         );
 
         expect(prunedBeforeFull).toHaveLength(2);
@@ -3024,7 +3366,7 @@ if (import.meta.vitest) {
             paddingRight: 4
           })
         );
-        expect(css({ center: "inline" }).split(" ")).toHaveLength(3);
+        expect(getAtomicClassNames(css({ center: "inline" }))).toHaveLength(3);
       });
 
       it("resolves shortcut conflicts by transformed property within each condition", () => {

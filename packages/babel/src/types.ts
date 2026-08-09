@@ -6,11 +6,15 @@ import type {
   StaticCssEvalDiagnostic,
   StaticCssEvalProvider
 } from "./staticCssEval/types.js";
+import type { DefineRulesCxConditionsMetadata } from "./defineRulesCxConditionsTypes.js";
 
 export interface PluginOptions {
   result: [string, string];
   jsxCssProp?: boolean;
   jsxCssPropTransformed?: boolean;
+  optimize?: {
+    defineRulesCxConditions?: boolean;
+  };
   /** @internal Prepared sync provider supplied by bundler prepasses only. */
   staticCssEvalProvider?: StaticCssEvalProvider;
 }
@@ -24,6 +28,7 @@ export interface MinchoStaticCssEvalMetadata {
 
 export interface MinchoBabelFileMetadata {
   minchoStaticCssEval?: MinchoStaticCssEvalMetadata;
+  minchoDefineRulesCxConditions?: DefineRulesCxConditionsMetadata;
   [key: string]: unknown;
 }
 
