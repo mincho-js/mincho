@@ -10,9 +10,7 @@ inputs:
 runs:
   using: composite
   steps:
-    - uses: actions/setup-node@v4
-      with:
-        node-version: 22.12.0
+    - uses: jdx/mise-action@v3
 
     # https://github.com/actions/cache/blob/main/examples.md#node---yarn
     # https://github.blog/changelog/2022-10-11-github-actions-deprecating-save-state-and-set-output-commands/
