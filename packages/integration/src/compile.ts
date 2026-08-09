@@ -16,16 +16,16 @@ interface CompileOptions {
 }
 
 function getScopedSourceWithCache({
-  cwd,
   contents,
   originalPath,
   packageName,
+  rootPath,
   resolverCache
 }: {
-  cwd: string;
   contents: string;
   originalPath: string;
   packageName: string;
+  rootPath: string;
   resolverCache: Map<string, string>;
 }) {
   if (resolverCache.has(originalPath)) {
@@ -35,7 +35,7 @@ function getScopedSourceWithCache({
   const source = addFileScope({
     source: contents,
     filePath: originalPath,
-    rootPath: cwd,
+    rootPath,
     packageName
   });
 
@@ -126,11 +126,12 @@ export async function compile({
   originalPath
 }: CompileOptions) {
   const packageInfo = getPackageInfo(cwd);
+  const sourcePackageInfo = getPackageInfo(dirname(originalPath));
   const source = getScopedSourceWithCache({
-    cwd,
     contents,
     originalPath,
-    packageName: packageInfo.name,
+    packageName: sourcePackageInfo.name,
+    rootPath: sourcePackageInfo.dirname,
     resolverCache
   });
 

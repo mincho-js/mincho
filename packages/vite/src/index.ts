@@ -807,8 +807,8 @@ export function minchoVitePlugin(
         }
       }
 
-      if (/(j|t)sx?(\?used)?$/.test(id) && !id.endsWith(".vanilla.js")) {
-        if (id.includes("node_modules")) return;
+      if (/\.(j|t)sx?(\?used)?$/.test(id) && !id.endsWith(".vanilla.js")) {
+        if (id.includes("node_modules") || /(^|\/)\.yarn\//.test(id)) return;
 
         if (id.endsWith(".css.ts")) {
           return;
@@ -5008,7 +5008,18 @@ if (import.meta.vitest) {
         await fs.promises.readFile(fixturePath, "utf8")
       ).replace(
         /"@mincho-js-proof\/([^"]+)"/g,
-        '"./node_modules/@mincho-js-proof/$1/dist/index.js"'
+        (_specifier, packageName: string) =>
+          JSON.stringify(
+            normalizePath(
+              join(
+                fixtureRoot,
+                "node_modules",
+                "@mincho-js-proof",
+                packageName,
+                "dist/index.js"
+              )
+            )
+          )
       );
       const integrationModule = await import("@mincho-js/integration");
 
@@ -5037,6 +5048,20 @@ if (import.meta.vitest) {
               write: false
             },
             resolve: {
+              alias: Object.fromEntries(
+                ["diamond-a", "diamond-b", "diamond-c"].map((packageName) => [
+                  `@mincho-js-proof/${packageName}/style.css`,
+                  normalizePath(
+                    join(
+                      fixtureRoot,
+                      "node_modules",
+                      "@mincho-js-proof",
+                      packageName,
+                      "dist/index.css"
+                    )
+                  )
+                ])
+              ),
               preserveSymlinks: true
             }
           });
