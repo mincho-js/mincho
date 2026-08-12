@@ -2,8 +2,10 @@ import {
   beginDefineRulesRegistrySession,
   endDefineRulesRegistrySession,
   getActiveDefineRulesRegistrySession,
+  parseDefineRulesPresetArtifactV5,
   type DefineRulesRegistrySession
 } from "@mincho-js/css/defineRules/registry";
+import { defineRules } from "@mincho-js/css";
 import { processVanillaFile } from "@vanilla-extract/integration";
 import {
   getConfigEntry,
@@ -21,6 +23,62 @@ export type DefineRulesPresetRegistryFileOptions = Parameters<
 export interface DefineRulesPresetRegistryResult {
   source: string;
   registrySession: DefineRulesRegistrySession;
+  ancestorStyleSpecifiers: readonly string[];
+}
+
+export function getDefineRulesAncestorStyleSpecifiers(
+  registrySession: DefineRulesRegistrySession
+): string[] {
+  return getDefineRulesAncestorStyleSpecifiersFromArtifacts(
+    registrySession.instances.map((instance) => instance.getPresetSnapshot())
+  );
+}
+
+function getDefineRulesAncestorStyleSpecifiersFromArtifacts(
+  artifacts: readonly ReturnType<typeof parseDefineRulesPresetArtifactV5>[]
+): string[] {
+  const specifiers: string[] = [];
+  const packages = new Set<string>();
+
+  for (const artifact of artifacts) {
+    const nodes = new Map(
+      artifact.nodes.map((node) => [node.nodeId, node] as const)
+    );
+    const visited = new Set<typeof artifact.rootNodeId>();
+    const root = nodes.get(artifact.rootNodeId);
+
+    if (root === undefined) {
+      throw new TypeError("defineRules preset root node is missing");
+    }
+
+    const localPackage = root.origin.slice(0, root.origin.indexOf(":"));
+    const visit = (nodeId: typeof artifact.rootNodeId): void => {
+      if (visited.has(nodeId)) return;
+      const node = nodes.get(nodeId);
+
+      if (node === undefined) {
+        throw new TypeError(
+          `defineRules preset parent node is missing: ${nodeId}`
+        );
+      }
+
+      visited.add(nodeId);
+      for (const parentId of node.parents) visit(parentId);
+
+      const packageSpecifier = node.origin.slice(0, node.origin.indexOf(":"));
+      if (
+        packageSpecifier !== localPackage &&
+        !packages.has(packageSpecifier)
+      ) {
+        packages.add(packageSpecifier);
+        specifiers.push(`${packageSpecifier}/style.css`);
+      }
+    };
+
+    visit(artifact.rootNodeId);
+  }
+
+  return specifiers;
 }
 
 export function runDefineRulesPresetRegistryStep<Result>(
@@ -45,11 +103,14 @@ export async function processDefineRulesPresetRegistryFile(
 
   try {
     const source = await processVanillaFile(options);
-    validateDefineRulesRegistrySession(registrySession);
+    const presetArtifacts =
+      validateDefineRulesRegistrySessionArtifacts(registrySession);
 
     return {
       source,
-      registrySession
+      registrySession,
+      ancestorStyleSpecifiers:
+        getDefineRulesAncestorStyleSpecifiersFromArtifacts(presetArtifacts)
     };
   } finally {
     endDefineRulesRegistrySession();
@@ -59,7 +120,16 @@ export async function processDefineRulesPresetRegistryFile(
 export function validateDefineRulesRegistrySession(
   registrySession: DefineRulesRegistrySession
 ): void {
-  for (const instance of registrySession.instances) {
+  validateDefineRulesRegistrySessionArtifacts(registrySession);
+}
+
+function validateDefineRulesRegistrySessionArtifacts(
+  registrySession: DefineRulesRegistrySession
+): ReturnType<typeof parseDefineRulesPresetArtifactV5>[] {
+  return registrySession.instances.map((instance) => {
+    const artifact = parseDefineRulesPresetArtifactV5(
+      instance.getPresetSnapshot()
+    );
     const diagnosticContext = {
       fileScope: instance.fileScope,
       registrationIndex: instance.registrationIndex
@@ -86,7 +156,8 @@ export function validateDefineRulesRegistrySession(
       diagnosticContext,
       { validatePlainSerializableValues: true }
     );
-  }
+    return artifact;
+  });
 }
 
 // == Tests ====================================================================
@@ -203,6 +274,7 @@ if (import.meta.vitest) {
   }
 
   function createRegistrySession(config: unknown): DefineRulesRegistrySession {
+    const presetArtifact = defineRules({ properties: {} }).preset;
     return {
       instances: [
         {
@@ -213,24 +285,8 @@ if (import.meta.vitest) {
           },
           registrationIndex: 0,
           config,
-          presetArtifact: {
-            schema: "mincho.defineRulesPreset",
-            version: 4,
-            classNameByCache: {},
-            writeKeyByCacheKey: {},
-            conditionById: {},
-            propertyById: {},
-            writeKeyById: {}
-          },
-          getPresetSnapshot: () => ({
-            schema: "mincho.defineRulesPreset",
-            version: 4,
-            classNameByCache: {},
-            writeKeyByCacheKey: {},
-            conditionById: {},
-            propertyById: {},
-            writeKeyById: {}
-          })
+          presetArtifact,
+          getPresetSnapshot: () => presetArtifact
         }
       ],
       nextRegistrationIndex: 1,
@@ -252,6 +308,26 @@ if (import.meta.vitest) {
   }
 
   interface DefineRulesPresetSerializationManifest {
+    DEFINE_RULES_PRESET_SERIALIZATION_PATHS: {
+      readonly packageDiamond: string;
+      readonly packageDiamondReversed: string;
+      readonly packageDiamondDuplicate: string;
+      readonly packageDiamondDist: string;
+      readonly packageDiamondDistCss: string;
+      readonly packageDiamondReversedDist: string;
+      readonly packageDiamondReversedDistCss: string;
+      readonly packageDiamondA: string;
+      readonly packageDiamondACss: string;
+      readonly packageDiamondB: string;
+      readonly packageDiamondBCss: string;
+      readonly packageDiamondC: string;
+      readonly packageDiamondCCss: string;
+    };
+    DEFINE_RULES_PRESET_SERIALIZATION_PACKAGE_DIAMOND_FAILURE_CASES: readonly {
+      readonly caseId: string;
+      readonly expectedDiagnostic: string;
+      readonly relativePath: string;
+    }[];
     DEFINE_RULES_PRESET_SERIALIZATION_REGISTRY_MATRIX_CASES: readonly Omit<
       RegistryFixtureCase,
       "fixturePath"
@@ -326,6 +402,56 @@ if (import.meta.vitest) {
     return fs.readFile(fixturePath, "utf8");
   }
 
+  async function readDefineRulesPresetSerializationFixture(
+    relativePath: string
+  ): Promise<string> {
+    return readRegistryFixtureSource(
+      await getDefineRulesPresetSerializationFixturePath(relativePath)
+    );
+  }
+
+  async function listFixtureFiles(rootPath: string): Promise<string[]> {
+    const fs = await import("node:fs/promises");
+    const path = await import("node:path");
+    const files: string[] = [];
+
+    for (const entry of await fs.readdir(rootPath, { withFileTypes: true })) {
+      const entryPath = path.join(rootPath, entry.name);
+
+      if (entry.isDirectory()) {
+        files.push(...(await listFixtureFiles(entryPath)));
+      } else {
+        files.push(entryPath);
+      }
+    }
+
+    return files;
+  }
+
+  function extractExportedPresetArtifact(
+    source: string,
+    exportName = "preset"
+  ): DefineRulesPresetArtifact {
+    const pattern = new RegExp(
+      `export const ${exportName} = (\\{.*?\\});`,
+      "s"
+    );
+    const match = pattern.exec(source);
+
+    if (match?.[1] === undefined) {
+      throw new Error(`Fixture is missing exported ${exportName} V5 preset`);
+    }
+
+    return parseDefineRulesPresetArtifactV5(JSON.parse(match[1]));
+  }
+
+  function resolvePackageDiamondFixtureSpecifiers(source: string): string {
+    return source.replace(
+      /"@mincho-js-proof\/([^"]+)"/g,
+      '"../node_modules/@mincho-js-proof/$1/dist/index.js"'
+    );
+  }
+
   function normalizeRegistryFixtureSource(source: string): string {
     return source.replace(/\s+/g, " ").trim();
   }
@@ -386,36 +512,39 @@ if (import.meta.vitest) {
     expect(message).toContain("registrationIndex: 0");
   }
 
-  function collectClassNameByCacheValues(
+  function collectPresetClassNames(
     registrySession: DefineRulesRegistrySession
   ): string[] {
-    return registrySession.instances.flatMap((instance) =>
-      Object.values(instance.presetArtifact.classNameByCache)
-    );
+    return [
+      ...new Set(
+        registrySession.instances.flatMap((instance) =>
+          instance.presetArtifact.nodes.flatMap((node) =>
+            node.atoms.map((atom) => atom.className)
+          )
+        )
+      )
+    ];
   }
 
-  function expectRegistryInstancesToHaveClassNameByCache(
+  function expectRegistryInstancesToHavePresetAtoms(
     registrySession: DefineRulesRegistrySession
   ): void {
     for (const instance of registrySession.instances) {
       expect(
-        Object.keys(instance.presetArtifact.classNameByCache).length
+        instance.presetArtifact.nodes.flatMap((node) => node.atoms).length
       ).toBeGreaterThan(0);
     }
   }
 
-  function expectSourceToContainV4PresetArtifact(source: string): void {
+  function expectSourceToContainV5PresetArtifact(source: string): void {
     const normalizedSource = normalizeSource(source);
 
     expect(normalizedSource).toMatch(
       /schema:["']mincho\.defineRulesPreset["']/
     );
-    expect(normalizedSource).toContain("version:4");
-    expect(normalizedSource).toContain("classNameByCache:{");
-    expect(normalizedSource).toContain("writeKeyByCacheKey:{");
-    expect(normalizedSource).toContain("conditionById:{");
-    expect(normalizedSource).toContain("propertyById:{");
-    expect(normalizedSource).toContain("writeKeyById:{");
+    expect(normalizedSource).toContain("version:5");
+    expect(normalizedSource).toContain("rootNodeId:");
+    expect(normalizedSource).toContain("nodes:[");
   }
 
   function expectSerializedPresetArtifactsToOmitCx(
@@ -427,7 +556,9 @@ if (import.meta.vitest) {
       normalizedSource.matchAll(/\{schema:["']mincho\.defineRulesPreset["']/g)
     );
 
-    expect(artifactMatches).toHaveLength(registrySession.instances.length);
+    expect(artifactMatches.length).toBeGreaterThanOrEqual(
+      registrySession.instances.length
+    );
     for (const artifactMatch of artifactMatches) {
       let depth = 0;
       let artifactEndIndex = artifactMatch.index;
@@ -453,12 +584,9 @@ if (import.meta.vitest) {
         artifactEndIndex
       );
 
-      expect(artifactSource).toContain("version:4");
-      expect(artifactSource).toContain("classNameByCache:{");
-      expect(artifactSource).toContain("writeKeyByCacheKey:{");
-      expect(artifactSource).toContain("conditionById:{");
-      expect(artifactSource).toContain("propertyById:{");
-      expect(artifactSource).toContain("writeKeyById:{");
+      expect(artifactSource).toContain("version:5");
+      expect(artifactSource).toContain("rootNodeId:");
+      expect(artifactSource).toContain("nodes:[");
       expect(artifactSource).not.toContain("registeredSegments:");
       expect(artifactSource).not.toContain("segmentCache:");
       expect(artifactSource).not.toContain("fullResultCache:");
@@ -504,12 +632,9 @@ if (import.meta.vitest) {
         artifactEndIndex
       );
 
-      expect(artifactSource).toContain("version:4");
-      expect(artifactSource).toContain("classNameByCache:{");
-      expect(artifactSource).toContain("writeKeyByCacheKey:{");
-      expect(artifactSource).toContain("conditionById:{");
-      expect(artifactSource).toContain("propertyById:{");
-      expect(artifactSource).toContain("writeKeyById:{");
+      expect(artifactSource).toContain("version:5");
+      expect(artifactSource).toContain("rootNodeId:");
+      expect(artifactSource).toContain("nodes:[");
       expect(artifactSource).not.toContain("registeredSegments:");
       expect(artifactSource).not.toContain("segmentCache:");
       expect(artifactSource).not.toContain("fullResultCache:");
@@ -520,7 +645,7 @@ if (import.meta.vitest) {
     }
   }
 
-  function countV4PresetArtifacts(source: string): number {
+  function countV5PresetArtifacts(source: string): number {
     return Array.from(
       normalizeSource(source).matchAll(
         /schema:["']mincho\.defineRulesPreset["']/g
@@ -531,7 +656,13 @@ if (import.meta.vitest) {
   function getRegistryInstanceClassNames(
     instance: DefineRulesRegistrySession["instances"][number] | undefined
   ): string[] {
-    return Object.values(instance?.presetArtifact.classNameByCache ?? {});
+    return [
+      ...new Set(
+        instance?.presetArtifact.nodes.flatMap((node) =>
+          node.atoms.map((atom) => atom.className)
+        ) ?? []
+      )
+    ];
   }
 
   type DefineRulesPresetArtifact =
@@ -553,31 +684,18 @@ if (import.meta.vitest) {
     const excludedClassNames = new Set(filter.excludeClassNames ?? []);
     const classNames: string[] = [];
 
-    for (const [cacheKey, writeKeyId] of Object.entries(
-      artifact.writeKeyByCacheKey
-    )) {
-      const writeKey = artifact.writeKeyById[writeKeyId];
-      if (writeKey == null) {
-        continue;
-      }
-
-      const property = artifact.propertyById[writeKey.propertyId];
-      const condition = artifact.conditionById[writeKey.conditionId];
-      const className = artifact.classNameByCache[cacheKey];
-
+    for (const atom of artifact.nodes.flatMap((node) => node.atoms)) {
       if (
-        condition != null &&
-        property === filter.property &&
-        condition.media === filter.media &&
-        condition.selector === "&" &&
-        className != null &&
-        excludedClassNames.has(className) === false
+        atom.property === filter.property &&
+        atom.condition.media === filter.media &&
+        atom.condition.selector === "&" &&
+        excludedClassNames.has(atom.className) === false
       ) {
-        classNames.push(className);
+        classNames.push(atom.className);
       }
     }
 
-    return classNames;
+    return [...new Set(classNames)];
   }
 
   function expectSinglePresetWriteClassName(
@@ -592,7 +710,8 @@ if (import.meta.vitest) {
   function expectPresetArtifactToContainConditionalWrites(
     artifact: DefineRulesPresetArtifact
   ): void {
-    expect(Object.values(artifact.conditionById)).toEqual(
+    const atoms = artifact.nodes.flatMap((node) => node.atoms);
+    expect(atoms.map((atom) => atom.condition)).toEqual(
       expect.arrayContaining([
         {
           layer: null,
@@ -617,7 +736,7 @@ if (import.meta.vitest) {
         }
       ])
     );
-    expect(Object.values(artifact.propertyById)).toEqual(
+    expect(atoms.map((atom) => atom.property)).toEqual(
       expect.arrayContaining(["color", "fontSize"])
     );
   }
@@ -887,15 +1006,15 @@ if (import.meta.vitest) {
           fixtureCase.caseId,
           fixtureCase.fixturePath
         );
-        const classNames = collectClassNameByCacheValues(registrySession);
+        const classNames = collectPresetClassNames(registrySession);
 
         expect(registrySession.instances).toHaveLength(
           fixtureCase.expectedRegistryInstances
         );
 
-        expectSourceToContainV4PresetArtifact(source);
+        expectSourceToContainV5PresetArtifact(source);
         expectSerializedPresetArtifactsToOmitCx(source, registrySession);
-        expectRegistryInstancesToHaveClassNameByCache(registrySession);
+        expectRegistryInstancesToHavePresetAtoms(registrySession);
         expect(classNames.length).toBeGreaterThan(0);
         for (const className of classNames) {
           expect(source).toContain(className);
@@ -905,7 +1024,7 @@ if (import.meta.vitest) {
   });
 
   describe("defineRules preset registry wrapper", () => {
-    it("registry serializes live v4 preset artifacts from processed css calls", async () => {
+    it("registry serializes live V5 preset artifacts from processed css calls", async () => {
       const { source, registrySession, emittedCss } =
         await processRegistryFixture(
           `
@@ -924,13 +1043,11 @@ if (import.meta.vitest) {
           "serialization"
         );
       const [registeredInstance] = registrySession.instances;
-      const classNames = Object.values(
-        registeredInstance?.presetArtifact.classNameByCache ?? {}
-      );
+      const classNames = getRegistryInstanceClassNames(registeredInstance);
 
       expect(registrySession.instances).toHaveLength(1);
       expect(registeredInstance?.registrationIndex).toBe(0);
-      expectSourceToContainV4PresetArtifact(source);
+      expectSourceToContainV5PresetArtifact(source);
       expectSerializedPresetArtifactsToOmitCx(source, registrySession);
       expect(classNames).toHaveLength(1);
       expect(source).toContain(classNames[0]!);
@@ -938,7 +1055,7 @@ if (import.meta.vitest) {
       expect(getActiveDefineRulesRegistrySession()).toBe(undefined);
     });
 
-    it("registry fixture validates v4 artifact extraction and consumer reuse", async () => {
+    it("registry fixture validates V5 artifact extraction and consumer reuse", async () => {
       const { source, registrySession } = await processRegistryFixture(
         `
           import { defineRules } from "@mincho-js/css";
@@ -974,23 +1091,27 @@ if (import.meta.vitest) {
         "consumer-reuse"
       );
       const [providerInstance, consumerInstance] = registrySession.instances;
-      const providerClassNames = Object.values(
-        providerInstance?.presetArtifact.classNameByCache ?? {}
-      );
-      const consumerClassNames = Object.values(
-        consumerInstance?.presetArtifact.classNameByCache ?? {}
-      );
+      const providerClassNames =
+        getRegistryInstanceClassNames(providerInstance);
+      const consumerClassNames =
+        getRegistryInstanceClassNames(consumerInstance);
 
       expect(registrySession.instances).toHaveLength(2);
-      expectSourceToContainV4PresetArtifact(source);
+      expectSourceToContainV5PresetArtifact(source);
       expectSerializedPresetArtifactsToOmitCx(source, registrySession);
-      expectRegistryInstancesToHaveClassNameByCache(registrySession);
-      const reusedClassName = providerClassNames.join(" ");
-
+      expectRegistryInstancesToHavePresetAtoms(registrySession);
       expect(providerClassNames.length).toBeGreaterThan(0);
       expect(consumerClassNames).toEqual(providerClassNames);
-      expectSerializedMarkerClassName(source, "providerClass", reusedClassName);
-      expectSerializedMarkerClassName(source, "consumerClass", reusedClassName);
+      expectSerializedMarkerClassName(
+        source,
+        "providerClass",
+        providerClassNames.join(" ")
+      );
+      expectSerializedMarkerClassName(
+        source,
+        "consumerClass",
+        providerClassNames.join(" ")
+      );
     });
 
     it("reuses conditional provider preset metadata across package fixture boundaries", async () => {
@@ -1015,9 +1136,9 @@ if (import.meta.vitest) {
         expect(consumerInstance?.fileScope.filePath).toContain(
           "consumer.css.ts"
         );
-        expectSourceToContainV4PresetArtifact(source);
+        expectSourceToContainV5PresetArtifact(source);
         expectSerializedSourcePresetArtifactsToOmitCx(source);
-        expectRegistryInstancesToHaveClassNameByCache(registrySession);
+        expectRegistryInstancesToHavePresetAtoms(registrySession);
         for (const instance of registrySession.instances) {
           expect(Object.hasOwn(instance.presetArtifact, "cx")).toBe(false);
         }
@@ -1043,21 +1164,19 @@ if (import.meta.vitest) {
           consumerArtifact,
           { property: "fontSize", media: desktopMedia }
         );
-        const reusedClassName = `${providerTabletClass} ${providerDesktopClass}`;
-
         expect(consumerTabletClass).toBe(providerTabletClass);
         expect(consumerDesktopClass).toBe(providerDesktopClass);
         expectSerializedMarkerClassName(
           source,
           "consumerClass",
-          reusedClassName
+          `${providerTabletClass} ${providerDesktopClass}`
         );
         expectSerializedMarkerClassName(
           source,
           "importedProviderClass",
-          reusedClassName
+          `${providerTabletClass} ${providerDesktopClass}`
         );
-        expect(countV4PresetArtifacts(source)).toBe(2);
+        expect(countV5PresetArtifacts(source)).toBe(2);
         expect(emittedCss).toMatch(/@media\s+screen and \(min-width: 768px\)/);
         expect(emittedCss).toMatch(/@media\s+screen and \(min-width: 1024px\)/);
         expect(emittedCss).toMatch(/font-size:\s*16(?:px)?/);
@@ -1083,9 +1202,9 @@ if (import.meta.vitest) {
         const [providerInstance, consumerInstance] = registrySession.instances;
 
         expect(registrySession.instances).toHaveLength(2);
-        expectSourceToContainV4PresetArtifact(source);
+        expectSourceToContainV5PresetArtifact(source);
         expectSerializedSourcePresetArtifactsToOmitCx(source);
-        expectRegistryInstancesToHaveClassNameByCache(registrySession);
+        expectRegistryInstancesToHavePresetAtoms(registrySession);
         for (const instance of registrySession.instances) {
           expect(Object.hasOwn(instance.presetArtifact, "cx")).toBe(false);
         }
@@ -1125,7 +1244,7 @@ if (import.meta.vitest) {
           "importedProviderClass",
           `${providerTabletClass} ${providerDesktopClass}`
         );
-        expect(countV4PresetArtifacts(source)).toBe(2);
+        expect(countV5PresetArtifacts(source)).toBe(2);
         expectSerializedMarkerClassName(
           source,
           "consumerDesktopOverride",
@@ -1151,6 +1270,209 @@ if (import.meta.vitest) {
       } finally {
         await fixture.cleanup();
       }
+    });
+
+    describe("V5 package fixture diamond ownership", () => {
+      it("keeps tracked package fixture artifacts V5-only", async () => {
+        const path = await import("node:path");
+        const manifest = await loadDefineRulesPresetSerializationManifest();
+        const readmePath =
+          await getDefineRulesPresetSerializationFixturePath("README.md");
+        const fixtureRoot = path.dirname(readmePath);
+        const fixtureFiles = await listFixtureFiles(fixtureRoot);
+        const legacyMatches: string[] = [];
+
+        for (const fixtureFile of fixtureFiles) {
+          if (/[\\/]diamond-v4[\\/]/.test(fixtureFile)) continue;
+          if (!/\.(?:js|mjs|ts|md)$/.test(fixtureFile)) continue;
+
+          const fixtureSource = await readRegistryFixtureSource(fixtureFile);
+          if (
+            /"version":4|version:4|classNameByCache|V4 shape/.test(
+              fixtureSource
+            )
+          ) {
+            legacyMatches.push(path.relative(fixtureRoot, fixtureFile));
+          }
+        }
+
+        expect(manifest.DEFINE_RULES_PRESET_SERIALIZATION_PATHS).toHaveProperty(
+          "packageDiamond"
+        );
+        expect(legacyMatches).toEqual([]);
+      });
+
+      it("derives ancestor style imports while preserving package fixture diamond local ownership", async () => {
+        const manifest = await loadDefineRulesPresetSerializationManifest();
+        const paths = manifest.DEFINE_RULES_PRESET_SERIALIZATION_PATHS;
+        const [aCss, bCss, cCss, dCss, dDistSource] = await Promise.all([
+          readDefineRulesPresetSerializationFixture(paths.packageDiamondACss),
+          readDefineRulesPresetSerializationFixture(paths.packageDiamondBCss),
+          readDefineRulesPresetSerializationFixture(paths.packageDiamondCCss),
+          readDefineRulesPresetSerializationFixture(
+            paths.packageDiamondDistCss
+          ),
+          readDefineRulesPresetSerializationFixture(paths.packageDiamondDist)
+        ]);
+        const dArtifact = extractExportedPresetArtifact(dDistSource);
+        expect(
+          extractExportedPresetArtifact(
+            dDistSource.replace(
+              '{"schema":"mincho.defineRulesPreset","version":5,',
+              '{"version":5,"schema":"mincho.defineRulesPreset",'
+            )
+          )
+        ).toEqual(dArtifact);
+        const rootNode = dArtifact.nodes.find(
+          (node) => node.nodeId === dArtifact.rootNodeId
+        );
+        const bNode = dArtifact.nodes.find((node) =>
+          node.origin.includes("/diamond-b:")
+        );
+        const cNode = dArtifact.nodes.find((node) =>
+          node.origin.includes("/diamond-c:")
+        );
+
+        if (
+          rootNode === undefined ||
+          bNode === undefined ||
+          cNode === undefined
+        ) {
+          throw new Error("Diamond fixture artifact is missing expected nodes");
+        }
+
+        expect(
+          dArtifact.nodes.filter((node) => node.origin.includes("/diamond-a:"))
+        ).toHaveLength(1);
+        expect(rootNode.parents).toEqual([bNode.nodeId, cNode.nodeId]);
+        expect(dDistSource).toContain("selected = 'diamond_c_color'");
+        expect(aCss).toContain("display: flex;");
+        expect(aCss).not.toContain("color: rebeccapurple;");
+        expect(bCss).toContain("color: rebeccapurple;");
+        expect(bCss).not.toContain("display: flex;");
+        expect(cCss).toContain("color: rebeccapurple;");
+        expect(cCss).not.toContain("display: flex;");
+        expect(dCss).toContain("padding: 13px;");
+        expect(dCss).not.toContain("color: rebeccapurple;");
+        expect(dCss).not.toContain("display: flex;");
+
+        const fixturePath = await getDefineRulesPresetSerializationFixturePath(
+          paths.packageDiamond
+        );
+        const { source, registrySession, emittedCss } =
+          await processRegistryFixture(
+            resolvePackageDiamondFixtureSpecifiers(
+              await readRegistryFixtureSource(fixturePath)
+            ),
+            "package-fixture-diamond",
+            fixturePath
+          );
+        const [instance] = registrySession.instances;
+
+        expect(registrySession.instances).toHaveLength(1);
+        expectSourceToContainV5PresetArtifact(source);
+        expect(source).toMatch(/selected = '[^']*diamond_c_color'/);
+        expect(source).toMatch(/inherited = '[^']*diamond_a_display'/);
+        expect(source).toMatch(/acceptsHistoricalB = '[^']*diamond_b_color'/);
+        expect(source).toMatch(/acceptsHistoricalC = '[^']*diamond_c_color'/);
+        expect(source).toMatch(
+          /acceptsBothHistorical = '[^']*diamond_c_color'/
+        );
+        expect(source).toContain("diamond_b_color");
+        expect(source).toContain("diamond_c_color");
+        expect(instance?.presetArtifact.nodes).toHaveLength(4);
+        expect(
+          instance?.presetArtifact.nodes.filter((node) =>
+            node.origin.includes("/diamond-a:")
+          )
+        ).toHaveLength(1);
+        expect(emittedCss).toContain("padding: 13px");
+        expect(emittedCss).not.toContain("color: rebeccapurple");
+        expect(emittedCss).not.toContain("display: flex");
+        expect(getDefineRulesAncestorStyleSpecifiers(registrySession)).toEqual([
+          "@mincho-js-proof/diamond-a/style.css",
+          "@mincho-js-proof/diamond-b/style.css",
+          "@mincho-js-proof/diamond-c/style.css"
+        ]);
+      });
+
+      it("preserves package fixture diamond reversed order and exact duplicate nodes", async () => {
+        const manifest = await loadDefineRulesPresetSerializationManifest();
+        const paths = manifest.DEFINE_RULES_PRESET_SERIALIZATION_PATHS;
+        const reversedPath = await getDefineRulesPresetSerializationFixturePath(
+          paths.packageDiamondReversed
+        );
+        const duplicatePath =
+          await getDefineRulesPresetSerializationFixturePath(
+            paths.packageDiamondDuplicate
+          );
+        const reversedResult = await processRegistryFixture(
+          resolvePackageDiamondFixtureSpecifiers(
+            await readRegistryFixtureSource(reversedPath)
+          ),
+          "package-fixture-diamond-reversed",
+          reversedPath
+        );
+        const duplicateResult = await processRegistryFixture(
+          resolvePackageDiamondFixtureSpecifiers(
+            await readRegistryFixtureSource(duplicatePath)
+          ),
+          "package-fixture-diamond-duplicate",
+          duplicatePath
+        );
+
+        expect(reversedResult.source).toMatch(
+          /selected = '[^']*diamond_b_color'/
+        );
+        expect(reversedResult.source).toMatch(
+          /acceptsBothHistorical = '[^']*diamond_b_color'/
+        );
+        expect(reversedResult.source).toContain("diamond_b_color");
+        expect(reversedResult.source).toContain("diamond_c_color");
+        expectSourceToContainV5PresetArtifact(duplicateResult.source);
+        expect(
+          duplicateResult.registrySession.instances[0]?.presetArtifact.nodes.filter(
+            (node) => node.origin.includes("/diamond-a:")
+          )
+        ).toHaveLength(1);
+      });
+
+      it("rejects package fixture diamond revision class cycle malformed and V4 contracts", async () => {
+        const manifest = await loadDefineRulesPresetSerializationManifest();
+
+        for (const fixtureCase of manifest.DEFINE_RULES_PRESET_SERIALIZATION_PACKAGE_DIAMOND_FAILURE_CASES) {
+          const fixturePath =
+            await getDefineRulesPresetSerializationFixturePath(
+              fixtureCase.relativePath
+            );
+          let thrownError: unknown;
+
+          try {
+            await processRegistryFixture(
+              resolvePackageDiamondFixtureSpecifiers(
+                await readRegistryFixtureSource(fixturePath)
+              ),
+              `package-fixture-diamond-${fixtureCase.caseId}`,
+              fixturePath
+            );
+          } catch (error) {
+            thrownError = error;
+          }
+
+          if (!(thrownError instanceof Error)) {
+            throw new Error(`${fixtureCase.caseId} did not reject`);
+          }
+
+          expect(thrownError.message).toContain(fixtureCase.expectedDiagnostic);
+          if (fixtureCase.caseId === "cycle") {
+            expect(thrownError.message).toContain("parents[0]");
+            expect(thrownError.message).toContain("diamond-cycle");
+          }
+          if (fixtureCase.caseId === "same-origin-different-revision") {
+            expect(thrownError.message).toContain("diamond-revision");
+          }
+        }
+      });
     });
 
     it("cleanup ends sessions after success, evaluation errors, and skipped registration", async () => {
@@ -1219,9 +1541,9 @@ if (import.meta.vitest) {
       const ownerClassNames = getRegistryInstanceClassNames(ownerInstance);
 
       expect(registrySession.instances).toHaveLength(1);
-      expectSourceToContainV4PresetArtifact(source);
+      expectSourceToContainV5PresetArtifact(source);
       expectSerializedPresetArtifactsToOmitCx(source, registrySession);
-      expectRegistryInstancesToHaveClassNameByCache(registrySession);
+      expectRegistryInstancesToHavePresetAtoms(registrySession);
       expect(ownerClassNames).toHaveLength(1);
       expect(source).toContain(
         `ownerClassName = '${ownerClassNames[0]} owner-external'`
@@ -1254,9 +1576,9 @@ if (import.meta.vitest) {
         getRegistryInstanceClassNames(destructuredInstance);
 
       expect(registrySession.instances).toHaveLength(1);
-      expectSourceToContainV4PresetArtifact(source);
+      expectSourceToContainV5PresetArtifact(source);
       expectSerializedPresetArtifactsToOmitCx(source, registrySession);
-      expectRegistryInstancesToHaveClassNameByCache(registrySession);
+      expectRegistryInstancesToHavePresetAtoms(registrySession);
       expect(destructuredClassNames).toHaveLength(1);
       expect(source).toContain(
         `destructuredClassName = '${destructuredClassNames[0]} destructured-external'`
@@ -1341,10 +1663,10 @@ if (import.meta.vitest) {
           firstEvaluation,
           secondEvaluation
         ]);
-        const firstClassNames = collectClassNameByCacheValues(
+        const firstClassNames = collectPresetClassNames(
           firstResult.registrySession
         );
-        const secondClassNames = collectClassNameByCacheValues(
+        const secondClassNames = collectPresetClassNames(
           secondResult.registrySession
         );
 
@@ -1378,16 +1700,12 @@ if (import.meta.vitest) {
             secondResult.registrySession.instances[0]?.fileScope.filePath ?? ""
           )
         ).toBe(true);
-        expect(countV4PresetArtifacts(firstResult.source)).toBe(1);
-        expect(countV4PresetArtifacts(secondResult.source)).toBe(1);
-        expectSourceToContainV4PresetArtifact(firstResult.source);
-        expectSourceToContainV4PresetArtifact(secondResult.source);
-        expectRegistryInstancesToHaveClassNameByCache(
-          firstResult.registrySession
-        );
-        expectRegistryInstancesToHaveClassNameByCache(
-          secondResult.registrySession
-        );
+        expect(countV5PresetArtifacts(firstResult.source)).toBe(1);
+        expect(countV5PresetArtifacts(secondResult.source)).toBe(1);
+        expectSourceToContainV5PresetArtifact(firstResult.source);
+        expectSourceToContainV5PresetArtifact(secondResult.source);
+        expectRegistryInstancesToHavePresetAtoms(firstResult.registrySession);
+        expectRegistryInstancesToHavePresetAtoms(secondResult.registrySession);
         expect(firstClassNames).toHaveLength(1);
         expect(secondClassNames).toHaveLength(1);
 
@@ -1450,10 +1768,10 @@ if (import.meta.vitest) {
         expect(
           successfulResult.registrySession.instances[0]?.registrationIndex
         ).toBe(0);
-        expectRegistryInstancesToHaveClassNameByCache(
+        expectRegistryInstancesToHavePresetAtoms(
           successfulResult.registrySession
         );
-        expectSourceToContainV4PresetArtifact(successfulResult.source);
+        expectSourceToContainV5PresetArtifact(successfulResult.source);
         expect(successfulResult.source).not.toContain(
           cleanupState.failedClassName
         );
@@ -1482,11 +1800,9 @@ if (import.meta.vitest) {
           (instance) => instance.registrationIndex
         )
       ).toEqual([0, 1]);
-      expect(countV4PresetArtifacts(firstResult.source)).toBe(2);
-      expectSourceToContainV4PresetArtifact(firstResult.source);
-      expectRegistryInstancesToHaveClassNameByCache(
-        firstResult.registrySession
-      );
+      expect(countV5PresetArtifacts(firstResult.source)).toBe(2);
+      expectSourceToContainV5PresetArtifact(firstResult.source);
+      expectRegistryInstancesToHavePresetAtoms(firstResult.registrySession);
       expect(firstCurrentClassNames).toHaveLength(1);
       expect(firstRemovedClassNames).toHaveLength(1);
 
@@ -1502,11 +1818,9 @@ if (import.meta.vitest) {
 
       expect(secondResult.registrySession.instances).toHaveLength(1);
       expect(secondCurrentInstance?.registrationIndex).toBe(0);
-      expect(countV4PresetArtifacts(secondResult.source)).toBe(1);
-      expectSourceToContainV4PresetArtifact(secondResult.source);
-      expectRegistryInstancesToHaveClassNameByCache(
-        secondResult.registrySession
-      );
+      expect(countV5PresetArtifacts(secondResult.source)).toBe(1);
+      expectSourceToContainV5PresetArtifact(secondResult.source);
+      expectRegistryInstancesToHavePresetAtoms(secondResult.registrySession);
       expect(secondCurrentClassNames).toHaveLength(1);
       for (const secondCurrentClassName of secondCurrentClassNames) {
         expect(secondResult.source).toContain(secondCurrentClassName);
@@ -1541,6 +1855,35 @@ if (import.meta.vitest) {
           })
         )
       ).not.toThrow();
+    });
+
+    it("reuses each preset snapshot after registry validation", () => {
+      const registrySession = createRegistrySession({});
+      const [instance] = registrySession.instances;
+      if (instance === undefined) throw new Error("Expected registry instance");
+      const getPresetSnapshot = instance.getPresetSnapshot;
+      let snapshotReadCount = 0;
+      instance.getPresetSnapshot = () => {
+        snapshotReadCount += 1;
+        return getPresetSnapshot();
+      };
+      const presetArtifacts =
+        validateDefineRulesRegistrySessionArtifacts(registrySession);
+
+      expect(
+        getDefineRulesAncestorStyleSpecifiersFromArtifacts(presetArtifacts)
+      ).toEqual([]);
+      expect(snapshotReadCount).toBe(1);
+    });
+
+    it("rejects version 4 preset snapshots with the V5 diagnostic", () => {
+      expect(() =>
+        parseDefineRulesPresetArtifactV5({
+          schema: "mincho.defineRulesPreset",
+          version: 4,
+          classNameByCache: {}
+        })
+      ).toThrow("expected defineRules preset version 5");
     });
 
     it("valid config validation accepts serializable context data", () => {

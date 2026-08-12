@@ -834,7 +834,7 @@ export function minchoEsbuildPlugin({
           });
 
           try {
-            const { source: contents } =
+            const { ancestorStyleSpecifiers, source: registrySource } =
               await integrationHelpers.runDefineRulesPresetRegistryStep(() =>
                 integrationHelpers.processDefineRulesPresetRegistryFile({
                   source,
@@ -843,6 +843,11 @@ export function minchoEsbuildPlugin({
                   identOption: build.initialOptions.minify ? "short" : "debug"
                 })
               );
+            const contents = `${ancestorStyleSpecifiers
+              .map((specifier) => `import ${JSON.stringify(specifier)};`)
+              .join(
+                "\n"
+              )}${ancestorStyleSpecifiers.length === 0 ? "" : "\n"}${registrySource}`;
 
             return {
               contents,
@@ -868,13 +873,11 @@ export function minchoEsbuildPlugin({
       );
 
       build.onLoad({ filter: /\.(j|t)sx?$/ }, async (args) => {
+        if (args.path.endsWith(".css.ts")) return;
         if (args.path.includes("node_modules")) {
           if (!includeNodeModulesPattern) return;
           if (!includeNodeModulesPattern.test(args.path)) return;
         }
-
-        // gets handled by vanilla-extract/esbuild-plugin
-        if (args.path.endsWith(".css.ts")) return;
 
         const babelOptions: MinchoBabelOptionsWithStaticCssEval | undefined =
           jsxCssProp === undefined ? undefined : { jsxCssProp };
@@ -934,7 +937,10 @@ export function minchoEsbuildPlugin({
 
 export const minchoEsbuildPlugins = (
   options: MinchoEsbuildPluginOptions = {}
-) => [minchoEsbuildPlugin(options), vanillaExtractPlugin()];
+) => [
+  minchoEsbuildPlugin(options),
+  vanillaExtractPlugin({ externals: ["@mincho-js/transform-to-vanilla"] })
+];
 
 // == Tests ====================================================================
 // Ignore errors when compiling to CommonJS.
@@ -1214,64 +1220,73 @@ if (import.meta.vitest) {
     source: string
   ): DefineRulesPresetRegistryResult {
     return {
+      ancestorStyleSpecifiers: [],
       source,
       registrySession: createEmptyRegistrySession()
     };
   }
 
-  function createV4PresetBuildSource(className: string): string {
-    return `
-      export const preset = {
-        schema: "${DEFINE_RULES_PRESET_SCHEMA}",
-        version: 4,
-        classNameByCache: {
-          shared: "${className}"
-        },
-        writeKeyByCacheKey: {
-          shared: 0
-        },
-        conditionById: {
-          0: {
-            layer: null,
-            supports: null,
-            media: null,
-            container: null,
-            selector: "&"
-          }
-        },
-        propertyById: {
-          0: "background"
-        },
-        writeKeyById: {
-          0: {
-            conditionId: 0,
-            propertyId: 0
-          }
-        }
+  async function createV5PresetBuildSource(
+    filePath = "src/extracted_rules.css.ts"
+  ): Promise<{
+    className: string;
+    marker: string;
+    source: string;
+  }> {
+    const [css, fileScope] = await Promise.all([
+      import("@mincho-js/css"),
+      import("@vanilla-extract/css/fileScope")
+    ]);
+    fileScope.setFileScope(filePath, "@mincho-js/esbuild");
+
+    try {
+      const rules = css.defineRules({ properties: { background: true } });
+      const className = rules.css({ background: "blue" });
+      const marker = splitClassNames(className).find(isSegmentMarker);
+      if (marker === undefined) {
+        throw new Error(
+          "Expected defineRules output to include a segment marker"
+        );
+      }
+
+      return {
+        className,
+        marker,
+        source: `
+          export const preset = ${JSON.stringify(rules.preset)};
+          export const shared = ${JSON.stringify(className)};
+        `
       };
-      export const shared = "${className}";
-    `;
+    } finally {
+      fileScope.endFileScope();
+    }
   }
 
-  function expectSourceToContainV4PresetArtifact(source: string): void {
+  function expectSourceToContainV5PresetArtifact(source: string): void {
     expect(source).toMatch(
       new RegExp(
         `["']?schema["']?\\s*:\\s*["']${escapeRegExp(DEFINE_RULES_PRESET_SCHEMA)}["']`
       )
     );
-    expect(source).toMatch(/["']?version["']?\s*:\s*4/);
-    expect(source).toMatch(/["']?classNameByCache["']?\s*:\s*\{/);
-    expect(source).toMatch(/["']?writeKeyByCacheKey["']?\s*:\s*\{/);
-    expect(source).toMatch(/["']?conditionById["']?\s*:\s*\{/);
-    expect(source).toMatch(/["']?propertyById["']?\s*:\s*\{/);
-    expect(source).toMatch(/["']?writeKeyById["']?\s*:\s*\{/);
-    expectSourceV4PresetArtifactToOmitRuntimeFields(source);
+    expect(source).toMatch(/["']?version["']?\s*:\s*5/);
+    expect(source).toMatch(/["']?rootNodeId["']?\s*:\s*["'][a-f0-9]{64}["']/);
+    expect(source).toMatch(/["']?nodes["']?\s*:\s*\[/);
+    expect(source).toMatch(
+      /["']?origin["']?\s*:\s*["'](?:mincho|@mincho-js\/esbuild):/
+    );
+    expect(source).toMatch(/["']?atoms["']?\s*:\s*\[/);
+    expect(source).not.toMatch(/["']?classNameByCache["']?\s*:/);
+    expect(source).not.toMatch(/["']?writeKeyByCacheKey["']?\s*:/);
+    expect(source).not.toMatch(/["']?conditionById["']?\s*:/);
+    expect(source).not.toMatch(/["']?propertyById["']?\s*:/);
+    expect(source).not.toMatch(/["']?writeKeyById["']?\s*:/);
+    expectSourceV5PresetArtifactToOmitRuntimeFields(source);
   }
 
-  function expectSourceV4PresetArtifactToOmitRuntimeFields(
+  function expectSourceV5PresetArtifactToOmitRuntimeFields(
     source: string
   ): void {
-    const artifactSource = extractV4PresetArtifactSource(source);
+    const artifactSource = extractV5PresetArtifactSource(source);
     expect(artifactSource).not.toMatch(/["']?registeredSegments["']?\s*:/);
     expect(artifactSource).not.toMatch(/["']?segmentCache["']?\s*:/);
     expect(artifactSource).not.toMatch(/["']?fullResultCache["']?\s*:/);
@@ -1279,7 +1294,7 @@ if (import.meta.vitest) {
     expect(artifactSource).not.toMatch(/["']?cx["']?\s*:/);
   }
 
-  function extractV4PresetArtifactSource(source: string): string {
+  function extractV5PresetArtifactSource(source: string): string {
     const schemaMatch = source.match(
       new RegExp(
         `["']?schema["']?\\s*:\\s*["']${escapeRegExp(DEFINE_RULES_PRESET_SCHEMA)}["']`
@@ -1307,37 +1322,44 @@ if (import.meta.vitest) {
     throw new Error("Expected defineRules preset artifact object to close");
   }
 
-  function expectSourceToContainPopulatedClassNameByCache(
-    source: string
-  ): void {
-    expect(source).toMatch(
-      /["']?classNameByCache["']?\s*:\s*\{[\s\S]*["'][^"']+["']/
-    );
+  function expectSourceToContainPopulatedPresetAtom(source: string): void {
+    expect(source).toMatch(/["']?className["']?\s*:\s*["'][^"']+["']/);
   }
 
-  function expectSourceToContainClassNameByCacheValue(
+  function expectSourceToContainPresetAtomClassName(
     source: string,
     className: string
   ): void {
-    expectSourceToContainV4PresetArtifact(source);
-    for (const atomicClassName of splitClassNames(className).filter(
+    expectSourceToContainV5PresetArtifact(source);
+    for (const atomClassName of splitClassNames(className).filter(
       (token) => !isSegmentMarker(token)
     )) {
       expect(source).toMatch(
         new RegExp(
-          `["']?classNameByCache["']?\\s*:\\s*\\{[\\s\\S]*["']${escapeRegExp(atomicClassName)}["']`
+          `["']?className["']?\\s*:\\s*["']${escapeRegExp(atomClassName)}["']`
         )
       );
     }
   }
 
-  function countV4PresetArtifacts(source: string): number {
+  function countV5PresetArtifacts(source: string): number {
     return Array.from(
       source.matchAll(
-        /["']?schema["']?\s*:\s*["']mincho\.defineRulesPreset["']/g
+        new RegExp(
+          `["']?schema["']?\\s*:\\s*["']${escapeRegExp(DEFINE_RULES_PRESET_SCHEMA)}["']`,
+          "g"
+        )
       )
     ).length;
   }
+
+  it("counts V5 preset artifacts independently of property order", () => {
+    expect(
+      countV5PresetArtifacts(
+        'const first={version:5,schema:"mincho.defineRulesPreset"};const second={schema:"mincho.defineRulesPreset",nodes:[],version:5};'
+      )
+    ).toBe(2);
+  });
 
   function createLivePresetBuildSource(): string {
     return `
@@ -3709,11 +3731,11 @@ if (import.meta.vitest) {
           "fillBlue"
         );
 
-        expectSourceToContainClassNameByCacheValue(
+        expectSourceToContainPresetAtomClassName(
           loadResult.contents,
           registryClassName
         );
-        expectSourceToContainPopulatedClassNameByCache(loadResult.contents);
+        expectSourceToContainPopulatedPresetAtom(loadResult.contents);
       } finally {
         await fs.promises.rm(root, { force: true, recursive: true });
       }
@@ -3740,8 +3762,8 @@ if (import.meta.vitest) {
           await buildRealEsbuildRegistryFixture(fixtureCase);
 
         expect(registrySource).not.toBe("");
-        expectSourceToContainV4PresetArtifact(registrySource);
-        expectSourceToContainPopulatedClassNameByCache(registrySource);
+        expectSourceToContainV5PresetArtifact(registrySource);
+        expectSourceToContainPopulatedPresetAtom(registrySource);
         if (fixtureCase.expectedRegistryInstances > 1) {
           const artifactCount = Array.from(
             registrySource.matchAll(
@@ -3767,8 +3789,8 @@ if (import.meta.vitest) {
         await buildRealEsbuildRegistryFixture(fixtureCase);
 
       expect(registrySource).not.toBe("");
-      expect(countV4PresetArtifacts(registrySource)).toBe(0);
-      expect(countV4PresetArtifacts(js)).toBe(0);
+      expect(countV5PresetArtifacts(registrySource)).toBe(0);
+      expect(countV5PresetArtifacts(js)).toBe(0);
       expect(registrySource).toContain("rebeccapurple");
     });
 
@@ -3833,7 +3855,7 @@ if (import.meta.vitest) {
       expect(
         hasCssCallWithStringProperty(loadResult.contents, "background", "blue")
       ).toBe(false);
-      expectSourceToContainClassNameByCacheValue(
+      expectSourceToContainPresetAtomClassName(
         loadResult.contents,
         fillBlueClassName
       );
@@ -3887,7 +3909,7 @@ if (import.meta.vitest) {
 
       expect(registrySpy).toHaveBeenCalledTimes(1);
       expect(loadResult.loader).toBe("js");
-      expect(countV4PresetArtifacts(loadResult.contents)).toBe(0);
+      expect(countV5PresetArtifacts(loadResult.contents)).toBe(0);
       expect(loadResult.contents).toContain("blue");
     });
 
@@ -3903,11 +3925,13 @@ if (import.meta.vitest) {
         integrationHelpers,
         "runDefineRulesPresetRegistryStep"
       );
+      const presetBuildSource = await createV5PresetBuildSource();
       const registrySpy = vi
         .spyOn(integrationHelpers, "processDefineRulesPresetRegistryFile")
-        .mockResolvedValue(
-          createRegistryResult(createV4PresetBuildSource("shared_class"))
-        );
+        .mockResolvedValue({
+          ...createRegistryResult(presetBuildSource.source),
+          ancestorStyleSpecifiers: ["@scope/ancestor/style.css"]
+        });
 
       const harness = createBuildHarness();
       const { loadResult, resolveResult } =
@@ -3931,9 +3955,12 @@ if (import.meta.vitest) {
       });
       expect(loadResult.loader).toBe("js");
       expect(loadResult.resolveDir).toBe("/workspace/src");
-      expectSourceToContainClassNameByCacheValue(
+      expect(loadResult.contents).toContain(
+        'import "@scope/ancestor/style.css";'
+      );
+      expectSourceToContainPresetAtomClassName(
         loadResult.contents,
-        "shared_class"
+        presetBuildSource.className
       );
     });
 
@@ -3945,11 +3972,10 @@ if (import.meta.vitest) {
       vi.spyOn(integrationHelpers, "compile").mockResolvedValue({
         source: "compiled source"
       } as Awaited<ReturnType<typeof compile>>);
+      const presetBuildSource = await createV5PresetBuildSource();
       const registrySpy = vi
         .spyOn(integrationHelpers, "processDefineRulesPresetRegistryFile")
-        .mockResolvedValue(
-          createRegistryResult(createV4PresetBuildSource("short_class"))
-        );
+        .mockResolvedValue(createRegistryResult(presetBuildSource.source));
 
       const harness = createBuildHarness({ minify: true });
       await loadExtractedCssFromEntry(harness);
@@ -4011,8 +4037,7 @@ if (import.meta.vitest) {
         expect(registrySpy).toHaveBeenCalledTimes(1);
         expect(loadResult.loader).toBe("js");
         expect(loadResult.resolveDir).toBe(dirname(resolveResult.path));
-        expectSourceToContainV4PresetArtifact(loadResult.contents);
-        expectSourceToContainPopulatedClassNameByCache(loadResult.contents);
+        expectSourceToContainV5PresetArtifact(loadResult.contents);
       }
     });
 
@@ -4047,18 +4072,26 @@ if (import.meta.vitest) {
         integrationHelpers,
         "processDefineRulesPresetRegistryFile"
       );
+      const fixtureProjectRoot = resolvePath(
+        dirname(fixtureCase.fixturePath),
+        "../../../../../.."
+      );
+      const fixtureAppPath = join(
+        fixtureProjectRoot,
+        "packages/esbuild/src/app.ts"
+      );
 
       const realEsbuild = await import("esbuild");
       const harness = createBuildHarness({
-        absWorkingDir: process.cwd(),
+        absWorkingDir: fixtureProjectRoot,
         esbuild: realEsbuild
       });
       const scriptLoadResult = (await harness.loadScript({
-        path: join(process.cwd(), "packages/esbuild/src/app.ts")
+        path: fixtureAppPath
       })) as ScriptLoadResult;
       const resolveResult = (await harness.resolveExtractedCss({
         path: "extracted_rules.css.ts",
-        importer: join(process.cwd(), "packages/esbuild/src/app.ts"),
+        importer: fixtureAppPath,
         pluginData: scriptLoadResult.pluginData
       })) as ResolvedExtractedCssResult;
       const loadResult = (await harness.loadExtractedCss({
@@ -4068,7 +4101,7 @@ if (import.meta.vitest) {
 
       expect(registrySpy).toHaveBeenCalledTimes(1);
       expect(loadResult.loader).toBe("js");
-      expect(countV4PresetArtifacts(loadResult.contents)).toBe(0);
+      expect(countV5PresetArtifacts(loadResult.contents)).toBe(0);
       expect(loadResult.contents).toContain("rebeccapurple");
     }, 20000);
 
@@ -4270,7 +4303,10 @@ if (import.meta.vitest) {
         ]);
       });
 
-      firstDeferred.resolve(createV4PresetBuildSource("provider-a_class"));
+      const firstPresetBuildSource = await createV5PresetBuildSource(
+        "src/extracted_a.css.ts"
+      );
+      firstDeferred.resolve(firstPresetBuildSource.source);
       const firstLoadResult = await firstLoadPromise;
 
       await vi.waitFor(() => {
@@ -4281,7 +4317,10 @@ if (import.meta.vitest) {
         ]);
       });
 
-      secondDeferred.resolve(createV4PresetBuildSource("provider-b_class"));
+      const secondPresetBuildSource = await createV5PresetBuildSource(
+        "src/extracted_b.css.ts"
+      );
+      secondDeferred.resolve(secondPresetBuildSource.source);
       const secondLoadResult = await secondLoadPromise;
 
       expect(processOrder).toEqual([
@@ -4302,16 +4341,31 @@ if (import.meta.vitest) {
         outputCss: undefined,
         identOption: "debug"
       });
-      expectSourceToContainClassNameByCacheValue(
+      expectSourceToContainPresetAtomClassName(
         firstLoadResult.contents,
-        "provider-a_class"
+        firstPresetBuildSource.className
       );
-      expectSourceToContainClassNameByCacheValue(
+      expectSourceToContainPresetAtomClassName(
         secondLoadResult.contents,
-        "provider-b_class"
+        secondPresetBuildSource.className
       );
-      expect(firstLoadResult.contents).not.toContain("provider-b_class");
-      expect(secondLoadResult.contents).not.toContain("provider-a_class");
+      expect(firstPresetBuildSource.marker).not.toBe(
+        secondPresetBuildSource.marker
+      );
+      expect(firstLoadResult.contents).not.toContain(
+        secondPresetBuildSource.marker
+      );
+      expect(secondLoadResult.contents).not.toContain(
+        firstPresetBuildSource.marker
+      );
+    });
+
+    it("counts V5 preset artifacts when schema and version property order differs", () => {
+      expect(
+        countV5PresetArtifacts(
+          `{ version: 5, schema: "${DEFINE_RULES_PRESET_SCHEMA}" } { schema: "${DEFINE_RULES_PRESET_SCHEMA}", version: 5 }`
+        )
+      ).toBe(2);
     });
   });
 }

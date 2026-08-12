@@ -4,10 +4,7 @@ import { preset as primaryRootPreset } from "__DEFINE_RULES_PRESET_SPECIFIER__";
 import { preset as secondaryRootPreset } from "__DEFINE_RULES_PRESET_SECONDARY_SPECIFIER__";
 
 export const preset = defineRules({
-  presets: {
-    ...primaryRootPreset,
-    ...secondaryRootPreset
-  },
+  presets: [primaryRootPreset, secondaryRootPreset],
   properties: {
     color: true,
     display: true,

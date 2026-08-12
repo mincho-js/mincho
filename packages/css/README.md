@@ -46,7 +46,7 @@ Define styles in a file named `.css.ts`:
 import { css } from "@mincho-js/css";
 
 export const container = css({
-  padding: 10
+  padding: 10,
 });
 ```
 
@@ -152,9 +152,9 @@ export const button = rules({
     Block: 10,
     Inline: 20
   },
-  
+
   props: ["margin"],
-  
+
   toggles: {
     rounded: { borderRadius: 999 }
   }
@@ -211,28 +211,28 @@ import { defineRules, theme } from "@mincho-js/css";
 const [themeClass, themeVars] = theme({
   color: {
     text: "black",
-    accent: "rebeccapurple"
+    accent: "rebeccapurple",
   },
   space: {
-    card: "16px"
-  }
+    card: "16px",
+  },
 });
 
 const { css } = defineRules({
   context: themeVars,
   properties: {
     color: true,
-    padding: true
-  }
+    padding: true,
+  },
 });
 
 export const card = css((theme) => ({
   color: theme.color.text,
-  padding: theme.space.card
+  padding: theme.space.card,
 }));
 
 export const staticCard = css({
-  color: "black"
+  color: "black",
 });
 
 export const appThemeClass = themeClass;
@@ -249,28 +249,28 @@ const { css, cx, preset } = defineRules({
     tablet: "screen and (min-width: 768px)",
     desktop: {
       "@media": "screen and (min-width: 1024px)",
-      selector: "&[data-layout=wide]"
-    }
+      selector: "&[data-layout=wide]",
+    },
   },
   properties: {
     color: true,
     fontSize: true,
-    padding: true
-  }
+    padding: true,
+  },
 });
 
 export const card = css({
   color: {
     base: "black",
-    _desktop: "white"
+    _desktop: "white",
   },
   padding: 12,
   _tablet: {
-    fontSize: 16
+    fontSize: 16,
   },
   fontSize: {
-    _desktop: 20
-  }
+    _desktop: 20,
+  },
 });
 
 export const cardClassName = cx(card, "external");
@@ -292,25 +292,22 @@ const [themeClass, themeVars] = theme({
   colors: {
     text: {
       default: "#111111",
-      muted: "#666666"
-    }
-  }
+      muted: "#666666",
+    },
+  },
 });
 
 const { css } = defineRules({
   properties: defineRules.propertyValues([
     {
-      source: [
-        themeVars.colors.text.default,
-        themeVars.colors.text.muted
-      ],
-      properties: ["color", "backgroundColor"]
-    }
-  ])
+      source: [themeVars.colors.text.default, themeVars.colors.text.muted],
+      properties: ["color", "backgroundColor"],
+    },
+  ]),
 });
 
 export const quietText = css({
-  color: themeVars.colors.text.muted
+  color: themeVars.colors.text.muted,
 });
 
 export const appThemeClass = themeClass;
@@ -323,13 +320,13 @@ const { css } = defineRules({
   properties: defineRules.propertyValues([
     {
       source: { muted: themeVars.colors.text.muted },
-      properties: ["color"]
-    }
-  ])
+      properties: ["color"],
+    },
+  ]),
 });
 
 export const quietText = css({
-  color: "muted"
+  color: "muted",
 });
 ```
 
@@ -339,7 +336,7 @@ For spacing leaves plus a custom variable, spread the spacing leaves into the so
 import { createVar, defineRules, theme } from "@mincho-js/css";
 
 const [, themeVars] = theme({
-  space: ["0px", "4px", "8px"]
+  space: ["0px", "4px", "8px"],
 });
 
 const customSpacingVariable = createVar();
@@ -348,32 +345,63 @@ const { css } = defineRules({
   properties: defineRules.propertyValues([
     {
       source: [...themeVars.space, customSpacingVariable],
-      properties: ["gap", "padding"]
-    }
-  ])
+      properties: ["gap", "padding"],
+    },
+  ]),
 });
 
 export const padded = css({
   gap: customSpacingVariable,
-  padding: themeVars.space[1]
+  padding: themeVars.space[1],
 });
 ```
 
 `source: [themeVars.space, customSpacingVariable]` preserves the nested array and does not flatten. Use `source: [...themeVars.space, customSpacingVariable]` when you want each spacing leaf plus the custom variable.
 
-The `preset` export is a V4 artifact. Pass it to another `defineRules({ presets })` call to reuse class names and the metadata needed by scoped `cx`.
+The `preset` export is a V5 graph preset artifact. Pass it to another `defineRules({ presets })` call to compose and reuse class names and the graph metadata needed by scoped `cx`.
 
-`defineRules().cx` is scoped and metadata aware. It flattens inputs like the root `cx`, then uses V4 preset metadata from its own scope and imported presets to keep the later known class for the same write key. The root `cx` export remains global and clsx-compatible. It does not read defineRules metadata.
+`defineRules().cx` is scoped and metadata-aware. It flattens inputs like the root `cx`, then resolves active rules by selecting the winning class according to V5 last-parent/local-wins semantics. The root `cx` export remains global and clsx-compatible; it does not read preset metadata.
 
 Unknown or external class tokens are preserved after root `cx` has flattened the inputs. They are not dropped, deduped, sorted, or moved relative to other unknown tokens.
 
 Known conflicts merge only when the normalized condition tuple and expanded write property are exactly equal. The condition tuple is `layer`, `supports`, `media`, `container`, and `selector`. For example, a `color` write under `_desktop` only conflicts with another `color` write under that exact tuple. There is no media range subsumption, selector equivalence, or cross-layer precedence inference.
+
+### V5 Package, Runtime, and Stylesheet Contract
+
+The V5 package contract establishes a strict, high-performance separation between build-time style authoring, runtime class name resolution, and static asset delivery.
+
+#### 1. V5 Graph Schema and Resolution
+
+- **Graph Nodes & Immutable Parents**: Presets are structured as content-addressed V5 node graphs where parent-child relationships are immutable. Each node contains a unique `nodeId`, `contentHash`, `parents` array (referenced by ID), and its own local atoms (ordered own atoms).
+- **Diamond Dedupe & Traversal**: The resolution engine performs a root-first deterministic traversal (parent-first DFS) with exact diamond node deduplication.
+- **Diagnostics & Rejection**: Strict validation enforces origin/content revision errors, class/AtomId conflict errors, and cycle errors (via tri-color DFS cycle diagnostics).
+- **Last-Parent / Local-Wins equivalent AtomId Selection**: Conflict resolution resolves compatible classes to their selected `AtomId` using last-parent-wins or local-wins order. There is absolutely no backward compatibility, migration utilities, or fallback parsing for legacy V3/V4/maps formats.
+
+#### 2. Package Authoring & Runtime Split
+
+- **App Imports (`.`)**: Application components and consumer entry points import runtime-safe, graph-free compiled helpers directly from the package root `.` (e.g., `import { Button } from "my-pkg"`).
+- **Authoring Imports (`./preset`)**: Downstream library authoring in `.css.ts` files imports authoring helpers, types, and preset nodes from the subpath `./preset` (e.g., `import { preset } from "my-pkg/preset"`).
+- **Explicit Stylesheet Escape Hatch (`./style.css`)**: Published packages provide sidecar CSS containing only locally owned rules. Consumers or bundlers can import `./style.css` as a full escape hatch, while bundler entry roots automatically resolve and inject sidecar stylesheets relative to entry chunks.
+
+#### 3. Compact Dynamic & Static cx Behavior
+
+- **Dynamic Scoped cx**: Dynamic `cx` runtime outputs are optimized to exclude the full V5 graph. They carry only a compact `classWrites` lookup mapping valid classes to internal write IDs, plus optional marker `segments`. Segments are optimization prefixes: payloads must match their recorded write IDs or are handled as ordinary class tokens; duplicate sequences are safe and the last write wins.
+- **Static cx**: When classes can be statically resolved at build time, `cx` emits static class literals with zero runtime table footprint or hydration overhead.
+
+#### 4. Known Caveats & Limitations
+
+- **Unused Rules**: Built package stylesheets contain all defined component rules; pruning unused component declarations is not performed at the asset level.
+- **Native Node CSS Loading**: Native Node.js runtimes cannot load `.css.ts` or CSS-importing root exports without a bundler integration.
+- **No Per-Export Hydration**: Scoped style hydration is global to the active environment; per-export or partial-hydration models are not implemented.
+- **No Semantic Folding**: CSS folding across selectors or layers is not performed; parent declarations are never duplicated or compiled into child stylesheets.
+- **No External Overlay / Manifest**: Style resolution and loading do not depend on external manifest JSON, import maps, or overlay registries.
 
 ## Features
 
 Some features are already implemented in Vanilla Extract, but we're assuming a first-time reader.
 
 Instead, we've attached an emoji to make it easier to distinguish.
+
 - Vanilla Extract: :cupcake:
 - Mincho: :icecream:
 
@@ -383,18 +411,20 @@ We need to have a hash value to solve the problem of overlapping class names.
 [Vanilla Extract's `style()`](https://vanilla-extract.style/documentation/api/style/) is already doing a good job.
 
 **Code:**
+
 ```typescript
 const myCss = css({
   color: "blue",
-  backgroundColor: "#EEEEEE"
+  backgroundColor: "#EEEEEE",
 });
 ```
 
 **Compiled:**
+
 ```css
 .[FILE_NAME]_myCSS__[HASH] {
   color: blue;
-  background-color: #EEEEEE;
+  background-color: #eeeeee;
 }
 ```
 
@@ -405,6 +435,7 @@ const myCss = css({
 [Unitless Properties](https://vanilla-extract.style/documentation/styling#unitless-properties) is convenient because it reduces unnecessary string representations.
 
 **Code:**
+
 ```typescript
 export const myCss = css({
   // cast to pixels
@@ -413,11 +444,12 @@ export const myCss = css({
 
   // unitless properties
   flexGrow: 1,
-  opacity: 0.5
+  opacity: 0.5,
 });
 ```
 
 **Compiled:**
+
 ```css
 .[FILE_NAME]_myCSS__[HASH] {
   padding: 10px;
@@ -433,13 +465,15 @@ export const myCss = css({
 [Vendor Prefixes](https://vanilla-extract.style/documentation/styling#vendor-prefixes) is convenient because it reduces unnecessary string representations.
 
 **Code:**
+
 ```typescript
 export const myCss = css({
-  WebkitTapHighlightColor: "rgba(0, 0, 0, 0)"
+  WebkitTapHighlightColor: "rgba(0, 0, 0, 0)",
 });
 ```
 
 **Compiled:**
+
 ```css
 .[FILE_NAME]_myCSS__[HASH] {
   -webkit-tap-highlight-color: rgba(0, 0, 0, 0);
@@ -451,15 +485,17 @@ export const myCss = css({
 [Fallback Styles](https://vanilla-extract.style/documentation/styling#fallback-styles) is convenient because it reduces unnecessary properties.
 
 **Code:**
+
 ```typescript
 export const myCss = css({
   // In Firefox and IE the "overflow: overlay" will be
   // ignored and the "overflow: auto" will be applied
-  overflow: ["auto", "overlay"]
+  overflow: ["auto", "overlay"],
 });
 ```
 
 **Compiled:**
+
 ```css
 .[FILE_NAME]_myCSS__[HASH] {
   overflow: auto;
@@ -475,17 +511,21 @@ Inspired by the [Less's Merge properties](https://lesscss.org/features/#merge-fe
 - if they end in `_`, they are joined by a whitespace
 
 **Code:**
+
 ```typescript
 export const myCss = css({
   boxShadow$: ["inset 0 0 10px #555", "0 0 20px black"],
-  transform_: ["scale(2)", "rotate(15deg)"]
+  transform_: ["scale(2)", "rotate(15deg)"],
 });
 ```
 
 **Compiled:**
+
 ```css
 .[FILE_NAME]_myCSS__[HASH] {
-  boxShadow: inset 0 0 10px #555, 0 0 20px black;
+  box-shadow:
+    inset 0 0 10px #555,
+    0 0 20px black;
   transform: scale(2) rotate(15deg);
 }
 ```
@@ -494,6 +534,7 @@ For use with Fallback Styles, use a double array.
 It's automatically composited.
 
 **Code:**
+
 ```typescript
 export const myCss = css({
   transform_: [
@@ -501,12 +542,13 @@ export const myCss = css({
     "scale(2)",
 
     //  Fallback style
-    ["rotate(28.64deg)", "rotate(0.5rad)"]
-  ]
+    ["rotate(28.64deg)", "rotate(0.5rad)"],
+  ],
 });
 ```
 
 **Compiled:**
+
 ```css
 .[FILE_NAME]_myCSS__[HASH] {
   transform: scale(2) rotate(28.64deg);
@@ -519,13 +561,15 @@ export const myCss = css({
 Inspired by the [Tailwind's Important modifier](https://tailwindcss.com/docs/configuration#important-modifier), If `!` is at the end of the value, treat it as `!important`.
 
 **Code:**
+
 ```typescript
 export const myCss = css({
-  color: "red!"
+  color: "red!",
 });
 ```
 
 **Compiled:**
+
 ```css
 .[FILE_NAME]_myCSS__[HASH] {
   color: red !important;
@@ -540,15 +584,17 @@ Inspired by the [SASS Variable](https://sass-lang.com/documentation/variables/),
 The conversion to prefix and `kebab-case` happens automatically.
 
 **Code:**
+
 ```typescript
 export const myCss = css({
   $myCssVariable: "purple",
   color: "$myCssVariable",
-  backgroundColor: "$myOtherVariable(red)"
+  backgroundColor: "$myOtherVariable(red)",
 });
 ```
 
 **Compiled:**
+
 ```css
 .[FILE_NAME]_myCSS__[HASH] {
   --my-css-variable: purple;
@@ -566,21 +612,23 @@ However, no other classes or attributes are added, it's a simple conversion.
 `camelCase` also convert to `kebab-case`.
 
 **Code:**
+
 ```typescript
 export const myCss = css({
   _hover: {
-    color: "pink"
+    color: "pink",
   },
   _firstOfType: {
-    color: "blue"
+    color: "blue",
   },
   __before: {
-    content: ""
-  }
+    content: "",
+  },
 });
 ```
 
 **Compiled:**
+
 ```css
 .[FILE_NAME]_myCSS__[HASH]:hover {
   color: pink;
@@ -604,6 +652,7 @@ If the start is `[` without `&` treat it as `attribute selectors`.
 It is a continuation of Simple Pseudo Selectors.
 
 **Code:**
+
 ```typescript
 export const myCss = css({
   "[disabled]": {
@@ -616,6 +665,7 @@ export const myCss = css({
 ```
 
 **Compiled:**
+
 ```css
 .[FILE_NAME]_myCSS__[HASH][disabled] {
   color: red;
@@ -634,18 +684,20 @@ I want to reduce nesting as much as possible.
 Exception values for all properties are treated as complex selectors.
 
 **Code:**
+
 ```typescript
 export const myCss = css({
- "&:hover:not(:active)": {
-    border: "2px solid aquamarine"
+  "&:hover:not(:active)": {
+    border: "2px solid aquamarine",
   },
   "nav li > &": {
-    textDecoration: "underline"
-  }
+    textDecoration: "underline",
+  },
 });
 ```
 
 **Compiled:**
+
 ```css
 .[FILE_NAME]_myCSS__[HASH]:hover:not(:active) {
   border: 2px solid aquamarine;
@@ -659,10 +711,10 @@ nav li > .[FILE_NAME]_myCSS__[HASH] {
 > [!WARNING]
 > Constraints like circular reference still apply.
 
-
 #### Complex Selectors - Reference constraints
 
 That it inherits all of Vanilla Extract's constraints.
+
 ```typescript
 const invalid = css({
   // ❌ ERROR: Targetting `a[href]`
@@ -689,25 +741,26 @@ export const child = css({
 #### Complex Selectors - Circular reference
 
 As above, [Circular reference](https://vanilla-extract.style/documentation/styling/#circular-selectors) is the same.
+
 ```typescript
 export const child = css({
   background: "blue",
   get selectors() {
     return {
       [`${parent} &`]: {
-        color: 'red'
-      }
+        color: "red",
+      },
     };
-  }
+  },
 });
 
 export const parent = css({
   background: "yellow",
   selectors: {
     [`&:has(${child})`]: {
-      padding: 10
-    }
-  }
+      padding: 10,
+    },
+  },
 });
 ```
 
@@ -716,26 +769,28 @@ export const parent = css({
 Allows nesting, like [Vanilla Extract's Media Queries](https://vanilla-extract.style/documentation/styling#media-queries), and also allows top-levels.
 
 **Code:**
+
 ```typescript
 export const myCss = css({
   // Nested
   "@media": {
     "screen and (min-width: 768px)": {
-      padding: 10
+      padding: 10,
     },
     "(prefers-reduced-motion)": {
-      transitionProperty: "color"
-    }
+      transitionProperty: "color",
+    },
   },
 
   // Top level
   "@supports (display: grid)": {
-    display: "grid"
-  }
+    display: "grid",
+  },
 });
 ```
 
 **Compiled:**
+
 ```css
 @media screen and (min-width: 768px) {
   .[FILE_NAME]_myCSS__[HASH] {
@@ -763,25 +818,27 @@ Inspired by the [Griffel's Keyframes](https://griffel.js.org/react/api/make-styl
 `fontFamily$` is used as special case of the `Merge Values` rule.
 
 **Code:**
+
 ```typescript
 export const myCss = css({
   // Keyframes
   animationName: {
     "0%": { transform: "rotate(0deg)" },
-    "100%": { transform: "rotate(360deg)" }
+    "100%": { transform: "rotate(360deg)" },
   },
   animationDuration: "3s",
 
   // Fontface
   fontFamily: {
-    src: "local('Comic Sans MS')"
+    src: "local('Comic Sans MS')",
   },
   // Fontface with multiple
-  fontfamily$: [{ src: "local('Noto Sans')" }, { src: "local('Gentium')" }]
+  fontFamily$: [{ src: "local('Noto Sans')" }, { src: "local('Gentium')" }],
 });
 ```
 
 **Compiled:**
+
 ```css
 @keyframes [FILE_NAME]_myCSSKeyframes__[HASH] {
   0% {
@@ -810,7 +867,8 @@ export const myCss = css({
   animation-duration: 3s;
 
   font-family: [FILE_NAME]_myCSSFontFace1__[HASH];
-  font-family: [FILE_NAME]_myCSSFontFace2__[HASH], [FILE_NAME]_myCSSFontFace3__[HASH];
+  font-family:
+    [FILE_NAME]_myCSSFontFace2__[HASH], [FILE_NAME]_myCSSFontFace3__[HASH];
 }
 ```
 
@@ -818,23 +876,25 @@ export const myCss = css({
 
 Inspired by the [SCSS's nested properties](https://sass-lang.com/documentation/style-rules/declarations/#nesting), this feature allows nesting for property names.
 
-Reduce redundancy and make your context stand out. 
+Reduce redundancy and make your context stand out.
 
 Uppercase it to distinguish it from `Property based condition`.
 [`Vendor Prefixes`](./000-css-literals.md#5-vendor-prefixes) exists only in Top level, while `Nested Properties` exists only in nesting, so you can tell them apart.
 
 **Code:**
+
 ```typescript
 export const myCss = css({
   transition: {
     Property: "font-size",
     Duration: "4s",
-    Delay: "2s"
-  }
+    Delay: "2s",
+  },
 });
 ```
 
 **Compiled:**
+
 ```css
 .[FILE_NAME]_myCSS__[HASH] {
   transition-property: font-size;
@@ -856,12 +916,13 @@ export const myCss = css({
     _hover: "green",
     "[disabled]": "blue",
     "nav li > &": "black",
-    "@media (prefers-color-scheme: dark)": "white"
-  }
+    "@media (prefers-color-scheme: dark)": "white",
+  },
 });
 ```
 
 **Compiled:**
+
 ```css
 .[FILE_NAME]_myCSS__[HASH] {
   color: red;
@@ -881,7 +942,7 @@ nav li > .[FILE_NAME]_myCSS__[HASH] {
 
 @media (prefers-color-scheme: dark) {
   .[FILE_NAME]_myCSS__[HASH] {
-    color: red;
+    color: white;
   }
 }
 ```
@@ -897,19 +958,20 @@ export const myCss = css({
   "nav li > &": {
     color: "red",
     _hover: {
-      color: "green"
+      color: "green",
     },
     "&:hover:not(:active)": {
-      color: "blue"
+      color: "blue",
     },
     ":root[dir=rtl] &": {
-      color: "black"
-    }
-  }
+      color: "black",
+    },
+  },
 });
 ```
 
 **Compiled:**
+
 ```css
 nav li > .[FILE_NAME]_myCSS__[HASH] {
   color: red;
@@ -919,11 +981,11 @@ nav li > .[FILE_NAME]_myCSS__[HASH]:hover {
   color: green;
 }
 
-nav li > .[FILE_NAME]_myCSS__[HASH][disabled]:hover:not(:active) {
+nav li > .[FILE_NAME]_myCSS__[HASH]:hover:not(:active) {
   color: blue;
 }
 
-:root[dir=rtl] nav li > .[FILE_NAME]_myCSS__[HASH] {
+:root[dir="rtl"] nav li > .[FILE_NAME]_myCSS__[HASH] {
   color: black;
 }
 ```
@@ -936,6 +998,7 @@ Depending on the `Ar-Rules` keyword, the combining syntax is slightly different.
 (Unlike [`@media`](https://developer.mozilla.org/en-US/docs/Web/CSS/@media), [`@supports`](https://developer.mozilla.org/en-US/docs/Web/CSS/@supports), and [`@container`](https://developer.mozilla.org/en-US/docs/Web/CSS/@container), [`@layer`](https://developer.mozilla.org/en-US/docs/Web/CSS/@layer) is displayed like `parent.child`.)
 
 **Code:**
+
 ```typescript
 export const myCss = css({
   "nav li > &": {
@@ -944,29 +1007,30 @@ export const myCss = css({
     "@media (prefers-color-scheme: dark)": {
       "@media": {
         "(prefers-reduced-motion)": {
-          color: "green"
+          color: "green",
         },
         "(min-width: 900px)": {
-          color: "blue"
-        }
-      }
+          color: "blue",
+        },
+      },
     },
 
     "@layer framework": {
       "@layer": {
-        "layout": {
-          color: "black"
+        layout: {
+          color: "black",
         },
-        "utilities": {
-          color: "white"
-        }
-      }
-    }
-  }
+        utilities: {
+          color: "white",
+        },
+      },
+    },
+  },
 });
 ```
 
 **Compiled:**
+
 ```css
 nav li > .[FILE_NAME]_myCSS__[HASH] {
   color: red;
@@ -984,16 +1048,15 @@ nav li > .[FILE_NAME]_myCSS__[HASH] {
   }
 }
 
-
 @layer framework.layout {
   nav li > .[FILE_NAME]_myCSS__[HASH] {
-    color: blue;
+    color: black;
   }
 }
 
 @layer framework.utilities {
   nav li > .[FILE_NAME]_myCSS__[HASH] {
-    color: blue;
+    color: white;
   }
 }
 ```
@@ -1001,6 +1064,7 @@ nav li > .[FILE_NAME]_myCSS__[HASH] {
 It can be used with `Property based condition`.
 
 **Code:**
+
 ```typescript
 export const myCss = css({
   "nav li > &": {
@@ -1008,16 +1072,16 @@ export const myCss = css({
       base: "red",
       "@media (prefers-color-scheme: dark)": {
         "@media (prefers-reduced-motion)": "green",
-        "@media (min-width: 900px)": "blue"
+        "@media (min-width: 900px)": "blue",
       },
       "@layer framework": {
         "@layer": {
-          "layout": "black",
-          "utilities": "white"
-        }
-      }
-    }
-  }
+          layout: "black",
+          utilities: "white",
+        },
+      },
+    },
+  },
 });
 ```
 
@@ -1026,18 +1090,20 @@ export const myCss = css({
 Inspired by the [Stylus's property lookup](https://stylus-lang.com/docs/variables.html#property-lookup), this feature can be used to refer to a property value.
 
 **Code:**
+
 ```typescript
 export const myCss = css({
   width: "50px",
   height: "@width",
-  margin: "calc(@width / 2)"
+  margin: "calc(@width / 2)",
 });
 ```
 
 **Compiled:**
+
 ```css
 .[FILE_NAME]_myCSS__[HASH] {
-  width: 50px
+  width: 50px;
   height: 50px;
   margin: calc(50px / 2);
 }
@@ -1046,14 +1112,16 @@ export const myCss = css({
 When used alone, like `"@flexGrow"`, you can use the literal value it refers to.
 
 **Code:**
+
 ```typescript
 export const myCss = css({
   flexGrow: 1,
-  flexShrink: "@flexGrow"
+  flexShrink: "@flexGrow",
 });
 ```
 
 **Compiled:**
+
 ```css
 .[FILE_NAME]_myCSS__[HASH] {
   flex-grow: 1;
@@ -1068,24 +1136,26 @@ Inspired by the [JSS plugin nested](https://cssinjs.org/jss-plugin-nested?v=v10.
 Use the `%` symbol.
 
 **Code:**
+
 ```typescript
 export const myCss = cssVariant({
   primary: {
     color: "red",
     ":has(%secondary)": {
       color: "blue",
-    }
+    },
   },
   secondary: {
     color: "black",
-    "%primary &":{
-      color: "white"
-    }
-  }
+    "%primary &": {
+      color: "white",
+    },
+  },
 });
 ```
 
 **Compiled:**
+
 ```css
 .[FILE_NAME]_myCSS_primary__[HASH] {
   color: red;
@@ -1109,6 +1179,7 @@ export const myCss = cssVariant({
 [Vanilla Extract's composition](https://vanilla-extract.style/documentation/style-composition/) is well enough made, so keep it.
 
 **Code:**
+
 ```typescript
 const base = css({ padding: 12 });
 const primary = css([base, { background: "blue" }]);
@@ -1116,6 +1187,7 @@ const secondary = css([base, { background: "aqua" }]);
 ```
 
 **Compiled:**
+
 ```css
 .[FILE_NAME]_base__[HASH] {
   padding: 12px;
@@ -1135,14 +1207,16 @@ const secondary = css([base, { background: "aqua" }]);
 Define it as an object style, similar to css.
 
 **Code:**
+
 ```typescript
 const myRule = rules({
   color: "blue",
-  backgroundColor: "red"
+  backgroundColor: "red",
 });
 ```
 
 **Compiled:**
+
 ```css
 .[FILE_NAME]_myRule__[HASH] {
   color: blue;
@@ -1151,9 +1225,10 @@ const myRule = rules({
 ```
 
 However, it is returned as a function, so you need to run it to use it.
+
 ```typescript
 function MyComponent() {
-  return <div className={myCSS()}></div>;
+  return <div className={myRule()}></div>;
 }
 ```
 
@@ -1162,13 +1237,15 @@ function MyComponent() {
 Provides dynamic styles using CSS Variables.
 
 **Code:**
+
 ```typescript
 const myRule = rules({
-  props: ["color", "background", { size: { targets: ["padding", "margin"] }}]
+  props: ["color", "background", { size: { targets: ["padding", "margin"] } }],
 });
 ```
 
 **Compiled:**
+
 ```css
 .[FILE_NAME]_myRule__[HASH] {
   color: var(--[FILE_NAME]_myRule_color__[HASH]);
@@ -1181,19 +1258,21 @@ const myRule = rules({
 You can also set a default value.
 
 **Code:**
+
 ```typescript
 const myRule = rules({
   props: [
     "color",
     {
       background: { base: "red", targets: ["background"] },
-      size: { base: "3px", targets: ["padding", "margin"] }
-    }
-  ]
+      size: { base: "3px", targets: ["padding", "margin"] },
+    },
+  ],
 });
 ```
 
 **Compiled:**
+
 ```css
 .[FILE_NAME]_myRule__[HASH] {
   color: var(--[FILE_NAME]_myRule_color__[HASH]);
@@ -1205,16 +1284,17 @@ const myRule = rules({
 
 You can think of use cases as those that are statically extracted and those that are dynamically assigned.
 
-
 **Static Usage:**
+
 ```typescript
 const myCSS = css([
   myRule.props({ color: "red", background: "blue", size: "5px" }),
-  { borderRadius: 999 }
+  { borderRadius: 999 },
 ]);
 ```
 
 **Compiled:**
+
 ```css
 .[FILE_NAME]_myCSS__[HASH] {
   --myCSS_color__[HASH]: red;
@@ -1227,6 +1307,7 @@ const myCSS = css([
 If dynamic case, it is assigned as an inline style.
 
 **Dynamic Usage**
+
 ```typescript
 import { myRule } from "sample.css";
 
@@ -1240,6 +1321,7 @@ function Sample({ color }) {
 [Stitches's `variants`](https://stitches.dev/docs/variants#adding-variants) is well enough made.
 
 **Code:**
+
 ```typescript
 const button = rules({
   color: "black",
@@ -1250,26 +1332,27 @@ const button = rules({
     color: {
       brand: {
         color: "#FFFFA0",
-        backgroundColor: "blueviolet"
+        backgroundColor: "blueviolet",
       },
       accent: {
         color: "#FFE4B5",
-        backgroundColor: "slateblue"
-      }
+        backgroundColor: "slateblue",
+      },
     },
     size: {
       small: { padding: 12 },
       medium: { padding: 16 },
-      large: { padding: 24 }
+      large: { padding: 24 },
     },
     rounded: {
-      true: { borderRadius: 999 }
-    }
-  }
+      true: { borderRadius: 999 },
+    },
+  },
 });
 ```
 
 **Compiled:**
+
 ```css
 .[FILE_NAME]_button__[HASH] {
   color: black;
@@ -1295,16 +1378,21 @@ const button = rules({
 .[FILE_NAME]_button_size_large__[HASH] {
   padding: 24px;
 }
+
+.[FILE_NAME]_button_rounded_true__[HASH] {
+  border-radius: 999px;
+}
 ```
 
 You can use it as if you were using `css`.
 
 **Usage:**
+
 ```typescript
 button({
   color: "accent",
   size: "large",
-  rounded: true
+  rounded: true,
 });
 ```
 
@@ -1315,6 +1403,7 @@ button({
 Therefore, we introduce a specialized syntax.
 
 **Code Before:**
+
 ```typescript
 const button = rules({
   // base styles
@@ -1322,13 +1411,14 @@ const button = rules({
   variants: {
     // common variants
     rounded: {
-      true: { borderRadius: 999 }
-    }
-  }
+      true: { borderRadius: 999 },
+    },
+  },
 });
 ```
 
 **Code After:**
+
 ```typescript
 const button = rules({
   // base styles
@@ -1343,7 +1433,7 @@ const button = rules({
 });
 ```
 
-### 24. Compound Variants :icecream: 
+### 24. Compound Variants :icecream:
 
 [Stitches's `Compound Variants`](https://stitches.dev/docs/variants#compound-variants) is an effective way to set up additional css by leveraging the combination of variations you have already set up.
 
@@ -1351,6 +1441,7 @@ However, the method of writing the conditions seems quite inconvenient when cond
 So we want to improve the UX in this area.
 
 **Code Before:**
+
 ```typescript
 const button = rules({
   // base styles
@@ -1358,13 +1449,13 @@ const button = rules({
   variants: {
     color: {
       brand: { color: "#FFFFA0" },
-      accent: { color: "#FFE4B5" }
+      accent: { color: "#FFE4B5" },
     },
     size: {
       small: { padding: 12 },
       medium: { padding: 16 },
-      large: { padding: 24 }
-    }
+      large: { padding: 24 },
+    },
   },
   compoundVariants: [
     {
@@ -1373,10 +1464,10 @@ const button = rules({
         size: "small",
       },
       style: {
-        fontSize: "16px"
-      }
-    }
-  ]
+        fontSize: "16px",
+      },
+    },
+  ],
 });
 ```
 
@@ -1384,6 +1475,7 @@ It doesn't seem uncomfortable when the conditions are not as demanding as they a
 But if the conditions become complicated, it will be inconvenient to fill out.
 
 **Code After:**
+
 ```typescript
 const button = rules({
   // base styles
@@ -1391,33 +1483,30 @@ const button = rules({
   variants: {
     color: {
       brand: { color: "#FFFFA0" },
-      accent: { color: "#FFE4B5" }
+      accent: { color: "#FFE4B5" },
     },
     size: {
       small: { padding: 12 },
       medium: { padding: 16 },
-      large: { padding: 24 }
-    }
+      large: { padding: 24 },
+    },
   },
   compoundVariants: ({ color, size }) => [
     {
       condition: [color.brand, size.small],
       style: {
-        fontSize: "16px"
-      }
-    }
-  ]
+        fontSize: "16px",
+      },
+    },
+  ],
 });
 ```
 
 **Compiled:**
+
 ```css
 .[FILE_NAME]_button_compound_0__[HASH] {
   font-size: 16px;
-}
-.[FILE_NAME]_button_compound_1__[HASH] {
-  font-size: 24px;
-  font-weight: bold;
 }
 ```
 
@@ -1426,6 +1515,7 @@ const button = rules({
 The way of [Stitches's `Default Variants`](https://stitches.dev/docs/variants#default-variants) is already good to use, so we keep this method in ours.
 
 **Code:**
+
 ```typescript
 const button = rules({
   // base styles
@@ -1434,17 +1524,17 @@ const button = rules({
     color: {
       brand: {
         color: "#FFFFA0",
-        backgroundColor: "blueviolet"
+        backgroundColor: "blueviolet",
       },
       accent: {
         color: "#FFE4B5",
-        backgroundColor: "slateblue"
-      }
-    }
+        backgroundColor: "slateblue",
+      },
+    },
   },
   defaultVariants: {
-    color: "brand"
-  }
+    color: "brand",
+  },
 });
 ```
 

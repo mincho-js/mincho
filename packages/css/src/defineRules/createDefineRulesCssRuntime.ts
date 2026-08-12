@@ -20,9 +20,6 @@ export const createDefineRulesCssRuntime = <
   config: DefineRulesCtx<Properties, Shortcuts, Conditions, Context>
 ) => {
   return createDefineRulesRuntime<Properties, Shortcuts, Conditions, Context>(
-    config,
-    {
-      preservePresetReference: true
-    }
+    config
   ).css;
 };

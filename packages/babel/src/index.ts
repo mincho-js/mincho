@@ -174,7 +174,18 @@ if (import.meta.vitest) {
     return {
       importPath: "@mincho-js/css/defineRules/createDefineRulesCxRuntime",
       importName: "createDefineRulesCxRuntime",
-      args: [{ properties: { color: true } }]
+      args: [
+        {
+          classWrites: {
+            base: 0,
+            active: 0
+          },
+          segments: {
+            __mincho_seg_base: [0],
+            __mincho_seg_active: [0]
+          }
+        }
+      ]
     };
   }
 

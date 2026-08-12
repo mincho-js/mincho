@@ -1,6 +1,5 @@
 import type { NormalizedCondition } from "./conditions.js";
 import type {
-  DefineRulesPresetArtifactV4,
   DefineRulesPresetCompiledEntry,
   DefineRulesPresetCompiledKnownEntry,
   DefineRulesPresetCompiledSegment,
@@ -35,23 +34,13 @@ export interface EngineMetadata {
   internProperty(property: string): PropertyId;
   internWriteKey(conditionId: ConditionId, propertyId: PropertyId): WriteKeyId;
   registerAtomicClass(className: string, writeKeyId: WriteKeyId): void;
-  registerAtomicCacheEntry(
-    cacheKey: string,
-    className: string,
-    writeKeyId: WriteKeyId
-  ): void;
-  hydrateAtomicClassesFromArtifact(
-    artifact: Pick<
-      DefineRulesPresetArtifactV4,
-      "classNameByCache" | "writeKeyByCacheKey"
-    >
-  ): void;
   registerSegment(
     input: string,
     compiledSegment: CompiledSegment
   ): string | undefined;
   getRegisteredSegment(input: string): CompiledSegment | undefined;
   getSegmentByMarker(marker: string): CompiledSegment | undefined;
+  getRegisteredSegmentsByMarker(): ReadonlyMap<string, CompiledSegment>;
   getSegmentByMarkerToken(token: string): CompiledSegment | undefined;
   getCompiledSegment(input: string): CompiledSegment;
   compileSegment(input: string): CompiledSegment;
@@ -60,7 +49,6 @@ export interface EngineMetadata {
   getCachedFullResult(input: string): string | undefined;
   setCachedFullResult(input: string, result: string): void;
   clearRuntimeCaches(): void;
-  exportArtifact(): DefineRulesPresetArtifactV4;
   getWriteKeyIdForClassName(className: string): WriteKeyId | undefined;
   readonly segmentCacheSize: number;
   readonly fullResultCacheSize: number;
@@ -151,8 +139,6 @@ export function createEngineMetadata(
   const conditionIdByKey = new Map<string, ConditionId>();
   const propertyIdByKey = new Map<string, PropertyId>();
   const writeKeyIdByKey = new Map<string, WriteKeyId>();
-  const classNameByCache: Record<string, string> = {};
-  const writeKeyByCacheKey: Record<string, number> = {};
   const conditionById: Record<number, NormalizedCondition> = {};
   const propertyById: Record<number, string> = {};
   const writeKeyById: Record<
@@ -240,33 +226,6 @@ export function createEngineMetadata(
     atomicRegistryVersion += 1;
   }
 
-  function registerAtomicCacheEntry(
-    cacheKey: string,
-    className: string,
-    writeKeyId: WriteKeyId
-  ): void {
-    classNameByCache[cacheKey] = className;
-    writeKeyByCacheKey[cacheKey] = writeKeyId;
-    registerAtomicClass(className, writeKeyId);
-  }
-
-  function hydrateAtomicClassesFromArtifact(
-    artifact: Pick<
-      DefineRulesPresetArtifactV4,
-      "classNameByCache" | "writeKeyByCacheKey"
-    >
-  ): void {
-    for (const [cacheKey, className] of Object.entries(
-      artifact.classNameByCache
-    )) {
-      const writeKeyId = artifact.writeKeyByCacheKey[cacheKey];
-
-      if (typeof writeKeyId === "number") {
-        registerAtomicClass(className, writeKeyId);
-      }
-    }
-  }
-
   function registerSegment(
     input: string,
     compiledSegment: CompiledSegment
@@ -317,6 +276,13 @@ export function createEngineMetadata(
     }
 
     return cachedSegment.segment;
+  }
+
+  function getRegisteredSegmentsByMarker(): ReadonlyMap<
+    string,
+    CompiledSegment
+  > {
+    return segmentByMarker;
   }
 
   function getSegmentByMarkerToken(token: string): CompiledSegment | undefined {
@@ -513,18 +479,6 @@ export function createEngineMetadata(
     segmentMarkerPayloadCache.clear();
     transientSegmentByPayload.clear();
     transientPayloadByMarker.clear();
-  }
-
-  function exportArtifact(): DefineRulesPresetArtifactV4 {
-    return {
-      schema: "mincho.defineRulesPreset",
-      version: 4,
-      classNameByCache: { ...classNameByCache },
-      writeKeyByCacheKey: { ...writeKeyByCacheKey },
-      conditionById: cloneConditionById(conditionById),
-      propertyById: { ...propertyById },
-      writeKeyById: cloneWriteKeyById(writeKeyById)
-    };
   }
 
   function getWriteKeyIdForClassName(
@@ -734,11 +688,10 @@ export function createEngineMetadata(
     internProperty,
     internWriteKey,
     registerAtomicClass,
-    registerAtomicCacheEntry,
-    hydrateAtomicClassesFromArtifact,
     registerSegment,
     getRegisteredSegment,
     getSegmentByMarker,
+    getRegisteredSegmentsByMarker,
     getSegmentByMarkerToken,
     getCompiledSegment,
     compileSegment,
@@ -747,7 +700,6 @@ export function createEngineMetadata(
     getCachedFullResult,
     setCachedFullResult,
     clearRuntimeCaches,
-    exportArtifact,
     getWriteKeyIdForClassName,
     get segmentCacheSize() {
       return segmentCache.size;
@@ -769,30 +721,6 @@ function conditionCacheKey(condition: NormalizedCondition): string {
     condition.container,
     condition.selector
   ]);
-}
-
-function cloneConditionById(
-  conditionById: Record<number, NormalizedCondition>
-): Record<number, NormalizedCondition> {
-  const clone: Record<number, NormalizedCondition> = {};
-
-  for (const [conditionId, condition] of Object.entries(conditionById)) {
-    clone[Number(conditionId)] = { ...condition };
-  }
-
-  return clone;
-}
-
-function cloneWriteKeyById(
-  writeKeyById: Record<number, { conditionId: number; propertyId: number }>
-): Record<number, { conditionId: number; propertyId: number }> {
-  const clone: Record<number, { conditionId: number; propertyId: number }> = {};
-
-  for (const [writeKeyId, writeKey] of Object.entries(writeKeyById)) {
-    clone[Number(writeKeyId)] = { ...writeKey };
-  }
-
-  return clone;
 }
 
 function createSegmentMarker(payload: string): string {
@@ -856,16 +784,8 @@ if (import.meta.vitest) {
     const propertyId = metadata.internProperty(property);
     const writeKeyId = metadata.internWriteKey(conditionId, propertyId);
 
-    metadata.registerAtomicCacheEntry(
-      `${property}:first`,
-      firstClassName,
-      writeKeyId
-    );
-    metadata.registerAtomicCacheEntry(
-      `${property}:second`,
-      secondClassName,
-      writeKeyId
-    );
+    metadata.registerAtomicClass(firstClassName, writeKeyId);
+    metadata.registerAtomicClass(secondClassName, writeKeyId);
 
     return writeKeyId;
   }
@@ -894,71 +814,6 @@ if (import.meta.vitest) {
 
       expect(secondId).toBe(firstId);
       expect(differentId).not.toBe(firstId);
-    });
-
-    it("interns write keys by condition and transformed property only", () => {
-      const metadata = createEngineMetadata();
-      const conditionId = metadata.internCondition(baseCondition());
-      const propertyId = metadata.internProperty("paddingLeft");
-      const firstWriteKeyId = metadata.internWriteKey(conditionId, propertyId);
-      const secondWriteKeyId = metadata.internWriteKey(conditionId, propertyId);
-
-      metadata.registerAtomicCacheEntry(
-        "paddingLeft:4",
-        "pl_4",
-        firstWriteKeyId
-      );
-      metadata.registerAtomicCacheEntry(
-        "paddingLeft:8",
-        "pl_8",
-        secondWriteKeyId
-      );
-
-      expect(secondWriteKeyId).toBe(firstWriteKeyId);
-      expect(metadata.exportArtifact().writeKeyByCacheKey).toEqual({
-        "paddingLeft:4": firstWriteKeyId,
-        "paddingLeft:8": firstWriteKeyId
-      });
-    });
-
-    it("compiles unknown entries unchanged and known entries from hydrated runtime lookup", () => {
-      const source = createEngineMetadata();
-      const writeKeyId = registerAtomicPair(
-        source,
-        "color",
-        "color_red",
-        "color_blue"
-      );
-      const runtime = createEngineMetadata();
-
-      runtime.hydrateAtomicClassesFromArtifact(source.exportArtifact());
-
-      expect(runtime.compileSegment("external color_red external")).toEqual({
-        entries: [
-          { kind: "unknown", className: "external" },
-          { kind: "known", className: "color_red", writeKeyId },
-          { kind: "unknown", className: "external" }
-        ],
-        hasKnownAtomicClass: true
-      });
-    });
-
-    it("merges using hydrated runtime state after dropping preset artifact maps", () => {
-      const source = createEngineMetadata();
-      registerAtomicPair(source, "color", "color_red", "color_blue");
-      const artifact = source.exportArtifact();
-      const runtime = createEngineMetadata();
-
-      runtime.hydrateAtomicClassesFromArtifact(artifact);
-      artifact.classNameByCache = {};
-      artifact.writeKeyByCacheKey = {};
-      artifact.conditionById = {};
-      artifact.propertyById = {};
-      artifact.writeKeyById = {};
-
-      expect(
-        runtime.mergeClassList("before color_red middle color_blue after")
-      ).toBe("before middle color_blue after");
     });
 
     it("checks registered segments before the bounded segment LRU", () => {
@@ -1104,51 +959,6 @@ if (import.meta.vitest) {
       expect(withoutSegmentMarkers(metadata.mergeClassList(input))).toBe(
         "color_blue"
       );
-    });
-
-    it("lazily recompiles unknown cached full results after hydration", () => {
-      const source = createEngineMetadata();
-      registerAtomicPair(source, "display", "display_block", "display_flex");
-      const hydrated = createEngineMetadata();
-      const input = "display_block display_flex";
-
-      hydrated.mergeClassList(input);
-      expect(hydrated.segmentCacheSize).toBeGreaterThan(0);
-      expect(hydrated.fullResultCacheSize).toBeGreaterThan(0);
-
-      hydrated.hydrateAtomicClassesFromArtifact(source.exportArtifact());
-
-      expect(hydrated.getCachedFullResult(input)).toBe(undefined);
-      expect(withoutSegmentMarkers(hydrated.mergeClassList(input))).toBe(
-        "display_flex"
-      );
-    });
-
-    it("serializes only artifact-safe V4 metadata keys", () => {
-      const metadata = createEngineMetadata();
-      registerAtomicPair(metadata, "color", "color_red", "color_blue");
-
-      metadata.registerSegment("color_red", {
-        entries: [{ kind: "unknown", className: "color_red" }],
-        hasKnownAtomicClass: false
-      });
-      metadata.mergeClassList("color_red");
-
-      const artifact = metadata.exportArtifact();
-      const serializedArtifact = JSON.stringify(artifact);
-
-      expect(Object.keys(artifact)).toEqual([
-        "schema",
-        "version",
-        "classNameByCache",
-        "writeKeyByCacheKey",
-        "conditionById",
-        "propertyById",
-        "writeKeyById"
-      ]);
-      expect(serializedArtifact).not.toContain("registeredSegments");
-      expect(serializedArtifact).not.toContain("segmentCache");
-      expect(serializedArtifact).not.toContain("fullResultCache");
     });
 
     it("grows epoch arrays and resets the epoch counter before overflow reuse", () => {

@@ -151,36 +151,53 @@ export interface DefineRulesPresetCompiledSegment {
   hasKnownAtomicClass: boolean;
 }
 
-export type DefineRulesPresetClassNameByCache = Record<string, string>;
+declare const presetNodeIdBrand: unique symbol;
+declare const presetOriginIdBrand: unique symbol;
+declare const presetContentHashBrand: unique symbol;
+declare const presetAtomIdBrand: unique symbol;
 
-export type DefineRulesPresetArtifactV3 = {
-  schema: "mincho.defineRulesPreset";
-  version: 3;
-  classNameByCache: DefineRulesPresetClassNameByCache;
+export type PresetNodeId = string & {
+  readonly [presetNodeIdBrand]: "PresetNodeId";
 };
 
-export interface DefineRulesPresetWriteKey {
-  conditionId: number;
-  propertyId: number;
-}
+export type PresetOriginId = string & {
+  readonly [presetOriginIdBrand]: "PresetOriginId";
+};
 
-export type DefineRulesPresetArtifactV4 = {
-  schema: "mincho.defineRulesPreset";
-  version: 4;
-  classNameByCache: DefineRulesPresetClassNameByCache;
-  writeKeyByCacheKey: Record<string, number>;
-  conditionById: Record<number, NormalizedCondition>;
-  propertyById: Record<number, string>;
-  writeKeyById: Record<number, DefineRulesPresetWriteKey>;
+export type PresetContentHash = string & {
+  readonly [presetContentHashBrand]: "PresetContentHash";
+};
+
+export type PresetAtomId = string & {
+  readonly [presetAtomIdBrand]: "PresetAtomId";
+};
+
+export type DefineRulesPresetAtomV5 = {
+  readonly atomId: PresetAtomId;
+  readonly cacheKey: string;
+  readonly className: string;
+  readonly condition: Readonly<NormalizedCondition>;
+  readonly property: string;
+};
+
+export type DefineRulesPresetNodeV5 = {
+  readonly nodeId: PresetNodeId;
+  readonly origin: PresetOriginId;
+  readonly contentHash: PresetContentHash;
+  readonly parents: readonly PresetNodeId[];
+  readonly atoms: readonly DefineRulesPresetAtomV5[];
+};
+
+export type DefineRulesPresetArtifactV5 = {
+  readonly schema: "mincho.defineRulesPreset";
+  readonly version: 5;
+  readonly rootNodeId: PresetNodeId;
+  readonly nodes: readonly DefineRulesPresetNodeV5[];
 };
 
 export type DefineRulesPresetInput =
-  | DefineRulesPresetArtifactV3
-  | DefineRulesPresetArtifactV4
-  | DefineRulesPresetClassNameByCache
+  | DefineRulesPresetArtifactV5
   | readonly DefineRulesPresetInput[];
-
-export type DefineRulesPresetMap = DefineRulesPresetClassNameByCache;
 
 type DefineRulesNestedCallback = (...args: never[]) => unknown;
 
@@ -606,80 +623,15 @@ if (import.meta.vitest) {
     });
 
     describe.concurrent("DefineRulesPresetInput Type", () => {
-      it("Accepts artifact-safe v4 metadata helper types", () => {
-        const knownEntry: DefineRulesPresetCompiledKnownEntry = {
-          kind: "known",
-          className: "color_red",
-          writeKeyId: 0
-        };
-        const unknownEntry: DefineRulesPresetCompiledUnknownEntry = {
-          kind: "unknown",
-          className: "external"
-        };
-        const segment: DefineRulesPresetCompiledSegment = {
-          entries: [knownEntry, unknownEntry],
-          hasKnownAtomicClass: true
-        };
-        const writeKey: DefineRulesPresetWriteKey = {
-          conditionId: 0,
-          propertyId: 0
-        };
-        const artifact: DefineRulesPresetArtifactV4 = {
-          schema: "mincho.defineRulesPreset",
-          version: 4,
-          classNameByCache: {
-            colorRed: "color_red"
-          },
-          writeKeyByCacheKey: {
-            colorRed: 0
-          },
-          conditionById: {
-            0: {
-              layer: null,
-              supports: null,
-              media: null,
-              container: null,
-              selector: "&"
-            }
-          },
-          propertyById: {
-            0: "color"
-          },
-          writeKeyById: {
-            0: writeKey
-          }
-        };
-
-        assertType<DefineRulesPresetCompiledEntry>(knownEntry);
-        assertType<DefineRulesPresetCompiledEntry>(unknownEntry);
-        assertType<DefineRulesPresetCompiledSegment>(segment);
-        assertType<DefineRulesPresetArtifactV4>(artifact);
-
-        const { defineRulesCtx } = createDefineRulesTypeCase({
-          presets: [artifact, [artifact]],
-          properties: {
-            color: true
-          }
-        });
-
-        assertType<DefineRulesPresetInput | undefined>(defineRulesCtx.presets);
-      });
-
       it("Rejects preset owner objects", () => {
-        const owner = {
-          css: (_args: unknown) => "className",
-          preset: {
-            colorRed: "color_red"
-          }
-        };
+        type OwnerIsPresetInput = {
+          css: (_args: unknown) => string;
+          preset: { colorRed: string };
+        } extends DefineRulesPresetInput
+          ? true
+          : false;
 
-        createDefineRulesTypeCase({
-          properties: {
-            color: true
-          },
-          // @ts-expect-error: presets accepts v4 artifacts or arrays only.
-          presets: owner
-        });
+        assertType<OwnerIsPresetInput>(false);
       });
     });
 

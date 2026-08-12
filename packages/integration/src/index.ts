@@ -5,6 +5,7 @@ export {
 } from "./babel.js";
 export { compile } from "./compile.js";
 export {
+  getDefineRulesAncestorStyleSpecifiers,
   processDefineRulesPresetRegistryFile,
   runDefineRulesPresetRegistryStep,
   validateDefineRulesRegistrySession,

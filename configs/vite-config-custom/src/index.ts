@@ -61,7 +61,15 @@ function NodeBuilder(viteConfigEnv: ConfigEnv) {
         // https://github.com/qmhc/vite-plugin-dts/issues/267
         dtsForEsm({
           include: ["src"],
-          tsconfigPath: resolve(packageRoot, "tsconfig.lib.json")
+          tsconfigPath: resolve(packageRoot, "tsconfig.lib.json"),
+          compilerOptions: {
+            tsBuildInfoFile: resolve(
+              packageRoot,
+              ".cache",
+              "typescript",
+              "tsbuildinfo-vite-esm"
+            )
+          }
         })
       );
     }
