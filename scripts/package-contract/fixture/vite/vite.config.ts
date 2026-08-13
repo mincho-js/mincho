@@ -5,11 +5,9 @@ import { defineConfig } from "vite";
 
 export default defineConfig({
   root: import.meta.dirname,
-  plugins: [
-    minchoVitePlugin(),
-    vanillaExtractPlugin()
-  ],
+  plugins: [minchoVitePlugin(), vanillaExtractPlugin()],
   build: {
+    cssCodeSplit: true,
     cssMinify: false,
     lib: {
       entry: {
@@ -24,7 +22,8 @@ export default defineConfig({
     },
     minify: false,
     rollupOptions: {
-      external: (id) => id.startsWith("@mincho-js-proof/") && !id.endsWith("/style.css"),
+      external: (id) =>
+        id.startsWith("@mincho-js-proof/") && !id.endsWith("/style.css"),
       output: [{ format: "es" }, { format: "cjs", interop: "compat" }]
     },
     target: "es2020"
