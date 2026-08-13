@@ -3,6 +3,7 @@ import type {
   ClassValue,
   ClassMultipleInput,
   ClassMultipleResult,
+  Cx,
   CxWith,
   CxWithCallback,
   CxWithCallbackArgs,
@@ -11,6 +12,74 @@ import type {
 } from "./types.js";
 
 const cxImpl: (...inputs: ClassValue[]) => string = clsx;
+
+function cxMultipleResult<T extends ClassMultipleInput>(
+  mapper: (...inputs: ClassValue[]) => string,
+  map: T
+): ClassMultipleResult<T> {
+  const result = {} as ClassMultipleResult<T>;
+
+  for (const key in map) {
+    result[key] = mapper(map[key]);
+  }
+
+  return result;
+}
+
+function createCx(cxImpl: (...inputs: ClassValue[]) => string): Cx {
+  function cxMultiple<T extends ClassMultipleInput>(
+    map: T
+  ): ClassMultipleResult<T> {
+    return cxMultipleResult(cxImpl, map);
+  }
+
+  function cxWith<const T extends ClassValue>(): CxWith<T>;
+  function cxWith<const F extends CxWithCallback>(
+    callback: F
+  ): CxWithMixin<CxWithCallbackArgs<F>>;
+  function cxWith<const Input>(
+    callback: (params: Input) => ClassValue
+  ): CxWithMixin<[params: Input]>;
+  function cxWith<const T extends ClassValue, const F extends CxWithCallback>(
+    callback?: ((params: T) => ClassValue) | F
+  ): CxWith<T> & CxWithMixin<CxWithCallbackArgs<F>> {
+    type CxWithRuntimeCallback = (...className: unknown[]) => ClassValue;
+    const cxFunction = (callback ??
+      ((...className: ClassValue[]) => className)) as CxWithRuntimeCallback;
+
+    function cxWithImpl(...className: unknown[]) {
+      return cxImpl(cxFunction(...className));
+    }
+
+    function cxWithMultiple<
+      ClassNameMap extends Record<
+        string,
+        T | CxWithTupleValue<CxWithCallbackArgs<F>>
+      >
+    >(classNameMap: ClassNameMap): ClassMultipleResult<ClassNameMap> {
+      const transformedClassNameMap: Record<keyof ClassNameMap, ClassValue> =
+        {} as Record<keyof ClassNameMap, ClassValue>;
+      for (const key in classNameMap) {
+        const value = classNameMap[key];
+        transformedClassNameMap[key] = Array.isArray(value)
+          ? cxFunction(...value)
+          : cxFunction(value);
+      }
+
+      return cxMultipleResult(cxImpl, transformedClassNameMap);
+    }
+
+    return Object.assign(cxWithImpl, {
+      multiple: cxWithMultiple
+    }) as CxWith<T> & CxWithMixin<CxWithCallbackArgs<F>>;
+  }
+
+  return Object.assign(cxImpl as Cx, {
+    multiple: cxMultiple,
+    with: cxWith
+  });
+}
+
 /**
  * Conditionally join class names into a single string
  *
@@ -37,62 +106,8 @@ const cxImpl: (...inputs: ClassValue[]) => string = clsx;
  * cx('foo', [1 && 'bar', { baz: false }], ['hello', ['world']], 'cya');
  * // => 'foo bar hello world cya'
  */
-export const cx = Object.assign(cxImpl, {
-  multiple: cxMultiple,
-  with: cxWith
-});
-
-function cxMultiple<T extends ClassMultipleInput>(
-  map: T
-): ClassMultipleResult<T> {
-  const result = {} as ClassMultipleResult<T>;
-
-  for (const key in map) {
-    result[key] = cxImpl(map[key]);
-  }
-
-  return result;
-}
-
-function cxWith<const T extends ClassValue>(): CxWith<T>;
-function cxWith<const F extends CxWithCallback>(
-  callback: F
-): CxWithMixin<CxWithCallbackArgs<F>>;
-function cxWith<const Input>(
-  callback: (params: Input) => ClassValue
-): CxWithMixin<[params: Input]>;
-function cxWith<const T extends ClassValue, const F extends CxWithCallback>(
-  callback?: ((params: T) => ClassValue) | F
-): CxWith<T> & CxWithMixin<CxWithCallbackArgs<F>> {
-  type CxWithRuntimeCallback = (...className: unknown[]) => ClassValue;
-  const cxFunction = (callback ??
-    ((...className: ClassValue[]) => className)) as CxWithRuntimeCallback;
-
-  function cxWithImpl(...className: unknown[]) {
-    return cxImpl(cxFunction(...className));
-  }
-
-  function cxWithMultiple<
-    ClassNameMap extends Record<
-      string,
-      T | CxWithTupleValue<CxWithCallbackArgs<F>>
-    >
-  >(classNameMap: ClassNameMap): ClassMultipleResult<ClassNameMap> {
-    type TransformedClassNameMap = Record<keyof ClassNameMap, ClassValue>;
-    const transformedClassNameMap: TransformedClassNameMap =
-      {} as TransformedClassNameMap;
-    for (const key in classNameMap) {
-      const value = classNameMap[key];
-      transformedClassNameMap[key] = Array.isArray(value)
-        ? cxFunction(...value)
-        : cxFunction(value);
-    }
-    return cxMultiple(transformedClassNameMap);
-  }
-
-  return Object.assign(cxWithImpl, { multiple: cxWithMultiple }) as CxWith<T> &
-    CxWithMixin<CxWithCallbackArgs<F>>;
-}
+export const cx = createCx(cxImpl);
+export { createCx };
 
 // == Tests ====================================================================
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment

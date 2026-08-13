@@ -4,27 +4,16 @@ import type {
   CSSRule,
   NormalizedCondition
 } from "@mincho-js/transform-to-vanilla";
-import type {
-  ClassMultipleInput,
-  ClassMultipleResult,
-  ClassValue,
-  CxWith,
-  CxWithCallback,
-  CxWithCallbackArgs,
-  CxWithMixin,
-  CxWithTupleValue
-} from "../classname/types.js";
-import type { Cx } from "../classname/index.js";
+import type { ClassValue, Cx } from "../classname/index.js";
 import { isUnSafeObjectKey } from "../utils.js";
-import {
-  getActiveDefineRulesRegistrySession,
-  registerDefineRulesRegistryInstance
-} from "./registry.js";
+import { createCx } from "../classname/cx.js";
+import { registerDefineRulesRegistryInstance } from "./registry.js";
 import { normalizeDefineRulesConditions } from "./conditions.js";
 import { createCanonicalStyleCache } from "./utils.js";
-import { createEngineMetadata } from "./metadata.js";
+import { createCanonicalWriteKey, createEngineMetadata } from "./metadata.js";
 import type { CompiledSegment, EngineMetadata } from "./metadata.js";
 import { createRuntimePresetState } from "./runtimePreset.js";
+import { createPresetOriginId } from "./presetCanonical.js";
 import { createDefineRulesCxRuntimeArtifact } from "./cxRuntimeArtifact.js";
 import type { DefineRulesCxRuntimeArtifact } from "./cxRuntimeArtifact.js";
 import type {
@@ -91,20 +80,27 @@ export function createDefineRulesRuntime<
   );
   const styleCache = createCanonicalStyleCache(config.debugId);
   const metadata = createEngineMetadata();
-  const registerPreset = options.registerPreset !== false;
   const presetState = createRuntimePresetState(
     config.presets,
     styleCache,
-    metadata,
-    registerPreset
+    metadata
   );
 
-  if (registerPreset && getActiveDefineRulesRegistrySession() !== undefined) {
-    registerDefineRulesRegistryInstance({
+  if (options.registerPreset !== false) {
+    const registryInstance = registerDefineRulesRegistryInstance({
       config: config as DefineRulesCtx<Properties, Shortcuts, Conditions>,
-      presetArtifact: presetState.getSnapshot(),
       getPresetSnapshot: presetState.getSnapshot
     });
+
+    if (registryInstance !== undefined) {
+      presetState.bindOrigin(
+        createPresetOriginId({
+          packageName: registryInstance.fileScope.packageName,
+          producerPath: registryInstance.fileScope.filePath,
+          registrationIndex: registryInstance.registrationIndex
+        })
+      );
+    }
   }
 
   function resolveToFragments(args: CssInput): ResolvedStyleFragment[] {
@@ -197,69 +193,13 @@ export function createDefineRulesRuntime<
 }
 
 function createDefineRulesCx(metadata: EngineMetadata): DefineRulesRuntimeCx {
-  const cxImpl = ((...inputs: ClassValue[]) => {
+  const cxImpl = (...inputs: ClassValue[]) => {
     return metadata.mergeCompiledSegments(
       collectClassValueSegments(metadata, inputs)
     );
-  }) as (...inputs: ClassValue[]) => string;
+  };
 
-  function cxMultiple<T extends ClassMultipleInput>(
-    map: T
-  ): ClassMultipleResult<T> {
-    const result = {} as ClassMultipleResult<T>;
-
-    for (const key in map) {
-      result[key] = cxImpl(map[key]);
-    }
-
-    return result;
-  }
-
-  function cxWith<const T extends ClassValue>(): CxWith<T>;
-  function cxWith<const F extends CxWithCallback>(
-    callback: F
-  ): CxWithMixin<CxWithCallbackArgs<F>>;
-  function cxWith<const Input>(
-    callback: (params: Input) => ClassValue
-  ): CxWithMixin<[params: Input]>;
-  function cxWith<const T extends ClassValue, const F extends CxWithCallback>(
-    callback?: ((params: T) => ClassValue) | F
-  ): CxWith<T> & CxWithMixin<CxWithCallbackArgs<F>> {
-    type CxWithRuntimeCallback = (...className: unknown[]) => ClassValue;
-    const cxFunction = (callback ??
-      ((...className: ClassValue[]) => className)) as CxWithRuntimeCallback;
-
-    function cxWithImpl(...className: unknown[]) {
-      return cxImpl(cxFunction(...className));
-    }
-
-    function cxWithMultiple<
-      ClassNameMap extends Record<
-        string,
-        T | CxWithTupleValue<CxWithCallbackArgs<F>>
-      >
-    >(classNameMap: ClassNameMap): ClassMultipleResult<ClassNameMap> {
-      type TransformedClassNameMap = Record<keyof ClassNameMap, ClassValue>;
-      const transformedClassNameMap: TransformedClassNameMap =
-        {} as TransformedClassNameMap;
-      for (const key in classNameMap) {
-        const value = classNameMap[key];
-        transformedClassNameMap[key] = Array.isArray(value)
-          ? cxFunction(...value)
-          : cxFunction(value);
-      }
-      return cxMultiple(transformedClassNameMap);
-    }
-
-    return Object.assign(cxWithImpl, {
-      multiple: cxWithMultiple
-    }) as CxWith<T> & CxWithMixin<CxWithCallbackArgs<F>>;
-  }
-
-  return Object.assign(cxImpl, {
-    multiple: cxMultiple,
-    with: cxWith
-  }) as DefineRulesRuntimeCx;
+  return createCx(cxImpl) as DefineRulesRuntimeCx;
 }
 
 function collectClassValueSegments(
@@ -438,7 +378,10 @@ function collectAtomicWrites(
           declaration.property,
           declaration.value
         ),
-        writeKey: atomicWriteKey(declaration.condition, declaration.property)
+        writeKey: createCanonicalWriteKey(
+          declaration.condition,
+          declaration.property
+        )
       });
     }
   }
@@ -514,20 +457,6 @@ function styleForDeclarationCondition(
   }
 
   return style;
-}
-
-function atomicWriteKey(
-  condition: NormalizedCondition,
-  property: string
-): string {
-  return JSON.stringify([
-    condition.layer,
-    condition.supports,
-    condition.media,
-    condition.container,
-    condition.selector,
-    property
-  ]);
 }
 
 function mergeStyleInto(
