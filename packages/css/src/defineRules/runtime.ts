@@ -4,11 +4,6 @@ import type {
   CSSRule,
   NormalizedCondition
 } from "@mincho-js/transform-to-vanilla";
-import {
-  endFileScope,
-  hasFileScope,
-  setFileScope
-} from "@vanilla-extract/css/fileScope";
 import type {
   ClassMultipleInput,
   ClassMultipleResult,
@@ -21,19 +16,24 @@ import type {
 } from "../classname/types.js";
 import type { Cx } from "../classname/index.js";
 import { isUnSafeObjectKey } from "../utils.js";
-import { registerDefineRulesRegistryInstance } from "./registry.js";
+import {
+  getActiveDefineRulesRegistrySession,
+  registerDefineRulesRegistryInstance
+} from "./registry.js";
 import { normalizeDefineRulesConditions } from "./conditions.js";
 import { createCanonicalStyleCache } from "./utils.js";
-import { createEngineMetadata, SEGMENT_MARKER_PREFIX } from "./metadata.js";
+import { createEngineMetadata } from "./metadata.js";
 import type { CompiledSegment, EngineMetadata } from "./metadata.js";
+import { createRuntimePresetState } from "./runtimePreset.js";
+import { createDefineRulesCxRuntimeArtifact } from "./cxRuntimeArtifact.js";
+import type { DefineRulesCxRuntimeArtifact } from "./cxRuntimeArtifact.js";
 import type {
   DefineRulesCss,
   DefineRulesComplexCssInput,
   DefineRulesCtx,
   DefineRulesConditions,
   DefineRulesEmptyConditions,
-  DefineRulesPresetArtifactV4,
-  DefineRulesPresetInput,
+  DefineRulesPresetArtifactV5,
   DefineRulesProperties,
   DefineRulesShortcuts
 } from "./types.js";
@@ -62,11 +62,10 @@ export interface DefineRulesRuntimeResult<
     Context
   >;
   cx: DefineRulesRuntimeCx;
-  preset: DefineRulesPresetArtifactV4;
+  readonly preset: DefineRulesPresetArtifactV5;
 }
 
 export interface DefineRulesRuntimeOptions {
-  preservePresetReference?: boolean;
   registerPreset?: boolean;
 }
 
@@ -82,7 +81,9 @@ export function createDefineRulesRuntime<
 >(
   config: DefineRulesCtx<Properties, Shortcuts, Conditions, Context>,
   options: DefineRulesRuntimeOptions = {}
-): DefineRulesRuntimeResult<Properties, Shortcuts, Conditions, Context> {
+): DefineRulesRuntimeResult<Properties, Shortcuts, Conditions, Context> & {
+  readonly getCxRuntimeArtifact: () => DefineRulesCxRuntimeArtifact;
+} {
   type CssInput = DefineRulesComplexCssInput<Properties, Shortcuts, Conditions>;
   type ContextualCssInput = CssInput | ((context: Context) => CssInput);
   const normalizedConditions = normalizeDefineRulesConditions(
@@ -90,18 +91,19 @@ export function createDefineRulesRuntime<
   );
   const styleCache = createCanonicalStyleCache(config.debugId);
   const metadata = createEngineMetadata();
-  const presetArtifact = createDefineRulesPresetArtifact(
+  const registerPreset = options.registerPreset !== false;
+  const presetState = createRuntimePresetState(
     config.presets,
-    options?.preservePresetReference === true,
     styleCache,
-    metadata
+    metadata,
+    registerPreset
   );
 
-  if (options.registerPreset !== false) {
+  if (registerPreset && getActiveDefineRulesRegistrySession() !== undefined) {
     registerDefineRulesRegistryInstance({
       config: config as DefineRulesCtx<Properties, Shortcuts, Conditions>,
-      presetArtifact,
-      getPresetSnapshot: () => clonePresetArtifact(presetArtifact)
+      presetArtifact: presetState.getSnapshot(),
+      getPresetSnapshot: presetState.getSnapshot
     });
   }
 
@@ -142,29 +144,23 @@ export function createDefineRulesRuntime<
       className: string;
       writeKeyId: number;
     }>;
-    let didAddAtomicCacheEntry = false;
 
     for (const atomicWrite of atomicWrites) {
-      const hasFragment = styleCache.hasFragment(
+      const { cacheKey, className } = styleCache.addFragment(
         atomicWrite.property,
         atomicWrite.value,
         atomicWrite.style
       );
-      const className = styleCache.addFragment(
-        atomicWrite.property,
-        atomicWrite.value,
-        atomicWrite.style
-      );
+      const inheritedWriteKeyId = metadata.getWriteKeyIdForClassName(className);
       const writeKeyId = internAtomicWriteKey(metadata, atomicWrite);
 
-      if (hasFragment === false) {
-        registerAtomicWriteMetadata(
-          metadata,
-          styleCache,
+      if (inheritedWriteKeyId === undefined) {
+        presetState.addOwnAtom({
+          cacheKey,
           className,
-          writeKeyId
-        );
-        didAddAtomicCacheEntry = true;
+          condition: atomicWrite.condition,
+          property: atomicWrite.property
+        });
       }
 
       entries.push({ kind: "known", className, writeKeyId });
@@ -178,10 +174,6 @@ export function createDefineRulesRuntime<
     const markedClassName =
       marker === undefined ? className : `${marker} ${className}`;
 
-    if (didAddAtomicCacheEntry) {
-      syncPresetArtifact(presetArtifact, metadata.exportArtifact());
-    }
-
     return markedClassName;
   }
 
@@ -189,7 +181,19 @@ export function createDefineRulesRuntime<
     raw: cssRaw
   }) as DefineRulesCss<CssInput, Context>;
   const cx = createDefineRulesCx(metadata);
-  return { css, cx, preset: presetArtifact };
+  return {
+    css,
+    cx,
+    getCxRuntimeArtifact() {
+      return createDefineRulesCxRuntimeArtifact(
+        presetState.getSnapshot(),
+        metadata.getRegisteredSegmentsByMarker()
+      );
+    },
+    get preset() {
+      return presetState.getSnapshot();
+    }
+  };
 }
 
 function createDefineRulesCx(metadata: EngineMetadata): DefineRulesRuntimeCx {
@@ -835,116 +839,6 @@ function applyShortcut<
   throw new Error(`Unsupported shortcut definition for "${name}"`);
 }
 
-function createDefineRulesPresetArtifact(
-  presetInput: DefineRulesPresetInput | undefined,
-  preserveReference: boolean,
-  styleCache: ReturnType<typeof createCanonicalStyleCache>,
-  metadata: EngineMetadata
-): DefineRulesPresetArtifactV4 {
-  const presetArtifact =
-    preserveReference && isDefineRulesPresetArtifactV4(presetInput)
-      ? presetInput
-      : metadata.exportArtifact();
-
-  importPresetInput(presetInput, styleCache, metadata);
-  syncPresetArtifact(presetArtifact, metadata.exportArtifact());
-
-  return presetArtifact;
-}
-
-function importPresetInput(
-  presetInput: DefineRulesPresetInput | undefined,
-  styleCache: ReturnType<typeof createCanonicalStyleCache>,
-  metadata: EngineMetadata
-): void {
-  if (presetInput == null) {
-    return;
-  }
-
-  if (Array.isArray(presetInput)) {
-    for (const item of presetInput) {
-      importPresetInput(item, styleCache, metadata);
-    }
-    return;
-  }
-
-  if (!isDefineRulesPresetArtifactV4(presetInput)) {
-    throwUnsupportedPresetInput();
-  }
-
-  importV4PresetArtifact(presetInput, styleCache, metadata);
-}
-
-function isDefineRulesPresetArtifactV4(
-  value: unknown
-): value is DefineRulesPresetArtifactV4 {
-  return (
-    isPlainRecordObject(value) &&
-    value.schema === "mincho.defineRulesPreset" &&
-    value.version === 4 &&
-    isStringRecord(value.classNameByCache) &&
-    isNumberRecord(value.writeKeyByCacheKey) &&
-    isPlainRecordObject(value.conditionById) &&
-    Object.values(value.conditionById).every(isNormalizedCondition) &&
-    isStringRecord(value.propertyById) &&
-    isPlainRecordObject(value.writeKeyById) &&
-    Object.values(value.writeKeyById).every(isPresetWriteKey)
-  );
-}
-
-function importV4PresetArtifact(
-  artifact: DefineRulesPresetArtifactV4,
-  styleCache: ReturnType<typeof createCanonicalStyleCache>,
-  metadata: EngineMetadata
-): void {
-  const conditionIdMap: Record<number, number> = {};
-  const propertyIdMap: Record<number, number> = {};
-  const writeKeyIdMap: Record<number, number> = {};
-
-  for (const [artifactConditionId, condition] of Object.entries(
-    artifact.conditionById
-  )) {
-    conditionIdMap[Number(artifactConditionId)] =
-      metadata.internCondition(condition);
-  }
-
-  for (const [artifactPropertyId, property] of Object.entries(
-    artifact.propertyById
-  )) {
-    propertyIdMap[Number(artifactPropertyId)] =
-      metadata.internProperty(property);
-  }
-
-  for (const [artifactWriteKeyId, writeKey] of Object.entries(
-    artifact.writeKeyById
-  )) {
-    const conditionId = conditionIdMap[writeKey.conditionId];
-    const propertyId = propertyIdMap[writeKey.propertyId];
-    if (conditionId === undefined || propertyId === undefined) {
-      throwUnsupportedPresetInput();
-    }
-    writeKeyIdMap[Number(artifactWriteKeyId)] = metadata.internWriteKey(
-      conditionId,
-      propertyId
-    );
-  }
-
-  styleCache.importSnapshot(artifact.classNameByCache);
-
-  for (const [cacheKey, artifactWriteKeyId] of Object.entries(
-    artifact.writeKeyByCacheKey
-  )) {
-    const className = artifact.classNameByCache[cacheKey];
-    const writeKeyId = writeKeyIdMap[artifactWriteKeyId];
-
-    if (className === undefined || writeKeyId === undefined) {
-      throwUnsupportedPresetInput();
-    }
-
-    metadata.registerAtomicCacheEntry(cacheKey, className, writeKeyId);
-  }
-}
-
 function internAtomicWriteKey(
   metadata: EngineMetadata,
   atomicWrite: AtomicWrite
@@ -952,339 +846,6 @@ function internAtomicWriteKey(
   const conditionId = metadata.internCondition(atomicWrite.condition);
   const propertyId = metadata.internProperty(atomicWrite.property);
   return metadata.internWriteKey(conditionId, propertyId);
-}
-
-function registerAtomicWriteMetadata(
-  metadata: EngineMetadata,
-  styleCache: ReturnType<typeof createCanonicalStyleCache>,
-  className: string,
-  writeKeyId: number
-): void {
-  const cacheKey = findCacheKeyForClassName(styleCache, className);
-  metadata.registerAtomicCacheEntry(cacheKey, className, writeKeyId);
-}
-
-function findCacheKeyForClassName(
-  styleCache: ReturnType<typeof createCanonicalStyleCache>,
-  className: string
-): string {
-  for (const [cacheKey, cachedClassName] of Object.entries(
-    styleCache.exportSnapshot()
-  )) {
-    if (cachedClassName === className) {
-      return cacheKey;
-    }
-  }
-
-  throw new Error(`Unable to resolve defineRules cache key for ${className}`);
-}
-
-function clonePresetArtifact(
-  artifact: DefineRulesPresetArtifactV4
-): DefineRulesPresetArtifactV4 {
-  return {
-    schema: "mincho.defineRulesPreset",
-    version: 4,
-    classNameByCache: { ...artifact.classNameByCache },
-    writeKeyByCacheKey: { ...artifact.writeKeyByCacheKey },
-    conditionById: cloneConditionById(artifact.conditionById),
-    propertyById: { ...artifact.propertyById },
-    writeKeyById: cloneWriteKeyById(artifact.writeKeyById)
-  };
-}
-
-function cloneConditionById(
-  conditionById: DefineRulesPresetArtifactV4["conditionById"]
-): DefineRulesPresetArtifactV4["conditionById"] {
-  const clone: DefineRulesPresetArtifactV4["conditionById"] = {};
-
-  for (const [conditionId, condition] of Object.entries(conditionById)) {
-    clone[Number(conditionId)] = { ...condition };
-  }
-
-  return clone;
-}
-
-function cloneWriteKeyById(
-  writeKeyById: DefineRulesPresetArtifactV4["writeKeyById"]
-): DefineRulesPresetArtifactV4["writeKeyById"] {
-  const clone: DefineRulesPresetArtifactV4["writeKeyById"] = {};
-
-  for (const [writeKeyId, writeKey] of Object.entries(writeKeyById)) {
-    clone[Number(writeKeyId)] = { ...writeKey };
-  }
-
-  return clone;
-}
-
-function syncPresetArtifact(
-  target: DefineRulesPresetArtifactV4,
-  source: DefineRulesPresetArtifactV4
-): void {
-  target.schema = source.schema;
-  target.version = source.version;
-  replaceRecord(target.classNameByCache, source.classNameByCache);
-  replaceRecord(target.writeKeyByCacheKey, source.writeKeyByCacheKey);
-  replaceRecord(target.conditionById, source.conditionById);
-  replaceRecord(target.propertyById, source.propertyById);
-  replaceRecord(target.writeKeyById, source.writeKeyById);
-}
-
-function replaceRecord<T>(
-  target: Record<string, T>,
-  source: Record<string, T>
-) {
-  for (const key of Object.keys(target)) {
-    delete target[key];
-  }
-  Object.assign(target, source);
-}
-
-function isStringRecord(value: unknown): value is Record<string, string> {
-  return (
-    isPlainRecordObject(value) &&
-    Object.values(value).every((entry) => typeof entry === "string")
-  );
-}
-
-function isNumberRecord(value: unknown): value is Record<string, number> {
-  return (
-    isPlainRecordObject(value) &&
-    Object.values(value).every((entry) => typeof entry === "number")
-  );
-}
-
-function isPresetWriteKey(
-  value: unknown
-): value is DefineRulesPresetArtifactV4["writeKeyById"][number] {
-  return (
-    isPlainRecordObject(value) &&
-    typeof value.conditionId === "number" &&
-    typeof value.propertyId === "number"
-  );
-}
-
-function isNormalizedCondition(value: unknown): value is NormalizedCondition {
-  return (
-    isPlainRecordObject(value) &&
-    typeof value.selector === "string" &&
-    (value.layer === null || typeof value.layer === "string") &&
-    (value.supports === null || typeof value.supports === "string") &&
-    (value.media === null || typeof value.media === "string") &&
-    (value.container === null || typeof value.container === "string")
-  );
-}
-
-function isPlainRecordObject(value: unknown): value is Record<string, unknown> {
-  if (value == null || typeof value !== "object" || Array.isArray(value)) {
-    return false;
-  }
-
-  const proto = Object.getPrototypeOf(value);
-  return proto === Object.prototype || proto === null;
-}
-
-function throwUnsupportedPresetInput(): never {
-  throw new Error(
-    "Unsupported defineRules preset input at config.presets; expected version 4"
-  );
-}
-
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-ignore error TS1343: The 'import.meta' meta-property is only allowed when the '--module' option is 'es2020', 'es2022', 'esnext', 'system', 'node16', or 'nodenext'.
-if (import.meta.vitest) {
-  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-  // @ts-ignore error TS1343: The 'import.meta' meta-property is only allowed when the '--module' option is 'es2020', 'es2022', 'esnext', 'system', 'node16', or 'nodenext'.
-  const { describe, it, expect, afterEach } = import.meta.vitest;
-
-  afterEach(() => {
-    while (hasFileScope()) {
-      endFileScope();
-    }
-  });
-
-  function cloneRuntimePresetArtifact(
-    artifact: DefineRulesPresetArtifactV4
-  ): DefineRulesPresetArtifactV4 {
-    return clonePresetArtifact(artifact);
-  }
-
-  function withoutSegmentMarkers(className: string): string {
-    return className
-      .split(/\s+/)
-      .filter(
-        (token) => token.length > 0 && !token.startsWith(SEGMENT_MARKER_PREFIX)
-      )
-      .join(" ");
-  }
-
-  describe("defineRules runtime presets", () => {
-    it("keeps truthy bigint class values and ignores zero bigint", () => {
-      const runtime = createDefineRulesRuntime({ properties: {} });
-
-      expect(runtime.cx(0n, 42n)).toBe("42");
-    });
-
-    it("skips unsafe object keys while merging style fragments", () => {
-      const objectPrototype = Object.prototype as Record<string, unknown>;
-      const source: Record<string, unknown> = { color: "red" };
-      const target: Record<string, unknown> = {};
-
-      Object.defineProperty(source, "__proto__", {
-        value: { minchoPrototypePolluted: true },
-        enumerable: true
-      });
-      Object.defineProperty(source, "constructor", {
-        value: { minchoPrototypePolluted: true },
-        enumerable: true
-      });
-      Object.defineProperty(source, "prototype", {
-        value: { minchoPrototypePolluted: true },
-        enumerable: true
-      });
-
-      try {
-        mergeStyleInto(target, source);
-
-        expect(target).toEqual({ color: "red" });
-        expect(Object.prototype.hasOwnProperty.call(target, "__proto__")).toBe(
-          false
-        );
-        expect(
-          Object.prototype.hasOwnProperty.call(target, "constructor")
-        ).toBe(false);
-        expect(Object.prototype.hasOwnProperty.call(target, "prototype")).toBe(
-          false
-        );
-        expect(objectPrototype.minchoPrototypePolluted).toBe(undefined);
-      } finally {
-        delete objectPrototype.minchoPrototypePolluted;
-      }
-    });
-
-    it("exports v4 artifacts with metadata maps and no runtime-only state", () => {
-      setFileScope("runtime-v4.css.ts", "pkg");
-      const runtime = createDefineRulesRuntime({
-        debugId: "runtimeV4Artifact",
-        properties: {
-          color: true
-        }
-      });
-      const className = runtime.css({ color: "red" });
-      const artifact = runtime.preset;
-
-      expect(Object.keys(artifact)).toEqual([
-        "schema",
-        "version",
-        "classNameByCache",
-        "writeKeyByCacheKey",
-        "conditionById",
-        "propertyById",
-        "writeKeyById"
-      ]);
-      expect(artifact).not.toHaveProperty("registeredSegments");
-      expect(artifact).not.toHaveProperty("segmentCache");
-      expect(artifact).not.toHaveProperty("fullResultCache");
-      expect(artifact).not.toHaveProperty("cx");
-      expect(artifact).not.toHaveProperty("atomicClassByClassName");
-      expect(artifact.version).toBe(4);
-      expect(Object.values(artifact.classNameByCache)).toEqual([
-        withoutSegmentMarkers(className)
-      ]);
-      expect(Object.keys(artifact.writeKeyByCacheKey)).toEqual(
-        Object.keys(artifact.classNameByCache)
-      );
-      expect(
-        JSON.stringify({
-          writeKeyByCacheKey: artifact.writeKeyByCacheKey,
-          conditionById: artifact.conditionById,
-          propertyById: artifact.propertyById,
-          writeKeyById: artifact.writeKeyById
-        })
-      ).not.toContain(withoutSegmentMarkers(className));
-    });
-
-    it("remaps colliding artifact-local IDs from imported v4 presets", () => {
-      setFileScope("runtime-remap.css.ts", "pkg");
-      const colorProvider = createDefineRulesRuntime({
-        debugId: "colorProvider",
-        properties: {
-          color: true
-        }
-      });
-      const backgroundProvider = createDefineRulesRuntime({
-        debugId: "backgroundProvider",
-        properties: {
-          background: true
-        }
-      });
-      const colorClassName = colorProvider.css({ color: "red" });
-      const backgroundClassName = backgroundProvider.css({
-        background: "blue"
-      });
-      const colorPreset = cloneRuntimePresetArtifact(colorProvider.preset);
-      const backgroundPreset = cloneRuntimePresetArtifact(
-        backgroundProvider.preset
-      );
-
-      expect(Object.keys(colorPreset.writeKeyById)).toEqual(["0"]);
-      expect(Object.keys(backgroundPreset.writeKeyById)).toEqual(["0"]);
-
-      const consumer = createDefineRulesRuntime({
-        debugId: "remapConsumer",
-        presets: [colorPreset, backgroundPreset],
-        properties: {
-          color: true,
-          background: true
-        }
-      });
-
-      expect(consumer.css({ color: "red" })).toBe(colorClassName);
-      expect(consumer.css({ background: "blue" })).toBe(backgroundClassName);
-
-      const importedCacheKeys = Object.keys(consumer.preset.writeKeyByCacheKey);
-      const colorCacheKey = Object.keys(colorPreset.classNameByCache)[0];
-      const backgroundCacheKey = Object.keys(
-        backgroundPreset.classNameByCache
-      )[0];
-      const colorWriteKeyId =
-        consumer.preset.writeKeyByCacheKey[colorCacheKey as string];
-      const backgroundWriteKeyId =
-        consumer.preset.writeKeyByCacheKey[backgroundCacheKey as string];
-
-      expect(importedCacheKeys).toEqual(
-        expect.arrayContaining([colorCacheKey, backgroundCacheKey])
-      );
-      expect(colorWriteKeyId).not.toBe(backgroundWriteKeyId);
-      expect(
-        consumer.preset.propertyById[
-          consumer.preset.writeKeyById[colorWriteKeyId].propertyId
-        ]
-      ).toBe("color");
-      expect(
-        consumer.preset.propertyById[
-          consumer.preset.writeKeyById[backgroundWriteKeyId].propertyId
-        ]
-      ).toBe("background");
-
-      consumer.preset.classNameByCache = {};
-      consumer.preset.writeKeyByCacheKey = {};
-      consumer.preset.conditionById = {};
-      consumer.preset.propertyById = {};
-      consumer.preset.writeKeyById = {};
-      const result = consumer.cx(
-        colorClassName,
-        backgroundClassName,
-        colorClassName
-      );
-
-      expect(withoutSegmentMarkers(result)).toBe(
-        `${withoutSegmentMarkers(backgroundClassName)} ${withoutSegmentMarkers(
-          colorClassName
-        )}`
-      );
-    });
-  });
 }
 
 // == Utils ====================================================================

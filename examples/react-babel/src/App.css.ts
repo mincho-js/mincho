@@ -1,4 +1,4 @@
-import { css } from "@examples/shared-component";
+import { css } from "@examples/shared-component/preset";
 
 const sharedCardHostClassName = css({
   display: "block"

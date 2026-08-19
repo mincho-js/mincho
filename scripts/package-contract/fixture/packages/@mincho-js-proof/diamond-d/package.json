@@ -1,0 +1,28 @@
+{
+  "name": "@mincho-js-proof/diamond-d",
+  "version": "0.0.0",
+  "type": "module",
+  "sideEffects": [
+    "./dist/style.css"
+  ],
+  "dependencies": {
+    "@mincho-js-proof/diamond-b": "0.0.0",
+    "@mincho-js-proof/diamond-c": "0.0.0"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./preset": {
+      "types": "./dist/preset.d.ts",
+      "default": "./dist/preset.js"
+    },
+    "./style.css": {
+      "default": "./dist/style.css"
+    }
+  },
+  "files": [
+    "dist/"
+  ]
+}

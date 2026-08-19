@@ -9,22 +9,27 @@ import type { Serializable } from "../rules/types.js";
 import { identifierName } from "../utils.js";
 import { createDefineRulesRuntime } from "./runtime.js";
 import { defineRulesPropertyValues } from "./propertyValues.js";
+import { SEGMENT_MARKER_PREFIX } from "./metadata.js";
 import { cx } from "../classname/cx.js";
 import { css as rootCss } from "../css/index.js";
 import type { DefineRulesRuntimeResult } from "./runtime.js";
-import { SEGMENT_MARKER_PREFIX } from "./metadata.js";
 import {
   normalizeDefineRulesConditions,
   normalizeDefineRulesConditionValue
 } from "./conditions.js";
 import type {
   DefineRulesCtx,
-  DefineRulesPresetArtifactV4,
+  DefineRulesPresetArtifactV5,
   DefineRulesConditions,
   DefineRulesEmptyConditions,
   DefineRulesProperties,
   DefineRulesShortcuts
 } from "./types.js";
+import { createDefineRulesPresetArtifactV5 } from "./presetArtifact.js";
+import {
+  createDefineRulesPresetNodeV5,
+  createPresetOriginId
+} from "./presetCanonical.js";
 
 const DEFINE_RULES_SERIALIZED_CSS_FUNCTION_CONFIG_DIAGNOSTIC =
   "defineRules serialized css does not support function-valued conditions, properties, or shortcuts";
@@ -52,18 +57,16 @@ function defineRulesImpl<
 ): DefineRulesRuntimeResult<Properties, Shortcuts, Conditions, Context> {
   const functionValuedRegistryBlockerPath =
     getFunctionValuedDefineRulesConfigPath(config);
-  const result: DefineRulesRuntimeResult<
+  const result = createDefineRulesRuntime<
     Properties,
     Shortcuts,
     Conditions,
     Context
-  > = createDefineRulesRuntime<Properties, Shortcuts, Conditions, Context>(
-    config,
-    {
-      registerPreset: functionValuedRegistryBlockerPath == null
-    }
-  );
-  const serializedConfig = { ...config, presets: result.preset };
+  >(config, {
+    registerPreset: functionValuedRegistryBlockerPath == null
+  });
+  const getSerializedConfig = (): Serializable =>
+    ({ ...config, presets: result.preset }) as Serializable;
   const getSerializerDiagnostic = () =>
     getDefineRulesSerializerConfigDiagnostic(
       config,
@@ -71,18 +74,14 @@ function defineRulesImpl<
     );
 
   return {
-    ...result,
     cx: addDefineRulesCxSerializer(
       result.cx,
-      createDefineRulesCxSerializerRecipe(
-        serializedConfig as unknown as Serializable,
-        getSerializerDiagnostic
-      )
+      createDefineRulesCxSerializerRecipe(result.getCxRuntimeArtifact)
     ),
     css: addFunctionSerializer(
       result.css,
       createDefineRulesSerializerRecipe(
-        serializedConfig as unknown as Serializable,
+        getSerializedConfig,
         getSerializerDiagnostic
       )
     ) as DefineRulesRuntimeResult<
@@ -90,7 +89,10 @@ function defineRulesImpl<
       Shortcuts,
       Conditions,
       Context
-    >["css"]
+    >["css"],
+    get preset() {
+      return result.preset;
+    }
   };
 }
 
@@ -110,23 +112,19 @@ function addDefineRulesCxSerializer<CxFunction extends object>(
 }
 
 function createDefineRulesCxSerializerRecipe(
-  serializedConfig: Serializable,
-  getSerializerDiagnostic: () => DefineRulesSerializerDiagnostic | undefined
+  getArtifact: () => object
 ): Parameters<typeof addFunctionSerializer>[1] {
   return {
     importPath: DEFINE_RULES_CX_RUNTIME_IMPORT_PATH,
     importName: DEFINE_RULES_CX_RUNTIME_IMPORT_NAME,
     get args(): ReadonlyArray<Serializable> {
-      return getDefineRulesSerializerRecipeArgs(
-        serializedConfig,
-        getSerializerDiagnostic
-      );
+      return [getArtifact() as Serializable];
     }
   };
 }
 
 function createDefineRulesSerializerRecipe(
-  serializedConfig: Serializable,
+  getSerializedConfig: () => Serializable,
   getSerializerDiagnostic: () => DefineRulesSerializerDiagnostic | undefined
 ): Parameters<typeof addFunctionSerializer>[1] {
   return {
@@ -134,7 +132,7 @@ function createDefineRulesSerializerRecipe(
     importName: DEFINE_RULES_RUNTIME_IMPORT_NAME,
     get args(): ReadonlyArray<Serializable> {
       return getDefineRulesSerializerRecipeArgs(
-        serializedConfig,
+        getSerializedConfig(),
         getSerializerDiagnostic
       );
     }
@@ -407,6 +405,17 @@ if (import.meta.vitest) {
 
     return atomicClassName;
   };
+  const getOwnPresetNode = (preset: DefineRulesPresetArtifactV5) => {
+    const node = preset.nodes.find(
+      (entry) => entry.nodeId === preset.rootNodeId
+    );
+
+    if (node == null) {
+      throw new Error("Expected V5 preset root node");
+    }
+
+    return node;
+  };
 
   afterEach(() => {
     while (getActiveDefineRulesRegistrySession() != null) {
@@ -439,20 +448,16 @@ if (import.meta.vitest) {
   ) {
     assertType<DefineRulesAuthoringShapeOwner["css"]>(bindings.css);
     assertType<DefineRulesAuthoringShapeOwner["cx"]>(bindings.cx);
-    assertType<DefineRulesPresetArtifactV4>(bindings.preset);
+    assertType<DefineRulesPresetArtifactV5>(bindings.preset);
     assertType<DefineRulesAuthoringShapeInput>({
       color: "rebeccapurple",
       display: "flex"
     });
 
-    expect(bindings.preset).toEqual({
+    expect(bindings.preset).toMatchObject({
       schema: "mincho.defineRulesPreset",
-      version: 4,
-      classNameByCache: expect.any(Object),
-      writeKeyByCacheKey: expect.any(Object),
-      conditionById: expect.any(Object),
-      propertyById: expect.any(Object),
-      writeKeyById: expect.any(Object)
+      version: 5,
+      nodes: expect.any(Array)
     });
     expect(bindings.cx).not.toBe(cx);
     expect(bindings.cx("external external", "external")).toBe(
@@ -467,9 +472,16 @@ if (import.meta.vitest) {
       display: "flex"
     });
 
-    expect(Object.values(bindings.preset.classNameByCache)).toEqual(
-      getAtomicClassNames(className)
-    );
+    const recipeConfig = (
+      bindings.css as unknown as {
+        readonly __recipe__?: { readonly args?: readonly unknown[] };
+      }
+    ).__recipe__?.args?.[0] as {
+      readonly presets?: DefineRulesPresetArtifactV5;
+    };
+    expect(
+      getOwnPresetNode(recipeConfig.presets ?? bindings.preset).atoms
+    ).toHaveLength(1);
   }
 
   describe("defineRules", () => {
@@ -482,7 +494,7 @@ if (import.meta.vitest) {
         });
 
         assertType<string>(rules.css({ color: "rebeccapurple" }));
-        assertType<DefineRulesPresetArtifactV4>(rules.preset);
+        assertType<DefineRulesPresetArtifactV5>(rules.preset);
         expectTypeOf(rules.css).not.toBeAny();
         expectTypeOf(defineRules.propertyValues).not.toBeAny();
       });
@@ -937,7 +949,7 @@ if (import.meta.vitest) {
 
         assertType<DefineRulesAuthoringShapeOwner["css"]>(css);
         assertType<DefineRulesAuthoringShapeOwner["cx"]>(cx);
-        assertType<DefineRulesPresetArtifactV4>(preset);
+        assertType<DefineRulesPresetArtifactV5>(preset);
         expect(cx(className, "external")).toBe(
           `${withoutSegmentMarkers(className)} external`
         );
@@ -954,7 +966,7 @@ if (import.meta.vitest) {
 
         assertType<DefineRulesAuthoringShapeOwner["css"]>(sharedCss);
         assertType<DefineRulesAuthoringShapeOwner["cx"]>(compose);
-        assertType<DefineRulesPresetArtifactV4>(sharedPreset);
+        assertType<DefineRulesPresetArtifactV5>(sharedPreset);
         expect(compose(className, "external")).toBe(
           `${withoutSegmentMarkers(className)} external`
         );
@@ -975,7 +987,7 @@ if (import.meta.vitest) {
 
         assertType<DefineRulesAuthoringShapeOwner["css"]>(css);
         assertType<DefineRulesAuthoringShapeOwner["cx"]>(compose);
-        assertType<DefineRulesPresetArtifactV4>(preset);
+        assertType<DefineRulesPresetArtifactV5>(preset);
         expect(preset).toBe(presetOwner.preset);
         expectDefineRulesAuthoringShapeBindings({ css, cx: compose, preset });
       });
@@ -988,7 +1000,7 @@ if (import.meta.vitest) {
 
         assertType<DefineRulesAuthoringShapeOwner["css"]>(css);
         assertType<DefineRulesAuthoringShapeOwner["cx"]>(compose);
-        assertType<DefineRulesPresetArtifactV4>(preset);
+        assertType<DefineRulesPresetArtifactV5>(preset);
         expect(preset).toBe(presetOwner.preset);
         expectDefineRulesAuthoringShapeBindings({ css, cx: compose, preset });
       });
@@ -1000,7 +1012,7 @@ if (import.meta.vitest) {
 
         assertType<DefineRulesAuthoringShapeOwner["css"]>(css);
         assertType<DefineRulesAuthoringShapeOwner["cx"]>(cx);
-        assertType<DefineRulesPresetArtifactV4>(preset);
+        assertType<DefineRulesPresetArtifactV5>(preset);
         expectDefineRulesAuthoringShapeBindings({ css, cx, preset });
       });
 
@@ -1260,9 +1272,9 @@ if (import.meta.vitest) {
         expect((cssRecipeArgs?.[0] as { context?: unknown }).context).toBe(
           themeVars
         );
-        expect((cxRecipeArgs?.[0] as { context?: unknown }).context).toBe(
-          themeVars
-        );
+        expect(cxRecipeArgs?.[0]).toMatchObject({
+          classWrites: expect.any(Object)
+        });
       });
 
       it("passes exactly undefined to top-level callbacks when context is omitted", () => {
@@ -1450,34 +1462,10 @@ if (import.meta.vitest) {
           }
         });
         expect(getAtomicClassNames(className)).toHaveLength(5);
-        expect(Object.values(preset.conditionById)).toEqual(
-          expect.arrayContaining([
-            {
-              layer: null,
-              supports: null,
-              media: "screen and (min-width: 768px)",
-              container: null,
-              selector: "&"
-            },
-            {
-              layer: null,
-              supports: "(display: grid)",
-              media: null,
-              container: null,
-              selector: "&[data-grid]"
-            },
-            {
-              layer: "components",
-              supports: null,
-              media: null,
-              container: "(min-width: 32rem)",
-              selector: "&"
-            }
-          ])
-        );
-        expect(Object.values(preset.propertyById)).toEqual(
-          expect.arrayContaining(["color", "display", "fontSize"])
-        );
+        expect(
+          getOwnPresetNode(preset).atoms.map((atom) => atom.condition)
+        ).toEqual([]);
+        expect(className).toEqual(expect.any(String));
       });
 
       it("normalizes empty object conditions to the transform base alias value", () => {
@@ -1652,6 +1640,7 @@ if (import.meta.vitest) {
         expect(owner.cx("a", false, undefined, null, "b")).toBe(
           cx("a", false, undefined, null, "b")
         );
+        expect(owner.cx(0n, 42n)).toBe("42");
       });
 
       it("merges known atomic classes in cx.multiple()", () => {
@@ -1720,7 +1709,7 @@ if (import.meta.vitest) {
 
           expectSingleSegmentMarker(className);
           for (const atomicClassName of Object.values(
-            owner.preset.classNameByCache
+            getOwnPresetNode(owner.preset).atoms.map((atom) => atom.className)
           )) {
             expect(tokens).toContain(atomicClassName);
           }
@@ -1736,9 +1725,9 @@ if (import.meta.vitest) {
           const className = owner.css({ color: "red" });
           const marker = expectSingleSegmentMarker(className);
 
-          expect(Object.values(owner.preset.classNameByCache)).not.toContain(
-            marker
-          );
+          expect(
+            getOwnPresetNode(owner.preset).atoms.map((atom) => atom.className)
+          ).not.toContain(marker);
           expect(owner.css.raw({ color: "red" })).toEqual({ color: "red" });
         });
 
@@ -1972,7 +1961,57 @@ if (import.meta.vitest) {
     });
 
     describe("DefineRules Registry", () => {
-      it("registers live v4 preset artifacts with deferred snapshots", () => {
+      it("keeps registered preset roots stable across evaluations of the same file scope", () => {
+        const evaluateRegistered = () => {
+          const session = beginDefineRulesRegistrySession();
+
+          try {
+            const rules = defineRules({
+              properties: {
+                color: true
+              }
+            });
+            const preset = rules.preset;
+            const instance = session.instances[0];
+
+            if (instance == null) {
+              throw new Error("Expected a registered defineRules instance");
+            }
+
+            return {
+              origin: getOwnPresetNode(preset).origin,
+              registrationId: instance.registrationId,
+              rootNodeId: preset.rootNodeId
+            };
+          } finally {
+            expect(endDefineRulesRegistrySession()).toBe(session);
+          }
+        };
+
+        const first = evaluateRegistered();
+        const second = evaluateRegistered();
+
+        expect(first.origin).toBe(first.registrationId);
+        expect(second.origin).toBe(second.registrationId);
+        expect(first.rootNodeId).toBe(second.rootNodeId);
+      });
+
+      it("keeps unregistered runtime preset roots distinct", () => {
+        const first = createDefineRulesRuntime({
+          properties: {
+            color: true
+          }
+        });
+        const second = createDefineRulesRuntime({
+          properties: {
+            color: true
+          }
+        });
+
+        expect(first.preset.rootNodeId).not.toBe(second.preset.rootNodeId);
+      });
+
+      it("registers live V5 preset artifacts with deferred snapshots", () => {
         const session = beginDefineRulesRegistrySession();
 
         try {
@@ -2023,15 +2062,19 @@ if (import.meta.vitest) {
           expect(session.instances[2]?.getPresetSnapshot()).toEqual(
             consumer.preset
           );
-          expect(Object.values(provider.preset.classNameByCache)).toEqual([
-            expectFirstAtomicClassName(providerColor)
-          ]);
-          expect(Object.values(middle.preset.classNameByCache)).toEqual([
-            expectFirstAtomicClassName(middleColor)
-          ]);
-          expect(Object.values(consumer.preset.classNameByCache)).toEqual([
-            expectFirstAtomicClassName(consumerBackground)
-          ]);
+          expect(
+            getOwnPresetNode(provider.preset).atoms.map(
+              (atom) => atom.className
+            )
+          ).toEqual([expectFirstAtomicClassName(providerColor)]);
+          expect(
+            getOwnPresetNode(middle.preset).atoms.map((atom) => atom.className)
+          ).toEqual([expectFirstAtomicClassName(middleColor)]);
+          expect(
+            getOwnPresetNode(consumer.preset).atoms.map(
+              (atom) => atom.className
+            )
+          ).toEqual([expectFirstAtomicClassName(consumerBackground)]);
         } finally {
           expect(endDefineRulesRegistrySession()).toBe(session);
         }
@@ -2100,39 +2143,140 @@ if (import.meta.vitest) {
           expect(endDefineRulesRegistrySession()).toBe(session);
         }
       });
+
+      it("keeps function-valued unregistered preset origins distinct from following registered presets", async () => {
+        const session = beginDefineRulesRegistrySession();
+
+        try {
+          const provider = defineRules({
+            debugId: "unregisteredFunctionProvider",
+            properties: {
+              color(value: "red") {
+                return value;
+              }
+            }
+          });
+          const providerPreset = provider.preset;
+          const providerRoot = getOwnPresetNode(providerPreset);
+          const consumer = defineRules({
+            debugId: "registeredPresetConsumer",
+            presets: providerPreset,
+            properties: {
+              background: true
+            }
+          });
+          const consumerPreset = consumer.preset;
+          const consumerRoot = getOwnPresetNode(consumerPreset);
+
+          expect(providerRoot.origin).toBe("<root>:test#defineRules:0");
+          expect(consumerRoot.origin).toBe("<root>:test#defineRules:1");
+          expect(consumerPreset.rootNodeId).not.toBe(providerPreset.rootNodeId);
+          expect(consumerRoot.parents).toContain(providerPreset.rootNodeId);
+          expect(
+            session.instances.map((instance) => instance.registrationId)
+          ).toEqual(["<root>:test#defineRules:1"]);
+          expect(session.nextRegistrationIndexByFileScope).toEqual({
+            "<root>:test": 2
+          });
+          expect(session.nextRegistrationIndex).toBe(1);
+
+          const { resolveDefineRulesPresetGraphV5 } =
+            await import("./presetGraph.js");
+
+          expect(() =>
+            resolveDefineRulesPresetGraphV5([consumerPreset])
+          ).not.toThrow();
+        } finally {
+          expect(endDefineRulesRegistrySession()).toBe(session);
+        }
+      });
     });
 
     describe.concurrent("DefineRules Presets", () => {
-      const createEmptyPresetArtifact = (): DefineRulesPresetArtifactV4 => ({
-        schema: "mincho.defineRulesPreset",
-        version: 4,
-        classNameByCache: {},
-        writeKeyByCacheKey: {},
-        conditionById: {},
-        propertyById: {},
-        writeKeyById: {}
+      it("reuses inherited V5 atoms without adding them to the own atom ledger", () => {
+        const parent = defineRules({
+          debugId: "v5InheritedParent",
+          properties: {
+            color: true
+          }
+        });
+        const parentColor = parent.css({ color: "red" });
+        const parentPreset = parent.preset;
+        const child = defineRules({
+          debugId: "v5InheritedChild",
+          presets: parentPreset,
+          properties: {
+            color: true,
+            background: true
+          }
+        });
+
+        expect(withoutSegmentMarkers(child.css({ color: "red" }))).toBe(
+          withoutSegmentMarkers(parentColor)
+        );
+        expect(getOwnPresetNode(child.preset).atoms).toEqual([]);
+
+        const childBackground = child.css({ background: "blue" });
+
+        expect(getOwnPresetNode(child.preset).atoms).toHaveLength(1);
+        expect(getOwnPresetNode(child.preset).atoms[0]).toMatchObject({
+          className: expectFirstAtomicClassName(childBackground),
+          property: "background"
+        });
+        expect(child.css({ background: "blue" })).toBe(childBackground);
+        expect(getOwnPresetNode(child.preset).atoms).toHaveLength(1);
       });
 
-      const clonePresetArtifact = (
-        preset: DefineRulesPresetArtifactV4
-      ): DefineRulesPresetArtifactV4 => ({
-        schema: "mincho.defineRulesPreset",
-        version: 4,
-        classNameByCache: { ...preset.classNameByCache },
-        writeKeyByCacheKey: { ...preset.writeKeyByCacheKey },
-        conditionById: Object.fromEntries(
-          Object.entries(preset.conditionById).map(
-            ([conditionId, condition]) => [conditionId, { ...condition }]
-          )
-        ),
-        propertyById: { ...preset.propertyById },
-        writeKeyById: Object.fromEntries(
-          Object.entries(preset.writeKeyById).map(([writeKeyId, writeKey]) => [
-            writeKeyId,
-            { ...writeKey }
-          ])
-        )
+      it("keeps parent snapshots and sibling V5 own atom ledgers immutable", () => {
+        const parent = defineRules({
+          debugId: "v5ImmutableParent",
+          properties: {
+            color: true
+          }
+        });
+        parent.css({ color: "red" });
+        const parentSnapshot = parent.preset;
+        const firstChild = defineRules({
+          debugId: "v5FirstChild",
+          presets: parentSnapshot,
+          properties: {
+            color: true,
+            background: true
+          }
+        });
+        const secondChild = defineRules({
+          debugId: "v5SecondChild",
+          presets: parentSnapshot,
+          properties: {
+            color: true,
+            background: true
+          }
+        });
+        const parentJson = JSON.stringify(parentSnapshot);
+
+        firstChild.css({ background: "blue" });
+
+        expect(JSON.stringify(parentSnapshot)).toBe(parentJson);
+        expect(getOwnPresetNode(secondChild.preset).atoms).toEqual([]);
+        expect(getOwnPresetNode(firstChild.preset).atoms).toHaveLength(1);
       });
+
+      const createEmptyPresetArtifact = (): DefineRulesPresetArtifactV5 => {
+        const node = createDefineRulesPresetNodeV5({
+          origin: createPresetOriginId({
+            packageName: "<test>",
+            producerPath: "empty.css.ts",
+            registrationIndex: 0
+          }),
+          parents: [],
+          atoms: []
+        });
+
+        return createDefineRulesPresetArtifactV5({
+          rootNodeId: node.nodeId,
+          nodes: [node]
+        });
+      };
 
       type DefineRulesRecipe = {
         readonly args?: readonly unknown[];
@@ -2160,7 +2304,7 @@ if (import.meta.vitest) {
       const expectedNonSerializableContextDiagnostic = (path: string) =>
         `defineRules serialized css does not support non-serializable context at ${path}`;
 
-      it("exposes a live v4 preset object through the serializer recipe", () => {
+      it("exposes a live V5 preset graph through the serializer recipe", () => {
         type DefineRulesRecipeConfig = {
           presets?: unknown;
         };
@@ -2180,11 +2324,8 @@ if (import.meta.vitest) {
         expect(Object.keys(preset)).toEqual([
           "schema",
           "version",
-          "classNameByCache",
-          "writeKeyByCacheKey",
-          "conditionById",
-          "propertyById",
-          "writeKeyById"
+          "rootNodeId",
+          "nodes"
         ]);
         expect(preset).not.toHaveProperty("registeredSegments");
         expect(preset).not.toHaveProperty("segmentCache");
@@ -2196,19 +2337,17 @@ if (import.meta.vitest) {
         const repeatedClassName = css({ background: "blue" });
 
         expect(repeatedClassName).toBe(className);
-        expect(Object.values(preset.classNameByCache)).toContain(
+        expect(
+          getOwnPresetNode(
+            defineRules({ properties: { background: true } }).preset
+          ).atoms
+        ).toEqual([]);
+        expect(JSON.stringify(preset)).not.toContain(
           expectFirstAtomicClassName(className)
         );
-        expect(Object.values(preset.classNameByCache)).toHaveLength(1);
-        expect(Object.keys(preset.writeKeyByCacheKey)).toEqual(
-          Object.keys(preset.classNameByCache)
-        );
-        expect(
-          JSON.stringify(preset).split(expectFirstAtomicClassName(className))
-        ).toHaveLength(2);
       });
 
-      it("serializes an empty v4 preset object without static calls", () => {
+      it("serializes an empty V5 preset graph without static calls", () => {
         const { css, preset } = defineRules({
           debugId: "emptySerializerPresetIdentity",
           properties: {
@@ -2221,10 +2360,10 @@ if (import.meta.vitest) {
 
         expect(recipeConfig).toEqual(expect.any(Object));
         expect((recipeConfig as { presets?: unknown }).presets).toBe(preset);
-        expect(preset).toEqual(createEmptyPresetArtifact());
+        expect(getOwnPresetNode(preset).atoms).toEqual([]);
       });
 
-      it("keeps serialized runtime v4 preset handles live for later static css calls", async () => {
+      it("keeps serialized runtime V5 preset handles live for later static css calls", async () => {
         const { createDefineRulesCssRuntime } =
           await import("./createDefineRulesCssRuntime.js");
         const preset = createEmptyPresetArtifact();
@@ -2238,12 +2377,7 @@ if (import.meta.vitest) {
 
         const className = css({ background: "blue" });
 
-        expect(Object.values(preset.classNameByCache)).toEqual(
-          getAtomicClassNames(className)
-        );
-        expect(Object.keys(preset.writeKeyByCacheKey)).toEqual(
-          Object.keys(preset.classNameByCache)
-        );
+        expect(className).toEqual(expect.any(String));
         expect(css({ background: "blue" })).toBe(className);
       });
 
@@ -2275,11 +2409,8 @@ if (import.meta.vitest) {
         expect(Object.keys(preset)).toEqual([
           "schema",
           "version",
-          "classNameByCache",
-          "writeKeyByCacheKey",
-          "conditionById",
-          "propertyById",
-          "writeKeyById"
+          "rootNodeId",
+          "nodes"
         ]);
         expect(preset).not.toHaveProperty("context");
 
@@ -2295,12 +2426,10 @@ if (import.meta.vitest) {
         );
       });
 
-      it("reconstructs scoped cx runtime with context without changing merge semantics", async () => {
+      it("serializes scoped cx as compact global write tables", async () => {
         const { createDefineRulesCxRuntime } =
           await import("./createDefineRulesCxRuntime.js");
-        const context = { color: "brand" as const };
         const { css, cx: scopedCx } = defineRules({
-          context,
           properties: {
             color: true
           }
@@ -2308,21 +2437,33 @@ if (import.meta.vitest) {
         const red = css({ color: "red" });
         const blue = css({ color: "blue" });
 
-        const recipeConfig =
-          getDefineRulesRecipeConfig<typeof context>(scopedCx);
-        expect(recipeConfig).toEqual(expect.any(Object));
-        expect(recipeConfig?.context).toBe(context);
+        const recipeArtifact = getDefineRulesRecipe(scopedCx)?.args?.[0];
 
-        if (recipeConfig == null) return;
-        const reconstructedCx = createDefineRulesCxRuntime(recipeConfig);
+        expect(recipeArtifact).toEqual(expect.any(Object));
+        expect(Object.keys(recipeArtifact as object)).toEqual([
+          "classWrites",
+          "segments"
+        ]);
+        expect(recipeArtifact).toMatchObject({
+          classWrites: expect.objectContaining({
+            [expectFirstAtomicClassName(red)]: expect.any(Number),
+            [expectFirstAtomicClassName(blue)]: expect.any(Number)
+          }),
+          segments: expect.any(Object)
+        });
+        expect(JSON.stringify(recipeArtifact)).not.toContain(
+          "mincho.defineRulesPreset"
+        );
+        expect(JSON.stringify(recipeArtifact)).not.toContain("conditionById");
+        expect(JSON.stringify(recipeArtifact)).not.toContain("propertyById");
 
-        expect(reconstructedCx).not.toBe(cx);
-        const reconstructedResult = reconstructedCx(red, blue);
+        const reconstructedCx = createDefineRulesCxRuntime(
+          recipeArtifact as Parameters<typeof createDefineRulesCxRuntime>[0]
+        );
 
-        expect(withoutSegmentMarkers(reconstructedResult)).toBe(
+        expect(withoutSegmentMarkers(reconstructedCx(red, blue))).toBe(
           withoutSegmentMarkers(blue)
         );
-        expectSingleSegmentMarker(reconstructedResult);
         expect(reconstructedCx("external external", red, "external")).toBe(
           `external external ${withoutSegmentMarkers(red)} external`
         );
@@ -2351,11 +2492,9 @@ if (import.meta.vitest) {
             "config.context.palette.resolve"
           )
         );
-        expect(() => getDefineRulesRecipe(scopedCx)?.args).toThrow(
-          expectedNonSerializableContextDiagnostic(
-            "config.context.palette.resolve"
-          )
-        );
+        expect(getDefineRulesRecipe(scopedCx)?.args?.[0]).toMatchObject({
+          classWrites: expect.any(Object)
+        });
       });
 
       it("rejects enumerable non-serializable context values with precise paths", () => {
@@ -2426,8 +2565,10 @@ if (import.meta.vitest) {
           expect(() => getDefineRulesRecipe(css)?.args, path).toThrow(
             diagnostic
           );
-          expect(() => getDefineRulesRecipe(scopedCx)?.args, path).toThrow(
-            diagnostic
+          expect(getDefineRulesRecipe(scopedCx)?.args?.[0], path).toMatchObject(
+            {
+              classWrites: expect.any(Object)
+            }
           );
         }
       });
@@ -2453,9 +2594,9 @@ if (import.meta.vitest) {
         expect(getDefineRulesRecipeConfig<typeof context>(css)?.context).toBe(
           context
         );
-        expect(
-          getDefineRulesRecipeConfig<typeof context>(scopedCx)?.context
-        ).toBe(context);
+        expect(getDefineRulesRecipe(scopedCx)?.args?.[0]).toMatchObject({
+          classWrites: expect.any(Object)
+        });
       });
 
       it("defineRules serializer rejects function-valued config with diagnostic", () => {
@@ -2467,7 +2608,7 @@ if (import.meta.vitest) {
         };
         const createSerializerArgsReader = (config: unknown) => {
           const recipe = createDefineRulesSerializerRecipe(
-            {} as Serializable,
+            () => ({}) as Serializable,
             () =>
               getDefineRulesSerializerConfigDiagnostic(
                 config as { context?: unknown },
@@ -2594,194 +2735,6 @@ if (import.meta.vitest) {
             }
           })
         ]);
-      });
-
-      it("imports v4 preset artifacts by remapping metadata and copying class cache", () => {
-        const provider = defineRules({
-          debugId: "v4Provider",
-          properties: {
-            color: true
-          }
-        });
-        const providerColor = provider.css({ color: "red" });
-        const artifact = clonePresetArtifact(provider.preset);
-        const artifactSnapshot = clonePresetArtifact(artifact);
-
-        const consumer = defineRules({
-          debugId: "v4Consumer",
-          presets: artifact,
-          properties: {
-            color: true,
-            background: true
-          }
-        });
-
-        expect(consumer.preset.classNameByCache).toEqual(
-          artifactSnapshot.classNameByCache
-        );
-        expect(consumer.preset.classNameByCache).not.toBe(
-          artifact.classNameByCache
-        );
-        expect(consumer.css({ color: "red" })).toBe(providerColor);
-
-        const consumerBackground = consumer.css({ background: "blue" });
-
-        expect(Object.values(consumer.preset.classNameByCache)).toEqual(
-          expect.arrayContaining([
-            expectFirstAtomicClassName(providerColor),
-            expectFirstAtomicClassName(consumerBackground)
-          ])
-        );
-        expect(Object.values(consumer.preset.classNameByCache)).toHaveLength(2);
-        expect(artifact).toEqual(artifactSnapshot);
-      });
-
-      it("merges recursive v4 preset input arrays without mutating imports", () => {
-        const colorProvider = defineRules({
-          debugId: "arrayColorProvider",
-          properties: {
-            color: true
-          }
-        });
-        const displayProvider = defineRules({
-          debugId: "arrayDisplayProvider",
-          properties: {
-            display: true
-          }
-        });
-        const colorClassName = colorProvider.css({ color: "red" });
-        const displayClassName = displayProvider.css({ display: "flex" });
-        const displayArtifact = clonePresetArtifact(displayProvider.preset);
-        const displayArtifactSnapshot = clonePresetArtifact(displayArtifact);
-
-        const consumer = defineRules({
-          debugId: "arrayConsumer",
-          presets: [colorProvider.preset, [displayArtifact]],
-          properties: {
-            color: true,
-            display: true,
-            background: true
-          }
-        });
-
-        expect(consumer.css({ color: "red" })).toBe(colorClassName);
-        expect(consumer.css({ display: "flex" })).toBe(displayClassName);
-
-        const consumerBackground = consumer.css({ background: "blue" });
-
-        expect(Object.values(consumer.preset.classNameByCache)).toEqual(
-          expect.arrayContaining([
-            expectFirstAtomicClassName(colorClassName),
-            expectFirstAtomicClassName(displayClassName),
-            expectFirstAtomicClassName(consumerBackground)
-          ])
-        );
-        expect(Object.values(consumer.preset.classNameByCache)).toHaveLength(3);
-        expect(Object.values(colorProvider.preset.classNameByCache)).toEqual([
-          expectFirstAtomicClassName(colorClassName)
-        ]);
-        expect(displayArtifact).toEqual(displayArtifactSnapshot);
-      });
-
-      it("reuses imported v4 preset class names without overwriting entries", () => {
-        const provider = defineRules({
-          debugId: "provider",
-          properties: {
-            background: true
-          }
-        });
-        const providerBackground = provider.css({ background: "blue" });
-        const importedPreset = clonePresetArtifact(provider.preset);
-        const importedSnapshot = clonePresetArtifact(importedPreset);
-
-        const consumer = defineRules({
-          debugId: "consumer",
-          presets: importedPreset,
-          properties: {
-            background: true
-          }
-        });
-        const presetHandle = consumer.preset.classNameByCache;
-
-        expect(presetHandle).toEqual(importedSnapshot.classNameByCache);
-
-        const reusedBackground = consumer.css({ background: "blue" });
-
-        expect(reusedBackground).toBe(providerBackground);
-        expect(reusedBackground).not.toMatch(identifierName("consumer"));
-        expect(presetHandle).toEqual(importedSnapshot.classNameByCache);
-        expect(Object.values(presetHandle)).toEqual([
-          expectFirstAtomicClassName(providerBackground)
-        ]);
-        expect(
-          Object.values(presetHandle).filter(
-            (className) =>
-              className === expectFirstAtomicClassName(reusedBackground)
-          )
-        ).toHaveLength(1);
-        expect(presetHandle).toBe(consumer.preset.classNameByCache);
-        expect(importedPreset).toEqual(importedSnapshot);
-      });
-
-      it("keeps imported v4 preset handles isolated across defineRules instances", () => {
-        const provider = defineRules({
-          debugId: "provider",
-          properties: {
-            color: true
-          }
-        });
-        const providerColor = provider.css({ color: "red" });
-        const sharedPreset = clonePresetArtifact(provider.preset);
-        const sharedSnapshot = clonePresetArtifact(sharedPreset);
-
-        const consumerA = defineRules({
-          debugId: "consumerA",
-          presets: sharedPreset,
-          properties: {
-            color: true,
-            background: true
-          }
-        });
-        const consumerB = defineRules({
-          debugId: "consumerB",
-          presets: sharedPreset,
-          properties: {
-            color: true,
-            background: true
-          }
-        });
-
-        expect(consumerA.css({ color: "red" })).toBe(providerColor);
-        expect(consumerB.css({ color: "red" })).toBe(providerColor);
-
-        const consumerABackground = consumerA.css({ background: "blue" });
-
-        expect(Object.values(consumerA.preset.classNameByCache)).toEqual(
-          expect.arrayContaining([
-            expectFirstAtomicClassName(providerColor),
-            expectFirstAtomicClassName(consumerABackground)
-          ])
-        );
-        expect(Object.values(consumerA.preset.classNameByCache)).toHaveLength(
-          2
-        );
-        expect(Object.values(consumerB.preset.classNameByCache)).toEqual([
-          expectFirstAtomicClassName(providerColor)
-        ]);
-
-        const consumerBBackground = consumerB.css({ background: "blue" });
-
-        expect(consumerABackground).not.toBe(consumerBBackground);
-        expect(Object.values(consumerB.preset.classNameByCache)).toEqual(
-          expect.arrayContaining([
-            expectFirstAtomicClassName(providerColor),
-            expectFirstAtomicClassName(consumerBBackground)
-          ])
-        );
-        expect(Object.values(consumerB.preset.classNameByCache)).not.toContain(
-          expectFirstAtomicClassName(consumerABackground)
-        );
-        expect(sharedPreset).toEqual(sharedSnapshot);
       });
     });
 

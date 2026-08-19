@@ -164,24 +164,19 @@ export function createCanonicalStyleCache(debugId?: string) {
     key: unknown,
     value: unknown,
     fragment: CSSRule
-  ): string {
+  ): { cacheKey: string; className: string } {
     const cacheKey = fragmentCacheKey(key, value, fragment);
     fragmentCacheKeys.add(cacheKey);
-    return cacheClassName(cacheKey, fragment);
+    return { cacheKey, className: cacheClassName(cacheKey, fragment) };
   }
 
-  function importSnapshot(entries: Record<string, string>): void {
-    for (const [cacheKey, className] of Object.entries(entries)) {
-      if (isUnSafeObjectKey(cacheKey)) {
-        continue;
-      }
-
-      fragmentCacheKeys.add(cacheKey);
-
-      if (!hasCacheKey(cacheKey)) {
-        classNameCache[cacheKey] = className;
-      }
+  function hydrateFragment(cacheKey: string, className: string): void {
+    if (isUnSafeObjectKey(cacheKey)) {
+      return;
     }
+
+    fragmentCacheKeys.add(cacheKey);
+    classNameCache[cacheKey] = className;
   }
 
   function exportSnapshot(): Record<string, string> {
@@ -209,7 +204,7 @@ export function createCanonicalStyleCache(debugId?: string) {
     hasFragment,
     getFragment,
     addFragment,
-    importSnapshot,
+    hydrateFragment,
     exportSnapshot,
     clear,
     get size() {
@@ -355,7 +350,7 @@ if (import.meta.vitest) {
           vars: { "--b": "2", "--a": "1" },
           background: "rgb(0, 0, 255)"
         }
-      );
+      ).className;
 
       expectClassName(className);
       expect(
@@ -386,9 +381,19 @@ if (import.meta.vitest) {
             background: "rgb(0, 0, 255)",
             vars: { "--a": "1", "--b": "2" }
           }
-        )
+        ).className
       ).toBe(className);
       expect(cache.size).toBe(1);
+    });
+
+    it("should return the cache key with an added fragment class name", () => {
+      const cache = createCanonicalStyleCache(debugId);
+      const { cacheKey, className } = cache.addFragment("color", "red", {
+        color: "red"
+      });
+
+      expectClassName(className);
+      expect(cache.exportSnapshot()).toEqual({ [cacheKey]: className });
     });
 
     it("should distinguish full and pruned fragments for the same property/value pair in the whole fragment cache", () => {
@@ -397,10 +402,10 @@ if (import.meta.vitest) {
       const full = cache.addFragment("background", "red", {
         vars: { "--alpha": "1" },
         background: "rgba(255, 0, 0, var(--alpha))"
-      });
+      }).className;
       const pruned = cache.addFragment("background", "red", {
         vars: { "--alpha": "1" }
-      });
+      }).className;
 
       expectClassName(full);
       expectClassName(pruned);
@@ -429,14 +434,18 @@ if (import.meta.vitest) {
         undefined
       );
 
-      const className = cache.addFragment("background", "red", firstFragment);
+      const className = cache.addFragment(
+        "background",
+        "red",
+        firstFragment
+      ).className;
       expectClassName(className);
       expect(cache.getFragment("background", "red", secondFragment)).toBe(
         className
       );
-      expect(cache.addFragment("background", "red", secondFragment)).toBe(
-        className
-      );
+      expect(
+        cache.addFragment("background", "red", secondFragment).className
+      ).toBe(className);
       expect(cache.size).toBe(1);
 
       cache.clear();
@@ -446,76 +455,6 @@ if (import.meta.vitest) {
       expect(cache.getFragment("background", "red", secondFragment)).toBe(
         undefined
       );
-    });
-
-    it("should import and export tracked fragment snapshots", () => {
-      const cache = createCanonicalStyleCache(debugId);
-      const seededFragment = {
-        vars: { "--b": "2", "--a": "1" },
-        background: "rgb(0, 0, 255)"
-      } as const;
-      const reorderedFragment = {
-        background: "rgb(0, 0, 255)",
-        vars: { "--a": "1", "--b": "2" }
-      } as const;
-      const seededClassName = "seeded-background";
-      const seededSnapshot = {
-        [fragmentCacheKey("background", { b: 2, a: 1 }, seededFragment)]:
-          seededClassName
-      };
-
-      cache.importSnapshot(seededSnapshot);
-
-      expect(
-        cache.hasFragment("background", { a: 1, b: 2 }, reorderedFragment)
-      ).toBe(true);
-      expect(
-        cache.getFragment("background", { a: 1, b: 2 }, reorderedFragment)
-      ).toBe(seededClassName);
-
-      cache.add("display", "block");
-
-      expect(cache.exportSnapshot()).toEqual(seededSnapshot);
-      expect(cache.size).toBe(2);
-    });
-
-    it("should ignore unsafe object keys when importing fragment snapshots", () => {
-      const cache = createCanonicalStyleCache(debugId);
-      const snapshot: Record<string, string> = {
-        constructor: "unsafe-constructor",
-        prototype: "unsafe-prototype"
-      };
-
-      Object.defineProperty(snapshot, "__proto__", {
-        value: "unsafe-proto",
-        enumerable: true
-      });
-
-      cache.importSnapshot(snapshot);
-
-      expect(cache.exportSnapshot()).toEqual({});
-      expect(cache.size).toBe(0);
-    });
-
-    it("should reuse seeded fragment entries without overwriting imported class names", () => {
-      const cache = createCanonicalStyleCache(debugId);
-      const seededFragment = {
-        color: "red",
-        vars: { "--shade": "500" }
-      } as const;
-      const seededClassName = "seeded-color";
-
-      cache.importSnapshot({
-        [fragmentCacheKey("color", "brand", seededFragment)]: seededClassName
-      });
-
-      expect(cache.addFragment("color", "brand", seededFragment)).toBe(
-        seededClassName
-      );
-      expect(cache.exportSnapshot()).toEqual({
-        [fragmentCacheKey("color", "brand", seededFragment)]: seededClassName
-      });
-      expect(cache.size).toBe(1);
     });
 
     it("should treat null prototype objects as plain objects", () => {

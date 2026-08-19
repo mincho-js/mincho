@@ -18,9 +18,53 @@ export const DEFINE_RULES_PRESET_SERIALIZATION_PATHS = {
   providerRoot: "provider-module/src/index.ts",
   providerSidecarCss: "provider-module/dist/style.css",
   providerPreset: "provider-module/src/preset.css.ts",
+  packageDiamond: "package-diamond/src/index.css.ts",
+  packageDiamondReversed: "package-diamond/src/reversed.css.ts",
+  packageDiamondDuplicate: "package-diamond/src/duplicate-node.css.ts",
+  packageDiamondDist: "package-diamond/dist/index.js",
+  packageDiamondDistCss: "package-diamond/dist/index.css",
+  packageDiamondReversedDist: "package-diamond/dist/reversed.js",
+  packageDiamondReversedDistCss: "package-diamond/dist/reversed.css",
+  packageDiamondA: "package-diamond/node_modules/@mincho-js-proof/diamond-a/dist/index.js",
+  packageDiamondACss:
+    "package-diamond/node_modules/@mincho-js-proof/diamond-a/dist/index.css",
+  packageDiamondB: "package-diamond/node_modules/@mincho-js-proof/diamond-b/dist/index.js",
+  packageDiamondBCss:
+    "package-diamond/node_modules/@mincho-js-proof/diamond-b/dist/index.css",
+  packageDiamondC: "package-diamond/node_modules/@mincho-js-proof/diamond-c/dist/index.js",
+  packageDiamondCCss:
+    "package-diamond/node_modules/@mincho-js-proof/diamond-c/dist/index.css",
   viteConsumerEntry: "vite-consumer/src/entry.ts",
   viteConsumerRoot: "vite-consumer"
 } as const;
+
+export const DEFINE_RULES_PRESET_SERIALIZATION_PACKAGE_DIAMOND_FAILURE_CASES = [
+  {
+    caseId: "same-origin-different-revision",
+    expectedDiagnostic: "origin revision conflicts",
+    relativePath: "package-diamond/src/revision-conflict.css.ts"
+  },
+  {
+    caseId: "same-class-different-atom-id",
+    expectedDiagnostic: "diamond_conflict_class",
+    relativePath: "package-diamond/src/class-conflict.css.ts"
+  },
+  {
+    caseId: "cycle",
+    expectedDiagnostic: "cycle detected",
+    relativePath: "package-diamond/src/cycle.css.ts"
+  },
+  {
+    caseId: "malformed-v5",
+    expectedDiagnostic: "expected a SHA-256 hash",
+    relativePath: "package-diamond/src/malformed-v5.css.ts"
+  },
+  {
+    caseId: "v4-rejection",
+    expectedDiagnostic: "expected defineRules preset version 5",
+    relativePath: "package-diamond/src/v4-rejection.css.ts"
+  }
+] as const;
 
 export const DEFINE_RULES_PRESET_SERIALIZATION_REGISTRY_MATRIX_CASES = [
   {

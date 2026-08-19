@@ -9,10 +9,17 @@ import type {
   DefineRulesConditions,
   DefineRulesEmptyConditions,
   DefineRulesCtx,
-  DefineRulesPresetArtifactV4,
+  DefineRulesPresetArtifactV5,
   DefineRulesProperties,
   DefineRulesShortcuts
 } from "./types.js";
+import { createDefineRulesPresetArtifactV5 } from "./presetArtifact.js";
+import {
+  createDefineRulesPresetNodeV5,
+  createPresetOriginId
+} from "./presetCanonical.js";
+export { parseDefineRulesPresetArtifactV5 } from "./presetArtifact.js";
+export { resolveDefineRulesPresetGraphV5 } from "./presetGraph.js";
 
 interface NormalizedDefineRulesRegistryFileScope {
   packageName: string;
@@ -24,8 +31,8 @@ export interface DefineRulesRegistryInstance {
   fileScope: NormalizedDefineRulesRegistryFileScope;
   registrationIndex: number;
   config: unknown;
-  presetArtifact: DefineRulesPresetArtifactV4;
-  getPresetSnapshot(): DefineRulesPresetArtifactV4;
+  presetArtifact: DefineRulesPresetArtifactV5;
+  getPresetSnapshot(): DefineRulesPresetArtifactV5;
 }
 
 export interface DefineRulesRegistrySession {
@@ -118,8 +125,7 @@ export function registerDefineRulesRegistryInstance<
   const Conditions extends DefineRulesConditions = DefineRulesEmptyConditions
 >(metadata: {
   config: DefineRulesCtx<Properties, Shortcuts, Conditions>;
-  presetArtifact: DefineRulesPresetArtifactV4;
-  getPresetSnapshot(): DefineRulesPresetArtifactV4;
+  getPresetSnapshot(): DefineRulesPresetArtifactV5;
 }): DefineRulesRegistryInstance | undefined {
   const session = getActiveDefineRulesRegistrySession();
 
@@ -143,7 +149,9 @@ export function registerDefineRulesRegistryInstance<
     fileScope,
     registrationIndex,
     config: metadata.config,
-    presetArtifact: metadata.presetArtifact,
+    get presetArtifact() {
+      return metadata.getPresetSnapshot();
+    },
     getPresetSnapshot: metadata.getPresetSnapshot
   };
 
@@ -162,40 +170,25 @@ if (import.meta.vitest) {
   // @ts-ignore error TS1343: The 'import.meta' meta-property is only allowed when the '--module' option is 'es2020', 'es2022', 'esnext', 'system', 'node16', or 'nodenext'.
   const { describe, it, expect, afterEach } = import.meta.vitest;
 
-  const createRegistryPresetArtifact = (): DefineRulesPresetArtifactV4 => ({
-    schema: "mincho.defineRulesPreset",
-    version: 4,
-    classNameByCache: {},
-    writeKeyByCacheKey: {},
-    conditionById: {},
-    propertyById: {},
-    writeKeyById: {}
-  });
+  const createRegistryPresetArtifact = (): DefineRulesPresetArtifactV5 => {
+    const node = createDefineRulesPresetNodeV5({
+      origin: createPresetOriginId({
+        packageName: "pkg",
+        producerPath: "src/registry.css.ts",
+        registrationIndex: 0
+      }),
+      parents: [],
+      atoms: []
+    });
 
-  const cloneRegistryPresetArtifact = (
-    artifact: DefineRulesPresetArtifactV4
-  ): DefineRulesPresetArtifactV4 => ({
-    schema: "mincho.defineRulesPreset",
-    version: 4,
-    classNameByCache: { ...artifact.classNameByCache },
-    writeKeyByCacheKey: { ...artifact.writeKeyByCacheKey },
-    conditionById: Object.fromEntries(
-      Object.entries(artifact.conditionById).map(([conditionId, condition]) => [
-        conditionId,
-        { ...condition }
-      ])
-    ),
-    propertyById: { ...artifact.propertyById },
-    writeKeyById: Object.fromEntries(
-      Object.entries(artifact.writeKeyById).map(([writeKeyId, writeKey]) => [
-        writeKeyId,
-        { ...writeKey }
-      ])
-    )
-  });
+    return createDefineRulesPresetArtifactV5({
+      rootNodeId: node.nodeId,
+      nodes: [node]
+    });
+  };
 
   const createRegistryMetadata = (
-    presetArtifact: DefineRulesPresetArtifactV4 = createRegistryPresetArtifact()
+    presetArtifact: DefineRulesPresetArtifactV5 = createRegistryPresetArtifact()
   ) => {
     return {
       config: {
@@ -205,7 +198,7 @@ if (import.meta.vitest) {
         }
       } as const,
       presetArtifact,
-      getPresetSnapshot: () => cloneRegistryPresetArtifact(presetArtifact)
+      getPresetSnapshot: () => createDefineRulesPresetArtifactV5(presetArtifact)
     };
   };
 
@@ -394,7 +387,7 @@ if (import.meta.vitest) {
       expect(session.nextRegistrationIndexByFileScope).toEqual({});
     });
 
-    it("stores live preset artifact references and defers snapshot reads", () => {
+    it("stores V5 preset artifact references and defers snapshot reads", () => {
       const session = beginDefineRulesRegistrySession();
       setFileScope("live.css.ts", "pkg");
       const preset = createRegistryPresetArtifact();
@@ -402,7 +395,7 @@ if (import.meta.vitest) {
       const metadata = createRegistryMetadata(preset);
       const getPresetSnapshot = () => {
         snapshotReadCount += 1;
-        return cloneRegistryPresetArtifact(preset);
+        return createDefineRulesPresetArtifactV5(preset);
       };
 
       const instance = registerDefineRulesRegistryInstance({
@@ -410,45 +403,27 @@ if (import.meta.vitest) {
         getPresetSnapshot
       });
 
-      preset.classNameByCache.colorRed = "color_red";
-      preset.writeKeyByCacheKey.colorRed = 0;
-      preset.conditionById[0] = {
-        layer: null,
-        supports: null,
-        media: null,
-        container: null,
-        selector: "&"
-      };
-      preset.propertyById[0] = "color";
-      preset.writeKeyById[0] = {
-        conditionId: 0,
-        propertyId: 0
-      };
-
-      expect(instance?.presetArtifact).toBe(metadata.presetArtifact);
-      expect(instance?.config).toBe(metadata.config);
       expect(snapshotReadCount).toBe(0);
-      expect(instance?.getPresetSnapshot()).toEqual(preset);
+      expect(instance?.presetArtifact).toEqual(metadata.presetArtifact);
+      expect(instance?.config).toBe(metadata.config);
       expect(snapshotReadCount).toBe(1);
+      expect(instance?.getPresetSnapshot()).toEqual(preset);
+      expect(snapshotReadCount).toBe(2);
       expect(session.instances[0]).toBe(instance);
     });
 
-    it("stores v4 preset artifact metadata", () => {
+    it("stores V5 preset artifact metadata", () => {
       beginDefineRulesRegistrySession();
-      setFileScope("v4.css.ts", "pkg");
+      setFileScope("v5.css.ts", "pkg");
 
       const instance = registerDefineRulesRegistryInstance(
         createRegistryMetadata()
       );
 
-      expect(instance?.presetArtifact).toEqual({
+      expect(instance?.presetArtifact).toMatchObject({
         schema: "mincho.defineRulesPreset",
-        version: 4,
-        classNameByCache: {},
-        writeKeyByCacheKey: {},
-        conditionById: {},
-        propertyById: {},
-        writeKeyById: {}
+        version: 5,
+        nodes: [expect.objectContaining({ atoms: [], parents: [] })]
       });
     });
   });

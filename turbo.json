@@ -23,6 +23,9 @@
       ]
     },
     "lint": {
+      "dependsOn": [
+        "build"
+      ],
       "inputs": [
         "$TURBO_HASH_GLOBAL_DEPS"
       ],

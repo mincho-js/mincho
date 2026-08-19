@@ -27,6 +27,8 @@
     /* Path Aliases for Workspace Packages */
     "baseUrl": "../../",
     "paths": {
+      "@examples/shared-component": ["examples/shared-component/src"],
+      "@examples/shared-component/preset": ["examples/shared-component/src/preset.ts"],
       "@mincho-js/react": ["packages/react/src"],
       "@mincho-js/css": ["packages/css/src"],
       "@mincho-js/vite": ["packages/vite/src"]

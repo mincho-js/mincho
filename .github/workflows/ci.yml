@@ -105,3 +105,28 @@ jobs:
 
       - name: Test
         run: yarn test
+
+  production-contract:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Yarn download cache
+        uses: ./.github/actions/node-setup
+
+      - name: Verify production contract without build or test caches
+        run: yarn verify:production-contract
+
+      - name: Preserve packed package artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-contract-artifacts
+          path: "**/_release/**"
+          if-no-files-found: warn

@@ -107,6 +107,10 @@ packages/integration/src/__fixtures__/defineRules-preset-serialization/**/node_m
 !packages/integration/src/__fixtures__/defineRules-preset-serialization/**/node_modules/@mincho-js-proof/
 !packages/integration/src/__fixtures__/defineRules-preset-serialization/**/node_modules/@mincho-js-proof/**
 
+# Stable package-contract fixtures must survive clean checkouts.
+!scripts/package-contract/fixture/packages/**/dist/
+!scripts/package-contract/fixture/packages/**/dist/**
+
 # Gatsby files
 .cache/
 # Comment in the public line in if your project uses Gatsby and not Next.js

@@ -11,7 +11,8 @@ export default (viteConfigEnv: ConfigEnv) => {
     build: {
       lib: {
         entry: {
-          index: resolve(import.meta.dirname, "src/index.ts")
+          index: resolve(import.meta.dirname, "src/index.ts"),
+          preset: resolve(import.meta.dirname, "src/preset.ts")
         },
         cssFileName: "style"
       }
@@ -21,6 +22,7 @@ export default (viteConfigEnv: ConfigEnv) => {
       vanillaExtractPlugin() as unknown as never
     ],
     resolve: {
+      dedupe: ["@vanilla-extract/css"],
       preserveSymlinks: true
     }
   });

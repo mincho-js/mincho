@@ -203,7 +203,6 @@ function resolveKnownClassOperand(
     ? { kind: "class", source: "local-css-call", ...range }
     : null;
 }
-
 function countOperandConditions(operand: DefineRulesCxOperandMetadata): number {
   switch (operand.kind) {
     case "class":

@@ -4,7 +4,9 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "sideEffects": true,
+  "sideEffects": [
+    "./dist/style.css"
+  ],
   "typings": "./dist/esm/index.d.ts",
   "main": "./dist/cjs/index.cjs",
   "module": "./dist/esm/index.mjs",
@@ -17,6 +19,16 @@
       "require": {
         "types": "./dist/esm/index.d.ts",
         "default": "./dist/cjs/index.cjs"
+      }
+    },
+    "./preset": {
+      "import": {
+        "types": "./dist/esm/preset.d.ts",
+        "default": "./dist/esm/preset.mjs"
+      },
+      "require": {
+        "types": "./dist/esm/preset.d.ts",
+        "default": "./dist/cjs/preset.cjs"
       }
     },
     "./style.css": {

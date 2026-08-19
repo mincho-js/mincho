@@ -1,2 +1,2 @@
-export { css, preset, sharedCardClassName } from "./preset.css.js";
+export { sharedCardClassName } from "./shared-component.css.js";
 export { SharedExampleCard } from "./SharedExampleCard.js";
