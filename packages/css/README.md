@@ -157,7 +157,7 @@ export const button = rules({
 
   toggles: {
     rounded: { borderRadius: 999 }
-  }
+  },
 
   variants: {
     color: {
@@ -169,7 +169,7 @@ export const button = rules({
       medium: { padding: 16 },
       large: { padding: 24 }
     }
-  }
+  },
 
   compoundVariants: ({ color, size }) => [
     {
@@ -942,7 +942,7 @@ nav li > .[FILE_NAME]_myCSS__[HASH] {
 
 @media (prefers-color-scheme: dark) {
   .[FILE_NAME]_myCSS__[HASH] {
-    color: white;
+    color: red;
   }
 }
 ```
@@ -981,7 +981,7 @@ nav li > .[FILE_NAME]_myCSS__[HASH]:hover {
   color: green;
 }
 
-nav li > .[FILE_NAME]_myCSS__[HASH]:hover:not(:active) {
+nav li > .[FILE_NAME]_myCSS__[HASH][disabled]:hover:not(:active) {
   color: blue;
 }
 
@@ -1050,13 +1050,13 @@ nav li > .[FILE_NAME]_myCSS__[HASH] {
 
 @layer framework.layout {
   nav li > .[FILE_NAME]_myCSS__[HASH] {
-    color: black;
+    color: blue;
   }
 }
 
 @layer framework.utilities {
   nav li > .[FILE_NAME]_myCSS__[HASH] {
-    color: white;
+    color: blue;
   }
 }
 ```
@@ -1103,7 +1103,7 @@ export const myCss = css({
 
 ```css
 .[FILE_NAME]_myCSS__[HASH] {
-  width: 50px;
+  width: 50px
   height: 50px;
   margin: calc(50px / 2);
 }
@@ -1193,11 +1193,11 @@ const secondary = css([base, { background: "aqua" }]);
   padding: 12px;
 }
 
-.[FILE_NAME]_base__[HASH] {
+.[FILE_NAME]_primary__[HASH] {
   background: blue;
 }
 
-.[FILE_NAME]_base__[HASH] {
+.[FILE_NAME]_secondary__[HASH] {
   background: aqua;
 }
 ```
@@ -1378,10 +1378,6 @@ const button = rules({
 .[FILE_NAME]_button_size_large__[HASH] {
   padding: 24px;
 }
-
-.[FILE_NAME]_button_rounded_true__[HASH] {
-  border-radius: 999px;
-}
 ```
 
 You can use it as if you were using `css`.
@@ -1507,6 +1503,10 @@ const button = rules({
 ```css
 .[FILE_NAME]_button_compound_0__[HASH] {
   font-size: 16px;
+}
+.[FILE_NAME]_button_compound_1__[HASH] {
+  font-size: 24px;
+  font-weight: bold;
 }
 ```
 
