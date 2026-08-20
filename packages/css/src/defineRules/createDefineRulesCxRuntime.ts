@@ -1,14 +1,5 @@
-import { cx } from "../classname/cx.js";
-import type {
-  ClassMultipleInput,
-  ClassMultipleResult,
-  ClassValue,
-  CxWith,
-  CxWithCallback,
-  CxWithCallbackArgs,
-  CxWithMixin,
-  CxWithTupleValue
-} from "../classname/types.js";
+import { cx as rootCx, createCx } from "../classname/cx.js";
+import type { ClassValue } from "../classname/types.js";
 import type { Cx } from "../classname/index.js";
 import type { DefineRulesCxRuntimeArtifact } from "./cxRuntimeArtifact.js";
 
@@ -23,14 +14,21 @@ type RuntimeEntry =
 export const createDefineRulesCxRuntime = (
   artifact: DefineRulesCxRuntimeArtifact
 ): Cx => {
+  const classWrites = new Map(artifact.classWrites);
+  const segments = new Map(artifact.segments ?? []);
   const markerByWrites = new Map<string, string>();
 
-  for (const [marker, writes] of Object.entries(artifact.segments ?? {})) {
-    markerByWrites.set(writes.join(","), marker);
+  for (const [marker, writes] of segments) {
+    const writeSequence = writes.join(",");
+    const existingMarker = markerByWrites.get(writeSequence);
+
+    if (existingMarker === undefined || marker < existingMarker) {
+      markerByWrites.set(writeSequence, marker);
+    }
   }
 
   const cxImpl = (...inputs: ClassValue[]) => {
-    const entries = collectEntries(cx(...inputs), artifact);
+    const entries = collectEntries(rootCx(...inputs), classWrites, segments);
     const seenWrites = new Set<number>();
     const kept: RuntimeEntry[] = [];
 
@@ -63,70 +61,13 @@ export const createDefineRulesCxRuntime = (
     return marker === undefined ? className : `${marker} ${className}`;
   };
 
-  function cxMultiple<T extends ClassMultipleInput>(
-    map: T
-  ): ClassMultipleResult<T> {
-    const result = {} as ClassMultipleResult<T>;
-
-    for (const key in map) {
-      result[key] = cxImpl(map[key]);
-    }
-
-    return result;
-  }
-
-  function cxWith<const T extends ClassValue>(): CxWith<T>;
-  function cxWith<const F extends CxWithCallback>(
-    callback: F
-  ): CxWithMixin<CxWithCallbackArgs<F>>;
-  function cxWith<const Input>(
-    callback: (params: Input) => ClassValue
-  ): CxWithMixin<[params: Input]>;
-  function cxWith<const T extends ClassValue, const F extends CxWithCallback>(
-    callback?: ((params: T) => ClassValue) | F
-  ): CxWith<T> & CxWithMixin<CxWithCallbackArgs<F>> {
-    type CxWithRuntimeCallback = (...className: unknown[]) => ClassValue;
-    const cxFunction = (callback ??
-      ((...className: ClassValue[]) => className)) as CxWithRuntimeCallback;
-
-    function cxWithImpl(...className: unknown[]) {
-      return cxImpl(cxFunction(...className));
-    }
-
-    function cxWithMultiple<
-      ClassNameMap extends Record<
-        string,
-        T | CxWithTupleValue<CxWithCallbackArgs<F>>
-      >
-    >(classNameMap: ClassNameMap): ClassMultipleResult<ClassNameMap> {
-      type TransformedClassNameMap = Record<keyof ClassNameMap, ClassValue>;
-      const transformedClassNameMap: TransformedClassNameMap =
-        {} as TransformedClassNameMap;
-
-      for (const key in classNameMap) {
-        const value = classNameMap[key];
-        transformedClassNameMap[key] = Array.isArray(value)
-          ? cxFunction(...value)
-          : cxFunction(value);
-      }
-
-      return cxMultiple(transformedClassNameMap);
-    }
-
-    return Object.assign(cxWithImpl, {
-      multiple: cxWithMultiple
-    }) as CxWith<T> & CxWithMixin<CxWithCallbackArgs<F>>;
-  }
-
-  return Object.assign(cxImpl, {
-    multiple: cxMultiple,
-    with: cxWith
-  }) as Cx;
+  return createCx(cxImpl) as Cx;
 };
 
 function collectEntries(
   className: string,
-  artifact: DefineRulesCxRuntimeArtifact
+  classWrites: ReadonlyMap<string, number>,
+  segments: ReadonlyMap<string, readonly number[]>
 ): RuntimeEntry[] {
   const entries: RuntimeEntry[] = [];
   const tokens = className.trim().split(/\s+/);
@@ -138,14 +79,10 @@ function collectEntries(
       continue;
     }
 
-    const segments = artifact.segments;
-    const hasSegment =
-      segments !== undefined &&
-      Object.prototype.hasOwnProperty.call(segments, token);
-    const segment = hasSegment ? segments[token] : undefined;
+    const segment = segments.get(token);
 
     if (segment === undefined) {
-      appendClassEntry(entries, token, artifact.classWrites);
+      appendClassEntry(entries, token, classWrites);
       continue;
     }
 
@@ -155,8 +92,7 @@ function collectEntries(
       payload.length !== segment.length ||
       !payload.every(
         (value, payloadIndex) =>
-          Object.prototype.hasOwnProperty.call(artifact.classWrites, value) &&
-          artifact.classWrites[value] === segment[payloadIndex]
+          classWrites.get(value) === segment[payloadIndex]
       )
     ) {
       entries.push({ kind: "unknown", className: token });
@@ -179,11 +115,9 @@ function collectEntries(
 function appendClassEntry(
   entries: RuntimeEntry[],
   className: string,
-  classWrites: Record<string, number>
+  classWrites: ReadonlyMap<string, number>
 ): void {
-  const writeId = Object.prototype.hasOwnProperty.call(classWrites, className)
-    ? classWrites[className]
-    : undefined;
+  const writeId = classWrites.get(className);
 
   if (writeId === undefined) {
     entries.push({ kind: "unknown", className });
@@ -203,44 +137,4 @@ function getKnownWriteIds(entries: readonly RuntimeEntry[]): number[] {
   }
 
   return writeIds;
-}
-
-// == Tests ====================================================================
-// Ignore errors when compiling to CommonJS.
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-ignore error TS1343: The 'import.meta' meta-property is only allowed when the '--module' option is 'es2020', 'es2022', 'esnext', 'system', 'node16', or 'nodenext'.
-if (import.meta.vitest) {
-  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-  // @ts-ignore error TS1343: The 'import.meta' meta-property is only allowed when the '--module' option is 'es2020', 'es2022', 'esnext', 'system', 'node16', or 'nodenext'.
-  const { describe, expect, it } = import.meta.vitest;
-
-  describe("defineRules cx runtime", () => {
-    it("preserves prototype-inherited tokens as unknown", () => {
-      const runtimeWithSegments = createDefineRulesCxRuntime({
-        classWrites: {},
-        segments: {}
-      });
-      const runtimeWithoutSegments = createDefineRulesCxRuntime({
-        classWrites: {}
-      });
-
-      expect(runtimeWithSegments("toString toString")).toBe(
-        "toString toString"
-      );
-      expect(runtimeWithoutSegments("__proto__ __proto__")).toBe(
-        "__proto__ __proto__"
-      );
-    });
-
-    it("preserves inherited marker payload write IDs as unknown", () => {
-      const classWrites: Record<string, number> = { owned: 1 };
-      Object.setPrototypeOf(classWrites, { inherited: 1 });
-      const runtime = createDefineRulesCxRuntime({
-        classWrites,
-        segments: { marker: [1] }
-      });
-
-      expect(runtime("marker inherited owned")).toBe("marker inherited owned");
-    });
-  });
 }

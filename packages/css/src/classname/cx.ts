@@ -3,6 +3,7 @@ import type {
   ClassValue,
   ClassMultipleInput,
   ClassMultipleResult,
+  Cx,
   CxWith,
   CxWithCallback,
   CxWithCallbackArgs,
@@ -11,6 +12,74 @@ import type {
 } from "./types.js";
 
 const cxImpl: (...inputs: ClassValue[]) => string = clsx;
+
+function cxMultipleResult<T extends ClassMultipleInput>(
+  mapper: (...inputs: ClassValue[]) => string,
+  map: T
+): ClassMultipleResult<T> {
+  const result = Object.create(null) as ClassMultipleResult<T>;
+
+  for (const key in map) {
+    result[key] = mapper(map[key]);
+  }
+
+  return result;
+}
+
+function createCx(cxImpl: (...inputs: ClassValue[]) => string): Cx {
+  function cxMultiple<T extends ClassMultipleInput>(
+    map: T
+  ): ClassMultipleResult<T> {
+    return cxMultipleResult(cxImpl, map);
+  }
+
+  function cxWith<const T extends ClassValue>(): CxWith<T>;
+  function cxWith<const F extends CxWithCallback>(
+    callback: F
+  ): CxWithMixin<CxWithCallbackArgs<F>>;
+  function cxWith<const Input>(
+    callback: (params: Input) => ClassValue
+  ): CxWithMixin<[params: Input]>;
+  function cxWith<const T extends ClassValue, const F extends CxWithCallback>(
+    callback?: ((params: T) => ClassValue) | F
+  ): CxWith<T> & CxWithMixin<CxWithCallbackArgs<F>> {
+    type CxWithRuntimeCallback = (...className: unknown[]) => ClassValue;
+    const cxFunction = (callback ??
+      ((...className: ClassValue[]) => className)) as CxWithRuntimeCallback;
+
+    function cxWithImpl(...className: unknown[]) {
+      return cxImpl(cxFunction(...className));
+    }
+
+    function cxWithMultiple<
+      ClassNameMap extends Record<
+        string,
+        T | CxWithTupleValue<CxWithCallbackArgs<F>>
+      >
+    >(classNameMap: ClassNameMap): ClassMultipleResult<ClassNameMap> {
+      const transformedClassNameMap: Record<keyof ClassNameMap, ClassValue> =
+        Object.create(null) as Record<keyof ClassNameMap, ClassValue>;
+      for (const key in classNameMap) {
+        const value = classNameMap[key];
+        transformedClassNameMap[key] = Array.isArray(value)
+          ? cxFunction(...value)
+          : cxFunction(value);
+      }
+
+      return cxMultipleResult(cxImpl, transformedClassNameMap);
+    }
+
+    return Object.assign(cxWithImpl, {
+      multiple: cxWithMultiple
+    }) as CxWith<T> & CxWithMixin<CxWithCallbackArgs<F>>;
+  }
+
+  return Object.assign((...inputs: ClassValue[]) => cxImpl(...inputs), {
+    multiple: cxMultiple,
+    with: cxWith
+  });
+}
+
 /**
  * Conditionally join class names into a single string
  *
@@ -37,62 +106,8 @@ const cxImpl: (...inputs: ClassValue[]) => string = clsx;
  * cx('foo', [1 && 'bar', { baz: false }], ['hello', ['world']], 'cya');
  * // => 'foo bar hello world cya'
  */
-export const cx = Object.assign(cxImpl, {
-  multiple: cxMultiple,
-  with: cxWith
-});
-
-function cxMultiple<T extends ClassMultipleInput>(
-  map: T
-): ClassMultipleResult<T> {
-  const result = {} as ClassMultipleResult<T>;
-
-  for (const key in map) {
-    result[key] = cxImpl(map[key]);
-  }
-
-  return result;
-}
-
-function cxWith<const T extends ClassValue>(): CxWith<T>;
-function cxWith<const F extends CxWithCallback>(
-  callback: F
-): CxWithMixin<CxWithCallbackArgs<F>>;
-function cxWith<const Input>(
-  callback: (params: Input) => ClassValue
-): CxWithMixin<[params: Input]>;
-function cxWith<const T extends ClassValue, const F extends CxWithCallback>(
-  callback?: ((params: T) => ClassValue) | F
-): CxWith<T> & CxWithMixin<CxWithCallbackArgs<F>> {
-  type CxWithRuntimeCallback = (...className: unknown[]) => ClassValue;
-  const cxFunction = (callback ??
-    ((...className: ClassValue[]) => className)) as CxWithRuntimeCallback;
-
-  function cxWithImpl(...className: unknown[]) {
-    return cxImpl(cxFunction(...className));
-  }
-
-  function cxWithMultiple<
-    ClassNameMap extends Record<
-      string,
-      T | CxWithTupleValue<CxWithCallbackArgs<F>>
-    >
-  >(classNameMap: ClassNameMap): ClassMultipleResult<ClassNameMap> {
-    type TransformedClassNameMap = Record<keyof ClassNameMap, ClassValue>;
-    const transformedClassNameMap: TransformedClassNameMap =
-      {} as TransformedClassNameMap;
-    for (const key in classNameMap) {
-      const value = classNameMap[key];
-      transformedClassNameMap[key] = Array.isArray(value)
-        ? cxFunction(...value)
-        : cxFunction(value);
-    }
-    return cxMultiple(transformedClassNameMap);
-  }
-
-  return Object.assign(cxWithImpl, { multiple: cxWithMultiple }) as CxWith<T> &
-    CxWithMixin<CxWithCallbackArgs<F>>;
-}
+export const cx = createCx(cxImpl);
+export { createCx };
 
 // == Tests ====================================================================
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
@@ -103,6 +118,30 @@ if (import.meta.vitest) {
   const { describe, it, expect, assertType, vi } = import.meta.vitest;
 
   describe.concurrent("cx()", () => {
+    it("keeps caller implementations and independently created helpers isolated", () => {
+      const implementation = Object.freeze(
+        vi.fn((...inputs: ClassValue[]) => clsx(...inputs))
+      );
+      const first = createCx(implementation);
+      const firstMultiple = first.multiple;
+      const firstWith = first.with;
+      const second = createCx(implementation);
+
+      expect(first).not.toBe(second);
+      expect(first.multiple).toBe(firstMultiple);
+      expect(first.with).toBe(firstWith);
+      expect(second.multiple).not.toBe(firstMultiple);
+      expect(second.with).not.toBe(firstWith);
+      expect(implementation).not.toHaveProperty("multiple");
+      expect(implementation).not.toHaveProperty("with");
+      expect(first("base", false, ["active"])).toBe("base active");
+      expect(implementation).toHaveBeenLastCalledWith("base", false, [
+        "active"
+      ]);
+      expect(second.multiple({ item: "second" })).toEqual({ item: "second" });
+      expect(first.with((value: string) => value)("first")).toBe("first");
+    });
+
     it("handles string inputs (variadic)", () => {
       expect(cx("foo", "bar", "baz")).toBe("foo bar baz");
       expect(cx("foo")).toBe("foo");
@@ -210,6 +249,19 @@ if (import.meta.vitest) {
   });
 
   describe.concurrent("cx.multiple()", () => {
+    it("preserves an own enumerable __proto__ key", () => {
+      const result = cx.multiple({
+        ["__proto__"]: ["first", false, "second"],
+        ordinary: "third"
+      });
+
+      expect(Object.entries(result)).toEqual([
+        ["__proto__", "first second"],
+        ["ordinary", "third"]
+      ]);
+      expect(Object.getPrototypeOf(result)).toBeNull();
+    });
+
     it("processes a map of class values", () => {
       const result = cx.multiple({
         primary: ["bg-blue-500", "text-white"],
@@ -261,6 +313,20 @@ if (import.meta.vitest) {
   });
 
   describe.concurrent("cx.with()", () => {
+    it("preserves an own enumerable __proto__ key through the mapper", () => {
+      const mapper = cx.with((name: string) => [name, "active"]);
+      const result = mapper.multiple({
+        ["__proto__"]: ["base"],
+        ordinary: ["next"]
+      });
+
+      expect(Object.entries(result)).toEqual([
+        ["__proto__", "base active"],
+        ["ordinary", "next active"]
+      ]);
+      expect(Object.getPrototypeOf(result)).toBeNull();
+    });
+
     it("creates a typed constraint without transformer", () => {
       type LayoutDisplay = "flex" | "grid" | "block";
       type LayoutSpacing = `p-${number}` | `m-${number}`;

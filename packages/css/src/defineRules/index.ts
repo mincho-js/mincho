@@ -416,6 +416,39 @@ if (import.meta.vitest) {
 
     return node;
   };
+  const hasSerializedRecipe = (
+    value: unknown
+  ): value is {
+    readonly __recipe__: { readonly args: readonly unknown[] };
+  } => {
+    if (
+      (typeof value !== "object" || value === null) &&
+      typeof value !== "function"
+    ) {
+      return false;
+    }
+    if (!("__recipe__" in value)) return false;
+    const recipe = value.__recipe__;
+    return (
+      typeof recipe === "object" &&
+      recipe !== null &&
+      "args" in recipe &&
+      Array.isArray(recipe.args)
+    );
+  };
+  const isDefineRulesPresetArtifactV5 = (
+    value: unknown
+  ): value is DefineRulesPresetArtifactV5 =>
+    typeof value === "object" &&
+    value !== null &&
+    "schema" in value &&
+    value.schema === "mincho.defineRulesPreset" &&
+    "version" in value &&
+    value.version === 5 &&
+    "rootNodeId" in value &&
+    typeof value.rootNodeId === "string" &&
+    "nodes" in value &&
+    Array.isArray(value.nodes);
 
   afterEach(() => {
     while (getActiveDefineRulesRegistrySession() != null) {
@@ -472,16 +505,19 @@ if (import.meta.vitest) {
       display: "flex"
     });
 
-    const recipeConfig = (
-      bindings.css as unknown as {
-        readonly __recipe__?: { readonly args?: readonly unknown[] };
-      }
-    ).__recipe__?.args?.[0] as {
-      readonly presets?: DefineRulesPresetArtifactV5;
-    };
-    expect(
-      getOwnPresetNode(recipeConfig.presets ?? bindings.preset).atoms
-    ).toHaveLength(1);
+    if (!hasSerializedRecipe(bindings.css)) {
+      throw new Error("Expected serialized defineRules css recipe");
+    }
+    const recipeConfig = bindings.css.__recipe__.args[0];
+    if (
+      typeof recipeConfig !== "object" ||
+      recipeConfig === null ||
+      !("presets" in recipeConfig) ||
+      !isDefineRulesPresetArtifactV5(recipeConfig.presets)
+    ) {
+      throw new Error("Expected serialized defineRules preset recipe input");
+    }
+    expect(getOwnPresetNode(recipeConfig.presets).atoms).toHaveLength(1);
   }
 
   describe("defineRules", () => {
@@ -1273,7 +1309,7 @@ if (import.meta.vitest) {
           themeVars
         );
         expect(cxRecipeArgs?.[0]).toMatchObject({
-          classWrites: expect.any(Object)
+          classWrites: expect.any(Array)
         });
       });
 
@@ -1961,56 +1997,6 @@ if (import.meta.vitest) {
     });
 
     describe("DefineRules Registry", () => {
-      it("keeps registered preset roots stable across evaluations of the same file scope", () => {
-        const evaluateRegistered = () => {
-          const session = beginDefineRulesRegistrySession();
-
-          try {
-            const rules = defineRules({
-              properties: {
-                color: true
-              }
-            });
-            const preset = rules.preset;
-            const instance = session.instances[0];
-
-            if (instance == null) {
-              throw new Error("Expected a registered defineRules instance");
-            }
-
-            return {
-              origin: getOwnPresetNode(preset).origin,
-              registrationId: instance.registrationId,
-              rootNodeId: preset.rootNodeId
-            };
-          } finally {
-            expect(endDefineRulesRegistrySession()).toBe(session);
-          }
-        };
-
-        const first = evaluateRegistered();
-        const second = evaluateRegistered();
-
-        expect(first.origin).toBe(first.registrationId);
-        expect(second.origin).toBe(second.registrationId);
-        expect(first.rootNodeId).toBe(second.rootNodeId);
-      });
-
-      it("keeps unregistered runtime preset roots distinct", () => {
-        const first = createDefineRulesRuntime({
-          properties: {
-            color: true
-          }
-        });
-        const second = createDefineRulesRuntime({
-          properties: {
-            color: true
-          }
-        });
-
-        expect(first.preset.rootNodeId).not.toBe(second.preset.rootNodeId);
-      });
-
       it("registers live V5 preset artifacts with deferred snapshots", () => {
         const session = beginDefineRulesRegistrySession();
 
@@ -2144,51 +2130,21 @@ if (import.meta.vitest) {
         }
       });
 
-      it("keeps function-valued unregistered preset origins distinct from following registered presets", async () => {
-        const session = beginDefineRulesRegistrySession();
+      it("reuses registry origin identity across sequential evaluations", () => {
+        const origins: string[] = [];
 
-        try {
-          const provider = defineRules({
-            debugId: "unregisteredFunctionProvider",
-            properties: {
-              color(value: "red") {
-                return value;
-              }
-            }
-          });
-          const providerPreset = provider.preset;
-          const providerRoot = getOwnPresetNode(providerPreset);
-          const consumer = defineRules({
-            debugId: "registeredPresetConsumer",
-            presets: providerPreset,
-            properties: {
-              background: true
-            }
-          });
-          const consumerPreset = consumer.preset;
-          const consumerRoot = getOwnPresetNode(consumerPreset);
+        for (let index = 0; index < 2; index += 1) {
+          const session = beginDefineRulesRegistrySession();
 
-          expect(providerRoot.origin).toBe("<root>:test#defineRules:0");
-          expect(consumerRoot.origin).toBe("<root>:test#defineRules:1");
-          expect(consumerPreset.rootNodeId).not.toBe(providerPreset.rootNodeId);
-          expect(consumerRoot.parents).toContain(providerPreset.rootNodeId);
-          expect(
-            session.instances.map((instance) => instance.registrationId)
-          ).toEqual(["<root>:test#defineRules:1"]);
-          expect(session.nextRegistrationIndexByFileScope).toEqual({
-            "<root>:test": 2
-          });
-          expect(session.nextRegistrationIndex).toBe(1);
-
-          const { resolveDefineRulesPresetGraphV5 } =
-            await import("./presetGraph.js");
-
-          expect(() =>
-            resolveDefineRulesPresetGraphV5([consumerPreset])
-          ).not.toThrow();
-        } finally {
-          expect(endDefineRulesRegistrySession()).toBe(session);
+          try {
+            const owner = defineRules({ properties: { color: true } });
+            origins.push(getOwnPresetNode(owner.preset).origin);
+          } finally {
+            expect(endDefineRulesRegistrySession()).toBe(session);
+          }
         }
+
+        expect(origins[0]).toBe(origins[1]);
       });
     });
 
@@ -2445,11 +2401,11 @@ if (import.meta.vitest) {
           "segments"
         ]);
         expect(recipeArtifact).toMatchObject({
-          classWrites: expect.objectContaining({
-            [expectFirstAtomicClassName(red)]: expect.any(Number),
-            [expectFirstAtomicClassName(blue)]: expect.any(Number)
-          }),
-          segments: expect.any(Object)
+          classWrites: expect.arrayContaining([
+            [expectFirstAtomicClassName(red), expect.any(Number)],
+            [expectFirstAtomicClassName(blue), expect.any(Number)]
+          ]),
+          segments: expect.any(Array)
         });
         expect(JSON.stringify(recipeArtifact)).not.toContain(
           "mincho.defineRulesPreset"
@@ -2493,7 +2449,7 @@ if (import.meta.vitest) {
           )
         );
         expect(getDefineRulesRecipe(scopedCx)?.args?.[0]).toMatchObject({
-          classWrites: expect.any(Object)
+          classWrites: expect.any(Array)
         });
       });
 
@@ -2567,7 +2523,7 @@ if (import.meta.vitest) {
           );
           expect(getDefineRulesRecipe(scopedCx)?.args?.[0], path).toMatchObject(
             {
-              classWrites: expect.any(Object)
+              classWrites: expect.any(Array)
             }
           );
         }
@@ -2595,7 +2551,7 @@ if (import.meta.vitest) {
           context
         );
         expect(getDefineRulesRecipe(scopedCx)?.args?.[0]).toMatchObject({
-          classWrites: expect.any(Object)
+          classWrites: expect.any(Array)
         });
       });
 

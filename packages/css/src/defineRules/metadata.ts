@@ -10,6 +10,20 @@ export type ConditionId = number;
 export type PropertyId = number;
 export type WriteKeyId = number;
 
+export function createCanonicalWriteKey(
+  condition: NormalizedCondition,
+  property: string
+): string {
+  return JSON.stringify([
+    condition.layer,
+    condition.supports,
+    condition.media,
+    condition.container,
+    condition.selector,
+    property
+  ]);
+}
+
 export type CompiledKnownEntry = DefineRulesPresetCompiledKnownEntry & {
   writeKeyId: WriteKeyId;
 };

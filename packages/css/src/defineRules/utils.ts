@@ -164,7 +164,7 @@ export function createCanonicalStyleCache(debugId?: string) {
     key: unknown,
     value: unknown,
     fragment: CSSRule
-  ): { cacheKey: string; className: string } {
+  ): { readonly cacheKey: string; readonly className: string } {
     const cacheKey = fragmentCacheKey(key, value, fragment);
     fragmentCacheKeys.add(cacheKey);
     return { cacheKey, className: cacheClassName(cacheKey, fragment) };
@@ -343,14 +343,14 @@ if (import.meta.vitest) {
     it("should ignore plain object key order in whole fragment cache keys and fragments", () => {
       const cache = createCanonicalStyleCache(debugId);
 
-      const className = cache.addFragment(
+      const { className } = cache.addFragment(
         "background",
         { b: 2, a: 1 },
         {
           vars: { "--b": "2", "--a": "1" },
           background: "rgb(0, 0, 255)"
         }
-      ).className;
+      );
 
       expectClassName(className);
       expect(
@@ -396,25 +396,53 @@ if (import.meta.vitest) {
       expect(cache.exportSnapshot()).toEqual({ [cacheKey]: className });
     });
 
+    it("should hydrate fragment values for getFragment and exportSnapshot", () => {
+      const fragment = { color: "red" } as const;
+      const source = createCanonicalStyleCache(debugId);
+      const { cacheKey, className } = source.addFragment(
+        "color",
+        "red",
+        fragment
+      );
+      const cache = createCanonicalStyleCache(debugId);
+
+      cache.hydrateFragment(cacheKey, className);
+
+      expect(cache.getFragment("color", "red", fragment)).toBe(className);
+      expect(cache.exportSnapshot()).toEqual({ [cacheKey]: className });
+    });
+
+    it("should ignore unsafe hydrated fragment keys", () => {
+      const cache = createCanonicalStyleCache(debugId);
+
+      for (const cacheKey of ["__proto__", "constructor", "prototype"]) {
+        cache.hydrateFragment(cacheKey, "hydrated");
+      }
+
+      expect(cache.size).toBe(0);
+      expect(cache.exportSnapshot()).toEqual({});
+      expect(Object.prototype).not.toHaveProperty("hydrated");
+    });
+
     it("should distinguish full and pruned fragments for the same property/value pair in the whole fragment cache", () => {
       const cache = createCanonicalStyleCache(debugId);
 
       const full = cache.addFragment("background", "red", {
         vars: { "--alpha": "1" },
         background: "rgba(255, 0, 0, var(--alpha))"
-      }).className;
+      });
       const pruned = cache.addFragment("background", "red", {
         vars: { "--alpha": "1" }
-      }).className;
+      });
 
-      expectClassName(full);
-      expectClassName(pruned);
-      expect(pruned).not.toBe(full);
+      expectClassName(full.className);
+      expectClassName(pruned.className);
+      expect(pruned.className).not.toBe(full.className);
       expect(
         cache.getFragment("background", "red", {
           vars: { "--alpha": "1" }
         })
-      ).toBe(pruned);
+      ).toBe(pruned.className);
       expect(cache.size).toBe(2);
     });
 
@@ -434,11 +462,11 @@ if (import.meta.vitest) {
         undefined
       );
 
-      const className = cache.addFragment(
+      const { className } = cache.addFragment(
         "background",
         "red",
         firstFragment
-      ).className;
+      );
       expectClassName(className);
       expect(cache.getFragment("background", "red", secondFragment)).toBe(
         className
