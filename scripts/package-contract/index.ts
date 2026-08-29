@@ -2,13 +2,11 @@ import { cp, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  assertBuildArtifacts,
-  assertInstalledPackageContract,
-  assertVerifierFailurePaths
-} from "./artifacts.js";
+import { assertBuildArtifacts } from "./artifacts.js";
 import { packFixturePackages } from "./fixture-packages.js";
+import { assertInstalledPackageContract } from "./installed-package-contract.js";
 import { runCommand } from "./process.js";
+import { assertVerifierFailurePaths } from "./verifier-failures.js";
 import { collectWorkspaceClosure, packWorkspaceClosure } from "./workspace.js";
 
 const scriptRoot = dirname(fileURLToPath(import.meta.url));
@@ -16,10 +14,16 @@ const repoRoot = join(scriptRoot, "..", "..");
 
 async function writeConsumerManifest(
   consumerRoot: string,
-  archives: readonly { readonly archivePath: string; readonly manifest: { readonly name: string } }[]
+  archives: readonly {
+    readonly archivePath: string;
+    readonly manifest: { readonly name: string };
+  }[]
 ): Promise<void> {
   const dependencies = Object.fromEntries(
-    archives.map((archive) => [archive.manifest.name, `file:${archive.archivePath}`])
+    archives.map((archive) => [
+      archive.manifest.name,
+      `file:${archive.archivePath}`
+    ])
   );
   Object.assign(dependencies, {
     "@vanilla-extract/css": "1.20.1",
@@ -35,7 +39,9 @@ async function writeConsumerManifest(
 
 async function main(): Promise<void> {
   assertVerifierFailurePaths();
-  const consumerRoot = await mkdtemp(join(tmpdir(), "mincho-package-contract-"));
+  const consumerRoot = await mkdtemp(
+    join(tmpdir(), "mincho-package-contract-")
+  );
   console.log(`[package-contract] temp isolation: ${consumerRoot}`);
   try {
     const workspaces = await collectWorkspaceClosure(repoRoot);
@@ -47,7 +53,9 @@ async function main(): Promise<void> {
       `[package-contract] packed packages: ${packed.map((entry) => entry.manifest.name).join(", ")}`
     );
     await writeConsumerManifest(consumerRoot, packed);
-    await cp(join(scriptRoot, "fixture"), join(consumerRoot, "fixture"), { recursive: true });
+    await cp(join(scriptRoot, "fixture"), join(consumerRoot, "fixture"), {
+      recursive: true
+    });
     await runCommand({
       command: "npm",
       args: ["install", "--ignore-scripts", "--no-audit", "--no-fund"],
@@ -77,7 +85,9 @@ async function main(): Promise<void> {
     await assertBuildArtifacts({ consumerRoot });
     console.log("[package-contract] artifact assertions: passed");
   } finally {
-    await rm(consumerRoot, { force: true, recursive: true });
+    if (process.env.MINCHO_KEEP_PACKAGE_CONTRACT !== "1") {
+      await rm(consumerRoot, { force: true, recursive: true });
+    }
   }
 }
 

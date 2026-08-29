@@ -6,6 +6,11 @@ import type {
   PresetOriginId
 } from "./types.js";
 
+export const presetArtifactDiagnostics = {
+  unsupportedFields: "contains unsupported fields",
+  invalidHash: "expected a SHA-256 hash"
+} as const;
+
 export function readRecord(
   value: unknown,
   path: string,
@@ -20,7 +25,7 @@ export function readRecord(
     names.length !== keys.length ||
     names.some((name) => !keys.includes(name))
   ) {
-    throwInvalid(path, "contains unsupported fields");
+    throwInvalid(path, presetArtifactDiagnostics.unsupportedFields);
   }
 
   for (const key of keys) {
@@ -88,7 +93,7 @@ export function readAtomId(value: unknown, path: string): PresetAtomId {
 function readHash(value: unknown, path: string): string {
   const hash = readString(value, path);
   if (!/^[a-f0-9]{64}$/.test(hash))
-    throwInvalid(path, "expected a SHA-256 hash");
+    throwInvalid(path, presetArtifactDiagnostics.invalidHash);
   return hash;
 }
 

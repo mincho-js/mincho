@@ -1,7 +1,20 @@
-import { build } from "esbuild";
-import { parseDefineRulesPresetArtifactV5 } from "../../packages/css/src/defineRules/presetArtifact.js";
-import type { DefineRulesPresetArtifactV5 } from "../../packages/css/src/defineRules/types.js";
+import { posix } from "node:path";
+import {
+  parseDefineRulesPresetArtifactV5,
+  resolveDefineRulesPresetGraphV5
+} from "@mincho-js/css/defineRules/registry";
+import {
+  exportedStaticValues,
+  isStaticRecord,
+  type StaticExport,
+  type StaticRecord,
+  type StaticValue
+} from "./exported-presets.js";
+import { collectEsmImportedExports } from "./static-exports.js";
 import { PackageContractError } from "./types.js";
+
+type Output = { readonly label: string; readonly source: string };
+type PresetArtifact = ReturnType<typeof parseDefineRulesPresetArtifactV5>;
 
 function assertContract(condition: unknown, detail: string): asserts condition {
   if (!condition) throw new PackageContractError(detail);
@@ -18,15 +31,21 @@ export const diamondPackageNames = new Set<string>(
   diamondSelectors.map(({ packageName }) => packageName)
 );
 
-const presetSchemaPattern = /["']?schema["']?\s*:\s*["']mincho\.defineRulesPreset["']/;
-const v5PresetPattern = /\{[^{}]*["']?schema["']?\s*:\s*["']mincho\.defineRulesPreset["'][^{}]*["']?version["']?\s*:\s*5(?=\s*[,}])/;
-const legacyPresetPattern = /\{[^{}]*["']?schema["']?\s*:\s*["']mincho\.defineRulesPreset["'][^{}]*["']?version["']?\s*:\s*[34](?=\s*[,}])/;
+const propertyBoundary = String.raw`(?:^|[,{])\s*`;
+const presetSchemaProperty = String.raw`["']?schema["']?\s*:\s*["']mincho\.defineRulesPreset["']`;
+const runtimeGraphPatterns = [
+  new RegExp(`${propertyBoundary}${presetSchemaProperty}`),
+  /["']?rootNodeId["']?\s*:/
+] as const;
 
 export function count(source: string, value: string): number {
   return source.split(value).length - 1;
 }
 
-export function assertDiamondSelectorsOnce(source: string, label: string): void {
+export function assertDiamondSelectorsOnce(
+  source: string,
+  label: string
+): void {
   for (const { selector } of diamondSelectors) {
     assertContract(
       count(source, selector) === 1,
@@ -36,66 +55,191 @@ export function assertDiamondSelectorsOnce(source: string, label: string): void 
 }
 
 export function assertNoRuntimeGraph(source: string, label: string): void {
-  assertContract(!presetSchemaPattern.test(source), `${label} leaked preset graph: ${presetSchemaPattern.source}`);
-}
-
-export function assertV5PresetOutput(source: string, label: string, diamondOnly = false): void {
-  assertContract(presetSchemaPattern.test(source), `${label} schema is absent`);
-  assertContract(v5PresetPattern.test(source), `${label} is not V5-only`);
-  assertContract(!legacyPresetPattern.test(source), `${label} retains legacy version output`);
-  if (diamondOnly) {
-    for (const { packageName } of diamondSelectors) {
-      assertContract(source.includes(`${packageName}:`), `${label} omits ${packageName}`);
-    }
+  for (const pattern of runtimeGraphPatterns) {
+    assertContract(
+      !pattern.test(source),
+      `${label} leaked preset graph: ${pattern.source}`
+    );
   }
 }
 
-export function assertV5PresetArtifact(value: unknown, label: string): DefineRulesPresetArtifactV5 {
+function collectPresetArtifacts(
+  value: StaticValue,
+  artifacts: StaticRecord[]
+): void {
+  if (Array.isArray(value)) {
+    for (const child of value) collectPresetArtifacts(child, artifacts);
+    return;
+  }
+  if (!isStaticRecord(value)) return;
+  if (
+    Object.prototype.hasOwnProperty.call(value, "schema") &&
+    value.schema === "mincho.defineRulesPreset"
+  ) {
+    artifacts.push(value);
+  }
+  for (const child of Object.values(value)) {
+    collectPresetArtifacts(child, artifacts);
+  }
+}
+
+function parseArtifact(value: StaticRecord, label: string): PresetArtifact {
   try {
     return parseDefineRulesPresetArtifactV5(value);
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
-    throw new PackageContractError(`${label} is not a valid V5 preset: ${detail}`);
+    throw new PackageContractError(`${label}: ${detail}`);
   }
 }
 
-export function assertDiamondPresetOrigins(artifact: DefineRulesPresetArtifactV5, label: string): void {
-  const origins = new Set(artifact.nodes.map(({ origin }) => origin.slice(0, origin.indexOf(":"))));
-  assertContract(origins.size === diamondPackageNames.size, `${label} package origins changed`);
-  for (const packageName of diamondPackageNames) {
-    assertContract(origins.has(packageName), `${label} omits ${packageName}`);
+function resolveArtifacts(
+  artifacts: readonly PresetArtifact[],
+  label: string
+): void {
+  try {
+    resolveDefineRulesPresetGraphV5(artifacts);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new PackageContractError(`${label}: ${detail}`);
   }
 }
 
-export async function presetExport(entrypoint: string, label: string, consumerRoot: string): Promise<unknown> {
-  const result = await build({
-    absWorkingDir: consumerRoot,
-    bundle: true,
-    format: "esm",
-    loader: { ".css": "empty" },
-    platform: "node",
-    stdin: {
-      contents: `
-        import { preset as candidatePreset } from ${JSON.stringify(entrypoint)};
-        import { parseDefineRulesPresetArtifactV5 } from "@mincho-js/css/defineRules/registry";
-        import { createDefineRulesCssRuntime } from "@mincho-js/css/defineRules/createDefineRulesCssRuntime";
+function parsedArtifacts(
+  exportedValues: readonly StaticExport[],
+  label: string
+): PresetArtifact[] {
+  const artifacts: PresetArtifact[] = [];
+  for (const exported of exportedValues) {
+    const exportedArtifacts: StaticRecord[] = [];
+    collectPresetArtifacts(exported.value, exportedArtifacts);
+    for (const [index, artifact] of exportedArtifacts.entries()) {
+      const suffix =
+        exportedArtifacts.length > 1 ? ` artifact ${index + 1}` : "";
+      artifacts.push(
+        parseArtifact(artifact, `${label} export ${exported.name}${suffix}`)
+      );
+    }
+  }
+  return artifacts;
+}
 
-        const parsedPreset = parseDefineRulesPresetArtifactV5(candidatePreset);
-        export const runtime = createDefineRulesCssRuntime({ presets: parsedPreset, properties: {} });
-        export { parsedPreset as preset };
-      `,
-      resolveDir: consumerRoot,
-      sourcefile: `${label}.mjs`
-    },
-    write: false
-  });
-  const output = result.outputFiles[0];
+function outputExports(
+  label: string,
+  outputs: ReadonlyMap<string, Output>,
+  resolving: ReadonlySet<string>
+): readonly StaticExport[] {
   assertContract(
-    result.outputFiles.length === 1 && output !== undefined,
-    `${label} did not emit one importable preset module`
+    !resolving.has(label),
+    `${label} has a CommonJS re-export cycle`
   );
-  const module: Record<string, unknown> = await import(
-    `data:text/javascript;base64,${Buffer.from(output.contents).toString("base64")}`
+  const output = outputs.get(label);
+  assertContract(output !== undefined, `Missing JS artifact ${label}`);
+  const nextResolving = new Set(resolving).add(label);
+  const resolveReexport = (
+    moduleSpecifier: string,
+    memberName: string,
+    supportedTarget: RegExp
+  ): StaticValue => {
+    assertContract(
+      supportedTarget.test(moduleSpecifier),
+      `${label} re-exports preset from unsupported target ${moduleSpecifier}`
+    );
+    const target = posix.normalize(
+      posix.join(posix.dirname(label), moduleSpecifier)
+    );
+    assertContract(
+      !posix.isAbsolute(target) && target !== ".." && !target.startsWith("../"),
+      `${label} re-exports preset outside the artifact root`
+    );
+    const targetExport = outputExports(target, outputs, nextResolving).find(
+      ({ name }) => name === memberName
+    );
+    assertContract(
+      targetExport !== undefined,
+      `${label} re-exports missing preset ${memberName} from ${target}`
+    );
+    return targetExport.value;
+  };
+  const directExports = exportedStaticValues(output.source, label, (reexport) =>
+    resolveReexport(reexport.moduleSpecifier, reexport.memberName, /\.cjs$/)
   );
-  return module["preset"];
+  const esmReexports = collectEsmImportedExports(output.source, label)
+    .filter(({ exportName }) => /preset/i.test(exportName))
+    .map(
+      (reexport): StaticExport => ({
+        name: reexport.exportName,
+        value: resolveReexport(
+          reexport.moduleSpecifier,
+          reexport.memberName,
+          /\.(?:m?js)$/
+        )
+      })
+    );
+  return [...directExports, ...esmReexports];
+}
+
+export function assertV5PresetOutput(
+  source: string,
+  label: string,
+  diamondOnly = false
+): void {
+  const artifacts = parsedArtifacts(exportedStaticValues(source, label), label);
+  assertContract(artifacts.length > 0, `${label} schema is absent`);
+  resolveArtifacts(artifacts, label);
+  if (diamondOnly) {
+    const origins = artifacts.flatMap((artifact) =>
+      artifact.nodes.map((node) => node.origin)
+    );
+    for (const { packageName } of diamondSelectors) {
+      assertContract(
+        origins.some((origin) => origin.startsWith(`${packageName}:`)),
+        `${label} omits ${packageName}`
+      );
+    }
+  }
+}
+
+export function assertV5PresetOutputs(
+  outputs: readonly Output[],
+  label: string,
+  requiredLabels: readonly string[],
+  requiredPresetLabels: readonly string[]
+): void {
+  const outputByLabel = new Map(
+    outputs.map((output) => [output.label, output])
+  );
+  assertContract(
+    outputByLabel.size === outputs.length,
+    `${label} contains duplicate JS artifact labels`
+  );
+  for (const requiredLabel of requiredLabels) {
+    assertContract(
+      outputByLabel.has(requiredLabel),
+      `${label} is missing required JS artifact ${requiredLabel}`
+    );
+  }
+  for (const requiredPresetLabel of requiredPresetLabels) {
+    const output = outputByLabel.get(requiredPresetLabel);
+    assertContract(
+      output !== undefined,
+      `${label} is missing required JS artifact ${requiredPresetLabel}`
+    );
+    const formatArtifacts = parsedArtifacts(
+      outputExports(output.label, outputByLabel, new Set()),
+      output.label
+    );
+    assertContract(
+      formatArtifacts.length > 0,
+      `${requiredPresetLabel} schema is absent`
+    );
+    resolveArtifacts(formatArtifacts, requiredPresetLabel);
+  }
+  const artifacts = outputs.flatMap((output) =>
+    parsedArtifacts(
+      outputExports(output.label, outputByLabel, new Set()),
+      output.label
+    )
+  );
+  assertContract(artifacts.length > 0, `${label} schema is absent`);
+  resolveArtifacts(artifacts, label);
 }
