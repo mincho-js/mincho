@@ -6,7 +6,7 @@
   "scripts": {
     "start": "vite",
     "build": "vite build",
-    "check": "tsc",
+    "check": "yarn g:check",
     "lint": "eslint . --cache --cache-location .cache/eslint --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview"
   },
