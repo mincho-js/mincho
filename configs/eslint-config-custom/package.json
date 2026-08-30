@@ -6,6 +6,7 @@
   "license": "MIT",
   "exports": {
     "./typescript": {
+      "types": "./eslint.config.typescript.d.ts",
       "import": {
         "default": "./eslint.config.typescript.js"
       }
