@@ -1,10 +1,11 @@
 import nextra from "nextra";
+import withRspack from "next-rspack";
 
 const withNextra = nextra({
   contentDirBasePath: "/docs"
 });
 
-export default withNextra({
+const nextConfig = withNextra({
   reactStrictMode: true,
   output: "export",
   basePath: "/mincho",
@@ -13,3 +14,5 @@ export default withNextra({
     unoptimized: true
   }
 });
+
+export default withRspack(nextConfig);
