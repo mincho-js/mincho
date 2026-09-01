@@ -55,6 +55,7 @@
   "dependencies": {
     "@babel/core": "^7.29.0",
     "@babel/plugin-syntax-jsx": "^7.28.6",
+    "@babel/preset-typescript": "^7.28.5",
     "@mincho-js/babel": "workspace:^",
     "@mincho-js/css": "workspace:^",
     "@vanilla-extract/integration": "^8.0.10",

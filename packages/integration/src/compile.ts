@@ -1,3 +1,4 @@
+import { typescriptPresetPath } from "./babelPreset.js";
 import { basename, dirname, join } from "node:path";
 import * as fs from "node:fs";
 import { addFileScope, getPackageInfo } from "@vanilla-extract/integration";
@@ -16,16 +17,16 @@ interface CompileOptions {
 }
 
 function getScopedSourceWithCache({
-  cwd,
   contents,
   originalPath,
   packageName,
+  rootPath,
   resolverCache
 }: {
-  cwd: string;
   contents: string;
   originalPath: string;
   packageName: string;
+  rootPath: string;
   resolverCache: Map<string, string>;
 }) {
   if (resolverCache.has(originalPath)) {
@@ -35,7 +36,7 @@ function getScopedSourceWithCache({
   const source = addFileScope({
     source: contents,
     filePath: originalPath,
-    rootPath: cwd,
+    rootPath,
     packageName
   });
 
@@ -65,7 +66,7 @@ function transformScopedDependencySource({
   source = transformSync(source, {
     filename: filePath,
     plugins: [minchoStyledComponentPlugin()],
-    presets: ["@babel/preset-typescript"],
+    presets: [typescriptPresetPath],
     sourceMaps: false
   })!.code!;
 
@@ -126,11 +127,12 @@ export async function compile({
   originalPath
 }: CompileOptions) {
   const packageInfo = getPackageInfo(cwd);
+  const sourcePackageInfo = getPackageInfo(dirname(originalPath));
   const source = getScopedSourceWithCache({
-    cwd,
     contents,
     originalPath,
-    packageName: packageInfo.name,
+    packageName: sourcePackageInfo.name,
+    rootPath: sourcePackageInfo.dirname,
     resolverCache
   });
 

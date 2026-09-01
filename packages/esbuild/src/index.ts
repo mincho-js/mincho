@@ -4074,7 +4074,7 @@ if (import.meta.vitest) {
       );
       const fixtureProjectRoot = resolvePath(
         dirname(fixtureCase.fixturePath),
-        "../../../../../.."
+        "../../../../../../.."
       );
       const fixtureAppPath = join(
         fixtureProjectRoot,

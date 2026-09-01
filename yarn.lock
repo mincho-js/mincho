@@ -2350,6 +2350,7 @@ __metadata:
   dependencies:
     "@babel/core": "npm:^7.29.0"
     "@babel/plugin-syntax-jsx": "npm:^7.28.6"
+    "@babel/preset-typescript": "npm:^7.28.5"
     "@mincho-js/babel": "workspace:^"
     "@mincho-js/css": "workspace:^"
     "@mincho-js/debug-log": "workspace:^"

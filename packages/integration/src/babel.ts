@@ -1,3 +1,4 @@
+import { typescriptPresetPath } from "./babelPreset.js";
 import { type TransformOptions, transformFileAsync } from "@babel/core";
 import {
   type InternalImportedStaticCssEvalModuleRecord as ImportedStaticCssEvalModuleRecord,
@@ -249,7 +250,7 @@ export async function babelTransform(
         ...(Array.isArray(babelCoreOptions.presets)
           ? babelCoreOptions.presets
           : []),
-        "@babel/preset-typescript"
+        typescriptPresetPath
       ],
       sourceMaps: false
     });
@@ -530,6 +531,30 @@ if (import.meta.vitest) {
   }
 
   describe("babelTransform", () => {
+    it("resolves its TypeScript preset outside the consumer cwd", async () => {
+      const fs = await import("node:fs/promises");
+      const { tmpdir } = await import("node:os");
+      const { join } = await import("node:path");
+      const fixtureRoot = await fs.mkdtemp(
+        join(tmpdir(), "mincho-preset-consumer-")
+      );
+      fixtureRoots.push(fixtureRoot);
+      const fixturePath = join(fixtureRoot, "entry.ts");
+      await fs.writeFile(
+        fixturePath,
+        "export const value: number = 42;",
+        "utf8"
+      );
+
+      const transformed = await babelTransform(fixturePath, {
+        cwd: fixtureRoot,
+        babelrc: false,
+        configFile: false
+      });
+
+      expect(transformed.code).toContain("export const value = 42;");
+    });
+
     it("does not start a prepass for a project engine without a source provider", async () => {
       const fixturePath = await createBabelFixture(
         `

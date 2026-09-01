@@ -51,7 +51,12 @@ interface ResolvedConfig {
   mode: string;
   build: {
     cssCodeSplit?: boolean;
-    lib?: { cssFileName?: string } | false;
+    lib?:
+      | {
+          cssFileName?: string;
+          entry?: string | readonly string[] | Readonly<Record<string, string>>;
+        }
+      | false;
     watch: unknown;
   };
 }
@@ -91,11 +96,20 @@ interface LibraryCssSidecarContract {
   readonly hasOwnCss: boolean;
 }
 
+interface LoadedModule {
+  code: string | null;
+  importedIdResolutions?: readonly {
+    id: string;
+    external?: boolean | "absolute" | "relative";
+  }[];
+}
+
 interface PluginContext {
   addWatchFile: (id: string) => void;
   load?: (options: {
     id: string;
-  }) => Promise<{ code?: string } | null> | { code?: string } | null;
+    resolveDependencies?: boolean;
+  }) => Promise<LoadedModule | null> | LoadedModule | null;
   resolve?: (
     source: string,
     importer?: string,
@@ -113,7 +127,11 @@ interface PluginContext {
 interface Plugin {
   name: string;
   enforce?: "pre" | "post";
-  buildStart?: () => void;
+  buildStart?: {
+    order: "post";
+    sequential: true;
+    handler: (this: PluginContext) => void | Promise<void>;
+  };
   configureServer?: (server: ViteDevServer) => void;
   configResolved?: (config: ResolvedConfig) => void | Promise<void>;
   resolveId?: (id: string, importer?: string) => string | undefined;
@@ -593,9 +611,41 @@ export function minchoVitePlugin(
   return {
     name: "mincho-css-vite",
     enforce: "pre",
-    buildStart() {
-      libraryCssSidecarContracts.clear();
-      libraryCssAssetFileName = undefined;
+    buildStart: {
+      // Entry preloading must wait for async CSS compiler initialization.
+      order: "post",
+      sequential: true,
+      async handler(this: PluginContext) {
+        libraryCssSidecarContracts.clear();
+        libraryCssAssetFileName = undefined;
+        if (config.build.lib && this.load) {
+          const entry = config.build.lib.entry;
+          if (entry === undefined) return;
+          const entryIds =
+            typeof entry === "string"
+              ? [entry]
+              : Array.isArray(entry)
+                ? entry
+                : Object.values(entry);
+
+          // Resolving imports does not finish their transforms. Load the full
+          // graph before another entry can serialize a shared preset.
+          const loadedIds = new Set<string>();
+          const preload = async (id: string): Promise<void> => {
+            if (loadedIds.has(id)) return;
+            loadedIds.add(id);
+            const moduleInfo = await this.load?.({
+              id,
+              resolveDependencies: true
+            });
+            for (const dependency of moduleInfo?.importedIdResolutions ?? []) {
+              if (!dependency.external) await preload(dependency.id);
+            }
+          };
+
+          for (const id of entryIds) await preload(id);
+        }
+      }
     },
     configureServer(serverInstance: ViteDevServer) {
       server = serverInstance;
@@ -835,8 +885,8 @@ export function minchoVitePlugin(
         }
       }
 
-      if (/(j|t)sx?(\?used)?$/.test(id) && !id.endsWith(".vanilla.js")) {
-        if (id.includes("node_modules")) return;
+      if (/\.(j|t)sx?(\?used)?$/.test(id) && !id.endsWith(".vanilla.js")) {
+        if (id.includes("node_modules") || /(^|\/)\.yarn\//.test(id)) return;
 
         if (id.endsWith(".css.ts")) {
           return;
@@ -2188,8 +2238,12 @@ if (import.meta.vitest) {
     }
 
     return {
-      buildStart() {
-        plugin.buildStart?.();
+      async buildStart() {
+        await plugin.buildStart?.handler.call({
+          addWatchFile(file: string) {
+            watchFiles.push(file);
+          }
+        });
       },
       async load(id: string) {
         return plugin.load?.(id);
@@ -4677,6 +4731,67 @@ if (import.meta.vitest) {
       expect(readFileSpy).not.toHaveBeenCalled();
     });
 
+    it("waits for asynchronous plugin initialization before preloading library CSS", async () => {
+      const { build } = await import("vite");
+      const cacheRoot = createViteFixtureCacheRoot();
+      await fs.promises.mkdir(cacheRoot, { recursive: true });
+      const root = await fs.promises.mkdtemp(
+        join(cacheRoot, "async-css-init-")
+      );
+      const entryPath = join(root, "entry.css");
+      await fs.promises.writeFile(entryPath, "");
+      let initialized = false;
+      let loadedBeforeInitialization = false;
+
+      try {
+        const result = await build({
+          root,
+          configFile: false,
+          logLevel: "silent",
+          plugins: [
+            minchoVitePlugin() as never,
+            {
+              name: "async-css-compiler",
+              enforce: "post",
+              async buildStart() {
+                await new Promise((resolve) => setTimeout(resolve, 100));
+                initialized = true;
+              },
+              load(id) {
+                if (id !== entryPath) return null;
+                loadedBeforeInitialization ||= !initialized;
+                return initialized ? ".ready { color: purple; }" : "";
+              }
+            }
+          ],
+          build: {
+            cssCodeSplit: true,
+            cssMinify: false,
+            lib: { entry: entryPath, fileName: "index", formats: ["es"] },
+            write: false
+          }
+        });
+        const css = (Array.isArray(result) ? result : [result])
+          .flatMap((output) => {
+            if (!("output" in output)) throw new Error("Expected build output");
+            return output.output;
+          })
+          .filter(
+            (output) =>
+              output.type === "asset" && output.fileName.endsWith(".css")
+          )
+          .map((output) =>
+            output.type === "asset" ? String(output.source) : ""
+          )
+          .join("\n");
+
+        expect(loadedBeforeInitialization).toBe(false);
+        expect(css).toContain("color: purple;");
+      } finally {
+        await fs.promises.rm(root, { force: true, recursive: true });
+      }
+    });
+
     it("preserves virtual CSS IDs across build starts", async () => {
       const integrationModule = await import("@mincho-js/integration");
       vi.spyOn(integrationModule, "babelTransform").mockResolvedValue({
@@ -4697,7 +4812,7 @@ if (import.meta.vitest) {
       }
       expect(await harness.load(resolvedVirtualId)).not.toBeNull();
 
-      harness.buildStart();
+      await harness.buildStart();
 
       await expect(harness.load(resolvedVirtualId)).resolves.not.toBeNull();
       expect(harness.resolveId(importId, fixture.extractedId)).toBe(
@@ -5086,7 +5201,18 @@ if (import.meta.vitest) {
         await fs.promises.readFile(fixturePath, "utf8")
       ).replace(
         /"@mincho-js-proof\/([^"]+)"/g,
-        '"./node_modules/@mincho-js-proof/$1/dist/index.js"'
+        (_specifier, packageName: string) =>
+          JSON.stringify(
+            normalizePath(
+              join(
+                fixtureRoot,
+                "node_modules",
+                "@mincho-js-proof",
+                packageName,
+                "dist/index.js"
+              )
+            )
+          )
       );
       const integrationModule = await import("@mincho-js/integration");
 
@@ -5115,6 +5241,20 @@ if (import.meta.vitest) {
               write: false
             },
             resolve: {
+              alias: Object.fromEntries(
+                ["diamond-a", "diamond-b", "diamond-c"].map((packageName) => [
+                  `@mincho-js-proof/${packageName}/style.css`,
+                  normalizePath(
+                    join(
+                      fixtureRoot,
+                      "node_modules",
+                      "@mincho-js-proof",
+                      packageName,
+                      "dist/index.css"
+                    )
+                  )
+                ])
+              ),
               preserveSymlinks: true
             }
           });
@@ -5596,7 +5736,7 @@ if (import.meta.vitest) {
           build: { lib: { cssFileName: "style" }, watch: true }
         }
       });
-      harness.buildStart();
+      await harness.buildStart();
       const firstFixture = await createExtractedCssFixture(harness);
       await harness.transform(
         firstFixture.extractedId,
@@ -5619,7 +5759,7 @@ if (import.meta.vitest) {
         'import "./style.css";\nexport const first = true;'
       );
 
-      harness.buildStart();
+      await harness.buildStart();
       const secondFixture = await createExtractedCssFixture(harness);
       await harness.transform(
         secondFixture.extractedId,
@@ -5685,7 +5825,7 @@ if (import.meta.vitest) {
           }
         }
       });
-      harness.buildStart();
+      await harness.buildStart();
       const { extractedId, extractedSource } =
         await createExtractedCssFixture(harness);
       await harness.transform(extractedId, extractedSource);
@@ -5831,41 +5971,37 @@ if (import.meta.vitest) {
       ).rejects.toThrow("entry chunk entry.mjs expected one emitted CSS asset");
     });
 
-    it("real Vite registry builds helper-wrapped, IIFE, nested, multiple instances, and imported helper fixtures", async () => {
-      const realBuildCaseIds = [
-        "registry-helper-wrapped-executed",
-        "registry-iife-executed",
-        "registry-nested-function-executed",
-        "registry-multiple-instances",
-        "registry-imported-helper-executed"
-      ];
-
-      for (const caseId of realBuildCaseIds) {
-        const fixtureCase = serializedRegistryFixtureCases.find(
-          (candidate) => candidate.caseId === caseId
-        );
-        if (fixtureCase == null) {
-          throw new Error(`Missing registry fixture case ${caseId}`);
-        }
-
-        const { registrySource } =
-          await buildRealViteRegistryFixture(fixtureCase);
-
-        expect(registrySource).not.toBe("");
-        expectSourceToContainV5PresetArtifact(registrySource);
-        expectSourceToContainPopulatedPresetAtom(registrySource);
-        if (fixtureCase.expectedRegistryInstances > 1) {
-          const artifactCount = Array.from(
-            registrySource.matchAll(
-              /["']?schema["']?\s*:\s*["']mincho\.defineRulesPreset["']/g
-            )
-          ).length;
-          expect(artifactCount).toBeGreaterThanOrEqual(
-            fixtureCase.expectedRegistryInstances
-          );
-        }
+    it.each([
+      "registry-helper-wrapped-executed",
+      "registry-iife-executed",
+      "registry-nested-function-executed",
+      "registry-multiple-instances",
+      "registry-imported-helper-executed"
+    ])("real Vite registry builds %s", async (caseId: string) => {
+      const fixtureCase = serializedRegistryFixtureCases.find(
+        (candidate) => candidate.caseId === caseId
+      );
+      if (fixtureCase == null) {
+        throw new Error(`Missing registry fixture case ${caseId}`);
       }
-    }, 20000);
+
+      const { registrySource } =
+        await buildRealViteRegistryFixture(fixtureCase);
+
+      expect(registrySource).not.toBe("");
+      expectSourceToContainV5PresetArtifact(registrySource);
+      expectSourceToContainPopulatedPresetAtom(registrySource);
+      if (fixtureCase.expectedRegistryInstances > 1) {
+        const artifactCount = Array.from(
+          registrySource.matchAll(
+            /["']?schema["']?\s*:\s*["']mincho\.defineRulesPreset["']/g
+          )
+        ).length;
+        expect(artifactCount).toBeGreaterThanOrEqual(
+          fixtureCase.expectedRegistryInstances
+        );
+      }
+    });
 
     it("real Vite function-valued config build skips registry artifacts", async () => {
       const fixtureCase = registryFixtureMatrixCases.find(
@@ -6236,10 +6372,10 @@ if (import.meta.vitest) {
       let suiteRoot = "";
 
       beforeAll(async () => {
-        const cacheRoot = createViteFixtureCacheRoot();
-        await fs.promises.mkdir(cacheRoot, { recursive: true });
+        const { tmpdir } = await import("node:os");
+        // Keep this node_modules consumer outside the workspace's PnP graph.
         suiteRoot = await fs.promises.mkdtemp(
-          join(cacheRoot, "shared-component-package-")
+          join(tmpdir(), "shared-component-package-")
         );
         installedPackageRoot = join(
           suiteRoot,
@@ -6357,6 +6493,13 @@ if (import.meta.vitest) {
               write: false
             },
             resolve: {
+              // Vite's workspace PnP resolver cannot locate this isolated install.
+              alias: [
+                {
+                  find: /^@examples\/shared-component$/,
+                  replacement: installedPackageRoot
+                }
+              ],
               preserveSymlinks: true
             }
           });
