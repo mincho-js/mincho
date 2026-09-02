@@ -20,6 +20,7 @@
     "@eslint/js": "^9.39.4",
     "@mincho-js/css": "workspace:^",
     "@mincho-js/vite": "workspace:^",
+    "@types/node": "^25.6.2",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@typescript-eslint/eslint-plugin": "^8.52.0",
@@ -32,6 +33,7 @@
     "globals": "^17.6.0",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.59.2",
-    "vite": "^7.3.3"
+    "vite": "^7.3.3",
+    "vitest": "^4.1.5"
   }
 }

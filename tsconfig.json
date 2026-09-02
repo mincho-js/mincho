@@ -27,10 +27,10 @@
       "path": "packages/react"
     },
     {
-      "path": "packages/transform-to-vanilla"
+      "path": "packages/transform-runtime"
     },
     {
-      "path": "packages/transform-runtime"
+      "path": "packages/transform-to-vanilla"
     },
     {
       "path": "packages/vite"

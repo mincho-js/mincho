@@ -62,10 +62,13 @@
   "prettier": "prettier-config-custom",
   "devDependencies": {
     "@types/deep-diff": "^1.0.5",
+    "@types/node": "^25.6.2",
     "eslint-config-custom": "workspace:^",
     "prettier-config-custom": "workspace:^",
     "tsconfig-custom": "workspace:^",
-    "vite-config-custom": "workspace:^"
+    "vite": "^7.3.3",
+    "vite-config-custom": "workspace:^",
+    "vitest": "^4.1.5"
   },
   "dependencies": {
     "@mincho-js/pretify-deep-diff": "^1.0.5",

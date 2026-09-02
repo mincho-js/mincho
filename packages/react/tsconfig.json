@@ -5,6 +5,9 @@
       "path": "../css"
     },
     {
+      "path": "../debug-log"
+    },
+    {
       "path": "../../configs/vite-config-custom"
     },
     {

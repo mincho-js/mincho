@@ -12,6 +12,7 @@
       }
     },
     "./yaml": {
+      "types": "./eslint.config.yaml.d.ts",
       "import": {
         "default": "./eslint.config.yaml.js"
       }

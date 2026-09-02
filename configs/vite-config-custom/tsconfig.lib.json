@@ -3,7 +3,13 @@
   "compilerOptions": {
     "outDir": "./dist",
     "rootDir": "./src",
-    "tsBuildInfoFile": "./.cache/typescript/tsbuildinfo-esm"
+    "tsBuildInfoFile": "./.cache/typescript/tsbuildinfo-esm",
+    "types": [
+      "node",
+      "vite/client"
+    ]
   },
-  "include": ["src"]
+  "include": [
+    "src"
+  ]
 }

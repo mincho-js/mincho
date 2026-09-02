@@ -62,12 +62,17 @@
     "@mincho-js/transform-runtime": "workspace:^"
   },
   "devDependencies": {
+    "@mincho-js/debug-log": "workspace:^",
     "@types/babel__core": "^7.20.5",
     "@types/babel__generator": "^7.27.0",
     "@types/babel__traverse": "^7.28.0",
+    "@types/node": "^25.6.2",
     "eslint-config-custom": "workspace:^",
     "prettier-config-custom": "workspace:^",
     "tsconfig-custom": "workspace:^",
-    "vite-config-custom": "workspace:^"
+    "tslib": "^2.8.1",
+    "vite": "^7.3.3",
+    "vite-config-custom": "workspace:^",
+    "vitest": "^4.1.5"
   }
 }

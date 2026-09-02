@@ -2,7 +2,7 @@
 # Manual changes might be lost - proceed with caution!
 
 __metadata:
-  version: 9
+  version: 10
   cacheKey: 10
 
 "@aashutoshrathi/word-wrap@npm:^1.2.3":
@@ -1662,14 +1662,21 @@ __metadata:
   resolution: "@examples/shared-component@workspace:examples/shared-component"
   dependencies:
     "@mincho-js/css": "workspace:^"
+    "@mincho-js/debug-log": "workspace:^"
+    "@mincho-js/react": "workspace:^"
     "@mincho-js/vite": "workspace:^"
+    "@types/node": "npm:^25.6.2"
     "@types/react": "npm:^19.2.14"
     "@vanilla-extract/css": "npm:^1.20.1"
+    "@vanilla-extract/vite-plugin": "npm:^5.2.2"
     eslint-config-custom: "workspace:^"
     prettier-config-custom: "workspace:^"
     react: "npm:^19.2.6"
+    react-dom: "npm:^19.2.6"
     tsconfig-custom: "workspace:^"
+    vite: "npm:^7.3.3"
     vite-config-custom: "workspace:^"
+    vitest: "npm:^4.1.5"
   languageName: unknown
   linkType: soft
 
@@ -2264,14 +2271,19 @@ __metadata:
     "@babel/preset-typescript": "npm:^7.28.5"
     "@babel/traverse": "npm:^7.29.0"
     "@emotion/hash": "npm:^0.9.2"
+    "@mincho-js/debug-log": "workspace:^"
     "@mincho-js/transform-runtime": "workspace:^"
     "@types/babel__core": "npm:^7.20.5"
     "@types/babel__generator": "npm:^7.27.0"
     "@types/babel__traverse": "npm:^7.28.0"
+    "@types/node": "npm:^25.6.2"
     eslint-config-custom: "workspace:^"
     prettier-config-custom: "workspace:^"
     tsconfig-custom: "workspace:^"
+    tslib: "npm:^2.8.1"
+    vite: "npm:^7.3.3"
     vite-config-custom: "workspace:^"
+    vitest: "npm:^4.1.5"
   languageName: unknown
   linkType: soft
 
@@ -2279,11 +2291,15 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@mincho-js/css-additional-types@workspace:packages/css-additional-types"
   dependencies:
+    "@mincho-js/debug-log": "workspace:^"
+    "@types/node": "npm:^25.6.2"
     eslint-config-custom: "workspace:^"
     mdn-data: "git+https://github.com/mdn/data.git#7f0c865a3c4b5d891285c93308ee5c25cb5cfee8"
     prettier-config-custom: "workspace:^"
     tsconfig-custom: "workspace:^"
+    vite: "npm:^7.3.3"
     vite-config-custom: "workspace:^"
+    vitest: "npm:^4.1.5"
   languageName: unknown
   linkType: soft
 
@@ -2293,13 +2309,17 @@ __metadata:
   dependencies:
     "@emotion/hash": "npm:^0.9.2"
     "@fastify/deepmerge": "npm:^3.2.1"
+    "@mincho-js/debug-log": "workspace:^"
     "@mincho-js/transform-to-vanilla": "workspace:^"
+    "@types/node": "npm:^25.6.2"
     "@vanilla-extract/css": "npm:^1.20.1"
     clsx: "npm:^2.1.1"
     eslint-config-custom: "workspace:^"
     prettier-config-custom: "workspace:^"
     tsconfig-custom: "workspace:^"
+    vite: "npm:^7.3.3"
     vite-config-custom: "workspace:^"
+    vitest: "npm:^4.1.5"
   peerDependencies:
     "@vanilla-extract/css": "*"
   languageName: unknown
@@ -2319,13 +2339,16 @@ __metadata:
     "@mincho-js/pretify-deep-diff": "npm:^1.0.5"
     "@pinojs/json-colorizer": "npm:^4.0.0"
     "@types/deep-diff": "npm:^1.0.5"
+    "@types/node": "npm:^25.6.2"
     boxen: "npm:^8.0.1"
     chalk: "npm:^5.6.2"
     deep-diff: "npm:^1.0.2"
     eslint-config-custom: "workspace:^"
     prettier-config-custom: "workspace:^"
     tsconfig-custom: "workspace:^"
+    vite: "npm:^7.3.3"
     vite-config-custom: "workspace:^"
+    vitest: "npm:^4.1.5"
   languageName: unknown
   linkType: soft
 
@@ -2333,14 +2356,22 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@mincho-js/esbuild@workspace:packages/esbuild"
   dependencies:
+    "@mincho-js/css": "workspace:^"
+    "@mincho-js/debug-log": "workspace:^"
     "@mincho-js/integration": "workspace:^"
+    "@types/node": "npm:^25.6.2"
+    "@vanilla-extract/css": "npm:^1.20.1"
     "@vanilla-extract/esbuild-plugin": "npm:^2.3.22"
     "@vanilla-extract/integration": "npm:^8.0.10"
     esbuild: "npm:^0.27.7"
     eslint-config-custom: "workspace:^"
     prettier-config-custom: "workspace:^"
     tsconfig-custom: "workspace:^"
+    vite: "npm:^7.3.3"
     vite-config-custom: "workspace:^"
+    vitest: "npm:^4.1.5"
+  peerDependencies:
+    "@vanilla-extract/css": "*"
   languageName: unknown
   linkType: soft
 
@@ -2355,13 +2386,18 @@ __metadata:
     "@mincho-js/css": "workspace:^"
     "@mincho-js/debug-log": "workspace:^"
     "@types/babel__core": "npm:^7.20.5"
+    "@types/node": "npm:^25.6.2"
     "@vanilla-extract/css": "npm:^1.20.1"
     "@vanilla-extract/integration": "npm:^8.0.10"
     esbuild: "npm:^0.27.7"
     eslint-config-custom: "workspace:^"
     prettier-config-custom: "workspace:^"
     tsconfig-custom: "workspace:^"
+    vite: "npm:^7.3.3"
     vite-config-custom: "workspace:^"
+    vitest: "npm:^4.1.5"
+  peerDependencies:
+    "@vanilla-extract/css": "*"
   languageName: unknown
   linkType: soft
 
@@ -2381,6 +2417,8 @@ __metadata:
   dependencies:
     "@mincho-js/css": "workspace:^"
     "@mincho-js/csstype": "npm:^3.1.4"
+    "@mincho-js/debug-log": "workspace:^"
+    "@types/node": "npm:^25.6.2"
     "@types/react": "npm:^19.2.14"
     "@types/react-dom": "npm:^19.2.3"
     "@vanilla-extract/css": "npm:^1.20.1"
@@ -2389,8 +2427,11 @@ __metadata:
     react: "npm:^19.2.6"
     react-dom: "npm:^19.2.6"
     tsconfig-custom: "workspace:^"
+    vite: "npm:^7.3.3"
     vite-config-custom: "workspace:^"
+    vitest: "npm:^4.1.5"
   peerDependencies:
+    "@vanilla-extract/css": "*"
     react: ">=16.8.0"
     react-dom: ">=16.8.0"
   languageName: unknown
@@ -2400,10 +2441,14 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@mincho-js/transform-runtime@workspace:packages/transform-runtime"
   dependencies:
+    "@mincho-js/debug-log": "workspace:^"
+    "@types/node": "npm:^25.6.2"
     eslint-config-custom: "workspace:^"
     prettier-config-custom: "workspace:^"
     tsconfig-custom: "workspace:^"
+    vite: "npm:^7.3.3"
     vite-config-custom: "workspace:^"
+    vitest: "npm:^4.1.5"
   languageName: unknown
   linkType: soft
 
@@ -2414,11 +2459,16 @@ __metadata:
     "@fastify/deepmerge": "npm:^3.2.1"
     "@mincho-js/css-additional-types": "workspace:^"
     "@mincho-js/csstype": "npm:^3.1.4"
+    "@mincho-js/debug-log": "workspace:^"
+    "@types/node": "npm:^25.6.2"
     "@vanilla-extract/css": "npm:^1.20.1"
     eslint-config-custom: "workspace:^"
     prettier-config-custom: "workspace:^"
     tsconfig-custom: "workspace:^"
+    tslib: "npm:^2.8.1"
+    vite: "npm:^7.3.3"
     vite-config-custom: "workspace:^"
+    vitest: "npm:^4.1.5"
   languageName: unknown
   linkType: soft
 
@@ -2428,6 +2478,7 @@ __metadata:
   dependencies:
     "@babel/core": "npm:^7.29.0"
     "@mincho-js/css": "workspace:^"
+    "@mincho-js/debug-log": "workspace:^"
     "@mincho-js/integration": "workspace:^"
     "@mincho-js/transform-to-vanilla": "workspace:^"
     "@rollup/pluginutils": "npm:^5.3.0"
@@ -2440,7 +2491,9 @@ __metadata:
     prettier-config-custom: "workspace:^"
     tsconfig-custom: "workspace:^"
     typescript: "npm:^5.9.3"
+    vite: "npm:^7.3.3"
     vite-config-custom: "workspace:^"
+    vitest: "npm:^4.1.5"
   peerDependencies:
     "@vanilla-extract/css": "*"
   languageName: unknown
@@ -4317,6 +4370,13 @@ __metadata:
   version: 2.0.13
   resolution: "@types/mdx@npm:2.0.13"
   checksum: 10/b73ed5f08114879b9590dc6a9ee8b648643c57c708583cd24b2bc3cc8961361fc63139ac7e9291e7b3b6e6b45707749d01d6f9727ddec5533df75dc3b90871a4
+  languageName: node
+  linkType: hard
+
+"@types/mdx@npm:^2.0.13":
+  version: 2.0.14
+  resolution: "@types/mdx@npm:2.0.14"
+  checksum: 10/bb485c22c6f57b1f17437c889671859ce99160d97da9f72036fd57a8db22127088dde783bf19df975858fde69c2fc92349f6f39a803e51e823549967db282ae8
   languageName: node
   linkType: hard
 
@@ -9868,6 +9928,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "mincho-docs@workspace:site"
   dependencies:
+    "@types/mdx": "npm:^2.0.13"
     "@types/node": "npm:^25.6.2"
     "@types/react": "npm:^19.2.14"
     next: "npm:^16.2.6"
@@ -9886,11 +9947,13 @@ __metadata:
   dependencies:
     "@changesets/changelog-github": "npm:^0.5.2"
     "@changesets/cli": "npm:^2.29.8"
+    "@mincho-js/css": "workspace:^"
     "@mincho-js/debug-log": "workspace:^"
     "@monorepo-utils/workspaces-to-typescript-project-references": "npm:^2.11.0"
     "@types/eslint": "npm:^9.6.1"
     "@types/node": "npm:^25.6.2"
     "@typescript/analyze-trace": "npm:^0.10.1"
+    "@vanilla-extract/css": "npm:^1.20.1"
     "@vanilla-extract/vite-plugin": "npm:^5.2.2"
     "@vitest/coverage-v8": "npm:^4.1.5"
     "@yarnpkg/types": "npm:^4.0.1"
@@ -10989,6 +11052,7 @@ __metadata:
     "@mincho-js/vite": "workspace:^"
     "@types/babel__core": "npm:^7.20.5"
     "@types/cssesc": "npm:^3.0.2"
+    "@types/node": "npm:^25.6.2"
     "@types/react": "npm:^19.2.14"
     "@types/react-dom": "npm:^19.2.3"
     "@types/scheduler": "npm:^0.26.0"
@@ -11016,6 +11080,7 @@ __metadata:
     typescript: "npm:~5.9.3"
     typescript-eslint: "npm:^8.59.2"
     vite: "npm:^7.3.3"
+    vitest: "npm:^4.1.5"
   languageName: unknown
   linkType: soft
 
@@ -11072,6 +11137,7 @@ __metadata:
     "@mincho-js/css": "workspace:^"
     "@mincho-js/react": "workspace:^"
     "@mincho-js/vite": "workspace:^"
+    "@types/node": "npm:^25.6.2"
     "@types/react": "npm:^19.2.14"
     "@types/react-dom": "npm:^19.2.3"
     "@typescript-eslint/eslint-plugin": "npm:^8.52.0"
@@ -11087,6 +11153,7 @@ __metadata:
     typescript: "npm:^5.9.3"
     typescript-eslint: "npm:^8.59.2"
     vite: "npm:^7.3.3"
+    vitest: "npm:^4.1.5"
   languageName: unknown
   linkType: soft
 
@@ -11471,14 +11538,14 @@ __metadata:
 
 "resolve@patch:resolve@npm%3A^1.10.0#optional!builtin<compat/resolve>":
   version: 1.22.10
-  resolution: "resolve@patch:resolve@npm%3A1.22.10#optional!builtin<compat/resolve>::version=1.22.10&hash=c3c19d"
+  resolution: "resolve@patch:resolve@npm%3A1.22.10#optional!builtin<compat/resolve>::version=1.22.10&hash=9bd1a5"
   dependencies:
     is-core-module: "npm:^2.16.0"
     path-parse: "npm:^1.0.7"
     supports-preserve-symlinks-flag: "npm:^1.0.0"
   bin:
     resolve: bin/resolve
-  checksum: 10/d4d878bfe3702d215ea23e75e0e9caf99468e3db76f5ca100d27ebdc527366fee3877e54bce7d47cc72ca8952fc2782a070d238bfa79a550eeb0082384c3b81a
+  checksum: 10/c202d86f0b7090886c41427c7161c781169fafe20c9389c5feb0bc021a83e29db8f691c02fcd7d9730db2e7de6ef608a45d0e509733e7e54060d64f0e38521a5
   languageName: node
   linkType: hard
 
@@ -13030,6 +13097,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "vite-config-custom@workspace:configs/vite-config-custom"
   dependencies:
+    "@types/node": "npm:^25.6.2"
     eslint-config-custom: "workspace:^"
     prettier-config-custom: "workspace:^"
     tsconfig-custom: "workspace:^"
@@ -13039,6 +13107,7 @@ __metadata:
     vite-plugin-dts-build: "npm:^0.2.3"
     vite-plugin-externalize-deps: "npm:^0.10.0"
     vite-tsconfig-paths: "npm:^6.1.1"
+    vitest: "npm:^4.1.5"
   languageName: unknown
   linkType: soft
 

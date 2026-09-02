@@ -2,6 +2,9 @@
   "files": [],
   "references": [
     {
+      "path": "../debug-log"
+    },
+    {
       "path": "../../configs/vite-config-custom"
     },
     {

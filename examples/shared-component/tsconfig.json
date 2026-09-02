@@ -5,6 +5,12 @@
       "path": "../../packages/css"
     },
     {
+      "path": "../../packages/debug-log"
+    },
+    {
+      "path": "../../packages/react"
+    },
+    {
       "path": "../../packages/vite"
     },
     {

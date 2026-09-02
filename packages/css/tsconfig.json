@@ -5,6 +5,9 @@
       "path": "../transform-to-vanilla"
     },
     {
+      "path": "../debug-log"
+    },
+    {
       "path": "../../configs/vite-config-custom"
     },
     {

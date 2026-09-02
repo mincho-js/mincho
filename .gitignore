@@ -53,6 +53,9 @@ web_modules/
 # TypeScript cache
 *.tsbuildinfo
 
+# Integration tests generate and remove these files during parallel checks.
+/packages/integration/temps/
+
 # Optional npm cache directory
 .npm
 

@@ -2,10 +2,13 @@
   "files": [],
   "references": [
     {
-      "path": "../../configs/vite-config-custom"
+      "path": "../transform-runtime"
     },
     {
-      "path": "../transform-runtime"
+      "path": "../debug-log"
+    },
+    {
+      "path": "../../configs/vite-config-custom"
     },
     {
       "path": "./tsconfig.lib.json"

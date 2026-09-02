@@ -17,13 +17,18 @@ export async function runCommand({
   const rendered = [command, ...args].join(" ");
   console.log(`[package-contract] $ ${rendered}`);
 
+  // Keep npm and the isolated consumers free of the workspace's PnP loader.
+  // Workspace yarn commands inject their own loader when they need it.
+  const env = { ...process.env };
+  delete env.NODE_OPTIONS;
+
   const result = await new Promise<{
     readonly code: number | null;
     readonly signal: NodeJS.Signals | null;
     readonly stderr: string;
     readonly stdout: string;
   }>((resolve, reject) => {
-    const child = spawn(command, args, { cwd, stdio: "pipe" });
+    const child = spawn(command, args, { cwd, env, stdio: "pipe" });
     let stderr = "";
     let stdout = "";
     child.stdout.on("data", (chunk: Buffer) => {
