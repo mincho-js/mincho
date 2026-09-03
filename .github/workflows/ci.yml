@@ -41,6 +41,11 @@ jobs:
       - name: Check peer dependencies
         run: yarn check:peers
 
+      - name: Check PnP compatibility
+        run: |
+          yarn test:doctor
+          yarn doctor
+
       - name: Check package consistency
         run: yarn constraints
 

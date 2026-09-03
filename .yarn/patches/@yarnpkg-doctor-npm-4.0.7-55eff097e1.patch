@@ -1,0 +1,90 @@
+diff --git a/lib/cli.js b/lib/cli.js
+index 2c8ddb309d49c3ae59b3036ba3667e2c967fdff4..3fa46faabf248bb315f59bd5b7857b1f47cad25e 100644
+--- a/lib/cli.js
++++ b/lib/cli.js
+@@ -187,18 +187,14 @@ async function checkForUnmetPeerDependency(workspace, dependencyType, via, peer,
+     report.reportError(core_1.MessageName.UNNAMED, `${prettyLocation}: Unmet transitive peer dependency on ${core_1.structUtils.prettyDescriptor(configuration, peer)}, via ${core_1.structUtils.prettyDescriptor(configuration, via)}`);
+ }
+ async function makeResolveFn(project) {
+-    const cache = await core_1.Cache.find(project.configuration);
+-    const resolver = project.configuration.makeResolver();
+-    const fetcher = project.configuration.makeFetcher();
+-    const checksums = project.storedChecksums;
+-    const yarnReport = new core_1.ThrowReport();
+-    const fetchOptions = { project, fetcher, cache, checksums, report: yarnReport, cacheOptions: { skipIntegrityCheck: true } };
+-    const resolveOptions = { ...fetchOptions, resolver, fetchOptions };
++    await project.restoreInstallState();
+     return async (descriptor) => {
+-        const candidates = await resolver.getCandidates(descriptor, {}, resolveOptions);
+-        if (candidates.length === 0)
+-            return null;
+-        return await resolver.resolve(candidates[0], resolveOptions);
++        const normalized = project.configuration.normalizeDependency(descriptor);
++        const resolution = project.storedResolutions.get(normalized.descriptorHash);
++        const pkg = project.storedPackages.get(resolution);
++        if (!pkg)
++            throw new Error(`Dependency is absent from the installed lockfile; run yarn install`);
++        return pkg;
+     };
+ }
+ async function processManifest(workspace, { configuration, report }) {
+@@ -231,8 +227,11 @@ async function processWorkspace(workspace, { configuration, fileList, report })
+     const progress = core_1.StreamReport.progressViaCounter(fileList.length + 1);
+     const reportedProgress = report.reportProgress(progress);
+     for (const scriptName of workspace.manifest.scripts.keys())
+-        if (scriptName.match(/^(pre|post)(?!(install|pack)$)/) && !scriptName.match(/^prettier/))
+-            report.reportWarning(core_1.MessageName.UNNAMED, `User scripts prefixed with "pre" or "post" (like "${scriptName}") will not be called in sequence anymore; prefer calling prologues and epilogues explicitly`);
++        if (scriptName.match(/^(pre|post)(?!(install|pack)$)/) && !scriptName.match(/^prettier/)) {
++            const scriptNode = await buildJsonNode(fslib_1.ppath.join(workspace.cwd, core_1.Manifest.fileName), [`scripts`, scriptName]);
++            const prettyLocation = ast.prettyNodeLocation(configuration, scriptNode);
++            report.reportWarning(core_1.MessageName.UNNAMED, `${prettyLocation}: User scripts prefixed with "pre" or "post" (like "${scriptName}") will not be called in sequence anymore; prefer calling prologues and epilogues explicitly`);
++        }
+     if (Array.isArray(workspace.manifest.raw.bundleDependencies) || Array.isArray(workspace.manifest.raw.bundledDependencies))
+         report.reportWarning(core_1.MessageName.UNNAMED, `The bundleDependencies (or bundledDependencies) field is not supported anymore; prefer using a bundler`);
+     for (const p of fileList) {
+@@ -249,6 +248,7 @@ class EntryCommand extends clipanion_1.Command {
+     constructor() {
+         super(...arguments);
+         this.cwd = clipanion_1.Option.String({ required: false });
++        this.json = clipanion_1.Option.Boolean(`--json`, false);
+     }
+     async execute() {
+         const cwd = fslib_1.npath.toPortablePath(fslib_1.npath.resolve(this.cwd ?? `.`));
+@@ -270,9 +270,14 @@ class EntryCommand extends clipanion_1.Command {
+         const report = await core_1.StreamReport.start({
+             configuration,
+             stdout: this.context.stdout,
++            json: this.json,
++            includeLogs: true,
++            includeFooter: !this.json,
+         }, async (report) => {
+             report.reportInfo(core_1.MessageName.UNNAMED, `Found ${allManifestFolders.length} package(s) to process`);
+             report.reportInfo(core_1.MessageName.UNNAMED, `For a grand total of ${allFiles.length} file(s) to validate`);
++            let inspectedWorkspaces = 0;
++            let inspectedFiles = 0;
+             const progress = core_1.StreamReport.progressViaCounter(allManifestFolders.length);
+             const reportedProgress = report.reportProgress(progress);
+             try {
+@@ -298,9 +303,13 @@ class EntryCommand extends clipanion_1.Command {
+                                 fileList,
+                                 report,
+                             });
++                            inspectedWorkspaces += 1;
++                            inspectedFiles += fileList.length;
+                         });
+                     }
+-                    catch { }
++                    catch (error) {
++                        report.reportExceptionOnce(error);
++                    }
+                     progress.tick();
+                 }
+             }
+@@ -310,6 +319,7 @@ class EntryCommand extends clipanion_1.Command {
+             }
+             report.reportSeparator();
+             await reportedProgress;
++            report.reportJson({ type: `summary`, workspaces: inspectedWorkspaces, files: inspectedFiles });
+         });
+         return report.exitCode();
+     }

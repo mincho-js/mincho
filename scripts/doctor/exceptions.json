@@ -1,0 +1,652 @@
+[
+  {
+    "id": "configs-eslint-config-custom-eslint-config-base-node-modules-01",
+    "file": "configs/eslint-config-custom/eslint.config.base.js",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": "\"node_modules/**\",",
+    "count": 1,
+    "reason": "This ignore glob excludes node_modules in non-PnP consumers; it does not resolve or access a dependency.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "examples-react-babel-package-preview-01",
+    "file": "examples/react-babel/package.json",
+    "type": "warning",
+    "message": "User scripts prefixed with \"pre\" or \"post\" (like \"preview\") will not be called in sequence anymore; prefer calling prologues and epilogues explicitly",
+    "source": "\"preview\": \"vite preview\"",
+    "count": 1,
+    "reason": "Vite preview is an explicitly invoked command, not a pre lifecycle hook; no automatic sequencing is expected.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "examples-react-swc-package-build-peer-01",
+    "file": "examples/react-swc/package.json",
+    "type": "error",
+    "message": "Unmet transitive peer dependency on @vanilla-extract/css@*, via @mincho-js/react@workspace:^",
+    "source": "\"@mincho-js/react\": \"workspace:^\",",
+    "count": 1,
+    "reason": "This private example declares @vanilla-extract/css in devDependencies for CSS compilation; the production build emits CSS assets and the consumer contract tests the built output.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "examples-react-swc-package-preview-01",
+    "file": "examples/react-swc/package.json",
+    "type": "warning",
+    "message": "User scripts prefixed with \"pre\" or \"post\" (like \"preview\") will not be called in sequence anymore; prefer calling prologues and epilogues explicitly",
+    "source": "\"preview\": \"vite preview\"",
+    "count": 1,
+    "reason": "Vite preview is an explicitly invoked command, not a pre lifecycle hook; no automatic sequencing is expected.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "examples-shared-component-package-build-peer-01",
+    "file": "examples/shared-component/package.json",
+    "type": "error",
+    "message": "Unmet transitive peer dependency on @vanilla-extract/css@*, via @mincho-js/css@workspace:^",
+    "source": "\"@mincho-js/css\": \"workspace:^\",",
+    "count": 1,
+    "reason": "This private example declares @vanilla-extract/css in devDependencies for CSS compilation; the production build emits CSS assets and the consumer contract tests the built output.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "babel-static-css-eval-boundary-node-modules-01",
+    "file": "packages/babel/src/staticCssEval/boundary.ts",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": "\"Cannot statically evaluate css prop value: dependency is inside node_modules (/project/node_modules/pkg/styles.ts)\"",
+    "count": 1,
+    "reason": "This regression fixture or assertion deliberately models node_modules package paths for non-PnP consumers; it is not a workspace dependency lookup.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "babel-static-css-eval-boundary-node-modules-02",
+    "file": "packages/babel/src/staticCssEval/boundary.ts",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": ".includes(\"node_modules\");",
+    "count": 1,
+    "reason": "This path classifier enforces the node_modules boundary for non-PnP paths; it does not construct a dependency location.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "babel-static-css-eval-boundary-node-modules-03",
+    "file": "packages/babel/src/staticCssEval/boundary.ts",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": "it(\"rejects outside-root, node_modules, virtual, and package-export dependencies\", () => {",
+    "count": 1,
+    "reason": "This regression fixture or assertion deliberately models node_modules package paths for non-PnP consumers; it is not a workspace dependency lookup.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "babel-static-css-eval-boundary-node-modules-04",
+    "file": "packages/babel/src/staticCssEval/boundary.ts",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": "resolvedId: \"/project/node_modules/pkg/styles.ts\",",
+    "count": 1,
+    "reason": "This regression fixture or assertion deliberately models node_modules package paths for non-PnP consumers; it is not a workspace dependency lookup.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "babel-static-css-eval-boundary-node-modules-05",
+    "file": "packages/babel/src/staticCssEval/boundary.ts",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": "resolvedRealpath: \"/project/node_modules/pkg/styles.ts\",",
+    "count": 1,
+    "reason": "This regression fixture or assertion deliberately models node_modules package paths for non-PnP consumers; it is not a workspace dependency lookup.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "babel-static-css-eval-boundary-node-modules-06",
+    "file": "packages/babel/src/staticCssEval/boundary.ts",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": "return `dependency is inside node_modules (${options.resolvedRealpath})`;",
+    "count": 1,
+    "reason": "This diagnostic explains a rejected node_modules boundary; the string is not used as a filesystem location.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "babel-static-css-eval-diagnostics-node-modules-01",
+    "file": "packages/babel/src/staticCssEval/diagnostics.ts",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": "\"Provider-backed package, `node_modules`, and outside-root ESM source\"",
+    "count": 1,
+    "reason": "This support-matrix label documents provider-backed node_modules compatibility and is also used by its assertion; it performs no resolution.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "babel-static-css-eval-imported-modules-node-modules-01",
+    "file": "packages/babel/src/staticCssEval/importedModules.ts",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": "watchFiles: [\"/project/node_modules/@scope/styles/package.json\"]",
+    "count": 1,
+    "reason": "This regression fixture or assertion deliberately models node_modules package paths for non-PnP consumers; it is not a workspace dependency lookup.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "babel-static-css-eval-types-node-modules-01",
+    "file": "packages/babel/src/staticCssEval/types.ts",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": "\"Provider-backed package, `node_modules`, and outside-root ESM source\"",
+    "count": 1,
+    "reason": "This support-matrix label documents provider-backed node_modules compatibility and is also used by its assertion; it performs no resolution.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "babel-static-css-eval-types-node-modules-02",
+    "file": "packages/babel/src/staticCssEval/types.ts",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": "\"Provider-backed package, `node_modules`, and outside-root ESM source\",",
+    "count": 1,
+    "reason": "This support-matrix label documents provider-backed node_modules compatibility and is also used by its assertion; it performs no resolution.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "esbuild-index-node-modules-01",
+    "file": "packages/esbuild/src/index.ts",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": "const packagePath = join(fixture.root, \"node_modules/pkg/styles.ts\");",
+    "count": 2,
+    "reason": "This regression fixture or assertion deliberately models node_modules package paths for non-PnP consumers; it is not a workspace dependency lookup.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "esbuild-index-node-modules-02",
+    "file": "packages/esbuild/src/index.ts",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": "const packageRoot = join(fixture.root, \"node_modules/@pkg/styles\");",
+    "count": 6,
+    "reason": "This regression fixture or assertion deliberately models node_modules package paths for non-PnP consumers; it is not a workspace dependency lookup.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "esbuild-index-node-modules-03",
+    "file": "packages/esbuild/src/index.ts",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": "if (args.path.includes(\"node_modules\")) {",
+    "count": 1,
+    "reason": "This filter applies includeNodeModules to node_modules paths supplied by esbuild; it does not locate packages on disk.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "esbuild-index-node-modules-04",
+    "file": "packages/esbuild/src/index.ts",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": "sourceText: \"/node_modules/@pkg/styles/icon.wasm\",",
+    "count": 1,
+    "reason": "This regression fixture or assertion deliberately models node_modules package paths for non-PnP consumers; it is not a workspace dependency lookup.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "esbuild-index-esbuild-loader-01",
+    "file": "packages/esbuild/src/index.ts",
+    "type": "warning",
+    "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
+    "source": "loader: \"js\",",
+    "count": 1,
+    "reason": "This is an esbuild loader option, not a Webpack loader package; its value is an esbuild syntax name selected directly or by getScriptLoader.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "esbuild-index-esbuild-loader-02",
+    "file": "packages/esbuild/src/index.ts",
+    "type": "warning",
+    "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
+    "source": "loader: getScriptLoader(args.path),",
+    "count": 1,
+    "reason": "This is an esbuild loader option, not a Webpack loader package; its value is an esbuild syntax name selected directly or by getScriptLoader.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "integration-fixtures-manifest-node-modules-01",
+    "file": "packages/integration/src/__fixtures__/defineRules-preset-serialization/manifest.ts",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": "\"package-diamond/node_modules/@mincho-js-proof/diamond-a/dist/index.css\",",
+    "count": 1,
+    "reason": "This regression fixture or assertion deliberately models node_modules package paths for non-PnP consumers; it is not a workspace dependency lookup.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "integration-fixtures-manifest-node-modules-02",
+    "file": "packages/integration/src/__fixtures__/defineRules-preset-serialization/manifest.ts",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": "\"package-diamond/node_modules/@mincho-js-proof/diamond-b/dist/index.css\",",
+    "count": 1,
+    "reason": "This regression fixture or assertion deliberately models node_modules package paths for non-PnP consumers; it is not a workspace dependency lookup.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "integration-fixtures-manifest-node-modules-03",
+    "file": "packages/integration/src/__fixtures__/defineRules-preset-serialization/manifest.ts",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": "\"package-diamond/node_modules/@mincho-js-proof/diamond-c/dist/index.css\",",
+    "count": 1,
+    "reason": "This regression fixture or assertion deliberately models node_modules package paths for non-PnP consumers; it is not a workspace dependency lookup.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "integration-fixtures-manifest-node-modules-04",
+    "file": "packages/integration/src/__fixtures__/defineRules-preset-serialization/manifest.ts",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": "packageDiamondA: \"package-diamond/node_modules/@mincho-js-proof/diamond-a/dist/index.js\",",
+    "count": 1,
+    "reason": "This regression fixture or assertion deliberately models node_modules package paths for non-PnP consumers; it is not a workspace dependency lookup.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "integration-fixtures-manifest-node-modules-05",
+    "file": "packages/integration/src/__fixtures__/defineRules-preset-serialization/manifest.ts",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": "packageDiamondB: \"package-diamond/node_modules/@mincho-js-proof/diamond-b/dist/index.js\",",
+    "count": 1,
+    "reason": "This regression fixture or assertion deliberately models node_modules package paths for non-PnP consumers; it is not a workspace dependency lookup.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "integration-fixtures-manifest-node-modules-06",
+    "file": "packages/integration/src/__fixtures__/defineRules-preset-serialization/manifest.ts",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": "packageDiamondC: \"package-diamond/node_modules/@mincho-js-proof/diamond-c/dist/index.js\",",
+    "count": 1,
+    "reason": "This regression fixture or assertion deliberately models node_modules package paths for non-PnP consumers; it is not a workspace dependency lookup.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "integration-babel-node-modules-01",
+    "file": "packages/integration/src/babel.ts",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": "const dataWatchFile = \"/project/node_modules/@scope/styles/tokens.json\";",
+    "count": 1,
+    "reason": "This regression fixture or assertion deliberately models node_modules package paths for non-PnP consumers; it is not a workspace dependency lookup.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "integration-compile-esbuild-loader-01",
+    "file": "packages/integration/src/compile.ts",
+    "type": "warning",
+    "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
+    "source": "loader: \"tsx\",",
+    "count": 2,
+    "reason": "This is an esbuild loader option, not a Webpack loader package; its value is an esbuild syntax name selected directly or by getScriptLoader.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "integration-define-rules-preset-node-modules-01",
+    "file": "packages/integration/src/defineRulesPreset.ts",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": "'\"../node_modules/@mincho-js-proof/$1/dist/index.js\"'",
+    "count": 1,
+    "reason": "This regression fixture or assertion deliberately models node_modules package paths for non-PnP consumers; it is not a workspace dependency lookup.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "integration-static-css-eval-node-modules-01",
+    "file": "packages/integration/src/staticCssEval.ts",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": "\"C:\\\\project\\\\node_modules\\\\pkg\\\\styles.ts\",",
+    "count": 1,
+    "reason": "This regression fixture or assertion deliberately models node_modules package paths for non-PnP consumers; it is not a workspace dependency lookup.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "integration-static-css-eval-node-modules-02",
+    "file": "packages/integration/src/staticCssEval.ts",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": "it(\"normalizes node_modules and root boundary checks through callbacks\", () => {",
+    "count": 1,
+    "reason": "This regression fixture or assertion deliberately models node_modules package paths for non-PnP consumers; it is not a workspace dependency lookup.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "integration-static-css-eval-node-modules-03",
+    "file": "packages/integration/src/staticCssEval.ts",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": "return normalizeFilePath(filePath).split(\"/\").includes(\"node_modules\");",
+    "count": 1,
+    "reason": "This helper classifies path segments for node_modules compatibility without assuming where a dependency is installed.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "integration-static-css-eval-prepass-node-modules-01",
+    "file": "packages/integration/src/staticCssEvalPrepass.ts",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": "const stylesId = \"/project/node_modules/@scope/styles/index.ts\";",
+    "count": 1,
+    "reason": "This regression fixture or assertion deliberately models node_modules package paths for non-PnP consumers; it is not a workspace dependency lookup.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "integration-static-css-eval-prepass-node-modules-02",
+    "file": "packages/integration/src/staticCssEvalPrepass.ts",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": "watchFiles: [\"/project/node_modules/@scope/styles/package.json\"]",
+    "count": 1,
+    "reason": "This regression fixture or assertion deliberately models node_modules package paths for non-PnP consumers; it is not a workspace dependency lookup.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "integration-static-css-eval-prepass-node-modules-03",
+    "file": "packages/integration/src/staticCssEvalPrepass.ts",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": "watchFiles: [\"/project/node_modules/@scope/styles/styles.json\"]",
+    "count": 2,
+    "reason": "This regression fixture or assertion deliberately models node_modules package paths for non-PnP consumers; it is not a workspace dependency lookup.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "integration-static-css-eval-utils-node-modules-01",
+    "file": "packages/integration/src/staticCssEvalUtils.ts",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": ".includes(\"node_modules\");",
+    "count": 1,
+    "reason": "This helper classifies path segments for node_modules compatibility without assuming where a dependency is installed.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "vite-index-node-modules-01",
+    "file": "packages/vite/src/index.ts",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": "\"node_modules\",",
+    "count": 2,
+    "reason": "This regression fixture or assertion deliberately models node_modules package paths for non-PnP consumers; it is not a workspace dependency lookup.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "vite-index-node-modules-02",
+    "file": "packages/vite/src/index.ts",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": "\"node_modules/@examples/shared-component\"",
+    "count": 1,
+    "reason": "This regression fixture or assertion deliberately models node_modules package paths for non-PnP consumers; it is not a workspace dependency lookup.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "vite-index-node-modules-03",
+    "file": "packages/vite/src/index.ts",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": "\"node_modules/@mincho-js-proof/define-rules-preset/extracted_provider.css.ts.vanilla.css\";",
+    "count": 1,
+    "reason": "This regression fixture or assertion deliberately models node_modules package paths for non-PnP consumers; it is not a workspace dependency lookup.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "vite-index-node-modules-04",
+    "file": "packages/vite/src/index.ts",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": "const assetUrl = \"/node_modules/@pkg/styles/asset.svg\";",
+    "count": 1,
+    "reason": "This regression fixture or assertion deliberately models node_modules package paths for non-PnP consumers; it is not a workspace dependency lookup.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "vite-index-node-modules-05",
+    "file": "packages/vite/src/index.ts",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": "const packagePath = join(fixture.root, \"node_modules/pkg/styles.ts\");",
+    "count": 1,
+    "reason": "This regression fixture or assertion deliberately models node_modules package paths for non-PnP consumers; it is not a workspace dependency lookup.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "vite-index-node-modules-06",
+    "file": "packages/vite/src/index.ts",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": "const packageRoot = join(fixture.root, \"node_modules/@pkg/styles\");",
+    "count": 2,
+    "reason": "This regression fixture or assertion deliberately models node_modules package paths for non-PnP consumers; it is not a workspace dependency lookup.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "vite-index-node-modules-07",
+    "file": "packages/vite/src/index.ts",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": "const wasmUrl = \"/node_modules/@pkg/styles/icon.wasm\";",
+    "count": 1,
+    "reason": "This regression fixture or assertion deliberately models node_modules package paths for non-PnP consumers; it is not a workspace dependency lookup.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "vite-index-node-modules-08",
+    "file": "packages/vite/src/index.ts",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": "if (id.includes(\"node_modules\") || /(^|\\/)\\.yarn\\//.test(id)) return;",
+    "count": 1,
+    "reason": "This transform filter skips both node_modules and Yarn-managed dependency paths; it does not resolve a package location.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "contract-artifact-sources-node-modules-01",
+    "file": "scripts/package-contract/artifact-sources.ts",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": "return join(consumerRoot, \"node_modules\", ...packageName.split(\"/\"));",
+    "count": 1,
+    "reason": "The package contract deliberately installs and inspects an isolated npm node_modules consumer, separate from the PnP workspace.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "contract-fixture-esbuild-dynamic-css-import-01",
+    "file": "scripts/package-contract/fixture/esbuild/src/dynamic.css.ts",
+    "type": "error",
+    "message": "Undeclared dependency on @mincho-js-proof/diamond-d",
+    "source": "import { preset as diamondPreset } from \"@mincho-js-proof/diamond-d/preset\";",
+    "count": 1,
+    "reason": "This consumer fixture is copied into an isolated npm project; scripts/package-contract/index.ts generates its dependencies from packed workspace and proof packages before executing it.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "contract-fixture-esbuild-index-import-01",
+    "file": "scripts/package-contract/fixture/esbuild/src/index.ts",
+    "type": "error",
+    "message": "Undeclared dependency on @examples/shared-component",
+    "source": "import \"@examples/shared-component/style.css\";",
+    "count": 1,
+    "reason": "This consumer fixture is copied into an isolated npm project; scripts/package-contract/index.ts generates its dependencies from packed workspace and proof packages before executing it.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "contract-fixture-esbuild-index-import-02",
+    "file": "scripts/package-contract/fixture/esbuild/src/index.ts",
+    "type": "error",
+    "message": "Undeclared dependency on @mincho-js-proof/diamond-a",
+    "source": "import \"@mincho-js-proof/diamond-a/style.css\";",
+    "count": 1,
+    "reason": "This consumer fixture is copied into an isolated npm project; scripts/package-contract/index.ts generates its dependencies from packed workspace and proof packages before executing it.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "contract-fixture-esbuild-index-import-03",
+    "file": "scripts/package-contract/fixture/esbuild/src/index.ts",
+    "type": "error",
+    "message": "Undeclared dependency on @mincho-js-proof/diamond-b",
+    "source": "import \"@mincho-js-proof/diamond-b/style.css\";",
+    "count": 1,
+    "reason": "This consumer fixture is copied into an isolated npm project; scripts/package-contract/index.ts generates its dependencies from packed workspace and proof packages before executing it.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "contract-fixture-esbuild-index-import-04",
+    "file": "scripts/package-contract/fixture/esbuild/src/index.ts",
+    "type": "error",
+    "message": "Undeclared dependency on @mincho-js-proof/diamond-c",
+    "source": "import \"@mincho-js-proof/diamond-c/style.css\";",
+    "count": 1,
+    "reason": "This consumer fixture is copied into an isolated npm project; scripts/package-contract/index.ts generates its dependencies from packed workspace and proof packages before executing it.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "contract-fixture-esbuild-index-import-05",
+    "file": "scripts/package-contract/fixture/esbuild/src/index.ts",
+    "type": "error",
+    "message": "Undeclared dependency on @mincho-js-proof/diamond-d",
+    "source": "import \"@mincho-js-proof/diamond-d/style.css\";",
+    "count": 1,
+    "reason": "This consumer fixture is copied into an isolated npm project; scripts/package-contract/index.ts generates its dependencies from packed workspace and proof packages before executing it.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "contract-fixture-vite-dynamic-css-import-01",
+    "file": "scripts/package-contract/fixture/vite/src/dynamic.css.ts",
+    "type": "error",
+    "message": "Undeclared dependency on @mincho-js-proof/diamond-d",
+    "source": "import { preset as diamondPreset } from \"@mincho-js-proof/diamond-d/preset\";",
+    "count": 1,
+    "reason": "This consumer fixture is copied into an isolated npm project; scripts/package-contract/index.ts generates its dependencies from packed workspace and proof packages before executing it.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "contract-fixture-vite-dynamic-import-01",
+    "file": "scripts/package-contract/fixture/vite/src/dynamic.ts",
+    "type": "error",
+    "message": "Undeclared dependency on @examples/shared-component",
+    "source": "import {",
+    "count": 1,
+    "reason": "This consumer fixture is copied into an isolated npm project; scripts/package-contract/index.ts generates its dependencies from packed workspace and proof packages before executing it.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "contract-fixture-vite-dynamic-import-02",
+    "file": "scripts/package-contract/fixture/vite/src/dynamic.ts",
+    "type": "error",
+    "message": "Undeclared dependency on @mincho-js-proof/diamond-a",
+    "source": "import \"@mincho-js-proof/diamond-a/style.css\";",
+    "count": 1,
+    "reason": "This consumer fixture is copied into an isolated npm project; scripts/package-contract/index.ts generates its dependencies from packed workspace and proof packages before executing it.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "contract-fixture-vite-dynamic-import-03",
+    "file": "scripts/package-contract/fixture/vite/src/dynamic.ts",
+    "type": "error",
+    "message": "Undeclared dependency on @mincho-js-proof/diamond-b",
+    "source": "import \"@mincho-js-proof/diamond-b/style.css\";",
+    "count": 1,
+    "reason": "This consumer fixture is copied into an isolated npm project; scripts/package-contract/index.ts generates its dependencies from packed workspace and proof packages before executing it.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "contract-fixture-vite-dynamic-import-04",
+    "file": "scripts/package-contract/fixture/vite/src/dynamic.ts",
+    "type": "error",
+    "message": "Undeclared dependency on @mincho-js-proof/diamond-c",
+    "source": "import \"@mincho-js-proof/diamond-c/style.css\";",
+    "count": 1,
+    "reason": "This consumer fixture is copied into an isolated npm project; scripts/package-contract/index.ts generates its dependencies from packed workspace and proof packages before executing it.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "contract-fixture-vite-dynamic-import-05",
+    "file": "scripts/package-contract/fixture/vite/src/dynamic.ts",
+    "type": "error",
+    "message": "Undeclared dependency on @mincho-js-proof/diamond-d",
+    "source": "import \"@mincho-js-proof/diamond-d/style.css\";",
+    "count": 1,
+    "reason": "This consumer fixture is copied into an isolated npm project; scripts/package-contract/index.ts generates its dependencies from packed workspace and proof packages before executing it.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "contract-fixture-vite-dynamic-import-06",
+    "file": "scripts/package-contract/fixture/vite/src/dynamic.ts",
+    "type": "error",
+    "message": "Undeclared dependency on @mincho-js-proof/diamond-d",
+    "source": "import { local as diamondLocal } from \"@mincho-js-proof/diamond-d\";",
+    "count": 1,
+    "reason": "This consumer fixture is copied into an isolated npm project; scripts/package-contract/index.ts generates its dependencies from packed workspace and proof packages before executing it.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "contract-fixture-vite-static-css-import-01",
+    "file": "scripts/package-contract/fixture/vite/src/static.css.ts",
+    "type": "error",
+    "message": "Undeclared dependency on @mincho-js-proof/diamond-d",
+    "source": "import { preset as diamondPreset } from \"@mincho-js-proof/diamond-d/preset\";",
+    "count": 1,
+    "reason": "This consumer fixture is copied into an isolated npm project; scripts/package-contract/index.ts generates its dependencies from packed workspace and proof packages before executing it.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "contract-fixture-vite-vite-config-import-01",
+    "file": "scripts/package-contract/fixture/vite/vite.config.ts",
+    "type": "error",
+    "message": "Undeclared dependency on @mincho-js/vite",
+    "source": "import { minchoVitePlugin } from \"@mincho-js/vite\";",
+    "count": 1,
+    "reason": "This consumer fixture is copied into an isolated npm project; scripts/package-contract/index.ts generates its dependencies from packed workspace and proof packages before executing it.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "contract-index-node-modules-01",
+    "file": "scripts/package-contract/index.ts",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": "artifactPath: join(consumerRoot, \"node_modules\")",
+    "count": 1,
+    "reason": "The package contract deliberately installs and inspects an isolated npm node_modules consumer, separate from the PnP workspace.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "contract-index-node-modules-02",
+    "file": "scripts/package-contract/index.ts",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": "join(consumerRoot, \"node_modules\", \"vite\", \"bin\", \"vite.js\"),",
+    "count": 1,
+    "reason": "The package contract deliberately installs and inspects an isolated npm node_modules consumer, separate from the PnP workspace.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "site-mdx-components-import-01",
+    "file": "site/mdx-components.tsx",
+    "type": "error",
+    "message": "Undeclared dependency on mdx",
+    "source": "import type { MDXComponents } from 'mdx/types'",
+    "count": 1,
+    "reason": "This type-only mdx/types import is supplied by the declared @types/mdx development dependency; there is no runtime mdx import.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "site-package-build-peer-01",
+    "file": "site/package.json",
+    "type": "error",
+    "message": "Unmet transitive peer dependency on typescript@*, via nextra@^4.6.1",
+    "source": "\"nextra\": \"^4.6.1\",",
+    "count": 1,
+    "reason": "The private documentation app provides Nextra's TypeScript build peer through devDependencies; TypeScript is installed for the Next build and is not a runtime source import in Nextra.",
+    "expires": "2026-12-31"
+  }
+]

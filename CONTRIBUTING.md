@@ -120,6 +120,11 @@ yarn install
 yarn build
 ```
 
+Run `yarn doctor` for the [Yarn PnP source scan](https://yarnpkg.com/migration/pnp#calling-the-doctor) enforced by CI after its immutable install.
+The pinned Doctor checks installed lockfile entries; new warnings, errors, incomplete scans, and stale exceptions fail the check.
+Reviewed false positives are recorded with stable IDs, exact source matches, occurrence counts, reasons, and review deadlines in [the Doctor exceptions](scripts/doctor/exceptions.json). CI reports each decision as `ALLOW`, `NEW`, `EXPIRED`, `STALE`, `BROAD`, `AMBIGUOUS`, or `ERROR`.
+Use `yarn doctor:raw` to inspect all upstream diagnostics, or `yarn test:doctor` to test the exception checker. See [Doctor maintenance](scripts/doctor/README.md).
+
 ### Working process
 
 We work in an [RFC](https://en.wikipedia.org/wiki/Request_for_Comments) - [TDD](https://en.wikipedia.org/wiki/Test-driven_development) way.

@@ -47,6 +47,11 @@ configs/*/**/package.json
 packages/*/**/package.json
 examples/*/**/package.json
 
+# Keep workspace manifests visible to source scanners such as Yarn Doctor.
+!configs/*/package.json
+!packages/*/package.json
+!examples/*/package.json
+
 # Snowpack dependency directory (https://snowpack.dev/)
 web_modules/
 
