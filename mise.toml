@@ -1,5 +1,6 @@
 [tools]
-node = "26.7.0"
+node = "24.21.0"
+"npm:@yarnpkg/cli-dist" = "4.18.0"
 
 [settings]
-node.corepack = true
+node.corepack = false
