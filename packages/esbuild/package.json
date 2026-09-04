@@ -53,6 +53,7 @@
   },
   "prettier": "prettier-config-custom",
   "dependencies": {
+    "@babel/parser": "^7.29.0",
     "@mincho-js/integration": "workspace:^",
     "@vanilla-extract/esbuild-plugin": "^2.3.22",
     "@vanilla-extract/integration": "^8.0.10",

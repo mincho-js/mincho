@@ -1,4 +1,5 @@
-import { NodePath, types as t } from "@babel/core";
+import { types as t } from "@babel/core";
+import type { NodePath } from "@babel/core";
 import { addNamed } from "@babel/helper-module-imports";
 import type { ProgramScope } from "./types.js";
 
@@ -21,9 +22,11 @@ export function registerImportMethod(
   if (!imports.has(`${moduleName}:${methodName}`)) {
     const id = addNamed(path, methodName, moduleName);
     imports.set(`${moduleName}:${methodName}`, id);
+
     return id;
   } else {
     const id = imports.get(`${moduleName}:${methodName}`) as t.Identifier;
+
     return t.cloneNode(id);
   }
 }
@@ -41,12 +44,15 @@ export function getNearestIdentifier(path: NodePath<t.Node>) {
     if (currentPath.isIdentifier()) {
       return currentPath;
     }
+
     // Check for id property (typical for declarations)
     const id = currentPath.get("id");
+
     if (!Array.isArray(id)) {
       if (id.isIdentifier()) {
         return id;
       }
+
       if (id.isArrayPattern()) {
         for (const element of id.get("elements")) {
           if (element.isIdentifier()) {
@@ -55,6 +61,7 @@ export function getNearestIdentifier(path: NodePath<t.Node>) {
         }
       }
     }
+
     // Check for key property (for object properties)
     const key = currentPath.get("key");
     if (!Array.isArray(key) && key.isIdentifier()) {

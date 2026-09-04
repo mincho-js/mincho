@@ -1,5 +1,6 @@
 import { NodePath, types as t, transformFromAstSync } from "@babel/core";
 import type { PluginState, ProgramScope } from "../types.js";
+import { cloneExtractionNodes } from "./extractionBindings.js";
 
 export default function postprocess(
   path: NodePath<t.Node>,
@@ -8,7 +9,7 @@ export default function postprocess(
   const programParent = path.scope as ProgramScope;
 
   // Use transformFromAstSync instead of generator
-  const program = t.program(programParent.minchoData.nodes as t.Statement[]);
+  const program = t.program(cloneExtractionNodes(programParent));
   const result = transformFromAstSync(program, "", {
     ast: false,
     code: true

@@ -77,5 +77,8 @@
     "@fastify/deepmerge": "^3.2.1",
     "@mincho-js/css-additional-types": "workspace:^",
     "@mincho-js/csstype": "^3.1.4"
+  },
+  "peerDependencies": {
+    "@vanilla-extract/css": "*"
   }
 }

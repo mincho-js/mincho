@@ -2,13 +2,21 @@ import * as fs from "node:fs";
 import { dirname, join, resolve as resolvePath } from "node:path";
 import { vanillaExtractPlugin } from "@vanilla-extract/esbuild-plugin";
 import {
+  type Loader,
   type Plugin as EsbuildPlugin,
   type PluginBuild,
   type ResolveResult
 } from "esbuild";
+import { EsbuildAssets } from "./assets.js";
 import {
   type BabelOptions,
-  babelTransform,
+  type InternalStaticCssEvalSourceUnsupportedReason as StaticCssEvalSourceUnsupportedReason,
+  type InternalStaticCssEvalLoadedSource as StaticCssEvalLoadedSource,
+  type InternalStaticCssEvalSourceProvider as StaticCssEvalSourceProvider,
+  type InternalStaticCssEvalSourceResolution as StaticCssEvalSourceResolution,
+  type InternalStaticCssEvalSourceKind as StaticCssEvalSourceKind,
+  type InternalStaticCssEvalSourceOrigin as StaticCssEvalSourceOrigin,
+  babelTransformSource,
   compile,
   internalCollectStaticCssEvalDependencyIds as collectStaticCssEvalDependencyIds,
   internalCreateStaticCssEvalSourceIdentity as createStaticCssEvalSourceIdentity,
@@ -31,103 +39,17 @@ import {
 
 type ScriptLoader = "js" | "jsx" | "ts" | "tsx";
 
-type MaybePromise<T> = T | Promise<T>;
-
-interface StaticCssEvalSourceResolution {
-  id?: string;
-  resolvedFile?: string;
-  canonicalModuleId?: string;
-  normalizedPathKey?: string;
-  realpath?: string;
-  sourceHash?: string;
-  version?: string | number;
-  sourceIdentity?: StaticCssEvalSourceIdentity;
-  sourceKind?: StaticCssEvalSourceKind;
-  sourceOrigin?: StaticCssEvalSourceOrigin;
-  unsupportedReason?: StaticCssEvalSourceUnsupportedReason;
-  watchFiles?: readonly string[];
-  resolverKind?: StaticCssEvalResolverKind;
-}
-
-interface StaticCssEvalLoadedSource {
-  source?: string;
-  sourceText?: string;
-  resolvedFile?: string;
-  canonicalModuleId?: string;
-  normalizedPathKey?: string;
-  realpath?: string;
-  sourceHash?: string;
-  version?: string | number;
-  sourceIdentity?: StaticCssEvalSourceIdentity;
-  sourceKind?: StaticCssEvalSourceKind;
-  sourceOrigin?: StaticCssEvalSourceOrigin;
-  unsupportedReason?: StaticCssEvalSourceUnsupportedReason;
-  watchFiles?: readonly string[];
-  resolverKind?: StaticCssEvalResolverKind;
-}
-
-interface StaticCssEvalSourceIdentity {
-  sourceHash?: string;
-  version?: string | number;
-}
-
-type StaticCssEvalResolverKind =
-  | "source-provider"
-  | "filesystem"
-  | "vite"
-  | "esbuild"
-  | "test"
-  | (string & {});
-
-type StaticCssEvalSourceKind =
-  | "project-source"
-  | "package-source"
-  | "provider-virtual"
-  | "static-data"
-  | "external-no-source"
-  | "unresolved"
-  | "unsupported-source-shape";
-
-type StaticCssEvalSourceOrigin =
-  | "project"
-  | "package"
-  | "provider"
-  | "data"
-  | "external"
-  | "unresolved"
-  | "unsupported";
-
-type StaticCssEvalSourceUnsupportedReason =
-  | "external-no-source"
-  | "unresolved"
-  | "unsupported-source-shape";
-
-interface StaticCssEvalSourceProvider {
-  resolve(
-    importerId: string,
-    importPath: string
-  ): MaybePromise<StaticCssEvalSourceResolution | null>;
-  load(id: string): MaybePromise<StaticCssEvalLoadedSource | null>;
-}
-
 const integrationHelpers = {
-  babelTransform,
+  babelTransformSource,
   compile,
   processDefineRulesPresetRegistryFile,
   runDefineRulesPresetRegistryStep
 };
 
-type MinchoBabelOptions = BabelOptions & { jsxCssProp?: boolean };
-
-type MinchoBabelOptionsWithStaticCssEval = Omit<
-  MinchoBabelOptions,
-  "staticCssEvalSourceProvider"
-> & {
-  staticCssEvalSourceProvider?: StaticCssEvalSourceProvider;
-};
+type MinchoBabelOptionsWithStaticCssEval = BabelOptions;
 
 type BabelTransformResult = Omit<
-  Awaited<ReturnType<typeof babelTransform>>,
+  Awaited<ReturnType<typeof babelTransformSource>>,
   "staticCssEval"
 > & {
   staticCssEval?: StaticCssEvalMetadata;
@@ -193,13 +115,35 @@ type StaticCssEvalLoadedSourceCache = Map<
 
 const unsupportedStaticCssEvalResolutionPrefix =
   "virtual:mincho-static-css-eval-unsupported:";
+
 const esbuildStaticCssEvalModuleIdPrefix = "esbuild:";
 
-function getScriptLoader(path: string): ScriptLoader {
-  if (/\.tsx$/i.test(path)) return "tsx";
-  if (/\.ts$/i.test(path)) return "ts";
-  if (/\.jsx$/i.test(path)) return "jsx";
-  return "js";
+function getScriptLoader(
+  filePath: string,
+  loaders: Record<string, Loader> = {}
+): ScriptLoader | undefined {
+  const extension = Object.keys(loaders)
+    .sort((a, b) => b.length - a.length)
+    .find((extension) => filePath.endsWith(extension));
+
+  const loader = extension
+    ? loaders[extension]
+    : /\.[cm]?ts$/.test(filePath)
+      ? "ts"
+      : /\.[cm]?js$/.test(filePath)
+        ? "js"
+        : filePath.endsWith(".tsx")
+          ? "tsx"
+          : filePath.endsWith(".jsx")
+            ? "jsx"
+            : undefined;
+
+  return loader === "js" ||
+    loader === "jsx" ||
+    loader === "ts" ||
+    loader === "tsx"
+    ? loader
+    : undefined;
 }
 
 function createEsbuildStaticCssEvalSourceProvider(options: {
@@ -209,12 +153,13 @@ function createEsbuildStaticCssEvalSourceProvider(options: {
   rootRealpath: Promise<string>;
   resolutionCache: StaticCssEvalResolutionCache;
   loadedSourceCache: StaticCssEvalLoadedSourceCache;
+  assets: EsbuildAssets;
 }): StaticCssEvalSourceProvider {
   const ownerId = normalizeStaticCssEvalFileId(options.ownerId);
 
   return {
     async resolve(importerId: string, importPath: string) {
-      const cacheKey = `${normalizeStaticCssEvalFileId(importerId)}\0${importPath}`;
+      const cacheKey = `${getEsbuildStaticCssEvalCacheKey(importerId)}\0${importPath}`;
 
       if (options.resolutionCache.has(cacheKey)) {
         return options.resolutionCache.get(cacheKey) ?? null;
@@ -228,10 +173,12 @@ function createEsbuildStaticCssEvalSourceProvider(options: {
       });
 
       options.resolutionCache.set(cacheKey, resolution);
+
       return resolution;
     },
+
     async load(id: string) {
-      const cacheKey = normalizeStaticCssEvalFileId(id);
+      const cacheKey = getEsbuildStaticCssEvalCacheKey(id);
 
       if (options.loadedSourceCache.has(cacheKey)) {
         return options.loadedSourceCache.get(cacheKey) ?? null;
@@ -241,10 +188,12 @@ function createEsbuildStaticCssEvalSourceProvider(options: {
         id,
         ownerId,
         ownerSource: options.ownerSource,
+        assets: options.assets,
         rootRealpath: options.rootRealpath
       });
 
       options.loadedSourceCache.set(cacheKey, loadedSource);
+
       return loadedSource;
     }
   };
@@ -293,9 +242,10 @@ async function resolveEsbuildImport(
 ): Promise<ResolveResult | null> {
   if (typeof build.resolve === "function") {
     const resolved = await build.resolve(importPath, {
-      importer: importerId,
+      importer: parseEsbuildStaticCssEvalLoadId(importerId).path,
+      namespace: parseEsbuildStaticCssEvalLoadId(importerId).namespace,
       kind: "import-statement",
-      resolveDir: dirname(importerId)
+      resolveDir: dirname(parseEsbuildStaticCssEvalLoadId(importerId).path)
     });
 
     if (resolved.errors.length > 0 || resolved.path === "") {
@@ -317,6 +267,7 @@ async function loadEsbuildStaticCssEvalSource(options: {
   id: string;
   ownerId: string;
   ownerSource: string;
+  assets: EsbuildAssets;
   rootRealpath: Promise<string>;
 }): Promise<StaticCssEvalLoadedSource | null> {
   const fileId = normalizeStaticCssEvalFileId(options.id);
@@ -388,17 +339,20 @@ async function loadEsbuildStaticCssEvalSource(options: {
 
     throw error;
   }
+
   const metadata = createEsbuildStaticCssEvalFileMetadata({
     realpath,
     rootRealpath,
     stat,
     suffix: loadId.suffix
   });
-  const staticDataSource = new URLSearchParams(loadId.suffix.slice(1)).has(
-    "url"
-  )
-    ? getEsbuildStaticCssEvalUrlSource(realpath, rootRealpath)
+
+  const staticDataSource = new URLSearchParams(
+    loadId.suffix.split("#", 1)[0]?.slice(1)
+  ).has("url")
+    ? await options.assets.load(realpath, loadId.suffix)
     : source;
+
   const sourceText = prepareStaticCssEvalStaticDataSource(
     metadata.normalizedPathKey,
     staticDataSource
@@ -411,20 +365,14 @@ async function loadEsbuildStaticCssEvalSource(options: {
   };
 }
 
-function getEsbuildStaticCssEvalUrlSource(
-  realpath: string,
-  rootRealpath: string
-): string {
-  const normalizedRealpath = normalizeStaticCssEvalFileId(realpath);
-  const normalizedRootRealpath = normalizeStaticCssEvalFileId(rootRealpath);
+function getEsbuildStaticCssEvalCacheKey(id: string): string {
+  const moduleId = parseEsbuildStaticCssEvalLoadId(id);
 
-  if (isPathInsideRoot(normalizedRootRealpath, normalizedRealpath)) {
-    return `/${normalizedRealpath
-      .slice(normalizedRootRealpath.length)
-      .replace(/^\/+/, "")}`;
-  }
-
-  return `/@fs/${normalizedRealpath.replace(/^\/+/, "")}`;
+  return JSON.stringify([
+    normalizeEsbuildStaticCssEvalNamespace(moduleId.namespace),
+    normalizeStaticCssEvalFileId(moduleId.path),
+    moduleId.suffix
+  ]);
 }
 
 interface EsbuildStaticCssEvalFileMetadataOptions {
@@ -497,7 +445,8 @@ function createEsbuildStaticCssEvalFileMetadata({
     realpath,
     rootRealpath
   });
-  const querySuffix = sourceKind === "static-data" ? suffix : "";
+
+  const querySuffix = suffix;
   const resolvedFile = `${realpath}${querySuffix}`;
 
   return {
@@ -623,19 +572,14 @@ function isEsbuildStaticCssEvalFileNamespace(namespace: string): boolean {
 }
 
 function getStaticCssEvalQuerySuffix(sourceId: string): string {
-  const queryIndex = sourceId.indexOf("?");
+  const suffixIndex = sourceId.search(/[?#]/);
 
-  if (queryIndex === -1) {
-    return "";
-  }
-
-  const hashIndex = sourceId.indexOf("#", queryIndex);
-
-  return sourceId.slice(queryIndex, hashIndex === -1 ? undefined : hashIndex);
+  return suffixIndex === -1 ? "" : sourceId.slice(suffixIndex);
 }
 
 function stripStaticCssEvalQuery(sourceId: string): string {
   const queryIndex = sourceId.search(/[?#]/);
+
   return queryIndex === -1 ? sourceId : sourceId.slice(0, queryIndex);
 }
 
@@ -724,6 +668,7 @@ function resolveStaticCssEvalImportFromFileSystem(
   const basePath = importPath.startsWith("/")
     ? importPath
     : resolvePath(dirname(importerId), importPath);
+
   const candidates = [
     basePath,
     `${basePath}.ts`,
@@ -783,23 +728,34 @@ export function minchoEsbuildPlugin({
 }: MinchoEsbuildPluginOptions = {}): EsbuildPlugin {
   return {
     name: "mincho-js-esbuild",
+
     setup(build) {
       const resolvers = new Map<string, string>();
       const resolverCache = new Map<string, string>();
       const staticCssEvalResolutionCache: StaticCssEvalResolutionCache =
         new Map();
+
       const staticCssEvalLoadedSourceCache: StaticCssEvalLoadedSourceCache =
         new Map();
+
       const staticCssEvalProjectEngine = new internalMinchoProjectEngine();
+      const assets = new EsbuildAssets(build);
+      build.onStart(() => assets.beginBuild());
+      build.onResolve({ filter: /.*/ }, (args) =>
+        args.kind === "url-token" ? assets.resolveCssUrl(args.path) : undefined
+      );
+
       const rootRealpath = getRealpathOrResolvedPath(
         build.initialOptions.absWorkingDir ?? process.cwd()
       );
 
-      build.onEnd(() => {
+      build.onEnd((result) => {
         resolvers.clear();
         resolverCache.clear();
         staticCssEvalResolutionCache.clear();
         staticCssEvalLoadedSourceCache.clear();
+
+        if (result) return assets.finishBuild(result);
       });
 
       build.onResolve({ filter: /^extracted_(.*)\.css\.ts$/ }, async (args) => {
@@ -823,13 +779,16 @@ export function minchoEsbuildPlugin({
         { filter: /.*/, namespace: "extracted-css" },
         async ({ path, pluginData }) => {
           const resolverContents = resolvers.get(pluginData.path)!;
-          const { source } = await integrationHelpers.compile({
+          const assetWatchFiles = new Set<string>();
+          const { source, watchFiles = [] } = await integrationHelpers.compile({
             esbuild: build.esbuild,
             filePath: path,
             originalPath: pluginData.mainFilePath!,
             contents: resolverContents,
             externals: [],
             cwd: build.initialOptions.absWorkingDir,
+            loader: assets.getCompileLoaders(),
+            plugins: [assets.createCompilePlugin(assetWatchFiles)],
             resolverCache
           });
 
@@ -843,6 +802,7 @@ export function minchoEsbuildPlugin({
                   identOption: build.initialOptions.minify ? "short" : "debug"
                 })
               );
+
             const contents = `${ancestorStyleSpecifiers
               .map((specifier) => `import ${JSON.stringify(specifier)};`)
               .join(
@@ -852,7 +812,8 @@ export function minchoEsbuildPlugin({
             return {
               contents,
               loader: "js",
-              resolveDir: dirname(path)
+              resolveDir: dirname(path),
+              watchFiles: [...new Set([...watchFiles, ...assetWatchFiles])]
             };
           } catch (error) {
             if (error instanceof ReferenceError) {
@@ -872,15 +833,20 @@ export function minchoEsbuildPlugin({
         }
       );
 
-      build.onLoad({ filter: /\.(j|t)sx?$/ }, async (args) => {
+      build.onLoad({ filter: /.*/, namespace: "file" }, async (args) => {
+        const loader = getScriptLoader(args.path, build.initialOptions.loader);
+        if (!loader) return;
         if (args.path.endsWith(".css.ts")) return;
+
         if (args.path.includes("node_modules")) {
           if (!includeNodeModulesPattern) return;
           if (!includeNodeModulesPattern.test(args.path)) return;
         }
 
+        const source = await fs.promises.readFile(args.path, "utf8");
         const babelOptions: MinchoBabelOptionsWithStaticCssEval | undefined =
           jsxCssProp === undefined ? undefined : { jsxCssProp };
+
         const transformBabelOptions:
           | MinchoBabelOptionsWithStaticCssEval
           | undefined =
@@ -892,21 +858,28 @@ export function minchoEsbuildPlugin({
                   createEsbuildStaticCssEvalSourceProvider({
                     build,
                     ownerId: args.path,
-                    ownerSource: await fs.promises.readFile(args.path, "utf8"),
+                    ownerSource: source,
+                    assets,
                     rootRealpath,
                     resolutionCache: staticCssEvalResolutionCache,
                     loadedSourceCache: staticCssEvalLoadedSourceCache
                   })
               }
             : babelOptions;
+
         const {
           code,
+          map,
           result: [file, cssExtract],
           staticCssEval
-        } = (await integrationHelpers.babelTransform(
-          args.path,
-          transformBabelOptions
-        )) as BabelTransformResult;
+        } = (await integrationHelpers.babelTransformSource({
+          filename: args.path,
+          source,
+          loader,
+          babel: transformBabelOptions,
+          sourceMaps: Boolean(build.initialOptions.sourcemap)
+        })) as BabelTransformResult;
+
         const staticCssEvalFileResult =
           staticCssEvalProjectEngine.getFileResult(args.path);
 
@@ -917,8 +890,10 @@ export function minchoEsbuildPlugin({
         }
 
         return {
-          contents: code,
-          loader: getScriptLoader(args.path),
+          contents: map
+            ? `${code}\n//# sourceMappingURL=data:application/json;base64,${Buffer.from(JSON.stringify(map)).toString("base64")}`
+            : code,
+          loader,
           pluginData: {
             mainFilePath: args.path
           },
@@ -952,6 +927,7 @@ if (import.meta.vitest) {
   const { afterEach, beforeAll, describe, expect, it, vi } = import.meta.vitest;
 
   const DEFINE_RULES_PRESET_SCHEMA = "mincho.defineRulesPreset";
+
   type DefineRulesPresetSerializationCase = {
     caseId: string;
     expectedEvaluation: "serialized" | "not-serialized";
@@ -984,6 +960,7 @@ if (import.meta.vitest) {
   let consumerFixturePath: string;
   let registryFixtureMatrixCases: DefineRulesPresetSerializationFixtureCase[] =
     [];
+
   let serializedRegistryFixtureCases: DefineRulesPresetSerializationFixtureCase[] =
     [];
 
@@ -1094,19 +1071,25 @@ if (import.meta.vitest) {
   };
 
   type LoadCallback = (args: MockLoadArgs) => Promise<unknown>;
+
   type ResolveCallback = (args: MockResolveArgs) => Promise<unknown>;
+
   type TestEsbuildApi = Parameters<typeof compile>[0]["esbuild"];
 
   function createBuildHarness({
     absWorkingDir = "/workspace",
     esbuild,
     minify = false,
+    loader,
+    outdir,
     plugin = minchoEsbuildPlugin(),
     resolve: resolveImport
   }: {
     absWorkingDir?: string;
     esbuild?: TestEsbuildApi;
     minify?: boolean;
+    loader?: Record<string, Loader>;
+    outdir?: string;
     plugin?: EsbuildPlugin;
     resolve?: PluginBuild["resolve"];
   } = {}) {
@@ -1119,8 +1102,11 @@ if (import.meta.vitest) {
       esbuild: esbuild ?? {},
       initialOptions: {
         absWorkingDir,
-        minify
+        minify,
+        loader,
+        outdir
       },
+
       async resolve(path: string, options?: { importer?: string }) {
         if (resolveImport) {
           return resolveImport(path, options);
@@ -1145,20 +1131,26 @@ if (import.meta.vitest) {
               pluginData: undefined
             };
       },
+
       onResolve(_options: { filter: RegExp }, callback: ResolveCallback): void {
         extractedCssResolveCallback = callback;
       },
+
       onLoad(
         options: { filter: RegExp; namespace?: string },
         callback: LoadCallback
       ): void {
         if (options.namespace === "extracted-css") {
           extractedCssLoadCallback = callback;
+
           return;
         }
 
         scriptLoadCallback = callback;
       },
+
+      onStart(): void {},
+
       onEnd(callback: () => void): void {
         endCallback = callback;
       }
@@ -1170,13 +1162,33 @@ if (import.meta.vitest) {
       endBuild() {
         endCallback?.();
       },
+
       async loadScript(args: MockLoadArgs) {
         if (scriptLoadCallback == null) {
           throw new Error("Missing script onLoad callback");
         }
 
-        return scriptLoadCallback(args);
+        if (fs.existsSync(args.path)) return scriptLoadCallback(args);
+
+        // Unit fixtures with mocked transforms need no disk-backed owner.
+        const readFile = fs.promises.readFile.bind(fs.promises);
+        const readSpy = vi
+          .spyOn(fs.promises, "readFile")
+          .mockImplementation(((file: fs.PathLike, options: unknown) =>
+            file === args.path
+              ? Promise.resolve("")
+              : readFile(
+                  file,
+                  options as "utf8"
+                )) as typeof fs.promises.readFile);
+
+        try {
+          return await scriptLoadCallback(args);
+        } finally {
+          readSpy.mockRestore();
+        }
       },
+
       async resolveExtractedCss(args: MockResolveArgs) {
         if (extractedCssResolveCallback == null) {
           throw new Error("Missing extracted-css onResolve callback");
@@ -1184,6 +1196,7 @@ if (import.meta.vitest) {
 
         return extractedCssResolveCallback(args);
       },
+
       async loadExtractedCss(args: MockLoadArgs) {
         if (extractedCssLoadCallback == null) {
           throw new Error("Missing extracted-css onLoad callback");
@@ -1237,6 +1250,7 @@ if (import.meta.vitest) {
       import("@mincho-js/css"),
       import("@vanilla-extract/css/fileScope")
     ]);
+
     fileScope.setFileScope(filePath, "@mincho-js/esbuild");
 
     try {
@@ -1280,6 +1294,7 @@ if (import.meta.vitest) {
     expect(source).not.toMatch(/["']?conditionById["']?\s*:/);
     expect(source).not.toMatch(/["']?propertyById["']?\s*:/);
     expect(source).not.toMatch(/["']?writeKeyById["']?\s*:/);
+
     expectSourceV5PresetArtifactToOmitRuntimeFields(source);
   }
 
@@ -1287,6 +1302,7 @@ if (import.meta.vitest) {
     source: string
   ): void {
     const artifactSource = extractV5PresetArtifactSource(source);
+
     expect(artifactSource).not.toMatch(/["']?registeredSegments["']?\s*:/);
     expect(artifactSource).not.toMatch(/["']?segmentCache["']?\s*:/);
     expect(artifactSource).not.toMatch(/["']?fullResultCache["']?\s*:/);
@@ -1310,10 +1326,13 @@ if (import.meta.vitest) {
     }
 
     let depth = 0;
+
     for (let index = artifactStart; index < source.length; index += 1) {
       const char = source[index];
+
       if (char === "{") depth += 1;
       if (char === "}") depth -= 1;
+
       if (depth === 0) {
         return source.slice(artifactStart, index + 1);
       }
@@ -1331,6 +1350,7 @@ if (import.meta.vitest) {
     className: string
   ): void {
     expectSourceToContainV5PresetArtifact(source);
+
     for (const atomClassName of splitClassNames(className).filter(
       (token) => !isSegmentMarker(token)
     )) {
@@ -1389,6 +1409,7 @@ if (import.meta.vitest) {
   async function createLivePresetSmokeFixture(prefix: string) {
     const cacheRoot = join(process.cwd(), "packages/esbuild/.cache");
     await fs.promises.mkdir(cacheRoot, { recursive: true });
+
     const root = await fs.promises.mkdtemp(join(cacheRoot, prefix));
     const srcRoot = join(root, "src");
     const entryPath = join(srcRoot, "entry.ts");
@@ -1443,6 +1464,7 @@ if (import.meta.vitest) {
   ) {
     const cacheRoot = join(process.cwd(), "packages/esbuild/.cache");
     await fs.promises.mkdir(cacheRoot, { recursive: true });
+
     const root = await fs.promises.mkdtemp(join(cacheRoot, prefix));
     const srcRoot = join(root, "src");
     const entryPath = join(srcRoot, "entry.tsx");
@@ -1559,12 +1581,14 @@ if (import.meta.vitest) {
   ) {
     const cacheRoot = join(process.cwd(), "packages/esbuild/.cache");
     await fs.promises.mkdir(cacheRoot, { recursive: true });
+
     const root = await fs.promises.mkdtemp(join(cacheRoot, prefix));
     const srcRoot = join(root, "src");
     const entryPath = join(srcRoot, "entry.tsx");
     const stylesPath = join(srcRoot, "styles.ts");
     const entrySource =
       options.entrySource ?? createImportedCssPropEntrySource();
+
     const styleSource = options.styleSource ?? createImportedStyleSource("red");
 
     await fs.promises.mkdir(srcRoot, { recursive: true });
@@ -1625,6 +1649,7 @@ if (import.meta.vitest) {
       .mockResolvedValue({ source: "compiled static css" } as Awaited<
         ReturnType<typeof compile>
       >);
+
     vi.spyOn(
       integrationHelpers,
       "processDefineRulesPresetRegistryFile"
@@ -1633,14 +1658,17 @@ if (import.meta.vitest) {
     const scriptLoadResult = (await harness.loadScript({
       path: entryPath
     })) as ScriptLoadResult;
+
     const { file: sidecarFile } = extractCssPropSidecarImport(
       scriptLoadResult.contents
     );
+
     const resolveResult = (await harness.resolveExtractedCss({
       path: sidecarFile,
       importer: entryPath,
       pluginData: scriptLoadResult.pluginData
     })) as ResolvedExtractedCssResult;
+
     await harness.loadExtractedCss({
       path: resolveResult.path,
       pluginData: resolveResult.pluginData
@@ -1670,6 +1698,7 @@ if (import.meta.vitest) {
       .filter((outputFile) => /\.(?:mjs|js)$/.test(outputFile.path))
       .map((outputFile) => outputFile.text)
       .join("\n");
+
     const css = outputFiles
       .filter((outputFile) => outputFile.path.endsWith(".css"))
       .map((outputFile) => outputFile.text)
@@ -1771,21 +1800,26 @@ if (import.meta.vitest) {
   ) {
     const cacheRoot = join(process.cwd(), "packages/esbuild/.cache");
     await fs.promises.mkdir(cacheRoot, { recursive: true });
+
     const root = await fs.promises.mkdtemp(
       join(cacheRoot, `${fixtureCase.caseId}-`)
     );
+
     const srcRoot = join(root, "src");
     await fs.promises.cp(dirname(fixtureCase.fixturePath), srcRoot, {
       recursive: true
     });
+
     const fixtureSource = await fs.promises.readFile(
       join(srcRoot, "index.css.ts"),
       "utf8"
     );
+
     const entrySource = createRealRegistryBuildEntrySource(
       fixtureCase,
       fixtureSource
     );
+
     const entryPath = join(srcRoot, "entry.ts");
     await fs.promises.writeFile(entryPath, entrySource);
 
@@ -1806,20 +1840,24 @@ if (import.meta.vitest) {
       join(root, "src/index.css.ts"),
       "utf8"
     );
+
     const babelTransformSpy = vi
-      .spyOn(integrationHelpers, "babelTransform")
+      .spyOn(integrationHelpers, "babelTransformSource")
       .mockResolvedValue({
         code: 'import "extracted_registry.css.ts";\nexport const __registryBuildMarker = "entry";',
         result: ["extracted_registry.css.ts", fixtureSource]
       });
+
     const registrySources: string[] = [];
     const processRegistryFile =
       integrationHelpers.processDefineRulesPresetRegistryFile;
+
     integrationHelpers.processDefineRulesPresetRegistryFile = async (
       options
     ) => {
       const result = await processRegistryFile(options);
       registrySources.push(result.source);
+
       return result;
     };
 
@@ -1835,9 +1873,11 @@ if (import.meta.vitest) {
         plugins: minchoEsbuildPlugins(),
         write: false
       });
+
       const jsOutput = result.outputFiles.find((outputFile) =>
         outputFile.path.endsWith(".js")
       );
+
       const cssOutput = result.outputFiles.find((outputFile) =>
         outputFile.path.endsWith(".css")
       );
@@ -1917,6 +1957,7 @@ if (import.meta.vitest) {
       source,
       exportName
     );
+
     const stringLiteralMatch = /^(?:"([^"]+)"|'([^']+)')$/.exec(exportedInit);
 
     if (stringLiteralMatch == null) {
@@ -2033,15 +2074,16 @@ if (import.meta.vitest) {
       // @ts-ignore error TS1343: The 'import.meta' meta-property is only allowed when the '--module' option is 'es2020', 'es2022', 'esnext', 'system', 'node16', or 'nodenext'.
       import.meta.url
     ).href;
+
     const sourceIntegrationModule = (await import(
       /* @vite-ignore */ sourceIntegrationUrl
     )) as {
-      babelTransform: typeof babelTransform;
+      babelTransformSource: typeof babelTransformSource;
     };
 
     return vi
-      .spyOn(integrationHelpers, "babelTransform")
-      .mockImplementation(sourceIntegrationModule.babelTransform);
+      .spyOn(integrationHelpers, "babelTransformSource")
+      .mockImplementation(sourceIntegrationModule.babelTransformSource);
   }
 
   async function loadExtractedCssFromEntry(
@@ -2052,11 +2094,13 @@ if (import.meta.vitest) {
     const scriptLoadResult = (await harness.loadScript({
       path: entryPath
     })) as ScriptLoadResult;
+
     const resolveResult = (await harness.resolveExtractedCss({
       path: extractedPath,
       importer: entryPath,
       pluginData: scriptLoadResult.pluginData
     })) as ResolvedExtractedCssResult;
+
     const loadResult = (await harness.loadExtractedCss({
       path: resolveResult.path,
       pluginData: resolveResult.pluginData
@@ -2077,6 +2121,7 @@ if (import.meta.vitest) {
     const { entryPath, root } = await createJsxCssPropFixture(
       "static-css-resolve-directory-"
     );
+
     const directoryPath = join(root, "src", "styles");
     const indexPath = join(directoryPath, "index.ts");
     await fs.promises.mkdir(directoryPath);
@@ -2101,9 +2146,11 @@ if (import.meta.vitest) {
         const rootRealpath = normalizeStaticCssEvalFileId(
           await fs.promises.realpath(fixture.root)
         );
+
         const stylesRealpath = normalizeStaticCssEvalFileId(
           await fs.promises.realpath(fixture.stylesPath)
         );
+
         const stat = await fs.promises.stat(stylesRealpath);
         const sourceIdentity = createStaticCssEvalSourceIdentity(stat);
 
@@ -2137,9 +2184,11 @@ if (import.meta.vitest) {
         const stylesRealpath = normalizeStaticCssEvalFileId(
           await fs.promises.realpath(fixture.stylesPath)
         );
+
         const outsideRootFile = normalizeStaticCssEvalFileId(
           join(process.cwd(), "package.json")
         );
+
         const packagePath = join(fixture.root, "node_modules/pkg/styles.ts");
         await fs.promises.mkdir(dirname(packagePath), { recursive: true });
         await fs.promises.writeFile(
@@ -2147,11 +2196,12 @@ if (import.meta.vitest) {
           createImportedStyleSource("blue"),
           "utf8"
         );
+
         const packageRealpath = normalizeStaticCssEvalFileId(
           await fs.promises.realpath(packagePath)
         );
 
-        vi.spyOn(integrationHelpers, "babelTransform").mockResolvedValue({
+        vi.spyOn(integrationHelpers, "babelTransformSource").mockResolvedValue({
           code: fixture.entrySource,
           result: ["", ""],
           staticCssEval: {
@@ -2168,6 +2218,7 @@ if (import.meta.vitest) {
           absWorkingDir: fixture.root,
           plugin: minchoEsbuildPlugin({ jsxCssProp: true })
         });
+
         const scriptLoadResult = (await harness.loadScript({
           path: fixture.entryPath
         })) as ScriptLoadResult;
@@ -2184,12 +2235,14 @@ if (import.meta.vitest) {
       const { entryPath, root } = await createJsxCssPropFixture(
         "jsx-css-prop-enabled-"
       );
+
       const babelTransformSpy = await spyOnSourceBabelTransform();
       const compileSpy = vi
         .spyOn(integrationHelpers, "compile")
         .mockResolvedValue({
           source: "compiled source"
         } as Awaited<ReturnType<typeof compile>>);
+
       vi.spyOn(
         integrationHelpers,
         "processDefineRulesPresetRegistryFile"
@@ -2199,15 +2252,19 @@ if (import.meta.vitest) {
         const harness = createBuildHarness({
           plugin: minchoEsbuildPlugin({ jsxCssProp: true })
         });
+
         const scriptLoadResult = (await harness.loadScript({
           path: entryPath
         })) as ScriptLoadResult;
+
         const { file: sidecarFile, localNames: sidecarLocalNames } =
           extractCssPropSidecarImport(scriptLoadResult.contents);
+
         const cxImportMatch =
           /import \{ [^}]*\bcx(?: as ([A-Za-z_$][\w$]*))?[^}]*\} from "@mincho-js\/css";/.exec(
             scriptLoadResult.contents
           );
+
         const cxIdentifier = cxImportMatch?.[1] ?? "cx";
         const classNameMergeMatch =
           /className=\{([A-Za-z_$][\w$]*)\("base", ([A-Za-z_$][\w$]*)\)\}/.exec(
@@ -2215,10 +2272,14 @@ if (import.meta.vitest) {
           );
 
         expect(babelTransformSpy).toHaveBeenCalledWith(
-          entryPath,
           expect.objectContaining({
-            jsxCssProp: true,
-            staticCssEvalSourceProvider: expect.any(Object)
+            filename: entryPath,
+            source: expect.any(String),
+            loader: "tsx",
+            babel: expect.objectContaining({
+              jsxCssProp: true,
+              staticCssEvalSourceProvider: expect.any(Object)
+            })
           })
         );
         expect(scriptLoadResult.loader).toBe("tsx");
@@ -2235,10 +2296,12 @@ if (import.meta.vitest) {
           importer: entryPath,
           pluginData: scriptLoadResult.pluginData
         })) as ResolvedExtractedCssResult;
+
         const loadResult = (await harness.loadExtractedCss({
           path: resolveResult.path,
           pluginData: resolveResult.pluginData
         })) as ExtractedCssLoadResult;
+
         const compileOptions = compileSpy.mock.calls[0]?.[0];
 
         if (compileOptions == null) {
@@ -2275,18 +2338,22 @@ if (import.meta.vitest) {
         "jsx-css-prop-v2-class-value-",
         createJsxCssPropV2ClassValueFixtureSource()
       );
+
       const babelTransformSpy = await spyOnSourceBabelTransform();
 
       try {
         const harness = createBuildHarness({
           plugin: minchoEsbuildPlugin({ jsxCssProp: true })
         });
+
         const scriptLoadResult = (await harness.loadScript({
           path: entryPath
         })) as ScriptLoadResult;
+
         const cxIdentifier = extractCxIdentifierFromSource(
           scriptLoadResult.contents
         );
+
         const missingResolveResult = await harness.resolveExtractedCss({
           path: "extracted_missing.css.ts",
           importer: entryPath,
@@ -2294,10 +2361,14 @@ if (import.meta.vitest) {
         });
 
         expect(babelTransformSpy).toHaveBeenCalledWith(
-          entryPath,
           expect.objectContaining({
-            jsxCssProp: true,
-            staticCssEvalSourceProvider: expect.any(Object)
+            filename: entryPath,
+            source: expect.any(String),
+            loader: "tsx",
+            babel: expect.objectContaining({
+              jsxCssProp: true,
+              staticCssEvalSourceProvider: expect.any(Object)
+            })
           })
         );
         expect(scriptLoadResult.loader).toBe("tsx");
@@ -2306,10 +2377,12 @@ if (import.meta.vitest) {
         expect(scriptLoadResult.contents).not.toContain("css={styleB}");
         expect(scriptLoadResult.contents).not.toContain("css(styleA)");
         expect(scriptLoadResult.contents).not.toContain("_css(styleA)");
+
         expectSourceToContainV2ClassValueCssPropLowering(
           scriptLoadResult.contents,
           cxIdentifier
         );
+
         expect(missingResolveResult).toBeUndefined();
       } finally {
         await fs.promises.rm(root, { force: true, recursive: true });
@@ -2321,6 +2394,7 @@ if (import.meta.vitest) {
         "jsx-css-prop-plugin-array-",
         createJsxCssPropV2ClassValueFixtureSource()
       );
+
       const minchoPlugin = minchoEsbuildPlugins({ jsxCssProp: true })[0];
       const babelTransformSpy = await spyOnSourceBabelTransform();
 
@@ -2335,18 +2409,24 @@ if (import.meta.vitest) {
         const scriptLoadResult = (await harness.loadScript({
           path: entryPath
         })) as ScriptLoadResult;
+
         const cxIdentifier = extractCxIdentifierFromSource(
           scriptLoadResult.contents
         );
 
         expect(babelTransformSpy).toHaveBeenCalledWith(
-          entryPath,
           expect.objectContaining({
-            jsxCssProp: true,
-            staticCssEvalSourceProvider: expect.any(Object)
+            filename: entryPath,
+            source: expect.any(String),
+            loader: "tsx",
+            babel: expect.objectContaining({
+              jsxCssProp: true,
+              staticCssEvalSourceProvider: expect.any(Object)
+            })
           })
         );
         expect(scriptLoadResult.contents).not.toContain(" css=");
+
         expectSourceToContainV2ClassValueCssPropLowering(
           scriptLoadResult.contents,
           cxIdentifier
@@ -2361,17 +2441,22 @@ if (import.meta.vitest) {
       const fixture = await createImportedCssPropEsbuildFixture(
         "jsx-css-prop-imported-rebuild-"
       );
+
       await spyOnSourceBabelTransform();
+
       const harness = createBuildHarness({
         absWorkingDir: fixture.root,
         plugin: minchoEsbuildPlugin({ jsxCssProp: true })
       });
+
       const scriptLoadResult = (await harness.loadScript({
         path: fixture.entryPath
       })) as ScriptLoadResult;
+
       const stylesRealpath = normalizeStaticCssEvalFileId(
         await fs.promises.realpath(fixture.stylesPath)
       );
+
       const context = await realEsbuild.context({
         absWorkingDir: fixture.root,
         bundle: true,
@@ -2390,6 +2475,7 @@ if (import.meta.vitest) {
         const redOutput = collectEsbuildOutputTexts(await context.rebuild());
 
         expectCssPropBuildOutputToContainColor(redOutput, "red");
+
         expect(redOutput.all).not.toContain("color: blue");
 
         await fs.promises.writeFile(
@@ -2401,6 +2487,7 @@ if (import.meta.vitest) {
         const blueOutput = collectEsbuildOutputTexts(await context.rebuild());
 
         expectCssPropBuildOutputToContainColor(blueOutput, "blue");
+
         expect(blueOutput.all).not.toContain("color: red");
       } finally {
         await context.dispose();
@@ -2412,17 +2499,17 @@ if (import.meta.vitest) {
       const fixture = await createImportedCssPropEsbuildFixture(
         "jsx-css-prop-provider-canonical-"
       );
+
       const captured: {
         loadedSource?: StaticCssEvalLoadedSource | null;
         resolution?: StaticCssEvalSourceResolution | null;
       } = {};
 
       try {
-        vi.spyOn(integrationHelpers, "babelTransform").mockImplementation(
-          async (
-            _path: string,
-            options: MinchoBabelOptionsWithStaticCssEval = {}
-          ) => {
+        vi.spyOn(integrationHelpers, "babelTransformSource").mockImplementation(
+          async ({
+            babel: options = {}
+          }: Parameters<typeof babelTransformSource>[0]) => {
             const sourceProvider = options.staticCssEvalSourceProvider;
 
             if (!sourceProvider) {
@@ -2460,6 +2547,7 @@ if (import.meta.vitest) {
         const harness = createBuildHarness({
           absWorkingDir: fixture.root,
           plugin: minchoEsbuildPlugin({ jsxCssProp: true }),
+
           async resolve(source) {
             return source === "./styles"
               ? createStaticCssEvalResolveResult(
@@ -2468,13 +2556,16 @@ if (import.meta.vitest) {
               : emptyResolveResult;
           }
         });
+
         const scriptLoadResult = (await harness.loadScript({
           path: fixture.entryPath
         })) as ScriptLoadResult;
+
         const stylesRealpath = normalizeStaticCssEvalFileId(
           await fs.promises.realpath(fixture.stylesPath)
         );
-        const canonicalModuleId = stylesRealpath;
+
+        const canonicalModuleId = `${stylesRealpath}?import#hmr`;
         const resolution = captured.resolution;
         const loadedSource = captured.loadedSource;
 
@@ -2522,7 +2613,7 @@ if (import.meta.vitest) {
           await fs.promises.realpath(fixture.stylesPath)
         );
 
-        vi.spyOn(integrationHelpers, "babelTransform").mockResolvedValue({
+        vi.spyOn(integrationHelpers, "babelTransformSource").mockResolvedValue({
           code: fixture.entrySource,
           result: ["", ""],
           staticCssEval:
@@ -2533,6 +2624,7 @@ if (import.meta.vitest) {
           absWorkingDir: fixture.root,
           plugin: minchoEsbuildPlugin({ jsxCssProp: true })
         });
+
         const scriptLoadResult = (await harness.loadScript({
           path: fixture.entryPath
         })) as ScriptLoadResult;
@@ -2547,12 +2639,15 @@ if (import.meta.vitest) {
       const fixture = await createImportedCssPropEsbuildFixture(
         "static-css-eval-watch-files-"
       );
+
       const stylesRealpath = normalizeStaticCssEvalFileId(
         await fs.promises.realpath(fixture.stylesPath)
       );
+
       const outsideRootFile = normalizeStaticCssEvalFileId(
         join(process.cwd(), "package.json")
       );
+
       const packagePath = join(fixture.root, "node_modules/pkg/styles.ts");
       await fs.promises.mkdir(dirname(packagePath), { recursive: true });
       await fs.promises.writeFile(
@@ -2560,17 +2655,18 @@ if (import.meta.vitest) {
         createImportedStyleSource("blue"),
         "utf8"
       );
+
       const packageRealpath = normalizeStaticCssEvalFileId(
         await fs.promises.realpath(packagePath)
       );
+
       let resolveCalls = 0;
       const loadedStyleSources: string[] = [];
 
-      vi.spyOn(integrationHelpers, "babelTransform").mockImplementation(
-        async (
-          _path: Parameters<typeof babelTransform>[0],
-          options: MinchoBabelOptionsWithStaticCssEval = {}
-        ) => {
+      vi.spyOn(integrationHelpers, "babelTransformSource").mockImplementation(
+        async ({
+          babel: options = {}
+        }: Parameters<typeof babelTransformSource>[0]) => {
           const sourceProvider = options.staticCssEvalSourceProvider;
 
           if (!sourceProvider) {
@@ -2581,6 +2677,7 @@ if (import.meta.vitest) {
             fixture.entryPath,
             "./styles"
           );
+
           const secondResolution = await sourceProvider.resolve(
             fixture.entryPath,
             "./styles"
@@ -2595,11 +2692,13 @@ if (import.meta.vitest) {
           const firstLoadedSource = await sourceProvider.load(
             firstResolution.normalizedPathKey
           );
+
           const secondLoadedSource = await sourceProvider.load(
             firstResolution.normalizedPathKey
           );
 
           expect(secondLoadedSource).toBe(firstLoadedSource);
+
           loadedStyleSources.push(firstLoadedSource?.sourceText ?? "");
 
           return {
@@ -2628,6 +2727,7 @@ if (import.meta.vitest) {
         const harness = createBuildHarness({
           absWorkingDir: fixture.root,
           plugin: minchoEsbuildPlugin({ jsxCssProp: true }),
+
           async resolve(
             source: string,
             options?: Parameters<PluginBuild["resolve"]>[1]
@@ -2637,6 +2737,7 @@ if (import.meta.vitest) {
             }
 
             resolveCalls += 1;
+
             return createStaticCssEvalResolveResult(
               resolveStaticCssEvalImportFromFileSystem(
                 options?.importer ?? fixture.entryPath,
@@ -2645,6 +2746,7 @@ if (import.meta.vitest) {
             );
           }
         });
+
         const firstLoadResult = (await harness.loadScript({
           path: fixture.entryPath
         })) as ScriptLoadResult;
@@ -2687,6 +2789,7 @@ if (import.meta.vitest) {
           entrySource: createImportedCssPropEntrySource("./barrel")
         }
       );
+
       const barrelPath = join(fixture.srcRoot, "barrel.ts");
       const buttonPath = join(fixture.srcRoot, "button.ts");
 
@@ -2705,11 +2808,12 @@ if (import.meta.vitest) {
         const barrelRealpath = normalizeStaticCssEvalFileId(
           await fs.promises.realpath(barrelPath)
         );
+
         const buttonRealpath = normalizeStaticCssEvalFileId(
           await fs.promises.realpath(buttonPath)
         );
 
-        vi.spyOn(integrationHelpers, "babelTransform").mockResolvedValue({
+        vi.spyOn(integrationHelpers, "babelTransformSource").mockResolvedValue({
           code: fixture.entrySource,
           result: ["", ""],
           staticCssEval: {
@@ -2747,6 +2851,7 @@ if (import.meta.vitest) {
           absWorkingDir: fixture.root,
           plugin: minchoEsbuildPlugin({ jsxCssProp: true })
         });
+
         const scriptLoadResult = (await harness.loadScript({
           path: fixture.entryPath
         })) as ScriptLoadResult;
@@ -2780,10 +2885,12 @@ if (import.meta.vitest) {
         const stylesRealpath = normalizeStaticCssEvalFileId(
           await fs.promises.realpath(fixture.stylesPath)
         );
+
         const harness = createBuildHarness({
           absWorkingDir: fixture.root,
           plugin: minchoEsbuildPlugin({ jsxCssProp: true })
         });
+
         const scriptLoadResult = (await harness.loadScript({
           path: fixture.entryPath
         })) as ScriptLoadResult;
@@ -2804,6 +2911,7 @@ if (import.meta.vitest) {
           entrySource: createNamespaceCssPropEntrySource()
         }
       );
+
       const barrelPath = join(fixture.srcRoot, "barrel.ts");
       const buttonPath = join(fixture.srcRoot, "button.ts");
       const primaryButtonPath = join(fixture.srcRoot, "primaryButton.ts");
@@ -2829,6 +2937,7 @@ if (import.meta.vitest) {
         absWorkingDir: fixture.root,
         plugin: minchoEsbuildPlugin({ jsxCssProp: true })
       });
+
       const context = await realEsbuild.context({
         absWorkingDir: fixture.root,
         bundle: true,
@@ -2845,12 +2954,15 @@ if (import.meta.vitest) {
         const barrelRealpath = normalizeStaticCssEvalFileId(
           await fs.promises.realpath(barrelPath)
         );
+
         const buttonRealpath = normalizeStaticCssEvalFileId(
           await fs.promises.realpath(buttonPath)
         );
+
         const primaryButtonRealpath = normalizeStaticCssEvalFileId(
           await fs.promises.realpath(primaryButtonPath)
         );
+
         const firstWatchFiles = getScriptLoadWatchFiles(
           await harness.loadScript({
             path: fixture.entryPath
@@ -2872,6 +2984,7 @@ if (import.meta.vitest) {
 
         const blueOutput = collectEsbuildOutputTexts(await context.rebuild());
         expectCssPropBuildOutputToContainColor(blueOutput, "blue");
+
         expect(blueOutput.all).not.toContain("color: red");
 
         await fs.promises.writeFile(
@@ -2882,9 +2995,11 @@ if (import.meta.vitest) {
 
         const greenOutput = collectEsbuildOutputTexts(await context.rebuild());
         expectCssPropBuildOutputToContainColor(greenOutput, "green");
+
         expect(greenOutput.all).not.toContain("color: blue");
 
         harness.endBuild();
+
         const secondWatchFiles = getScriptLoadWatchFiles(
           await harness.loadScript({
             path: fixture.entryPath
@@ -2908,6 +3023,7 @@ if (import.meta.vitest) {
           entrySource: createNamespaceCssPropEntrySource("./barrel", "styles")
         }
       );
+
       const barrelPath = join(fixture.srcRoot, "barrel.ts");
       const resetPath = join(fixture.srcRoot, "reset.ts");
       const buttonPath = join(fixture.srcRoot, "button.ts");
@@ -2932,12 +3048,15 @@ if (import.meta.vitest) {
         const barrelRealpath = normalizeStaticCssEvalFileId(
           await fs.promises.realpath(barrelPath)
         );
+
         const resetRealpath = normalizeStaticCssEvalFileId(
           await fs.promises.realpath(resetPath)
         );
+
         const buttonRealpath = normalizeStaticCssEvalFileId(
           await fs.promises.realpath(buttonPath)
         );
+
         const transformResult: BabelTransformResult = {
           code: fixture.entrySource,
           result: ["", ""],
@@ -2947,7 +3066,8 @@ if (import.meta.vitest) {
             terminalLeafPath: buttonRealpath
           })
         };
-        vi.spyOn(integrationHelpers, "babelTransform").mockResolvedValue(
+
+        vi.spyOn(integrationHelpers, "babelTransformSource").mockResolvedValue(
           transformResult
         );
 
@@ -2955,6 +3075,7 @@ if (import.meta.vitest) {
           absWorkingDir: fixture.root,
           plugin: minchoEsbuildPlugin({ jsxCssProp: true })
         });
+
         const watchFiles = getScriptLoadWatchFiles(
           await harness.loadScript({
             path: fixture.entryPath
@@ -2976,6 +3097,7 @@ if (import.meta.vitest) {
           entrySource: createImportedCssPropEntrySource("./barrel")
         }
       );
+
       const barrelPath = join(fixture.srcRoot, "barrel.ts");
       const buttonPath = join(fixture.srcRoot, "button.ts");
 
@@ -2994,9 +3116,11 @@ if (import.meta.vitest) {
         const barrelRealpath = normalizeStaticCssEvalFileId(
           await fs.promises.realpath(barrelPath)
         );
+
         const buttonRealpath = normalizeStaticCssEvalFileId(
           await fs.promises.realpath(buttonPath)
         );
+
         const cycleStaticCssEval: StaticCssEvalMetadata = {
           dependencyFiles: [barrelRealpath, buttonRealpath],
           dependencies: [
@@ -3015,12 +3139,14 @@ if (import.meta.vitest) {
           ],
           resolvedModuleIds: [barrelRealpath, buttonRealpath]
         };
+
         const cycleError = new Error(
           "STATIC_CSS_EVAL_IMPORT_CYCLE: cyclic static css reference detected"
         ) as Error & { staticCssEval: StaticCssEvalMetadata };
+
         cycleError.staticCssEval = cycleStaticCssEval;
 
-        vi.spyOn(integrationHelpers, "babelTransform").mockRejectedValue(
+        vi.spyOn(integrationHelpers, "babelTransformSource").mockRejectedValue(
           cycleError
         );
 
@@ -3028,6 +3154,7 @@ if (import.meta.vitest) {
           absWorkingDir: fixture.root,
           plugin: minchoEsbuildPlugin({ jsxCssProp: true })
         });
+
         let thrownError: unknown;
 
         try {
@@ -3053,11 +3180,14 @@ if (import.meta.vitest) {
         "jsx-css-prop-cache-scope-red-",
         { styleSource: createImportedStyleSource("red") }
       );
+
       const blueFixture = await createImportedCssPropEsbuildFixture(
         "jsx-css-prop-cache-scope-blue-",
         { styleSource: createImportedStyleSource("blue") }
       );
+
       await spyOnSourceBabelTransform();
+
       const sharedMinchoPlugin = minchoEsbuildPlugin({ jsxCssProp: true });
       const redContext = await realEsbuild.context({
         absWorkingDir: redFixture.root,
@@ -3070,6 +3200,7 @@ if (import.meta.vitest) {
         plugins: [sharedMinchoPlugin, vanillaExtractPlugin()],
         write: false
       });
+
       const blueContext = await realEsbuild.context({
         absWorkingDir: blueFixture.root,
         bundle: true,
@@ -3089,8 +3220,11 @@ if (import.meta.vitest) {
         );
 
         expectCssPropBuildOutputToContainColor(redOutput, "red");
+
         expect(redOutput.all).not.toContain("color: blue");
+
         expectCssPropBuildOutputToContainColor(blueOutput, "blue");
+
         expect(blueOutput.all).not.toContain("color: red");
       } finally {
         await Promise.all([redContext.dispose(), blueContext.dispose()]);
@@ -3121,6 +3255,7 @@ if (import.meta.vitest) {
           `
         }
       );
+
       const packageRoot = join(fixture.root, "node_modules/@pkg/styles");
       const packageIndexPath = join(packageRoot, "index.ts");
       await spyOnSourceBabelTransform();
@@ -3144,6 +3279,7 @@ if (import.meta.vitest) {
             "@pkg/styles": createStaticCssEvalResolveResult(packageIndexPath)
           })
         });
+
         const { scriptSource, sidecarSource } =
           await loadCssPropSidecarSourceFromHarness(harness, fixture.entryPath);
 
@@ -3163,6 +3299,7 @@ if (import.meta.vitest) {
           entrySource: createImportedCssPropEntrySource("@pkg/styles")
         }
       );
+
       const packageRoot = join(fixture.root, "node_modules/@pkg/styles");
       const packageIndexPath = join(packageRoot, "index.ts");
       const packageButtonPath = join(packageRoot, "button.ts");
@@ -3188,6 +3325,7 @@ if (import.meta.vitest) {
             "@pkg/styles": createStaticCssEvalResolveResult(packageIndexPath)
           })
         });
+
         const { sidecarSource } = await loadCssPropSidecarSourceFromHarness(
           harness,
           fixture.entryPath
@@ -3215,6 +3353,7 @@ if (import.meta.vitest) {
           `
         }
       );
+
       const packageRoot = join(fixture.root, "node_modules/@pkg/styles");
       const packageJsonPath = join(packageRoot, "styles.json");
       await spyOnSourceBabelTransform();
@@ -3238,6 +3377,7 @@ if (import.meta.vitest) {
               createStaticCssEvalResolveResult(packageJsonPath)
           })
         });
+
         const { sidecarSource } = await loadCssPropSidecarSourceFromHarness(
           harness,
           fixture.entryPath
@@ -3263,6 +3403,7 @@ if (import.meta.vitest) {
           `
         }
       );
+
       const packageRoot = join(fixture.root, "node_modules/@pkg/styles");
       const rawColorPath = join(packageRoot, "color.txt");
       const captured: {
@@ -3273,11 +3414,10 @@ if (import.meta.vitest) {
       try {
         await fs.promises.mkdir(packageRoot, { recursive: true });
         await fs.promises.writeFile(rawColorPath, "red", "utf8");
-        vi.spyOn(integrationHelpers, "babelTransform").mockImplementation(
-          async (
-            _path: string,
-            options: MinchoBabelOptionsWithStaticCssEval = {}
-          ) => {
+        vi.spyOn(integrationHelpers, "babelTransformSource").mockImplementation(
+          async ({
+            babel: options = {}
+          }: Parameters<typeof babelTransformSource>[0]) => {
             const sourceProvider = options.staticCssEvalSourceProvider;
 
             if (!sourceProvider) {
@@ -3316,7 +3456,9 @@ if (import.meta.vitest) {
             )
           })
         });
+
         await harness.loadScript({ path: fixture.entryPath });
+
         const rawRealpath = normalizeStaticCssEvalFileId(
           await fs.promises.realpath(rawColorPath)
         );
@@ -3357,6 +3499,7 @@ if (import.meta.vitest) {
           `
         }
       );
+
       const packageRoot = join(fixture.root, "node_modules/@pkg/styles");
       const wasmPath = join(packageRoot, "icon.wasm");
       const captured: {
@@ -3367,11 +3510,10 @@ if (import.meta.vitest) {
       try {
         await fs.promises.mkdir(packageRoot, { recursive: true });
         await fs.promises.writeFile(wasmPath, "wasm-init", "utf8");
-        vi.spyOn(integrationHelpers, "babelTransform").mockImplementation(
-          async (
-            _path: string,
-            options: MinchoBabelOptionsWithStaticCssEval = {}
-          ) => {
+        vi.spyOn(integrationHelpers, "babelTransformSource").mockImplementation(
+          async ({
+            babel: options = {}
+          }: Parameters<typeof babelTransformSource>[0]) => {
             const sourceProvider = options.staticCssEvalSourceProvider;
 
             if (!sourceProvider) {
@@ -3402,6 +3544,9 @@ if (import.meta.vitest) {
 
         const harness = createBuildHarness({
           absWorkingDir: fixture.root,
+          esbuild: await import("esbuild"),
+          loader: { ".wasm": "file" },
+          outdir: join(fixture.root, "out"),
           plugin: minchoEsbuildPlugin({ jsxCssProp: true }),
           resolve: createMappedEsbuildResolve({
             "@pkg/styles/icon.wasm?url": createSuffixedEsbuildResolveResult(
@@ -3410,7 +3555,9 @@ if (import.meta.vitest) {
             )
           })
         });
+
         await harness.loadScript({ path: fixture.entryPath });
+
         const wasmRealpath = normalizeStaticCssEvalFileId(
           await fs.promises.realpath(wasmPath)
         );
@@ -3426,7 +3573,7 @@ if (import.meta.vitest) {
           resolverKind: "esbuild"
         });
         expect(captured.loadedSource).toMatchObject({
-          sourceText: "/node_modules/@pkg/styles/icon.wasm",
+          sourceText: expect.stringMatching(/^\.\/icon-[A-Z0-9]+\.wasm\?url$/),
           resolvedFile: `${wasmRealpath}?url`,
           sourceKind: "static-data",
           sourceOrigin: "data",
@@ -3438,15 +3585,6 @@ if (import.meta.vitest) {
       }
     });
 
-    it("uses Vite-compatible /@fs URLs for static data outside root", () => {
-      expect(
-        getEsbuildStaticCssEvalUrlSource(
-          "/workspace/shared/icon.wasm",
-          "/workspace/app"
-        )
-      ).toBe("/@fs/workspace/shared/icon.wasm");
-    });
-
     it("rejects static css eval external no-source imports without filesystem fallback", async () => {
       const fixture = await createImportedCssPropEsbuildFixture(
         "static-css-eval-external-no-source-",
@@ -3454,6 +3592,7 @@ if (import.meta.vitest) {
           entrySource: createImportedCssPropEntrySource("@pkg/external")
         }
       );
+
       await spyOnSourceBabelTransform();
 
       try {
@@ -3483,6 +3622,7 @@ if (import.meta.vitest) {
           entrySource: createImportedCssPropEntrySource("virtual:styles")
         }
       );
+
       await spyOnSourceBabelTransform();
 
       try {
@@ -3534,6 +3674,7 @@ if (import.meta.vitest) {
             `
           }
         );
+
         const packageRoot = join(fixture.root, "node_modules/@pkg/styles");
         const wasmPath = join(packageRoot, "icon.wasm");
         await spyOnSourceBabelTransform();
@@ -3573,6 +3714,7 @@ if (import.meta.vitest) {
           }
         `
       );
+
       await spyOnSourceBabelTransform();
 
       try {
@@ -3580,6 +3722,7 @@ if (import.meta.vitest) {
           absWorkingDir: fallbackFixture.root,
           plugin: minchoEsbuildPlugin({ jsxCssProp: true })
         });
+
         await expect(
           fallbackHarness.loadScript({ path: fallbackFixture.entryPath })
         ).rejects.toThrow('import "virtual:styles" could not be resolved');
@@ -3596,7 +3739,9 @@ if (import.meta.vitest) {
       const fixture = await createImportedCssPropEsbuildFixture(
         "jsx-css-prop-imported-deleted-dependency-"
       );
+
       await spyOnSourceBabelTransform();
+
       const context = await realEsbuild.context({
         absWorkingDir: fixture.root,
         bundle: true,
@@ -3615,6 +3760,7 @@ if (import.meta.vitest) {
         expectCssPropBuildOutputToContainColor(redOutput, "red");
 
         await fs.promises.rm(fixture.stylesPath, { force: true });
+
         await expect(context.rebuild()).rejects.toThrow(
           'import "./styles" could not be resolved'
         );
@@ -3642,9 +3788,10 @@ if (import.meta.vitest) {
         const { entryPath, root } = await createJsxCssPropFixture(
           fixtureCase.prefix
         );
+
         const babelTransformSpy = vi.spyOn(
           integrationHelpers,
-          "babelTransform"
+          "babelTransformSource"
         );
 
         try {
@@ -3652,6 +3799,7 @@ if (import.meta.vitest) {
           const scriptLoadResult = (await harness.loadScript({
             path: entryPath
           })) as ScriptLoadResult;
+
           const resolveResult = await harness.resolveExtractedCss({
             path: "extracted_missing.css.ts",
             importer: entryPath,
@@ -3659,8 +3807,12 @@ if (import.meta.vitest) {
           });
 
           expect(babelTransformSpy).toHaveBeenCalledWith(
-            entryPath,
-            fixtureCase.expectedBabelOptions
+            expect.objectContaining({
+              filename: entryPath,
+              source: expect.any(String),
+              loader: "tsx",
+              babel: fixtureCase.expectedBabelOptions
+            })
           );
           expect(scriptLoadResult.loader).toBe("tsx");
           expect(scriptLoadResult.contents).toContain('className="base"');
@@ -3695,9 +3847,11 @@ if (import.meta.vitest) {
           plugins: minchoEsbuildPlugins(),
           write: false
         });
+
         const jsOutput = result.outputFiles.find((outputFile) =>
           outputFile.path.endsWith(".js")
         );
+
         const cssOutput = result.outputFiles.find((outputFile) =>
           outputFile.path.endsWith(".css")
         );
@@ -3710,22 +3864,28 @@ if (import.meta.vitest) {
         }
 
         const fillBlueClassName = extractFillBlueClassName(jsOutput.text);
+
         expect(jsOutput.text).not.toContain('background: "blue"');
+
         expectCssSourceToContainClassNames(cssOutput.text, fillBlueClassName);
+
         expect(cssOutput.text).toContain("background: blue;");
 
-        vi.spyOn(integrationHelpers, "babelTransform").mockResolvedValue({
+        vi.spyOn(integrationHelpers, "babelTransformSource").mockResolvedValue({
           code: 'import "extracted_rules.css.ts";\nexport { css, preset, fillBlue };',
           result: ["extracted_rules.css.ts", createLivePresetBuildSource()]
         });
+
         const harness = createBuildHarness({
           absWorkingDir: process.cwd(),
           esbuild: realEsbuild
         });
+
         const { loadResult } = await loadExtractedCssFromEntry(
           harness,
           join(process.cwd(), "packages/esbuild/src/registry-entry.ts")
         );
+
         const registryClassName = extractExportedStringValueFromBuildSource(
           loadResult.contents,
           "fillBlue"
@@ -3762,14 +3922,17 @@ if (import.meta.vitest) {
           await buildRealEsbuildRegistryFixture(fixtureCase);
 
         expect(registrySource).not.toBe("");
+
         expectSourceToContainV5PresetArtifact(registrySource);
         expectSourceToContainPopulatedPresetAtom(registrySource);
+
         if (fixtureCase.expectedRegistryInstances > 1) {
           const artifactCount = Array.from(
             registrySource.matchAll(
               /["']?schema["']?\s*:\s*["']mincho\.defineRulesPreset["']/g
             )
           ).length;
+
           expect(artifactCount).toBeGreaterThanOrEqual(
             fixtureCase.expectedRegistryInstances
           );
@@ -3811,10 +3974,11 @@ if (import.meta.vitest) {
         "packages/esbuild/src/live-preset-entry.ts"
       );
 
-      vi.spyOn(integrationHelpers, "babelTransform").mockResolvedValue({
+      vi.spyOn(integrationHelpers, "babelTransformSource").mockResolvedValue({
         code: 'import "extracted_rules.css.ts";\nexport { css, preset, fillBlue };',
         result: ["extracted_rules.css.ts", livePresetFixtureSource]
       });
+
       const registrySpy = vi.spyOn(
         integrationHelpers,
         "processDefineRulesPresetRegistryFile"
@@ -3824,14 +3988,17 @@ if (import.meta.vitest) {
         absWorkingDir: process.cwd(),
         esbuild: realEsbuild
       });
+
       const { loadResult, resolveResult } = await loadExtractedCssFromEntry(
         harness,
         entryPath
       );
+
       const fillBlueInit = extractExportedVariableInitFromBuildSource(
         loadResult.contents,
         "fillBlue"
       );
+
       const fillBlueClassName = extractExportedStringValueFromBuildSource(
         loadResult.contents,
         "fillBlue"
@@ -3847,7 +4014,9 @@ if (import.meta.vitest) {
       expect(loadResult.loader).toBe("js");
       expect(loadResult.resolveDir).toBe(dirname(resolveResult.path));
       expect(fillBlueInit).toMatch(/^(?:"[^"]+"|'[^']+')$/);
+
       const fillBlueClassNames = splitClassNames(fillBlueClassName);
+
       expect(fillBlueClassNames.filter(isSegmentMarker)).toHaveLength(1);
       expect(
         fillBlueClassNames.filter((token) => !isSegmentMarker(token))
@@ -3855,6 +4024,7 @@ if (import.meta.vitest) {
       expect(
         hasCssCallWithStringProperty(loadResult.contents, "background", "blue")
       ).toBe(false);
+
       expectSourceToContainPresetAtomClassName(
         loadResult.contents,
         fillBlueClassName
@@ -3874,16 +4044,18 @@ if (import.meta.vitest) {
         });
         export const raw = invalid.css.raw({ color: "brand" });
       `;
+
       const realEsbuild = await import("esbuild");
       const entryPath = join(
         process.cwd(),
         "packages/esbuild/src/function-valued-config-entry.ts"
       );
 
-      vi.spyOn(integrationHelpers, "babelTransform").mockResolvedValue({
+      vi.spyOn(integrationHelpers, "babelTransformSource").mockResolvedValue({
         code: 'import "extracted_rules.css.ts";\nexport { raw };',
         result: ["extracted_rules.css.ts", functionValuedConfigBuildSource]
       });
+
       const registrySpy = vi.spyOn(
         integrationHelpers,
         "processDefineRulesPresetRegistryFile"
@@ -3893,9 +4065,11 @@ if (import.meta.vitest) {
         absWorkingDir: process.cwd(),
         esbuild: realEsbuild
       });
+
       const scriptLoadResult = (await harness.loadScript({
         path: entryPath
       })) as ScriptLoadResult;
+
       const resolveResult = (await harness.resolveExtractedCss({
         path: "extracted_rules.css.ts",
         importer: entryPath,
@@ -3914,17 +4088,19 @@ if (import.meta.vitest) {
     });
 
     it("routes extracted css through the shared preset registry wrapper without breaking the namespace flow", async () => {
-      vi.spyOn(integrationHelpers, "babelTransform").mockResolvedValue({
+      vi.spyOn(integrationHelpers, "babelTransformSource").mockResolvedValue({
         code: "export const app = {};",
         result: ["extracted_rules.css.ts", "resolver contents"]
       });
       vi.spyOn(integrationHelpers, "compile").mockResolvedValue({
         source: "compiled source"
       } as Awaited<ReturnType<typeof compile>>);
+
       const registryStepSpy = vi.spyOn(
         integrationHelpers,
         "runDefineRulesPresetRegistryStep"
       );
+
       const presetBuildSource = await createV5PresetBuildSource();
       const registrySpy = vi
         .spyOn(integrationHelpers, "processDefineRulesPresetRegistryFile")
@@ -3958,6 +4134,7 @@ if (import.meta.vitest) {
       expect(loadResult.contents).toContain(
         'import "@scope/ancestor/style.css";'
       );
+
       expectSourceToContainPresetAtomClassName(
         loadResult.contents,
         presetBuildSource.className
@@ -3965,13 +4142,14 @@ if (import.meta.vitest) {
     });
 
     it("passes short identifiers to the registry wrapper when esbuild minifies", async () => {
-      vi.spyOn(integrationHelpers, "babelTransform").mockResolvedValue({
+      vi.spyOn(integrationHelpers, "babelTransformSource").mockResolvedValue({
         code: "export const app = {};",
         result: ["extracted_rules.css.ts", "resolver contents"]
       });
       vi.spyOn(integrationHelpers, "compile").mockResolvedValue({
         source: "compiled source"
       } as Awaited<ReturnType<typeof compile>>);
+
       const presetBuildSource = await createV5PresetBuildSource();
       const registrySpy = vi
         .spyOn(integrationHelpers, "processDefineRulesPresetRegistryFile")
@@ -3997,14 +4175,16 @@ if (import.meta.vitest) {
         vi.restoreAllMocks();
 
         const fixtureSource = readFixtureSource(fixtureCase.fixturePath);
+
         for (const expectedSourceSnippet of fixtureCase.expectedSourceSnippets) {
           expectSourceToContainSnippet(fixtureSource, expectedSourceSnippet);
         }
 
-        vi.spyOn(integrationHelpers, "babelTransform").mockResolvedValue({
+        vi.spyOn(integrationHelpers, "babelTransformSource").mockResolvedValue({
           code: 'import "extracted_rules.css.ts";\nexport { css, preset, shared };',
           result: ["extracted_rules.css.ts", "resolver contents"]
         });
+
         const compileFixtureSource = integrationHelpers.compile;
         vi.spyOn(integrationHelpers, "compile").mockImplementation(
           (options: Parameters<typeof compile>[0]) =>
@@ -4013,6 +4193,7 @@ if (import.meta.vitest) {
               contents: fixtureSource
             })
         );
+
         const registrySpy = vi.spyOn(
           integrationHelpers,
           "processDefineRulesPresetRegistryFile"
@@ -4023,6 +4204,7 @@ if (import.meta.vitest) {
           absWorkingDir: process.cwd(),
           esbuild: realEsbuild
         });
+
         const { loadResult, resolveResult } = await loadExtractedCssFromEntry(
           harness,
           join(process.cwd(), "packages/esbuild/src/app.ts")
@@ -4037,6 +4219,7 @@ if (import.meta.vitest) {
         expect(registrySpy).toHaveBeenCalledTimes(1);
         expect(loadResult.loader).toBe("js");
         expect(loadResult.resolveDir).toBe(dirname(resolveResult.path));
+
         expectSourceToContainV5PresetArtifact(loadResult.contents);
       }
     });
@@ -4050,14 +4233,16 @@ if (import.meta.vitest) {
       }
 
       const fixtureSource = readFixtureSource(fixtureCase.fixturePath);
+
       for (const expectedSourceSnippet of fixtureCase.expectedSourceSnippets) {
         expectSourceToContainSnippet(fixtureSource, expectedSourceSnippet);
       }
 
-      vi.spyOn(integrationHelpers, "babelTransform").mockResolvedValue({
+      vi.spyOn(integrationHelpers, "babelTransformSource").mockResolvedValue({
         code: 'import "extracted_rules.css.ts";\nexport { raw };',
         result: ["extracted_rules.css.ts", "resolver contents"]
       });
+
       const compileFixtureSource = integrationHelpers.compile;
       vi.spyOn(integrationHelpers, "compile").mockImplementation(
         (options: Parameters<typeof compile>[0]) =>
@@ -4068,14 +4253,17 @@ if (import.meta.vitest) {
             contents: fixtureSource
           })
       );
+
       const registrySpy = vi.spyOn(
         integrationHelpers,
         "processDefineRulesPresetRegistryFile"
       );
+
       const fixtureProjectRoot = resolvePath(
         dirname(fixtureCase.fixturePath),
         "../../../../../../.."
       );
+
       const fixtureAppPath = join(
         fixtureProjectRoot,
         "packages/esbuild/src/app.ts"
@@ -4086,14 +4274,17 @@ if (import.meta.vitest) {
         absWorkingDir: fixtureProjectRoot,
         esbuild: realEsbuild
       });
+
       const scriptLoadResult = (await harness.loadScript({
         path: fixtureAppPath
       })) as ScriptLoadResult;
+
       const resolveResult = (await harness.resolveExtractedCss({
         path: "extracted_rules.css.ts",
         importer: fixtureAppPath,
         pluginData: scriptLoadResult.pluginData
       })) as ResolvedExtractedCssResult;
+
       const loadResult = (await harness.loadExtractedCss({
         path: resolveResult.path,
         pluginData: resolveResult.pluginData
@@ -4113,7 +4304,7 @@ if (import.meta.vitest) {
         "@mincho-js-proof/define-rules-preset"
       );
 
-      vi.spyOn(integrationHelpers, "babelTransform").mockResolvedValue({
+      vi.spyOn(integrationHelpers, "babelTransformSource").mockResolvedValue({
         code: consumerFixtureSource,
         result: ["extracted_rules.css.ts", ""]
       });
@@ -4128,6 +4319,7 @@ if (import.meta.vitest) {
           mainFilePath: string;
         };
       };
+
       const resolveResult = await harness.resolveExtractedCss({
         path: "extracted_rules.css.ts",
         importer: "/workspace/src/app.ts",
@@ -4148,13 +4340,14 @@ if (import.meta.vitest) {
     });
 
     it("preserves the existing ReferenceError wrapping when extracted css evaluation fails", async () => {
-      vi.spyOn(integrationHelpers, "babelTransform").mockResolvedValue({
+      vi.spyOn(integrationHelpers, "babelTransformSource").mockResolvedValue({
         code: "export const app = {};",
         result: ["extracted_rules.css.ts", "resolver contents"]
       });
       vi.spyOn(integrationHelpers, "compile").mockResolvedValue({
         source: "compiled source"
       } as Awaited<ReturnType<typeof compile>>);
+
       const registrySpy = vi
         .spyOn(integrationHelpers, "processDefineRulesPresetRegistryFile")
         .mockRejectedValue(new ReferenceError("window is not defined"));
@@ -4163,11 +4356,13 @@ if (import.meta.vitest) {
       const scriptLoadResult = (await harness.loadScript({
         path: "/workspace/src/app.ts"
       })) as ScriptLoadResult;
+
       const resolveResult = (await harness.resolveExtractedCss({
         path: "extracted_rules.css.ts",
         importer: "/workspace/src/app.ts",
         pluginData: scriptLoadResult.pluginData
       })) as ResolvedExtractedCssResult;
+
       const loadResult = (await harness.loadExtractedCss({
         path: resolveResult.path,
         pluginData: resolveResult.pluginData
@@ -4196,7 +4391,7 @@ if (import.meta.vitest) {
     });
 
     it("cleans extracted-css resolvers on build end", async () => {
-      vi.spyOn(integrationHelpers, "babelTransform").mockResolvedValue({
+      vi.spyOn(integrationHelpers, "babelTransformSource").mockResolvedValue({
         code: 'import "extracted_rules.css.ts";\nexport const app = {};',
         result: ["extracted_rules.css.ts", "resolver contents"]
       });
@@ -4205,6 +4400,7 @@ if (import.meta.vitest) {
       const scriptLoadResult = (await harness.loadScript({
         path: "/workspace/src/app.ts"
       })) as ScriptLoadResult;
+
       const resolveBeforeEnd = await harness.resolveExtractedCss({
         path: "extracted_rules.css.ts",
         importer: "/workspace/src/app.ts",
@@ -4235,7 +4431,7 @@ if (import.meta.vitest) {
       const secondDeferred = createDeferred<string>();
       const processOrder: string[] = [];
 
-      vi.spyOn(integrationHelpers, "babelTransform")
+      vi.spyOn(integrationHelpers, "babelTransformSource")
         .mockResolvedValueOnce({
           code: "export const appA = {};",
           result: ["extracted_a.css.ts", "resolver contents a"]
@@ -4250,6 +4446,7 @@ if (import.meta.vitest) {
             source: `compiled source:${options.filePath}`
           }) as Awaited<ReturnType<typeof compile>>
       );
+
       const registrySpy = vi
         .spyOn(integrationHelpers, "processDefineRulesPresetRegistryFile")
         .mockImplementation(
@@ -4261,11 +4458,13 @@ if (import.meta.vitest) {
             if (options.filePath.endsWith("extracted_a.css.ts")) {
               const result = await firstDeferred.promise;
               processOrder.push(`end:${options.filePath}`);
+
               return createRegistryResult(result);
             }
 
             const result = await secondDeferred.promise;
             processOrder.push(`end:${options.filePath}`);
+
             return createRegistryResult(result);
           }
         );
@@ -4274,14 +4473,17 @@ if (import.meta.vitest) {
       const scriptLoadResultA = (await harness.loadScript({
         path: "/workspace/src/app-a.ts"
       })) as ScriptLoadResult;
+
       const scriptLoadResultB = (await harness.loadScript({
         path: "/workspace/src/app-b.ts"
       })) as ScriptLoadResult;
+
       const resolveResultA = (await harness.resolveExtractedCss({
         path: "extracted_a.css.ts",
         importer: "/workspace/src/app-a.ts",
         pluginData: scriptLoadResultA.pluginData
       })) as ResolvedExtractedCssResult;
+
       const resolveResultB = (await harness.resolveExtractedCss({
         path: "extracted_b.css.ts",
         importer: "/workspace/src/app-b.ts",
@@ -4292,6 +4494,7 @@ if (import.meta.vitest) {
         path: resolveResultA.path,
         pluginData: resolveResultA.pluginData
       }) as Promise<ExtractedCssLoadResult>;
+
       const secondLoadPromise = harness.loadExtractedCss({
         path: resolveResultB.path,
         pluginData: resolveResultB.pluginData
@@ -4306,7 +4509,9 @@ if (import.meta.vitest) {
       const firstPresetBuildSource = await createV5PresetBuildSource(
         "src/extracted_a.css.ts"
       );
+
       firstDeferred.resolve(firstPresetBuildSource.source);
+
       const firstLoadResult = await firstLoadPromise;
 
       await vi.waitFor(() => {
@@ -4320,7 +4525,9 @@ if (import.meta.vitest) {
       const secondPresetBuildSource = await createV5PresetBuildSource(
         "src/extracted_b.css.ts"
       );
+
       secondDeferred.resolve(secondPresetBuildSource.source);
+
       const secondLoadResult = await secondLoadPromise;
 
       expect(processOrder).toEqual([
@@ -4341,6 +4548,7 @@ if (import.meta.vitest) {
         outputCss: undefined,
         identOption: "debug"
       });
+
       expectSourceToContainPresetAtomClassName(
         firstLoadResult.contents,
         firstPresetBuildSource.className
@@ -4349,6 +4557,7 @@ if (import.meta.vitest) {
         secondLoadResult.contents,
         secondPresetBuildSource.className
       );
+
       expect(firstPresetBuildSource.marker).not.toBe(
         secondPresetBuildSource.marker
       );

@@ -5,10 +5,12 @@ import {
   internalCreateImportedStaticCssEvalModuleRecord as createImportedStaticCssEvalModuleRecord,
   internalCreateImportedStaticCssEvalProvider as createImportedStaticCssEvalProvider,
   internalGetStaticCssEvalMemberReference as getStaticCssEvalMemberReference,
+  internalStaticCssEvalLimits,
   internalUnwrapTransparentCssRuleExpression as unwrapTransparentCssRuleExpression,
   type InternalImportedStaticCssEvalImportResolution as BabelImportedStaticCssEvalImportResolution,
   type InternalImportedStaticCssEvalLoadedModule as BabelImportedStaticCssEvalLoadedModule,
   type InternalImportedStaticCssEvalModuleRecord as ImportedStaticCssEvalModuleRecord,
+  type MinchoStaticCssEvalMetadata,
   type PluginOptions
 } from "@mincho-js/babel";
 import type {
@@ -57,7 +59,16 @@ interface NormalizedStaticCssEvalSourceResolution {
 interface PreparedStaticCssEvalPrepass {
   provider: StaticCssEvalProvider;
   result: StaticCssEvalPrepassResult;
+  diagnostics: MinchoStaticCssEvalMetadata["diagnostics"];
 }
+
+// Only bounded prepass exits use this signal; provider and parser failures
+// still propagate to the caller.
+class StaticCssEvalPrepassLimit extends Error {}
+
+// Bounds dependency discovery for the whole owner, independently of the
+// evaluator's per-literal node limit.
+export const STATIC_CSS_EVAL_PREPASS_MAX_TRAVERSED_NODES = 100_000;
 
 interface StaticCssEvalPrepassState {
   loadedModules: ImportedStaticCssEvalLoadedModule[];
@@ -68,11 +79,18 @@ interface StaticCssEvalPrepassState {
   resolvedDependencies: StaticCssEvalResolvedDependency[];
   resolvedImports: Map<string, NormalizedStaticCssEvalSourceResolution | null>;
   loadedDependencyIds: Set<string>;
+  visitedExports: Set<string>;
+  visitedNamespaces: Set<string>;
+  visitedLocals: Set<string>;
+  traversedNodes: number;
 }
 
 interface StaticCssEvalPrepassContext {
   sourceProvider: StaticCssEvalSourceProvider;
   state: StaticCssEvalPrepassState;
+  moduleId: string;
+  importDepth: number;
+  objectDepth: number;
 }
 
 type StaticCssEvalPrepassImportBinding =
@@ -82,6 +100,7 @@ type StaticCssEvalPrepassImportBinding =
   >
     ? ImportBinding
     : never;
+
 type StaticCssEvalPrepassCjsImportBinding =
   ImportedStaticCssEvalModuleRecord["cjsImports"] extends ReadonlyMap<
     string,
@@ -89,7 +108,9 @@ type StaticCssEvalPrepassCjsImportBinding =
   >
     ? CjsImportBinding
     : never;
+
 type StaticCssEvalPrepassExportName = string | null;
+
 type StaticCssEvalPrepassExportEntry =
   ImportedStaticCssEvalModuleRecord["exports"] extends ReadonlyMap<
     StaticCssEvalPrepassExportName,
@@ -140,14 +161,12 @@ interface StaticCssEvalPrepassExpressionWalkOptions {
   readonly expression: t.Expression;
   readonly memberPath: readonly string[];
   readonly context: StaticCssEvalPrepassContext;
-  readonly localStack: readonly StaticCssEvalPrepassLocalWalkFrame[];
 }
 
 interface StaticCssEvalPrepassReferenceWalkOptions {
   readonly moduleRecord: ImportedStaticCssEvalModuleRecord;
   readonly reference: StaticCssEvalPrepassReference;
   readonly context: StaticCssEvalPrepassContext;
-  readonly localStack: readonly StaticCssEvalPrepassLocalWalkFrame[];
 }
 
 interface StaticCssEvalPrepassLocalBindingWalkOptions {
@@ -155,7 +174,6 @@ interface StaticCssEvalPrepassLocalBindingWalkOptions {
   readonly bindingName: string;
   readonly memberPath: readonly string[];
   readonly context: StaticCssEvalPrepassContext;
-  readonly localStack: readonly StaticCssEvalPrepassLocalWalkFrame[];
 }
 
 interface CreateLoadedModuleOptions {
@@ -174,7 +192,8 @@ type PreparedStaticCssEvalLoadedSource =
       loadedSource: StaticCssEvalLoadedSource;
     };
 
-const STATIC_CSS_EVAL_PREPASS_MAX_SOURCE_BYTES = 1024 * 1024;
+const STATIC_CSS_EVAL_PREPASS_MAX_SOURCE_BYTES =
+  internalStaticCssEvalLimits.maxLoadedDependencySourceBytes;
 
 const STATIC_CSS_EVAL_PREPASS_RESERVED_EXPORT_NAMES = new Set([
   "await",
@@ -229,6 +248,7 @@ export async function createStaticCssEvalPrepass(
     ownerRecord.programPath,
     { importerId: ownerId }
   );
+
   const prepassState: StaticCssEvalPrepassState = {
     loadedModules: [ownerModule],
     importResolutions: [],
@@ -237,61 +257,90 @@ export async function createStaticCssEvalPrepass(
     dependencyToOwners: new Map(),
     resolvedDependencies: [],
     resolvedImports: new Map(),
-    loadedDependencyIds: new Set([ownerId])
+    loadedDependencyIds: new Set([ownerId]),
+    visitedExports: new Set(),
+    visitedNamespaces: new Set(),
+    visitedLocals: new Set(),
+    traversedNodes: 0
   };
+
   const prepassContext: StaticCssEvalPrepassContext = {
     sourceProvider,
-    state: prepassState
+    state: prepassState,
+    moduleId: ownerId,
+    importDepth: 0,
+    objectDepth: 0
   };
 
-  for (const candidate of candidates) {
-    const dependencyRequest = createStaticCssEvalPrepassDependencyRequest(
-      ownerRecord,
-      candidate.bindingName,
-      candidate.memberPath ?? []
-    );
+  const diagnostics: MinchoStaticCssEvalMetadata["diagnostics"] = [];
 
-    if (!dependencyRequest) {
-      if (candidate.bindingName) {
-        await loadStaticCssEvalPrepassLocalBindingDependencies({
-          moduleRecord: ownerRecord,
-          bindingName: candidate.bindingName,
-          memberPath: candidate.memberPath ?? [],
-          context: prepassContext,
-          localStack: []
-        });
+  try {
+    for (const candidate of candidates) {
+      const dependencyRequest = createStaticCssEvalPrepassDependencyRequest(
+        ownerRecord,
+        candidate.bindingName,
+        candidate.memberPath ?? []
+      );
+
+      if (!dependencyRequest) {
+        if (candidate.bindingName) {
+          await loadStaticCssEvalPrepassLocalBindingDependencies({
+            moduleRecord: ownerRecord,
+            bindingName: candidate.bindingName,
+            memberPath: candidate.memberPath ?? [],
+            context: prepassContext
+          });
+        }
+
+        continue;
       }
 
-      continue;
-    }
-
-    const moduleRecord = await loadStaticCssEvalPrepassDependency(
-      ownerId,
-      dependencyRequest.importPath,
-      prepassContext
-    );
-
-    if (!moduleRecord) {
-      continue;
-    }
-
-    if (dependencyRequest.exportRequest) {
-      await loadStaticCssEvalPrepassGraphDependencies(
-        moduleRecord,
-        dependencyRequest.exportRequest,
+      const moduleRecord = await loadStaticCssEvalPrepassDependency(
+        ownerId,
+        dependencyRequest.importPath,
         prepassContext
       );
-    }
-  }
 
-  await loadStaticCssEvalPrepassOwnerLiteralDependencies(
-    ownerRecord,
-    prepassContext
-  );
+      if (!moduleRecord) {
+        continue;
+      }
+
+      if (dependencyRequest.exportRequest) {
+        await loadStaticCssEvalPrepassGraphDependencies(
+          moduleRecord,
+          dependencyRequest.exportRequest,
+          prepassContext
+        );
+      }
+    }
+
+    await loadStaticCssEvalPrepassOwnerLiteralDependencies(
+      ownerRecord,
+      prepassContext
+    );
+  } catch (error) {
+    if (!(error instanceof StaticCssEvalPrepassLimit)) {
+      throw error;
+    }
+
+    diagnostics.push({
+      code: "limit-exceeded",
+      category: "policy",
+      reason: "unsupported-literal",
+      message: error.message,
+      owner: { file: ownerId }
+    });
+
+    // Keep discovered watch dependencies, but never evaluate a partial graph.
+    prepassState.loadedModules = [];
+    prepassState.importResolutions = [];
+    prepassState.resolvedModuleCache.clear();
+  }
 
   const ownerToDependencies = new Map<string, string[]>([
     [ownerId, prepassState.ownerDependencies]
   ]);
+
   const provider = createImportedStaticCssEvalProvider({
     modules: prepassState.loadedModules,
     importResolutions: prepassState.importResolutions,
@@ -300,6 +349,7 @@ export async function createStaticCssEvalPrepass(
 
   return {
     provider,
+    diagnostics,
     result: {
       dependencyFiles: [...prepassState.ownerDependencies],
       ownerToDependencies,
@@ -324,6 +374,7 @@ async function loadStaticCssEvalPrepassDependency(
       importerId,
       importPath
     );
+
     resolution = sourceResolution
       ? normalizeStaticCssEvalSourceResolution(sourceResolution)
       : createUnresolvedStaticCssEvalSourceResolution(importPath);
@@ -367,12 +418,28 @@ async function loadStaticCssEvalPrepassDependency(
     return undefined;
   }
 
+  if (context.importDepth >= internalStaticCssEvalLimits.maxImportDepth) {
+    throw new StaticCssEvalPrepassLimit(
+      "Static CSS prepass exceeded max import depth"
+    );
+  }
+  if (
+    state.loadedDependencyIds.size >
+    internalStaticCssEvalLimits.maxEvaluatedModulesPerOwner
+  ) {
+    throw new StaticCssEvalPrepassLimit(
+      "Static CSS prepass exceeded max evaluated modules per owner"
+    );
+  }
+
   state.loadedDependencyIds.add(resolution.resolvedFile);
+
   const loadedSource = await sourceProvider.load(resolution.normalizedPathKey);
 
   if (!loadedSource) {
     const loadFailureResolution =
       createLoadFailureStaticCssEvalSourceResolution(resolution);
+
     markPrepassImportResolutionUnloaded(
       state.importResolutions,
       importerId,
@@ -385,6 +452,7 @@ async function loadStaticCssEvalPrepassDependency(
       importPath,
       loadFailureResolution
     );
+
     return undefined;
   }
 
@@ -409,6 +477,7 @@ async function loadStaticCssEvalPrepassDependency(
       resolution,
       preparedSource.loadedSource
     );
+
     return undefined;
   }
 
@@ -431,6 +500,7 @@ async function loadStaticCssEvalPrepassDependency(
       loadedSource,
       "unsupported-source-shape"
     );
+
     markResolvedDependencyLoaded(
       state.resolvedDependencies,
       importerId,
@@ -445,6 +515,7 @@ async function loadStaticCssEvalPrepassDependency(
       resolution,
       unsupportedSource
     );
+
     return undefined;
   }
 
@@ -568,9 +639,10 @@ async function loadStaticCssEvalPrepassGraphDependencies(
   if (request.wholeNamespace) {
     await loadWholeNamespacePrepassDependencies(
       moduleRecord,
-      { includeDefaultExport: true, seen: new Set() },
+      { includeDefaultExport: true, seen: context.state.visitedNamespaces },
       context
     );
+
     return;
   }
 
@@ -583,7 +655,7 @@ async function loadStaticCssEvalPrepassGraphDependencies(
     {
       exportName: request.exportName,
       memberPath: request.memberPath,
-      seen: new Set()
+      seen: context.state.visitedExports
     },
     context
   );
@@ -618,8 +690,7 @@ async function loadStaticCssEvalPrepassOwnerLiteralDependencies(
       moduleRecord,
       expression,
       memberPath: [],
-      context,
-      localStack: []
+      context
     });
   }
 }
@@ -628,12 +699,20 @@ async function loadStaticCssEvalPrepassExpressionDependencies(
   options: StaticCssEvalPrepassExpressionWalkOptions
 ): Promise<void> {
   const expression = unwrapTransparentCssRuleExpression(options.expression);
+  options = {
+    ...options,
+    context: enterStaticCssEvalPrepassExpression(options.context, expression)
+  };
+
+  // Long alias chains must consume the node budget without growing the JS stack.
+  await Promise.resolve();
 
   if (t.isObjectExpression(expression)) {
     await loadStaticCssEvalPrepassObjectExpressionDependencies({
       ...options,
       expression
     });
+
     return;
   }
 
@@ -642,6 +721,7 @@ async function loadStaticCssEvalPrepassExpressionDependencies(
       ...options,
       expression
     });
+
     return;
   }
 
@@ -650,6 +730,7 @@ async function loadStaticCssEvalPrepassExpressionDependencies(
       ...options,
       expression
     });
+
     return;
   }
 
@@ -661,6 +742,7 @@ async function loadStaticCssEvalPrepassExpressionDependencies(
       ...options,
       expression
     });
+
     return;
   }
 
@@ -669,6 +751,7 @@ async function loadStaticCssEvalPrepassExpressionDependencies(
       ...options,
       expression
     });
+
     return;
   }
 
@@ -688,6 +771,7 @@ async function loadStaticCssEvalPrepassExpressionDependencies(
       expression: expression.alternate,
       memberPath: []
     });
+
     return;
   }
 
@@ -702,6 +786,7 @@ async function loadStaticCssEvalPrepassExpressionDependencies(
       expression: expression.right,
       memberPath: []
     });
+
     return;
   }
 
@@ -713,11 +798,13 @@ async function loadStaticCssEvalPrepassExpressionDependencies(
         memberPath: []
       });
     }
+
     await loadStaticCssEvalPrepassExpressionDependencies({
       ...options,
       expression: expression.right,
       memberPath: []
     });
+
     return;
   }
 
@@ -727,6 +814,7 @@ async function loadStaticCssEvalPrepassExpressionDependencies(
       expression: expression.argument,
       memberPath: []
     });
+
     return;
   }
 
@@ -736,6 +824,7 @@ async function loadStaticCssEvalPrepassExpressionDependencies(
       expression: expression.argument,
       memberPath: []
     });
+
     return;
   }
 
@@ -746,9 +835,9 @@ async function loadStaticCssEvalPrepassExpressionDependencies(
     await loadStaticCssEvalPrepassFunctionDependencies({
       moduleRecord: options.moduleRecord,
       node: expression,
-      context: options.context,
-      localStack: options.localStack
+      context: options.context
     });
+
     return;
   }
 
@@ -764,8 +853,7 @@ async function loadStaticCssEvalPrepassExpressionDependencies(
       bindingName: reference.bindingName,
       memberPath: [...reference.memberPath, ...options.memberPath]
     },
-    context: options.context,
-    localStack: options.localStack
+    context: options.context
   });
 }
 
@@ -909,6 +997,7 @@ async function loadStaticCssEvalPrepassRequireCallDependencies(
     { exportName, memberPath, wholeNamespace: false },
     options.context
   );
+
   return true;
 }
 
@@ -919,6 +1008,7 @@ async function loadStaticCssEvalPrepassObjectExpressionDependencies(
 ): Promise<void> {
   if (options.memberPath.length > 0) {
     await loadStaticCssEvalPrepassObjectMemberDependencies(options);
+
     return;
   }
 
@@ -1006,6 +1096,7 @@ async function loadStaticCssEvalPrepassObjectMemberDependencies(
       expression: property.value,
       memberPath: remainingMemberPath
     });
+
     return;
   }
 }
@@ -1055,9 +1146,9 @@ async function loadStaticCssEvalPrepassReferenceDependencies(
       moduleRecord: options.moduleRecord,
       bindingName: options.reference.bindingName,
       memberPath: options.reference.memberPath,
-      context: options.context,
-      localStack: options.localStack
+      context: options.context
     });
+
     return;
   }
 
@@ -1086,28 +1177,29 @@ async function loadStaticCssEvalPrepassLocalBindingDependencies(
     bindingName: options.bindingName,
     memberPath: [...options.memberPath]
   };
+
   const currentKey = createStaticCssEvalPrepassLocalWalkKey(currentFrame);
 
-  if (
-    options.localStack.some(
-      (frame) => createStaticCssEvalPrepassLocalWalkKey(frame) === currentKey
-    )
-  ) {
+  if (options.context.state.visitedLocals.has(currentKey)) {
     return;
   }
+
+  options.context.state.visitedLocals.add(currentKey);
+  countStaticCssEvalPrepassNode(options.context);
 
   const binding = options.moduleRecord.programPath.scope.getBinding(
     options.bindingName
   );
+
   const bindingPath = binding?.path;
 
   if (bindingPath?.isFunctionDeclaration()) {
     await loadStaticCssEvalPrepassFunctionDependencies({
       moduleRecord: options.moduleRecord,
       node: bindingPath.node,
-      context: options.context,
-      localStack: [...options.localStack, currentFrame]
+      context: options.context
     });
+
     return;
   }
 
@@ -1124,8 +1216,7 @@ async function loadStaticCssEvalPrepassLocalBindingDependencies(
     moduleRecord: options.moduleRecord,
     expression,
     memberPath: options.memberPath,
-    context: options.context,
-    localStack: [...options.localStack, currentFrame]
+    context: options.context
   });
 }
 
@@ -1133,7 +1224,6 @@ async function loadStaticCssEvalPrepassFunctionDependencies(options: {
   readonly moduleRecord: ImportedStaticCssEvalModuleRecord;
   readonly node: t.Function | t.ArrowFunctionExpression;
   readonly context: StaticCssEvalPrepassContext;
-  readonly localStack: readonly StaticCssEvalPrepassLocalWalkFrame[];
 }): Promise<void> {
   if (t.isBlockStatement(options.node.body)) {
     for (const statement of options.node.body.body) {
@@ -1142,6 +1232,7 @@ async function loadStaticCssEvalPrepassFunctionDependencies(options: {
         statement
       });
     }
+
     return;
   }
 
@@ -1149,8 +1240,7 @@ async function loadStaticCssEvalPrepassFunctionDependencies(options: {
     moduleRecord: options.moduleRecord,
     expression: options.node.body,
     memberPath: [],
-    context: options.context,
-    localStack: options.localStack
+    context: options.context
   });
 }
 
@@ -1158,8 +1248,10 @@ async function loadStaticCssEvalPrepassStatementDependencies(options: {
   readonly moduleRecord: ImportedStaticCssEvalModuleRecord;
   readonly statement: t.Statement;
   readonly context: StaticCssEvalPrepassContext;
-  readonly localStack: readonly StaticCssEvalPrepassLocalWalkFrame[];
 }): Promise<void> {
+  countStaticCssEvalPrepassNode(options.context);
+  await Promise.resolve();
+
   if (t.isBlockStatement(options.statement)) {
     for (const statement of options.statement.body) {
       await loadStaticCssEvalPrepassStatementDependencies({
@@ -1167,6 +1259,7 @@ async function loadStaticCssEvalPrepassStatementDependencies(options: {
         statement
       });
     }
+
     return;
   }
 
@@ -1175,9 +1268,9 @@ async function loadStaticCssEvalPrepassStatementDependencies(options: {
       moduleRecord: options.moduleRecord,
       expression: options.statement.argument,
       memberPath: [],
-      context: options.context,
-      localStack: options.localStack
+      context: options.context
     });
+
     return;
   }
 
@@ -1188,11 +1281,11 @@ async function loadStaticCssEvalPrepassStatementDependencies(options: {
           moduleRecord: options.moduleRecord,
           expression: declaration.init,
           memberPath: [],
-          context: options.context,
-          localStack: options.localStack
+          context: options.context
         });
       }
     }
+
     return;
   }
 
@@ -1201,9 +1294,9 @@ async function loadStaticCssEvalPrepassStatementDependencies(options: {
       moduleRecord: options.moduleRecord,
       expression: options.statement.expression,
       memberPath: [],
-      context: options.context,
-      localStack: options.localStack
+      context: options.context
     });
+
     return;
   }
 
@@ -1212,8 +1305,7 @@ async function loadStaticCssEvalPrepassStatementDependencies(options: {
       moduleRecord: options.moduleRecord,
       expression: options.statement.test,
       memberPath: [],
-      context: options.context,
-      localStack: options.localStack
+      context: options.context
     });
     await loadStaticCssEvalPrepassStatementDependencies({
       ...options,
@@ -1226,6 +1318,7 @@ async function loadStaticCssEvalPrepassStatementDependencies(options: {
         statement: options.statement.alternate
       });
     }
+
     return;
   }
 
@@ -1237,13 +1330,13 @@ async function loadStaticCssEvalPrepassStatementDependencies(options: {
       moduleRecord: options.moduleRecord,
       expression: options.statement.test,
       memberPath: [],
-      context: options.context,
-      localStack: options.localStack
+      context: options.context
     });
     await loadStaticCssEvalPrepassStatementDependencies({
       ...options,
       statement: options.statement.body
     });
+
     return;
   }
 
@@ -1258,8 +1351,7 @@ async function loadStaticCssEvalPrepassStatementDependencies(options: {
         moduleRecord: options.moduleRecord,
         expression: options.statement.init,
         memberPath: [],
-        context: options.context,
-        localStack: options.localStack
+        context: options.context
       });
     }
 
@@ -1268,12 +1360,12 @@ async function loadStaticCssEvalPrepassStatementDependencies(options: {
       options.statement.update
     ]) {
       if (!expression) continue;
+
       await loadStaticCssEvalPrepassExpressionDependencies({
         moduleRecord: options.moduleRecord,
         expression,
         memberPath: [],
-        context: options.context,
-        localStack: options.localStack
+        context: options.context
       });
     }
 
@@ -1281,6 +1373,7 @@ async function loadStaticCssEvalPrepassStatementDependencies(options: {
       ...options,
       statement: options.statement.body
     });
+
     return;
   }
 
@@ -1292,13 +1385,13 @@ async function loadStaticCssEvalPrepassStatementDependencies(options: {
       moduleRecord: options.moduleRecord,
       expression: options.statement.right,
       memberPath: [],
-      context: options.context,
-      localStack: options.localStack
+      context: options.context
     });
     await loadStaticCssEvalPrepassStatementDependencies({
       ...options,
       statement: options.statement.body
     });
+
     return;
   }
 
@@ -1307,18 +1400,21 @@ async function loadStaticCssEvalPrepassStatementDependencies(options: {
       ...options,
       statement: options.statement.block
     });
+
     if (options.statement.handler) {
       await loadStaticCssEvalPrepassStatementDependencies({
         ...options,
         statement: options.statement.handler.body
       });
     }
+
     if (options.statement.finalizer) {
       await loadStaticCssEvalPrepassStatementDependencies({
         ...options,
         statement: options.statement.finalizer
       });
     }
+
     return;
   }
 
@@ -1327,19 +1423,19 @@ async function loadStaticCssEvalPrepassStatementDependencies(options: {
       moduleRecord: options.moduleRecord,
       expression: options.statement.discriminant,
       memberPath: [],
-      context: options.context,
-      localStack: options.localStack
+      context: options.context
     });
+
     for (const switchCase of options.statement.cases) {
       if (switchCase.test) {
         await loadStaticCssEvalPrepassExpressionDependencies({
           moduleRecord: options.moduleRecord,
           expression: switchCase.test,
           memberPath: [],
-          context: options.context,
-          localStack: options.localStack
+          context: options.context
         });
       }
+
       for (const statement of switchCase.consequent) {
         await loadStaticCssEvalPrepassStatementDependencies({
           ...options,
@@ -1347,6 +1443,7 @@ async function loadStaticCssEvalPrepassStatementDependencies(options: {
         });
       }
     }
+
     return;
   }
 
@@ -1355,8 +1452,7 @@ async function loadStaticCssEvalPrepassStatementDependencies(options: {
       moduleRecord: options.moduleRecord,
       expression: options.statement.argument,
       memberPath: [],
-      context: options.context,
-      localStack: options.localStack
+      context: options.context
     });
   }
 }
@@ -1364,7 +1460,7 @@ async function loadStaticCssEvalPrepassStatementDependencies(options: {
 function createStaticCssEvalPrepassLocalWalkKey(
   frame: StaticCssEvalPrepassLocalWalkFrame
 ): string {
-  return `${frame.recordId}\0${frame.bindingName}\0${frame.memberPath.join(".")}`;
+  return JSON.stringify([frame.recordId, frame.bindingName, frame.memberPath]);
 }
 
 async function loadExportNamePrepassDependencies(
@@ -1383,6 +1479,7 @@ async function loadExportNamePrepassDependencies(
   }
 
   walk.seen.add(walkKey);
+  context = enterStaticCssEvalPrepassModule(context, moduleRecord.id);
 
   const exportEntry = moduleRecord.exports.get(walk.exportName);
 
@@ -1393,6 +1490,7 @@ async function loadExportNamePrepassDependencies(
       walk,
       context
     );
+
     return;
   }
 
@@ -1420,17 +1518,14 @@ async function loadWholeNamespacePrepassDependencies(
   walk: StaticCssEvalPrepassWholeNamespaceWalk,
   context: StaticCssEvalPrepassContext
 ): Promise<void> {
-  const walkKey = createStaticCssEvalPrepassWalkKey(
-    moduleRecord.id,
-    walk.includeDefaultExport ? "<namespace-with-default>" : "<namespace>",
-    []
-  );
+  const walkKey = JSON.stringify([moduleRecord.id, walk.includeDefaultExport]);
 
   if (walk.seen.has(walkKey)) {
     return;
   }
 
   walk.seen.add(walkKey);
+  context = enterStaticCssEvalPrepassModule(context, moduleRecord.id);
 
   for (const [exportName, exportEntry] of moduleRecord.exports) {
     if (exportName === null) {
@@ -1444,7 +1539,7 @@ async function loadWholeNamespacePrepassDependencies(
     await loadExplicitExportEntryPrepassDependencies(
       moduleRecord,
       exportEntry,
-      { exportName, memberPath: [], seen: walk.seen },
+      { exportName, memberPath: [], seen: context.state.visitedExports },
       context
     );
   }
@@ -1480,18 +1575,18 @@ async function loadExplicitExportEntryPrepassDependencies(
         moduleRecord,
         expression: exportEntry.expression,
         memberPath: walk.memberPath,
-        context,
-        localStack: []
+        context
       });
+
       return;
     case "local":
       await loadStaticCssEvalPrepassLocalBindingDependencies({
         moduleRecord,
         bindingName: exportEntry.localName,
         memberPath: walk.memberPath,
-        context,
-        localStack: []
+        context
       });
+
       return;
     case "reexport": {
       const dependencyRecord = await loadStaticCssEvalPrepassDependency(
@@ -1513,6 +1608,7 @@ async function loadExplicitExportEntryPrepassDependencies(
         },
         context
       );
+
       return;
     }
     case "unsupported":
@@ -1527,7 +1623,56 @@ function createStaticCssEvalPrepassWalkKey(
   exportName: string,
   memberPath: readonly string[]
 ): string {
-  return `${file}\0${exportName}\0${memberPath.join(".")}`;
+  return JSON.stringify([file, exportName, memberPath]);
+}
+
+function countStaticCssEvalPrepassNode(
+  context: StaticCssEvalPrepassContext
+): void {
+  context.state.traversedNodes += 1;
+
+  if (
+    context.state.traversedNodes > STATIC_CSS_EVAL_PREPASS_MAX_TRAVERSED_NODES
+  ) {
+    throw new StaticCssEvalPrepassLimit(
+      "Static CSS prepass exceeded max traversed node count"
+    );
+  }
+}
+
+function enterStaticCssEvalPrepassModule(
+  context: StaticCssEvalPrepassContext,
+  moduleId: string
+): StaticCssEvalPrepassContext {
+  countStaticCssEvalPrepassNode(context);
+
+  const importDepth =
+    context.importDepth + Number(moduleId !== context.moduleId);
+  if (importDepth > internalStaticCssEvalLimits.maxImportDepth) {
+    throw new StaticCssEvalPrepassLimit(
+      "Static CSS prepass exceeded max import depth"
+    );
+  }
+
+  return { ...context, moduleId, importDepth };
+}
+
+function enterStaticCssEvalPrepassExpression(
+  context: StaticCssEvalPrepassContext,
+  expression: t.Expression
+): StaticCssEvalPrepassContext {
+  countStaticCssEvalPrepassNode(context);
+
+  const objectDepth =
+    context.objectDepth +
+    Number(t.isObjectExpression(expression) || t.isArrayExpression(expression));
+  if (objectDepth > internalStaticCssEvalLimits.maxObjectArrayRecursionDepth) {
+    throw new StaticCssEvalPrepassLimit(
+      "Static CSS prepass exceeded max object/array recursion depth"
+    );
+  }
+
+  return { ...context, objectDepth };
 }
 
 function assertNever(value: never): never {
@@ -1584,6 +1729,7 @@ function getStaticCssEvalPrepassRequireImportPath(
       }
     }
   });
+
   const expressionPath = match.path;
 
   if (
@@ -1684,6 +1830,7 @@ function createLoadedModule(
 ): ImportedStaticCssEvalLoadedModule {
   const sourceText =
     options.sourceText ?? getLoadedSourceText(id, loadedSource);
+
   const sourceIdentity = createLoadedSourceIdentity(
     sourceText,
     loadedSource,
@@ -1708,20 +1855,25 @@ function createStaticCssEvalPrepassImportResolution(
 ): ImportedStaticCssEvalImportResolution {
   const canonicalModuleId =
     loadedSource?.canonicalModuleId ?? resolution.canonicalModuleId;
+
   const normalizedPathKey =
     loadedSource?.normalizedPathKey ?? resolution.normalizedPathKey;
+
   const sourceKind = loadedSource?.sourceKind ?? resolution.sourceKind;
   const sourceOrigin =
     loadedSource?.sourceOrigin ??
     (loadedSource?.sourceKind
       ? getStaticCssEvalSourceOrigin(loadedSource.sourceKind)
       : resolution.sourceOrigin);
+
   const unsupportedReason =
     loadedSource?.unsupportedReason ?? resolution.unsupportedReason;
+
   const watchFiles = loadedSource?.watchFiles ?? resolution.watchFiles;
   const loadedSourceText = loadedSource
     ? (loadedSource.sourceText ?? loadedSource.source)
     : undefined;
+
   const sourceIdentity = loadedSource
     ? loadedSourceText === undefined
       ? (normalizeStaticCssEvalSourceIdentity(
@@ -1731,6 +1883,7 @@ function createStaticCssEvalPrepassImportResolution(
         ) ?? resolution.sourceIdentity)
       : createLoadedSourceIdentity(loadedSourceText, loadedSource, resolution)
     : resolution.sourceIdentity;
+
   const resolverKind = loadedSource?.resolverKind ?? resolution.resolverKind;
 
   return {
@@ -1800,6 +1953,7 @@ function markPrepassImportResolutionUnloaded(
       importResolution.importPath === importPath &&
       importResolution.resolvedId === resolution.resolvedFile
   );
+
   const unloadedImportResolution = createStaticCssEvalPrepassImportResolution(
     importerId,
     importPath,
@@ -1808,6 +1962,7 @@ function markPrepassImportResolutionUnloaded(
 
   if (importResolutionIndex === -1) {
     importResolutions.push(unloadedImportResolution);
+
     return;
   }
 
@@ -1827,6 +1982,7 @@ function markPrepassImportResolutionLoaded(
       importResolution.importPath === importPath &&
       importResolution.resolvedId === resolution.resolvedFile
   );
+
   const loadedImportResolution = createStaticCssEvalPrepassImportResolution(
     importerId,
     importPath,
@@ -1836,6 +1992,7 @@ function markPrepassImportResolutionLoaded(
 
   if (importResolutionIndex === -1) {
     importResolutions.push(loadedImportResolution);
+
     return;
   }
 
@@ -1863,22 +2020,29 @@ function createLoadedModuleSourceMetadata(
     (loadedSource.sourceKind
       ? getStaticCssEvalSourceOrigin(loadedSource.sourceKind)
       : resolution?.sourceOrigin);
+
   const canonicalModuleId =
     loadedSource.canonicalModuleId ?? resolution?.canonicalModuleId;
+
   const normalizedPathKey =
     loadedSource.normalizedPathKey ?? resolution?.normalizedPathKey;
+
   const unsupportedReason =
     loadedSource.unsupportedReason ?? resolution?.unsupportedReason;
+
   const watchFiles = loadedSource.watchFiles ?? resolution?.watchFiles;
   const sourceIdentity = normalizeStaticCssEvalSourceIdentity(
     loadedSource.sourceIdentity,
     loadedSource.sourceHash,
     loadedSource.version
   );
+
   const sourceHash =
     sourceIdentity?.sourceHash ?? resolution?.sourceIdentity?.sourceHash;
+
   const version =
     sourceIdentity?.version ?? resolution?.sourceIdentity?.version;
+
   const resolverKind = loadedSource.resolverKind ?? resolution?.resolverKind;
 
   return {
@@ -2159,6 +2323,7 @@ function getStaticCssEvalQueryFlags(sourceId: string): string[] {
 
 function stripStaticCssEvalQuery(sourceId: string): string {
   const queryIndex = sourceId.search(/[?#]/);
+
   return queryIndex === -1 ? sourceId : sourceId.slice(0, queryIndex);
 }
 
@@ -2204,8 +2369,10 @@ function normalizeStaticCssEvalSourceResolution(
 
   const canonicalModuleId =
     resolution.canonicalModuleId ?? resolution.id ?? resolvedFile;
+
   const normalizedPathKey =
     resolution.normalizedPathKey ?? canonicalModuleId ?? resolvedFile;
+
   const sourceKind = resolution.sourceKind ?? "project-source";
 
   return {
@@ -2281,10 +2448,12 @@ function createLoadedSourceIdentity(
     loadedSource.sourceHash,
     loadedSource.version
   );
+
   const sourceHash =
     sourceIdentity?.sourceHash ??
     resolution?.sourceIdentity?.sourceHash ??
     createStaticCssEvalSourceTextHash(sourceText);
+
   const version =
     sourceIdentity?.version ?? resolution?.sourceIdentity?.version;
 
@@ -2304,17 +2473,21 @@ function createStaticCssEvalResolvedDependency(
   const sourceText = loadedSource
     ? (loadedSource.sourceText ?? loadedSource.source)
     : undefined;
+
   const sourceIdentity = loadedSource
     ? createLoadedSourceIdentity(sourceText ?? "", loadedSource, resolution)
     : resolution.sourceIdentity;
+
   const sourceKind = loadedSource?.sourceKind ?? resolution.sourceKind;
   const sourceOrigin =
     loadedSource?.sourceOrigin ??
     (loadedSource?.sourceKind
       ? getStaticCssEvalSourceOrigin(loadedSource.sourceKind)
       : resolution.sourceOrigin);
+
   const unsupportedReason =
     loadedSource?.unsupportedReason ?? resolution.unsupportedReason;
+
   const watchFiles = loadedSource?.watchFiles ?? resolution.watchFiles;
 
   return {
@@ -2346,6 +2519,7 @@ function markResolvedDependencyLoaded(
       dependency.specifier === specifier &&
       dependency.resolvedFile === resolution.resolvedFile
   );
+
   const loadedDependency = createStaticCssEvalResolvedDependency(
     importerId,
     specifier,
@@ -2356,6 +2530,7 @@ function markResolvedDependencyLoaded(
 
   if (resolvedDependencyIndex === -1) {
     resolvedDependencies.push(loadedDependency);
+
     return;
   }
 
@@ -2374,6 +2549,7 @@ function markResolvedDependencyUnloaded(
       dependency.specifier === specifier &&
       dependency.resolvedFile === resolution.resolvedFile
   );
+
   const unloadedDependency = createStaticCssEvalResolvedDependency(
     importerId,
     specifier,
@@ -2383,6 +2559,7 @@ function markResolvedDependencyUnloaded(
 
   if (resolvedDependencyIndex === -1) {
     resolvedDependencies.push(unloadedDependency);
+
     return;
   }
 
@@ -2414,6 +2591,7 @@ function addOwnerDependency(
 
   if (!owners) {
     dependencyToOwners.set(dependencyId, [ownerId]);
+
     return;
   }
 
@@ -2529,6 +2707,7 @@ if (import.meta.vitest) {
   ): Promise<YarnNodeLinkerFixture> {
     const { mkdir, mkdtemp, readFile, rm, writeFile } =
       await import("node:fs/promises");
+
     const { join } = await import("node:path");
     const tempParent = join(
       process.cwd(),
@@ -2548,6 +2727,7 @@ if (import.meta.vitest) {
       "@fixture",
       "styles"
     );
+
     const ownerId = join(srcDir, "App.tsx");
     const unsupportedOwnerId = join(srcDir, "Unsupported.tsx");
     const yarnrcPath = join(rootDir, ".yarnrc.yml");
@@ -2740,9 +2920,11 @@ if (import.meta.vitest) {
         watchFiles
       }
     ] satisfies readonly YarnNodeLinkerFixtureLoadEntry[];
+
     const loadEntries = new Map(
       entries.map((entry) => [entry.normalizedPathKey, entry])
     );
+
     const resolutions = new Map<string, YarnNodeLinkerFixtureLoadEntry>([
       [createFixtureResolutionKey(ownerId, "@fixture/styles"), entries[2]],
       [
@@ -2767,6 +2949,7 @@ if (import.meta.vitest) {
         entries[8]
       ]
     ]);
+
     const provider: StaticCssEvalSourceProvider = {
       resolve(importerId, importPath) {
         const entry = resolutions.get(
@@ -2775,6 +2958,7 @@ if (import.meta.vitest) {
 
         return entry ? createYarnNodeLinkerResolution(entry, nodeLinker) : null;
       },
+
       async load(id) {
         const entry = loadEntries.get(id);
 
@@ -2822,6 +3006,7 @@ if (import.meta.vitest) {
         external: externalId,
         supported: [directId, defaultId, barrelId, starSourceId, jsonId, rawId]
       },
+
       dispose: () => rm(rootDir, { recursive: true, force: true })
     };
   }
@@ -2895,11 +3080,13 @@ if (import.meta.vitest) {
           return <div css={button} />;
         }
       `;
+
       const stylesSource = `export const button = { color: "red" } as const;`;
       const sources: Record<string, string> = {
         [ownerId]: ownerSource,
         [stylesId]: stylesSource
       };
+
       const provider: StaticCssEvalSourceProvider = {
         resolve(importerId, importPath) {
           expect({ importerId, importPath }).toEqual({
@@ -2909,6 +3096,7 @@ if (import.meta.vitest) {
 
           return { id: stylesId };
         },
+
         load(id) {
           const source = sources[id];
 
@@ -2944,11 +3132,13 @@ if (import.meta.vitest) {
           return <div css={styles.button} />;
         }
       `;
+
       const stylesSource = `exports.button = { color: "red" };`;
       const calls: {
         resolved: Array<{ importerId: string; importPath: string }>;
         loaded: string[];
       } = { resolved: [], loaded: [] };
+
       const provider: StaticCssEvalSourceProvider = {
         resolve(importerId, importPath) {
           calls.resolved.push({ importerId, importPath });
@@ -2963,6 +3153,7 @@ if (import.meta.vitest) {
               }
             : null;
         },
+
         load(id) {
           calls.loaded.push(id);
 
@@ -3033,10 +3224,12 @@ if (import.meta.vitest) {
         `,
         [stylesId]: `exports.button = { color: "red" };`
       };
+
       const calls: {
         resolved: Array<{ importerId: string; importPath: string }>;
         loaded: string[];
       } = { resolved: [], loaded: [] };
+
       const provider: StaticCssEvalSourceProvider = {
         resolve(importerId, importPath) {
           calls.resolved.push({ importerId, importPath });
@@ -3049,6 +3242,7 @@ if (import.meta.vitest) {
             ? { id: stylesId }
             : null;
         },
+
         load(id) {
           calls.loaded.push(id);
 
@@ -3125,6 +3319,7 @@ if (import.meta.vitest) {
           </>;
         }
       `;
+
       const sources: Record<string, string> = {
         [ownerId]: ownerSource,
         [keysId]: `export const key = "button" as const;`,
@@ -3139,6 +3334,7 @@ if (import.meta.vitest) {
         [shadowedCallValueId]: `export const shadowedCallValue = "gold" as const;`,
         [unusedId]: `export const unused = { color: "orange" } as const;`
       };
+
       const resolutions: Record<string, string> = {
         [`${ownerId}\0./keys`]: keysId,
         [`${ownerId}\0./tone`]: toneId,
@@ -3152,13 +3348,16 @@ if (import.meta.vitest) {
         [`${ownerId}\0./shadowed-call-value`]: shadowedCallValueId,
         [`${ownerId}\0./unused`]: unusedId
       };
+
       const calls: {
         resolved: Array<{ importerId: string; importPath: string }>;
         loaded: string[];
       } = { resolved: [], loaded: [] };
+
       const provider: StaticCssEvalSourceProvider = {
         resolve(importerId, importPath) {
           calls.resolved.push({ importerId, importPath });
+
           const resolvedId = resolutions[`${importerId}\0${importPath}`];
 
           return resolvedId
@@ -3170,8 +3369,10 @@ if (import.meta.vitest) {
               }
             : null;
         },
+
         load(id) {
           calls.loaded.push(id);
+
           const source = sources[id];
 
           return source === undefined ? null : { source, resolverKind: "test" };
@@ -3270,6 +3471,7 @@ if (import.meta.vitest) {
           return <div css={makeButton()} data-unused={unused} />;
         }
       `;
+
       const sources: Record<string, string> = {
         [ownerId]: ownerSource,
         [baseId]: `export const base = { color: "red" } as const;`,
@@ -3284,6 +3486,7 @@ if (import.meta.vitest) {
         [caseValueId]: `export const caseValue = "case";`,
         [unusedId]: `export const unused = { color: "orange" } as const;`
       };
+
       const resolutions: Record<string, string> = {
         [`${ownerId}\0./base`]: baseId,
         [`${ownerId}\0./keys`]: keysId,
@@ -3297,13 +3500,16 @@ if (import.meta.vitest) {
         [`${ownerId}\0./case-value`]: caseValueId,
         [`${ownerId}\0./unused`]: unusedId
       };
+
       const calls: {
         resolved: Array<{ importerId: string; importPath: string }>;
         loaded: string[];
       } = { resolved: [], loaded: [] };
+
       const provider: StaticCssEvalSourceProvider = {
         resolve(importerId, importPath) {
           calls.resolved.push({ importerId, importPath });
+
           const resolvedId = resolutions[`${importerId}\0${importPath}`];
 
           return resolvedId
@@ -3315,8 +3521,10 @@ if (import.meta.vitest) {
               }
             : null;
         },
+
         load(id) {
           calls.loaded.push(id);
+
           const source = sources[id];
 
           return source === undefined ? null : { source, resolverKind: "test" };
@@ -3381,6 +3589,7 @@ if (import.meta.vitest) {
           </>;
         }
       `;
+
       const loadedIds: string[] = [];
       const provider: StaticCssEvalSourceProvider = {
         resolve(importerId, importPath) {
@@ -3395,6 +3604,7 @@ if (import.meta.vitest) {
 
           return null;
         },
+
         load(id) {
           loadedIds.push(id);
 
@@ -3444,10 +3654,12 @@ if (import.meta.vitest) {
           return <div css={styles.button} />;
         }
       `;
+
       const calls: {
         resolved: Array<{ importerId: string; importPath: string }>;
         loaded: string[];
       } = { resolved: [], loaded: [] };
+
       const provider: StaticCssEvalSourceProvider = {
         resolve(importerId, importPath) {
           calls.resolved.push({ importerId, importPath });
@@ -3461,6 +3673,7 @@ if (import.meta.vitest) {
               }
             : null;
         },
+
         load(id) {
           calls.loaded.push(id);
 
@@ -3491,6 +3704,7 @@ if (import.meta.vitest) {
           return <div css={button} />;
         }
       `;
+
       const stylesSource = `
         import { key } from "./keys";
         import { toneKey } from "./tone";
@@ -3503,6 +3717,7 @@ if (import.meta.vitest) {
           [key]: \`\${palette[toneKey]}\`
         } as const;
       `;
+
       const sources: Record<string, string> = {
         [ownerId]: ownerSource,
         [stylesId]: stylesSource,
@@ -3511,6 +3726,7 @@ if (import.meta.vitest) {
         [paletteId]: `export const palette = { primary: "red" } as const;`,
         [unusedId]: `export const unused = { color: "orange" } as const;`
       };
+
       const resolutions: Record<string, string> = {
         [`${ownerId}\0./styles`]: stylesId,
         [`${stylesId}\0./keys`]: keysId,
@@ -3518,13 +3734,16 @@ if (import.meta.vitest) {
         [`${stylesId}\0./palette`]: paletteId,
         [`${stylesId}\0./unused`]: unusedId
       };
+
       const calls: {
         resolved: Array<{ importerId: string; importPath: string }>;
         loaded: string[];
       } = { resolved: [], loaded: [] };
+
       const provider: StaticCssEvalSourceProvider = {
         resolve(importerId, importPath) {
           calls.resolved.push({ importerId, importPath });
+
           const resolvedId = resolutions[`${importerId}\0${importPath}`];
 
           return resolvedId
@@ -3536,8 +3755,10 @@ if (import.meta.vitest) {
               }
             : null;
         },
+
         load(id) {
           calls.loaded.push(id);
+
           const source = sources[id];
 
           return source === undefined ? null : { source, resolverKind: "test" };
@@ -3579,6 +3800,7 @@ if (import.meta.vitest) {
           return <div css={styles.button} />;
         }
       `;
+
       const barrelSource = `
         var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
           if (k2 === undefined) k2 = k;
@@ -3596,11 +3818,13 @@ if (import.meta.vitest) {
         };
         __exportStar(require("./styles"), exports);
       `;
+
       const stylesSource = `exports.button = { color: "red" };`;
       const calls: {
         resolved: Array<{ importerId: string; importPath: string }>;
         loaded: string[];
       } = { resolved: [], loaded: [] };
+
       const provider: StaticCssEvalSourceProvider = {
         resolve(importerId, importPath) {
           calls.resolved.push({ importerId, importPath });
@@ -3625,6 +3849,7 @@ if (import.meta.vitest) {
               }
             : null;
         },
+
         load(id) {
           calls.loaded.push(id);
 
@@ -3686,6 +3911,7 @@ if (import.meta.vitest) {
           return <div css={button} />;
         }
       `;
+
       const loadedIds: string[] = [];
       const provider: StaticCssEvalSourceProvider = {
         resolve(importerId, importPath) {
@@ -3705,6 +3931,7 @@ if (import.meta.vitest) {
             watchFiles: ["/project/package.json"]
           };
         },
+
         load(id) {
           loadedIds.push(id);
 
@@ -3745,6 +3972,7 @@ if (import.meta.vitest) {
           return <div css={button} />;
         }
       `;
+
       const provider: StaticCssEvalSourceProvider = {
         resolve() {
           return {
@@ -3757,6 +3985,7 @@ if (import.meta.vitest) {
             watchFiles: ["/project/node_modules/@scope/styles/package.json"]
           };
         },
+
         load(id) {
           if (id === ownerId) {
             return { source: ownerSource };
@@ -3805,6 +4034,7 @@ if (import.meta.vitest) {
           </>;
         }
       `;
+
       const calls: Array<{ importerId: string; importPath: string }> = [];
       const provider: StaticCssEvalSourceProvider = {
         resolve(importerId, importPath) {
@@ -3833,6 +4063,7 @@ if (import.meta.vitest) {
 
           return null;
         },
+
         load(id) {
           if (id === ownerId) {
             return { source: ownerSource };
@@ -3913,11 +4144,13 @@ if (import.meta.vitest) {
           </>;
         }
       `;
+
       const resolutions: Record<string, string> = {
         [`${ownerId}\0@scope/styles/styles.json`]: jsonId,
         [`${ownerId}\0@scope/styles/tokens.css?raw`]: rawId,
         [`${ownerId}\0@scope/styles/icon.wasm?url`]: wasmUrlId
       };
+
       const provider: StaticCssEvalSourceProvider = {
         resolve(importerId, importPath) {
           const resolvedId = resolutions[`${importerId}\0${importPath}`];
@@ -3931,6 +4164,7 @@ if (import.meta.vitest) {
               }
             : null;
         },
+
         load(id) {
           if (id === ownerId) {
             return { source: ownerSource };
@@ -4038,11 +4272,13 @@ if (import.meta.vitest) {
           </>;
         }
       `;
+
       const resolutions: Record<string, string> = {
         [`${ownerId}\0@scope/styles/icon.wasm?init`]: wasmInitId,
         [`${ownerId}\0@scope/styles/huge.css?raw`]: oversizedRawId,
         [`${ownerId}\0@scope/styles/missing.css?raw`]: missingSourceId
       };
+
       const provider: StaticCssEvalSourceProvider = {
         resolve(importerId, importPath) {
           const resolvedId = resolutions[`${importerId}\0${importPath}`];
@@ -4056,6 +4292,7 @@ if (import.meta.vitest) {
               }
             : null;
         },
+
         load(id) {
           if (id === ownerId) {
             return { source: ownerSource };
@@ -4143,9 +4380,11 @@ if (import.meta.vitest) {
             fixture.ownerId,
             fixture.provider
           );
+
           const jsonRecord = result.resolvedModuleCache.get(
             fixture.moduleIds.json
           );
+
           const rawRecord = result.resolvedModuleCache.get(
             fixture.moduleIds.raw
           );

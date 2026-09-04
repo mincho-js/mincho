@@ -44,14 +44,17 @@ export function minchoBabelPlugin(): PluginObj<PluginState> {
               defineRulesCxConditionsOptimizationMetadataKey
             ] = true;
           }
+
           preprocess(path, state);
           state.opts.jsxCssPropTransformed = preprocessJsxCssProp(path, state);
         },
+
         exit(path, state) {
           removeUnusedJsxCssPropCssModuleImports(path);
           postprocess(path, state);
         }
       },
+
       CallExpression(path, state) {
         analyzeDefineRulesCxConditionsCallExpression(path, state);
 
@@ -64,6 +67,7 @@ export function minchoBabelPlugin(): PluginObj<PluginState> {
 }
 
 export { styledComponentPlugin as minchoStyledComponentPlugin } from "./styled.js";
+export { STATIC_CSS_EVAL_LIMITS as internalStaticCssEvalLimits } from "./staticCssEval/types.js";
 export {
   appendUniqueMetadataItems as internalAppendUniqueStaticCssEvalMetadataItems,
   appendUniqueResolvedModuleIds as internalAppendUniqueStaticCssEvalResolvedModuleIds,
@@ -129,19 +133,26 @@ if (import.meta.vitest) {
     tag: unknown,
     props?: Record<string, unknown>
   ) => Record<string, unknown>;
+
   type RuntimeCx = (...values: unknown[]) => string;
+
   type RuntimeCss = (styles: unknown) => string;
+
   type DefineRulesCxRuntimeButton = (...args: unknown[]) => string;
+
   type RuntimeVx = (
     value: string | number | boolean | null | undefined,
     suffix?: string | null
   ) => string | number;
+
   type StaticCssEvalProvider = NonNullable<
     PluginOptions["staticCssEvalProvider"]
   >;
+
   type StaticCssEvalProviderResult = ReturnType<
     StaticCssEvalProvider["getResolvedCssValue"]
   >;
+
   type StaticCssEvalValue = Extract<
     StaticCssEvalProviderResult,
     { kind: "resolved" }
@@ -155,6 +166,7 @@ if (import.meta.vitest) {
         const key = query.memberPath?.length
           ? `${query.bindingName}.${query.memberPath.join(".")}`
           : (query.bindingName ?? "");
+
         const value = values[key];
 
         if (value === undefined) {
@@ -196,10 +208,12 @@ if (import.meta.vitest) {
       { length: conditionCount },
       (_, index) => `class${index}`
     );
+
     const parameters = Array.from(
       { length: conditionCount },
       (_, index) => `flag${index}: boolean`
     );
+
     const operands = Array.from({ length: conditionCount }, (_, index) =>
       index % 2 === 0
         ? `flag${index} && class${index}`
@@ -224,10 +238,12 @@ if (import.meta.vitest) {
       (_, index) =>
         `const color${index} = css({ color: "${colorValues[index] ?? `color-${index}`}" });`
     ).join("\n");
+
     const parameters = Array.from(
       { length: conditionCount },
       (_, index) => `flag${index}: boolean`
     );
+
     const operands = Array.from({ length: conditionCount }, (_, index) => {
       if (index % 3 === 1) {
         return `flag${index} ? color${index} : base`;
@@ -235,6 +251,7 @@ if (import.meta.vitest) {
       if (index % 3 === 2) {
         return `[flag${index} && color${index}]`;
       }
+
       return `flag${index} && color${index}`;
     });
 
@@ -270,6 +287,7 @@ if (import.meta.vitest) {
   function createJoiningCx(onCall?: () => void): RuntimeCx {
     return (...values) => {
       onCall?.();
+
       const strings = values.filter((value): value is string => {
         if (typeof value !== "string") {
           return false;
@@ -319,6 +337,7 @@ if (import.meta.vitest) {
       runtimeCx: RuntimeCx,
       runtimeClasses: Readonly<Record<string, string>>
     ) => unknown;
+
     const button = execute(cx, classes);
 
     if (typeof button !== "function") {
@@ -343,6 +362,7 @@ if (import.meta.vitest) {
 
   interface InspectableDefineRulesRuntime {
     readonly defineRules: RuntimeDefineRules;
+
     computeClassNameStyle(className: string): Readonly<Record<string, string>>;
   }
 
@@ -371,6 +391,7 @@ if (import.meta.vitest) {
       "__minchoDefineRules",
       `${result.code}\nreturn button;`
     ) as (runtimeDefineRules: RuntimeDefineRules) => unknown;
+
     const button = execute(defineRules);
 
     if (typeof button !== "function") {
@@ -418,11 +439,13 @@ if (import.meta.vitest) {
 
           if (declarations.length === 0) {
             importPath.remove();
+
             return;
           }
 
           importPath.replaceWithMultiple(declarations);
         },
+
         ExportNamedDeclaration(exportPath) {
           const { declaration } = exportPath.node;
 
@@ -437,6 +460,7 @@ if (import.meta.vitest) {
   function createInspectableDefineRulesRuntime(): InspectableDefineRulesRuntime {
     let nextClassId = 0;
     const styles = new Map<string, InspectableClassStyle>();
+
     const css: RuntimeCss = (styleInput) => {
       if (!isInspectableStyle(styleInput)) {
         throw new Error("Inspectable css() only accepts string-valued styles");
@@ -445,13 +469,16 @@ if (import.meta.vitest) {
       const className = `class-${nextClassId}`;
       nextClassId += 1;
       styles.set(className, { order: nextClassId, style: styleInput });
+
       return className;
     };
+
     const cx: RuntimeCx = (...values) =>
       mergeInspectableClassValues(styles, values).join(" ");
 
     return {
       defineRules: () => ({ css, cx }),
+
       computeClassNameStyle(className) {
         return computeInspectableClassNameStyle(styles, className);
       }
@@ -477,6 +504,7 @@ if (import.meta.vitest) {
         if (value.length > 0) {
           classNames.push(value);
         }
+
         continue;
       }
 
@@ -484,6 +512,7 @@ if (import.meta.vitest) {
         if (value !== 0) {
           classNames.push(String(value));
         }
+
         continue;
       }
 
@@ -527,6 +556,7 @@ if (import.meta.vitest) {
       }
 
       keptClassNames.push(className);
+
       for (const property of properties) {
         seenProperties.add(property);
       }
@@ -542,10 +572,12 @@ if (import.meta.vitest) {
     const selectedTokens = new Set(
       className.trim().split(/\s+/).filter(Boolean)
     );
+
     const selectedStyles = [...styles]
       .filter(([token]) => selectedTokens.has(token))
       .map(([, style]) => style)
       .sort((left, right) => left.order - right.order);
+
     const customProperties: Record<string, string> = {};
     const properties: Record<string, string> = {};
 
@@ -633,6 +665,7 @@ if (import.meta.vitest) {
                 end: index + 1
               };
         }
+
         continue;
       }
 
@@ -680,6 +713,7 @@ if (import.meta.vitest) {
 
           importPath.replaceWithMultiple(declarations);
         },
+
         ExportNamedDeclaration(exportPath) {
           const { declaration } = exportPath.node;
 
@@ -798,10 +832,12 @@ if (import.meta.vitest) {
 
             if (declarations.length === 0) {
               importPath.remove();
+
               return;
             }
 
             importPath.replaceWithMultiple(declarations);
+
             return;
           }
 
@@ -827,10 +863,12 @@ if (import.meta.vitest) {
 
             if (declarations.length === 0) {
               importPath.remove();
+
               return;
             }
 
             importPath.replaceWithMultiple(declarations);
+
             return;
           }
 
@@ -866,11 +904,13 @@ if (import.meta.vitest) {
 
           if (declarations.length === 0) {
             importPath.remove();
+
             return;
           }
 
           importPath.replaceWithMultiple(declarations);
         },
+
         JSXElement(jsxPath) {
           jsxPath.replaceWith(
             t.callExpression(t.identifier("__minchoJsx"), [
@@ -879,6 +919,7 @@ if (import.meta.vitest) {
             ])
           );
         },
+
         JSXFragment(jsxPath) {
           jsxPath.replaceWith(
             t.callExpression(t.identifier("__minchoJsx"), [
@@ -1067,6 +1108,7 @@ if (import.meta.vitest) {
                 expression,
                 scope: path.scope
               });
+
               hasVisitedCssCandidate = true;
               snapshot = rule
                 ? createDynamicCssVariableRuleSnapshot(rule)
@@ -1101,6 +1143,7 @@ if (import.meta.vitest) {
         };
       default: {
         const unexpectedRule: never = rule;
+
         throw new Error(
           `Unexpected dynamic CSS variable rule: ${unexpectedRule}`
         );
@@ -1281,6 +1324,7 @@ if (import.meta.vitest) {
 
   const staticShapeDiagnosticPattern =
     /Mincho `css` requires statically known CSS shape/;
+
   const reactStyleGuidancePattern = /React `style=\{\.\.\.\}`/;
 
   function captureJsxCssPropFailure(
@@ -1312,6 +1356,7 @@ if (import.meta.vitest) {
         }
       }
     };
+
     const result = transformSync(code, {
       plugins: [[capturePlugin, options]],
       presets: ["@babel/preset-typescript"],
@@ -1370,6 +1415,7 @@ if (import.meta.vitest) {
           return <div css={{ color: "red" }} />;
         }
       `;
+
       const omitted = babelTransform(source);
       const explicitFalse = babelTransform(source, { jsxCssProp: false });
 
@@ -1392,6 +1438,7 @@ if (import.meta.vitest) {
           return rules.cx(rules.css("idle"), active && rules.css("active"));
         }
       `;
+
       const omitted = babelTransform(source);
       const emptyOptimize = babelTransform(source, { optimize: {} });
       const disabledOptimize = babelTransform(source, {
@@ -1425,6 +1472,7 @@ if (import.meta.vitest) {
           return rules.cx(rules.css("idle"), active && rules.css("active"));
         }
       `;
+
       const disabled = babelTransform(source, { jsxCssProp: false });
       const enabled = babelTransform(source, {
         jsxCssProp: false,
@@ -1455,9 +1503,11 @@ if (import.meta.vitest) {
           return cx(base, active && activeClass, [danger ? activeClass : base]);
         }
       `;
+
       const disabled = babelTransform(source, {
         optimize: { defineRulesCxConditions: false }
       });
+
       const enabled = babelTransform(source, {
         optimize: { defineRulesCxConditions: true }
       });
@@ -1502,6 +1552,7 @@ if (import.meta.vitest) {
           return cx(base, active ? activeClass : base);
         }
       `;
+
       const disabled = babelTransform(source, {
         staticCssEvalProvider: createResolvedStaticCssEvalProvider({
           cx: createDefineRulesCxRuntimeRecipeValue(),
@@ -1510,6 +1561,7 @@ if (import.meta.vitest) {
         }),
         optimize: { defineRulesCxConditions: false }
       });
+
       const enabled = babelTransform(source, {
         staticCssEvalProvider: createResolvedStaticCssEvalProvider({
           cx: createDefineRulesCxRuntimeRecipeValue(),
@@ -1566,9 +1618,11 @@ if (import.meta.vitest) {
             ${returnStatement}
           }
         `;
+
         const disabled = babelTransform(source, {
           optimize: { defineRulesCxConditions: false }
         });
+
         const enabled = babelTransform(source, {
           optimize: { defineRulesCxConditions: true }
         });
@@ -1590,15 +1644,18 @@ if (import.meta.vitest) {
           return cx(base, active && externalClass);
         }
       `;
+
       const staticCssEvalProvider = createResolvedStaticCssEvalProvider({
         cx: createDefineRulesCxRuntimeRecipeValue(),
         base: "__mincho_seg_base base",
         externalClass: "external-class"
       });
+
       const disabled = babelTransform(source, {
         staticCssEvalProvider,
         optimize: { defineRulesCxConditions: false }
       });
+
       const enabled = babelTransform(source, {
         staticCssEvalProvider,
         optimize: { defineRulesCxConditions: true }
@@ -1624,9 +1681,11 @@ if (import.meta.vitest) {
           return cx(active && makeClass());
         }
       `;
+
       const disabled = babelTransform(source, {
         optimize: { defineRulesCxConditions: false }
       });
+
       const enabled = babelTransform(source, {
         optimize: { defineRulesCxConditions: true }
       });
@@ -1647,14 +1706,17 @@ if (import.meta.vitest) {
           cx: createDefineRulesCxRuntimeRecipeValue(),
           ...createDefineRulesCxRuntimeClasses(conditionCount)
         });
+
         const disabled = babelTransform(source, {
           staticCssEvalProvider,
           optimize: { defineRulesCxConditions: false }
         });
+
         const enabled = babelTransform(source, {
           staticCssEvalProvider,
           optimize: { defineRulesCxConditions: true }
         });
+
         const classes = createDefineRulesCxRuntimeClasses(conditionCount);
         let optimizedCxCalls = 0;
         const optimizedButton = runDefineRulesCxModule(
@@ -1664,6 +1726,7 @@ if (import.meta.vitest) {
             optimizedCxCalls += 1;
           })
         );
+
         const optimizedCxCallsAfterInit = optimizedCxCalls;
         const referenceButton = runDefineRulesCxModule(
           disabled.code,
@@ -1682,6 +1745,7 @@ if (import.meta.vitest) {
         forEachBooleanPermutation(conditionCount, (flags) => {
           expect(optimizedButton(...flags)).toBe(referenceButton(...flags));
         });
+
         expect(optimizedCxCalls).toBe(optimizedCxCallsAfterInit);
       }
     });
@@ -1694,16 +1758,19 @@ if (import.meta.vitest) {
           return cx(base, probe.first && class0, probe.second && class1);
         }
       `;
+
       const staticCssEvalProvider = createResolvedStaticCssEvalProvider({
         cx: createDefineRulesCxRuntimeRecipeValue(),
         base: "__mincho_seg_base base",
         class0: "__mincho_seg_class_0 class-0",
         class1: "__mincho_seg_class_1 class-1"
       });
+
       const enabled = babelTransform(source, {
         staticCssEvalProvider,
         optimize: { defineRulesCxConditions: true }
       });
+
       const events: string[] = [];
       let optimizedCxCalls = 0;
       const button = runDefineRulesCxModule(
@@ -1713,14 +1780,18 @@ if (import.meta.vitest) {
           optimizedCxCalls += 1;
         })
       );
+
       const optimizedCxCallsAfterInit = optimizedCxCalls;
       const probe = {
         get first() {
           events.push("first");
+
           return true;
         },
+
         get second() {
           events.push("second");
+
           return false;
         }
       };
@@ -1738,10 +1809,12 @@ if (import.meta.vitest) {
         cx: createDefineRulesCxRuntimeRecipeValue(),
         ...createDefineRulesCxRuntimeClasses(5)
       });
+
       const disabled = babelTransform(source, {
         staticCssEvalProvider,
         optimize: { defineRulesCxConditions: false }
       });
+
       const enabled = babelTransform(source, {
         staticCssEvalProvider,
         optimize: { defineRulesCxConditions: true }
@@ -1761,19 +1834,23 @@ if (import.meta.vitest) {
       const disabled = babelTransform(source, {
         optimize: { defineRulesCxConditions: false }
       });
+
       const enabled = babelTransform(source, {
         optimize: { defineRulesCxConditions: true }
       });
+
       const referenceRuntime = createInspectableDefineRulesRuntime();
       const optimizedRuntime = createInspectableDefineRulesRuntime();
       const referenceButton = runLocalDefineRulesCxModule(
         disabled.code,
         referenceRuntime.defineRules
       );
+
       const optimizedButton = runLocalDefineRulesCxModule(
         enabled.code,
         optimizedRuntime.defineRules
       );
+
       const cssCallCount = enabled.code.match(/css\(\{/g)?.length ?? 0;
 
       expect(getDefineRulesCxConditionCalls(enabled.metadata)).toMatchObject([
@@ -1826,9 +1903,11 @@ if (import.meta.vitest) {
             ).join(", ")});
           }
         `;
+
         const disabled = babelTransform(source, {
           optimize: { defineRulesCxConditions: false }
         });
+
         const enabled = babelTransform(source, {
           optimize: { defineRulesCxConditions: true }
         });
@@ -1866,9 +1945,11 @@ if (import.meta.vitest) {
           );
         }
       `;
+
       const disabled = babelTransform(source, {
         optimize: { defineRulesCxConditions: false }
       });
+
       const enabled = babelTransform(source, {
         optimize: { defineRulesCxConditions: true }
       });
@@ -1889,6 +1970,7 @@ if (import.meta.vitest) {
           return <div class={style({ color: "red" })}>Hello</div>;
         }
       `;
+
       const disabled = babelTransform(source);
       const enabled = babelTransform(source, { jsxCssProp: true });
 
@@ -1923,6 +2005,7 @@ if (import.meta.vitest) {
       `,
         { jsxCssProp: true }
       );
+
       const sameFileConst = babelTransform(
         `
         const style = { color: "red" };
@@ -2003,6 +2086,7 @@ if (import.meta.vitest) {
       `,
         { jsxCssProp: true }
       );
+
       const imported = babelTransform(
         `
         import { button, stack } from "./styles";
@@ -2042,6 +2126,7 @@ if (import.meta.vitest) {
           return <div css={button} />;
         }
       `;
+
       const { result, code, metadata } = babelTransform(
         source,
         {
@@ -2065,6 +2150,7 @@ if (import.meta.vitest) {
         },
         { filename: ownerFile }
       );
+
       const staticCssEvalMetadata = metadata.minchoStaticCssEval;
 
       expect(staticCssEvalMetadata?.dependencies[0]?.file).toBe(stylesFile);
@@ -2089,6 +2175,7 @@ if (import.meta.vitest) {
           return <div css={styles} />;
         }
       `;
+
       const { result, code } = babelTransform(
         source,
         {
@@ -2134,6 +2221,7 @@ if (import.meta.vitest) {
           return <div css={styles} />;
         }
       `;
+
       const { result, code } = babelTransform(
         source,
         {
@@ -2314,6 +2402,7 @@ if (import.meta.vitest) {
       `,
         { jsxCssProp: true }
       );
+
       const sameFileConst = babelTransform(
         `
         const style = {
@@ -2355,6 +2444,7 @@ if (import.meta.vitest) {
       `,
         { jsxCssProp: true }
       );
+
       const spreadObject = babelTransform(
         `
         const base = { display: "flex", color: "red" } as const;
@@ -2365,6 +2455,7 @@ if (import.meta.vitest) {
       `,
         { jsxCssProp: true }
       );
+
       const spreadArray = babelTransform(
         `
         const stack = [{ display: "flex" }] as const;
@@ -2375,6 +2466,7 @@ if (import.meta.vitest) {
       `,
         { jsxCssProp: true }
       );
+
       const objectOutput = `${spreadObject.code}\n${spreadObject.result.join("\n")}`;
 
       expect(spreadObject.result[1]).toBe(inlineObject.result[1]);
@@ -2406,6 +2498,7 @@ if (import.meta.vitest) {
           </>;
         }
       `;
+
       const { result, code, metadata } = babelTransform(
         source,
         {
@@ -2433,6 +2526,7 @@ if (import.meta.vitest) {
         },
         { filename: ownerFile }
       );
+
       const staticCssEvalMetadata = metadata.minchoStaticCssEval;
       const output = `${code}\n${result.join("\n")}`;
 
@@ -2500,6 +2594,7 @@ if (import.meta.vitest) {
           </>;
         }
       `;
+
       const { result, code } = babelTransform(
         source,
         {
@@ -2544,6 +2639,7 @@ if (import.meta.vitest) {
         { length: 50 },
         (_, index) => `const a${index + 1} = a${index};`
       ).join("\n");
+
       const source = `
         import { base } from "./styles";
         const a0 = { color: "red" };
@@ -2553,6 +2649,7 @@ if (import.meta.vitest) {
           return <div css={{ ...base, nested: a50 }} />;
         }
       `;
+
       const { result } = babelTransform(
         source,
         {
@@ -2587,6 +2684,7 @@ if (import.meta.vitest) {
         (value) => `{ nested: ${value} }`,
         '"leaf"'
       );
+
       const source = `
         import { base } from "./styles";
 
@@ -2628,6 +2726,7 @@ if (import.meta.vitest) {
       const classValues = Array.from({ length: 10_000 }, () => "true").join(
         ", "
       );
+
       const source = `
         import { stack } from "./styles";
 
@@ -2676,6 +2775,7 @@ if (import.meta.vitest) {
           return <div css={{ ...base, accent: virtualTokens.accent }} />;
         }
       `;
+
       const { result, code, metadata } = babelTransform(
         source,
         {
@@ -2729,6 +2829,7 @@ if (import.meta.vitest) {
         },
         { filename: ownerFile }
       );
+
       const staticCssEvalMetadata = metadata.minchoStaticCssEval;
 
       expect(code).not.toContain(" css=");
@@ -2784,6 +2885,7 @@ if (import.meta.vitest) {
         `,
           { jsxCssProp: true }
         );
+
         const sameFileConst = babelTransform(
           `
           const styles = {
@@ -2872,6 +2974,7 @@ if (import.meta.vitest) {
       );
 
       const failure = captureJsxCssPropFailure(source, { jsxCssProp: true });
+
       expect(
         failure.metadata.minchoStaticCssEval?.diagnostics.map(
           ({ expressionType }) => expressionType
@@ -2986,6 +3089,7 @@ if (import.meta.vitest) {
       `,
         { jsxCssProp: true }
       );
+
       const functionFailure = captureJsxCssPropFailure(
         `
         function App() {
@@ -3030,6 +3134,7 @@ if (import.meta.vitest) {
           return <div css={cx(getClassName())} />;
         }
       `;
+
       const { result, code } = babelTransform(source, { jsxCssProp: true });
       const observed = runJsxCssPropRuntime(
         source,
@@ -3425,6 +3530,7 @@ if (import.meta.vitest) {
       `,
         { jsxCssProp: true }
       );
+
       const expectedClassNames = [
         /className=\{_cx\("base", condition && _\$mincho\$\$App\d+\)\}/,
         /className=\{_cx\("base", providedClass \|\| _\$mincho\$\$App\d+\)\}/,
@@ -3513,6 +3619,7 @@ if (import.meta.vitest) {
       `,
         { jsxCssProp: true }
       );
+
       const output = `${code}\n${result.join("\n")}`;
 
       expect(code).not.toContain(" css=");
@@ -3683,6 +3790,7 @@ if (import.meta.vitest) {
         `,
           { jsxCssProp: true }
         );
+
         const output = `${code}\n${result.join("\n")}`;
 
         expect(code).not.toContain(" css=");
@@ -3709,6 +3817,7 @@ if (import.meta.vitest) {
       `,
         { jsxCssProp: true }
       );
+
       const output = `${code}\n${result.join("\n")}`;
 
       expect(code).not.toContain(" css=");
@@ -3800,6 +3909,7 @@ if (import.meta.vitest) {
         `,
           { jsxCssProp: true }
         );
+
         const output = `${code}\n${result.join("\n")}`;
 
         expect(code).not.toContain(" css=");
@@ -3834,6 +3944,7 @@ if (import.meta.vitest) {
       `,
         { jsxCssProp: true }
       );
+
       const output = `${code}\n${result.join("\n")}`;
 
       expect(code).not.toContain(" css=");
@@ -3896,6 +4007,7 @@ if (import.meta.vitest) {
           })
         }
       );
+
       const output = `${code}\n${result.join("\n")}`;
 
       expect(code).not.toContain(" css=");
@@ -3979,6 +4091,7 @@ if (import.meta.vitest) {
         `,
           { jsxCssProp: true }
         );
+
         const output = `${code}\n${result.join("\n")}`;
 
         expect(code).not.toContain(" css=");
@@ -4041,6 +4154,7 @@ if (import.meta.vitest) {
         `,
           { jsxCssProp: true }
         );
+
         const output = `${code}\n${result.join("\n")}`;
 
         expect(code).not.toContain(" css=");
@@ -4154,6 +4268,7 @@ if (import.meta.vitest) {
         const { fixture, expectedClassName, expectedColors } = fixtureCase;
         const forbiddenColors =
           "forbiddenColors" in fixtureCase ? fixtureCase.forbiddenColors : [];
+
         const { result, code } = babelTransform(
           `
           const styleA = "style-a";
@@ -4170,6 +4285,7 @@ if (import.meta.vitest) {
         `,
           { jsxCssProp: true }
         );
+
         const output = `${code}\n${result.join("\n")}`;
 
         expect(code).not.toContain(" css=");
@@ -4177,12 +4293,15 @@ if (import.meta.vitest) {
         expect(result[1].match(/_css\(/g) ?? []).toHaveLength(
           expectedColors.length
         );
+
         for (const color of expectedColors) {
           expect(result[1]).toContain(`color: "${color}"`);
         }
+
         for (const color of forbiddenColors ?? []) {
           expect(result[1]).not.toContain(`color: "${color}"`);
         }
+
         expect(code).not.toMatch(/_cx\(condition && flag, _\$mincho/);
         expect(code).not.toMatch(/_cx\(a \|\| b, _\$mincho/);
         expect(code).not.toMatch(/_cx\(a \?\? b, _\$mincho/);
@@ -4287,6 +4406,7 @@ if (import.meta.vitest) {
         `,
           { jsxCssProp: true }
         );
+
         const output = `${code}\n${result.join("\n")}`;
 
         expect(code).not.toContain(" css=");
@@ -4320,6 +4440,7 @@ if (import.meta.vitest) {
         `,
           { jsxCssProp: true }
         );
+
         const output = `${code}\n${result.join("\n")}`;
 
         expect(code).not.toContain(" css=");
@@ -4338,6 +4459,7 @@ if (import.meta.vitest) {
       `,
         { jsxCssProp: true }
       );
+
       const output = `${code}\n${result.join("\n")}`;
 
       expect(code).not.toContain(" css=");
@@ -4358,6 +4480,7 @@ if (import.meta.vitest) {
       `,
         { jsxCssProp: true }
       );
+
       const output = `${code}\n${result.join("\n")}`;
 
       expect(code).not.toContain(" css=");
@@ -4382,6 +4505,7 @@ if (import.meta.vitest) {
       `,
         { jsxCssProp: true }
       );
+
       const output = `${code}\n${result.join("\n")}`;
 
       expect(code).not.toContain(" css=");
@@ -4409,6 +4533,7 @@ if (import.meta.vitest) {
       `,
         { jsxCssProp: true }
       );
+
       const output = `${code}\n${result.join("\n")}`;
       const generatedClassNames = code.match(
         /className=\{_\$mincho\$\$App\d+\}/g
@@ -4604,6 +4729,7 @@ if (import.meta.vitest) {
       `,
         { jsxCssProp: true }
       );
+
       const output = `${code}\n${result.join("\n")}`;
 
       expect(code).not.toContain(" css=");
@@ -5028,6 +5154,7 @@ if (import.meta.vitest) {
           }
         `
         );
+
         const output = `${code}\n${result.join("\n")}`;
 
         expect(code).not.toContain(" css=");
@@ -5244,6 +5371,7 @@ if (import.meta.vitest) {
       `,
         { jsxCssProp: true }
       );
+
       const output = `${code}\n${result.join("\n")}`;
 
       expect(code).not.toContain(" css=");
@@ -5306,6 +5434,7 @@ if (import.meta.vitest) {
         `,
           { jsxCssProp: true }
         );
+
         const output = `${code}\n${result.join("\n")}`;
 
         expect(code).not.toContain(" css=");
@@ -5439,6 +5568,7 @@ if (import.meta.vitest) {
           return <div css={[...base, { gap: props.gap }]} />;
         }
       `;
+
       const { result, code } = babelTransform(source, { jsxCssProp: true });
       const observed = runJsxCssPropRuntime(
         source,
@@ -5447,6 +5577,7 @@ if (import.meta.vitest) {
         return { props, hasCss: "css" in props };
       `
       );
+
       const runtimeSpreadFailure = captureJsxCssPropFailure(
         `
         function App(props: { styles: readonly Record<string, string>[]; color: string }) {
@@ -5619,6 +5750,7 @@ if (import.meta.vitest) {
           return <section css={{ color: state.active ? activeColor.value : inactiveColor.value }} />;
         }
       `;
+
       const { code } = babelTransform(source, { jsxCssProp: true });
       const observed = runJsxCssPropRuntime(
         source,
@@ -5679,6 +5811,7 @@ if (import.meta.vitest) {
           return <article css={{ color: value ?? fallback.value }} />;
         }
       `;
+
       const { code } = babelTransform(source, { jsxCssProp: true });
       const observed = runJsxCssPropRuntime(
         source,
@@ -5765,6 +5898,7 @@ if (import.meta.vitest) {
           }} />;
         }
       `;
+
       const { code } = babelTransform(source, { jsxCssProp: true });
       const observed = runJsxCssPropRuntime(
         source,
@@ -5818,6 +5952,7 @@ if (import.meta.vitest) {
           }} />;
         }
       `;
+
       const { code } = babelTransform(source, { jsxCssProp: true });
       const observed = runJsxCssPropRuntime(
         source,
@@ -5904,6 +6039,7 @@ if (import.meta.vitest) {
           return <div css={{ color: value }} />;
         }
       `;
+
       const { result, code } = babelTransform(source, { jsxCssProp: true });
       const observed = runJsxCssPropRuntime(
         source,
@@ -6265,6 +6401,7 @@ if (import.meta.vitest) {
       `,
         { jsxCssProp: true }
       );
+
       const artifact = result[1];
 
       expect(artifact).toContain("_css({");
@@ -6295,6 +6432,7 @@ if (import.meta.vitest) {
       `,
         { jsxCssProp: true }
       );
+
       const artifact = result[1];
 
       expect(artifact.match(/css as _css/g) ?? []).toHaveLength(1);
@@ -6321,6 +6459,7 @@ if (import.meta.vitest) {
       `,
         { jsxCssProp: true }
       );
+
       const getVarNameCase = babelTransform(
         `
         import { getVarName } from "@mincho-js/css";
@@ -6400,6 +6539,7 @@ if (import.meta.vitest) {
       `,
         { jsxCssProp: true }
       ).code;
+
       const expressionStyle = babelTransform(
         `
         function App(props) {
@@ -6471,6 +6611,7 @@ if (import.meta.vitest) {
           return <div {...pre} css={{ color: props.color }} {...post} />;
         }
       `;
+
       const { result, code } = babelTransform(source, { jsxCssProp: true });
       const observed = runJsxCssPropRuntime(
         source,
@@ -6532,6 +6673,7 @@ if (import.meta.vitest) {
         };
       `
       );
+
       const afterCssStyle = runJsxCssPropRuntime(
         `
         const post = {
@@ -6748,6 +6890,7 @@ if (import.meta.vitest) {
       `,
         { jsxCssProp: true }
       );
+
       const artifact = result[1];
 
       expect(artifact.match(/_minchoCreateVar\d*\(/g) ?? []).toHaveLength(7);
@@ -6840,6 +6983,7 @@ if (import.meta.vitest) {
           return <div css={state.condition ? { color: active.color } : { color: inactive.color }} />;
         }
       `;
+
       const { result, code } = babelTransform(source, { jsxCssProp: true });
       const artifact = result[1];
       const observed = runJsxCssPropRuntime(
@@ -6916,6 +7060,7 @@ if (import.meta.vitest) {
           return <div css={decide("outer", true) ? decide("inner", inner) ? { color: colors.active } : { color: colors.other } : decide("inactive", false) && { color: colors.fallback }} data-flip={flip()} />;
         }
       `;
+
       const observed = runJsxCssPropRuntime(
         source,
         "return { props: App(), events, reads };"
@@ -6959,6 +7104,7 @@ if (import.meta.vitest) {
           return <div style={{ opacity: 0.5 }} css={state.condition ? { color: primary.color } : { color: fallback.color }} />;
         }
       `;
+
       const { code } = babelTransform(source, { jsxCssProp: true });
       const observed = runJsxCssPropRuntime(
         source,
@@ -7050,6 +7196,7 @@ if (import.meta.vitest) {
           return <div css={empty.className || { color: fallback.color }} />;
         }
       `;
+
       const { code } = babelTransform(source, { jsxCssProp: true });
       const observed = runJsxCssPropRuntime(
         source,
@@ -7139,6 +7286,7 @@ if (import.meta.vitest) {
           return renderValue();
         }
       `;
+
       const { code } = babelTransform(source, { jsxCssProp: true });
       const observed = runJsxCssPropRuntime(
         source,
@@ -7245,6 +7393,7 @@ if (import.meta.vitest) {
           return <div css={condition ? { color: \`${"${props.color}"}\` } : { color: "red" }} />;
         }
       `;
+
       const fixtures = [
         `
           const condition = true;
@@ -7295,6 +7444,7 @@ if (import.meta.vitest) {
         templateLiteralFixture,
         { jsxCssProp: true }
       );
+
       expect(templateLiteralFailure.error.message).toContain(
         jsxCssPropErrorMessages.unsupportedDynamicCssRule
       );
@@ -7587,6 +7737,7 @@ if (import.meta.vitest) {
       `,
         { jsxCssProp: true }
       );
+
       const nestedCall = babelTransform(
         `
         function makeColor() {
@@ -7692,6 +7843,7 @@ if (import.meta.vitest) {
             return <section css={{ color: active ? activeColor.value : inactiveColor.value }} />;
           }
         `;
+
         const { result, code } = babelTransform(source, { jsxCssProp: true });
         const observed = runJsxCssPropRuntime(
           source,
@@ -7705,6 +7857,7 @@ if (import.meta.vitest) {
           };
         `
         );
+
         // Assembled so the bare-token assertion below cannot match its own fixture.
         const forbiddenRuntimeHelper = ["i", "x"].join("");
 
@@ -7789,6 +7942,7 @@ if (import.meta.vitest) {
             />;
           }
         `;
+
         const { code } = babelTransform(source, { jsxCssProp: true });
         const observed = runJsxCssPropRuntime(
           source,
@@ -7872,6 +8026,7 @@ if (import.meta.vitest) {
     it("maps partial evaluator deopt diagnostics and preserves unchanged diagnostics", () => {
       const depthBindingCount =
         STATIC_CSS_EVAL_LIMITS.maxObjectArrayRecursionDepth + 1;
+
       const depthBindings = Array.from(
         { length: depthBindingCount },
         (_, index) => {
@@ -7879,15 +8034,19 @@ if (import.meta.vitest) {
             index === depthBindingCount - 1
               ? `{ color: "red" }`
               : `style${index + 1}`;
+
           return `const style${index} = ${next};`;
         }
       ).join("\n");
+
       const largeStylePropertyCount =
         STATIC_CSS_EVAL_LIMITS.maxStaticLiteralNodeCount + 1;
+
       const largeStyle = Array.from(
         { length: largeStylePropertyCount },
         (_, index) => `p${index}: "${index}"`
       ).join(",");
+
       const fixtures = [
         {
           reason: "mutated-binding",
@@ -8339,6 +8498,7 @@ if (import.meta.vitest) {
         `,
           { jsxCssProp: true }
         );
+
         const output = `${code}\n${result.join("\n")}`;
 
         expect(code).not.toContain(" css=");
@@ -8367,6 +8527,7 @@ if (import.meta.vitest) {
           return <div css={styleA} {...props} />;
         }
       `;
+
       const { result, code } = babelTransform(source, { jsxCssProp: true });
       const output = `${code}\n${result.join("\n")}`;
       const observed = runJsxCssPropRuntime(source, "return App();") as Record<
@@ -8423,6 +8584,7 @@ if (import.meta.vitest) {
           return <div {...a} css={styleA} {...b} />;
         }
       `;
+
       const { result, code } = babelTransform(source, { jsxCssProp: true });
       const observed = runJsxCssPropRuntime(source, "return App();") as Record<
         string,
@@ -8458,6 +8620,7 @@ if (import.meta.vitest) {
           return <div css={styleA} {...a} {...b} />;
         }
       `;
+
       const { result, code } = babelTransform(source, { jsxCssProp: true });
       const observed = runJsxCssPropRuntime(source, "return App();") as Record<
         string,
@@ -8495,6 +8658,7 @@ if (import.meta.vitest) {
           return <div css={styleA} {...a} id="later" data-source="later" {...b} />;
         }
       `;
+
       const { result, code } = babelTransform(source, { jsxCssProp: true });
       const observed = runJsxCssPropRuntime(source, "return App();") as Record<
         string,
@@ -8580,6 +8744,7 @@ if (import.meta.vitest) {
       `,
         { jsxCssProp: true }
       );
+
       const output = `${code}\n${result.join("\n")}`;
 
       expect(code).not.toContain(" css=");
@@ -8959,6 +9124,7 @@ if (import.meta.vitest) {
           return <article css={{ color }} {...keyedPost} key="dynamic-key" ref={explicitRef} />;
         }
       `;
+
       const { code } = babelTransform(source, { jsxCssProp: true });
       const observed = runJsxCssPropRuntime(
         source,
@@ -9091,6 +9257,7 @@ if (import.meta.vitest) {
           return renderValue();
         }
       `;
+
       const { code } = babelTransform(source, { jsxCssProp: true });
       const observed = runJsxCssPropRuntime(
         source,
@@ -9169,6 +9336,7 @@ if (import.meta.vitest) {
             ${body}
           }
         `;
+
         const { code } = babelTransform(source, { jsxCssProp: true });
         const observed = runJsxCssPropRuntime(
           source,
@@ -9196,6 +9364,7 @@ if (import.meta.vitest) {
           return renderValue();
         }
       `;
+
       const { code } = babelTransform(source, { jsxCssProp: true });
       const observed = runJsxCssPropRuntime(
         source,
@@ -9275,6 +9444,7 @@ if (import.meta.vitest) {
         `,
         { jsxCssProp: true }
       );
+
       const directGenerator = babelTransform(
         `
           const styleA = "style-a";
@@ -9373,6 +9543,7 @@ if (import.meta.vitest) {
           return null;
         }
       `;
+
       const { code } = babelTransform(source, { jsxCssProp: true });
       const observed = runJsxCssPropRuntime(source, "return App(true);");
 
@@ -9676,6 +9847,7 @@ if (import.meta.vitest) {
             ${body}
           }
         `;
+
         const { code } = babelTransform(source, { jsxCssProp: true });
         const observed = runJsxCssPropRuntime(source, "return App(true);");
 
@@ -9786,6 +9958,7 @@ if (import.meta.vitest) {
         );
 
         expect(code).not.toContain(" css=");
+
         for (const expectedCodeSubstring of expectedCodeSubstrings) {
           expect(code).toContain(expectedCodeSubstring);
         }
@@ -9828,6 +10001,7 @@ if (import.meta.vitest) {
         `,
           { jsxCssProp: true }
         );
+
         const prunedImport = babelTransform(
           `
           import { css, defineRules } from "@mincho-js/css";
@@ -9868,6 +10042,7 @@ if (import.meta.vitest) {
         `,
           { jsxCssProp: true }
         );
+
         const nestedIife = babelTransform(
           `
           const props = { className: "base", css: "leaked", id: "root" };
@@ -10270,6 +10445,7 @@ if (import.meta.vitest) {
       it(name, () => {
         if (fixture === null) {
           expectNestedUnsupportedJsxTargetError();
+
           return;
         }
 
@@ -10283,6 +10459,7 @@ if (import.meta.vitest) {
 
     it("keeps Babel css prop tag literals mirrored from React tags", () => {
       const babelTags = [...supportedJsxCssPropTags];
+
       // eslint-disable-next-line @typescript-eslint/ban-ts-comment
       // @ts-ignore error TS1343: The 'import.meta' meta-property is only allowed when the '--module' option is 'es2020', 'es2022', 'esnext', 'system', 'node16', or 'nodenext'.
       const reactTagModules = import.meta.glob("../../react/src/tags.ts", {
@@ -10290,10 +10467,12 @@ if (import.meta.vitest) {
         import: "default",
         eager: true
       });
+
       const reactTagsSource = Object.values(reactTagModules)[0] as string;
       const [, reactTagsLiteral = ""] =
         /export const tags = \[([\s\S]*?)\] as const/.exec(reactTagsSource) ??
         [];
+
       const reactTags = Array.from(
         reactTagsLiteral.matchAll(/"([^"]+)"/g),
         ([, tag]) => tag

@@ -1,6 +1,7 @@
 import { types as t } from "@babel/core";
 import type { NodePath } from "@babel/core";
 import type { Binding } from "@babel/traverse";
+import { hasAliasedStaticCssEvalBindingMutation } from "./mutationAliases.js";
 
 const arrayMutationMethods = new Set([
   "copyWithin",
@@ -38,12 +39,14 @@ export function hasStaticCssEvalBindingMutation(
         path.stop();
       }
     },
+
     CallExpression(path) {
       if (isMutatingCallExpression(path, binding)) {
         mutated = true;
         path.stop();
       }
     },
+
     UnaryExpression(path) {
       if (
         path.node.operator === "delete" &&
@@ -53,6 +56,7 @@ export function hasStaticCssEvalBindingMutation(
         path.stop();
       }
     },
+
     UpdateExpression(path) {
       if (pathTouchesBinding(path.get("argument"), binding)) {
         mutated = true;
@@ -61,7 +65,9 @@ export function hasStaticCssEvalBindingMutation(
     }
   });
 
-  return mutated;
+  return (
+    mutated || hasAliasedStaticCssEvalBindingMutation(programPath, binding)
+  );
 }
 
 function isMutatingCallExpression(
@@ -83,6 +89,7 @@ function isMutatingCallExpression(
 
     if (isObjectMutationCall(calleePath, methodName)) {
       const firstArgument = path.get("arguments.0");
+
       return Boolean(
         firstArgument?.node && pathTouchesBinding(firstArgument, binding)
       );
@@ -101,6 +108,7 @@ function isObjectMutationCall(
   }
 
   const objectPath = calleePath.get("object");
+
   return objectPath.isIdentifier({ name: "Object" });
 }
 

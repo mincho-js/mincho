@@ -1,5 +1,12 @@
-import { typescriptPresetPath } from "./babelPreset.js";
-import { type TransformOptions, transformFileAsync } from "@babel/core";
+import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import { extname } from "node:path";
+import { jsxSyntaxPluginPath, typescriptPresetPath } from "./babelPreset.js";
+import {
+  type BabelFileResult,
+  type TransformOptions,
+  transformAsync
+} from "@babel/core";
 import {
   type InternalImportedStaticCssEvalModuleRecord as ImportedStaticCssEvalModuleRecord,
   type MinchoStaticCssEvalMetadata,
@@ -25,10 +32,13 @@ type MaybePromise<T> = T | Promise<T>;
 
 type StaticCssEvalMetadataDependency =
   MinchoStaticCssEvalMetadata["dependencies"][number];
+
 type StaticCssEvalMetadataDiagnostic =
   MinchoStaticCssEvalMetadata["diagnostics"][number];
+
 type StaticCssEvalMetadataCacheKey =
   MinchoStaticCssEvalMetadata["cacheKeys"][number];
+
 export type StaticCssEvalResolverKind =
   | "source-provider"
   | "filesystem"
@@ -80,21 +90,26 @@ export interface StaticCssEvalSourceResolution {
    * resolved file, canonical module id, and normalized load key.
    */
   id?: string;
+
   /** File path used by Babel/static eval diagnostics, dependency files, and cache keys. */
   resolvedFile?: string;
+
   /** Bundler graph id that should be preserved for callers, even when it differs from the file path. */
   canonicalModuleId?: string;
+
   /** Stable provider load/cache key; integration passes this value back to `load()`. */
   normalizedPathKey?: string;
   realpath?: string;
   sourceHash?: string;
   version?: string | number;
+
   /** Source identity from the bundler; loaded source identity takes precedence. */
   sourceIdentity?: StaticCssEvalSourceIdentity;
   readonly sourceKind?: StaticCssEvalSourceKind;
   readonly sourceOrigin?: StaticCssEvalSourceOrigin;
   readonly unsupportedReason?: StaticCssEvalSourceUnsupportedReason;
   readonly watchFiles?: readonly string[];
+
   /** Identifies which resolver produced this source for downstream cache/debug consumers. */
   resolverKind?: StaticCssEvalResolverKind;
 }
@@ -102,6 +117,7 @@ export interface StaticCssEvalSourceResolution {
 export interface StaticCssEvalLoadedSource {
   /** Preferred loaded module text. */
   sourceText?: string;
+
   /** Legacy alias for `sourceText`. */
   source?: string;
   resolvedFile?: string;
@@ -124,6 +140,7 @@ export interface StaticCssEvalSourceProvider {
     importerId: string,
     importPath: string
   ): MaybePromise<StaticCssEvalSourceResolution | null>;
+
   load(id: string): MaybePromise<StaticCssEvalLoadedSource | null>;
 }
 
@@ -183,6 +200,7 @@ export type BabelOptions = Omit<
   jsxCssProp?: boolean;
   optimize?: PluginOptions["optimize"];
   staticCssEvalProvider?: PluginOptions["staticCssEvalProvider"];
+
   /** @internal Async source provider used to prepare imported css eval data. */
   staticCssEvalSourceProvider?: StaticCssEvalSourceProvider;
   staticCssEvalProjectEngine?: StaticEvalProjectEngine;
@@ -190,15 +208,46 @@ export type BabelOptions = Omit<
 
 export type BabelTransformResult = {
   code: string;
+  readonly map?: BabelFileResult["map"];
   readonly jsxCssPropTransformed?: boolean;
   result: [string, string];
   readonly staticCssEval?: StaticCssEvalTransformResult;
 };
 
+export interface BabelTransformSourceOptions {
+  filename: string;
+  source: string;
+  loader?: "js" | "jsx" | "ts" | "tsx";
+  babel?: BabelOptions;
+  sourceMaps?: boolean;
+  inputSourceMap?: TransformOptions["inputSourceMap"];
+}
+
 export async function babelTransform(
   path: string,
   babel: BabelOptions = {}
 ): Promise<BabelTransformResult> {
+  let source: string;
+
+  try {
+    source = await readFile(path, "utf8");
+  } catch (error) {
+    babel.staticCssEvalProjectEngine?.refreshFile({ fileId: path });
+
+    throw new BabelTransformError(path, error);
+  }
+
+  return babelTransformSource({ filename: path, source, babel });
+}
+
+export async function babelTransformSource({
+  filename: path,
+  source,
+  loader = inferScriptLoader(path),
+  babel = {},
+  sourceMaps = false,
+  inputSourceMap
+}: BabelTransformSourceOptions): Promise<BabelTransformResult> {
   const {
     jsxCssProp = false,
     optimize,
@@ -207,39 +256,65 @@ export async function babelTransform(
     staticCssEvalProjectEngine,
     ...babelCoreOptions
   } = babel;
+
   const projectEngine = staticCssEvalProjectEngine;
+  const sourceProvider: StaticCssEvalSourceProvider | undefined =
+    staticCssEvalSourceProvider && {
+      resolve: (importerId, specifier) =>
+        staticCssEvalSourceProvider.resolve(importerId, specifier),
+
+      load: (id) =>
+        id === path
+          ? {
+              sourceText: source,
+              sourceHash: createHash("sha256").update(source).digest("hex")
+            }
+          : staticCssEvalSourceProvider.load(id)
+    };
+
   const prepassSourceProvider =
-    projectEngine && staticCssEvalSourceProvider
-      ? projectEngine.getBabelStaticEvalProvider(
-          path,
-          staticCssEvalSourceProvider
-        )
-      : staticCssEvalSourceProvider;
-  const staticCssEvalPrepass =
-    jsxCssProp === true && prepassSourceProvider
-      ? await createStaticCssEvalPrepass(path, prepassSourceProvider)
-      : undefined;
+    projectEngine && sourceProvider
+      ? projectEngine.getBabelStaticEvalProvider(path, sourceProvider)
+      : sourceProvider;
+
+  let staticCssEvalPrepass:
+    | Awaited<ReturnType<typeof createStaticCssEvalPrepass>>
+    | undefined;
+
   const observedStaticCssEvalMetadata = createEmptyStaticCssEvalMetadata();
-  const preparedStaticCssEvalProvider =
-    staticCssEvalProvider ?? staticCssEvalPrepass?.provider;
-  const observedStaticCssEvalProvider = preparedStaticCssEvalProvider
-    ? createObservingStaticCssEvalProvider(
-        preparedStaticCssEvalProvider,
-        observedStaticCssEvalMetadata
-      )
-    : undefined;
   const options: PluginOptions = {
     result: ["", ""],
     jsxCssProp,
-    ...(optimize ? { optimize } : {}),
-    staticCssEvalProvider: observedStaticCssEvalProvider
+    ...(optimize ? { optimize } : {})
   };
-  let result;
+
+  let result: BabelFileResult;
 
   try {
-    result = await transformFileAsync(path, {
+    staticCssEvalPrepass =
+      jsxCssProp && prepassSourceProvider
+        ? await createStaticCssEvalPrepass(path, prepassSourceProvider)
+        : undefined;
+
+    observedStaticCssEvalMetadata.diagnostics.push(
+      ...(staticCssEvalPrepass?.diagnostics ?? [])
+    );
+
+    const preparedProvider =
+      staticCssEvalProvider ?? staticCssEvalPrepass?.provider;
+
+    if (preparedProvider) {
+      options.staticCssEvalProvider = createObservingStaticCssEvalProvider(
+        preparedProvider,
+        observedStaticCssEvalMetadata
+      );
+    }
+
+    const transformed = await transformAsync(source, {
       ...babelCoreOptions,
+      filename: path,
       plugins: [
+        ...(loader === "jsx" || loader === "tsx" ? [jsxSyntaxPluginPath] : []),
         ...(Array.isArray(babelCoreOptions.plugins)
           ? babelCoreOptions.plugins
           : []),
@@ -250,10 +325,23 @@ export async function babelTransform(
         ...(Array.isArray(babelCoreOptions.presets)
           ? babelCoreOptions.presets
           : []),
-        typescriptPresetPath
+        ...(loader === "ts" || loader === "tsx"
+          ? [
+              [
+                typescriptPresetPath,
+                { allExtensions: true, isTSX: loader === "tsx" }
+              ] satisfies NonNullable<TransformOptions["presets"]>[number]
+            ]
+          : [])
       ],
-      sourceMaps: false
+      sourceMaps,
+      ...(inputSourceMap !== undefined ? { inputSourceMap } : {})
     });
+    if (!transformed || transformed.code == null) {
+      throw new Error(`Failed to transform ${path}`);
+    }
+
+    result = transformed;
   } catch (error) {
     const staticCssEval = createStaticCssEvalTransformResult(
       staticCssEvalPrepass?.result,
@@ -265,21 +353,20 @@ export async function babelTransform(
       ...(staticCssEval ? { result: staticCssEval } : {}),
       preserveProviderRecords: true
     });
-    throw new BabelTransformError(path, error, staticCssEval);
-  }
 
-  if (result === null || result.code == null) {
-    throw new Error(`Failed to transform ${path}`);
+    throw new BabelTransformError(path, error, staticCssEval);
   }
 
   const staticCssEvalMetadata = mergeStaticCssEvalMetadata(
     getStaticCssEvalMetadata(result.metadata),
     observedStaticCssEvalMetadata
   );
+
   const staticCssEval = createStaticCssEvalTransformResult(
     staticCssEvalPrepass?.result,
     staticCssEvalMetadata
   );
+
   projectEngine?.refreshFile({
     fileId: path,
     ...(staticCssEval ? { result: staticCssEval } : {}),
@@ -292,10 +379,28 @@ export async function babelTransform(
 
   return {
     result: options.result,
-    code: result.code,
+    code: result.code!,
+    ...(sourceMaps ? { map: result.map } : {}),
     jsxCssPropTransformed: options.jsxCssPropTransformed === true,
     ...(staticCssEval ? { staticCssEval } : {})
   };
+}
+
+function inferScriptLoader(
+  filename: string
+): NonNullable<BabelTransformSourceOptions["loader"]> {
+  switch (extname(filename).toLowerCase()) {
+    case ".jsx":
+      return "jsx";
+    case ".tsx":
+      return "tsx";
+    case ".ts":
+    case ".mts":
+    case ".cts":
+      return "ts";
+    default:
+      return "js";
+  }
 }
 
 function createStaticCssEvalGeneratedArtifacts(
@@ -323,10 +428,12 @@ if (import.meta.vitest) {
     const fs = await import("node:fs/promises");
     const path = await import("node:path");
     fixtureIndex += 1;
+
     const fixtureRoot = path.join(
       process.env.TMPDIR ?? `${process.cwd()}/temps`,
       `mincho-babel-css-prop-${fixtureIndex}-${label}`
     );
+
     const fixturePath = path.join(fixtureRoot, `${label}.tsx`);
 
     fixtureRoots.push(fixtureRoot);
@@ -342,10 +449,12 @@ if (import.meta.vitest) {
     const fs = await import("node:fs/promises");
     const path = await import("node:path");
     fixtureIndex += 1;
+
     const fixtureRoot = path.join(
       process.env.TMPDIR ?? `${process.cwd()}/temps`,
       `mincho-babel-css-prop-${fixtureIndex}-${label}`
     );
+
     const filePaths = {} as Record<keyof FixtureFiles, string>;
 
     fixtureRoots.push(fixtureRoot);
@@ -408,6 +517,7 @@ if (import.meta.vitest) {
           resolverKind: options.resolverKind ?? "test"
         };
       },
+
       async load(id) {
         const fs = await import("node:fs/promises");
 
@@ -429,12 +539,15 @@ if (import.meta.vitest) {
   type StaticCssEvalProvider = NonNullable<
     PluginOptions["staticCssEvalProvider"]
   >;
+
   type StaticCssEvalProviderResult = ReturnType<
     StaticCssEvalProvider["getResolvedCssValue"]
   >;
+
   type StaticCssEvalProviderQuery = Parameters<
     StaticCssEvalProvider["getResolvedCssValue"]
   >[0];
+
   type StaticCssEvalValue = Extract<
     StaticCssEvalProviderResult,
     { kind: "resolved" }
@@ -448,6 +561,7 @@ if (import.meta.vitest) {
         const key = query.memberPath?.length
           ? `${query.bindingName}.${query.memberPath.join(".")}`
           : (query.bindingName ?? "");
+
         const value = values[key];
 
         if (value === undefined) {
@@ -512,11 +626,13 @@ if (import.meta.vitest) {
       provider: {
         resolve(importerId, importPath) {
           calls.resolved.push({ importerId, importPath });
+
           const resolvedId =
             options.resolutions[`${importerId}\0${importPath}`];
 
           return resolvedId ? { id: resolvedId } : null;
         },
+
         load(id) {
           calls.loaded.push(id);
 
@@ -538,7 +654,9 @@ if (import.meta.vitest) {
       const fixtureRoot = await fs.mkdtemp(
         join(tmpdir(), "mincho-preset-consumer-")
       );
+
       fixtureRoots.push(fixtureRoot);
+
       const fixturePath = join(fixtureRoot, "entry.ts");
       await fs.writeFile(
         fixturePath,
@@ -564,6 +682,7 @@ if (import.meta.vitest) {
         `,
         "css-prop-engine-without-provider"
       );
+
       const engine = new MinchoProjectEngine();
 
       await expect(
@@ -579,6 +698,7 @@ if (import.meta.vitest) {
         "const broken =",
         "transform-failure-without-static-css-eval"
       );
+
       const engine = new MinchoProjectEngine();
       engine.refreshFile({
         fileId: fixturePath,
@@ -592,8 +712,10 @@ if (import.meta.vitest) {
           }
         ]
       });
+
       const provider = engine.getBabelStaticEvalProvider(fixturePath);
       await provider.resolve(fixturePath, "./current-dependency");
+
       let thrownError: unknown;
 
       try {
@@ -635,11 +757,13 @@ if (import.meta.vitest) {
         `,
         "define-rules-cx-optimize-option"
       );
+
       const omitted = await babelTransform(fixturePath);
       const emptyOptimize = await babelTransform(fixturePath, { optimize: {} });
       const disabledOptimize = await babelTransform(fixturePath, {
         optimize: { defineRulesCxConditions: false }
       });
+
       const enabledOptimize = await babelTransform(fixturePath, {
         jsxCssProp: false,
         optimize: { defineRulesCxConditions: true }
@@ -663,9 +787,11 @@ if (import.meta.vitest) {
         `,
         "css-prop-sidecar"
       );
+
       const { result, code } = await babelTransform(fixturePath, {
         jsxCssProp: true
       });
+
       const [sidecarFile, sidecarSource] = result;
       const exportedDeclarations = sidecarSource.match(/export var/g) ?? [];
 
@@ -678,18 +804,22 @@ if (import.meta.vitest) {
       expect(sidecarSource).not.toMatch(
         /export var [A-Za-z_$][\w$]* = [A-Za-z_$][\w$]*cx\(/s
       );
+
       const sidecarImportMatch = new RegExp(
         `import \\{ ([^}]+) \\} from "${escapeRegExp(sidecarFile)}";`
       ).exec(code);
+
       const sidecarRuntimeNames = [
         ...((sidecarImportMatch?.[1] ?? "").matchAll(
           /(?:^|, )([A-Za-z_$][\w$]*)(?: as ([A-Za-z_$][\w$]*))?/g
         ) ?? [])
       ].map(([, importedName, localName]) => localName ?? importedName);
+
       const cxImportMatch =
         /import \{ [^}]*\bcx(?: as ([A-Za-z_$][\w$]*))?[^}]*\} from "@mincho-js\/css";/.exec(
           code
         );
+
       const cxIdentifier = cxImportMatch?.[1] ?? "cx";
       const classNameMergeMatch =
         /className=\{([A-Za-z_$][\w$]*)\("base", ([A-Za-z_$][\w$]*)\)\}/.exec(
@@ -721,9 +851,11 @@ if (import.meta.vitest) {
         `,
         "dynamic-css-var-style"
       );
+
       const { result, code } = await babelTransform(fixturePath, {
         jsxCssProp: true
       });
+
       const [sidecarFile, sidecarSource] = result;
 
       expect(sidecarFile).toMatch(/^extracted_[a-z0-9]+\.css\.ts$/);
@@ -755,9 +887,11 @@ if (import.meta.vitest) {
         `,
         "pre-post-spread-merge"
       );
+
       const { result, code } = await babelTransform(fixturePath, {
         jsxCssProp: true
       });
+
       const [, sidecarSource] = result;
 
       expect(code).not.toContain(" css=");
@@ -790,9 +924,11 @@ if (import.meta.vitest) {
         `,
         "css-prop-sidecar-build-time-calls"
       );
+
       const { result, code } = await babelTransform(fixturePath, {
         jsxCssProp: true
       });
+
       const [, sidecarSource] = result;
 
       expect(code).not.toContain(" css=");
@@ -824,9 +960,11 @@ if (import.meta.vitest) {
         `,
         "css-prop-provider-absence"
       );
+
       const transformed = await babelTransform(fixturePath, {
         jsxCssProp: true
       });
+
       const { result, code } = transformed;
       const [, sidecarSource] = result;
       const exportedDeclarations = sidecarSource.match(/export var/g) ?? [];
@@ -873,15 +1011,18 @@ if (import.meta.vitest) {
         `,
         "css-prop-v2-classification"
       );
+
       const { result, code } = await babelTransform(fixturePath, {
         jsxCssProp: true
       });
+
       const [sidecarFile, sidecarSource] = result;
       const exportedDeclarations = sidecarSource.match(/export var/g) ?? [];
       const cxImportMatch =
         /import \{ [^}]*\bcx(?: as ([A-Za-z_$][\w$]*))?[^}]*\} from "@mincho-js\/css";/.exec(
           code
         );
+
       const cxIdentifier = cxImportMatch?.[1] ?? "cx";
 
       expect(sidecarFile).toMatch(/^extracted_[a-z0-9]+\.css\.ts$/);
@@ -955,9 +1096,11 @@ if (import.meta.vitest) {
         `,
         "css-prop-cx-alias"
       );
+
       const { result, code } = await babelTransform(fixturePath, {
         jsxCssProp: true
       });
+
       const [, sidecarSource] = result;
 
       expect(sidecarSource).not.toContain("classNames(");
@@ -975,9 +1118,11 @@ if (import.meta.vitest) {
         `,
         "css-prop-local-cx"
       );
+
       const { result, code } = await babelTransform(fixturePath, {
         jsxCssProp: true
       });
+
       const [, sidecarSource] = result;
 
       expect(sidecarSource).toContain("cx({");
@@ -1003,6 +1148,7 @@ if (import.meta.vitest) {
         `,
         "css-prop-imported-static-values"
       );
+
       const { result, code } = await babelTransform(fixturePath, {
         jsxCssProp: true,
         staticCssEvalProvider: createResolvedStaticCssEvalProvider({
@@ -1013,6 +1159,7 @@ if (import.meta.vitest) {
           "styles.button.primary": { color: "purple" }
         })
       });
+
       const [, sidecarSource] = result;
       const exportedDeclarations = sidecarSource.match(/export var/g) ?? [];
 
@@ -1044,21 +1191,26 @@ if (import.meta.vitest) {
         `,
         "css-prop-partial-evaluator-provider-boundary"
       );
+
       const queries: StaticCssEvalProviderQuery[] = [];
       const provider = createResolvedStaticCssEvalProvider({
         button: { color: "red" },
         "tokens.button.primary": { color: "purple" }
       });
+
       const observingProvider: StaticCssEvalProvider = {
         getResolvedCssValue(query): StaticCssEvalProviderResult {
           queries.push(query);
+
           return provider.getResolvedCssValue(query);
         }
       };
+
       const { result, code } = await babelTransform(fixturePath, {
         jsxCssProp: true,
         staticCssEvalProvider: observingProvider
       });
+
       const queryKeys = queries.map(({ bindingName, memberPath }) =>
         memberPath?.length
           ? `${bindingName}.${memberPath.join(".")}`
@@ -1087,6 +1239,7 @@ if (import.meta.vitest) {
         `,
         "css-prop-metadata-dedupe"
       );
+
       const dependency = {
         file: "/provider/styles.ts",
         kind: "imported",
@@ -1097,6 +1250,7 @@ if (import.meta.vitest) {
         inspected: true,
         contributed: true
       } satisfies StaticCssEvalMetadataDependency;
+
       const diagnostic = {
         id: "STATIC_CSS_EVAL_UNRESOLVED_EXPORT",
         code: "unsupported-source",
@@ -1109,6 +1263,7 @@ if (import.meta.vitest) {
         memberPath: [],
         importChain: [fixturePath, dependency.file]
       } satisfies StaticCssEvalMetadataDiagnostic;
+
       const cacheKey = {
         importerFile: fixturePath,
         resolvedFile: dependency.file,
@@ -1120,6 +1275,7 @@ if (import.meta.vitest) {
         resolverOptionsVersion: "test-resolver-options",
         staticEvalSupportVersion: "test-static-eval"
       } satisfies StaticCssEvalMetadataCacheKey;
+
       const packageCacheKey = {
         ...cacheKey,
         canonicalModuleId: "pkg:@scope/styles",
@@ -1135,6 +1291,7 @@ if (import.meta.vitest) {
           typescript: true
         }
       } satisfies StaticCssEvalMetadataCacheKey;
+
       const cacheKeys = [cacheKey, packageCacheKey] as const;
       let cacheKeyIndex = 0;
       const provider: StaticCssEvalProvider = {
@@ -1159,6 +1316,7 @@ if (import.meta.vitest) {
           staticCssEvalProvider: provider
         }
       );
+
       const [, sidecarSource] = result;
 
       expect(sidecarSource).toContain('color: "red"');
@@ -1200,10 +1358,12 @@ if (import.meta.vitest) {
           </>;
         }
       `;
+
       const fixturePath = await createBabelFixture(
         ownerSource,
         "css-prop-async-prepass-reachable-import"
       );
+
       const fixtureRoot = path.dirname(fixturePath);
       const stylesId = path.join(fixtureRoot, "styles.ts");
       const unusedId = path.join(fixtureRoot, "unused.ts");
@@ -1218,6 +1378,7 @@ if (import.meta.vitest) {
           [`${fixturePath}\0./unused`]: unusedId
         }
       });
+
       const { result, code, staticCssEval } = await babelTransform(
         fixturePath,
         {
@@ -1225,12 +1386,13 @@ if (import.meta.vitest) {
           staticCssEvalSourceProvider: provider
         }
       );
+
       const [, sidecarSource] = result;
 
       expect(calls.resolved).toEqual([
         { importerId: fixturePath, importPath: "./styles" }
       ]);
-      expect(calls.loaded).toEqual([fixturePath, stylesId]);
+      expect(calls.loaded).toEqual([stylesId]);
       expect(sidecarSource).toContain('color: "red"');
       expect(sidecarSource).not.toContain('color: "blue"');
       expect(code).not.toContain("_cx(button)");
@@ -1264,10 +1426,12 @@ if (import.meta.vitest) {
           </>;
         }
       `;
+
       const fixturePath = await createBabelFixture(
         ownerSource,
         "css-prop-prepass-reachable-spread-identifier"
       );
+
       const fixtureRoot = path.dirname(fixturePath);
       const directId = path.join(fixtureRoot, "direct.ts");
       const stylesId = path.join(fixtureRoot, "styles.ts");
@@ -1322,7 +1486,6 @@ if (import.meta.vitest) {
         { importerId: stylesId, importPath: "./palette" }
       ]);
       expect(calls.loaded).toEqual([
-        fixturePath,
         directId,
         tokensId,
         stylesId,
@@ -1357,10 +1520,12 @@ if (import.meta.vitest) {
           }} />;
         }
       `;
+
       const ownerId = await createBabelFixture(
         ownerSource,
         "css-prop-prepass-package-data-virtual-commonjs"
       );
+
       const packageId = "pkg:@scope/styles/index.ts";
       const packageLoadId = `${packageId}?condition=import`;
       const dataId = "pkg:@scope/styles/tokens.json?import";
@@ -1370,6 +1535,7 @@ if (import.meta.vitest) {
         resolved: [],
         loaded: []
       };
+
       const resolutions = new Map<string, StaticCssEvalSourceResolution>([
         [
           `${ownerId}\0@scope/styles`,
@@ -1411,6 +1577,7 @@ if (import.meta.vitest) {
           }
         ]
       ]);
+
       const loadedSources = new Map<string, StaticCssEvalLoadedSource>([
         [ownerId, { source: ownerSource }],
         [
@@ -1448,13 +1615,17 @@ if (import.meta.vitest) {
           }
         ]
       ]);
+
       const provider: StaticCssEvalSourceProvider = {
         resolve(importerId, importPath) {
           calls.resolved.push({ importerId, importPath });
+
           return resolutions.get(`${importerId}\0${importPath}`) ?? null;
         },
+
         load(id) {
           calls.loaded.push(id);
+
           return loadedSources.get(id) ?? null;
         }
       };
@@ -1470,13 +1641,7 @@ if (import.meta.vitest) {
         { importerId: ownerId, importPath: "virtual:mincho/styles" },
         { importerId: ownerId, importPath: "./styles.cjs" }
       ]);
-      expect(calls.loaded).toEqual([
-        ownerId,
-        packageLoadId,
-        dataId,
-        virtualId,
-        cjsId
-      ]);
+      expect(calls.loaded).toEqual([packageLoadId, dataId, virtualId, cjsId]);
       expect(staticCssEval?.resolvedDependencies).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
@@ -1516,6 +1681,7 @@ if (import.meta.vitest) {
           return <div css={button} />;
         }
       `;
+
       const stylesSource = `import { base } from "./base"; export const button = { ...base } as const;`;
       const redBaseSource = `export const base = { color: "red" } as const;`;
       const blueBaseSource = `export const base = { color: "blue" } as const;`;
@@ -1527,6 +1693,7 @@ if (import.meta.vitest) {
         },
         "css-prop-prepass-transitive-spread-invalidation"
       );
+
       const componentId = filePaths["component.tsx"];
       const stylesId = filePaths["styles.ts"];
       const baseId = filePaths["base.ts"];
@@ -1541,7 +1708,9 @@ if (import.meta.vitest) {
         componentId,
         provider
       );
+
       await fs.writeFile(baseId, blueBaseSource, "utf8");
+
       const secondPrepass = await createStaticCssEvalPrepass(
         componentId,
         provider
@@ -1591,6 +1760,7 @@ if (import.meta.vitest) {
           return <div css={button} />;
         }
       `;
+
       const stylesSource = `import { colorKey } from "./keys"; export const button = { [colorKey]: "red" } as const;`;
       const colorKeySource = `export const colorKey = "color" as const;`;
       const backgroundKeySource = `export const colorKey = "background" as const;`;
@@ -1602,6 +1772,7 @@ if (import.meta.vitest) {
         },
         "css-prop-computed-key-cache-invalidation"
       );
+
       const componentId = filePaths["component.tsx"];
       const stylesId = filePaths["styles.ts"];
       const keysId = filePaths["keys.ts"];
@@ -1616,7 +1787,9 @@ if (import.meta.vitest) {
         jsxCssProp: true,
         staticCssEvalSourceProvider: provider
       });
+
       await fs.writeFile(keysId, backgroundKeySource, "utf8");
+
       const secondTransform = await babelTransform(componentId, {
         jsxCssProp: true,
         staticCssEvalSourceProvider: provider
@@ -1655,6 +1828,7 @@ if (import.meta.vitest) {
           return <div css={button} />;
         }
       `;
+
       const stylesSource = `
         import { base } from "./base";
         import { propertyKey } from "./keys";
@@ -1662,6 +1836,7 @@ if (import.meta.vitest) {
         const helper = { ...base, [propertyKey]: "solid" } as const;
         export const button = { ...helper } as const;
       `;
+
       const redBaseSource = `export const base = { color: "red" } as const;`;
       const blueBaseSource = `export const base = { color: "blue" } as const;`;
       const borderKeySource = `export const propertyKey = "borderColor" as const;`;
@@ -1675,6 +1850,7 @@ if (import.meta.vitest) {
         },
         "css-prop-partial-evaluator-cache-invalidation"
       );
+
       const componentId = filePaths["component.tsx"];
       const stylesId = filePaths["styles.ts"];
       const baseId = filePaths["base.ts"];
@@ -1691,8 +1867,10 @@ if (import.meta.vitest) {
         jsxCssProp: true,
         staticCssEvalSourceProvider: provider
       });
+
       await fs.writeFile(baseId, blueBaseSource, "utf8");
       await fs.writeFile(keysId, backgroundKeySource, "utf8");
+
       const secondTransform = await babelTransform(componentId, {
         jsxCssProp: true,
         staticCssEvalSourceProvider: provider
@@ -1745,6 +1923,7 @@ if (import.meta.vitest) {
           return <div css={makeButton()} />;
         }
       `;
+
       const factorySource = `
         import { base } from "./base";
         import { propertyKey } from "./keys";
@@ -1756,6 +1935,7 @@ if (import.meta.vitest) {
           return { ...base, [propertyKey]: "solid" } as const;
         }
       `;
+
       const redBaseSource = `export const base = { color: "red" } as const;`;
       const blueBaseSource = `export const base = { color: "blue" } as const;`;
       const keySource = `export const propertyKey = "borderColor" as const;`;
@@ -1770,6 +1950,7 @@ if (import.meta.vitest) {
         },
         "css-prop-sidecar-factory-cache-invalidation"
       );
+
       const componentId = filePaths["component.tsx"];
       const factoryId = filePaths["factory.ts"];
       const baseId = filePaths["base.ts"];
@@ -1788,7 +1969,9 @@ if (import.meta.vitest) {
         jsxCssProp: true,
         staticCssEvalSourceProvider: provider
       });
+
       await fs.writeFile(baseId, blueBaseSource, "utf8");
+
       const secondTransform = await babelTransform(componentId, {
         jsxCssProp: true,
         staticCssEvalSourceProvider: provider
@@ -1829,6 +2012,7 @@ if (import.meta.vitest) {
           return <div css={button} />;
         }
       `;
+
       const stylesSource = `import { token } from "./tokens"; export const button = { color: token } as const;`;
       const tokenSource = `export const token = "red" as const;`;
       const { filePaths } = await createBabelFixtureFiles(
@@ -1839,10 +2023,12 @@ if (import.meta.vitest) {
         },
         "css-prop-project-engine-adapter-routes"
       );
+
       const componentId = filePaths["component.tsx"];
       const stylesId = filePaths["styles.ts"];
       const tokensId = filePaths["tokens.ts"];
       const engine = new MinchoProjectEngine();
+
       const createAdapterProvider = (resolverKind: StaticCssEvalResolverKind) =>
         createFileBackedStaticCssEvalSourceProvider({
           resolverKind,
@@ -1857,6 +2043,7 @@ if (import.meta.vitest) {
         staticCssEvalProjectEngine: engine,
         staticCssEvalSourceProvider: createAdapterProvider("vite")
       });
+
       const viteFileResult = engine.getFileResult(componentId);
       const invalidatedOwners = engine.invalidateByDependency(tokensId);
       const invalidatedFileResult = engine.getFileResult(componentId);
@@ -1865,6 +2052,7 @@ if (import.meta.vitest) {
         staticCssEvalProjectEngine: engine,
         staticCssEvalSourceProvider: createAdapterProvider("esbuild")
       });
+
       const esbuildFileResult = engine.getFileResult(componentId);
 
       expect(viteTransform.result[1]).toContain('color: "red"');
@@ -1902,8 +2090,10 @@ if (import.meta.vitest) {
           return <div css={button} />;
         }
       `;
+
       const stylesSource =
         'import { brand } from "./brand"; export const button = { color: `${brand}` } as const;';
+
       const redBrandSource = `export const brand = "red" as const;`;
       const blueBrandSource = `export const brand = "blue" as const;`;
       const { filePaths } = await createBabelFixtureFiles(
@@ -1914,6 +2104,7 @@ if (import.meta.vitest) {
         },
         "css-prop-template-cache-invalidation"
       );
+
       const componentId = filePaths["component.tsx"];
       const stylesId = filePaths["styles.ts"];
       const brandId = filePaths["brand.ts"];
@@ -1928,7 +2119,9 @@ if (import.meta.vitest) {
         jsxCssProp: true,
         staticCssEvalSourceProvider: provider
       });
+
       await fs.writeFile(brandId, blueBrandSource, "utf8");
+
       const secondTransform = await babelTransform(componentId, {
         jsxCssProp: true,
         staticCssEvalSourceProvider: provider
@@ -1966,6 +2159,7 @@ if (import.meta.vitest) {
           return <div css={button} />;
         }
       `;
+
       const stylesSource = `import { palette } from "./palette"; export const button = { color: palette?.primary } as const;`;
       const redPaletteSource = `export const palette = { primary: "red" } as const;`;
       const bluePaletteSource = `export const palette = { primary: "blue" } as const;`;
@@ -1977,6 +2171,7 @@ if (import.meta.vitest) {
         },
         "css-prop-optional-member-cache-invalidation"
       );
+
       const componentId = filePaths["component.tsx"];
       const stylesId = filePaths["styles.ts"];
       const paletteId = filePaths["palette.ts"];
@@ -1991,7 +2186,9 @@ if (import.meta.vitest) {
         jsxCssProp: true,
         staticCssEvalSourceProvider: provider
       });
+
       await fs.writeFile(paletteId, bluePaletteSource, "utf8");
+
       const secondTransform = await babelTransform(componentId, {
         jsxCssProp: true,
         staticCssEvalSourceProvider: provider
@@ -2030,6 +2227,7 @@ if (import.meta.vitest) {
           return <div css={styles.button} />;
         }
       `;
+
       const blueComponentSource = `
         const cjsPath = "./blue-styles";
         const styles = require(cjsPath);
@@ -2038,6 +2236,7 @@ if (import.meta.vitest) {
           return <div css={styles.button} />;
         }
       `;
+
       const redStylesSource = `exports.button = { color: "red" };`;
       const orangeStylesSource = `exports.button = { color: "orange" };`;
       const blueStylesSource = `exports.button = { color: "blue" };`;
@@ -2049,6 +2248,7 @@ if (import.meta.vitest) {
         },
         "css-prop-cjs-const-path-cache-invalidation"
       );
+
       const componentId = filePaths["component.tsx"];
       const redStylesId = filePaths["red-styles.cjs"];
       const blueStylesId = filePaths["blue-styles.cjs"];
@@ -2063,12 +2263,16 @@ if (import.meta.vitest) {
         jsxCssProp: true,
         staticCssEvalSourceProvider: provider
       });
+
       await fs.writeFile(redStylesId, orangeStylesSource, "utf8");
+
       const secondTransform = await babelTransform(componentId, {
         jsxCssProp: true,
         staticCssEvalSourceProvider: provider
       });
+
       await fs.writeFile(componentId, blueComponentSource, "utf8");
+
       const thirdTransform = await babelTransform(componentId, {
         jsxCssProp: true,
         staticCssEvalSourceProvider: provider
@@ -2111,6 +2315,7 @@ if (import.meta.vitest) {
           return <div css={button} />;
         }
       `;
+
       const redStylesSource = `export const button = { color: "red" } as const;`;
       const blueStylesSource = `export const button = { color: "blue" } as const;`;
       const { filePaths } = await createBabelFixtureFiles(
@@ -2120,6 +2325,7 @@ if (import.meta.vitest) {
         },
         "css-prop-imported-cache-invalidation"
       );
+
       const componentId = filePaths["component.tsx"];
       const stylesId = filePaths["styles.ts"];
       const provider = createFileBackedStaticCssEvalSourceProvider({
@@ -2132,7 +2338,9 @@ if (import.meta.vitest) {
         jsxCssProp: true,
         staticCssEvalSourceProvider: provider
       });
+
       await fs.writeFile(stylesId, blueStylesSource, "utf8");
+
       const secondTransform = await babelTransform(componentId, {
         jsxCssProp: true,
         staticCssEvalSourceProvider: provider
@@ -2186,12 +2394,14 @@ if (import.meta.vitest) {
           </>;
         }
       `;
+
       const { filePaths } = await createBabelFixtureFiles(
         {
           "component.tsx": componentSource
         },
         "css-prop-source-provider-cache-metadata"
       );
+
       const componentId = filePaths["component.tsx"];
       const packageId = "pkg:@scope/styles/index.ts";
       const packageLoadId = `${packageId}?condition=import`;
@@ -2235,6 +2445,7 @@ if (import.meta.vitest) {
           }
         ]
       ]);
+
       const loadedSources = new Map<string, StaticCssEvalLoadedSource>([
         [componentId, { source: componentSource }],
         [
@@ -2270,10 +2481,12 @@ if (import.meta.vitest) {
           }
         ]
       ]);
+
       const provider: StaticCssEvalSourceProvider = {
         resolve(importerId, importPath) {
           return resolutions.get(`${importerId}\0${importPath}`) ?? null;
         },
+
         load(id) {
           return loadedSources.get(id) ?? null;
         }
@@ -2367,6 +2580,7 @@ if (import.meta.vitest) {
           return <div css={styles.button} />;
         }
       `;
+
       const stylesSource = `exports.button = { color: "red" };`;
       const { filePaths } = await createBabelFixtureFiles(
         {
@@ -2375,6 +2589,7 @@ if (import.meta.vitest) {
         },
         "css-prop-cjs-require-metadata"
       );
+
       const componentId = filePaths["component.tsx"];
       const stylesId = filePaths["styles.cjs"];
       const provider = createFileBackedStaticCssEvalSourceProvider({
@@ -2390,6 +2605,7 @@ if (import.meta.vitest) {
           staticCssEvalSourceProvider: provider
         }
       );
+
       const [, sidecarSource] = result;
 
       expect(sidecarSource).toContain('color: "red"');
@@ -2451,13 +2667,16 @@ if (import.meta.vitest) {
           </>;
         }
       `;
+
       const componentId = await createBabelFixture(
         componentSource,
         "css-prop-cjs-diagnostic-dedupe"
       );
+
       const provider = createFileBackedStaticCssEvalSourceProvider({
         resolutions: {}
       });
+
       let thrownError: unknown;
 
       try {
@@ -2494,6 +2713,7 @@ if (import.meta.vitest) {
           return <div css={button} />;
         }
       `;
+
       const missingExportStylesSource = `export const card = { color: "red" } as const;`;
       const fixedStylesSource = `export const button = { color: "blue" } as const;`;
       const { filePaths } = await createBabelFixtureFiles(
@@ -2503,6 +2723,7 @@ if (import.meta.vitest) {
         },
         "css-prop-imported-unresolved-cache-invalidation"
       );
+
       const componentId = filePaths["component.tsx"];
       const stylesId = filePaths["styles.ts"];
       const provider = createFileBackedStaticCssEvalSourceProvider({
@@ -2510,6 +2731,7 @@ if (import.meta.vitest) {
           [`${componentId}\0./styles`]: stylesId
         }
       });
+
       let firstError: unknown;
 
       try {
@@ -2579,6 +2801,7 @@ if (import.meta.vitest) {
           return <div css={button} />;
         }
       `;
+
       const stylesSource = `export const card = { color: "red" } as const;`;
       const { filePaths } = await createBabelFixtureFiles(
         {
@@ -2587,6 +2810,7 @@ if (import.meta.vitest) {
         },
         "css-prop-imported-failure-context"
       );
+
       const componentId = filePaths["component.tsx"];
       const stylesId = filePaths["styles.ts"];
       const provider = createFileBackedStaticCssEvalSourceProvider({
@@ -2594,6 +2818,7 @@ if (import.meta.vitest) {
           [`${componentId}\0./styles`]: stylesId
         }
       });
+
       let thrownError: unknown;
 
       try {
@@ -2688,10 +2913,12 @@ if (import.meta.vitest) {
             return <div css={unsupported} />;
           }
         `;
+
         const componentId = await createBabelFixture(
           componentSource,
           `css-prop-static-data-${testCase.label}`
         );
+
         const provider: StaticCssEvalSourceProvider = {
           resolve(importerId, importPath) {
             if (
@@ -2709,6 +2936,7 @@ if (import.meta.vitest) {
               resolverKind: "test"
             };
           },
+
           load(id) {
             if (id === componentId) {
               return { sourceText: componentSource, resolverKind: "test" };
@@ -2730,6 +2958,7 @@ if (import.meta.vitest) {
             return null;
           }
         };
+
         let thrownError: unknown;
 
         try {
@@ -2782,6 +3011,7 @@ if (import.meta.vitest) {
           return <div css={button} />;
         }
       `;
+
       const barrelSource = `export { button } from "./styles";`;
       const stylesSource = `export const button = { color: "red" } as const;`;
       const { filePaths } = await createBabelFixtureFiles(
@@ -2792,6 +3022,7 @@ if (import.meta.vitest) {
         },
         "css-prop-provider-unsupported-barrel-no-fallback"
       );
+
       const componentId = filePaths["component.tsx"];
       const barrelId = filePaths["barrel.ts"];
       const stylesId = filePaths["styles.ts"];
@@ -2811,6 +3042,7 @@ if (import.meta.vitest) {
             resolverKind: "test"
           };
         },
+
         load(id) {
           loadedIds.push(id);
 
@@ -2834,6 +3066,7 @@ if (import.meta.vitest) {
           return null;
         }
       };
+
       let thrownError: unknown;
 
       try {
@@ -2881,6 +3114,7 @@ if (import.meta.vitest) {
           return <div css={button} />;
         }
       `;
+
       const stylesSource = `export const button = { color: "red" } as const;`;
       const { filePaths } = await createBabelFixtureFiles(
         {
@@ -2889,10 +3123,12 @@ if (import.meta.vitest) {
         },
         "css-prop-provider-unresolved-no-fallback"
       );
+
       const componentId = filePaths["component.tsx"];
       const provider = createFileBackedStaticCssEvalSourceProvider({
         resolutions: {}
       });
+
       let thrownError: unknown;
 
       try {
@@ -2952,10 +3188,12 @@ if (import.meta.vitest) {
           return <div css={button} />;
         }
       `;
+
       const fixturePath = await createBabelFixture(
         ownerSource,
         "css-prop-async-prepass-reexport-fallback"
       );
+
       const fixtureRoot = path.dirname(fixturePath);
       const barrelId = path.join(fixtureRoot, "barrel.ts");
       const stylesId = path.join(fixtureRoot, "styles.ts");
@@ -2970,6 +3208,7 @@ if (import.meta.vitest) {
           [`${barrelId}\0./styles`]: stylesId
         }
       });
+
       const { result, code, staticCssEval } = await babelTransform(
         fixturePath,
         {
@@ -2977,13 +3216,14 @@ if (import.meta.vitest) {
           staticCssEvalSourceProvider: provider
         }
       );
+
       const [, sidecarSource] = result;
 
       expect(calls.resolved).toEqual([
         { importerId: fixturePath, importPath: "./barrel" },
         { importerId: barrelId, importPath: "./styles" }
       ]);
-      expect(calls.loaded).toEqual([fixturePath, barrelId, stylesId]);
+      expect(calls.loaded).toEqual([barrelId, stylesId]);
       expect(sidecarSource).toContain('color: "red"');
       expect(code).not.toContain("_cx(button)");
       expect(staticCssEval?.dependencyFiles).toEqual([barrelId, stylesId]);
@@ -3039,10 +3279,12 @@ if (import.meta.vitest) {
           return <div css={button} />;
         }
       `;
+
       const fixturePath = await createBabelFixture(
         ownerSource,
         "css-prop-async-prepass-parse-failure"
       );
+
       const fixtureRoot = path.dirname(fixturePath);
       const stylesId = path.join(fixtureRoot, "styles.ts");
       const { provider, calls } = createFakeStaticCssEvalSourceProvider({
@@ -3054,6 +3296,7 @@ if (import.meta.vitest) {
           [`${fixturePath}\0./styles`]: stylesId
         }
       });
+
       const prepass = await createStaticCssEvalPrepass(fixturePath, provider);
       const resolution = prepass.provider.getResolvedCssValue({
         importerId: fixturePath,
@@ -3101,11 +3344,13 @@ if (import.meta.vitest) {
           return <div css={styles.button.primary} />;
         }
       `;
+
       const stylesSource = `export const button = { primary: { color: "red" } } as const;`;
       const fixturePath = await createBabelFixture(
         ownerSource,
         "css-prop-async-prepass-namespace-member"
       );
+
       const fixtureRoot = path.dirname(fixturePath);
       const stylesId = path.join(fixtureRoot, "styles.ts");
       const { provider, calls } = createFakeStaticCssEvalSourceProvider({
@@ -3117,6 +3362,7 @@ if (import.meta.vitest) {
           [`${fixturePath}\0./styles`]: stylesId
         }
       });
+
       const { result, code, staticCssEval } = await babelTransform(
         fixturePath,
         {
@@ -3124,12 +3370,13 @@ if (import.meta.vitest) {
           staticCssEvalSourceProvider: provider
         }
       );
+
       const [, sidecarSource] = result;
 
       expect(calls.resolved).toEqual([
         { importerId: fixturePath, importPath: "./styles" }
       ]);
-      expect(calls.loaded).toEqual([fixturePath, stylesId]);
+      expect(calls.loaded).toEqual([stylesId]);
       expect(sidecarSource).toContain('color: "red"');
       expect(code).not.toContain("_cx(styles.button.primary)");
       expect(staticCssEval?.dependencyFiles).toEqual([stylesId]);
@@ -3182,6 +3429,7 @@ if (import.meta.vitest) {
           </>;
         }
       `;
+
       const stylesSource = `
         const backgroundKey = "backgroundColor";
         const base = { color: "red" } as const;
@@ -3204,6 +3452,7 @@ if (import.meta.vitest) {
           ...hover
         } as const;
       `;
+
       const { filePaths } = await createBabelFixtureFiles(
         {
           "component.tsx": componentSource,
@@ -3211,6 +3460,7 @@ if (import.meta.vitest) {
         },
         "css-prop-provider-static-shape-spreads"
       );
+
       const componentId = filePaths["component.tsx"];
       const stylesId = filePaths["styles.ts"];
       const provider = createFileBackedStaticCssEvalSourceProvider({
@@ -3218,6 +3468,7 @@ if (import.meta.vitest) {
           [`${componentId}\0./styles`]: stylesId
         }
       });
+
       const { code, result, staticCssEval } = await babelTransform(
         componentId,
         {
@@ -3225,6 +3476,7 @@ if (import.meta.vitest) {
           staticCssEvalSourceProvider: provider
         }
       );
+
       const [sidecarFile, sidecarSource] = result;
 
       expect(sidecarFile).toMatch(/^extracted_[a-z0-9]+\.css\.ts$/);
@@ -3313,10 +3565,12 @@ if (import.meta.vitest) {
           return <div css={styles.button.primary} />;
         }
       `;
+
       const fixturePath = await createBabelFixture(
         ownerSource,
         "css-prop-async-prepass-export-star-namespace-member"
       );
+
       const fixtureRoot = path.dirname(fixturePath);
       const barrelId = path.join(fixtureRoot, "barrel.ts");
       const stylesId = path.join(fixtureRoot, "styles.ts");
@@ -3331,6 +3585,7 @@ if (import.meta.vitest) {
           [`${barrelId}\0./styles`]: stylesId
         }
       });
+
       const { result, code, staticCssEval } = await babelTransform(
         fixturePath,
         {
@@ -3338,13 +3593,14 @@ if (import.meta.vitest) {
           staticCssEvalSourceProvider: provider
         }
       );
+
       const [, sidecarSource] = result;
 
       expect(calls.resolved).toEqual([
         { importerId: fixturePath, importPath: "./barrel" },
         { importerId: barrelId, importPath: "./styles" }
       ]);
-      expect(calls.loaded).toEqual([fixturePath, barrelId, stylesId]);
+      expect(calls.loaded).toEqual([barrelId, stylesId]);
       expect(sidecarSource).toContain('color: "red"');
       expect(code).not.toContain("_cx(styles.button.primary)");
       expect(staticCssEval?.dependencyFiles).toEqual([barrelId, stylesId]);
@@ -3389,10 +3645,12 @@ if (import.meta.vitest) {
           return <div css={styles} />;
         }
       `;
+
       const fixturePath = await createBabelFixture(
         ownerSource,
         "css-prop-async-prepass-whole-namespace-export-star-default"
       );
+
       const fixtureRoot = path.dirname(fixturePath);
       const barrelId = path.join(fixtureRoot, "barrel.ts");
       const resetId = path.join(fixtureRoot, "reset.ts");
@@ -3413,6 +3671,7 @@ if (import.meta.vitest) {
           [`${barrelId}\0./styles`]: stylesId
         }
       });
+
       const { result: staticCssEval } = await createStaticCssEvalPrepass(
         fixturePath,
         provider
@@ -3473,10 +3732,12 @@ if (import.meta.vitest) {
           return <div css={styles} />;
         }
       `;
+
       const fixturePath = await createBabelFixture(
         ownerSource,
         "css-prop-async-prepass-star-only-default-exclusion"
       );
+
       const fixtureRoot = path.dirname(fixturePath);
       const barrelId = path.join(fixtureRoot, "barrel.ts");
       const defaultBarrelId = path.join(fixtureRoot, "defaultBarrel.ts");
@@ -3497,6 +3758,7 @@ if (import.meta.vitest) {
           [`${defaultBarrelId}\0./defaultLeaf`]: defaultLeafId
         }
       });
+
       const { result: staticCssEval } = await createStaticCssEvalPrepass(
         fixturePath,
         provider
@@ -3528,10 +3790,12 @@ if (import.meta.vitest) {
           return <div css={styles.button} />;
         }
       `;
+
       const fixturePath = await createBabelFixture(
         ownerSource,
         "css-prop-async-prepass-export-star-cycle"
       );
+
       const fixtureRoot = path.dirname(fixturePath);
       const barrelId = path.join(fixtureRoot, "barrel.ts");
       const loopId = path.join(fixtureRoot, "loop.ts");
@@ -3547,6 +3811,7 @@ if (import.meta.vitest) {
           [`${loopId}\0./barrel`]: barrelId
         }
       });
+
       let thrownError: unknown;
 
       try {
@@ -3569,7 +3834,7 @@ if (import.meta.vitest) {
         { importerId: barrelId, importPath: "./loop" },
         { importerId: loopId, importPath: "./barrel" }
       ]);
-      expect(calls.loaded).toEqual([fixturePath, barrelId, loopId]);
+      expect(calls.loaded).toEqual([barrelId, loopId]);
       expect(thrownError.staticCssEval?.dependencyFiles).toEqual([
         barrelId,
         loopId
@@ -3589,10 +3854,12 @@ if (import.meta.vitest) {
           return <div css={styles.button} />;
         }
       `;
+
       const fixturePath = await createBabelFixture(
         ownerSource,
         "css-prop-async-prepass-unresolved-export-star"
       );
+
       const fixtureRoot = path.dirname(fixturePath);
       const barrelId = path.join(fixtureRoot, "barrel.ts");
       const { provider, calls } = createFakeStaticCssEvalSourceProvider({
@@ -3604,6 +3871,7 @@ if (import.meta.vitest) {
           [`${fixturePath}\0./barrel`]: barrelId
         }
       });
+
       let thrownError: unknown;
 
       try {
@@ -3627,7 +3895,7 @@ if (import.meta.vitest) {
         { importerId: fixturePath, importPath: "./barrel" },
         { importerId: barrelId, importPath: "./missing" }
       ]);
-      expect(calls.loaded).toEqual([fixturePath, barrelId]);
+      expect(calls.loaded).toEqual([barrelId]);
       expect(thrownError.staticCssEval?.dependencyFiles).toEqual([barrelId]);
       expect(thrownError.staticCssEval?.diagnostics[0]).toMatchObject({
         id: "STATIC_CSS_EVAL_UNRESOLVED_IMPORT",
@@ -3664,10 +3932,12 @@ if (import.meta.vitest) {
           return <div css={styles.button} />;
         }
       `;
+
       const fixturePath = await createBabelFixture(
         ownerSource,
         "css-prop-async-prepass-package-boundary-export-star"
       );
+
       const fixtureRoot = path.dirname(fixturePath);
       const barrelId = path.join(fixtureRoot, "barrel.ts");
       const { provider, calls } = createFakeStaticCssEvalSourceProvider({
@@ -3679,6 +3949,7 @@ if (import.meta.vitest) {
           [`${fixturePath}\0./barrel`]: barrelId
         }
       });
+
       let thrownError: unknown;
 
       try {
@@ -3702,7 +3973,7 @@ if (import.meta.vitest) {
         { importerId: fixturePath, importPath: "./barrel" },
         { importerId: barrelId, importPath: "@scope/styles" }
       ]);
-      expect(calls.loaded).toEqual([fixturePath, barrelId]);
+      expect(calls.loaded).toEqual([barrelId]);
       expect(thrownError.staticCssEval?.dependencyFiles).toEqual([barrelId]);
       expect(thrownError.staticCssEval?.diagnostics[0]).toMatchObject({
         id: "STATIC_CSS_EVAL_UNRESOLVED_IMPORT",
@@ -3741,6 +4012,7 @@ if (import.meta.vitest) {
         `,
         "css-prop-reexport-whole-expression"
       );
+
       const provider = createUnsupportedReexportStaticCssEvalProvider();
       const { result, code, staticCssEval } = await babelTransform(
         wholeExpressionPath,
@@ -3817,37 +4089,45 @@ if (import.meta.vitest) {
         `,
         "css-prop-logical-rule-branches"
       );
+
       const { result, code } = await babelTransform(fixturePath, {
         jsxCssProp: true
       });
+
       const [sidecarFile, sidecarSource] = result;
       const exportedDeclarations = sidecarSource.match(/export var/g) ?? [];
       const sidecarImportMatch = new RegExp(
         `import \\{ ([^}]+) \\} from "${escapeRegExp(sidecarFile)}";`
       ).exec(code);
+
       const sidecarRuntimeNames = [
         ...((sidecarImportMatch?.[1] ?? "").matchAll(
           /(?:^|, )([A-Za-z_$][\w$]*)(?: as ([A-Za-z_$][\w$]*))?/g
         ) ?? [])
       ].map(([, importedName, localName]) => localName ?? importedName);
+
       const cxImportMatch =
         /import \{ [^}]*\bcx(?: as ([A-Za-z_$][\w$]*))?[^}]*\} from "@mincho-js\/css";/.exec(
           code
         );
+
       const cxIdentifier = cxImportMatch?.[1] ?? "cx";
       const rightOrClassNameMatch = new RegExp(
         `className=\\{${escapeRegExp(
           cxIdentifier
         )}\\(providedClass \\|\\| ([A-Za-z_$][\\w$]*)\\)\\}`
       ).exec(code);
+
       const rightNullishClassNameMatch = new RegExp(
         `className=\\{${escapeRegExp(
           cxIdentifier
         )}\\(maybeClass \\?\\? ([A-Za-z_$][\\w$]*)\\)\\}`
       ).exec(code);
+
       const generatedOnlyClassNameMatches = [
         ...code.matchAll(/className=\{([A-Za-z_$][\w$]*)\}/g)
       ];
+
       const orangeCssMatches = [...sidecarSource.matchAll(/color: "orange"/g)];
 
       expect(sidecarFile).toMatch(/^extracted_[a-z0-9]+\.css\.ts$/);
@@ -3913,6 +4193,7 @@ if (import.meta.vitest) {
         `,
         "css-prop-recursive-branches"
       );
+
       const { result, code, staticCssEval } = await babelTransform(
         fixturePath,
         {
@@ -3922,47 +4203,56 @@ if (import.meta.vitest) {
           })
         }
       );
+
       const [sidecarFile, sidecarSource] = result;
       const output = `${code}\n${sidecarSource}`;
       const exportedDeclarations = sidecarSource.match(/export var/g) ?? [];
       const sidecarImportMatch = new RegExp(
         `import \\{ ([^}]+) \\} from "${escapeRegExp(sidecarFile)}";`
       ).exec(code);
+
       const sidecarRuntimeNames = [
         ...((sidecarImportMatch?.[1] ?? "").matchAll(
           /(?:^|, )([A-Za-z_$][\w$]*)(?: as ([A-Za-z_$][\w$]*))?/g
         ) ?? [])
       ].map(([, importedName, localName]) => localName ?? importedName);
+
       const cxImportMatch =
         /import \{ [^}]*\bcx(?: as ([A-Za-z_$][\w$]*))?[^}]*\} from "@mincho-js\/css";/.exec(
           code
         );
+
       const cxIdentifier = cxImportMatch?.[1] ?? "cx";
       const nestedConditionalMatch = new RegExp(
         `className=\\{${escapeRegExp(
           cxIdentifier
         )}\\(condition \\? flag \\? ([A-Za-z_$][\\w$]*) : ([A-Za-z_$][\\w$]*) : styleA\\)\\}`
       ).exec(code);
+
       const chainedLogicalMatch = new RegExp(
         `className=\\{${escapeRegExp(
           cxIdentifier
         )}\\(condition && flag && ([A-Za-z_$][\\w$]*)\\)\\}`
       ).exec(code);
+
       const staticLeftLogicalMatch = new RegExp(
         `className=\\{${escapeRegExp(
           cxIdentifier
         )}\\(condition && ([A-Za-z_$][\\w$]*)\\)\\}`
       ).exec(code);
+
       const nestedArrayMatch = new RegExp(
         `className=\\{${escapeRegExp(cxIdentifier)}\\("base", ${escapeRegExp(
           cxIdentifier
         )}\\("nested", condition && ([A-Za-z_$][\\w$]*)\\)\\)\\}`
       ).exec(code);
+
       const providerBranchMatch = new RegExp(
         `className=\\{${escapeRegExp(
           cxIdentifier
         )}\\(condition \\? styles\\.red : ([A-Za-z_$][\\w$]*)\\)\\}`
       ).exec(code);
+
       const generatedClassNames = [
         ...(nestedConditionalMatch?.slice(1) ?? []),
         chainedLogicalMatch?.[1],
@@ -3980,6 +4270,7 @@ if (import.meta.vitest) {
       expect(exportedDeclarations).toHaveLength(6);
       expect(generatedClassNames).toHaveLength(6);
       expect(new Set(generatedClassNames)).toHaveLength(6);
+
       for (const color of [
         "red",
         "blue",
@@ -3990,9 +4281,11 @@ if (import.meta.vitest) {
       ]) {
         expect(sidecarSource).toContain(`color: "${color}"`);
       }
+
       for (const className of generatedClassNames) {
         expect(sidecarRuntimeNames).toContain(className);
       }
+
       expect(nestedConditionalMatch).not.toBeNull();
       expect(chainedLogicalMatch).not.toBeNull();
       expect(staticLeftLogicalMatch).not.toBeNull();
@@ -4020,6 +4313,7 @@ if (import.meta.vitest) {
         `,
         "css-prop-disabled-default"
       );
+
       const { result, code } = await babelTransform(fixturePath);
 
       expect(result[1]).toBe("");

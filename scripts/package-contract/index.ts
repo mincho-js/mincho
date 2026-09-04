@@ -25,6 +25,7 @@ async function writeConsumerManifest(
       `file:${archive.archivePath}`
     ])
   );
+
   Object.assign(dependencies, {
     "@vanilla-extract/css": "1.20.1",
     "@vanilla-extract/vite-plugin": "5.2.2",
@@ -33,22 +34,36 @@ async function writeConsumerManifest(
   });
   await writeFile(
     join(consumerRoot, "package.json"),
-    `${JSON.stringify({ name: "mincho-package-contract", private: true, type: "module", dependencies }, null, 2)}\n`
+    `${JSON.stringify(
+      {
+        name: "mincho-package-contract",
+        private: true,
+        type: "module",
+        dependencies,
+        devDependencies: { typescript: "5.9.3", "@types/node": "25.6.2" }
+      },
+      null,
+      2
+    )}\n`
   );
 }
 
 async function main(): Promise<void> {
   assertVerifierFailurePaths();
+
   const consumerRoot = await mkdtemp(
     join(tmpdir(), "mincho-package-contract-")
   );
+
   console.log(`[package-contract] temp isolation: ${consumerRoot}`);
+
   try {
     const workspaces = await collectWorkspaceClosure(repoRoot);
     const packed = [
       ...(await packWorkspaceClosure(repoRoot, consumerRoot, workspaces)),
       ...(await packFixturePackages(scriptRoot, consumerRoot))
     ];
+
     console.log(
       `[package-contract] packed packages: ${packed.map((entry) => entry.manifest.name).join(", ")}`
     );
@@ -63,6 +78,25 @@ async function main(): Promise<void> {
       artifactPath: join(consumerRoot, "node_modules")
     });
     await assertInstalledPackageContract({ consumerRoot, packed, repoRoot });
+    await runCommand({
+      command: "node",
+      args: ["fixture/modules/runtime.mjs"],
+      cwd: consumerRoot,
+      artifactPath: join(consumerRoot, "fixture", "modules")
+    });
+    await runCommand({
+      command: "node",
+      args: [
+        "node_modules/typescript/bin/tsc",
+        "--project",
+        "fixture/modules/tsconfig.json"
+      ],
+      cwd: consumerRoot,
+      artifactPath: join(consumerRoot, "fixture", "modules")
+    });
+    console.log(
+      "[package-contract] ESM/CJS imports and strict declarations: passed"
+    );
     await runCommand({
       command: "node",
       args: [

@@ -1,8 +1,13 @@
-import { typescriptPresetPath } from "./babelPreset.js";
-import { basename, dirname, join } from "node:path";
+import { jsxSyntaxPluginPath, typescriptPresetPath } from "./babelPreset.js";
+import { internalStripStaticCssEvalRequestQuery } from "./staticCssEvalUtils.js";
+import { basename, dirname, extname, join, resolve } from "node:path";
 import * as fs from "node:fs";
 import { addFileScope, getPackageInfo } from "@vanilla-extract/integration";
-import defaultEsbuild, { type BuildOptions, type PluginBuild } from "esbuild";
+import defaultEsbuild, {
+  type BuildOptions,
+  type Plugin,
+  type PluginBuild
+} from "esbuild";
 import { transformSync } from "@babel/core";
 import { minchoStyledComponentPlugin } from "@mincho-js/babel";
 
@@ -12,6 +17,8 @@ interface CompileOptions {
   contents: string;
   cwd?: string;
   externals?: Array<string>;
+  loader?: BuildOptions["loader"];
+  plugins?: BuildOptions["plugins"];
   resolverCache: Map<string, string>;
   originalPath: string;
 }
@@ -48,11 +55,13 @@ function getScopedSourceWithCache({
 function transformScopedDependencySource({
   contents,
   filePath,
+  loader,
   packageName,
   rootPath
 }: {
   contents: string;
   filePath: string;
+  loader: "js" | "jsx" | "ts" | "tsx";
   packageName: string;
   rootPath: string;
 }) {
@@ -65,35 +74,125 @@ function transformScopedDependencySource({
 
   source = transformSync(source, {
     filename: filePath,
-    plugins: [minchoStyledComponentPlugin()],
-    presets: [typescriptPresetPath],
+    plugins: [
+      ...(loader === "jsx" || loader === "tsx" ? [jsxSyntaxPluginPath] : []),
+      minchoStyledComponentPlugin()
+    ],
+    presets:
+      loader === "ts" || loader === "tsx"
+        ? [
+            [
+              typescriptPresetPath,
+              { allExtensions: true, isTSX: loader === "tsx" }
+            ]
+          ]
+        : [],
     sourceMaps: false
   })!.code!;
 
   return source;
 }
 
-function createScopedOnLoadPlugin(packageName: string) {
+function createScopedOnLoadPlugin(
+  packageName: string,
+  loaders: BuildOptions["loader"] = {}
+) {
   return {
     name: "mincho:custom-extract-scope",
+
     setup(build: PluginBuild) {
       build.onLoad(
-        { filter: /\.(t|j)sx?$/ },
+        { filter: /.*/, namespace: "file" },
         async (args: { path: string }) => {
+          const extension = extname(args.path);
+          const configuredExtension = Object.keys(loaders)
+            .sort((left, right) => right.length - left.length)
+            .find((candidate) => args.path.endsWith(candidate));
+
+          const loader =
+            (configuredExtension ? loaders[configuredExtension] : undefined) ??
+            (extension === ".tsx"
+              ? "tsx"
+              : extension === ".jsx"
+                ? "jsx"
+                : /\.[cm]?ts$/.test(extension)
+                  ? "ts"
+                  : /\.[cm]?js$/.test(extension)
+                    ? "js"
+                    : undefined);
+          if (
+            loader !== "js" &&
+            loader !== "jsx" &&
+            loader !== "ts" &&
+            loader !== "tsx"
+          ) {
+            return undefined;
+          }
+
           const contents = await fs.promises.readFile(args.path, "utf-8");
 
           return {
             contents: transformScopedDependencySource({
               contents,
               filePath: args.path,
+              loader,
               rootPath: build.initialOptions.absWorkingDir!,
               packageName
             }),
-            loader: "tsx",
+            loader,
             resolveDir: dirname(args.path)
           };
         }
       );
+    }
+  };
+}
+
+function scopeLoadedDependencies(plugin: Plugin, packageName: string): Plugin {
+  return {
+    ...plugin,
+    setup(build) {
+      return plugin.setup({
+        ...build,
+        onLoad(options, callback) {
+          build.onLoad(options, async (args) => {
+            const result = await callback(args);
+            if (
+              args.namespace !== "file" ||
+              result?.contents === undefined ||
+              result.errors?.length
+            ) {
+              return result;
+            }
+
+            // esbuild defaults plugin-provided contents to JS, regardless of
+            // the extension's configured loader.
+            const loader = result.loader ?? "js";
+            if (
+              loader !== "js" &&
+              loader !== "jsx" &&
+              loader !== "ts" &&
+              loader !== "tsx"
+            ) {
+              return result;
+            }
+
+            return {
+              ...result,
+              contents: transformScopedDependencySource({
+                contents:
+                  typeof result.contents === "string"
+                    ? result.contents
+                    : Buffer.from(result.contents).toString("utf8"),
+                filePath: args.path,
+                loader,
+                rootPath: build.initialOptions.absWorkingDir!,
+                packageName
+              })
+            };
+          });
+        }
+      });
     }
   };
 }
@@ -112,9 +211,13 @@ function getWatchFiles(
   cwd: string,
   metafile?: { inputs?: Record<string, unknown> }
 ) {
-  return Object.keys(metafile?.inputs || {}).map((filePath) =>
-    join(cwd, filePath)
-  );
+  return [
+    ...new Set(
+      Object.keys(metafile?.inputs || {}).map((filePath) =>
+        resolve(cwd, internalStripStaticCssEvalRequestQuery(filePath))
+      )
+    )
+  ];
 }
 
 export async function compile({
@@ -123,6 +226,8 @@ export async function compile({
   contents,
   cwd = process.cwd(),
   externals = [],
+  loader,
+  plugins = [],
   resolverCache = new Map(),
   originalPath
 }: CompileOptions) {
@@ -149,7 +254,13 @@ export async function compile({
     platform: "node",
     write: false,
     absWorkingDir: cwd,
-    plugins: [createScopedOnLoadPlugin(packageInfo.name)]
+    loader,
+    plugins: [
+      ...plugins.map((plugin) =>
+        scopeLoadedDependencies(plugin, packageInfo.name)
+      ),
+      createScopedOnLoadPlugin(packageInfo.name, loader)
+    ]
   });
 
   const compiledSource = assertSingleChildCompilationOutput(result.outputFiles);
@@ -191,6 +302,7 @@ if (import.meta.vitest) {
           initialOptions: {
             absWorkingDir: buildOptions.absWorkingDir
           },
+
           onLoad(
             _options: unknown,
             callback: (args: { path: string }) => Promise<{ contents: string }>
@@ -230,9 +342,12 @@ if (import.meta.vitest) {
       const { buildCalls, esbuild } = createChildEsbuildStub({
         metafileInputs: {
           "src/dependency.tsx": {},
-          "nested/child.ts": {}
+          "src/dependency.tsx?url#asset": {},
+          "nested/child.ts": {},
+          [resolve(process.cwd(), "nested/child.ts")]: {}
         }
       });
+
       const resolverCache = new Map<string, string>();
       const cwd = process.cwd();
       const originalPath = `${cwd}/source.css.ts`;
@@ -245,6 +360,7 @@ if (import.meta.vitest) {
         resolverCache,
         originalPath
       });
+
       const second = await compile({
         esbuild,
         filePath: `${cwd}/child.tsx`,
@@ -266,6 +382,31 @@ if (import.meta.vitest) {
       ]);
     });
 
+    it.each(["dependency.component", "dependency.custom.ts"])(
+      "uses the configured loader for scoped %s dependencies",
+      async (name: string) => {
+        vi.spyOn(fs.promises, "readFile").mockResolvedValue(
+          "export const child = <div />;"
+        );
+
+        const cwd = process.cwd();
+        const { esbuild } = createChildEsbuildStub({
+          onLoadPath: join(cwd, name)
+        });
+
+        const compiled = await compile({
+          esbuild,
+          filePath: join(cwd, "child.tsx"),
+          originalPath: join(cwd, "source.css.ts"),
+          contents: "export const value = 1;",
+          resolverCache: new Map(),
+          loader: { ".component": "jsx", ".custom.ts": "jsx" }
+        });
+
+        expect(compiled.source).toContain("export const value = 1;");
+      }
+    );
+
     it("compile throws Invalid child compilation result", async () => {
       vi.spyOn(fs.promises, "readFile").mockResolvedValue(
         'export const child = "ok";'
@@ -274,6 +415,7 @@ if (import.meta.vitest) {
       const { esbuild } = createChildEsbuildStub({
         outputFiles: []
       });
+
       const cwd = process.cwd();
 
       await expect(

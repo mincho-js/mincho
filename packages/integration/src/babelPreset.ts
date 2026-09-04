@@ -6,3 +6,9 @@ import { createRequire } from "node:module";
 export const typescriptPresetPath = createRequire(import.meta.url).resolve(
   "@babel/preset-typescript"
 );
+
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: declaration builds also check this source with a CommonJS target.
+export const jsxSyntaxPluginPath = createRequire(import.meta.url).resolve(
+  "@babel/plugin-syntax-jsx"
+);

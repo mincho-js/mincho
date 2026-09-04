@@ -180,31 +180,11 @@
     "expires": "2026-12-31"
   },
   {
-    "id": "esbuild-index-node-modules-04",
-    "file": "packages/esbuild/src/index.ts",
-    "type": "warning",
-    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
-    "source": "sourceText: \"/node_modules/@pkg/styles/icon.wasm\",",
-    "count": 1,
-    "reason": "This regression fixture or assertion deliberately models node_modules package paths for non-PnP consumers; it is not a workspace dependency lookup.",
-    "expires": "2026-12-31"
-  },
-  {
     "id": "esbuild-index-esbuild-loader-01",
     "file": "packages/esbuild/src/index.ts",
     "type": "warning",
     "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
     "source": "loader: \"js\",",
-    "count": 1,
-    "reason": "This is an esbuild loader option, not a Webpack loader package; its value is an esbuild syntax name selected directly or by getScriptLoader.",
-    "expires": "2026-12-31"
-  },
-  {
-    "id": "esbuild-index-esbuild-loader-02",
-    "file": "packages/esbuild/src/index.ts",
-    "type": "warning",
-    "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
-    "source": "loader: getScriptLoader(args.path),",
     "count": 1,
     "reason": "This is an esbuild loader option, not a Webpack loader package; its value is an esbuild syntax name selected directly or by getScriptLoader.",
     "expires": "2026-12-31"
@@ -285,7 +265,7 @@
     "type": "warning",
     "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
     "source": "loader: \"tsx\",",
-    "count": 2,
+    "count": 1,
     "reason": "This is an esbuild loader option, not a Webpack loader package; its value is an esbuild syntax name selected directly or by getScriptLoader.",
     "expires": "2026-12-31"
   },
@@ -647,6 +627,236 @@
     "source": "\"nextra\": \"^4.6.1\",",
     "count": 1,
     "reason": "The private documentation app provides Nextra's TypeScript build peer through devDependencies; TypeScript is installed for the Next build and is not a runtime source import in Nextra.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "esbuild-assets-esbuild-loader-01",
+    "file": "packages/esbuild/src/assets.ts",
+    "type": "warning",
+    "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
+    "source": "loader: \"js\",",
+    "count": 1,
+    "reason": "This reviewed esbuild build/onLoad syntax or asset-loader option names built-in esbuild loaders; it is not a Webpack loader package or a dependency lookup.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "esbuild-assets-esbuild-loader-02",
+    "file": "packages/esbuild/src/assets.ts",
+    "type": "warning",
+    "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
+    "source": "? { ...options.stdin, contents: entryContents, loader: \"js\" }",
+    "count": 1,
+    "reason": "This reviewed esbuild build/onLoad syntax or asset-loader option names built-in esbuild loaders; it is not a Webpack loader package or a dependency lookup.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "esbuild-assets-esbuild-loader-03",
+    "file": "packages/esbuild/src/assets.ts",
+    "type": "warning",
+    "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
+    "source": "loader: \"js\"",
+    "count": 2,
+    "reason": "This reviewed esbuild build/onLoad syntax or asset-loader option names built-in esbuild loaders; it is not a Webpack loader package or a dependency lookup.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "esbuild-contracts-test-esbuild-loader-01",
+    "file": "packages/esbuild/src/contracts.test.ts",
+    "type": "warning",
+    "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
+    "source": "loader: loader ? { [`.${extension}`]: loader } : undefined",
+    "count": 1,
+    "reason": "This reviewed esbuild build/onLoad syntax or asset-loader option names built-in esbuild loaders; it is not a Webpack loader package or a dependency lookup.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "esbuild-contracts-test-esbuild-loader-02",
+    "file": "packages/esbuild/src/contracts.test.ts",
+    "type": "warning",
+    "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
+    "source": "buildOptions(root, { loader: { \".tsx\": \"text\" } })",
+    "count": 1,
+    "reason": "This reviewed esbuild build/onLoad syntax or asset-loader option names built-in esbuild loaders; it is not a Webpack loader package or a dependency lookup.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "esbuild-contracts-test-esbuild-loader-03",
+    "file": "packages/esbuild/src/contracts.test.ts",
+    "type": "warning",
+    "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
+    "source": "() => ({ contents: \"export const value = 42;\", loader: \"js\" })",
+    "count": 1,
+    "reason": "This reviewed esbuild build/onLoad syntax or asset-loader option names built-in esbuild loaders; it is not a Webpack loader package or a dependency lookup.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "esbuild-contracts-test-esbuild-loader-04",
+    "file": "packages/esbuild/src/contracts.test.ts",
+    "type": "warning",
+    "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
+    "source": "loader: { \".js\": loader }",
+    "count": 1,
+    "reason": "This reviewed esbuild build/onLoad syntax or asset-loader option names built-in esbuild loaders; it is not a Webpack loader package or a dependency lookup.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "esbuild-contracts-test-esbuild-loader-05",
+    "file": "packages/esbuild/src/contracts.test.ts",
+    "type": "warning",
+    "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
+    "source": "loader: { \".png\": \"file\" }",
+    "count": 3,
+    "reason": "This reviewed esbuild build/onLoad syntax or asset-loader option names built-in esbuild loaders; it is not a Webpack loader package or a dependency lookup.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "esbuild-contracts-test-esbuild-loader-06",
+    "file": "packages/esbuild/src/contracts.test.ts",
+    "type": "warning",
+    "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
+    "source": "loader: { \".png\": \"dataurl\" },",
+    "count": 1,
+    "reason": "This reviewed esbuild build/onLoad syntax or asset-loader option names built-in esbuild loaders; it is not a Webpack loader package or a dependency lookup.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "esbuild-contracts-test-esbuild-loader-07",
+    "file": "packages/esbuild/src/contracts.test.ts",
+    "type": "warning",
+    "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
+    "source": "loader: { \".png\": \"file\" },",
+    "count": 6,
+    "reason": "This reviewed esbuild build/onLoad syntax or asset-loader option names built-in esbuild loaders; it is not a Webpack loader package or a dependency lookup.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "esbuild-contracts-test-esbuild-loader-08",
+    "file": "packages/esbuild/src/contracts.test.ts",
+    "type": "warning",
+    "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
+    "source": "loader: { \".png\": loader },",
+    "count": 1,
+    "reason": "This reviewed esbuild build/onLoad syntax or asset-loader option names built-in esbuild loaders; it is not a Webpack loader package or a dependency lookup.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "esbuild-contracts-test-esbuild-loader-09",
+    "file": "packages/esbuild/src/contracts.test.ts",
+    "type": "warning",
+    "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
+    "source": "loader: { \".svg\": \"file\" }",
+    "count": 1,
+    "reason": "This reviewed esbuild build/onLoad syntax or asset-loader option names built-in esbuild loaders; it is not a Webpack loader package or a dependency lookup.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "esbuild-contracts-test-esbuild-loader-10",
+    "file": "packages/esbuild/src/contracts.test.ts",
+    "type": "warning",
+    "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
+    "source": "buildOptions(root, { loader: { \".svg\": \"dataurl\" } })",
+    "count": 1,
+    "reason": "This reviewed esbuild build/onLoad syntax or asset-loader option names built-in esbuild loaders; it is not a Webpack loader package or a dependency lookup.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "esbuild-contracts-test-esbuild-loader-11",
+    "file": "packages/esbuild/src/contracts.test.ts",
+    "type": "warning",
+    "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
+    "source": "loader: \"css\"",
+    "count": 1,
+    "reason": "This reviewed esbuild build/onLoad syntax or asset-loader option names built-in esbuild loaders; it is not a Webpack loader package or a dependency lookup.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "esbuild-index-esbuild-loader-03",
+    "file": "packages/esbuild/src/index.ts",
+    "type": "warning",
+    "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
+    "source": "loader: assets.getCompileLoaders(),",
+    "count": 1,
+    "reason": "This reviewed esbuild build/onLoad syntax or asset-loader option names built-in esbuild loaders; it is not a Webpack loader package or a dependency lookup.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "esbuild-index-esbuild-loader-04",
+    "file": "packages/esbuild/src/index.ts",
+    "type": "warning",
+    "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
+    "source": "loader: \"tsx\",",
+    "count": 4,
+    "reason": "This reviewed esbuild build/onLoad syntax or asset-loader option names built-in esbuild loaders; it is not a Webpack loader package or a dependency lookup.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "esbuild-index-esbuild-loader-05",
+    "file": "packages/esbuild/src/index.ts",
+    "type": "warning",
+    "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
+    "source": "loader: { \".wasm\": \"file\" },",
+    "count": 1,
+    "reason": "This reviewed esbuild build/onLoad syntax or asset-loader option names built-in esbuild loaders; it is not a Webpack loader package or a dependency lookup.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "integration-compile-esbuild-loader-03",
+    "file": "packages/integration/src/compile.ts",
+    "type": "warning",
+    "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
+    "source": "loader: { \".component\": \"jsx\", \".custom.ts\": \"jsx\" }",
+    "count": 1,
+    "reason": "This reviewed esbuild build/onLoad syntax or asset-loader option names built-in esbuild loaders; it is not a Webpack loader package or a dependency lookup.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "examples-react-babel-package-build-peer-01",
+    "file": "examples/react-babel/package.json",
+    "type": "error",
+    "message": "Unmet transitive peer dependency on vite@^7.3.3, via @mincho-js/vite@workspace:^",
+    "source": "\"@mincho-js/vite\": \"workspace:^\",",
+    "count": 1,
+    "reason": "This private application declares matching vite ^7.3.3 in devDependencies for its Vite compilation. It deploys built browser assets; Vite is not a missing runtime dependency.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "contract-index-node-modules-03",
+    "file": "scripts/package-contract/index.ts",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": "\"node_modules/typescript/bin/tsc\",",
+    "count": 1,
+    "reason": "The package contract deliberately invokes the TypeScript compiler installed in its isolated npm consumer to check published declarations; it does not resolve workspace dependencies through node_modules.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "integration-compile-plugins-test-esbuild-loader-01",
+    "file": "packages/integration/src/compilePlugins.test.ts",
+    "type": "warning",
+    "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
+    "source": "loader: { \".custom\": \"text\" },",
+    "count": 1,
+    "reason": "This regression fixture names a built-in esbuild syntax or text loader; the string is not a Webpack loader package or a dependency lookup.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "integration-compile-plugins-test-esbuild-loader-02",
+    "file": "packages/integration/src/compilePlugins.test.ts",
+    "type": "warning",
+    "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
+    "source": "loader: \"text\",",
+    "count": 1,
+    "reason": "This regression fixture names a built-in esbuild syntax or text loader; the string is not a Webpack loader package or a dependency lookup.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "integration-compile-plugins-test-esbuild-loader-03",
+    "file": "packages/integration/src/compilePlugins.test.ts",
+    "type": "warning",
+    "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
+    "source": "loader: \"js\",",
+    "count": 1,
+    "reason": "This regression fixture names a built-in esbuild syntax or text loader; the string is not a Webpack loader package or a dependency lookup.",
     "expires": "2026-12-31"
   }
 ]

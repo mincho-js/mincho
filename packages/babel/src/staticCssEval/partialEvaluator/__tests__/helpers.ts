@@ -1,5 +1,5 @@
 import { transformSync, types as t } from "@babel/core";
-import type { PluginObj } from "@babel/core";
+import type { NodePath, PluginObj } from "@babel/core";
 import type { PartialEvalLimits } from "../context.js";
 import { createPartialEvalContext } from "../context.js";
 import type { PartialEvalDeoptResult, PartialEvalResult } from "../result.js";
@@ -31,6 +31,7 @@ export function expectConfidentExpression(
   result: PartialEvalResult
 ): t.Expression {
   const expect = getExpect();
+
   expect(result.kind).toBe("confident");
 
   if (result.kind !== "confident") {
@@ -44,6 +45,7 @@ export function expectDeoptResult(
   result: PartialEvalResult
 ): PartialEvalDeoptResult {
   const expect = getExpect();
+
   expect(result.kind).toBe("deopt");
 
   if (result.kind !== "deopt") {
@@ -58,6 +60,7 @@ export function expectStringLiteralExpression(
   value: string
 ): void {
   const expect = getExpect();
+
   expect(t.isStringLiteral(expression)).toBe(true);
 
   if (!t.isStringLiteral(expression)) {
@@ -72,6 +75,7 @@ export function expectNumericLiteralExpression(
   value: number
 ): void {
   const expect = getExpect();
+
   expect(t.isNumericLiteral(expression)).toBe(true);
 
   if (!t.isNumericLiteral(expression)) {
@@ -86,6 +90,7 @@ export function expectBooleanLiteralExpression(
   value: boolean
 ): void {
   const expect = getExpect();
+
   expect(t.isBooleanLiteral(expression)).toBe(true);
 
   if (!t.isBooleanLiteral(expression)) {
@@ -97,6 +102,7 @@ export function expectBooleanLiteralExpression(
 
 export function expectNullLiteralExpression(expression: t.Expression): void {
   const expect = getExpect();
+
   expect(t.isNullLiteral(expression)).toBe(true);
 
   if (!t.isNullLiteral(expression)) {
@@ -164,6 +170,7 @@ export function expectObjectExpression(
   expression: t.Expression
 ): t.ObjectExpression {
   const expect = getExpect();
+
   expect(t.isObjectExpression(expression)).toBe(true);
 
   if (!t.isObjectExpression(expression)) {
@@ -177,6 +184,7 @@ export function expectArrayExpression(
   expression: t.Expression
 ): t.ArrayExpression {
   const expect = getExpect();
+
   expect(t.isArrayExpression(expression)).toBe(true);
 
   if (!t.isArrayExpression(expression)) {
@@ -229,6 +237,7 @@ export function expectNoSpreadElement(
     expect(
       expression.properties.some((property) => t.isSpreadElement(property))
     ).toBe(false);
+
     return;
   }
 
@@ -246,6 +255,11 @@ function partialEvaluatorFixturePlugin(
   return {
     visitor: {
       Program(programPath) {
+        const captured: Array<{
+          expression: t.Expression;
+          scope: NodePath["scope"];
+        }> = [];
+
         programPath.traverse({
           CallExpression(callPath) {
             if (!t.isIdentifier(callPath.node.callee, { name: "capture" })) {
@@ -258,16 +272,24 @@ function partialEvaluatorFixturePlugin(
               return;
             }
 
-            results.push(
-              reducePartialEvalExpression({
-                expression: argument,
-                context: createPartialEvalContext({ owner, limits }),
-                programPath,
-                scope: callPath.scope
-              })
-            );
+            captured.push({ expression: argument, scope: callPath.scope });
+
+            // The fixture marker must not act as an unknown runtime call that
+            // could mutate the object expression being evaluated.
+            callPath.replaceWith(argument);
           }
         });
+
+        for (const { expression, scope } of captured) {
+          results.push(
+            reducePartialEvalExpression({
+              expression,
+              scope,
+              programPath,
+              context: createPartialEvalContext({ owner, limits })
+            })
+          );
+        }
       }
     }
   };
@@ -285,6 +307,7 @@ export function getStaticObjectPropertyName(
   if (t.isNumericLiteral(key)) {
     return String(key.value);
   }
+
   return null;
 }
 

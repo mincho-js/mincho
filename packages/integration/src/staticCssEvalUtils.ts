@@ -145,6 +145,7 @@ export function internalIsStaticCssEvalPathInsideRoot(
   const normalizedRoot = internalTrimStaticCssEvalTrailingSlash(
     internalNormalizeStaticCssEvalPathSyntax(rootPath)
   );
+
   const normalizedFilePath = internalTrimStaticCssEvalTrailingSlash(
     internalNormalizeStaticCssEvalPathSyntax(filePath)
   );
@@ -243,8 +244,9 @@ function internalStripStaticCssEvalSsrPrefix(id: string): string {
   return normalizedId;
 }
 
-function internalStripStaticCssEvalRequestQuery(id: string): string {
+export function internalStripStaticCssEvalRequestQuery(id: string): string {
   const queryIndex = id.search(/[?#]/);
+
   return queryIndex === -1 ? id : id.slice(0, queryIndex);
 }
 

@@ -1,7 +1,16 @@
 export {
   babelTransform,
+  babelTransformSource,
   type BabelOptions,
-  type BabelTransformResult
+  type BabelTransformResult,
+  type BabelTransformSourceOptions,
+  type StaticCssEvalSourceResolution as InternalStaticCssEvalSourceResolution,
+  type StaticCssEvalLoadedSource as InternalStaticCssEvalLoadedSource,
+  type StaticCssEvalSourceKind as InternalStaticCssEvalSourceKind,
+  type StaticCssEvalSourceOrigin as InternalStaticCssEvalSourceOrigin,
+  type StaticCssEvalSourceUnsupportedReason as InternalStaticCssEvalSourceUnsupportedReason,
+  type StaticCssEvalResolverKind as InternalStaticCssEvalResolverKind,
+  type StaticCssEvalSourceProvider as InternalStaticCssEvalSourceProvider
 } from "./babel.js";
 export { compile } from "./compile.js";
 export {
