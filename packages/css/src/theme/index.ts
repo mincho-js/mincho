@@ -45,10 +45,30 @@ type ThemeTokensInput<ThemeTokens extends Theme> =
   WithOptionalLayer<ThemeTokens> &
     ThisType<ResolveThemeOutput<ThemeTokens> & ThemeSubFunctions>;
 
+type ThemeContractObjectFields = {
+  vars: object;
+  values: object;
+  cssVarByPath: object;
+};
+
+// Reserve the structural contract shape in direct calls; arrays are token values.
+type ThemeCreationTokensInput<ThemeTokens extends Theme> =
+  ThemeTokensInput<ThemeTokens> &
+    (ThemeTokens extends ThemeContractObjectFields
+      ? Extract<
+          ThemeTokens[keyof ThemeContractObjectFields],
+          readonly unknown[]
+        > extends never
+        ? never
+        : unknown
+      : unknown);
+
 const THEME_CONTRACT_EXPECTED_ERROR =
-  "Theme replacement expected ThemeContract as first argument";
-const THEME_CONTRACT_REPLACEMENT_TOKENS_EXPECTED_ERROR =
-  "Theme replacement expected replacement tokens when first argument is ThemeContract";
+  "theme.extends() expected ThemeContract as first argument.";
+const THEME_CONTRACT_DIRECT_CALL_ERROR =
+  "theme() does not accept ThemeContract; use theme.extends().";
+const THEME_REPLACEMENT_TOKENS_EXPECTED_ERROR =
+  "theme.extends() expected replacement tokens.";
 
 export type ThemeContract<T extends Theme = Theme> = {
   readonly vars: ResolveThemeOutput<T>;
@@ -61,6 +81,17 @@ export type ThemeResult<T extends Theme = Theme> = [
   vars: ResolveThemeOutput<T>,
   contract: ThemeContract<T>
 ];
+
+type ThemeHandle<ThemeTokens extends Theme> = ((
+  tokens: ThemeCreationTokensInput<ThemeTokens>,
+  debugId?: string
+) => ThemeResult<ThemeTokens>) & {
+  readonly extends: (
+    contract: ThemeContract<ThemeTokens>,
+    replacementTokens: ThemeTokensInput<ThemeTokens>,
+    debugId?: string
+  ) => ThemeResult<ThemeTokens>;
+};
 
 export function globalTheme<const ThemeTokens extends Theme>(
   selector: string,
@@ -87,64 +118,54 @@ export function globalTheme<const ThemeTokens extends Theme>(
 }
 
 function themeImpl<const ThemeTokens extends Theme>(
-  tokens: ThemeTokensInput<ThemeTokens>,
+  tokens: ThemeCreationTokensInput<ThemeTokens>,
   debugId?: string
-): ThemeResult<ThemeTokens>;
-function themeImpl<const ThemeTokens extends Theme>(
-  contract: ThemeContract<ThemeTokens>,
-  replacementTokens: ThemeTokensInput<ThemeTokens>,
-  debugId?: string
-): ThemeResult<ThemeTokens>;
-function themeImpl<const ThemeTokens extends Theme>(
-  tokensOrVars: unknown,
-  debugIdOrReplacementTokens?: unknown,
-  debugId?: unknown
 ): ThemeResult<ThemeTokens> {
-  if (isThemeExtensionCall(debugIdOrReplacementTokens)) {
-    if (debugId !== undefined && typeof debugId !== "string") {
-      throw new Error("theme() extension debugId must be a string.");
-    }
-
-    assertThemeContract<ThemeTokens>(tokensOrVars);
-
-    return createThemeResult(
-      debugIdOrReplacementTokens as ThemeTokensInput<ThemeTokens>,
-      debugId,
-      (tokens) => assignReplacementTokensFromContract(tokensOrVars, tokens)
-    );
+  if (isThemeContract(tokens)) {
+    throw new Error(THEME_CONTRACT_DIRECT_CALL_ERROR);
   }
 
-  if (isThemeContract(tokensOrVars)) {
-    throw new Error(THEME_CONTRACT_REPLACEMENT_TOKENS_EXPECTED_ERROR);
-  }
-
-  if (
-    debugIdOrReplacementTokens !== undefined &&
-    typeof debugIdOrReplacementTokens !== "string"
-  ) {
+  if (debugId !== undefined && typeof debugId !== "string") {
     throw new Error("theme() debugId must be a string.");
   }
 
-  if (debugId !== undefined) {
-    throw new Error("theme() direct mode does not accept a third argument.");
+  return createThemeResult(tokens, debugId, assignTokens);
+}
+
+function themeExtends<const ThemeTokens extends Theme>(
+  contract: ThemeContract<ThemeTokens>,
+  replacementTokens: ThemeTokensInput<ThemeTokens>,
+  debugId?: string
+): ThemeResult<ThemeTokens> {
+  if (debugId !== undefined && typeof debugId !== "string") {
+    throw new Error("theme.extends() debugId must be a string.");
   }
 
-  return createThemeResult(
-    tokensOrVars as ThemeTokensInput<ThemeTokens>,
-    debugIdOrReplacementTokens as string | undefined,
-    assignTokens
+  assertThemeContract<ThemeTokens>(contract);
+
+  if (typeof replacementTokens !== "object" || replacementTokens === null) {
+    throw new Error(THEME_REPLACEMENT_TOKENS_EXPECTED_ERROR);
+  }
+
+  return createThemeResult(replacementTokens, debugId, (tokens) =>
+    assignReplacementTokensFromContract(contract, tokens)
   );
 }
 
-function themeWith<const ThemeTokens extends Theme>(): (
-  tokens: ThemeTokensInput<ThemeTokens>,
-  debugId?: string
-) => ThemeResult<ThemeTokens> {
-  return (tokens: ThemeTokensInput<ThemeTokens>, debugId?: string) =>
-    themeImpl(tokens, debugId);
+function themeWith<
+  const ThemeTokens extends Theme
+>(): ThemeHandle<ThemeTokens> {
+  return Object.assign(
+    (tokens: ThemeCreationTokensInput<ThemeTokens>, debugId?: string) =>
+      themeImpl(tokens, debugId),
+    { extends: themeExtends<ThemeTokens> }
+  );
 }
 
-export const theme = Object.assign(themeImpl, { with: themeWith });
+export const theme = Object.assign(themeImpl, {
+  extends: themeExtends,
+  with: themeWith
+});
 
 // == Theme Orchestration =====================================================
 interface ThemeAssignmentResult<ThemeTokens extends Theme> {
@@ -594,12 +615,6 @@ function resolveSemanticTokens(
 }
 
 // == Replacement Theme Assignment ============================================
-function isThemeExtensionCall(
-  value: unknown
-): value is ThemeTokensInput<Theme> {
-  return typeof value === "object" && value !== null;
-}
-
 function assignReplacementTokensFromContract<ThemeTokens extends Theme>(
   contract: ThemeContract<ThemeTokens>,
   replacementTokens: ThemeTokens
@@ -1578,7 +1593,7 @@ if (import.meta.vitest) {
     replacementTokens: unknown,
     debugId: string
   ): ThemeResult<ThemeTokens> {
-    return theme(
+    return theme.extends(
       contract,
       replacementTokens as ThemeTokensInput<ThemeTokens>,
       debugId
@@ -2284,6 +2299,80 @@ if (import.meta.vitest) {
   });
 
   describe.concurrent("theme", () => {
+    it("reserves the contract object shape for extension calls", () => {
+      const tokens = {
+        vars: { brand: "blue" },
+        values: { brand: "red" },
+        cssVarByPath: { brand: "green" }
+      };
+      const typedTheme = theme.with<typeof tokens>();
+      const assertReservedInputTypes = () => {
+        // @ts-expect-error: three object-valued contract fields are reserved.
+        theme(tokens);
+        // @ts-expect-error: typed handles reserve the same contract shape.
+        typedTheme(tokens);
+      };
+
+      assertType<() => void>(assertReservedInputTypes);
+      expect(() => callThemeForRuntimeError(tokens)).toThrow(
+        THEME_CONTRACT_DIRECT_CALL_ERROR
+      );
+      expect(() => Reflect.apply(typedTheme, undefined, [tokens])).toThrow(
+        THEME_CONTRACT_DIRECT_CALL_ERROR
+      );
+
+      const nestedResult = theme({ tokens });
+
+      expect(normalizeVars(nestedResult[2].values as AssignedVars)).toEqual({
+        "--tokens-vars-brand": "blue",
+        "--tokens-values-brand": "red",
+        "--tokens-css-var-by-path-brand": "green"
+      });
+    });
+
+    it("allows primitive tokens named after contract fields", () => {
+      const tokens = { vars: "blue", values: "red", cssVarByPath: "green" };
+      const result = theme(tokens);
+      const typedResult = theme.with<typeof tokens>()(tokens);
+
+      for (const [, , contract] of [result, typedResult]) {
+        expect(normalizeVars(contract.values as AssignedVars)).toEqual({
+          "--vars": "blue",
+          "--values": "red",
+          "--css-var-by-path": "green"
+        });
+      }
+    });
+
+    it.each([
+      {
+        vars: ["blue"],
+        values: { brand: "red" },
+        cssVarByPath: { brand: "green" }
+      },
+      {
+        vars: { brand: "blue" },
+        values: ["red"],
+        cssVarByPath: { brand: "green" }
+      },
+      {
+        vars: { brand: "blue" },
+        values: { brand: "red" },
+        cssVarByPath: ["green"]
+      }
+    ])("allows a token array among contract field names: %j", (tokens) => {
+      const result = theme(tokens);
+      const typedResult = theme.with<typeof tokens>()(tokens);
+
+      for (const [, , contract] of [result, typedResult]) {
+        expect(Object.values(contract.values).sort()).toEqual([
+          "blue",
+          "green",
+          "red"
+        ]);
+      }
+    });
+
     it("creates structural ThemeContract metadata", () => {
       type ContractTheme = {
         color: { brand: string; accent: string };
@@ -2350,24 +2439,27 @@ if (import.meta.vitest) {
         THEME_CONTRACT_EXPECTED_ERROR
       );
       expect(() =>
-        theme(
+        theme.extends(
           {} as unknown as ThemeContract<ContractTheme>,
           replacementTokens,
           "theme-invalid-contract-object"
         )
       ).toThrow(THEME_CONTRACT_EXPECTED_ERROR);
       expect(() =>
-        theme(
+        theme.extends(
           vars as unknown as ThemeContract<ContractTheme>,
           replacementTokens,
           "theme-invalid-contract-vars"
         )
       ).toThrow(THEME_CONTRACT_EXPECTED_ERROR);
       expect(() =>
-        callThemeForRuntimeError<ContractTheme>(vars, replacementTokens)
+        theme.extends(
+          vars as unknown as ThemeContract<ContractTheme>,
+          replacementTokens
+        )
       ).toThrow(THEME_CONTRACT_EXPECTED_ERROR);
       expect(() =>
-        theme(
+        theme.extends(
           {
             vars: contract.vars,
             values: contract.values
@@ -2377,7 +2469,7 @@ if (import.meta.vitest) {
         )
       ).toThrow(THEME_CONTRACT_EXPECTED_ERROR);
       expect(() =>
-        theme(
+        theme.extends(
           {
             vars: contract.vars,
             values: contract.values,
@@ -2388,14 +2480,35 @@ if (import.meta.vitest) {
         )
       ).not.toThrow();
       expect(() => callThemeForRuntimeError<ContractTheme>(contract)).toThrow(
-        THEME_CONTRACT_REPLACEMENT_TOKENS_EXPECTED_ERROR
+        THEME_CONTRACT_DIRECT_CALL_ERROR
       );
       expect(() =>
         callThemeForRuntimeError<ContractTheme>(
           contract,
           "theme-contract-with-debug"
         )
-      ).toThrow(THEME_CONTRACT_REPLACEMENT_TOKENS_EXPECTED_ERROR);
+      ).toThrow(THEME_CONTRACT_DIRECT_CALL_ERROR);
+      expect(() =>
+        callThemeForRuntimeError<ContractTheme>(contract, replacementTokens)
+      ).toThrow(THEME_CONTRACT_DIRECT_CALL_ERROR);
+
+      const typedTheme = theme.with<ContractTheme>();
+      expect(() =>
+        Reflect.apply(typedTheme, undefined, [contract, replacementTokens])
+      ).toThrow(THEME_CONTRACT_DIRECT_CALL_ERROR);
+      expect(() => Reflect.apply(theme.extends, undefined, [contract])).toThrow(
+        THEME_REPLACEMENT_TOKENS_EXPECTED_ERROR
+      );
+      expect(() =>
+        Reflect.apply(theme.extends, undefined, [
+          contract,
+          replacementTokens,
+          123
+        ])
+      ).toThrow("theme.extends() debugId must be a string.");
+      expect(() =>
+        callThemeForRuntimeError<ContractTheme>(tokens, 123)
+      ).toThrow("theme() debugId must be a string.");
     });
 
     it("exposes theme.with as a callable wrapper", () => {
@@ -2435,6 +2548,35 @@ if (import.meta.vitest) {
       expect(direct[2].vars).toBe(direct[1]);
       validateHashFormatForResolved(wrapped[1]);
       validateHashFormatForResolved(direct[1]);
+    });
+
+    it("extends through theme.with() with its fixed theme type", () => {
+      type FixedTheme = {
+        color: { brand: string };
+        font: { body: string };
+      };
+      const fixedTheme = theme.with<FixedTheme>();
+      const baseResult = fixedTheme({
+        color: { brand: "blue" },
+        font: { body: "arial" }
+      });
+      const [, baseVars, contract] = baseResult;
+      const derivedResult = fixedTheme.extends(
+        contract,
+        {
+          color: { brand: "red" },
+          font: { body: "helvetica" }
+        },
+        "theme-with-derived"
+      );
+      const [derivedClassName, derivedVars] = derivedResult;
+
+      assertType<ThemeResult<FixedTheme>>(derivedResult);
+      expectTypeOf(derivedResult).toEqualTypeOf<ThemeResult<FixedTheme>>();
+      expectThemeContractResult(derivedResult);
+      expect(derivedClassName).toMatch(identifierName("theme-with-derived"));
+      expect(derivedVars.color.brand).toBe(baseVars.color.brand);
+      expect(derivedVars.font.body).toBe(baseVars.font.body);
     });
 
     it("enforces theme.with() token contracts", () => {
@@ -2549,7 +2691,7 @@ if (import.meta.vitest) {
       });
     });
 
-    it("preserves overload return types", () => {
+    it("preserves theme API return types", () => {
       type ExpectedTheme = {
         colors: { brand: string };
         font: { body: string };
@@ -2583,14 +2725,14 @@ if (import.meta.vitest) {
         colors: { brand: "red" },
         font: { body: "helvetica" }
       };
-      const derived = theme(directContract, replacementTokens);
+      const derived = theme.extends(directContract, replacementTokens);
 
       assertType<ThemeResult<ExpectedTheme>>(derived);
       assertType<ExpectedVars>(derived[1]);
       expectTypeOf(derived).toEqualTypeOf<ThemeResult<ExpectedTheme>>();
       expectThemeContractResult(derived);
 
-      const derivedWithDebug = theme(
+      const derivedWithDebug = theme.extends(
         directContract,
         replacementTokens,
         "theme-overload-derived-debug"
@@ -2635,20 +2777,24 @@ if (import.meta.vitest) {
         font: { body: "arial" }
       };
       const strictResult = strictTheme(strictTokens);
-      const [, strictVars, strictContract] = strictResult;
+      const [, , strictContract] = strictResult;
       expectThemeContractResult(strictResult);
       const strictReplacementTokens: ThemeTokensInput<StrictTheme> = {
         color: { brand: "red", accent: "orange" },
         font: { body: "helvetica" }
       };
-      const strictDerived = theme<StrictTheme>(
+      const strictDerived = strictTheme.extends(
         strictContract,
-        strictReplacementTokens
+        strictReplacementTokens,
+        "theme-with-strict-derived"
       );
 
       assertType<ThemeResult<StrictTheme>>(strictDerived);
       expectTypeOf(strictDerived).toEqualTypeOf<ThemeResult<StrictTheme>>();
       expectThemeContractResult(strictDerived);
+      expect(strictDerived[0]).toMatch(
+        identifierName("theme-with-strict-derived")
+      );
 
       const rawLiteralTheme = theme(
         compositeValue({
@@ -2678,42 +2824,49 @@ if (import.meta.vitest) {
         }>
       >(rawLiteralTheme);
 
-      const incompleteContract = {
-        vars: strictVars,
-        values: {}
-      };
       const assertStrictReplacementTypeErrors = () => {
-        // @ts-expect-error: replacement mode requires ThemeContract, not resolved vars.
-        theme<StrictTheme>(strictVars, strictReplacementTokens);
-        // @ts-expect-error: replacement mode requires full ThemeContract metadata.
-        theme<StrictTheme>(incompleteContract, strictReplacementTokens);
+        // @ts-expect-error: legacy top-level replacement calls are not accepted.
+        theme<StrictTheme>(strictContract, strictReplacementTokens);
+        // @ts-expect-error: typed handles accept contracts only through handle.extends().
+        strictTheme(strictContract, strictReplacementTokens);
         // @ts-expect-error: font branch is required by the replacement contract.
-        theme<StrictTheme>(strictContract, {
+        theme.extends<StrictTheme>(strictContract, {
           color: { brand: "red", accent: "orange" }
         });
-        // @ts-expect-error: color.accent is required by the replacement contract.
-        theme<StrictTheme>(strictContract, {
+        theme.extends<StrictTheme>(strictContract, {
+          // @ts-expect-error: color.accent is required by the replacement contract.
           color: { brand: "red" },
           font: { body: "helvetica" }
         });
-        // @ts-expect-error: top-level replacement keys outside the contract are not accepted.
-        theme<StrictTheme>(strictContract, {
+        theme.extends<StrictTheme>(strictContract, {
           color: { brand: "red", accent: "orange" },
           font: { body: "helvetica" },
+          // @ts-expect-error: top-level replacement keys outside the contract are not accepted.
           space: "4px"
         });
-        // @ts-expect-error: nested replacement keys outside the contract are not accepted.
-        theme<StrictTheme>(strictContract, {
-          color: { brand: "red", accent: "orange", neutral: "gray" },
+        theme.extends<StrictTheme>(strictContract, {
+          color: {
+            brand: "red",
+            accent: "orange",
+            // @ts-expect-error: nested replacement keys outside the contract are not accepted.
+            neutral: "gray"
+          },
           font: { body: "helvetica" }
         });
-        // @ts-expect-error: color.brand must be a string in the strict replacement contract.
-        theme<StrictTheme>(strictContract, {
-          color: { brand: 123, accent: "orange" },
+        theme.extends<StrictTheme>(strictContract, {
+          color: {
+            // @ts-expect-error: color.brand must be a string in the strict replacement contract.
+            brand: 123,
+            accent: "orange"
+          },
           font: { body: "helvetica" }
         });
-        // @ts-expect-error: replacement-mode debugId must be a string.
-        theme<StrictTheme>(strictContract, strictReplacementTokens, 123);
+        theme.extends<StrictTheme>(
+          strictContract,
+          strictReplacementTokens,
+          // @ts-expect-error: replacement-mode debugId must be a string.
+          123
+        );
       };
 
       assertType<() => void>(assertStrictReplacementTypeErrors);
@@ -2737,7 +2890,7 @@ if (import.meta.vitest) {
       );
 
       try {
-        const derivedResult = theme(
+        const derivedResult = theme.extends(
           contract,
           {
             colors: { brand: "red" },
@@ -2746,7 +2899,7 @@ if (import.meta.vitest) {
           "theme-user-example-derived"
         );
         const [derivedClassName, nextVars, nextContract] = derivedResult;
-        const thirdResult = theme(
+        const thirdResult = theme.extends(
           nextContract,
           {
             colors: { brand: "green" },
@@ -3006,7 +3159,7 @@ if (import.meta.vitest) {
       );
 
       try {
-        const derivedResult = theme(
+        const derivedResult = theme.extends(
           contract,
           layeredReplacementTokens,
           "theme-token-forms-derived"
