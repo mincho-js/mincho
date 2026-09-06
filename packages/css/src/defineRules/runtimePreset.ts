@@ -41,6 +41,7 @@ export function createRuntimePresetState(
   for (const atom of graph.atomById.values()) {
     styleCache.hydrateFragment(atom.cacheKey, atom.className);
   }
+
   for (const [className, atomId] of graph.atomIdByClassName) {
     const atom = graph.atomById.get(atomId);
 
@@ -64,9 +65,11 @@ export function createRuntimePresetState(
       snapshot = undefined;
       registerAtom(metadata, created, created.className);
     },
+
     bindOrigin(nextOrigin): void {
       origin = nextOrigin;
     },
+
     getSnapshot(): DefineRulesPresetArtifactV5 {
       if (snapshot !== undefined) {
         return snapshot;
@@ -82,6 +85,7 @@ export function createRuntimePresetState(
         rootNodeId: ownNode.nodeId,
         nodes: [...collectParentNodes(parents), ownNode]
       });
+
       return snapshot;
     }
   };
@@ -112,7 +116,52 @@ function collectPresetArtifacts(
     return [parseDefineRulesPresetArtifactV5(presetInput)];
   }
 
-  return presetInput.flatMap(collectPresetArtifacts);
+  const artifacts: DefineRulesPresetArtifactV5[] = [];
+  const stack: {
+    values: readonly DefineRulesPresetInput[];
+    length: number;
+    index: number;
+  }[] = [{ values: presetInput, length: presetInput.length, index: 0 }];
+
+  const activeArrays = new Set<readonly DefineRulesPresetInput[]>([
+    presetInput
+  ]);
+
+  while (stack.length > 0) {
+    const frame = stack[stack.length - 1];
+
+    if (frame.index === frame.length) {
+      activeArrays.delete(frame.values);
+      stack.pop();
+      continue;
+    }
+
+    const index = frame.index++;
+
+    // Match flatMap's treatment of sparse arrays and omitted inputs.
+    if (!(index in frame.values)) continue;
+
+    const input = frame.values[index];
+    if (input === undefined) continue;
+
+    if (!Array.isArray(input)) {
+      artifacts.push(parseDefineRulesPresetArtifactV5(input));
+      continue;
+    }
+
+    if (activeArrays.has(input)) {
+      const path = `presets${stack.map(({ index }) => `[${index - 1}]`).join("")}`;
+
+      throw new TypeError(
+        `Invalid defineRules presets: array cycle detected at ${path}`
+      );
+    }
+
+    activeArrays.add(input);
+    stack.push({ values: input, length: input.length, index: 0 });
+  }
+
+  return artifacts;
 }
 
 function registerAtom(
@@ -132,10 +181,12 @@ function createUnregisteredRuntimeOrigin() {
   const packageName = fileScope?.packageName ?? "<runtime>";
   const producerPath =
     fileScope?.filePath.replace(/\\/g, "/") ?? "runtime.css.ts";
+
   const key = `${packageName}:${producerPath}`;
   const registrationIndex =
     nextUnregisteredOriginIndexByFileScope.get(key) ?? 0;
 
   nextUnregisteredOriginIndexByFileScope.set(key, registrationIndex + 1);
+
   return createPresetOriginId({ packageName, producerPath, registrationIndex });
 }
