@@ -34,6 +34,7 @@ type GraphNode = {
   readonly contentHash: string;
   readonly parents: readonly string[];
   readonly atoms: readonly DefineRulesPresetAtomV5[];
+  readonly canonicalContentHash: string;
 };
 
 export function resolveDefineRulesPresetGraphV5(
@@ -200,7 +201,8 @@ function readNode(value: unknown, path: string): GraphNode {
     origin,
     contentHash: readContentHash(node["contentHash"], `${origin}.contentHash`),
     parents,
-    atoms
+    atoms,
+    canonicalContentHash: hashPresetCanonical({ parents, atoms })
   };
 }
 
@@ -227,10 +229,7 @@ function readAtom(value: unknown, path: string): DefineRulesPresetAtomV5 {
 }
 
 function verifyNode(node: GraphNode, path: string): void {
-  const contentHash = hashPresetCanonical({
-    parents: node.parents,
-    atoms: node.atoms
-  });
+  const contentHash = node.canonicalContentHash;
 
   if (
     contentHash !== node.contentHash ||
@@ -243,8 +242,7 @@ function sameNode(left: GraphNode, right: GraphNode): boolean {
   return (
     left.origin === right.origin &&
     left.contentHash === right.contentHash &&
-    hashPresetCanonical({ parents: left.parents, atoms: left.atoms }) ===
-      hashPresetCanonical({ parents: right.parents, atoms: right.atoms })
+    left.canonicalContentHash === right.canonicalContentHash
   );
 }
 

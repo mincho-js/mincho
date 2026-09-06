@@ -30,6 +30,7 @@ type PresetArtifactInput = {
 
 type ParsedNodeClaim = {
   readonly claimedNodeId: PresetNodeId;
+  readonly canonicalNode: DefineRulesPresetNodeV5;
   readonly path: string;
   readonly node: DefineRulesPresetNodeV5;
 };
@@ -125,6 +126,7 @@ function parseNode(value: unknown, path: string): ParsedNodeClaim {
 
   return Object.freeze({
     claimedNodeId,
+    canonicalNode: parsed,
     path,
     node: Object.freeze({
       ...parsed,
@@ -289,11 +291,7 @@ function assertNoClaimedCycles(
 
 function assertClaimedHashes(claims: readonly ParsedNodeClaim[]): void {
   for (const claim of claims) {
-    const parsed = createDefineRulesPresetNodeV5({
-      origin: parsePresetOriginId(claim.node.origin),
-      parents: claim.node.parents,
-      atoms: claim.node.atoms
-    });
+    const parsed = claim.canonicalNode;
 
     if (
       claim.node.contentHash !== parsed.contentHash ||
