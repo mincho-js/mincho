@@ -46,6 +46,7 @@ export function createDefineRulesPresetArtifactV5(
       })
     )
   );
+
   assertArtifactReferences(input.rootNodeId, nodes);
 
   return Object.freeze({
@@ -71,6 +72,7 @@ export function parseDefineRulesPresetArtifactV5(
   if (artifact["schema"] !== "mincho.defineRulesPreset") {
     throwInvalid("$.schema", "expected defineRules preset schema");
   }
+
   if (artifact["version"] !== 5) {
     throwInvalid("$.version", "expected defineRules preset version 5");
   }
@@ -80,10 +82,13 @@ export function parseDefineRulesPresetArtifactV5(
   const claims = rawNodes.map((node, index) =>
     parseNode(node, `$.nodes[${index}]`)
   );
+
   assertClaimedReferences(rootNodeId, claims);
   assertNoClaimedCycles(rootNodeId, claims);
+
   const nodes = Object.freeze(claims.map((claim) => claim.node));
   assertClaimedHashes(claims);
+
   return Object.freeze({
     schema: "mincho.defineRulesPreset",
     version: 5,
@@ -100,18 +105,22 @@ function parseNode(value: unknown, path: string): ParsedNodeClaim {
     "parents",
     "atoms"
   ]);
+
   const claimedNodeId = readNodeId(node["nodeId"], `${path}.nodeId`);
   const claimedContentHash = readContentHash(
     node["contentHash"],
     `${path}.contentHash`
   );
+
   const origin = readOrigin(node["origin"], `${path}.origin`);
   const parents = readArray(node["parents"], `${path}.parents`).map(
     (parent, index) => readNodeId(parent, `${path}.parents[${index}]`)
   );
+
   const atoms = readArray(node["atoms"], `${path}.atoms`).map((atom, index) =>
     parseAtom(atom, `${path}.atoms[${index}]`)
   );
+
   const parsed = createDefineRulesPresetNodeV5({ origin, parents, atoms });
 
   return Object.freeze({
@@ -134,6 +143,7 @@ function parseAtom(value: unknown, path: string): DefineRulesPresetAtomV5 {
     "condition",
     "property"
   ]);
+
   const claimedAtomId = readAtomId(atom["atomId"], `${path}.atomId`);
   const cacheKey = readString(atom["cacheKey"], `${path}.cacheKey`);
   const className = readString(atom["className"], `${path}.className`);
@@ -167,6 +177,7 @@ function readCondition(
     "container",
     "selector"
   ]);
+
   return Object.freeze({
     layer: readNullableString(condition["layer"], `${path}.layer`),
     supports: readNullableString(condition["supports"], `${path}.supports`),
@@ -185,11 +196,13 @@ function assertArtifactReferences(
   for (const node of nodes) {
     if (nodeIds.has(node.nodeId))
       throw new TypeError("Duplicate defineRules preset node ID");
+
     nodeIds.add(node.nodeId);
   }
 
   if (!nodeIds.has(rootNodeId))
     throw new TypeError("Missing defineRules preset root node");
+
   for (const node of nodes) {
     for (const parent of node.parents) {
       if (!nodeIds.has(parent))
@@ -207,11 +220,13 @@ function assertClaimedReferences(
   for (const claim of claims) {
     if (nodeIds.has(claim.claimedNodeId))
       throwInvalid("$", "Duplicate defineRules preset node ID");
+
     nodeIds.add(claim.claimedNodeId);
   }
 
   if (!nodeIds.has(rootNodeId))
     throwInvalid("$", "Missing defineRules preset root node");
+
   for (const claim of claims) {
     for (const parent of claim.node.parents) {
       if (!nodeIds.has(parent))
@@ -226,27 +241,50 @@ function assertNoClaimedCycles(
 ): void {
   const nodes = new Map(claims.map((claim) => [claim.claimedNodeId, claim]));
   const colors = new Map<PresetNodeId, 0 | 1 | 2>();
+  const stack: {
+    readonly claim: ParsedNodeClaim;
+    readonly path: string;
+    nextParent: number;
+  }[] = [];
 
-  function visit(nodeId: PresetNodeId, path: string): void {
+  function enter(nodeId: PresetNodeId, path: string): void {
     const color = colors.get(nodeId);
+
     if (color === 1) throwInvalid(path, "cycle detected");
     if (color === 2) return;
+
     const claim = nodes.get(nodeId);
+
     if (claim === undefined)
       throwInvalid(path, "Missing defineRules preset parent node");
+
     colors.set(nodeId, 1);
-    for (const [parentIndex, parentId] of claim.node.parents.entries()) {
-      const parent = nodes.get(parentId);
-      const parentPath = `${path}.parents[${parentIndex}]${
-        parent === undefined ? "" : ` -> ${parent.node.origin}`
-      }`;
-      visit(parentId, parentPath);
-    }
-    colors.set(nodeId, 2);
+    stack.push({ claim, path, nextParent: 0 });
   }
 
   const root = nodes.get(rootNodeId);
-  if (root !== undefined) visit(rootNodeId, root.node.origin);
+  if (root === undefined) return;
+
+  enter(rootNodeId, root.node.origin);
+
+  while (stack.length > 0) {
+    const frame = stack[stack.length - 1];
+
+    if (frame.nextParent === frame.claim.node.parents.length) {
+      colors.set(frame.claim.claimedNodeId, 2);
+      stack.pop();
+      continue;
+    }
+
+    const parentIndex = frame.nextParent++;
+    const parentId = frame.claim.node.parents[parentIndex];
+    const parent = nodes.get(parentId);
+    const parentPath = `${frame.path}.parents[${parentIndex}]${
+      parent === undefined ? "" : ` -> ${parent.node.origin}`
+    }`;
+
+    enter(parentId, parentPath);
+  }
 }
 
 function assertClaimedHashes(claims: readonly ParsedNodeClaim[]): void {
@@ -256,6 +294,7 @@ function assertClaimedHashes(claims: readonly ParsedNodeClaim[]): void {
       parents: claim.node.parents,
       atoms: claim.node.atoms
     });
+
     if (
       claim.node.contentHash !== parsed.contentHash ||
       claim.claimedNodeId !== parsed.nodeId

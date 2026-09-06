@@ -41,6 +41,7 @@ function getOriginPackage(origin: string): string {
       `defineRules preset origin is missing a package separator: ${origin}`
     );
   }
+
   return origin.slice(0, separator);
 }
 
@@ -54,6 +55,7 @@ function getDefineRulesAncestorStyleSpecifiersFromArtifacts(
     const nodes = new Map(
       artifact.nodes.map((node) => [node.nodeId, node] as const)
     );
+
     const visited = new Set<typeof artifact.rootNodeId>();
     const root = nodes.get(artifact.rootNodeId);
 
@@ -62,20 +64,31 @@ function getDefineRulesAncestorStyleSpecifiersFromArtifacts(
     }
 
     const localPackage = getOriginPackage(root.origin);
-    const visit = (nodeId: typeof artifact.rootNodeId): void => {
-      if (visited.has(nodeId)) return;
-      const node = nodes.get(nodeId);
+    const stack = [{ node: root, nextParent: 0 }];
+    visited.add(root.nodeId);
 
-      if (node === undefined) {
-        throw new TypeError(
-          `defineRules preset parent node is missing: ${nodeId}`
-        );
+    while (stack.length > 0) {
+      const frame = stack[stack.length - 1];
+      const { node } = frame;
+
+      if (frame.nextParent < node.parents.length) {
+        const parentId = node.parents[frame.nextParent++];
+        if (visited.has(parentId)) continue;
+
+        const parent = nodes.get(parentId);
+        if (parent === undefined) {
+          throw new TypeError(
+            `defineRules preset parent node is missing: ${parentId}`
+          );
+        }
+
+        visited.add(parentId);
+        stack.push({ node: parent, nextParent: 0 });
+        continue;
       }
 
-      visited.add(nodeId);
-      for (const parentId of node.parents) visit(parentId);
-
       const packageSpecifier = getOriginPackage(node.origin);
+
       if (
         packageSpecifier !== localPackage &&
         !packages.has(packageSpecifier)
@@ -83,9 +96,9 @@ function getDefineRulesAncestorStyleSpecifiersFromArtifacts(
         packages.add(packageSpecifier);
         specifiers.push(`${packageSpecifier}/style.css`);
       }
-    };
 
-    visit(artifact.rootNodeId);
+      stack.pop();
+    }
   }
 
   return specifiers;
@@ -140,6 +153,7 @@ function validateDefineRulesRegistrySessionArtifacts(
     const artifact = parseDefineRulesPresetArtifactV5(
       instance.getPresetSnapshot()
     );
+
     const diagnosticContext = {
       fileScope: instance.fileScope,
       registrationIndex: instance.registrationIndex
@@ -166,6 +180,7 @@ function validateDefineRulesRegistrySessionArtifacts(
       diagnosticContext,
       { validatePlainSerializableValues: true }
     );
+
     return artifact;
   });
 }
@@ -206,6 +221,7 @@ if (import.meta.vitest) {
 
   function createRegistryFixturePath(label: string): string {
     fixtureIndex += 1;
+
     return `${process.cwd()}/packages/integration/src/__fixtures__/defineRulesPreset-registry-${fixtureIndex}-${label}.css.ts`;
   }
 
@@ -239,8 +255,10 @@ if (import.meta.vitest) {
       source: compiled.source,
       filePath: compiled.filePath,
       identOption: "debug",
+
       serializeVirtualCssPath: ({ fileName, source }) => {
         emittedCssSources.push(source);
+
         return `import "${fileName}";`;
       }
     });
@@ -285,6 +303,7 @@ if (import.meta.vitest) {
 
   function createRegistrySession(config: unknown): DefineRulesRegistrySession {
     const presetArtifact = defineRules({ properties: {} }).preset;
+
     return {
       instances: [
         {
@@ -296,6 +315,7 @@ if (import.meta.vitest) {
           registrationIndex: 0,
           config,
           presetArtifact,
+
           getPresetSnapshot: () => presetArtifact
         }
       ],
@@ -446,6 +466,7 @@ if (import.meta.vitest) {
       `export const ${exportName} = (\\{.*?\\});`,
       "s"
     );
+
     const match = pattern.exec(source);
 
     if (match?.[1] === undefined) {
@@ -504,6 +525,7 @@ if (import.meta.vitest) {
   }): Promise<void> {
     const fixturePath =
       await getDefineRulesPresetSerializationFixturePath(relativePath);
+
     const fixtureSource = await readRegistryFixtureSource(fixturePath);
     let thrownError: unknown;
 
@@ -514,7 +536,9 @@ if (import.meta.vitest) {
     }
 
     expect(thrownError).toBeInstanceOf(Error);
+
     const message = (thrownError as Error).message;
+
     expect(message).toContain(
       `defineRules registry serialization does not support non-serializable context at ${expectedPath}`
     );
@@ -569,26 +593,32 @@ if (import.meta.vitest) {
     expect(artifactMatches.length).toBeGreaterThanOrEqual(
       registrySession.instances.length
     );
+
     for (const artifactMatch of artifactMatches) {
       let depth = 0;
       let artifactEndIndex = artifactMatch.index;
+
       for (
         let index = artifactMatch.index;
         index < normalizedSource.length;
         index += 1
       ) {
         const character = normalizedSource[index];
+
         if (character === "{") {
           depth += 1;
         }
+
         if (character === "}") {
           depth -= 1;
+
           if (depth === 0) {
             artifactEndIndex = index + 1;
             break;
           }
         }
       }
+
       const artifactSource = normalizedSource.slice(
         artifactMatch.index,
         artifactEndIndex
@@ -605,6 +635,7 @@ if (import.meta.vitest) {
       expect(artifactSource).not.toContain('"cx":');
       expect(artifactSource).not.toContain("'cx':");
     }
+
     for (const instance of registrySession.instances) {
       expect(Object.hasOwn(instance.presetArtifact, "cx")).toBe(false);
     }
@@ -617,26 +648,32 @@ if (import.meta.vitest) {
     );
 
     expect(artifactMatches.length).toBeGreaterThan(0);
+
     for (const artifactMatch of artifactMatches) {
       let depth = 0;
       let artifactEndIndex = artifactMatch.index;
+
       for (
         let index = artifactMatch.index;
         index < normalizedSource.length;
         index += 1
       ) {
         const character = normalizedSource[index];
+
         if (character === "{") {
           depth += 1;
         }
+
         if (character === "}") {
           depth -= 1;
+
           if (depth === 0) {
             artifactEndIndex = index + 1;
             break;
           }
         }
       }
+
       const artifactSource = normalizedSource.slice(
         artifactMatch.index,
         artifactEndIndex
@@ -713,7 +750,9 @@ if (import.meta.vitest) {
     filter: PresetWriteClassNameFilter
   ): string {
     const classNames = getPresetWriteClassNames(artifact, filter);
+
     expect(classNames).toHaveLength(1);
+
     return classNames[0]!;
   }
 
@@ -721,6 +760,7 @@ if (import.meta.vitest) {
     artifact: DefineRulesPresetArtifact
   ): void {
     const atoms = artifact.nodes.flatMap((node) => node.atoms);
+
     expect(atoms.map((atom) => atom.condition)).toEqual(
       expect.arrayContaining([
         {
@@ -878,10 +918,12 @@ if (import.meta.vitest) {
     const fs = await import("node:fs/promises");
     const path = await import("node:path");
     fixtureIndex += 1;
+
     const fixtureRoot = path.join(
       process.env.TMPDIR ?? `${process.cwd()}/temps`,
       `defineRulesPreset-cross-package-${fixtureIndex}-${label}`
     );
+
     const providerPath = path.join(fixtureRoot, "provider.css.ts");
 
     await fs.mkdir(fixtureRoot, { recursive: true });
@@ -896,6 +938,7 @@ if (import.meta.vitest) {
       source: createCrossPackageConditionalConsumerSource(
         includeCxMergeExports
       ),
+
       cleanup: () => fs.rm(fixtureRoot, { recursive: true, force: true })
     };
   }
@@ -1008,6 +1051,7 @@ if (import.meta.vitest) {
           expect(registrySession.instances).toHaveLength(
             fixtureCase.expectedRegistryInstances
           );
+
           continue;
         }
 
@@ -1016,6 +1060,7 @@ if (import.meta.vitest) {
           fixtureCase.caseId,
           fixtureCase.fixturePath
         );
+
         const classNames = collectPresetClassNames(registrySession);
 
         expect(registrySession.instances).toHaveLength(
@@ -1025,7 +1070,9 @@ if (import.meta.vitest) {
         expectSourceToContainV5PresetArtifact(source);
         expectSerializedPresetArtifactsToOmitCx(source, registrySession);
         expectRegistryInstancesToHavePresetAtoms(registrySession);
+
         expect(classNames.length).toBeGreaterThan(0);
+
         for (const className of classNames) {
           expect(source).toContain(className);
         }
@@ -1052,13 +1099,16 @@ if (import.meta.vitest) {
         `,
           "serialization"
         );
+
       const [registeredInstance] = registrySession.instances;
       const classNames = getRegistryInstanceClassNames(registeredInstance);
 
       expect(registrySession.instances).toHaveLength(1);
       expect(registeredInstance?.registrationIndex).toBe(0);
+
       expectSourceToContainV5PresetArtifact(source);
       expectSerializedPresetArtifactsToOmitCx(source, registrySession);
+
       expect(classNames).toHaveLength(1);
       expect(source).toContain(classNames[0]!);
       expect(emittedCss).toMatch(/color:\s*red/);
@@ -1100,18 +1150,23 @@ if (import.meta.vitest) {
         `,
         "consumer-reuse"
       );
+
       const [providerInstance, consumerInstance] = registrySession.instances;
       const providerClassNames =
         getRegistryInstanceClassNames(providerInstance);
+
       const consumerClassNames =
         getRegistryInstanceClassNames(consumerInstance);
 
       expect(registrySession.instances).toHaveLength(2);
+
       expectSourceToContainV5PresetArtifact(source);
       expectSerializedPresetArtifactsToOmitCx(source, registrySession);
       expectRegistryInstancesToHavePresetAtoms(registrySession);
+
       expect(providerClassNames.length).toBeGreaterThan(0);
       expect(consumerClassNames).toEqual(providerClassNames);
+
       expectSerializedMarkerClassName(
         source,
         "providerClass",
@@ -1137,6 +1192,7 @@ if (import.meta.vitest) {
             "conditional-reuse",
             fixture.consumerPath
           );
+
         const [providerInstance, consumerInstance] = registrySession.instances;
 
         expect(registrySession.instances).toHaveLength(2);
@@ -1146,9 +1202,11 @@ if (import.meta.vitest) {
         expect(consumerInstance?.fileScope.filePath).toContain(
           "consumer.css.ts"
         );
+
         expectSourceToContainV5PresetArtifact(source);
         expectSerializedSourcePresetArtifactsToOmitCx(source);
         expectRegistryInstancesToHavePresetAtoms(registrySession);
+
         for (const instance of registrySession.instances) {
           expect(Object.hasOwn(instance.presetArtifact, "cx")).toBe(false);
         }
@@ -1162,20 +1220,25 @@ if (import.meta.vitest) {
           providerArtifact,
           { property: "fontSize", media: tabletMedia }
         );
+
         const providerDesktopClass = expectSinglePresetWriteClassName(
           providerArtifact,
           { property: "fontSize", media: desktopMedia }
         );
+
         const consumerTabletClass = expectSinglePresetWriteClassName(
           consumerArtifact,
           { property: "fontSize", media: tabletMedia }
         );
+
         const consumerDesktopClass = expectSinglePresetWriteClassName(
           consumerArtifact,
           { property: "fontSize", media: desktopMedia }
         );
+
         expect(consumerTabletClass).toBe(providerTabletClass);
         expect(consumerDesktopClass).toBe(providerDesktopClass);
+
         expectSerializedMarkerClassName(
           source,
           "consumerClass",
@@ -1186,6 +1249,7 @@ if (import.meta.vitest) {
           "importedProviderClass",
           `${providerTabletClass} ${providerDesktopClass}`
         );
+
         expect(countV5PresetArtifacts(source)).toBe(2);
         expect(emittedCss).toMatch(/@media\s+screen and \(min-width: 768px\)/);
         expect(emittedCss).toMatch(/@media\s+screen and \(min-width: 1024px\)/);
@@ -1209,12 +1273,15 @@ if (import.meta.vitest) {
             "conditional-cx-merge",
             fixture.consumerPath
           );
+
         const [providerInstance, consumerInstance] = registrySession.instances;
 
         expect(registrySession.instances).toHaveLength(2);
+
         expectSourceToContainV5PresetArtifact(source);
         expectSerializedSourcePresetArtifactsToOmitCx(source);
         expectRegistryInstancesToHavePresetAtoms(registrySession);
+
         for (const instance of registrySession.instances) {
           expect(Object.hasOwn(instance.presetArtifact, "cx")).toBe(false);
         }
@@ -1228,10 +1295,12 @@ if (import.meta.vitest) {
           providerArtifact,
           { property: "fontSize", media: tabletMedia }
         );
+
         const providerDesktopClass = expectSinglePresetWriteClassName(
           providerArtifact,
           { property: "fontSize", media: desktopMedia }
         );
+
         const consumerDesktopOverride = expectSinglePresetWriteClassName(
           consumerArtifact,
           {
@@ -1240,6 +1309,7 @@ if (import.meta.vitest) {
             excludeClassNames: [providerDesktopClass]
           }
         );
+
         const consumerTabletOverride = expectSinglePresetWriteClassName(
           consumerArtifact,
           {
@@ -1254,7 +1324,9 @@ if (import.meta.vitest) {
           "importedProviderClass",
           `${providerTabletClass} ${providerDesktopClass}`
         );
+
         expect(countV5PresetArtifacts(source)).toBe(2);
+
         expectSerializedMarkerClassName(
           source,
           "consumerDesktopOverride",
@@ -1275,6 +1347,7 @@ if (import.meta.vitest) {
           "mergedDifferentCondition",
           `${providerDesktopClass} ${consumerTabletOverride}`
         );
+
         expect(emittedCss).toMatch(/font-size:\s*18(?:px)?/);
         expect(emittedCss).toMatch(/font-size:\s*24(?:px)?/);
       } finally {
@@ -1288,6 +1361,7 @@ if (import.meta.vitest) {
         const manifest = await loadDefineRulesPresetSerializationManifest();
         const readmePath =
           await getDefineRulesPresetSerializationFixturePath("README.md");
+
         const fixtureRoot = path.dirname(readmePath);
         const fixtureFiles = await listFixtureFiles(fixtureRoot);
         const legacyMatches: string[] = [];
@@ -1297,6 +1371,7 @@ if (import.meta.vitest) {
           if (!/\.(?:js|mjs|ts|md)$/.test(fixtureFile)) continue;
 
           const fixtureSource = await readRegistryFixtureSource(fixtureFile);
+
           if (
             /"version":4|version:4|classNameByCache|V4 shape/.test(
               fixtureSource
@@ -1324,7 +1399,9 @@ if (import.meta.vitest) {
           ),
           readDefineRulesPresetSerializationFixture(paths.packageDiamondDist)
         ]);
+
         const dArtifact = extractExportedPresetArtifact(dDistSource);
+
         expect(
           extractExportedPresetArtifact(
             dDistSource.replace(
@@ -1333,12 +1410,15 @@ if (import.meta.vitest) {
             )
           )
         ).toEqual(dArtifact);
+
         const rootNode = dArtifact.nodes.find(
           (node) => node.nodeId === dArtifact.rootNodeId
         );
+
         const bNode = dArtifact.nodes.find((node) =>
           node.origin.includes("/diamond-b:")
         );
+
         const cNode = dArtifact.nodes.find((node) =>
           node.origin.includes("/diamond-c:")
         );
@@ -1369,6 +1449,7 @@ if (import.meta.vitest) {
         const fixturePath = await getDefineRulesPresetSerializationFixturePath(
           paths.packageDiamond
         );
+
         const { source, registrySession, emittedCss } =
           await processRegistryFixture(
             resolvePackageDiamondFixtureSpecifiers(
@@ -1377,10 +1458,13 @@ if (import.meta.vitest) {
             "package-fixture-diamond",
             fixturePath
           );
+
         const [instance] = registrySession.instances;
 
         expect(registrySession.instances).toHaveLength(1);
+
         expectSourceToContainV5PresetArtifact(source);
+
         expect(source).toMatch(/selected = '[^']*diamond_c_color'/);
         expect(source).toMatch(/inherited = '[^']*diamond_a_display'/);
         expect(source).toMatch(/acceptsHistoricalB = '[^']*diamond_b_color'/);
@@ -1412,10 +1496,12 @@ if (import.meta.vitest) {
         const reversedPath = await getDefineRulesPresetSerializationFixturePath(
           paths.packageDiamondReversed
         );
+
         const duplicatePath =
           await getDefineRulesPresetSerializationFixturePath(
             paths.packageDiamondDuplicate
           );
+
         const reversedResult = await processRegistryFixture(
           resolvePackageDiamondFixtureSpecifiers(
             await readRegistryFixtureSource(reversedPath)
@@ -1423,6 +1509,7 @@ if (import.meta.vitest) {
           "package-fixture-diamond-reversed",
           reversedPath
         );
+
         const duplicateResult = await processRegistryFixture(
           resolvePackageDiamondFixtureSpecifiers(
             await readRegistryFixtureSource(duplicatePath)
@@ -1439,7 +1526,9 @@ if (import.meta.vitest) {
         );
         expect(reversedResult.source).toContain("diamond_b_color");
         expect(reversedResult.source).toContain("diamond_c_color");
+
         expectSourceToContainV5PresetArtifact(duplicateResult.source);
+
         expect(
           duplicateResult.registrySession.instances[0]?.presetArtifact.nodes.filter(
             (node) => node.origin.includes("/diamond-a:")
@@ -1455,6 +1544,7 @@ if (import.meta.vitest) {
             await getDefineRulesPresetSerializationFixturePath(
               fixtureCase.relativePath
             );
+
           let thrownError: unknown;
 
           try {
@@ -1474,10 +1564,12 @@ if (import.meta.vitest) {
           }
 
           expect(thrownError.message).toContain(fixtureCase.expectedDiagnostic);
+
           if (fixtureCase.caseId === "cycle") {
             expect(thrownError.message).toContain("parents[0]");
             expect(thrownError.message).toContain("diamond-cycle");
           }
+
           if (fixtureCase.caseId === "same-origin-different-revision") {
             expect(thrownError.message).toContain("diamond-revision");
           }
@@ -1547,13 +1639,16 @@ if (import.meta.vitest) {
         `,
           "owner-returned-cx"
         );
+
       const [ownerInstance] = registrySession.instances;
       const ownerClassNames = getRegistryInstanceClassNames(ownerInstance);
 
       expect(registrySession.instances).toHaveLength(1);
+
       expectSourceToContainV5PresetArtifact(source);
       expectSerializedPresetArtifactsToOmitCx(source, registrySession);
       expectRegistryInstancesToHavePresetAtoms(registrySession);
+
       expect(ownerClassNames).toHaveLength(1);
       expect(source).toContain(
         `ownerClassName = '${ownerClassNames[0]} owner-external'`
@@ -1581,14 +1676,17 @@ if (import.meta.vitest) {
         `,
           "destructured-returned-cx"
         );
+
       const [destructuredInstance] = registrySession.instances;
       const destructuredClassNames =
         getRegistryInstanceClassNames(destructuredInstance);
 
       expect(registrySession.instances).toHaveLength(1);
+
       expectSourceToContainV5PresetArtifact(source);
       expectSerializedPresetArtifactsToOmitCx(source, registrySession);
       expectRegistryInstancesToHavePresetAtoms(registrySession);
+
       expect(destructuredClassNames).toHaveLength(1);
       expect(source).toContain(
         `destructuredClassName = '${destructuredClassNames[0]} destructured-external'`
@@ -1612,6 +1710,7 @@ if (import.meta.vitest) {
           fileB: createDeferred<void>()
         }
       };
+
       const fileAPath = createRegistryFixturePath("concurrent-file-a");
       const fileBPath = createRegistryFixturePath("concurrent-file-b");
       registryGlobals[stateKey] = concurrentState;
@@ -1626,11 +1725,14 @@ if (import.meta.vitest) {
           "concurrent-file-a",
           fileAPath
         );
+
         concurrentState.events.push("queued:fileA");
         concurrentState.processed.fileA.resolve();
         await concurrentState.gates.fileA.promise;
+
         return result;
       });
+
       const secondEvaluation = runDefineRulesPresetRegistryStep(async () => {
         const result = await processRegistryFixture(
           createConcurrentRegistryFixtureSource({
@@ -1641,13 +1743,16 @@ if (import.meta.vitest) {
           "concurrent-file-b",
           fileBPath
         );
+
         concurrentState.events.push("queued:fileB");
         concurrentState.processed.fileB.resolve();
+
         return result;
       });
 
       try {
         await concurrentState.processed.fileA.promise;
+
         expect(concurrentState.events).toEqual([
           "start:fileA",
           "registered:fileA",
@@ -1658,6 +1763,7 @@ if (import.meta.vitest) {
 
         concurrentState.gates.fileA.resolve();
         await concurrentState.processed.fileB.promise;
+
         expect(concurrentState.events).toEqual([
           "start:fileA",
           "registered:fileA",
@@ -1673,9 +1779,11 @@ if (import.meta.vitest) {
           firstEvaluation,
           secondEvaluation
         ]);
+
         const firstClassNames = collectPresetClassNames(
           firstResult.registrySession
         );
+
         const secondClassNames = collectPresetClassNames(
           secondResult.registrySession
         );
@@ -1712,10 +1820,12 @@ if (import.meta.vitest) {
         ).toBe(true);
         expect(countV5PresetArtifacts(firstResult.source)).toBe(1);
         expect(countV5PresetArtifacts(secondResult.source)).toBe(1);
+
         expectSourceToContainV5PresetArtifact(firstResult.source);
         expectSourceToContainV5PresetArtifact(secondResult.source);
         expectRegistryInstancesToHavePresetAtoms(firstResult.registrySession);
         expectRegistryInstancesToHavePresetAtoms(secondResult.registrySession);
+
         expect(firstClassNames).toHaveLength(1);
         expect(secondClassNames).toHaveLength(1);
 
@@ -1723,10 +1833,12 @@ if (import.meta.vitest) {
           expect(firstResult.source).toContain(firstClassName);
           expect(secondResult.source).not.toContain(firstClassName);
         }
+
         for (const secondClassName of secondClassNames) {
           expect(secondResult.source).toContain(secondClassName);
           expect(firstResult.source).not.toContain(secondClassName);
         }
+
         expect(getActiveDefineRulesRegistrySession()).toBe(undefined);
       } finally {
         concurrentState.gates.fileA.resolve();
@@ -1752,6 +1864,7 @@ if (import.meta.vitest) {
         ).rejects.toThrow("registered cleanup failure");
 
         expect(getActiveDefineRulesRegistrySession()).toBe(undefined);
+
         if (typeof cleanupState.failedClassName !== "string") {
           throw new Error("Expected failure fixture to record a class name");
         }
@@ -1778,10 +1891,12 @@ if (import.meta.vitest) {
         expect(
           successfulResult.registrySession.instances[0]?.registrationIndex
         ).toBe(0);
+
         expectRegistryInstancesToHavePresetAtoms(
           successfulResult.registrySession
         );
         expectSourceToContainV5PresetArtifact(successfulResult.source);
+
         expect(successfulResult.source).not.toContain(
           cleanupState.failedClassName
         );
@@ -1798,10 +1913,13 @@ if (import.meta.vitest) {
         "repeated-stale-first",
         filePath
       );
+
       const [firstCurrentInstance, firstRemovedInstance] =
         firstResult.registrySession.instances;
+
       const firstCurrentClassNames =
         getRegistryInstanceClassNames(firstCurrentInstance);
+
       const firstRemovedClassNames =
         getRegistryInstanceClassNames(firstRemovedInstance);
 
@@ -1811,8 +1929,10 @@ if (import.meta.vitest) {
         )
       ).toEqual([0, 1]);
       expect(countV5PresetArtifacts(firstResult.source)).toBe(2);
+
       expectSourceToContainV5PresetArtifact(firstResult.source);
       expectRegistryInstancesToHavePresetAtoms(firstResult.registrySession);
+
       expect(firstCurrentClassNames).toHaveLength(1);
       expect(firstRemovedClassNames).toHaveLength(1);
 
@@ -1821,6 +1941,7 @@ if (import.meta.vitest) {
         "repeated-stale-second",
         filePath
       );
+
       const [secondCurrentInstance] = secondResult.registrySession.instances;
       const secondCurrentClassNames = getRegistryInstanceClassNames(
         secondCurrentInstance
@@ -1829,16 +1950,21 @@ if (import.meta.vitest) {
       expect(secondResult.registrySession.instances).toHaveLength(1);
       expect(secondCurrentInstance?.registrationIndex).toBe(0);
       expect(countV5PresetArtifacts(secondResult.source)).toBe(1);
+
       expectSourceToContainV5PresetArtifact(secondResult.source);
       expectRegistryInstancesToHavePresetAtoms(secondResult.registrySession);
+
       expect(secondCurrentClassNames).toHaveLength(1);
+
       for (const secondCurrentClassName of secondCurrentClassNames) {
         expect(secondResult.source).toContain(secondCurrentClassName);
       }
+
       for (const firstRemovedClassName of firstRemovedClassNames) {
         expect(firstResult.source).toContain(firstRemovedClassName);
         expect(secondResult.source).not.toContain(firstRemovedClassName);
       }
+
       expect(secondResult.source).not.toContain("removedClass");
       expect(secondResult.source).not.toContain("removedPreset");
       expect(getActiveDefineRulesRegistrySession()).toBe(undefined);
@@ -1876,16 +2002,80 @@ if (import.meta.vitest) {
       ).toBe("@scope/package");
     });
 
+    it.each([5_000, 10_000])(
+      "collects styles from a %i-node chain in ancestor order without duplicates",
+      async (size: number) => {
+        const { createHash } = await import("node:crypto");
+
+        type Artifact = ReturnType<typeof parseDefineRulesPresetArtifactV5>;
+
+        type Node = Artifact["nodes"][number];
+
+        const nodes: Node[] = [];
+        const expectedPackages = new Set<string>();
+
+        const hash = (value: unknown) =>
+          createHash("sha256").update(JSON.stringify(value)).digest("hex");
+
+        for (let index = 0; index < size; index++) {
+          const packageName =
+            index % 17 === 0 || index === size - 1
+              ? "@scope/local"
+              : `@scope/ancestor-${Math.floor(index / 2)}`;
+
+          const origin =
+            `${packageName}:src/rules-${index}.css.ts#defineRules:0` as Node["origin"];
+
+          const parents =
+            index === 0
+              ? []
+              : [nodes[index - 1].nodeId, nodes[index - 1].nodeId];
+
+          // Empty atoms keep the serialized V5 fixture's canonical keys explicit.
+          const contentHash = hash({
+            atoms: [],
+            parents
+          }) as Node["contentHash"];
+
+          const nodeId = hash({ contentHash, origin }) as Node["nodeId"];
+          nodes.push({ nodeId, origin, contentHash, parents, atoms: [] });
+
+          if (packageName !== "@scope/local") expectedPackages.add(packageName);
+        }
+
+        const artifact: Artifact = {
+          schema: "mincho.defineRulesPreset",
+          version: 5,
+          rootNodeId: nodes[size - 1].nodeId,
+          nodes
+        };
+
+        const registrySession = createRegistrySession({});
+        registrySession.instances[0].getPresetSnapshot = () => artifact;
+        registrySession.instances.push(registrySession.instances[0]);
+
+        expect(getDefineRulesAncestorStyleSpecifiers(registrySession)).toEqual(
+          [...expectedPackages].map((name) => `${name}/style.css`)
+        );
+        expect(parseDefineRulesPresetArtifactV5(artifact).nodes).toHaveLength(
+          size
+        );
+      }
+    );
+
     it("reuses each preset snapshot after registry validation", () => {
       const registrySession = createRegistrySession({});
       const [instance] = registrySession.instances;
       if (instance === undefined) throw new Error("Expected registry instance");
+
       const getPresetSnapshot = instance.getPresetSnapshot;
       let snapshotReadCount = 0;
       instance.getPresetSnapshot = () => {
         snapshotReadCount += 1;
+
         return getPresetSnapshot();
       };
+
       const presetArtifacts =
         validateDefineRulesRegistrySessionArtifacts(registrySession);
 
@@ -1913,13 +2103,16 @@ if (import.meta.vitest) {
           accent: null
         }
       );
+
       const context = {
         palette: nullPrototypePalette,
         spacing: [0, 4, undefined],
         enabled: true
       };
+
       Object.defineProperty(context.palette, "resolve", {
         enumerable: false,
+
         value() {
           return context.palette.brand;
         }
@@ -1941,14 +2134,19 @@ if (import.meta.vitest) {
       class PaletteClass {
         brand = "red";
       }
+
       const customPrototype = Object.create(null) as { kind?: string };
       customPrototype.kind = "palette";
+
       const customPrototypeContext = Object.create(customPrototype) as {
         brand?: string;
       };
+
       customPrototypeContext.brand = "red";
+
       const cyclicContext: { self?: unknown } = {};
       cyclicContext.self = cyclicContext;
+
       const cases = [
         {
           context: {
@@ -2053,7 +2251,9 @@ if (import.meta.vitest) {
       }
 
       expect(thrownError).toBeInstanceOf(Error);
+
       const message = (thrownError as Error).message;
+
       expect(message).toContain(
         "defineRules registry serialization does not support non-serializable context at config.context.palette"
       );
@@ -2125,11 +2325,14 @@ if (import.meta.vitest) {
         processOrder.push("start:first");
         await firstGate.promise;
         processOrder.push("end:first");
+
         return "first";
       });
+
       const secondStep = runDefineRulesPresetRegistryStep(() => {
         processOrder.push("start:second");
         processOrder.push("end:second");
+
         return "second";
       });
 
@@ -2138,6 +2341,7 @@ if (import.meta.vitest) {
       });
 
       firstGate.resolve();
+
       await expect(Promise.all([firstStep, secondStep])).resolves.toEqual([
         "first",
         "second"

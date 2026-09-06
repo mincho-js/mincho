@@ -41,13 +41,17 @@ export function resolveDefineRulesPresetGraphV5(
 ): DefineRulesPresetGraphV5 {
   const nodes = new Map<string, GraphNode>();
   const roots: string[] = [];
+
   for (const [artifactIndex, artifact] of artifacts.entries()) {
     const parsed = readArtifact(artifact, `artifacts[${artifactIndex}]`);
     roots.push(parsed.rootNodeId);
+
     for (const node of parsed.nodes) {
       const existing = nodes.get(node.nodeId);
+
       if (existing !== undefined && !sameNode(existing, node))
         throwInvalid(node.origin, "node ID maps to different content");
+
       nodes.set(node.nodeId, node);
     }
   }
@@ -60,59 +64,91 @@ export function resolveDefineRulesPresetGraphV5(
     PresetOriginId,
     { readonly contentHash: string; readonly path: string }
   >();
+
   const producerOrigins: PresetOriginId[] = [];
   const styleOrigins: string[] = [];
   const styles = new Set<string>();
+  const stack: {
+    readonly node: GraphNode;
+    readonly path: string;
+    nextParent: number;
+  }[] = [];
 
-  function visit(nodeId: string, path: string): void {
-    const color = colors.get(nodeId);
+  function enter(node: GraphNode, path: string): void {
+    const color = colors.get(node.nodeId);
+
     if (color === 1) throwInvalid(path, "cycle detected");
     if (color === 2) return;
-    const node = nodes.get(nodeId);
-    if (node === undefined)
-      throwInvalid(path, `dangling parent node ${nodeId}`);
+
     const revision = revisions.get(node.origin);
+
     if (revision !== undefined && revision.contentHash !== node.contentHash)
       throwInvalid(path, `origin revision conflicts with ${revision.path}`);
+
     revisions.set(node.origin, { contentHash: node.contentHash, path });
-    colors.set(nodeId, 1);
-    for (const [parentIndex, parentId] of node.parents.entries()) {
-      const parent = nodes.get(parentId);
-      if (parent === undefined)
-        throwInvalid(
-          `${path}.parents[${parentIndex}]`,
-          `dangling parent node ${parentId}`
-        );
-      visit(parentId, `${path}.parents[${parentIndex}] -> ${parent.origin}`);
-    }
-    verifyNode(node, path);
-    for (const atom of node.atoms) {
-      const firstPath = classPaths.get(atom.className);
-      const firstAtomId = atomIdByClassName.get(atom.className);
-      if (firstAtomId !== undefined && firstAtomId !== atom.atomId)
-        throwInvalid(
-          path,
-          `class name ${atom.className} maps to different CSS content, condition, or property than ${firstPath}`
-        );
-      atomById.set(atom.atomId, atom);
-      atomIdByClassName.set(atom.className, atom.atomId);
-      classPaths.set(atom.className, path);
-    }
-    producerOrigins.push(node.origin);
-    const styleOrigin = node.origin.slice(0, node.origin.indexOf(":"));
-    if (!styles.has(styleOrigin)) {
-      styles.add(styleOrigin);
-      styleOrigins.push(styleOrigin);
-    }
-    colors.set(nodeId, 2);
+    colors.set(node.nodeId, 1);
+    stack.push({ node, path, nextParent: 0 });
   }
 
   for (const rootId of roots) {
     const root = nodes.get(rootId);
+
     if (root === undefined)
       throwInvalid("rootNodeId", `missing root node ${rootId}`);
-    visit(rootId, root.origin);
+
+    enter(root, root.origin);
+
+    while (stack.length > 0) {
+      const frame = stack[stack.length - 1];
+      const { node, path } = frame;
+
+      if (frame.nextParent < node.parents.length) {
+        const parentIndex = frame.nextParent++;
+        const parentId = node.parents[parentIndex];
+        const parent = nodes.get(parentId);
+
+        if (parent === undefined)
+          throwInvalid(
+            `${path}.parents[${parentIndex}]`,
+            `dangling parent node ${parentId}`
+          );
+
+        enter(parent, `${path}.parents[${parentIndex}] -> ${parent.origin}`);
+        continue;
+      }
+
+      // Apply each node after its parents, preserving precedence and deduplication.
+      verifyNode(node, path);
+
+      for (const atom of node.atoms) {
+        const firstPath = classPaths.get(atom.className);
+        const firstAtomId = atomIdByClassName.get(atom.className);
+
+        if (firstAtomId !== undefined && firstAtomId !== atom.atomId)
+          throwInvalid(
+            path,
+            `class name ${atom.className} maps to different CSS content, condition, or property than ${firstPath}`
+          );
+
+        atomById.set(atom.atomId, atom);
+        atomIdByClassName.set(atom.className, atom.atomId);
+        classPaths.set(atom.className, path);
+      }
+
+      producerOrigins.push(node.origin);
+
+      const styleOrigin = node.origin.slice(0, node.origin.indexOf(":"));
+
+      if (!styles.has(styleOrigin)) {
+        styles.add(styleOrigin);
+        styleOrigins.push(styleOrigin);
+      }
+
+      colors.set(node.nodeId, 2);
+      stack.pop();
+    }
   }
+
   return { atomById, atomIdByClassName, producerOrigins, styleOrigins };
 }
 
@@ -126,15 +162,18 @@ function readArtifact(
     "rootNodeId",
     "nodes"
   ]);
+
   if (
     artifact["schema"] !== "mincho.defineRulesPreset" ||
     artifact["version"] !== 5
   )
     throwInvalid(`${path}.version`, "expected defineRules preset version 5");
+
   const rootNodeId = readNodeId(artifact["rootNodeId"], `${path}.rootNodeId`);
   const nodes = readArray(artifact["nodes"], `${path}.nodes`).map(
     (node, index) => readNode(node, `${path}.nodes[${index}]`)
   );
+
   return { rootNodeId, nodes };
 }
 
@@ -146,13 +185,16 @@ function readNode(value: unknown, path: string): GraphNode {
     "parents",
     "atoms"
   ]);
+
   const origin = readOrigin(node["origin"], `${path}.origin`);
   const parents = readArray(node["parents"], `${origin}.parents`).map(
     (parent, index) => readNodeId(parent, `${origin}.parents[${index}]`)
   );
+
   const atoms = readArray(node["atoms"], `${origin}.atoms`).map((atom, index) =>
     readAtom(atom, `${origin}.atoms[${index}]`)
   );
+
   return {
     nodeId: readNodeId(node["nodeId"], `${origin}.nodeId`),
     origin,
@@ -170,14 +212,17 @@ function readAtom(value: unknown, path: string): DefineRulesPresetAtomV5 {
     "condition",
     "property"
   ]);
+
   const parsed = createDefineRulesPresetAtomV5({
     cacheKey: readString(atom["cacheKey"], `${path}.cacheKey`),
     className: readString(atom["className"], `${path}.className`),
     condition: readCondition(atom["condition"], `${path}.condition`),
     property: readString(atom["property"], `${path}.property`)
   });
+
   if (parsed.atomId !== readAtomId(atom["atomId"], `${path}.atomId`))
     throwInvalid(path, "claimed atom ID does not recompute");
+
   return parsed;
 }
 
@@ -186,6 +231,7 @@ function verifyNode(node: GraphNode, path: string): void {
     parents: node.parents,
     atoms: node.atoms
   });
+
   if (
     contentHash !== node.contentHash ||
     hashPresetCanonical({ origin: node.origin, contentHash }) !== node.nodeId
@@ -213,6 +259,7 @@ function readCondition(
     "container",
     "selector"
   ]);
+
   return Object.freeze({
     layer: readNullableString(condition["layer"], `${path}.layer`),
     supports: readNullableString(condition["supports"], `${path}.supports`),

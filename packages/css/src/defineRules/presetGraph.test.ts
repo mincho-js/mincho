@@ -54,11 +54,13 @@ describe("V5 preset graph", () => {
       parents: [a.nodeId],
       atoms: [bAtom]
     });
+
     const c = node({
       origin: origin("c"),
       parents: [a.nodeId],
       atoms: [cAtom]
     });
+
     const bPreset = artifact(b.nodeId, [a, b]);
     const cPreset = artifact(c.nodeId, [a, c]);
     const snapshot = JSON.stringify([bPreset, cPreset]);
@@ -93,6 +95,7 @@ describe("V5 preset graph", () => {
       parents: [a.nodeId],
       atoms: [bAtom]
     });
+
     const c = node({
       origin: origin("c"),
       parents: [a.nodeId],
@@ -107,6 +110,52 @@ describe("V5 preset graph", () => {
     expect(graph.atomById.get(aAtom.atomId)).toEqual(bAtom);
   });
 
+  it("visits shared nodes once across overlapping diamonds and repeated parents", () => {
+    const a = node({ origin: origin("a"), parents: [], atoms: [] });
+    const bAtom = atom("color:red", "b_color");
+    const cAtom = atom("color:red", "c_color");
+    const b = node({
+      origin: origin("b"),
+      parents: [a.nodeId],
+      atoms: [bAtom]
+    });
+
+    const c = node({
+      origin: origin("c"),
+      parents: [a.nodeId],
+      atoms: [cAtom]
+    });
+
+    const left = node({
+      origin: origin("left"),
+      parents: [b.nodeId, c.nodeId],
+      atoms: []
+    });
+
+    const right = node({
+      origin: origin("right"),
+      parents: [c.nodeId, b.nodeId],
+      atoms: []
+    });
+
+    const root = node({
+      origin: origin("root"),
+      parents: [left.nodeId, right.nodeId, b.nodeId],
+      atoms: []
+    });
+
+    const nodes = [a, b, c, left, right, root];
+    const preset = artifact(root.nodeId, [...nodes].reverse());
+    const graph = resolveDefineRulesPresetGraphV5([preset, preset]);
+
+    expect(graph.producerOrigins).toEqual(nodes.map((node) => node.origin));
+    expect(graph.atomById.get(bAtom.atomId)).toEqual(cAtom);
+    expect([...graph.atomIdByClassName.keys()]).toEqual([
+      bAtom.className,
+      cAtom.className
+    ]);
+  });
+
   it("rejects cycles, dangling and malformed parents with traversal paths", () => {
     const rootAtom = atom("color:red", "root_color");
     const root = node({
@@ -114,6 +163,7 @@ describe("V5 preset graph", () => {
       parents: [],
       atoms: [rootAtom]
     });
+
     const preset = artifact(root.nodeId, [root]);
     const cycle = {
       ...preset,
@@ -122,30 +172,36 @@ describe("V5 preset graph", () => {
         parents: [record.nodeId]
       }))
     };
+
     const missing = node({
       origin: origin("missing"),
       parents: [],
       atoms: []
     });
+
     const danglingRoot = node({
       origin: origin("dangling"),
       parents: [missing.nodeId],
       atoms: []
     });
+
     const danglingSource = artifact(danglingRoot.nodeId, [
       missing,
       danglingRoot
     ]);
+
     const dangling = {
       ...danglingSource,
       nodes: danglingSource.nodes.filter(
         (record) => record.nodeId !== missing.nodeId
       )
     };
+
     const malformed = {
       ...preset,
       nodes: preset.nodes.map((record) => ({ ...record }))
     };
+
     Reflect.set(malformed.nodes[0], "parents", "not-an-array");
 
     expect(() => resolveDefineRulesPresetGraphV5([cycle])).toThrow(
@@ -166,21 +222,25 @@ describe("V5 preset graph", () => {
       parents: [],
       atoms: [atom("color:red", "first_color")]
     });
+
     const second = node({
       origin: sameOrigin,
       parents: [],
       atoms: [atom("color:blue", "second_color")]
     });
+
     const classA = node({
       origin: origin("class-a"),
       parents: [],
       atoms: [atom("color:red", "shared_class")]
     });
+
     const classB = node({
       origin: origin("class-b"),
       parents: [],
       atoms: [atom("color:blue", "shared_class")]
     });
+
     const valid = artifact(first.nodeId, [first]);
     const otherAtom = atom("display:flex", "display_flex", "display");
     const invalidAtom = {
