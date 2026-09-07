@@ -13,6 +13,7 @@ import {
   readString,
   throwInvalid
 } from "./presetArtifactReaders.js";
+import { isVerifiedDefineRulesPresetNodeV5 } from "./presetArtifact.js";
 import type { NormalizedCondition } from "./conditions.js";
 import type {
   DefineRulesPresetArtifactV5,
@@ -35,6 +36,7 @@ type GraphNode = {
   readonly parents: readonly string[];
   readonly atoms: readonly DefineRulesPresetAtomV5[];
   readonly canonicalContentHash: string;
+  readonly verified: boolean;
 };
 
 export function resolveDefineRulesPresetGraphV5(
@@ -179,6 +181,13 @@ function readArtifact(
 }
 
 function readNode(value: unknown, path: string): GraphNode {
+  if (isVerifiedDefineRulesPresetNodeV5(value))
+    return {
+      ...value,
+      canonicalContentHash: value.contentHash,
+      verified: true
+    };
+
   const node = readRecord(value, path, [
     "nodeId",
     "origin",
@@ -202,7 +211,8 @@ function readNode(value: unknown, path: string): GraphNode {
     contentHash: readContentHash(node["contentHash"], `${origin}.contentHash`),
     parents,
     atoms,
-    canonicalContentHash: hashPresetCanonical({ parents, atoms })
+    canonicalContentHash: hashPresetCanonical({ parents, atoms }),
+    verified: false
   };
 }
 
@@ -229,6 +239,8 @@ function readAtom(value: unknown, path: string): DefineRulesPresetAtomV5 {
 }
 
 function verifyNode(node: GraphNode, path: string): void {
+  if (node.verified) return;
+
   const contentHash = node.canonicalContentHash;
 
   if (

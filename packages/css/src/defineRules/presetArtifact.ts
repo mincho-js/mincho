@@ -23,6 +23,19 @@ import type {
 import type { NormalizedCondition } from "./conditions.js";
 import { assertDefineRulesPresetVersionV5 } from "./presetArtifactVersion.js";
 
+// Only fully validated, normalized, deeply immutable outputs enter these sets.
+// Caller-owned objects, including frozen objects, never become cache keys.
+const verifiedArtifacts = new WeakSet<object>();
+const verifiedNodes = new WeakSet<object>();
+
+export function isVerifiedDefineRulesPresetNodeV5(
+  value: unknown
+): value is DefineRulesPresetNodeV5 {
+  return (
+    typeof value === "object" && value !== null && verifiedNodes.has(value)
+  );
+}
+
 type PresetArtifactInput = {
   readonly rootNodeId: PresetNodeId;
   readonly nodes: readonly DefineRulesPresetNodeV5[];
@@ -40,27 +53,38 @@ export function createDefineRulesPresetArtifactV5(
 ): DefineRulesPresetArtifactV5 {
   const nodes = Object.freeze(
     input.nodes.map((node) =>
-      createDefineRulesPresetNodeV5({
-        origin: parsePresetOriginId(node.origin),
-        parents: node.parents,
-        atoms: node.atoms
-      })
+      verifiedNodes.has(node)
+        ? node
+        : createDefineRulesPresetNodeV5({
+            origin: parsePresetOriginId(node.origin),
+            parents: node.parents,
+            atoms: node.atoms
+          })
     )
   );
 
   assertArtifactReferences(input.rootNodeId, nodes);
 
-  return Object.freeze({
-    schema: "mincho.defineRulesPreset",
-    version: 5,
-    rootNodeId: input.rootNodeId,
-    nodes
-  });
+  return parseDefineRulesPresetArtifactV5(
+    Object.freeze({
+      schema: "mincho.defineRulesPreset",
+      version: 5,
+      rootNodeId: input.rootNodeId,
+      nodes
+    })
+  );
 }
 
 export function parseDefineRulesPresetArtifactV5(
   value: unknown
 ): DefineRulesPresetArtifactV5 {
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    verifiedArtifacts.has(value)
+  )
+    return value as DefineRulesPresetArtifactV5;
+
   assertDefineRulesPresetVersionV5(value);
 
   const artifact = readRecord(value, "$", [
@@ -87,18 +111,32 @@ export function parseDefineRulesPresetArtifactV5(
   assertClaimedReferences(rootNodeId, claims);
   assertNoClaimedCycles(rootNodeId, claims);
 
-  const nodes = Object.freeze(claims.map((claim) => claim.node));
+  const nodes = Object.freeze(claims.map((claim) => claim.canonicalNode));
   assertClaimedHashes(claims);
 
-  return Object.freeze({
+  const verified: DefineRulesPresetArtifactV5 = Object.freeze({
     schema: "mincho.defineRulesPreset",
     version: 5,
     rootNodeId,
     nodes
   });
+
+  for (const node of nodes) verifiedNodes.add(node);
+
+  verifiedArtifacts.add(verified);
+
+  return verified;
 }
 
 function parseNode(value: unknown, path: string): ParsedNodeClaim {
+  if (isVerifiedDefineRulesPresetNodeV5(value))
+    return {
+      claimedNodeId: value.nodeId,
+      canonicalNode: value,
+      node: value,
+      path
+    };
+
   const node = readRecord(value, path, [
     "nodeId",
     "origin",
