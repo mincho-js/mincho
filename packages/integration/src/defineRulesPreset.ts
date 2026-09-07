@@ -8,6 +8,12 @@ import {
 import { defineRules } from "@mincho-js/css";
 import { processVanillaFile } from "@vanilla-extract/integration";
 import {
+  collectDefineRulesPackageGraph,
+  getDefineRulesPackageStyleSpecifiers,
+  type DefineRulesPackageGraph,
+  type DefineRulesPackageGraphArtifact
+} from "./defineRulesPackageGraph.js";
+import {
   getConfigEntry,
   validateSerializableConfigEntry
 } from "./defineRulesPresetValidation.js";
@@ -24,84 +30,19 @@ export interface DefineRulesPresetRegistryResult {
   source: string;
   registrySession: DefineRulesRegistrySession;
   ancestorStyleSpecifiers: readonly string[];
+  packageGraph?: DefineRulesPackageGraph;
 }
 
-export function getDefineRulesAncestorStyleSpecifiers(
-  registrySession: DefineRulesRegistrySession
-): string[] {
-  return getDefineRulesAncestorStyleSpecifiersFromArtifacts(
-    registrySession.instances.map((instance) => instance.getPresetSnapshot())
+export function getDefineRulesAncestorStyleSpecifiers(registrySession: {
+  readonly instances: readonly {
+    getPresetSnapshot(): DefineRulesPackageGraphArtifact;
+  }[];
+}): string[] {
+  return getDefineRulesPackageStyleSpecifiers(
+    collectDefineRulesPackageGraph(
+      registrySession.instances.map((instance) => instance.getPresetSnapshot())
+    )
   );
-}
-
-function getOriginPackage(origin: string): string {
-  const separator = origin.indexOf(":");
-  if (separator === -1) {
-    throw new TypeError(
-      `defineRules preset origin is missing a package separator: ${origin}`
-    );
-  }
-
-  return origin.slice(0, separator);
-}
-
-function getDefineRulesAncestorStyleSpecifiersFromArtifacts(
-  artifacts: readonly ReturnType<typeof parseDefineRulesPresetArtifactV5>[]
-): string[] {
-  const specifiers: string[] = [];
-  const packages = new Set<string>();
-
-  for (const artifact of artifacts) {
-    const nodes = new Map(
-      artifact.nodes.map((node) => [node.nodeId, node] as const)
-    );
-
-    const visited = new Set<typeof artifact.rootNodeId>();
-    const root = nodes.get(artifact.rootNodeId);
-
-    if (root === undefined) {
-      throw new TypeError("defineRules preset root node is missing");
-    }
-
-    const localPackage = getOriginPackage(root.origin);
-    const stack = [{ node: root, nextParent: 0 }];
-    visited.add(root.nodeId);
-
-    while (stack.length > 0) {
-      const frame = stack[stack.length - 1];
-      const { node } = frame;
-
-      if (frame.nextParent < node.parents.length) {
-        const parentId = node.parents[frame.nextParent++];
-        if (visited.has(parentId)) continue;
-
-        const parent = nodes.get(parentId);
-        if (parent === undefined) {
-          throw new TypeError(
-            `defineRules preset parent node is missing: ${parentId}`
-          );
-        }
-
-        visited.add(parentId);
-        stack.push({ node: parent, nextParent: 0 });
-        continue;
-      }
-
-      const packageSpecifier = getOriginPackage(node.origin);
-
-      if (
-        packageSpecifier !== localPackage &&
-        !packages.has(packageSpecifier)
-      ) {
-        packages.add(packageSpecifier);
-        specifiers.push(`${packageSpecifier}/style.css`);
-      }
-
-      stack.pop();
-    }
-  }
-
-  return specifiers;
 }
 
 export function runDefineRulesPresetRegistryStep<Result>(
@@ -129,11 +70,16 @@ export async function processDefineRulesPresetRegistryFile(
     const presetArtifacts =
       validateDefineRulesRegistrySessionArtifacts(registrySession);
 
+    const packageGraph = collectDefineRulesPackageGraph(presetArtifacts, {
+      owner: options.filePath
+    });
+
     return {
       source,
       registrySession,
+      packageGraph,
       ancestorStyleSpecifiers:
-        getDefineRulesAncestorStyleSpecifiersFromArtifacts(presetArtifacts)
+        getDefineRulesPackageStyleSpecifiers(packageGraph)
     };
   } finally {
     endDefineRulesRegistrySession();
@@ -1082,9 +1028,14 @@ if (import.meta.vitest) {
 
   describe("defineRules preset registry wrapper", () => {
     it("registry serializes live V5 preset artifacts from processed css calls", async () => {
-      const { source, registrySession, emittedCss } =
-        await processRegistryFixture(
-          `
+      const {
+        source,
+        registrySession,
+        emittedCss,
+        packageGraph,
+        ancestorStyleSpecifiers
+      } = await processRegistryFixture(
+        `
           import { defineRules } from "@mincho-js/css";
 
           const button = defineRules({
@@ -1097,11 +1048,16 @@ if (import.meta.vitest) {
           export const buttonClass = button.css({ color: "red" });
           export const buttonCss = button.css;
         `,
-          "serialization"
-        );
+        "serialization"
+      );
 
       const [registeredInstance] = registrySession.instances;
       const classNames = getRegistryInstanceClassNames(registeredInstance);
+
+      expect(packageGraph).toBeDefined();
+      expect(ancestorStyleSpecifiers).toEqual(
+        getDefineRulesPackageStyleSpecifiers(packageGraph!)
+      );
 
       expect(registrySession.instances).toHaveLength(1);
       expect(registeredInstance?.registrationIndex).toBe(0);
@@ -1993,15 +1949,6 @@ if (import.meta.vitest) {
       ).not.toThrow();
     });
 
-    it("rejects origins without a package separator", () => {
-      expect(() => getOriginPackage("missing-separator")).toThrow(
-        "defineRules preset origin is missing a package separator: missing-separator"
-      );
-      expect(
-        getOriginPackage("@scope/package:src/rules.ts#defineRules:0")
-      ).toBe("@scope/package");
-    });
-
     it.each([5_000, 10_000])(
       "collects styles from a %i-node chain in ancestor order without duplicates",
       async (size: number) => {
@@ -2019,7 +1966,7 @@ if (import.meta.vitest) {
 
         for (let index = 0; index < size; index++) {
           const packageName =
-            index % 17 === 0 || index === size - 1
+            index === size - 1
               ? "@scope/local"
               : `@scope/ancestor-${Math.floor(index / 2)}`;
 
@@ -2080,7 +2027,9 @@ if (import.meta.vitest) {
         validateDefineRulesRegistrySessionArtifacts(registrySession);
 
       expect(
-        getDefineRulesAncestorStyleSpecifiersFromArtifacts(presetArtifacts)
+        getDefineRulesPackageStyleSpecifiers(
+          collectDefineRulesPackageGraph(presetArtifacts)
+        )
       ).toEqual([]);
       expect(snapshotReadCount).toBe(1);
     });

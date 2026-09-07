@@ -8,5 +8,5 @@
     "noEmit": true,
     "types": ["node"]
   },
-  "files": ["consumer.mts", "consumer.cts"]
+  "files": ["consumer.mts", "consumer.cts", "preset-types.mts"]
 }

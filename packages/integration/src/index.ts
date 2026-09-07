@@ -22,6 +22,14 @@ export {
   type DefineRulesPresetRegistryResult
 } from "./defineRulesPreset.js";
 export {
+  collectDefineRulesPackageGraph,
+  mergeDefineRulesPackageGraphs,
+  getDefineRulesPackageStyleSpecifiers,
+  type DefineRulesPackageGraph,
+  type DefineRulesPackageGraphArtifact,
+  type DefineRulesPackageDependencyWitness
+} from "./defineRulesPackageGraph.js";
+export {
   createStaticCssEvalSourceHash,
   createUnsupportedStaticCssEvalResolution,
   getExistingRealpath,
