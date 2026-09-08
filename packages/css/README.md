@@ -243,7 +243,7 @@ Local-only authoring context can be any value your callbacks understand. Seriali
 ```typescript
 import { defineRules } from "@mincho-js/css";
 
-const { css, cx, preset } = defineRules({
+const cardRules = defineRules({
   conditions: {
     mobile: {},
     tablet: "screen and (min-width: 768px)",
@@ -258,6 +258,8 @@ const { css, cx, preset } = defineRules({
     padding: true,
   },
 });
+
+const { css, cx } = cardRules;
 
 export const card = css({
   color: {
@@ -274,7 +276,8 @@ export const card = css({
 });
 
 export const cardClassName = cx(card, "external");
-export const cardPreset = preset;
+// Read the snapshot after registering the styles to share.
+export const cardPreset = cardRules.preset;
 ```
 
 #### defineRules.propertyValues()
@@ -358,43 +361,58 @@ export const padded = css({
 
 `source: [themeVars.space, customSpacingVariable]` preserves the nested array and does not flatten. Use `source: [...themeVars.space, customSpacingVariable]` when you want each spacing leaf plus the custom variable.
 
-The `preset` export is a V5 graph preset artifact. Pass it to another `defineRules({ presets })` call to compose and reuse class names and the graph metadata needed by scoped `cx`.
+#### Preset snapshots and registration order
 
-`defineRules().cx` is scoped and metadata-aware. It flattens inputs like the root `cx`, then resolves active rules by selecting the winning class according to V5 last-parent/local-wins semantics. The root `cx` export remains global and clsx-compatible; it does not read preset metadata.
+`rules.preset` is an immutable V5 graph snapshot. Read it after generating the styles that downstream authors should reuse. Reading it twice without new styles returns the same snapshot. Adding a new local Atom causes the next read to produce a new snapshot; a previously captured value stays unchanged.
 
-Unknown or external class tokens are preserved after root `cx` has flattened the inputs. They are not dropped, deduped, sorted, or moved relative to other unknown tokens.
+```typescript
+// shared.css.ts
+const A = defineRules({ properties: { color: true, display: true } });
+export const sharedRed = A.css({ color: "red" });
+export const sharedPreset = A.preset;
 
-Known conflicts merge only when the normalized condition tuple and expanded write property are exactly equal. The condition tuple is `layer`, `supports`, `media`, `container`, and `selector`. For example, a `color` write under `_desktop` only conflicts with another `color` write under that exact tuple. There is no media range subsumption, selector equivalence, or cross-layer precedence inference.
+const B = defineRules({
+  properties: { color: true, display: true },
+  presets: sharedPreset,
+});
+export const childRed = B.css({ color: "red" }); // Reuses A's red Atom.
 
-### V5 Package, Runtime, and Stylesheet Contract
+A.css({ display: "flex" }); // Creates a newer A snapshot on the next read.
+// B continues to use sharedPreset; this addition does not update B.
+```
 
-The V5 package contract establishes a strict, high-performance separation between build-time style authoring, runtime class name resolution, and static asset delivery.
+Destructuring `const { preset } = rules` also captures a snapshot at that moment. It is not a live connection. To consume later additions, construct a new child from the newer snapshot. Combining two revisions of the same origin fails explicitly; publish and install matching JS, preset and stylesheet outputs together rather than mixing snapshots.
 
-#### 1. V5 Graph Schema and Resolution
+#### Graph order and existing classes
 
-- **Graph Nodes & Immutable Parents**: Presets are structured as content-addressed V5 node graphs where parent-child relationships are immutable. Each node contains a unique `nodeId`, `contentHash`, `parents` array (referenced by ID), and its own local atoms (ordered own atoms).
-- **Diamond Dedupe & Traversal**: The resolution engine performs a root-first deterministic traversal (parent-first DFS) with exact diamond node deduplication.
-- **Diagnostics & Rejection**: Strict validation enforces origin/content revision errors, class/AtomId conflict errors, and cycle errors (via tri-color DFS cycle diagnostics).
-- **Last-Parent / Local-Wins equivalent AtomId Selection**: Conflict resolution resolves compatible classes to their selected `AtomId` using last-parent-wins or local-wins order. There is absolutely no backward compatibility, migration utilities, or fallback parsing for legacy V3/V4/maps formats.
+Parents are visited before the local node, in the order of each `parents` array. Shared nodes are applied once, on their first visit. Reordering the storage array `artifact.nodes` does not change the result. Nested `presets` arrays preserve their left-to-right order; cyclic arrays and cyclic node references are rejected.
 
-#### 2. Package Authoring & Runtime Split
+For an equivalent Atom, later visited nodes select the class used for subsequent authoring. A local equivalent Atom therefore wins after its parents. With independent B and C branches, `[B, C]` selects C, while `[C, B]` selects B. Repeating B in `[B, C, B]` does not apply it again: C still wins. This is class selection for equivalent Atoms, not an analysis of the browser cascade.
 
-- **App Imports (`.`)**: Application components and consumer entry points import runtime-safe, graph-free compiled helpers directly from the package root `.` (e.g., `import { Button } from "my-pkg"`).
-- **Authoring Imports (`./preset`)**: Downstream library authoring in `.css.ts` files imports authoring helpers, types, and preset nodes from the subpath `./preset` (e.g., `import { preset } from "my-pkg/preset"`).
-- **Explicit Stylesheet Escape Hatch (`./style.css`)**: Published packages provide sidecar CSS containing only locally owned rules. Consumers or bundlers can import `./style.css` as a full escape hatch, while bundler entry roots automatically resolve and inject sidecar stylesheets relative to entry chunks.
+Other classes representing that same Atom remain registered for scoped `cx`, and their originating stylesheets remain necessary. A child does not rename or invalidate a parent's existing classes. Missing parents, conflicting revisions of one origin, inconsistent class/Atom mappings, and altered hashes are rejected; hashes are validated against content, not trusted as labels.
 
-#### 3. Compact Dynamic & Static cx Behavior
+#### Compact dynamic and static cx
 
 - **Dynamic Scoped cx**: Dynamic `cx` runtime outputs are optimized to exclude the full V5 graph. They carry only a compact `classWrites` lookup mapping valid classes to internal write IDs, plus optional marker `segments`. Segments are optimization prefixes: payloads must match their recorded write IDs or are handled as ordinary class tokens; duplicate sequences are safe and the last write wins.
 - **Static cx**: When classes can be statically resolved at build time, `cx` emits static class literals with zero runtime table footprint or hydration overhead.
 
-#### 4. Known Caveats & Limitations
+#### Local authoring and V5 serialization
 
-- **Unused Rules**: Built package stylesheets contain all defined component rules; pruning unused component declarations is not performed at the asset level.
-- **Native Node CSS Loading**: Native Node.js runtimes cannot load `.css.ts` or CSS-importing root exports without a bundler integration.
-- **No Per-Export Hydration**: Scoped style hydration is global to the active environment; per-export or partial-hydration models are not implemented.
-- **No Semantic Folding**: CSS folding across selectors or layers is not performed; parent declarations are never duplicated or compiled into child stylesheets.
-- **No External Overlay / Manifest**: Style resolution and loading do not depend on external manifest JSON, import maps, or overlay registries.
+Local executable authoring and published preset serialization are different contracts. Supported local property/shortcut functions and top-level `css(context => ...)` callbacks can compute styles. That does not make functions serializable. Registry extraction rejects function values encountered in `conditions`, `properties` or `shortcuts`, with a config path and file/registration diagnostic. Conditions themselves still have to satisfy the documented condition API; arbitrary functions are not valid condition definitions.
+
+Local callbacks may use a context value they understand. Serialized registry context must contain supported enumerable primitive values, arrays and plain records. Functions, symbols, bigint, cyclic context and non-plain objects are rejected. A V5 preset stores resulting Atoms and ancestry, not executable callbacks or a live context. Only V5 is supported; V3/V4 and legacy maps are rejected rather than migrated implicitly. Rebuild old producers with the current format.
+
+#### CSS ownership and package delivery
+
+A common ancestor and two independently generated classes are different forms of sharing. Generate genuinely shared styles in A **before** exporting A's preset, then let B and C reuse those Atoms. Generate only styles that are actually needed; pre-generating every allowed utility value increases CSS.
+
+If B and C independently generate `.b_red` and `.c_red`, composing their presets does not remove either stylesheet rule: existing B/C consumers still refer to those classes. Final application CSS minification may merge compatible declarations while retaining both selectors. Its effect depends on the actual bundler, rule order and output file; there is no cross-file or cross-chunk deduplication guarantee. Preserve conditions, layers, specificity, `!important`, loading order, source maps and native content hashes when evaluating any optimization.
+
+The repository's component-package contract separates application exports (`.`), authoring presets (`./preset`) and an explicit stylesheet (`./style.css`). A package author must configure those exports and keep stylesheet imports in `sideEffects`; these subpaths are not automatically created by calling `defineRules`. Root application exports should use compiled runtime helpers rather than importing the authoring graph. The compact dynamic `cx` payload contains class-write metadata, while statically resolved calls can become class literals.
+
+Load the CSS owned by every referenced producer. The root entry's CSS wiring and an explicit `./style.css` import are package-specific delivery contracts: verify them under production tree shaking, lazy loading and multiple entries. A whole-package stylesheet may retain rules for unused components; JS export tree shaking alone does not prove CSS removal. Native Node cannot execute CSS imports without an appropriate loader or bundler.
+
+See [preset graph performance](../../docs/preset-graph-performance.md) for reproducible cost measurements and their limits.
 
 ## Features
 

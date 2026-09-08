@@ -557,26 +557,32 @@ const { css } = defineRules({
 });
 ```
 
-## Class Name Register (Coming Soon)
+## V5 Preset Composition
 
-Register presets for cross-package CSS extraction:
+Generate shared styles before taking the snapshot used by another author:
 
 ```typescript
-// Package A: @design-system/core
-export const presets = defineRules({
-  /* ... */
-});
+// shared.css.ts
+const shared = defineRules({ properties: { color: true } });
+export const red = shared.css({ color: "red" });
+export const preset = shared.preset;
 
-// Package B: @design-system/components
-import { presets } from "@design-system/core";
-export const componentStyle = presets.css({
-  /* ... */
+// component.css.ts
+import { preset } from "./shared.css";
+const component = defineRules({
+  properties: { color: true },
+  presets: preset,
 });
-
-// Application
-import { presets } from "@design-system/core";
-presets.registerClassNames(); // Avoid duplicate class names
+export const componentRed = component.css({ color: "red" });
 ```
+
+A captured preset is immutable. Registering more styles in the parent does not update an existing child; read the newer snapshot and construct a new child to consume those changes. Mixing different revisions of one origin is rejected. Destructuring `preset` also captures it immediately.
+
+Graphs visit parents before the local node and apply a shared node once. Equivalent Atoms select the class from the later visited node; local Atoms follow their parents. `[B, C, B]` does not reapply B, so C remains selected. The storage order of `artifact.nodes` does not affect this traversal. Existing B and C classes remain valid, and both producers' CSS must still be loaded. This parent selection order is separate from the input order passed to scoped `cx`.
+
+Published component packages following the repository contract separate runtime exports (`.`), authoring data (`./preset`) and styles (`./style.css`). Authors must provide those exports and CSS side-effect declarations. Generate only genuinely shared styles in a common ancestor; two independently generated classes are not removed merely by composing presets. Final application minification can merge compatible rules within an output file, subject to the bundler's ordering and chunk constraints.
+
+Only V5 serialized presets are supported. Local function-based authoring does not imply serializability: registry extraction rejects function-valued configuration and unsupported context values. See the [CSS package contract](https://github.com/mincho-js/mincho/blob/main/packages/css/README.md#preset-snapshots-and-registration-order) for snapshot, serialization, scoped merging and CSS ownership details.
 
 ---
 
