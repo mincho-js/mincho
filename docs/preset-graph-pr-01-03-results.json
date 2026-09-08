@@ -1,0 +1,742 @@
+{
+  "date": "2026-09-25T15:19:59.036537+00:00",
+  "baselineCommit": "0ee56d1a3ca772e9aab023b46947ee7e7b415eb9",
+  "candidateCodeCommit": "a612044000cde2fc254c61e7190a0bc25ede6dac",
+  "cpu": "Intel(R) Core(TM) i5-8265U CPU @ 1.60GHz",
+  "runner": "scripts/benchmark-preset-graph.mjs",
+  "note": "Matched source runs executed serially without concurrent repository builds/tests. Each child has two warmups and five timed samples. Profiles are reordered for the 16-copy case. No application bundle-size or browser-performance claim.",
+  "runs": [
+    {
+      "profile": "base",
+      "configuration": {
+        "node": "v24.21.0",
+        "target": "source",
+        "sourceDigest": "eb01ecc7d02c6821b4e9a55804ce354962c9c4b87fa2b4507c9fd66d25061790",
+        "measuredDigest": "eb01ecc7d02c6821b4e9a55804ce354962c9c4b87fa2b4507c9fd66d25061790",
+        "shape": "chain",
+        "atomsPerNode": 1,
+        "nodes": 100,
+        "copies": 4,
+        "samples": 5,
+        "warmups": 2,
+        "heapMB": 512,
+        "timeoutMs": 60000,
+        "note": "RSS includes module loading, fixture creation and timed operations. Each case runs in an isolated process; timings exclude fixture creation."
+      },
+      "cases": [
+        {
+          "case": "shared",
+          "uniqueNodes": 100,
+          "edges": 99,
+          "atoms": 100,
+          "shape": "chain",
+          "inputArtifacts": 4,
+          "serializedBytes": 217017,
+          "parse": {
+            "medianMs": 59.009704000000056,
+            "p95Ms": 75.40779399999997
+          },
+          "resolve": {
+            "medianMs": 32.884524000000056,
+            "p95Ms": 34.72604500000011
+          },
+          "defineRules": {
+            "medianMs": 93.1419890000002,
+            "p95Ms": 100.19246999999996
+          },
+          "snapshot": {
+            "medianMs": 6.533292000000074,
+            "p95Ms": 6.648453999999674
+          },
+          "cachedSnapshot": {
+            "medianMs": 0.00041300000020783045,
+            "p95Ms": 0.005337000000054104
+          },
+          "peakRssKiB": 261496
+        },
+        {
+          "case": "cloned",
+          "uniqueNodes": 100,
+          "edges": 99,
+          "atoms": 100,
+          "shape": "chain",
+          "inputArtifacts": 4,
+          "serializedBytes": 217017,
+          "parse": {
+            "medianMs": 57.88944399999991,
+            "p95Ms": 64.59071200000005
+          },
+          "resolve": {
+            "medianMs": 31.198617999999897,
+            "p95Ms": 32.70178699999997
+          },
+          "defineRules": {
+            "medianMs": 92.79541800000015,
+            "p95Ms": 96.70539400000007
+          },
+          "snapshot": {
+            "medianMs": 6.221138999999766,
+            "p95Ms": 7.254621000000043
+          },
+          "cachedSnapshot": {
+            "medianMs": 0.00037699999984397436,
+            "p95Ms": 0.005106999999952677
+          },
+          "peakRssKiB": 260180
+        },
+        {
+          "case": "verified",
+          "uniqueNodes": 100,
+          "edges": 99,
+          "atoms": 100,
+          "shape": "chain",
+          "inputArtifacts": 4,
+          "serializedBytes": 217017,
+          "parse": {
+            "medianMs": 58.823057999999946,
+            "p95Ms": 61.28046599999993
+          },
+          "resolve": {
+            "medianMs": 32.11777399999983,
+            "p95Ms": 32.766887
+          },
+          "defineRules": {
+            "medianMs": 94.8057389999999,
+            "p95Ms": 101.59649100000001
+          },
+          "snapshot": {
+            "medianMs": 6.3429080000000795,
+            "p95Ms": 6.708990999999969
+          },
+          "cachedSnapshot": {
+            "medianMs": 0.00048299999980372377,
+            "p95Ms": 0.006714999999985594
+          },
+          "peakRssKiB": 260532
+        },
+        {
+          "case": "authoring",
+          "uniqueNodes": 100,
+          "edges": 99,
+          "atoms": 0,
+          "authoring": {
+            "medianMs": 665.8920209999997,
+            "p95Ms": 692.3063460000003
+          },
+          "inputNote": "Every step consumes the growing parent snapshot; final unique node count is not total input volume.",
+          "peakRssKiB": 341772
+        }
+      ]
+    },
+    {
+      "profile": "candidate",
+      "configuration": {
+        "node": "v24.21.0",
+        "target": "source",
+        "sourceDigest": "af51c2f4c48ea91a597285b960ee6a040922e45a608c5a23d5088c7f9fc3c0cf",
+        "measuredDigest": "af51c2f4c48ea91a597285b960ee6a040922e45a608c5a23d5088c7f9fc3c0cf",
+        "shape": "chain",
+        "atomsPerNode": 1,
+        "nodes": 100,
+        "copies": 4,
+        "samples": 5,
+        "warmups": 2,
+        "heapMB": 512,
+        "timeoutMs": 60000,
+        "note": "RSS includes module loading, fixture creation and timed operations. Each case runs in an isolated process; timings exclude fixture creation."
+      },
+      "cases": [
+        {
+          "case": "shared",
+          "uniqueNodes": 100,
+          "edges": 99,
+          "atoms": 100,
+          "shape": "chain",
+          "inputArtifacts": 4,
+          "serializedBytes": 217017,
+          "parse": {
+            "medianMs": 35.165175999999974,
+            "p95Ms": 42.265368999999964
+          },
+          "resolve": {
+            "medianMs": 23.803439000000026,
+            "p95Ms": 25.185133999999948
+          },
+          "defineRules": {
+            "medianMs": 37.536849000000075,
+            "p95Ms": 39.2284659999998
+          },
+          "snapshot": {
+            "medianMs": 0.4120269999998527,
+            "p95Ms": 0.575121000000081
+          },
+          "cachedSnapshot": {
+            "medianMs": 0.00041799999985414615,
+            "p95Ms": 0.005376000000069325
+          },
+          "peakRssKiB": 206228
+        },
+        {
+          "case": "cloned",
+          "uniqueNodes": 100,
+          "edges": 99,
+          "atoms": 100,
+          "shape": "chain",
+          "inputArtifacts": 4,
+          "serializedBytes": 217017,
+          "parse": {
+            "medianMs": 35.73330999999996,
+            "p95Ms": 41.72181599999999
+          },
+          "resolve": {
+            "medianMs": 23.465453000000025,
+            "p95Ms": 25.396162000000004
+          },
+          "defineRules": {
+            "medianMs": 37.36607499999991,
+            "p95Ms": 40.244187999999895
+          },
+          "snapshot": {
+            "medianMs": 0.4770819999998821,
+            "p95Ms": 0.6281599999999798
+          },
+          "cachedSnapshot": {
+            "medianMs": 0.0013450000001284934,
+            "p95Ms": 0.02037600000016937
+          },
+          "peakRssKiB": 206732
+        },
+        {
+          "case": "verified",
+          "uniqueNodes": 100,
+          "edges": 99,
+          "atoms": 100,
+          "shape": "chain",
+          "inputArtifacts": 4,
+          "serializedBytes": 217017,
+          "parse": {
+            "medianMs": 0.0037700000000313594,
+            "p95Ms": 0.01971800000001167
+          },
+          "resolve": {
+            "medianMs": 0.40423699999996643,
+            "p95Ms": 0.4817849999999453
+          },
+          "defineRules": {
+            "medianMs": 1.8283509999999978,
+            "p95Ms": 2.1475540000000137
+          },
+          "snapshot": {
+            "medianMs": 0.542948000000024,
+            "p95Ms": 0.5508310000000165
+          },
+          "cachedSnapshot": {
+            "medianMs": 0.0005069999999705033,
+            "p95Ms": 0.0014699999999265856
+          },
+          "peakRssKiB": 181064
+        },
+        {
+          "case": "authoring",
+          "uniqueNodes": 100,
+          "edges": 99,
+          "atoms": 0,
+          "authoring": {
+            "medianMs": 29.179940999999985,
+            "p95Ms": 36.216995
+          },
+          "inputNote": "Every step consumes the growing parent snapshot; final unique node count is not total input volume.",
+          "peakRssKiB": 204872
+        }
+      ]
+    },
+    {
+      "profile": "base",
+      "configuration": {
+        "node": "v24.21.0",
+        "target": "source",
+        "sourceDigest": "eb01ecc7d02c6821b4e9a55804ce354962c9c4b87fa2b4507c9fd66d25061790",
+        "measuredDigest": "eb01ecc7d02c6821b4e9a55804ce354962c9c4b87fa2b4507c9fd66d25061790",
+        "shape": "chain",
+        "atomsPerNode": 1,
+        "nodes": 200,
+        "copies": 4,
+        "samples": 5,
+        "warmups": 2,
+        "heapMB": 512,
+        "timeoutMs": 60000,
+        "note": "RSS includes module loading, fixture creation and timed operations. Each case runs in an isolated process; timings exclude fixture creation."
+      },
+      "cases": [
+        {
+          "case": "shared",
+          "uniqueNodes": 200,
+          "edges": 199,
+          "atoms": 200,
+          "shape": "chain",
+          "inputArtifacts": 4,
+          "serializedBytes": 434617,
+          "parse": {
+            "medianMs": 121.73044499999992,
+            "p95Ms": 130.2560800000001
+          },
+          "resolve": {
+            "medianMs": 65.13874099999998,
+            "p95Ms": 69.10755000000017
+          },
+          "defineRules": {
+            "medianMs": 193.46070099999997,
+            "p95Ms": 201.88529599999993
+          },
+          "snapshot": {
+            "medianMs": 15.069520000000011,
+            "p95Ms": 15.340236000000004
+          },
+          "cachedSnapshot": {
+            "medianMs": 0.0005639999999402789,
+            "p95Ms": 0.007016999999905238
+          },
+          "peakRssKiB": 329348
+        },
+        {
+          "case": "cloned",
+          "uniqueNodes": 200,
+          "edges": 199,
+          "atoms": 200,
+          "shape": "chain",
+          "inputArtifacts": 4,
+          "serializedBytes": 434617,
+          "parse": {
+            "medianMs": 134.79222600000003,
+            "p95Ms": 144.98694
+          },
+          "resolve": {
+            "medianMs": 66.58244999999988,
+            "p95Ms": 69.9941859999999
+          },
+          "defineRules": {
+            "medianMs": 196.76647000000003,
+            "p95Ms": 201.482751
+          },
+          "snapshot": {
+            "medianMs": 14.025425999999243,
+            "p95Ms": 14.476765000000341
+          },
+          "cachedSnapshot": {
+            "medianMs": 0.0004349999999249121,
+            "p95Ms": 0.006653999999798543
+          },
+          "peakRssKiB": 331188
+        },
+        {
+          "case": "verified",
+          "uniqueNodes": 200,
+          "edges": 199,
+          "atoms": 200,
+          "shape": "chain",
+          "inputArtifacts": 4,
+          "serializedBytes": 434617,
+          "parse": {
+            "medianMs": 129.4649300000001,
+            "p95Ms": 131.62073399999986
+          },
+          "resolve": {
+            "medianMs": 65.30721799999992,
+            "p95Ms": 68.38330500000029
+          },
+          "defineRules": {
+            "medianMs": 195.71559300000035,
+            "p95Ms": 199.80174399999987
+          },
+          "snapshot": {
+            "medianMs": 15.735716000000139,
+            "p95Ms": 17.628545999999915
+          },
+          "cachedSnapshot": {
+            "medianMs": 0.0005059999994045938,
+            "p95Ms": 0.006484999999884167
+          },
+          "peakRssKiB": 330548
+        },
+        {
+          "case": "authoring",
+          "uniqueNodes": 200,
+          "edges": 199,
+          "atoms": 0,
+          "authoring": {
+            "medianMs": 2925.1981210000004,
+            "p95Ms": 3808.2533219999987
+          },
+          "inputNote": "Every step consumes the growing parent snapshot; final unique node count is not total input volume.",
+          "peakRssKiB": 387296
+        }
+      ]
+    },
+    {
+      "profile": "candidate",
+      "configuration": {
+        "node": "v24.21.0",
+        "target": "source",
+        "sourceDigest": "af51c2f4c48ea91a597285b960ee6a040922e45a608c5a23d5088c7f9fc3c0cf",
+        "measuredDigest": "af51c2f4c48ea91a597285b960ee6a040922e45a608c5a23d5088c7f9fc3c0cf",
+        "shape": "chain",
+        "atomsPerNode": 1,
+        "nodes": 200,
+        "copies": 4,
+        "samples": 5,
+        "warmups": 2,
+        "heapMB": 512,
+        "timeoutMs": 60000,
+        "note": "RSS includes module loading, fixture creation and timed operations. Each case runs in an isolated process; timings exclude fixture creation."
+      },
+      "cases": [
+        {
+          "case": "shared",
+          "uniqueNodes": 200,
+          "edges": 199,
+          "atoms": 200,
+          "shape": "chain",
+          "inputArtifacts": 4,
+          "serializedBytes": 434617,
+          "parse": {
+            "medianMs": 81.34187900000006,
+            "p95Ms": 89.55365699999993
+          },
+          "resolve": {
+            "medianMs": 51.390666999999894,
+            "p95Ms": 60.859427000000096
+          },
+          "defineRules": {
+            "medianMs": 81.38852199999997,
+            "p95Ms": 92.0620550000001
+          },
+          "snapshot": {
+            "medianMs": 0.6959039999997003,
+            "p95Ms": 0.712898999999652
+          },
+          "cachedSnapshot": {
+            "medianMs": 0.0005000000001018634,
+            "p95Ms": 0.006657999999788444
+          },
+          "peakRssKiB": 244236
+        },
+        {
+          "case": "cloned",
+          "uniqueNodes": 200,
+          "edges": 199,
+          "atoms": 200,
+          "shape": "chain",
+          "inputArtifacts": 4,
+          "serializedBytes": 434617,
+          "parse": {
+            "medianMs": 159.7930170000002,
+            "p95Ms": 183.410075
+          },
+          "resolve": {
+            "medianMs": 82.48716400000012,
+            "p95Ms": 116.67761299999984
+          },
+          "defineRules": {
+            "medianMs": 142.8292150000002,
+            "p95Ms": 221.91233299999976
+          },
+          "snapshot": {
+            "medianMs": 1.616414000000077,
+            "p95Ms": 2.353439999999864
+          },
+          "cachedSnapshot": {
+            "medianMs": 0.0011450000001786975,
+            "p95Ms": 0.012373999999908847
+          },
+          "peakRssKiB": 244024
+        },
+        {
+          "case": "verified",
+          "uniqueNodes": 200,
+          "edges": 199,
+          "atoms": 200,
+          "shape": "chain",
+          "inputArtifacts": 4,
+          "serializedBytes": 434617,
+          "parse": {
+            "medianMs": 0.011329000000159795,
+            "p95Ms": 0.015754000000015367
+          },
+          "resolve": {
+            "medianMs": 1.5102719999999863,
+            "p95Ms": 1.9605400000000373
+          },
+          "defineRules": {
+            "medianMs": 3.445854000000054,
+            "p95Ms": 4.085527000000184
+          },
+          "snapshot": {
+            "medianMs": 1.195261999999957,
+            "p95Ms": 1.601707000000033
+          },
+          "cachedSnapshot": {
+            "medianMs": 0.0008900000000267028,
+            "p95Ms": 0.002420999999912965
+          },
+          "peakRssKiB": 181876
+        },
+        {
+          "case": "authoring",
+          "uniqueNodes": 200,
+          "edges": 199,
+          "atoms": 0,
+          "authoring": {
+            "medianMs": 133.4861800000001,
+            "p95Ms": 157.26155999999992
+          },
+          "inputNote": "Every step consumes the growing parent snapshot; final unique node count is not total input volume.",
+          "peakRssKiB": 243756
+        }
+      ]
+    },
+    {
+      "profile": "candidate",
+      "configuration": {
+        "node": "v24.21.0",
+        "target": "source",
+        "sourceDigest": "af51c2f4c48ea91a597285b960ee6a040922e45a608c5a23d5088c7f9fc3c0cf",
+        "measuredDigest": "af51c2f4c48ea91a597285b960ee6a040922e45a608c5a23d5088c7f9fc3c0cf",
+        "shape": "chain",
+        "atomsPerNode": 1,
+        "nodes": 100,
+        "copies": 16,
+        "samples": 5,
+        "warmups": 2,
+        "heapMB": 512,
+        "timeoutMs": 60000,
+        "note": "RSS includes module loading, fixture creation and timed operations. Each case runs in an isolated process; timings exclude fixture creation."
+      },
+      "cases": [
+        {
+          "case": "shared",
+          "uniqueNodes": 100,
+          "edges": 99,
+          "atoms": 100,
+          "shape": "chain",
+          "inputArtifacts": 16,
+          "serializedBytes": 868065,
+          "parse": {
+            "medianMs": 200.401296,
+            "p95Ms": 255.06215100000009
+          },
+          "resolve": {
+            "medianMs": 112.51339499999995,
+            "p95Ms": 135.92278099999976
+          },
+          "defineRules": {
+            "medianMs": 176.91644899999983,
+            "p95Ms": 186.41001899999992
+          },
+          "snapshot": {
+            "medianMs": 0.7997859999995853,
+            "p95Ms": 1.5026179999995293
+          },
+          "cachedSnapshot": {
+            "medianMs": 0.0005269999992378871,
+            "p95Ms": 0.007009999999354477
+          },
+          "peakRssKiB": 244612
+        },
+        {
+          "case": "cloned",
+          "uniqueNodes": 100,
+          "edges": 99,
+          "atoms": 100,
+          "shape": "chain",
+          "inputArtifacts": 16,
+          "serializedBytes": 868065,
+          "parse": {
+            "medianMs": 196.82268399999998,
+            "p95Ms": 216.0547099999999
+          },
+          "resolve": {
+            "medianMs": 146.07294199999978,
+            "p95Ms": 176.55766399999993
+          },
+          "defineRules": {
+            "medianMs": 244.58772500000032,
+            "p95Ms": 262.9985310000002
+          },
+          "snapshot": {
+            "medianMs": 0.9811110000000554,
+            "p95Ms": 1.2512950000000274
+          },
+          "cachedSnapshot": {
+            "medianMs": 0.0014080000000831205,
+            "p95Ms": 0.007300000000213913
+          },
+          "peakRssKiB": 246400
+        },
+        {
+          "case": "verified",
+          "uniqueNodes": 100,
+          "edges": 99,
+          "atoms": 100,
+          "shape": "chain",
+          "inputArtifacts": 16,
+          "serializedBytes": 868065,
+          "parse": {
+            "medianMs": 0.003917999999998756,
+            "p95Ms": 0.013002000000028602
+          },
+          "resolve": {
+            "medianMs": 1.2154030000000375,
+            "p95Ms": 1.8983759999999847
+          },
+          "defineRules": {
+            "medianMs": 2.0149679999999535,
+            "p95Ms": 2.26214200000004
+          },
+          "snapshot": {
+            "medianMs": 0.8576329999999643,
+            "p95Ms": 2.362169000000108
+          },
+          "cachedSnapshot": {
+            "medianMs": 0.0007540000000290092,
+            "p95Ms": 0.0019439999999804058
+          },
+          "peakRssKiB": 183416
+        },
+        {
+          "case": "authoring",
+          "uniqueNodes": 100,
+          "edges": 99,
+          "atoms": 0,
+          "authoring": {
+            "medianMs": 46.24831999999992,
+            "p95Ms": 61.59392000000014
+          },
+          "inputNote": "Every step consumes the growing parent snapshot; final unique node count is not total input volume.",
+          "peakRssKiB": 204416
+        }
+      ]
+    },
+    {
+      "profile": "base",
+      "configuration": {
+        "node": "v24.21.0",
+        "target": "source",
+        "sourceDigest": "eb01ecc7d02c6821b4e9a55804ce354962c9c4b87fa2b4507c9fd66d25061790",
+        "measuredDigest": "eb01ecc7d02c6821b4e9a55804ce354962c9c4b87fa2b4507c9fd66d25061790",
+        "shape": "chain",
+        "atomsPerNode": 1,
+        "nodes": 100,
+        "copies": 16,
+        "samples": 5,
+        "warmups": 2,
+        "heapMB": 512,
+        "timeoutMs": 60000,
+        "note": "RSS includes module loading, fixture creation and timed operations. Each case runs in an isolated process; timings exclude fixture creation."
+      },
+      "cases": [
+        {
+          "case": "shared",
+          "uniqueNodes": 100,
+          "edges": 99,
+          "atoms": 100,
+          "shape": "chain",
+          "inputArtifacts": 16,
+          "serializedBytes": 868065,
+          "parse": {
+            "medianMs": 357.49856299999965,
+            "p95Ms": 436.5370619999999
+          },
+          "resolve": {
+            "medianMs": 191.41011900000012,
+            "p95Ms": 223.62926499999958
+          },
+          "defineRules": {
+            "medianMs": 526.1389160000017,
+            "p95Ms": 560.5745109999998
+          },
+          "snapshot": {
+            "medianMs": 10.124455999999554,
+            "p95Ms": 13.746816999999282
+          },
+          "cachedSnapshot": {
+            "medianMs": 0.0005920000003243331,
+            "p95Ms": 0.008624999998573912
+          },
+          "peakRssKiB": 338780
+        },
+        {
+          "case": "cloned",
+          "uniqueNodes": 100,
+          "edges": 99,
+          "atoms": 100,
+          "shape": "chain",
+          "inputArtifacts": 16,
+          "serializedBytes": 868065,
+          "parse": {
+            "medianMs": 376.5389600000003,
+            "p95Ms": 399.367115
+          },
+          "resolve": {
+            "medianMs": 190.78251099999943,
+            "p95Ms": 217.66177100000004
+          },
+          "defineRules": {
+            "medianMs": 520.0551219999998,
+            "p95Ms": 522.5948859999999
+          },
+          "snapshot": {
+            "medianMs": 9.469532000000981,
+            "p95Ms": 10.946553000001586
+          },
+          "cachedSnapshot": {
+            "medianMs": 0.0008160000015777769,
+            "p95Ms": 0.010349999998652493
+          },
+          "peakRssKiB": 340100
+        },
+        {
+          "case": "verified",
+          "uniqueNodes": 100,
+          "edges": 99,
+          "atoms": 100,
+          "shape": "chain",
+          "inputArtifacts": 16,
+          "serializedBytes": 868065,
+          "parse": {
+            "medianMs": 367.2556089999998,
+            "p95Ms": 369.9477380000003
+          },
+          "resolve": {
+            "medianMs": 181.4590360000002,
+            "p95Ms": 219.84220099999993
+          },
+          "defineRules": {
+            "medianMs": 512.6057199999996,
+            "p95Ms": 551.1811109999999
+          },
+          "snapshot": {
+            "medianMs": 9.325807999999597,
+            "p95Ms": 11.250606999999945
+          },
+          "cachedSnapshot": {
+            "medianMs": 0.0006229999999050051,
+            "p95Ms": 0.008546999999452964
+          },
+          "peakRssKiB": 339424
+        },
+        {
+          "case": "authoring",
+          "uniqueNodes": 100,
+          "edges": 99,
+          "atoms": 0,
+          "authoring": {
+            "medianMs": 913.6605480000003,
+            "p95Ms": 989.611551
+          },
+          "inputNote": "Every step consumes the growing parent snapshot; final unique node count is not total input volume.",
+          "peakRssKiB": 341408
+        }
+      ]
+    }
+  ]
+}
