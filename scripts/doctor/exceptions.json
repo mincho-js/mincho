@@ -810,6 +810,16 @@
     "expires": "2026-12-31"
   },
   {
+    "id": "integration-define-rules-registry-queue-test-esbuild-loader-01",
+    "file": "packages/integration/src/defineRulesRegistryQueue.test.ts",
+    "type": "warning",
+    "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
+    "source": "transform(source, { format, loader: \"ts\", target: \"node20\" })",
+    "count": 1,
+    "reason": "This reviewed esbuild build/onLoad syntax or asset-loader option names built-in esbuild loaders; it is not a Webpack loader package or a dependency lookup.",
+    "expires": "2026-12-31"
+  },
+  {
     "id": "examples-react-babel-package-build-peer-01",
     "file": "examples/react-babel/package.json",
     "type": "error",

@@ -17,10 +17,9 @@ import {
   getConfigEntry,
   validateSerializableConfigEntry
 } from "./defineRulesPresetValidation.js";
+import { runDefineRulesPresetRegistryStep } from "./defineRulesRegistryQueue.js";
 
-type Awaitable<Value> = Value | PromiseLike<Value>;
-
-let defineRulesPresetRegistryQueue: Promise<void> = Promise.resolve();
+export { runDefineRulesPresetRegistryStep } from "./defineRulesRegistryQueue.js";
 
 export type DefineRulesPresetRegistryFileOptions = Parameters<
   typeof processVanillaFile
@@ -43,21 +42,6 @@ export function getDefineRulesAncestorStyleSpecifiers(registrySession: {
       registrySession.instances.map((instance) => instance.getPresetSnapshot())
     )
   );
-}
-
-export function runDefineRulesPresetRegistryStep<Result>(
-  step: () => Awaitable<Result>
-): Promise<Result> {
-  const queuedStep = defineRulesPresetRegistryQueue
-    .catch(() => undefined)
-    .then(step);
-
-  defineRulesPresetRegistryQueue = queuedStep.then(
-    () => undefined,
-    () => undefined
-  );
-
-  return queuedStep;
 }
 
 export async function processDefineRulesPresetRegistryFile(
