@@ -9,17 +9,17 @@
     "start": "next start"
   },
   "dependencies": {
-    "next": "^16.2.6",
+    "next": "^16.3.4",
     "nextra": "^4.6.1",
     "nextra-theme-docs": "^4.6.1",
-    "react": "^19.2.6",
-    "react-dom": "^19.2.6"
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
   },
   "devDependencies": {
     "@types/mdx": "^2.0.13",
     "@types/node": "^25.6.2",
-    "@types/react": "^19.2.14",
-    "next-rspack": "16.2.6",
+    "@types/react": "^19.2.18",
+    "next-rspack": "16.3.4",
     "typescript": "^5.9.3"
   }
 }
