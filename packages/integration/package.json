@@ -59,7 +59,7 @@
     "@mincho-js/babel": "workspace:^",
     "@mincho-js/css": "workspace:^",
     "@vanilla-extract/integration": "^8.0.10",
-    "esbuild": "^0.27.7"
+    "esbuild": "^0.28.2"
   },
   "devDependencies": {
     "@mincho-js/debug-log": "workspace:^",
