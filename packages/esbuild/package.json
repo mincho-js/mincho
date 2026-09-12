@@ -53,13 +53,16 @@
   },
   "prettier": "prettier-config-custom",
   "dependencies": {
+    "@ampproject/remapping": "^2.3.0",
     "@babel/parser": "^7.29.0",
     "@mincho-js/integration": "workspace:^",
     "@vanilla-extract/esbuild-plugin": "^2.3.22",
     "@vanilla-extract/integration": "^8.0.10",
-    "esbuild": "^0.27.7"
+    "esbuild": "^0.27.7",
+    "magic-string": "^0.30.21"
   },
   "devDependencies": {
+    "@jridgewell/trace-mapping": "^0.3.31",
     "@mincho-js/css": "workspace:^",
     "@mincho-js/debug-log": "workspace:^",
     "@types/node": "^25.6.2",

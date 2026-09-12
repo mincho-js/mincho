@@ -8,6 +8,7 @@ import {
   type ResolveResult
 } from "esbuild";
 import { EsbuildAssets } from "./assets.js";
+export { buildWithMincho, type BuildWithMinchoOptions } from "./build.js";
 import {
   getBuildTransaction,
   recordPackageGraph
@@ -872,6 +873,8 @@ export function minchoEsbuildPlugin({
       );
 
       build.onLoad({ filter: /.*/, namespace: "file" }, async (args) => {
+        if (args.with?.type === "json" || args.with?.type === "bytes") return;
+
         const loader = getScriptLoader(args.path, build.initialOptions.loader);
         if (!loader) return;
         if (args.path.endsWith(".css.ts")) return;
