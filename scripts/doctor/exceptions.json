@@ -600,16 +600,6 @@
     "expires": "2026-12-31"
   },
   {
-    "id": "contract-index-node-modules-02",
-    "file": "scripts/package-contract/index.ts",
-    "type": "warning",
-    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
-    "source": "join(consumerRoot, \"node_modules\", \"vite\", \"bin\", \"vite.js\"),",
-    "count": 1,
-    "reason": "The package contract deliberately installs and inspects an isolated npm node_modules consumer, separate from the PnP workspace.",
-    "expires": "2026-12-31"
-  },
-  {
     "id": "site-mdx-components-import-01",
     "file": "site/mdx-components.tsx",
     "type": "error",
@@ -656,6 +646,26 @@
     "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
     "source": "loader: \"js\"",
     "count": 2,
+    "reason": "This reviewed esbuild build/onLoad syntax or asset-loader option names built-in esbuild loaders; it is not a Webpack loader package or a dependency lookup.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "esbuild-build-input-snapshot-test-esbuild-loader-01",
+    "file": "packages/esbuild/src/buildInputSnapshot.test.ts",
+    "type": "warning",
+    "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
+    "source": "loader: \"js\"",
+    "count": 1,
+    "reason": "This reviewed esbuild build/onLoad syntax or asset-loader option names built-in esbuild loaders; it is not a Webpack loader package or a dependency lookup.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "esbuild-build-input-snapshot-test-esbuild-loader-02",
+    "file": "packages/esbuild/src/buildInputSnapshot.test.ts",
+    "type": "warning",
+    "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
+    "source": "loader: changed === \"loader\" ? \"text\" : \"js\"",
+    "count": 1,
     "reason": "This reviewed esbuild build/onLoad syntax or asset-loader option names built-in esbuild loaders; it is not a Webpack loader package or a dependency lookup.",
     "expires": "2026-12-31"
   },
@@ -800,6 +810,16 @@
     "expires": "2026-12-31"
   },
   {
+    "id": "integration-compile-esbuild-loader-02",
+    "file": "packages/integration/src/compile.ts",
+    "type": "warning",
+    "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
+    "source": "loader: nativeLoader,",
+    "count": 1,
+    "reason": "This reviewed esbuild build/onLoad syntax or asset-loader option names built-in esbuild loaders; it is not a Webpack loader package or a dependency lookup.",
+    "expires": "2026-12-31"
+  },
+  {
     "id": "integration-compile-esbuild-loader-03",
     "file": "packages/integration/src/compile.ts",
     "type": "warning",
@@ -830,16 +850,6 @@
     "expires": "2026-12-31"
   },
   {
-    "id": "contract-index-node-modules-03",
-    "file": "scripts/package-contract/index.ts",
-    "type": "warning",
-    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
-    "source": "\"node_modules/typescript/bin/tsc\",",
-    "count": 1,
-    "reason": "The package contract deliberately invokes the TypeScript compiler installed in its isolated npm consumer to check published declarations; it does not resolve workspace dependencies through node_modules.",
-    "expires": "2026-12-31"
-  },
-  {
     "id": "integration-compile-plugins-test-esbuild-loader-01",
     "file": "packages/integration/src/compilePlugins.test.ts",
     "type": "warning",
@@ -867,6 +877,26 @@
     "source": "loader: \"js\",",
     "count": 1,
     "reason": "This regression fixture names a built-in esbuild syntax or text loader; the string is not a Webpack loader package or a dependency lookup.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "contract-index-node-modules-02",
+    "file": "scripts/package-contract/index.ts",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": "join(consumerRoot, \"node_modules\", \"vite\", \"bin\", \"vite.js\"),",
+    "count": 1,
+    "reason": "The package contract deliberately installs and inspects an isolated npm node_modules consumer, separate from the PnP workspace.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "contract-index-node-modules-03",
+    "file": "scripts/package-contract/index.ts",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": "\"node_modules/typescript/bin/tsc\",",
+    "count": 1,
+    "reason": "The package contract deliberately invokes the TypeScript compiler installed in its isolated npm consumer to check published declarations; it does not resolve workspace dependencies through node_modules.",
     "expires": "2026-12-31"
   }
 ]

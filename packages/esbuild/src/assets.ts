@@ -1,4 +1,5 @@
 import { parse } from "@babel/parser";
+import { getBuildTransaction } from "./buildInputSnapshot.js";
 import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
@@ -50,7 +51,11 @@ export class EsbuildAssets {
   async load(path: string, suffix: string): Promise<string> {
     const options = this.build.initialOptions;
     const loader = getAssetLoader(path, options);
-    const contents = await fs.readFile(path);
+    const transaction = getBuildTransaction(this.build.initialOptions);
+    const contents = await (transaction
+      ? transaction.snapshot.readFile(path)
+      : fs.readFile(path));
+
     const digest = createHash("sha256").update(contents).digest("hex");
     const layout = await (this.layout ??= this.getEntryLayout());
     const outbase = layout.outbase;
@@ -140,7 +145,10 @@ export class EsbuildAssets {
 
           const value =
             query.has("raw") && !query.has("url")
-              ? await fs.readFile(args.path, "utf8")
+              ? await (getBuildTransaction(this.build.initialOptions)
+                  ?.snapshot.readFile(args.path)
+                  .then((bytes) => bytes.toString("utf8")) ??
+                  fs.readFile(args.path, "utf8"))
               : await this.load(args.path, args.suffix);
 
           watchFiles.add(args.path);

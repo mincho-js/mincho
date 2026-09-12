@@ -19,6 +19,10 @@ interface CompileOptions {
   externals?: Array<string>;
   loader?: BuildOptions["loader"];
   plugins?: BuildOptions["plugins"];
+
+  /** Transaction-owned input reader used by multi-pass build integrations. */
+  readFile?: (path: string) => Promise<string>;
+  readFileBytes?: (path: string) => Promise<Uint8Array>;
   resolverCache: Map<string, string>;
   originalPath: string;
 }
@@ -95,7 +99,10 @@ function transformScopedDependencySource({
 
 function createScopedOnLoadPlugin(
   packageName: string,
-  loaders: BuildOptions["loader"] = {}
+  loaders: BuildOptions["loader"] = {},
+  readFile: (path: string) => Promise<string> = (path) =>
+    fs.promises.readFile(path, "utf-8"),
+  readFileBytes?: (path: string) => Promise<Uint8Array>
 ) {
   return {
     name: "mincho:custom-extract-scope",
@@ -120,16 +127,26 @@ function createScopedOnLoadPlugin(
                   : /\.[cm]?js$/.test(extension)
                     ? "js"
                     : undefined);
+
           if (
             loader !== "js" &&
             loader !== "jsx" &&
             loader !== "ts" &&
             loader !== "tsx"
           ) {
+            const nativeLoader =
+              loader ?? (args.path.endsWith(".json") ? "json" : undefined);
+            if (readFileBytes && nativeLoader)
+              return {
+                contents: await readFileBytes(args.path),
+                loader: nativeLoader,
+                resolveDir: dirname(args.path)
+              };
+
             return undefined;
           }
 
-          const contents = await fs.promises.readFile(args.path, "utf-8");
+          const contents = await readFile(args.path);
 
           return {
             contents: transformScopedDependencySource({
@@ -228,6 +245,8 @@ export async function compile({
   externals = [],
   loader,
   plugins = [],
+  readFile,
+  readFileBytes,
   resolverCache = new Map(),
   originalPath
 }: CompileOptions) {
@@ -259,7 +278,12 @@ export async function compile({
       ...plugins.map((plugin) =>
         scopeLoadedDependencies(plugin, packageInfo.name)
       ),
-      createScopedOnLoadPlugin(packageInfo.name, loader)
+      createScopedOnLoadPlugin(
+        packageInfo.name,
+        loader,
+        readFile,
+        readFileBytes
+      )
     ]
   });
 
