@@ -1834,7 +1834,7 @@ __metadata:
     react: "npm:^19.2.6"
     react-dom: "npm:^19.2.6"
     tsconfig-custom: "workspace:^"
-    vite: "npm:^7.3.3"
+    vite: "npm:^7.3.5"
     vite-config-custom: "workspace:^"
     vitest: "npm:^4.1.5"
   languageName: unknown
@@ -2457,7 +2457,7 @@ __metadata:
     prettier-config-custom: "workspace:^"
     tsconfig-custom: "workspace:^"
     tslib: "npm:^2.8.1"
-    vite: "npm:^7.3.3"
+    vite: "npm:^7.3.5"
     vite-config-custom: "workspace:^"
     vitest: "npm:^4.1.5"
   languageName: unknown
@@ -2473,7 +2473,7 @@ __metadata:
     mdn-data: "git+https://github.com/mdn/data.git#7f0c865a3c4b5d891285c93308ee5c25cb5cfee8"
     prettier-config-custom: "workspace:^"
     tsconfig-custom: "workspace:^"
-    vite: "npm:^7.3.3"
+    vite: "npm:^7.3.5"
     vite-config-custom: "workspace:^"
     vitest: "npm:^4.1.5"
   languageName: unknown
@@ -2493,7 +2493,7 @@ __metadata:
     eslint-config-custom: "workspace:^"
     prettier-config-custom: "workspace:^"
     tsconfig-custom: "workspace:^"
-    vite: "npm:^7.3.3"
+    vite: "npm:^7.3.5"
     vite-config-custom: "workspace:^"
     vitest: "npm:^4.1.5"
   peerDependencies:
@@ -2522,7 +2522,7 @@ __metadata:
     eslint-config-custom: "workspace:^"
     prettier-config-custom: "workspace:^"
     tsconfig-custom: "workspace:^"
-    vite: "npm:^7.3.3"
+    vite: "npm:^7.3.5"
     vite-config-custom: "workspace:^"
     vitest: "npm:^4.1.5"
   languageName: unknown
@@ -2543,7 +2543,7 @@ __metadata:
     eslint-config-custom: "workspace:^"
     prettier-config-custom: "workspace:^"
     tsconfig-custom: "workspace:^"
-    vite: "npm:^7.3.3"
+    vite: "npm:^7.3.5"
     vite-config-custom: "workspace:^"
     vitest: "npm:^4.1.5"
   peerDependencies:
@@ -2569,7 +2569,7 @@ __metadata:
     eslint-config-custom: "workspace:^"
     prettier-config-custom: "workspace:^"
     tsconfig-custom: "workspace:^"
-    vite: "npm:^7.3.3"
+    vite: "npm:^7.3.5"
     vite-config-custom: "workspace:^"
     vitest: "npm:^4.1.5"
   peerDependencies:
@@ -2603,7 +2603,7 @@ __metadata:
     react: "npm:^19.2.6"
     react-dom: "npm:^19.2.6"
     tsconfig-custom: "workspace:^"
-    vite: "npm:^7.3.3"
+    vite: "npm:^7.3.5"
     vite-config-custom: "workspace:^"
     vitest: "npm:^4.1.5"
   peerDependencies:
@@ -2622,7 +2622,7 @@ __metadata:
     eslint-config-custom: "workspace:^"
     prettier-config-custom: "workspace:^"
     tsconfig-custom: "workspace:^"
-    vite: "npm:^7.3.3"
+    vite: "npm:^7.3.5"
     vite-config-custom: "workspace:^"
     vitest: "npm:^4.1.5"
   languageName: unknown
@@ -2642,7 +2642,7 @@ __metadata:
     prettier-config-custom: "workspace:^"
     tsconfig-custom: "workspace:^"
     tslib: "npm:^2.8.1"
-    vite: "npm:^7.3.3"
+    vite: "npm:^7.3.5"
     vite-config-custom: "workspace:^"
     vitest: "npm:^4.1.5"
   languageName: unknown
@@ -2667,7 +2667,7 @@ __metadata:
     prettier-config-custom: "workspace:^"
     tsconfig-custom: "workspace:^"
     typescript: "npm:^5.9.3"
-    vite: "npm:^7.3.3"
+    vite: "npm:^7.3.5"
     vite-config-custom: "workspace:^"
     vitest: "npm:^4.1.5"
   peerDependencies:
@@ -11520,7 +11520,7 @@ __metadata:
     tslib: "npm:^2.8.1"
     turbo: "npm:^2.9.14"
     typescript: "npm:^5.9.3"
-    vite: "npm:^7.3.3"
+    vite: "npm:^7.3.5"
     vite-node: "npm:^5.3.0"
     vitest: "npm:^4.1.5"
     yarn-constraints-rules: "npm:^0.1.0"
@@ -12794,7 +12794,7 @@ __metadata:
     scheduler: "npm:^0.27.0"
     typescript: "npm:~5.9.3"
     typescript-eslint: "npm:^8.59.2"
-    vite: "npm:^7.3.3"
+    vite: "npm:^7.3.5"
     vitest: "npm:^4.1.5"
   languageName: unknown
   linkType: soft
@@ -12890,7 +12890,7 @@ __metadata:
     react-dom: "npm:^19.2.6"
     typescript: "npm:^5.9.3"
     typescript-eslint: "npm:^8.59.2"
-    vite: "npm:^7.3.3"
+    vite: "npm:^7.3.5"
     vitest: "npm:^4.1.5"
   languageName: unknown
   linkType: soft
@@ -15088,7 +15088,7 @@ __metadata:
     prettier-config-custom: "workspace:^"
     tsconfig-custom: "workspace:^"
     typescript: "npm:^5.9.3"
-    vite: "npm:^7.3.3"
+    vite: "npm:^7.3.5"
     vite-config-builder: "npm:^0.1.1"
     vite-plugin-dts-build: "npm:^0.2.3"
     vite-plugin-externalize-deps: "npm:^0.10.0"
@@ -15274,9 +15274,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"vite@npm:^7.3.3":
-  version: 7.3.3
-  resolution: "vite@npm:7.3.3"
+"vite@npm:^7.3.5":
+  version: 7.3.5
+  resolution: "vite@npm:7.3.5"
   dependencies:
     esbuild: "npm:^0.27.0"
     fdir: "npm:^6.5.0"
@@ -15325,7 +15325,7 @@ __metadata:
       optional: true
   bin:
     vite: bin/vite.js
-  checksum: 10/c7fa17bc0aa530313417a28a144edcf910466b936cb192ce2c8cf7d6075e4b8e481b08a55ef71a7486757b03465b054d8c2cb49473d6fc9a0db8ac1dd641edff
+  checksum: 10/2e1337510d6b81948b035f8b096c9be22daf1101fc52ad3d06cad9e090057ba1c1396e5e12cbaac2485f9c6cdcc854f978fe862280bdfe1a9a4149c60734c125
   languageName: node
   linkType: hard
 

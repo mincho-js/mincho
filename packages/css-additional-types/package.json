@@ -61,7 +61,7 @@
     "mdn-data": "git+https://github.com/mdn/data.git#7f0c865a3c4b5d891285c93308ee5c25cb5cfee8",
     "prettier-config-custom": "workspace:^",
     "tsconfig-custom": "workspace:^",
-    "vite": "^7.3.3",
+    "vite": "^7.3.5",
     "vite-config-custom": "workspace:^",
     "vitest": "^4.1.5"
   }
