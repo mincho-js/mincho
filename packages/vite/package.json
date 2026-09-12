@@ -62,11 +62,13 @@
     "@vanilla-extract/integration": "^8.0.10"
   },
   "devDependencies": {
+    "@jridgewell/trace-mapping": "^0.3.31",
     "@mincho-js/debug-log": "workspace:^",
     "@types/babel__core": "^7.20.5",
     "@types/node": "^25.6.2",
     "@vanilla-extract/css": "^1.20.1",
     "@vanilla-extract/recipes": "^0.5.7",
+    "@vanilla-extract/vite-plugin": "^5.2.2",
     "eslint-config-custom": "workspace:^",
     "prettier-config-custom": "workspace:^",
     "tsconfig-custom": "workspace:^",

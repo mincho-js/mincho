@@ -2657,6 +2657,7 @@ __metadata:
   resolution: "@mincho-js/vite@workspace:packages/vite"
   dependencies:
     "@babel/core": "npm:^7.29.0"
+    "@jridgewell/trace-mapping": "npm:^0.3.31"
     "@mincho-js/css": "workspace:^"
     "@mincho-js/debug-log": "workspace:^"
     "@mincho-js/integration": "workspace:^"
@@ -2667,6 +2668,7 @@ __metadata:
     "@vanilla-extract/css": "npm:^1.20.1"
     "@vanilla-extract/integration": "npm:^8.0.10"
     "@vanilla-extract/recipes": "npm:^0.5.7"
+    "@vanilla-extract/vite-plugin": "npm:^5.2.2"
     eslint-config-custom: "workspace:^"
     prettier-config-custom: "workspace:^"
     tsconfig-custom: "workspace:^"
