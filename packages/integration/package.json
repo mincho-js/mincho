@@ -59,13 +59,13 @@
     "@mincho-js/babel": "workspace:^",
     "@mincho-js/css": "workspace:^",
     "@vanilla-extract/integration": "^8.0.10",
-    "esbuild": "^0.27.7"
+    "esbuild": "^0.28.2"
   },
   "devDependencies": {
     "@mincho-js/debug-log": "workspace:^",
     "@types/babel__core": "^7.20.5",
     "@types/node": "^25.6.2",
-    "@vanilla-extract/css": "^1.20.1",
+    "@vanilla-extract/css": "^1.21.2",
     "eslint-config-custom": "workspace:^",
     "prettier-config-custom": "workspace:^",
     "tsconfig-custom": "workspace:^",
