@@ -1,6 +1,17 @@
+// @ts-expect-error Authoring preset data is available only from ./preset.
+import type { preset } from "@mincho-js-proof/real-d" with {
+  "resolution-mode": "import"
+};
+import type { preset as packedPreset } from "@mincho-js-proof/real-d/preset" with {
+  "resolution-mode": "import"
+};
+import { defineRules } from "@mincho-js/css";
+import type { DefineRulesRegistrySession } from "@mincho-js/css/defineRules/registry";
 import { minchoBabelPlugin } from "@mincho-js/babel";
 import {
   babelTransformSource,
+  collectDefineRulesPackageGraph,
+  getDefineRulesAncestorStyleSpecifiers,
   type BabelTransformSourceOptions,
   type InternalStaticCssEvalSourceProvider
 } from "@mincho-js/integration";
@@ -32,3 +43,23 @@ const vitePlugin: VitePlugin = minchoVitePlugin({ jsxCssProp: true });
 export { options, provider, babelPlugin, esbuildPlugins, vitePlugin };
 
 export const transform = () => babelTransformSource(options);
+
+// Direct API artifacts must cross either conditional declaration format.
+export function collectDirectPreset() {
+  const preset = defineRules({ properties: { color: true } }).preset;
+
+  return {
+    graph: collectDefineRulesPackageGraph([preset]),
+    styles: getDefineRulesAncestorStyleSpecifiers({
+      instances: [{ getPresetSnapshot: () => preset }]
+    })
+  };
+}
+
+export function collectRegistryStyles(session: DefineRulesRegistrySession) {
+  return getDefineRulesAncestorStyleSpecifiers(session);
+}
+
+export function collectPackedPreset(preset: typeof packedPreset) {
+  return collectDefineRulesPackageGraph([preset]);
+}

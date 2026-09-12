@@ -36,6 +36,7 @@ export function assertVerifierFailurePaths(): void {
       }]
     }]
   })`;
+
   const exportedV5PresetFixture = `export const preset = ${v5PresetFixture};`;
   assertDecoderFailurePaths(v5PresetFixture);
   assertV5PresetOutput(
@@ -109,6 +110,52 @@ export function assertVerifierFailurePaths(): void {
         files: []
       })
   );
+  assertFailure(
+    "tree-shaken stylesheet",
+    "sideEffects excludes exported CSS",
+    () =>
+      assertStyleExport({
+        name: "@package-contract/dropped-css",
+        version: "0.0.0",
+        private: false,
+        dependencies: {},
+        optionalDependencies: {},
+        exports: { "./style.css": "./dist/style.css" },
+        sideEffects: false,
+        files: []
+      })
+  );
+  for (const target of ["./style.css", "./dist/nested/style.css"]) {
+    for (const pattern of ["*.css", "style.css", "./*.css", "**/*.css"]) {
+      assertStyleExport({
+        name: "@package-contract/basename-css",
+        version: "0.0.0",
+        private: false,
+        dependencies: {},
+        optionalDependencies: {},
+        exports: { "./style.css": target },
+        sideEffects: [pattern],
+        files: []
+      });
+    }
+  }
+  for (const sideEffects of [["dist/*.css"], ["*.js"], [true, null, 42]]) {
+    assertFailure(
+      "non-matching CSS side effects",
+      "sideEffects excludes exported CSS",
+      () =>
+        assertStyleExport({
+          name: "@package-contract/unmatched-css",
+          version: "0.0.0",
+          private: false,
+          dependencies: {},
+          optionalDependencies: {},
+          exports: { "./style.css": "./nested/dist/style.css" },
+          sideEffects,
+          files: []
+        })
+    );
+  }
   assertFailure(
     "missing package diamond selector",
     "selector count changed",

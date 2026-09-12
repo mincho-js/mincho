@@ -6,13 +6,15 @@ type CommandOptions = {
   readonly artifactPath?: string;
   readonly command: string;
   readonly cwd: string;
+  readonly env?: Readonly<Record<string, string>>;
 };
 
 export async function runCommand({
   args,
   artifactPath,
   command,
-  cwd
+  cwd,
+  env: overrides
 }: CommandOptions): Promise<void> {
   const rendered = [command, ...args].join(" ");
   console.log(`[package-contract] $ ${rendered}`);
@@ -21,6 +23,7 @@ export async function runCommand({
   // Workspace yarn commands inject their own loader when they need it.
   const env = { ...process.env };
   delete env.NODE_OPTIONS;
+  Object.assign(env, overrides);
 
   const result = await new Promise<{
     readonly code: number | null;
@@ -38,7 +41,9 @@ export async function runCommand({
       stderr += chunk.toString();
     });
     child.once("error", reject);
-    child.once("close", (code, signal) => resolve({ code, signal, stderr, stdout }));
+    child.once("close", (code, signal) =>
+      resolve({ code, signal, stderr, stdout })
+    );
   });
 
   if (result.code !== 0) {
@@ -51,7 +56,9 @@ export async function runCommand({
     ]
       .filter(Boolean)
       .join("\n");
+
     console.error(failure);
+
     throw new PackageContractError(failure);
   }
 }

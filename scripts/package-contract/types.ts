@@ -5,6 +5,7 @@ export type PackageManifest = {
   readonly dependencies: Readonly<Record<string, string>>;
   readonly optionalDependencies: Readonly<Record<string, string>>;
   readonly exports: unknown;
+  readonly sideEffects?: unknown;
   readonly files: readonly string[];
   readonly types?: string;
   readonly typings?: string;
