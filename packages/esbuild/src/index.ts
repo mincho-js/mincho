@@ -8,6 +8,7 @@ import {
   type ResolveResult
 } from "esbuild";
 import { EsbuildAssets } from "./assets.js";
+export { buildWithMincho, type BuildWithMinchoOptions } from "./build.js";
 import {
   getBuildTransaction,
   recordPackageGraph

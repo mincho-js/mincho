@@ -650,6 +650,36 @@
     "expires": "2026-12-31"
   },
   {
+    "id": "esbuild-build-test-esbuild-loader-01",
+    "file": "packages/esbuild/src/build.test.ts",
+    "type": "warning",
+    "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
+    "source": "loader: \"ts\",",
+    "count": 1,
+    "reason": "This reviewed esbuild build/onLoad syntax or asset-loader option names built-in esbuild loaders; it is not a Webpack loader package or a dependency lookup.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "esbuild-build-test-esbuild-loader-02",
+    "file": "packages/esbuild/src/build.test.ts",
+    "type": "warning",
+    "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
+    "source": "loader: \"js\",",
+    "count": 2,
+    "reason": "This reviewed esbuild build/onLoad syntax or asset-loader option names built-in esbuild loaders; it is not a Webpack loader package or a dependency lookup.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "esbuild-build-test-esbuild-loader-03",
+    "file": "packages/esbuild/src/build.test.ts",
+    "type": "warning",
+    "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
+    "source": "loader: { \".svg\": \"file\" },",
+    "count": 1,
+    "reason": "This reviewed esbuild build/onLoad syntax or asset-loader option names built-in esbuild loaders; it is not a Webpack loader package or a dependency lookup.",
+    "expires": "2026-12-31"
+  },
+  {
     "id": "esbuild-build-input-snapshot-test-esbuild-loader-01",
     "file": "packages/esbuild/src/buildInputSnapshot.test.ts",
     "type": "warning",
