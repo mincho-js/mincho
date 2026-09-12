@@ -870,6 +870,56 @@
     "expires": "2026-12-31"
   },
   {
+    "id": "contract-real-index-ts-import-b",
+    "file": "scripts/package-contract/fixture/real/src/index.ts",
+    "type": "error",
+    "message": "Undeclared dependency on @mincho-js-proof/real-b",
+    "source": "export { className as b } from \"@mincho-js-proof/real-b\";",
+    "count": 1,
+    "reason": "This fixture is copied into isolated npm and strict PnP consumers. scripts/package-contract/real-producers.ts packs this real producer, and index.ts declares every packed package in the generated consumer dependencies before executing the fixture.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "contract-real-index-ts-import-c",
+    "file": "scripts/package-contract/fixture/real/src/index.ts",
+    "type": "error",
+    "message": "Undeclared dependency on @mincho-js-proof/real-c",
+    "source": "export { className as c } from \"@mincho-js-proof/real-c\";",
+    "count": 1,
+    "reason": "This fixture is copied into isolated npm and strict PnP consumers. scripts/package-contract/real-producers.ts packs this real producer, and index.ts declares every packed package in the generated consumer dependencies before executing the fixture.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "contract-real-index-ts-import-d",
+    "file": "scripts/package-contract/fixture/real/src/index.ts",
+    "type": "error",
+    "message": "Undeclared dependency on @mincho-js-proof/real-d",
+    "source": "export { className as d } from \"@mincho-js-proof/real-d\";",
+    "count": 1,
+    "reason": "This fixture is copied into isolated npm and strict PnP consumers. scripts/package-contract/real-producers.ts packs this real producer, and index.ts declares every packed package in the generated consumer dependencies before executing the fixture.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "contract-real-lazy-ts-import-c",
+    "file": "scripts/package-contract/fixture/real/src/lazy.ts",
+    "type": "error",
+    "message": "Undeclared dependency on @mincho-js-proof/real-c",
+    "source": "export { className as lazy } from \"@mincho-js-proof/real-c\";",
+    "count": 1,
+    "reason": "This fixture is copied into isolated npm and strict PnP consumers. scripts/package-contract/real-producers.ts packs this real producer, and index.ts declares every packed package in the generated consumer dependencies before executing the fixture.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "contract-real-local-css-ts-import-d",
+    "file": "scripts/package-contract/fixture/real/src/local.css.ts",
+    "type": "error",
+    "message": "Undeclared dependency on @mincho-js-proof/real-d",
+    "source": "import { preset } from \"@mincho-js-proof/real-d/preset\";",
+    "count": 1,
+    "reason": "This fixture is copied into isolated npm and strict PnP consumers. scripts/package-contract/real-producers.ts packs this real producer, and index.ts declares every packed package in the generated consumer dependencies before executing the fixture.",
+    "expires": "2026-12-31"
+  },
+  {
     "id": "examples-react-babel-package-build-peer-01",
     "file": "examples/react-babel/package.json",
     "type": "error",
@@ -907,26 +957,6 @@
     "source": "loader: \"js\",",
     "count": 1,
     "reason": "This regression fixture names a built-in esbuild syntax or text loader; the string is not a Webpack loader package or a dependency lookup.",
-    "expires": "2026-12-31"
-  },
-  {
-    "id": "contract-index-node-modules-02",
-    "file": "scripts/package-contract/index.ts",
-    "type": "warning",
-    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
-    "source": "join(consumerRoot, \"node_modules\", \"vite\", \"bin\", \"vite.js\"),",
-    "count": 1,
-    "reason": "The package contract deliberately installs and inspects an isolated npm node_modules consumer, separate from the PnP workspace.",
-    "expires": "2026-12-31"
-  },
-  {
-    "id": "contract-index-node-modules-03",
-    "file": "scripts/package-contract/index.ts",
-    "type": "warning",
-    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
-    "source": "\"node_modules/typescript/bin/tsc\",",
-    "count": 1,
-    "reason": "The package contract deliberately invokes the TypeScript compiler installed in its isolated npm consumer to check published declarations; it does not resolve workspace dependencies through node_modules.",
     "expires": "2026-12-31"
   }
 ]

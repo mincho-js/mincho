@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { realpath } from "node:fs/promises";
-import { join, relative } from "node:path";
+import { join, matchesGlob, relative } from "node:path";
 import { installedPackageDirectory } from "./artifact-sources.js";
 import { diamondPackageNames } from "./diamond-artifacts.js";
 import type { PackedPackage, PackageManifest } from "./types.js";
@@ -24,6 +24,7 @@ function assertRecord(
 function exportTargets(value: unknown): string[] {
   if (typeof value === "string") return [value];
   if (typeof value !== "object" || value === null) return [];
+
   return Object.values(value).flatMap(exportTargets);
 }
 
@@ -46,11 +47,36 @@ export function assertStyleExport(manifest: PackageManifest): void {
     manifest.exports,
     `${manifest.name} has no exports map for ./style.css`
   );
+
   const style = manifest.exports["./style.css"];
   assertContract(
     exportTargets(style).some((target) => target.endsWith(".css")),
     `${manifest.name} is missing the ./style.css export`
   );
+
+  for (const target of exportTargets(style).filter((entry) =>
+    entry.endsWith(".css")
+  )) {
+    // Omission means all files have side effects. Explicit false or an array
+    // omitting the exported stylesheet permits bundlers to drop its import.
+    const preserved =
+      manifest.sideEffects === undefined ||
+      manifest.sideEffects === true ||
+      (Array.isArray(manifest.sideEffects) &&
+        manifest.sideEffects.some(
+          (pattern: unknown) =>
+            typeof pattern === "string" &&
+            matchesGlob(
+              target.replace(/^\.\//, ""),
+              pattern.replace(/^\.\//, "")
+            )
+        ));
+
+    assertContract(
+      preserved,
+      `${manifest.name} sideEffects excludes exported CSS: ${target}`
+    );
+  }
 }
 
 function assertPackageFiles(
@@ -62,6 +88,7 @@ function assertPackageFiles(
     targets.length > 0,
     `${manifest.name} has no exported targets`
   );
+
   for (const target of targets) {
     assertContract(
       target.startsWith("./") && !target.includes(".."),
@@ -72,20 +99,24 @@ function assertPackageFiles(
       `${manifest.name} export is absent from packed files: ${target}`
     );
   }
+
   const typeTargets = [manifest.types, manifest.typings, ...targets].filter(
     (target): target is string =>
       typeof target === "string" && /\.d\.(?:cts|mts|ts)$/.test(target)
   );
+
   assertContract(
     typeTargets.length > 0,
     `${manifest.name} exports no declaration file`
   );
+
   for (const target of typeTargets) {
     assertContract(
       existsSync(join(packageDirectory, target)),
       `${manifest.name} declaration file is absent: ${target}`
     );
   }
+
   if (manifest.files.some((entry) => entry.replace(/\/$/, "") === "dist")) {
     assertContract(
       existsSync(join(packageDirectory, "dist")),
@@ -100,20 +131,29 @@ export async function assertInstalledPackageContract(options: {
   readonly repoRoot: string;
 }): Promise<void> {
   const repoRealpath = await realpath(options.repoRoot);
+
   for (const packed of options.packed) {
     const directory = installedPackageDirectory(
       options.consumerRoot,
       packed.manifest.name
     );
+
     const resolvedDirectory = await realpath(directory);
     const workspaceRelativePath = relative(repoRealpath, resolvedDirectory);
     assertContract(
       workspaceRelativePath === ".." || workspaceRelativePath.startsWith("../"),
       `${packed.manifest.name} resolves into the workspace: ${resolvedDirectory}`
     );
+
     const manifest = await readPackageManifest(join(directory, "package.json"));
     assertNoWorkspaceDependencySpecs(manifest);
     assertPackageFiles(directory, manifest);
-    if (diamondPackageNames.has(manifest.name)) assertStyleExport(manifest);
+
+    if (
+      diamondPackageNames.has(manifest.name) ||
+      manifest.name.startsWith("@mincho-js-proof/real-") ||
+      manifest.name === "@examples/shared-component"
+    )
+      assertStyleExport(manifest);
   }
 }

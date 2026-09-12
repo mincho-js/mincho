@@ -1,4 +1,6 @@
 import { readdir, readFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { createRequire } from "node:module";
 import { join, relative, sep } from "node:path";
 import { diamondSelectors } from "./diamond-artifacts.js";
 import { PackageContractError } from "./types.js";
@@ -11,6 +13,21 @@ export function installedPackageDirectory(
   consumerRoot: string,
   packageName: string
 ): string {
+  const loader = join(consumerRoot, ".pnp.cjs");
+
+  if (existsSync(loader)) {
+    // Use the isolated consumer's resolver without installing its global hooks
+    // over this verifier's workspace PnP instance.
+    const pnp = createRequire(import.meta.url)(loader) as {
+      resolveToUnqualified(request: string, issuer: string): string;
+    };
+
+    return pnp.resolveToUnqualified(
+      packageName,
+      join(consumerRoot, "package.json")
+    );
+  }
+
   return join(consumerRoot, "node_modules", ...packageName.split("/"));
 }
 
@@ -29,7 +46,9 @@ async function artifactSources(
       entry.isFile() &&
       extensions.some((extension) => entry.name.endsWith(extension))
   );
+
   assertContract(files.length > 0, `No ${label} artifacts found in ${root}`);
+
   return (
     await Promise.all(
       files.map((entry) => source(join(entry.parentPath, entry.name)))
@@ -48,7 +67,9 @@ export async function jsSources(
   const files = entries.filter(
     (entry) => entry.isFile() && /\.(?:c|m)?js$/.test(entry.name)
   );
+
   assertContract(files.length > 0, `No JS artifacts found in ${root}`);
+
   return Promise.all(
     files.map(async (entry) => ({
       label: relative(root, join(entry.parentPath, entry.name))

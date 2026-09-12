@@ -36,6 +36,7 @@ export function assertVerifierFailurePaths(): void {
       }]
     }]
   })`;
+
   const exportedV5PresetFixture = `export const preset = ${v5PresetFixture};`;
   assertDecoderFailurePaths(v5PresetFixture);
   assertV5PresetOutput(
@@ -106,6 +107,21 @@ export function assertVerifierFailurePaths(): void {
         dependencies: {},
         optionalDependencies: {},
         exports: { ".": "./index.js" },
+        files: []
+      })
+  );
+  assertFailure(
+    "tree-shaken stylesheet",
+    "sideEffects excludes exported CSS",
+    () =>
+      assertStyleExport({
+        name: "@package-contract/dropped-css",
+        version: "0.0.0",
+        private: false,
+        dependencies: {},
+        optionalDependencies: {},
+        exports: { "./style.css": "./dist/style.css" },
+        sideEffects: false,
         files: []
       })
   );
