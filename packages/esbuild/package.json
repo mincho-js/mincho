@@ -56,7 +56,7 @@
     "@mincho-js/integration": "workspace:^",
     "@vanilla-extract/esbuild-plugin": "^2.3.22",
     "@vanilla-extract/integration": "^8.0.10",
-    "esbuild": "^0.27.7"
+    "esbuild": "^0.28.1"
   },
   "devDependencies": {
     "@mincho-js/css": "workspace:^",
