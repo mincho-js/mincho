@@ -128,7 +128,7 @@
     "tsconfig-custom": "workspace:^",
     "vite": "^7.3.3",
     "vite-config-custom": "workspace:^",
-    "vitest": "^4.1.5"
+    "vitest": "^5.0.0"
   },
   "peerDependencies": {
     "@vanilla-extract/css": "*"

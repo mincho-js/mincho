@@ -29,7 +29,7 @@
     "vite-plugin-dts-build": "^0.2.3",
     "vite-plugin-externalize-deps": "^0.10.0",
     "vite-tsconfig-paths": "^6.1.1",
-    "vitest": "^4.1.5"
+    "vitest": "^5.0.0"
   },
   "dependencies": {
     "typescript": "^5.9.3",
