@@ -15,6 +15,13 @@ import {
   type BabelTransformSourceOptions,
   type InternalStaticCssEvalSourceProvider
 } from "@mincho-js/integration";
+import {
+  collectDefineRulesPackageGraph as collectPurePackageGraph,
+  getDefineRulesPackageStyleSpecifiers,
+  mergeDefineRulesPackageGraphs,
+  type DefineRulesPackageGraph,
+  type DefineRulesPackageGraphArtifact
+} from "@mincho-js/integration/package-graph";
 import { minchoEsbuildPlugins } from "@mincho-js/esbuild";
 import { minchoVitePlugin } from "@mincho-js/vite";
 import type { Plugin as EsbuildPlugin } from "esbuild";
@@ -50,6 +57,7 @@ export function collectDirectPreset() {
 
   return {
     graph: collectDefineRulesPackageGraph([preset]),
+    pureGraph: collectPurePackageGraph([preset]),
     styles: getDefineRulesAncestorStyleSpecifiers({
       instances: [{ getPresetSnapshot: () => preset }]
     })
@@ -62,4 +70,17 @@ export function collectRegistryStyles(session: DefineRulesRegistrySession) {
 
 export function collectPackedPreset(preset: typeof packedPreset) {
   return collectDefineRulesPackageGraph([preset]);
+}
+
+export function collectPackedPackageGraph(preset: typeof packedPreset): {
+  graph: DefineRulesPackageGraph;
+  styles: readonly string[];
+} {
+  const artifact: DefineRulesPackageGraphArtifact = preset;
+  const graph = mergeDefineRulesPackageGraphs([
+    collectPurePackageGraph([artifact]),
+    collectDefineRulesPackageGraph([preset])
+  ]);
+
+  return { graph, styles: getDefineRulesPackageStyleSpecifiers(graph) };
 }

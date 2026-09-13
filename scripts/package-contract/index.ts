@@ -122,6 +122,10 @@ async function main(): Promise<void> {
         });
 
       await runNode(
+        ["fixture/modules/package-graph.mjs"],
+        join(consumerRoot, "fixture", "modules")
+      );
+      await runNode(
         ["fixture/modules/runtime.mjs"],
         join(consumerRoot, "fixture", "modules")
       );

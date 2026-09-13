@@ -63,6 +63,46 @@ const realPresets = await Promise.all(
   realPackageNames.map(async (name) => (await import(`${name}/preset`)).preset)
 );
 
+const packageGraphModules = [
+  await import("@mincho-js/integration/package-graph"),
+  require("@mincho-js/integration/package-graph")
+];
+
+const packageGraphs = packageGraphModules.map((analysis) =>
+  analysis.collectDefineRulesPackageGraph([realPresets[3]], {
+    owner: join(import.meta.dirname, "packed-preset.ts")
+  })
+);
+
+assert.deepEqual(
+  packageGraphs[0],
+  packageGraphs[1],
+  "ESM and CommonJS graph subpaths must collect the same package constraints"
+);
+
+for (const analysis of packageGraphModules) {
+  const graph = analysis.mergeDefineRulesPackageGraphs(packageGraphs);
+
+  assert.deepEqual(
+    analysis.getDefineRulesPackageStyleSpecifiers(graph),
+    realPackageNames.slice(0, -1).map((name) => `${name}/style.css`)
+  );
+  assert.deepEqual(
+    analysis.getDefineRulesPackageStyleSpecifiers(graph, {
+      excludePackages: []
+    }),
+    realPackageNames.map((name) => `${name}/style.css`)
+  );
+  assert.ok(
+    graph.dependencies.every((edge) =>
+      edge.witnesses.every((witness) =>
+        witness.owner.endsWith("packed-preset.ts")
+      )
+    ),
+    "Conditional graph subpaths must preserve owner witnesses"
+  );
+}
+
 const localColor = (preset) =>
   preset.nodes
     .find((node) => node.nodeId === preset.rootNodeId)

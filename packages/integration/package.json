@@ -31,6 +31,16 @@
         "types": "./dist/cjs/index.d.cts",
         "default": "./dist/cjs/index.cjs"
       }
+    },
+    "./package-graph": {
+      "import": {
+        "types": "./dist/esm/package-graph.d.ts",
+        "default": "./dist/esm/package-graph.mjs"
+      },
+      "require": {
+        "types": "./dist/cjs/package-graph.d.cts",
+        "default": "./dist/cjs/package-graph.cjs"
+      }
     }
   },
   "publishConfig": {
