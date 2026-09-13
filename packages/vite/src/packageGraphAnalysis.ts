@@ -1,0 +1,293 @@
+import { dirname, extname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { Worker as NodeWorker } from "node:worker_threads";
+import type { DefineRulesPackageGraph } from "@mincho-js/integration/package-graph";
+import {
+  analyzeRegisteredPackageGraphs,
+  restorePackageGraphError,
+  type PackageGraphAnalysisRequest,
+  type PackageGraphAnalysisResult,
+  type PackageGraphWorkerCommand,
+  type PackageGraphWorkerResponse
+} from "./packageGraphAnalysisCore.js";
+
+export type {
+  PackageGraphAnalysisRequest,
+  PackageGraphAnalysisResult
+} from "./packageGraphAnalysisCore.js";
+
+export type PackageGraphAnalysisMode = "worker" | "inline";
+
+export interface PackageGraphAnalysisOptions {
+  readonly mode?: PackageGraphAnalysisMode;
+}
+
+export interface PackageGraphAnalysis {
+  /** Clears module records and invalidates pending requests from older builds. */
+  beginGeneration(): number;
+
+  /** Obsolete asynchronous registrations are ignored and return false. */
+  register(options: {
+    readonly generation: number;
+    readonly moduleId: string;
+    readonly graph: DefineRulesPackageGraph;
+  }): boolean;
+
+  remove(options: {
+    readonly generation: number;
+    readonly moduleId: string;
+  }): boolean;
+
+  /** Missing records denote ordinary modules without a Mincho package graph. */
+  analyze(
+    request: PackageGraphAnalysisRequest
+  ): Promise<PackageGraphAnalysisResult>;
+
+  /** Terminal and idempotent; watch builds should close only when watching ends. */
+  close(): Promise<void>;
+}
+
+interface PendingAnalysis {
+  readonly generation: number;
+  readonly resolve: (result: PackageGraphAnalysisResult) => void;
+  readonly reject: (error: Error) => void;
+}
+
+function staleGenerationError(): Error {
+  const error = new Error(
+    "Package graph analysis generation is no longer current"
+  );
+
+  error.name = "PackageGraphAnalysisStaleGenerationError";
+
+  return error;
+}
+
+function closedError(): Error {
+  const error = new Error("Package graph analysis is closed");
+  error.name = "PackageGraphAnalysisClosedError";
+
+  return error;
+}
+
+function workerFileName(): string {
+  // Rollup rewrites this URL for the CommonJS runtime artifact.
+  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+  // @ts-ignore: declaration builds also check this source with a CommonJS target.
+  const moduleFile = fileURLToPath(import.meta.url);
+  const extension = extname(moduleFile);
+
+  // Source-level tests use the same worker artifact as installed consumers.
+  // The workspace test pipeline builds this entry before running those tests.
+  if (extension === ".ts") {
+    return join(dirname(moduleFile), "../dist/esm/packageGraphWorker.mjs");
+  }
+
+  return join(
+    dirname(moduleFile),
+    `packageGraphWorker${extension === ".cjs" ? ".cjs" : ".mjs"}`
+  );
+}
+
+export function createPackageGraphAnalysis(
+  options: PackageGraphAnalysisOptions = {}
+): PackageGraphAnalysis {
+  const mode = options.mode ?? "worker";
+  if (mode !== "worker" && mode !== "inline") {
+    throw new TypeError("Package graph analysis mode must be worker or inline");
+  }
+
+  const graphs = new Map<string, DefineRulesPackageGraph>();
+  const pending = new Map<number, PendingAnalysis>();
+  let generation = 0;
+  let requestId = 0;
+  let worker: NodeWorker | undefined;
+  let workerFailure: Error | undefined;
+  let closed = false;
+  let closing: Promise<void> | undefined;
+
+  const rejectPending = (error: Error): void => {
+    for (const request of pending.values()) request.reject(error);
+
+    pending.clear();
+    worker?.unref();
+  };
+
+  const failWorker = (instance: NodeWorker, error: unknown): void => {
+    if (worker !== instance || closed) return;
+
+    worker = undefined;
+    workerFailure = error instanceof Error ? error : new Error(String(error));
+    rejectPending(workerFailure);
+    void instance.terminate();
+  };
+
+  const finish = (response: PackageGraphWorkerResponse): void => {
+    const request = pending.get(response.requestId);
+    if (request === undefined) return;
+
+    pending.delete(response.requestId);
+
+    if (
+      response.generation !== generation ||
+      request.generation !== generation
+    ) {
+      request.reject(staleGenerationError());
+    } else if (response.type === "error") {
+      request.reject(restorePackageGraphError(response.error));
+    } else {
+      request.resolve(response.result);
+    }
+
+    if (pending.size === 0) worker?.unref();
+  };
+
+  const ensureWorker = (): NodeWorker => {
+    if (workerFailure !== undefined) throw workerFailure;
+    if (worker !== undefined) return worker;
+
+    // Keep the parent's loader arguments and environment, including strict PnP.
+    const instance = new NodeWorker(workerFileName());
+    worker = instance;
+    instance.on("message", finish);
+    instance.on("error", (error) => failWorker(instance, error));
+    instance.on("exit", (code) =>
+      failWorker(
+        instance,
+        new Error(`Package graph worker exited unexpectedly with code ${code}`)
+      )
+    );
+    instance.postMessage({
+      type: "reset",
+      generation
+    } satisfies PackageGraphWorkerCommand);
+    instance.unref();
+
+    return instance;
+  };
+
+  const send = (command: PackageGraphWorkerCommand): void => {
+    const instance = ensureWorker();
+
+    try {
+      instance.postMessage(command);
+    } catch (error) {
+      const failure = error instanceof Error ? error : new Error(String(error));
+      failWorker(instance, failure);
+
+      throw failure;
+    }
+  };
+
+  return {
+    beginGeneration() {
+      if (closed) throw closedError();
+
+      generation++;
+      graphs.clear();
+      rejectPending(staleGenerationError());
+      workerFailure = undefined;
+
+      if (worker !== undefined) send({ type: "reset", generation });
+
+      return generation;
+    },
+
+    register(record) {
+      if (closed || record.generation !== generation) return false;
+
+      if (mode === "worker") send({ type: "register", ...record });
+      else graphs.set(record.moduleId, structuredClone(record.graph));
+
+      return true;
+    },
+
+    remove(record) {
+      if (closed || record.generation !== generation) return false;
+
+      if (mode === "worker") {
+        if (worker !== undefined || workerFailure !== undefined) {
+          send({ type: "remove", ...record });
+        }
+      } else graphs.delete(record.moduleId);
+
+      return true;
+    },
+
+    analyze(request) {
+      if (closed) return Promise.reject(closedError());
+      if (request.generation !== generation) {
+        return Promise.reject(staleGenerationError());
+      }
+
+      const id = ++requestId;
+
+      return new Promise((resolve, reject) => {
+        pending.set(id, { generation, resolve, reject });
+
+        // With no registered graphs there is no worker queue to wait for.
+        if (
+          mode === "worker" &&
+          (worker !== undefined || workerFailure !== undefined)
+        ) {
+          try {
+            const instance = ensureWorker();
+            instance.ref();
+            send({ ...request, type: "analyze", requestId: id });
+          } catch (error) {
+            pending.delete(id);
+            reject(error);
+          }
+
+          return;
+        }
+
+        // Match worker request snapshots and cancellation at message boundaries.
+        const snapshot = structuredClone(request);
+        const selectedGraphs = new Map<string, DefineRulesPackageGraph>();
+
+        for (const moduleId of snapshot.moduleIds) {
+          const graph = graphs.get(moduleId);
+
+          if (graph !== undefined) selectedGraphs.set(moduleId, graph);
+        }
+
+        queueMicrotask(() => {
+          const current = pending.get(id);
+          if (current === undefined) return;
+
+          try {
+            finish({
+              type: "result",
+              generation: snapshot.generation,
+              requestId: id,
+              result: analyzeRegisteredPackageGraphs(selectedGraphs, snapshot)
+            });
+          } catch (error) {
+            pending.delete(id);
+            current.reject(
+              error instanceof Error ? error : new Error(String(error))
+            );
+          }
+        });
+      });
+    },
+
+    close() {
+      if (closing !== undefined) return closing;
+
+      closed = true;
+      graphs.clear();
+      rejectPending(closedError());
+
+      const instance = worker;
+      worker = undefined;
+      closing =
+        instance === undefined
+          ? Promise.resolve()
+          : instance.terminate().then(() => undefined);
+
+      return closing;
+    }
+  };
+}
