@@ -24,6 +24,7 @@ import {
 } from "@mincho-js/integration/package-graph";
 import { minchoEsbuildPlugins } from "@mincho-js/esbuild";
 import { minchoVitePlugin } from "@mincho-js/vite";
+import type { MinchoVitePluginOptions } from "@mincho-js/vite";
 import type { Plugin as EsbuildPlugin } from "esbuild";
 import type { Plugin as VitePlugin } from "vite";
 
@@ -45,7 +46,12 @@ const esbuildPlugins: EsbuildPlugin[] = minchoEsbuildPlugins({
   jsxCssProp: true
 });
 
-const vitePlugin: VitePlugin = minchoVitePlugin({ jsxCssProp: true });
+const viteOptions: MinchoVitePluginOptions = {
+  jsxCssProp: true,
+  libraryCss: { fileName: "style.css", analysis: "worker" }
+};
+
+const vitePlugin: VitePlugin = minchoVitePlugin(viteOptions);
 
 export { options, provider, babelPlugin, esbuildPlugins, vitePlugin };
 

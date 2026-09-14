@@ -1,5 +1,6 @@
 import {
   type BabelOptions,
+  type DefineRulesPackageGraph,
   babelTransformSource,
   type InternalStaticCssEvalSourceResolution as StaticCssEvalSourceResolution,
   type InternalStaticCssEvalSourceIdentity as StaticCssEvalSourceIdentity,
@@ -32,7 +33,6 @@ import { normalizePath } from "@rollup/pluginutils";
 import { dirname, join, posix, resolve } from "node:path";
 import { AsyncLocalStorage } from "node:async_hooks";
 import type {
-  ChunkMetadata,
   DevEnvironment,
   Plugin,
   ResolvedConfig,
@@ -41,19 +41,17 @@ import type {
 } from "vite";
 import * as fs from "node:fs";
 import { fileURLToPath } from "node:url";
-import { findChunkDirectivePrologueEnd } from "./chunkPrologue.js";
+import { createLibraryCssLinker } from "./libraryCssLinker.js";
+import { createPackageGraphAnalysis } from "./packageGraphAnalysis.js";
 
 type PluginContext = Rollup.PluginContext;
 
 type OutputPluginContext = Rollup.PluginContext;
 
-type OutputBundleItem =
-  | Rollup.OutputAsset
-  | (Rollup.OutputChunk & { viteMetadata?: ChunkMetadata });
-
 interface LibraryCssSidecarContract {
   readonly ancestorStyleSpecifiers: readonly string[];
   readonly hasOwnCss: boolean;
+  readonly packageGraph?: DefineRulesPackageGraph;
 }
 
 // Match both the old format and the new virtual format
@@ -144,9 +142,16 @@ interface StaticCssEvalCacheKey {
   parserVersion?: string | number;
 }
 
-interface MinchoVitePluginOptions {
+export interface MinchoVitePluginOptions {
   babel?: MinchoBabelOptions;
   jsxCssProp?: boolean;
+  libraryCss?: {
+    /** Exact output-relative CSS filename when build.cssCodeSplit is false. */
+    fileName?: string;
+
+    /** Analyze package graphs in a reusable worker, or in the main thread. */
+    analysis?: "worker" | "inline";
+  };
 }
 
 export function minchoVitePlugin(_options?: MinchoVitePluginOptions) {
@@ -210,11 +215,73 @@ function createMinchoViteEnvironmentPlugin(_options?: MinchoVitePluginOptions) {
     LibraryCssSidecarContract
   >();
 
+  let graphAnalysis = createPackageGraphAnalysis({
+    mode: _options?.libraryCss?.analysis ?? "worker"
+  });
+
+  let graphGeneration = graphAnalysis.beginGeneration();
+  let graphAnalysisClosed = false;
+  let transformEpoch = Symbol("build");
+  const outputLinkers = new Map<
+    object,
+    ReturnType<typeof createLibraryCssLinker>
+  >();
+
+  const validatedUnsplitCssByDirectory = new Map<string, Set<string>>();
+
+  function abortOutputLinkers(error: Error): void {
+    for (const linker of outputLinkers.values()) linker.abort(error);
+
+    outputLinkers.clear();
+  }
+
+  function setLibraryCssContract(
+    id: string,
+    contract: LibraryCssSidecarContract
+  ): void {
+    const previous = libraryCssSidecarContracts.get(id);
+    libraryCssSidecarContracts.set(id, contract);
+
+    if (contract.packageGraph) {
+      graphAnalysis.register({
+        generation: graphGeneration,
+        moduleId: id,
+        graph: contract.packageGraph
+      });
+    } else if (previous?.packageGraph) {
+      graphAnalysis.remove({ generation: graphGeneration, moduleId: id });
+    }
+  }
+
+  function deleteLibraryCssContract(id: string): void {
+    const previous = libraryCssSidecarContracts.get(id);
+    libraryCssSidecarContracts.delete(id);
+
+    if (previous?.packageGraph) {
+      graphAnalysis.remove({ generation: graphGeneration, moduleId: id });
+    }
+  }
+
+  function libraryCssLinker(
+    outputOptions: object
+  ): ReturnType<typeof createLibraryCssLinker> {
+    let linker = outputLinkers.get(outputOptions);
+
+    if (!linker) {
+      linker = createLibraryCssLinker({
+        cssCodeSplit: config.build.cssCodeSplit === true,
+        fileName: _options?.libraryCss?.fileName
+      });
+      outputLinkers.set(outputOptions, linker);
+    }
+
+    return linker;
+  }
+
   const virtualExt = ".vanilla.css";
   const virtualCssImportPrefix = "mincho-virtual-css:";
   const virtualCssIdPrefix = "\0mincho-virtual-css:";
   let rootRealpath = "";
-  let libraryCssAssetFileName: string | undefined;
 
   function invalidateViteModule(id: string): void {
     if (!server) {
@@ -275,7 +342,7 @@ function createMinchoViteEnvironmentPlugin(_options?: MinchoVitePluginOptions) {
   }
 
   function clearGeneratedCssForOwner(ownerId: string): void {
-    libraryCssSidecarContracts.delete(ownerId);
+    deleteLibraryCssContract(ownerId);
 
     const cssPaths = ownerToCssPaths.get(ownerId);
     if (!cssPaths) {
@@ -283,7 +350,7 @@ function createMinchoViteEnvironmentPlugin(_options?: MinchoVitePluginOptions) {
     }
 
     for (const cssPath of cssPaths) {
-      libraryCssSidecarContracts.delete(cssPath);
+      deleteLibraryCssContract(cssPath);
       resolvers.delete(cssPath);
       resolverCache.delete(cssPath);
       idToPluginData.delete(cssPath);
@@ -351,27 +418,24 @@ function createMinchoViteEnvironmentPlugin(_options?: MinchoVitePluginOptions) {
   }
 
   function collectLibraryCssSidecarContract(
-    entryChunk: Extract<OutputBundleItem, { type: "chunk" }>,
-    bundle: Record<string, OutputBundleItem>,
+    entryChunk: Rollup.RenderedChunk,
+    chunks: Record<string, Rollup.RenderedChunk>,
     getModuleInfo: OutputPluginContext["getModuleInfo"]
   ): {
     ancestorStyleSpecifiers: string[];
-    cssAssetFileNames: string[];
+    graphModuleIds: string[];
     hasOwnCss: boolean;
   } {
     const ancestorStyleSpecifiers: string[] = [];
-    const cssAssetFileNames: string[] = [];
+    const graphModuleIds: string[] = [];
     const seenModuleIds = new Set<string>();
     const seenChunkFileNames = new Set<string>();
-    const seenCssAssetFileNames = new Set<string>();
     const seenStyleSpecifiers = new Set<string>();
     const virtualCssOwnerIds = new Set<string>();
     let hasOwnCss = false;
 
-    for (const output of Object.values(bundle)) {
-      if (output.type !== "chunk") continue;
-
-      for (const moduleId of output.moduleIds ?? []) {
+    for (const output of Object.values(chunks)) {
+      for (const moduleId of output.moduleIds) {
         if (moduleId.endsWith(virtualExt)) {
           virtualCssOwnerIds.add(moduleId.slice(0, -virtualExt.length));
         }
@@ -397,11 +461,19 @@ function createMinchoViteEnvironmentPlugin(_options?: MinchoVitePluginOptions) {
           }
 
           seenModuleIds.add(current.moduleId);
-          hasOwnCss ||=
-            current.moduleId.endsWith(".css") ||
-            virtualCssOwnerIds.has(current.moduleId);
-          current.importedIds =
-            getModuleInfo(current.moduleId)?.importedIds ?? [];
+
+          const moduleInfo = getModuleInfo(current.moduleId);
+
+          if (!moduleInfo?.isExternal) {
+            hasOwnCss ||=
+              (/\.(?:css|scss|sass|less|styl|stylus)(?:\?|$)/.test(
+                current.moduleId
+              ) &&
+                !/[?&](?:inline|raw|url)(?:[=&]|$)/.test(current.moduleId)) ||
+              virtualCssOwnerIds.has(current.moduleId);
+          }
+
+          current.importedIds = moduleInfo?.importedIds ?? [];
         }
 
         const importedId = current.importedIds[current.index++];
@@ -422,6 +494,11 @@ function createMinchoViteEnvironmentPlugin(_options?: MinchoVitePluginOptions) {
 
         hasOwnCss ||= contract.hasOwnCss;
 
+        if (contract.packageGraph) {
+          graphModuleIds.push(current.moduleId);
+          continue;
+        }
+
         for (const specifier of contract.ancestorStyleSpecifiers) {
           if (!seenStyleSpecifiers.has(specifier)) {
             seenStyleSpecifiers.add(specifier);
@@ -431,9 +508,7 @@ function createMinchoViteEnvironmentPlugin(_options?: MinchoVitePluginOptions) {
       }
     };
 
-    const visitChunk = (
-      chunk: Extract<OutputBundleItem, { type: "chunk" }>
-    ): void => {
+    const visitChunk = (chunk: Rollup.RenderedChunk): void => {
       const worklist = [{ chunk, index: -1 }];
 
       while (worklist.length > 0) {
@@ -447,13 +522,10 @@ function createMinchoViteEnvironmentPlugin(_options?: MinchoVitePluginOptions) {
 
           seenChunkFileNames.add(current.chunk.fileName);
 
-          const moduleIds =
-            current.chunk.moduleIds ??
-            (current.chunk.facadeModuleId === null
-              ? []
-              : [current.chunk.facadeModuleId]);
+          // Walk the declared static import graph, not transform completion order.
+          if (current.chunk.facadeModuleId) visit(current.chunk.facadeModuleId);
 
-          for (const moduleId of moduleIds) visit(moduleId);
+          for (const moduleId of current.chunk.moduleIds) visit(moduleId);
 
           current.index = 0;
         }
@@ -461,9 +533,9 @@ function createMinchoViteEnvironmentPlugin(_options?: MinchoVitePluginOptions) {
         const importedFileName = current.chunk.imports?.[current.index++];
 
         if (importedFileName !== undefined) {
-          const importedChunk = bundle[importedFileName];
+          const importedChunk = chunks[importedFileName];
 
-          if (importedChunk?.type === "chunk") {
+          if (importedChunk) {
             worklist.push({ chunk: importedChunk, index: -1 });
           }
 
@@ -471,16 +543,6 @@ function createMinchoViteEnvironmentPlugin(_options?: MinchoVitePluginOptions) {
         }
 
         worklist.pop();
-
-        for (const cssAssetFileName of current.chunk.viteMetadata
-          ?.importedCss ?? []) {
-          if (!seenCssAssetFileNames.has(cssAssetFileName)) {
-            seenCssAssetFileNames.add(cssAssetFileName);
-            cssAssetFileNames.push(cssAssetFileName);
-          }
-        }
-
-        hasOwnCss ||= (current.chunk.viteMetadata?.importedCss.size ?? 0) > 0;
       }
     };
 
@@ -488,7 +550,7 @@ function createMinchoViteEnvironmentPlugin(_options?: MinchoVitePluginOptions) {
 
     return {
       ancestorStyleSpecifiers,
-      cssAssetFileNames,
+      graphModuleIds,
       hasOwnCss
     };
   }
@@ -502,8 +564,31 @@ function createMinchoViteEnvironmentPlugin(_options?: MinchoVitePluginOptions) {
       sequential: true,
 
       async handler(this: PluginContext) {
-        libraryCssSidecarContracts.clear();
-        libraryCssAssetFileName = undefined;
+        transformEpoch = Symbol("build");
+
+        if (graphAnalysisClosed) {
+          graphAnalysis = createPackageGraphAnalysis({
+            mode: _options?.libraryCss?.analysis ?? "worker"
+          });
+          graphAnalysisClosed = false;
+        }
+
+        graphGeneration = graphAnalysis.beginGeneration();
+
+        // Rollup may reuse unchanged transforms during a watch rebuild.
+        // Only changed owners are invalidated; unreachable records are never queried.
+        for (const [id, contract] of libraryCssSidecarContracts) {
+          if (contract.packageGraph) {
+            graphAnalysis.register({
+              generation: graphGeneration,
+              moduleId: id,
+              graph: contract.packageGraph
+            });
+          }
+        }
+
+        abortOutputLinkers(new Error("Vite started a new build generation"));
+        validatedUnsplitCssByDirectory.clear();
 
         if (config.build.lib && this.load) {
           const entry = config.build.lib.entry;
@@ -691,6 +776,7 @@ function createMinchoViteEnvironmentPlugin(_options?: MinchoVitePluginOptions) {
     ) {
       if (id.startsWith("\0")) return;
 
+      const epoch = transformEpoch;
       const fileId = normalizeStaticCssEvalFileId(id, rootRealpath);
 
       // A virtual provider may transform its owner while loading its source.
@@ -723,6 +809,8 @@ function createMinchoViteEnvironmentPlugin(_options?: MinchoVitePluginOptions) {
             externals: []
           });
 
+          if (epoch !== transformEpoch) return null;
+
           for (const file of watchFiles) {
             if (extractedCssFileFilter(file)) {
               continue;
@@ -748,6 +836,8 @@ function createMinchoViteEnvironmentPlugin(_options?: MinchoVitePluginOptions) {
               fileScope: { filePath: string };
               source: string;
             }) => {
+              if (epoch !== transformEpoch) return "";
+
               hasGeneratedVirtualCss = true;
 
               const id: string = `${fileScope.filePath}${virtualExt}`;
@@ -775,6 +865,8 @@ function createMinchoViteEnvironmentPlugin(_options?: MinchoVitePluginOptions) {
             }
           });
 
+          if (epoch !== transformEpoch) return null;
+
           if (
             config.command === "build" &&
             config.build.lib &&
@@ -783,19 +875,20 @@ function createMinchoViteEnvironmentPlugin(_options?: MinchoVitePluginOptions) {
           ) {
             const contract: LibraryCssSidecarContract = {
               ancestorStyleSpecifiers: registryResult.ancestorStyleSpecifiers,
-              hasOwnCss: hasGeneratedVirtualCss
+              hasOwnCss: hasGeneratedVirtualCss,
+              packageGraph: registryResult.packageGraph
             };
 
-            libraryCssSidecarContracts.set(id, contract);
+            setLibraryCssContract(id, contract);
 
             if (ownerToCssPaths.get(moduleInfo.originalPath)?.size === 1) {
-              libraryCssSidecarContracts.set(moduleInfo.originalPath, contract);
+              setLibraryCssContract(moduleInfo.originalPath, contract);
             } else {
-              libraryCssSidecarContracts.delete(moduleInfo.originalPath);
+              deleteLibraryCssContract(moduleInfo.originalPath);
             }
           } else {
-            libraryCssSidecarContracts.delete(id);
-            libraryCssSidecarContracts.delete(moduleInfo.originalPath);
+            deleteLibraryCssContract(id);
+            deleteLibraryCssContract(moduleInfo.originalPath);
           }
 
           return registryResult.source;
@@ -867,6 +960,8 @@ function createMinchoViteEnvironmentPlugin(_options?: MinchoVitePluginOptions) {
 
           throw error;
         }
+
+        if (epoch !== transformEpoch) return null;
 
         const {
           code: transformedCode,
@@ -943,143 +1038,136 @@ function createMinchoViteEnvironmentPlugin(_options?: MinchoVitePluginOptions) {
       return null;
     },
 
-    generateBundle: {
+    renderStart(outputOptions) {
+      if (
+        config.command === "build" &&
+        config.build.lib &&
+        (outputOptions.format === "es" || outputOptions.format === "cjs")
+      ) {
+        libraryCssLinker(outputOptions);
+      }
+    },
+
+    renderChunk: {
       order: "post",
 
-      async handler(outputOptions, bundle) {
+      async handler(code, chunk, outputOptions, meta) {
         if (
           config.command !== "build" ||
           !config.build.lib ||
           (outputOptions.format !== "es" && outputOptions.format !== "cjs")
-        ) {
-          return;
-        }
+        )
+          return null;
 
-        const cssAssets = Object.values(bundle).filter(
-          (output): output is Extract<OutputBundleItem, { type: "asset" }> =>
-            output.type === "asset" && output.fileName.endsWith(".css")
-        );
+        const linker = libraryCssLinker(outputOptions);
 
-        const entryChunks = Object.values(bundle).filter(
-          (output) => output.type === "chunk" && output.isEntry
-        );
+        try {
+          let ancestorStyleSpecifiers: string[] = [];
+          let hasOwnCss = false;
 
-        for (const chunk of entryChunks) {
-          if (chunk.type !== "chunk") continue;
-
-          const entryId = chunk.facadeModuleId;
-          if (entryId === null) continue;
-
-          const {
-            ancestorStyleSpecifiers,
-            cssAssetFileNames: collectedCssAssetFileNames,
-            hasOwnCss
-          } = collectLibraryCssSidecarContract(
-            chunk,
-            bundle,
-            this.getModuleInfo
-          );
-
-          const cssAssetFileNames =
-            config.build.cssCodeSplit === true
-              ? collectedCssAssetFileNames
-              : hasOwnCss
-                ? (() => {
-                    const cssName = `${(config.build.lib && config.build.lib.cssFileName) || "style"}.css`;
-                    const emittedCssAssetFileNames = cssAssets
-                      .filter(
-                        (asset) =>
-                          asset.originalFileNames?.includes("style.css") ||
-                          asset.names?.includes(cssName) ||
-                          asset.fileName === cssName
-                      )
-                      .map((asset) => asset.fileName);
-
-                    const [emittedCssAssetFileName] = emittedCssAssetFileNames;
-
-                    if (
-                      emittedCssAssetFileNames.length === 1 &&
-                      emittedCssAssetFileName !== undefined
-                    ) {
-                      libraryCssAssetFileName = emittedCssAssetFileName;
-                    }
-
-                    return emittedCssAssetFileNames.length === 0 &&
-                      libraryCssAssetFileName !== undefined
-                      ? [libraryCssAssetFileName]
-                      : emittedCssAssetFileNames;
-                  })()
-                : [];
-          if (
-            (hasOwnCss && cssAssetFileNames.length === 0) ||
-            (config.build.cssCodeSplit !== true && cssAssetFileNames.length > 1)
-          ) {
-            throw new Error(
-              `[mincho-css-vite] Library CSS sidecar for entry chunk ${chunk.fileName} expected one emitted CSS asset for unsplit output or at least one for split output, found ${cssAssetFileNames.length}`
+          if (chunk.isEntry || chunk.isDynamicEntry) {
+            const contract = collectLibraryCssSidecarContract(
+              chunk,
+              meta.chunks,
+              this.getModuleInfo
             );
-          }
-          if (
-            ancestorStyleSpecifiers.length === 0 &&
-            cssAssetFileNames.length === 0
-          ) {
-            continue;
-          }
 
-          const resolvedAncestors = await Promise.all(
-            ancestorStyleSpecifiers.map((specifier) =>
-              this.resolve(specifier, chunk.facadeModuleId ?? undefined, {
-                skipSelf: true
-              })
-            )
-          );
+            hasOwnCss = contract.hasOwnCss;
 
-          for (const [index, resolved] of resolvedAncestors.entries()) {
-            if (resolved === null) {
-              throw new Error(
-                `[mincho-css-vite] Library CSS sidecar ${ancestorStyleSpecifiers[index]} required by entry chunk ${chunk.fileName} is not exported by its package`
-              );
+            const analyzed =
+              contract.graphModuleIds.length > 0
+                ? await graphAnalysis.analyze({
+                    generation: graphGeneration,
+                    moduleIds: contract.graphModuleIds
+                  })
+                : undefined;
+
+            ancestorStyleSpecifiers = [
+              ...new Set([
+                ...(analyzed?.styleSpecifiers ?? []),
+                ...contract.ancestorStyleSpecifiers
+              ])
+            ];
+
+            const resolvedAncestors = await Promise.all(
+              ancestorStyleSpecifiers.map((specifier) =>
+                this.resolve(specifier, chunk.facadeModuleId ?? undefined, {
+                  skipSelf: true
+                })
+              )
+            );
+
+            for (const [index, resolved] of resolvedAncestors.entries()) {
+              if (resolved === null)
+                throw new Error(
+                  `[mincho-css-vite] Library CSS sidecar ${ancestorStyleSpecifiers[index]} required by entry chunk ${chunk.fileName} is not exported by its package`
+                );
             }
           }
 
-          for (const cssAssetFileName of cssAssetFileNames) {
-            if (
-              config.build.cssCodeSplit === true &&
-              !cssAssets.some((asset) => asset.fileName === cssAssetFileName)
-            ) {
-              throw new Error(
-                `[mincho-css-vite] Library CSS sidecar for entry chunk ${chunk.fileName} references missing CSS asset ${cssAssetFileName}`
-              );
-            }
-          }
-
-          const ownStyleSpecifiers = cssAssetFileNames.map(
-            (cssAssetFileName) => {
-              const relativeCssPath = posix.relative(
-                posix.dirname(chunk.fileName),
-                cssAssetFileName
-              );
-
-              return relativeCssPath.startsWith(".")
-                ? relativeCssPath
-                : `./${relativeCssPath}`;
-            }
+          return await linker.renderChunk({
+            code,
+            chunk,
+            chunks: meta.chunks,
+            format: outputOptions.format,
+            ancestorStyleSpecifiers,
+            hasOwnCss
+          });
+        } catch (error) {
+          linker.abort(
+            error instanceof Error ? error : new Error(String(error))
           );
 
-          const styleSpecifiers = [
-            ...ancestorStyleSpecifiers,
-            ...ownStyleSpecifiers
-          ];
-
-          const statements = styleSpecifiers.map((specifier) =>
-            outputOptions.format === "cjs"
-              ? `require(${JSON.stringify(specifier)});`
-              : `import ${JSON.stringify(specifier)};`
-          );
-
-          const prologueEnd = findChunkDirectivePrologueEnd(chunk.code);
-          chunk.code = `${chunk.code.slice(0, prologueEnd)}${statements.join("\n")}\n${chunk.code.slice(prologueEnd)}`;
+          throw error;
         }
       }
+    },
+    generateBundle: {
+      order: "post",
+
+      handler(outputOptions, bundle) {
+        // Vite owns final asset naming, hashing and source-map composition.
+        const directory = resolve(
+          config.root,
+          outputOptions.dir ??
+            (outputOptions.file
+              ? dirname(outputOptions.file)
+              : (config.build.outDir ?? "dist"))
+        );
+
+        let validatedUnsplitCss = validatedUnsplitCssByDirectory.get(directory);
+
+        if (!validatedUnsplitCss) {
+          validatedUnsplitCss = new Set();
+          validatedUnsplitCssByDirectory.set(directory, validatedUnsplitCss);
+        }
+
+        outputLinkers
+          .get(outputOptions)
+          ?.validateBundle(bundle, { validatedUnsplitCss });
+        outputLinkers.delete(outputOptions);
+      }
+    },
+
+    renderError(error) {
+      abortOutputLinkers(error ?? new Error("Vite rendering failed"));
+    },
+
+    async closeBundle() {
+      transformEpoch = Symbol("closed");
+      abortOutputLinkers(new Error("Vite bundle closed"));
+
+      if (!config.build.watch) {
+        graphAnalysisClosed = true;
+        await graphAnalysis.close();
+      }
+    },
+
+    async closeWatcher() {
+      transformEpoch = Symbol("closed");
+      abortOutputLinkers(new Error("Vite watcher closed"));
+      graphAnalysisClosed = true;
+      await graphAnalysis.close();
     }
   } satisfies Plugin;
 }
@@ -1677,6 +1765,19 @@ if (import.meta.vitest) {
       | null
       | { code: string; map?: string }
       | Promise<string | null | { code: string; map?: string }>;
+    closeWatcher?: () => Promise<void>;
+    renderChunk?: {
+      order: "post";
+      handler: (
+        this: OutputPluginContext,
+        code: string,
+        chunk: Extract<OutputBundleItem, { type: "chunk" }>,
+        options: { format: string },
+        meta: {
+          chunks: Record<string, Extract<OutputBundleItem, { type: "chunk" }>>;
+        }
+      ) => Promise<{ code: string; map?: unknown } | null>;
+    };
     generateBundle?: {
       order: "post";
       handler: (
@@ -2249,13 +2350,14 @@ if (import.meta.vitest) {
         root,
         configFile: false,
         logLevel: "silent",
-        plugins: [minchoVitePlugin()],
+        plugins: [minchoVitePlugin({ libraryCss: { fileName: "style.css" } })],
         build: {
           cssMinify: false,
           emptyOutDir: false,
           lib: {
             entry: entryPath,
             fileName: "index",
+            cssFileName: "style",
             formats: ["es"]
           },
           minify: false,
@@ -2376,7 +2478,15 @@ if (import.meta.vitest) {
     resolve?: PluginContext["resolve"];
     server?: ViteDevServer;
   } = {}) {
-    const plugin = minchoVitePlugin(pluginOptions) as unknown as Plugin;
+    const plugin = minchoVitePlugin({
+      ...pluginOptions,
+      libraryCss: {
+        fileName: "style.css",
+        analysis: "inline",
+        ...pluginOptions?.libraryCss
+      }
+    }) as unknown as Plugin;
+
     const resolvedConfig = createResolvedConfig(configOverrides);
     const watchFiles: string[] = [];
 
@@ -2395,6 +2505,10 @@ if (import.meta.vitest) {
         });
       },
 
+      async closeWatcher() {
+        await plugin.closeWatcher?.();
+      },
+
       async load(id: string) {
         return plugin.load?.(id);
       },
@@ -2406,12 +2520,44 @@ if (import.meta.vitest) {
           id: "/style.css"
         })
       ) {
+        const context = {
+          getModuleInfo: getModuleInfo ?? (() => null),
+          resolve: resolveOutputImport
+        };
+
+        const outputOptions = { format };
+        const chunks: Record<
+          string,
+          Extract<OutputBundleItem, { type: "chunk" }>
+        > = {};
+
+        for (const [fileName, output] of Object.entries(bundle)) {
+          if (output.type !== "chunk") continue;
+
+          output.imports ??= [];
+          output.moduleIds ??= output.facadeModuleId
+            ? [output.facadeModuleId]
+            : [];
+          chunks[fileName] = output;
+        }
+
+        await Promise.all(
+          Object.values(chunks).map(async (chunk) => {
+            const result = await plugin.renderChunk?.handler.call(
+              context,
+              chunk.code,
+              chunk,
+              outputOptions,
+              { chunks }
+            );
+
+            if (result) chunk.code = result.code;
+          })
+        );
+
         return plugin.generateBundle?.handler.call(
-          {
-            getModuleInfo: getModuleInfo ?? (() => null),
-            resolve: resolveOutputImport
-          },
-          { format },
+          context,
+          outputOptions,
           bundle
         );
       },
@@ -4938,13 +5084,16 @@ if (import.meta.vitest) {
           root,
           configFile: false,
           logLevel: "silent",
-          plugins: [minchoVitePlugin()],
+          plugins: [
+            minchoVitePlugin({ libraryCss: { fileName: "style.css" } })
+          ],
           build: {
             cssMinify: false,
             emptyOutDir: false,
             lib: {
               entry: entryPath,
               fileName: "index",
+              cssFileName: "style",
               formats: ["es"]
             },
             minify: false,
@@ -5406,7 +5555,11 @@ if (import.meta.vitest) {
         await unsplitHarness.generateBundle("es", {
           "entries/own.mjs": unsplitOwnEntry,
           "entries/inherited.mjs": unsplitInheritedEntry,
-          "style.css": { fileName: "style.css", type: "asset" }
+          "style.css": {
+            fileName: "style.css",
+            type: "asset",
+            originalFileNames: ["style.css"]
+          }
         });
 
         expect(unsplitOwnEntry.code).toContain('import "../style.css";');
@@ -5430,7 +5583,11 @@ if (import.meta.vitest) {
 
         await unsplitHarness.generateBundle("cjs", {
           "entries/own.cjs": cjsEntry,
-          "style.css": { fileName: "style.css", type: "asset" }
+          "style.css": {
+            fileName: "style.css",
+            type: "asset",
+            originalFileNames: ["style.css"]
+          }
         });
 
         expect(cjsEntry.code).toMatch(
@@ -5448,7 +5605,11 @@ if (import.meta.vitest) {
 
         await unsplitHarness.generateBundle("iife", {
           "entries/own.iife.js": iifeEntry,
-          "style.css": { fileName: "style.css", type: "asset" }
+          "style.css": {
+            fileName: "style.css",
+            type: "asset",
+            originalFileNames: ["style.css"]
+          }
         });
 
         expect(iifeEntry.code).toBe(iifeCode);
@@ -5607,13 +5768,16 @@ if (import.meta.vitest) {
             root: fixtureRoot,
             configFile: false,
             logLevel: "silent",
-            plugins: [minchoVitePlugin()],
+            plugins: [
+              minchoVitePlugin({ libraryCss: { fileName: "style.css" } })
+            ],
             build: {
               cssMinify: false,
               emptyOutDir: false,
               lib: {
                 entry: entryPath,
                 fileName: "entry",
+                cssFileName: "style",
                 formats: [format]
               },
               minify: false,
@@ -5816,7 +5980,7 @@ if (import.meta.vitest) {
 
         const noCssChunk: OutputBundleItem = {
           code: noCssCode,
-          facadeModuleId: viteConsumerEntryPath,
+          facadeModuleId: join(viteConsumerRootPath, "no-css.ts"),
           fileName: `entries/no-css.${extension}`,
           isEntry: true,
           moduleIds: [],
@@ -5948,7 +6112,11 @@ if (import.meta.vitest) {
 
         await harness.generateBundle(format, {
           [entryChunk.fileName]: entryChunk,
-          "style.css": { fileName: "style.css", type: "asset" }
+          "style.css": {
+            fileName: "style.css",
+            type: "asset",
+            originalFileNames: ["style.css"]
+          }
         });
 
         const expectedStyleSpecifiers = [
@@ -6092,7 +6260,11 @@ if (import.meta.vitest) {
         [firstSharedChunk.fileName]: firstSharedChunk,
         [secondSharedChunk.fileName]: secondSharedChunk,
         [dynamicChunk.fileName]: dynamicChunk,
-        "style.css": { fileName: "style.css", type: "asset" }
+        "style.css": {
+          fileName: "style.css",
+          type: "asset",
+          originalFileNames: ["style.css"]
+        }
       });
 
       expect(entryChunk.code).toBe(
@@ -6167,7 +6339,11 @@ if (import.meta.vitest) {
 
       await harness.generateBundle("es", {
         [firstChunk.fileName]: firstChunk,
-        "style.css": { fileName: "style.css", type: "asset" }
+        "style.css": {
+          fileName: "style.css",
+          type: "asset",
+          originalFileNames: ["style.css"]
+        }
       });
 
       expect(firstChunk.code).toBe(
@@ -6206,6 +6382,95 @@ if (import.meta.vitest) {
       ).toBe(2);
     });
 
+    it.each([false, true])(
+      "discards deferred registry results after a new build (reopen: %s)",
+      async (reopen: boolean) => {
+        const integrationModule = await import("@mincho-js/integration");
+        vi.spyOn(integrationModule, "babelTransformSource").mockResolvedValue({
+          code: 'import "extracted_stale.css.ts"; export const entry = true;',
+          result: ["extracted_stale.css.ts", "resolver contents"]
+        });
+        vi.spyOn(integrationModule, "compile").mockResolvedValue({
+          source: "compiled source",
+          watchFiles: []
+        } as Awaited<ReturnType<typeof compile>>);
+
+        let release = () => {};
+
+        const pendingRegistry = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+
+        const registrySpy = vi
+          .spyOn(integrationModule, "processDefineRulesPresetRegistryFile")
+          .mockImplementation(
+            async (
+              options: Parameters<
+                typeof integrationModule.processDefineRulesPresetRegistryFile
+              >[0]
+            ) => {
+              await pendingRegistry;
+              await options.serializeVirtualCssPath?.({
+                fileName: options.filePath,
+                fileScope: { filePath: options.filePath },
+                source: ".stale { color: red; }"
+              });
+
+              return {
+                ...createRegistryResult("export const stale = true;"),
+                ancestorStyleSpecifiers: ["@scope/stale/style.css"]
+              };
+            }
+          );
+
+        const harness = await createViteHarness({
+          configOverrides: {
+            build: { lib: {}, watch: true, cssCodeSplit: true }
+          }
+        });
+
+        await harness.buildStart();
+
+        const { extractedId, extractedSource } =
+          await createExtractedCssFixture(harness);
+
+        const transforming = harness.transform(extractedId, extractedSource);
+        await vi.waitFor(() => expect(registrySpy).toHaveBeenCalledOnce());
+
+        if (reopen) {
+          await harness.closeWatcher();
+          await harness.buildStart();
+        }
+
+        await harness.buildStart();
+        release();
+
+        expect(await transforming).toBeNull();
+
+        const virtualId = harness.resolveId(
+          `mincho-virtual-css:${extractedId}.vanilla.css`,
+          extractedId
+        );
+
+        assertString(virtualId, "Expected an authorized sidecar path");
+
+        expect(await harness.load(virtualId)).toBe("");
+
+        const chunk: OutputBundleItem = {
+          type: "chunk",
+          fileName: "entry.mjs",
+          isEntry: true,
+          facadeModuleId: viteConsumerEntryPath,
+          moduleIds: [extractedId],
+          code: "export const entry = true;"
+        };
+
+        await harness.generateBundle("es", { "entry.mjs": chunk });
+
+        expect(chunk.code).toBe("export const entry = true;");
+      }
+    );
+
     it("injects the emitted unsplit library CSS asset into each output format", async () => {
       const integrationModule = await import("@mincho-js/integration");
       vi.spyOn(integrationModule, "babelTransformSource").mockResolvedValue({
@@ -6236,6 +6501,7 @@ if (import.meta.vitest) {
       );
 
       const harness = await createViteHarness({
+        pluginOptions: { libraryCss: { fileName: "relocated/style.css" } },
         configOverrides: {
           build: {
             cssCodeSplit: false,
@@ -6272,8 +6538,8 @@ if (import.meta.vitest) {
 
       await harness.generateBundle("es", {
         [esChunk.fileName]: esChunk,
-        "relocated/style-C4D2.css": {
-          fileName: "relocated/style-C4D2.css",
+        "relocated/style.css": {
+          fileName: "relocated/style.css",
           names: ["configured-style.css"],
           originalFileNames: ["style.css"],
           type: "asset"
@@ -6286,10 +6552,10 @@ if (import.meta.vitest) {
       });
 
       expect(esChunk.code).toBe(
-        'import "../relocated/style-C4D2.css";\nexport const entry = true;'
+        'import "../relocated/style.css";\nexport const entry = true;'
       );
       expect(cjsChunk.code).toBe(
-        'require("../relocated/style-C4D2.css");\nexports.entry = true;'
+        'require("../relocated/style.css");\nexports.entry = true;'
       );
     });
 
@@ -6372,19 +6638,23 @@ if (import.meta.vitest) {
 
       await expect(
         harness.generateBundle("es", { "entry.mjs": entryChunk })
-      ).rejects.toThrow("entry chunk entry.mjs expected one emitted CSS asset");
+      ).rejects.toThrow("was linked before hashing but was not emitted");
       await expect(
         harness.generateBundle("es", {
           "entry.mjs": entryChunk,
           "plugin.css": { fileName: "plugin.css", type: "asset" }
         })
-      ).rejects.toThrow("entry chunk entry.mjs expected one emitted CSS asset");
+      ).rejects.toThrow("was linked before hashing but was not emitted");
       await expect(
         harness.generateBundle(
           "es",
           {
             "entry.mjs": entryChunk,
-            "style.css": { fileName: "style.css", type: "asset" }
+            "style.css": {
+              fileName: "style.css",
+              type: "asset",
+              originalFileNames: ["style.css"]
+            }
           },
           async () => null
         )

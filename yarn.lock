@@ -2683,6 +2683,7 @@ __metadata:
     "@vanilla-extract/recipes": "npm:^0.5.7"
     "@vanilla-extract/vite-plugin": "npm:^5.2.2"
     eslint-config-custom: "workspace:^"
+    magic-string: "npm:^0.30.21"
     prettier-config-custom: "workspace:^"
     tsconfig-custom: "workspace:^"
     typescript: "npm:^5.9.3"

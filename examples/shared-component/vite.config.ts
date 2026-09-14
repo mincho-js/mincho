@@ -18,7 +18,9 @@ export default (viteConfigEnv: ConfigEnv) => {
       }
     },
     plugins: [
-      minchoVitePlugin() as unknown as never,
+      minchoVitePlugin({
+        libraryCss: { fileName: "style.css" }
+      }) as unknown as never,
       vanillaExtractPlugin() as unknown as never
     ],
     resolve: {

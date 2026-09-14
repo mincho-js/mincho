@@ -47,7 +47,7 @@ for (const mode of ["import", "require"]) {
   for (const [input, metadata] of Object.entries(metafile.inputs)) {
     assert.match(
       input,
-      /\/(?:package-graph|defineRulesPackageGraph|packageGraphWorker|packageGraphAnalysisCore)[^/]*\.(?:mjs|cjs)$/,
+      /\/(?:package-graph|defineRulesPackageGraph|packageGraphWorker|packageGraphAnalysisCore)[^/]*\.(?:mjs|cjs|js)$/,
       `${mode}: worker pulled in ${input}`
     );
 

@@ -24,7 +24,7 @@ for (const minify of [false, true]) {
     JSON.stringify(result.metafile)
   );
 
-  // This checks production CSS and tree shaking. U1's expected failures cover
+  // This checks production CSS and tree shaking. The native CSS gate covers
   // Vite library source maps/hashes and automatic lazy CSS wiring separately.
   await viteBuild({
     root: import.meta.dirname,

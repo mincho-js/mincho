@@ -51,10 +51,12 @@ live alongside their package entry, inheriting Node loader arguments and the
 environment needed by strict PnP. Source-level worker tests require a package
 build first, which the workspace test pipeline performs automatically.
 
-This PR introduces the internal service and packaged workers. The native library
-CSS linker connects it to Vite build hooks in the next PR; there is no new public
-Vite option at this boundary. Compiler worker pools and payload-based execution
-selection are separate changes.
+The native library CSS linker registers graphs during transforms and awaits each
+output's static dependency scope before returning its final chunk. Select the
+execution mode with `libraryCss.analysis: "worker" | "inline"`; the default is
+`"worker"`. See [native CSS finalization](vite-css-finalization.md) for output
+naming, watch generations, and the single-build linking contract. Compiler worker
+pools and payload-based execution selection are separate changes.
 
 Regression tests cover inline/worker parity, output order, cycle witnesses,
 generation cancellation, worker exit and recovery, and shutdown. Installed npm

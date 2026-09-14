@@ -24,6 +24,9 @@ loader. The isolated consumer redirects packed dependency names to their exact
 tarballs using Yarn resolutions, including transitive semver requests; published
 manifests retain normal version ranges. Packed files must resolve outside the
 repository and release payloads must match current `dist` bytes.
+The pure `@mincho-js/integration/package-graph` subpath is imported and required
+at runtime and checked through both conditional declaration formats with direct
+API presets. Its ESM/CJS copies must produce equal package order and witnesses.
 
 The original unminified diamond fixtures remain static decoder and package
 contract regressions. Production minification runs separately; a passing
