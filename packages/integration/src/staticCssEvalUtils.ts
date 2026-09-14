@@ -1,37 +1,65 @@
 import * as fs from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import type {
+  BabelTransformResult,
+  StaticCssEvalSourceIdentity,
+  StaticCssEvalSourceResolution
+} from "./babel.js";
+import {
+  createStaticCssEvalSourceHash,
+  getExistingRealpath,
+  hasNodeModulesSegment,
+  isPathInsideRoot,
+  isProjectLocalImportPath,
+  isVirtualStaticCssEvalId,
+  trimTrailingSlash
+} from "./staticCssEval.js";
 
 export const internalStaticCssEvalExternalResolutionPrefix =
   "external:mincho-static-css-eval:";
 
-export interface InternalStaticCssEvalSourceIdentity {
-  sourceHash?: string;
-  version?: string | number;
-}
+export type InternalStaticCssEvalSourceIdentity = StaticCssEvalSourceIdentity;
 
-interface InternalStaticCssEvalDependency {
+type SourceMetadata = Partial<
+  Pick<
+    StaticCssEvalSourceResolution,
+    "sourceKind" | "sourceOrigin" | "unsupportedReason" | "watchFiles"
+  >
+>;
+
+interface InternalStaticCssEvalDependency extends SourceMetadata {
   file: string;
   kind?: string;
   watchFiles?: readonly string[];
 }
 
-interface InternalStaticCssEvalResolvedDependency {
+interface InternalStaticCssEvalResolvedDependency extends SourceMetadata {
   resolvedFile: string;
   canonicalModuleId?: string;
   normalizedPathKey?: string;
   watchFiles?: readonly string[];
 }
 
-interface InternalStaticCssEvalCacheKey {
+interface InternalStaticCssEvalCacheKey extends SourceMetadata {
+  importerFile?: string;
   resolvedFile?: string;
   resolvedId?: string;
   canonicalModuleId?: string;
   normalizedPathKey?: string;
   watchFiles?: readonly string[];
+  parserVersion?: string | number;
 }
 
+type DiagnosticMetadata = Partial<
+  Pick<
+    NonNullable<BabelTransformResult["staticCssEval"]>["diagnostics"][number],
+    "id"
+  >
+> & { dependency?: { file: string } };
+
 export interface InternalStaticCssEvalMetadataLike {
+  diagnostics?: readonly DiagnosticMetadata[];
   cacheKeys?: readonly InternalStaticCssEvalCacheKey[];
   dependencies?: readonly InternalStaticCssEvalDependency[];
   dependencyFiles?: readonly string[];
@@ -118,41 +146,27 @@ export function internalNormalizeStaticCssEvalPathSyntax(id: string): string {
 export function internalIsProjectLocalStaticCssEvalImportPath(
   importPath: string
 ): boolean {
-  return importPath.startsWith(".") || importPath.startsWith("/");
+  return isProjectLocalImportPath(importPath);
 }
 
 export function internalIsVirtualStaticCssEvalId(id: string): boolean {
-  return (
-    id.startsWith("\0") ||
-    id.includes("\0") ||
-    id.startsWith("virtual:") ||
-    id.includes("__x00__")
-  );
+  return isVirtualStaticCssEvalId(id);
 }
 
 export function internalHasStaticCssEvalNodeModulesSegment(
   filePath: string
 ): boolean {
-  return normalizeStaticCssEvalFileId(filePath)
-    .split("/")
-    .includes("node_modules");
+  return hasNodeModulesSegment(filePath, normalizeStaticCssEvalFileId);
 }
 
 export function internalIsStaticCssEvalPathInsideRoot(
   rootPath: string,
   filePath: string
 ): boolean {
-  const normalizedRoot = internalTrimStaticCssEvalTrailingSlash(
-    internalNormalizeStaticCssEvalPathSyntax(rootPath)
-  );
-
-  const normalizedFilePath = internalTrimStaticCssEvalTrailingSlash(
-    internalNormalizeStaticCssEvalPathSyntax(filePath)
-  );
-
-  return (
-    normalizedFilePath === normalizedRoot ||
-    normalizedFilePath.startsWith(`${normalizedRoot}/`)
+  return isPathInsideRoot(
+    rootPath,
+    filePath,
+    internalNormalizeStaticCssEvalPathSyntax
   );
 }
 
@@ -168,11 +182,7 @@ export async function internalGetStaticCssEvalRealpathOrResolvedPath(
 export async function internalGetExistingStaticCssEvalRealpath(
   filePath: string
 ): Promise<string | null> {
-  try {
-    return normalizeStaticCssEvalFileId(await fs.promises.realpath(filePath));
-  } catch {
-    return null;
-  }
+  return getExistingRealpath(filePath, normalizeStaticCssEvalFileId);
 }
 
 export async function internalGetExistingStaticCssEvalStat(
@@ -186,7 +196,7 @@ export async function internalGetExistingStaticCssEvalStat(
 }
 
 export function internalCreateStaticCssEvalSourceHash(stat: fs.Stats): string {
-  return `mtime:${stat.mtimeMs}:size:${stat.size}`;
+  return createStaticCssEvalSourceHash(stat);
 }
 
 export function internalCreateStaticCssEvalSourceIdentity(
@@ -251,17 +261,7 @@ export function internalStripStaticCssEvalRequestQuery(id: string): string {
 }
 
 function internalTrimStaticCssEvalTrailingSlash(filePath: string): string {
-  if (filePath.length <= 1) {
-    return filePath;
-  }
-
-  let end = filePath.length;
-
-  while (end > 0 && filePath.charAt(end - 1) === "/") {
-    end -= 1;
-  }
-
-  return filePath.slice(0, end);
+  return trimTrailingSlash(filePath);
 }
 
 function internalNormalizePathSyntax(filePath: string): string {
@@ -280,7 +280,7 @@ function internalIsStaticCssEvalStringValue(
   return typeof value === "string" && value !== "";
 }
 
-function internalGetStaticCssEvalQueryFlags(sourceId: string): string[] {
+export function internalGetStaticCssEvalQueryFlags(sourceId: string): string[] {
   const queryIndex = sourceId.indexOf("?");
 
   if (queryIndex === -1) {

@@ -1,0 +1,80 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`minchoBabelPlugin > aggregates multiple spreads and className before inline object css prop 1`] = `
+[
+  "extracted_17cnpin.css.ts",
+  "import { css as _css, cx as _cx } from "@mincho-js/css";
+export var _$mincho$$App = _css({
+  color: "red"
+});
+var _$mincho$$App2 = _$mincho$$App;",
+]
+`;
+
+exports[`minchoBabelPlugin > aggregates multiple spreads and className before inline object css prop 2`] = `
+"import { _$mincho$$App as _$mincho$$App2 } from "extracted_17cnpin.css.ts";
+import { css as _css, cx as _cx } from "@mincho-js/css";
+const a = {
+  id: "a"
+};
+const b = {
+  className: "from-b"
+};
+function App() {
+  const _minchoProps = {
+    ...a,
+    className: "base",
+    ...b
+  };
+  const {
+    css: _minchoCssProp,
+    className: _minchoClassName,
+    ..._minchoRest
+  } = _minchoProps;
+  return <div {..._minchoRest} className={_cx(_minchoClassName, _$mincho$$App2)} />;
+}"
+`;
+
+exports[`minchoBabelPlugin > aggregates spread props before explicit class-value css prop 1`] = `
+[
+  "extracted_48djc5.css.ts",
+  "",
+]
+`;
+
+exports[`minchoBabelPlugin > aggregates spread props before explicit class-value css prop 2`] = `
+"import { cx as _cx } from "@mincho-js/css";
+const styleA = "style-a";
+const props = {
+  className: "base",
+  css: "leaked",
+  id: "root"
+};
+function App() {
+  const _minchoProps = {
+    ...props
+  };
+  const {
+    css: _minchoCssProp,
+    className: _minchoClassName,
+    ..._minchoRest
+  } = _minchoProps;
+  return <div {..._minchoRest} className={_cx(_minchoClassName, styleA)} />;
+}"
+`;
+
+exports[`minchoBabelPlugin > leaves spread-only runtime css props untransformed 1`] = `
+[
+  "extracted_1dre7mx.css.ts",
+  "",
+]
+`;
+
+exports[`minchoBabelPlugin > leaves spread-only runtime css props untransformed 2`] = `
+"const styleA = "style-a";
+function App() {
+  return <div {...{
+    css: styleA
+  }} />;
+}"
+`;

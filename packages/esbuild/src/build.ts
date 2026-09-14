@@ -1,19 +1,14 @@
-import * as esbuild from "esbuild";
-import { parse } from "@babel/parser";
-import MagicString from "magic-string";
 import remappingImport, { type SourceMapInput } from "@ampproject/remapping";
-import { fileURLToPath } from "node:url";
-import { publishOutputs } from "./publish.js";
-import { dirname, isAbsolute, resolve } from "node:path";
+import { parse } from "@babel/parser";
 import {
   getDefineRulesPackageStyleSpecifiers,
   mergeDefineRulesPackageGraphs,
   type DefineRulesPackageGraph
 } from "@mincho-js/integration";
-import {
-  minchoEsbuildPlugins,
-  type MinchoEsbuildPluginOptions
-} from "./index.js";
+import * as esbuild from "esbuild";
+import MagicString from "magic-string";
+import { dirname, isAbsolute, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   BuildInputSnapshot,
   effectiveLoader,
@@ -22,6 +17,11 @@ import {
   type BuildPhase,
   type BuildTransaction
 } from "./buildInputSnapshot.js";
+import {
+  minchoEsbuildPlugins,
+  type MinchoEsbuildPluginOptions
+} from "./plugin.js";
+import { publishOutputs } from "./publish.js";
 
 type Remapper = (
   maps: SourceMapInput[],

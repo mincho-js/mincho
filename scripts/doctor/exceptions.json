@@ -151,7 +151,7 @@
   },
   {
     "id": "esbuild-index-node-modules-01",
-    "file": "packages/esbuild/src/index.ts",
+    "file": "packages/esbuild/src/plugin.ts",
     "type": "warning",
     "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
     "source": "const packagePath = join(fixture.root, \"node_modules/pkg/styles.ts\");",
@@ -161,7 +161,7 @@
   },
   {
     "id": "esbuild-index-node-modules-02",
-    "file": "packages/esbuild/src/index.ts",
+    "file": "packages/esbuild/src/plugin.ts",
     "type": "warning",
     "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
     "source": "const packageRoot = join(fixture.root, \"node_modules/@pkg/styles\");",
@@ -171,7 +171,7 @@
   },
   {
     "id": "esbuild-index-node-modules-03",
-    "file": "packages/esbuild/src/index.ts",
+    "file": "packages/esbuild/src/plugin.ts",
     "type": "warning",
     "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
     "source": "if (args.path.includes(\"node_modules\")) {",
@@ -181,7 +181,7 @@
   },
   {
     "id": "esbuild-index-esbuild-loader-01",
-    "file": "packages/esbuild/src/index.ts",
+    "file": "packages/esbuild/src/plugin.ts",
     "type": "warning",
     "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
     "source": "loader: \"js\",",
@@ -337,16 +337,6 @@
     "source": "watchFiles: [\"/project/node_modules/@scope/styles/styles.json\"]",
     "count": 2,
     "reason": "This regression fixture or assertion deliberately models node_modules package paths for non-PnP consumers; it is not a workspace dependency lookup.",
-    "expires": "2026-12-31"
-  },
-  {
-    "id": "integration-static-css-eval-utils-node-modules-01",
-    "file": "packages/integration/src/staticCssEvalUtils.ts",
-    "type": "warning",
-    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
-    "source": ".includes(\"node_modules\");",
-    "count": 1,
-    "reason": "This helper classifies path segments for node_modules compatibility without assuming where a dependency is installed.",
     "expires": "2026-12-31"
   },
   {
@@ -811,7 +801,7 @@
   },
   {
     "id": "esbuild-index-esbuild-loader-03",
-    "file": "packages/esbuild/src/index.ts",
+    "file": "packages/esbuild/src/plugin.ts",
     "type": "warning",
     "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
     "source": "loader: assets.getCompileLoaders(),",
@@ -821,7 +811,7 @@
   },
   {
     "id": "esbuild-index-esbuild-loader-04",
-    "file": "packages/esbuild/src/index.ts",
+    "file": "packages/esbuild/src/plugin.ts",
     "type": "warning",
     "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
     "source": "loader: \"tsx\",",
@@ -831,7 +821,7 @@
   },
   {
     "id": "esbuild-index-esbuild-loader-05",
-    "file": "packages/esbuild/src/index.ts",
+    "file": "packages/esbuild/src/plugin.ts",
     "type": "warning",
     "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
     "source": "loader: { \".wasm\": \"file\" },",

@@ -1,11 +1,12 @@
-import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
-import type { BuildOptions, Loader, OnLoadArgs, OnLoadResult } from "esbuild";
+export { internalEffectiveLoader as effectiveLoader } from "@mincho-js/integration";
 import {
   mergeDefineRulesPackageGraphs,
   type DefineRulesPackageGraph
 } from "@mincho-js/integration";
+import type { BuildOptions, OnLoadArgs, OnLoadResult } from "esbuild";
+import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 
 export type BuildPhase = "analyze" | "emit";
 
@@ -184,33 +185,6 @@ export const getBuildTransaction = (
 
 export function inputKey(args: OnLoadArgs): string {
   return JSON.stringify([args.namespace, args.path, args.suffix, args.with]);
-}
-
-export function effectiveLoader(
-  path: string,
-  loaders: BuildOptions["loader"]
-): Loader | undefined {
-  const extensions: Record<string, Loader> = {
-    ".js": "js",
-    ".mjs": "js",
-    ".cjs": "js",
-    ".jsx": "jsx",
-    ".ts": "ts",
-    ".mts": "ts",
-    ".cts": "ts",
-    ".tsx": "tsx",
-    ".module.css": "local-css",
-    ".css": "css",
-    ".json": "json",
-    ".txt": "text",
-    ...loaders
-  };
-
-  const extension = Object.keys(extensions)
-    .sort((a, b) => b.length - a.length)
-    .find((suffix) => path.endsWith(suffix));
-
-  return extension ? extensions[extension] : undefined;
 }
 
 export function observeLoad(

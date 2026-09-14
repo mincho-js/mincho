@@ -4,15 +4,23 @@ export {
   type BabelOptions,
   type BabelTransformResult,
   type BabelTransformSourceOptions,
-  type StaticCssEvalSourceResolution as InternalStaticCssEvalSourceResolution,
   type StaticCssEvalLoadedSource as InternalStaticCssEvalLoadedSource,
+  type StaticCssEvalResolverKind as InternalStaticCssEvalResolverKind,
   type StaticCssEvalSourceKind as InternalStaticCssEvalSourceKind,
   type StaticCssEvalSourceOrigin as InternalStaticCssEvalSourceOrigin,
-  type StaticCssEvalSourceUnsupportedReason as InternalStaticCssEvalSourceUnsupportedReason,
-  type StaticCssEvalResolverKind as InternalStaticCssEvalResolverKind,
-  type StaticCssEvalSourceProvider as InternalStaticCssEvalSourceProvider
+  type StaticCssEvalSourceProvider as InternalStaticCssEvalSourceProvider,
+  type StaticCssEvalSourceResolution as InternalStaticCssEvalSourceResolution,
+  type StaticCssEvalSourceUnsupportedReason as InternalStaticCssEvalSourceUnsupportedReason
 } from "./babel.js";
 export { compile } from "./compile.js";
+export {
+  collectDefineRulesPackageGraph,
+  getDefineRulesPackageStyleSpecifiers,
+  mergeDefineRulesPackageGraphs,
+  type DefineRulesPackageDependencyWitness,
+  type DefineRulesPackageGraph,
+  type DefineRulesPackageGraphArtifact
+} from "./defineRulesPackageGraph.js";
 export {
   getDefineRulesAncestorStyleSpecifiers,
   processDefineRulesPresetRegistryFile,
@@ -22,13 +30,10 @@ export {
   type DefineRulesPresetRegistryResult
 } from "./defineRulesPreset.js";
 export {
-  collectDefineRulesPackageGraph,
-  mergeDefineRulesPackageGraphs,
-  getDefineRulesPackageStyleSpecifiers,
-  type DefineRulesPackageGraph,
-  type DefineRulesPackageGraphArtifact,
-  type DefineRulesPackageDependencyWitness
-} from "./defineRulesPackageGraph.js";
+  effectiveLoader as internalEffectiveLoader,
+  getScriptLoader as internalGetScriptLoader,
+  isScriptLoader as internalIsScriptLoader
+} from "./scriptLoaders.js";
 export {
   createStaticCssEvalSourceHash,
   createUnsupportedStaticCssEvalResolution,
@@ -46,23 +51,25 @@ export {
   MinchoProjectEngine as internalMinchoProjectEngine,
   type StaticEvalProjectEngine as InternalStaticEvalProjectEngine
 } from "./staticCssEvalProjectEngine.js";
+export { getStaticCssEvalSourceOrigin as internalGetStaticCssEvalSourceOrigin } from "./staticCssEvalSource.js";
 export {
   internalCollectStaticCssEvalDependencyIds,
   internalCreateStaticCssEvalSourceHash,
   internalCreateStaticCssEvalSourceIdentity,
   internalGetExistingStaticCssEvalRealpath,
   internalGetExistingStaticCssEvalStat,
+  internalGetStaticCssEvalQueryFlags,
   internalGetStaticCssEvalRealpathOrResolvedPath,
   internalHasStaticCssEvalNodeModulesSegment,
-  internalIsProjectLocalStaticCssEvalImportPath,
   internalIsMissingStaticCssEvalFileSystemEntryError,
-  internalIsStaticCssEvalStaticDataFile,
+  internalIsProjectLocalStaticCssEvalImportPath,
   internalIsStaticCssEvalPathInsideRoot,
+  internalIsStaticCssEvalStaticDataFile,
   internalIsVirtualStaticCssEvalId,
+  normalizeStaticCssEvalFileId as internalNormalizeStaticCssEvalFileId,
   internalNormalizeStaticCssEvalPathSyntax,
   internalPrepareStaticCssEvalStaticDataSource,
   internalStaticCssEvalExternalResolutionPrefix,
-  normalizeStaticCssEvalFileId as internalNormalizeStaticCssEvalFileId,
   type InternalStaticCssEvalMetadataLike,
   type InternalStaticCssEvalSourceIdentity
 } from "./staticCssEvalUtils.js";

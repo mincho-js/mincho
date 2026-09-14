@@ -1,15 +1,16 @@
-import { jsxSyntaxPluginPath, typescriptPresetPath } from "./babelPreset.js";
-import { internalStripStaticCssEvalRequestQuery } from "./staticCssEvalUtils.js";
-import { basename, dirname, extname, join, resolve } from "node:path";
-import * as fs from "node:fs";
+import { transformSync } from "@babel/core";
+import { minchoStyledComponentPlugin } from "@mincho-js/babel";
 import { addFileScope, getPackageInfo } from "@vanilla-extract/integration";
 import defaultEsbuild, {
   type BuildOptions,
   type Plugin,
   type PluginBuild
 } from "esbuild";
-import { transformSync } from "@babel/core";
-import { minchoStyledComponentPlugin } from "@mincho-js/babel";
+import * as fs from "node:fs";
+import { basename, dirname, join, resolve } from "node:path";
+import { jsxSyntaxPluginPath, typescriptPresetPath } from "./babelPreset.js";
+import { effectiveLoader, isScriptLoader } from "./scriptLoaders.js";
+import { internalStripStaticCssEvalRequestQuery } from "./staticCssEvalUtils.js";
 
 interface CompileOptions {
   esbuild?: PluginBuild["esbuild"];
@@ -111,31 +112,10 @@ function createScopedOnLoadPlugin(
       build.onLoad(
         { filter: /.*/, namespace: "file" },
         async (args: { path: string }) => {
-          const extension = extname(args.path);
-          const configuredExtension = Object.keys(loaders)
-            .sort((left, right) => right.length - left.length)
-            .find((candidate) => args.path.endsWith(candidate));
+          const loader = effectiveLoader(args.path, loaders);
 
-          const loader =
-            (configuredExtension ? loaders[configuredExtension] : undefined) ??
-            (extension === ".tsx"
-              ? "tsx"
-              : extension === ".jsx"
-                ? "jsx"
-                : /\.[cm]?ts$/.test(extension)
-                  ? "ts"
-                  : /\.[cm]?js$/.test(extension)
-                    ? "js"
-                    : undefined);
-
-          if (
-            loader !== "js" &&
-            loader !== "jsx" &&
-            loader !== "ts" &&
-            loader !== "tsx"
-          ) {
-            const nativeLoader =
-              loader ?? (args.path.endsWith(".json") ? "json" : undefined);
+          if (!isScriptLoader(loader)) {
+            const nativeLoader = loader;
             if (readFileBytes && nativeLoader)
               return {
                 contents: await readFileBytes(args.path),

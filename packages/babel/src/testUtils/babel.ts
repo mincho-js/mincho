@@ -1,15 +1,10 @@
-import { internalResolveFromModule as resolveFromModule } from "@mincho-js/babel";
+import { resolveFromModule } from "../moduleResolution.js";
 
-// Resolve the built-in preset from Integration, independently of the consumer cwd.
+// Resolve fixtures' presets from this package, independently of the test cwd.
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: declaration builds also check this source with a CommonJS target.
 const moduleUrl = import.meta.url;
 export const typescriptPresetPath = resolveFromModule(
   moduleUrl,
   "@babel/preset-typescript"
-);
-
-export const jsxSyntaxPluginPath = resolveFromModule(
-  moduleUrl,
-  "@babel/plugin-syntax-jsx"
 );
