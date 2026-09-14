@@ -12,6 +12,7 @@ import {
   setAdapter
 } from "@vanilla-extract/css/adapter";
 import { endFileScope, setFileScope } from "@vanilla-extract/css/fileScope";
+import { vanillaExtractPlugin } from "@vanilla-extract/vite-plugin";
 import { build, type Plugin, type Rollup } from "vite";
 import { afterEach, describe, expect, it } from "vitest";
 import { minchoVitePlugin } from "./index.js";
@@ -57,6 +58,7 @@ async function compile(
     analysis = "worker",
     fileName,
     graph = false,
+    vanilla = false,
     assetNames = "assets/custom-[name]-[hash][extname]",
     entries = "entry.js"
   }: {
@@ -65,6 +67,7 @@ async function compile(
     analysis?: "worker" | "inline";
     fileName?: string;
     graph?: boolean;
+    vanilla?: boolean;
     assetNames?: string;
     entries?: string | Record<string, string>;
   } = {}
@@ -96,6 +99,7 @@ async function compile(
     plugins: [
       observer,
       minchoVitePlugin({ libraryCss: { analysis, fileName } }),
+      ...(vanilla ? vanillaExtractPlugin() : []),
       ...(graph
         ? [
             {
@@ -342,6 +346,65 @@ describe("native library CSS in one Vite application build", () => {
 
     expect(artifact(worker)).toEqual(artifact(inline));
   }, 60_000);
+
+  for (const format of ["es", "cjs"] as const) {
+    it(`${format}: preserves Mincho graph classes alongside vanilla-extract files`, async () => {
+      const preset = diamondArtifacts()[3]!;
+      const root = await fixture({
+        "entry.js": 'export { cls } from "./rules.ts";',
+        "rules.ts": [
+          'import { defineRules, css } from "@mincho-js/css";',
+          `const rules = defineRules({ presets: ${JSON.stringify(preset)}, properties: { display: true } });`,
+          'export const cls = css([rules.css({ display: "grid" })]);'
+        ].join("\n"),
+        "vanilla.css.ts": [
+          'import { style } from "@vanilla-extract/css";',
+          'export const native = style({ padding: "17px" });'
+        ].join("\n")
+      });
+
+      const baseline = await compile(root, { graph: true, format });
+      const baselineCss = cssAssets(baseline)
+        .map((asset) => String(asset.source))
+        .join("\n");
+
+      const gridSelectors = [
+        ...baselineCss.matchAll(/([^{}]+)\{[^{}]*display:\s*grid[^{}]*\}/g)
+      ].map(([, selector]) => selector!.trim());
+
+      expect(gridSelectors.length).toBeGreaterThan(0);
+
+      await writeFile(
+        join(root, "entry.js"),
+        'export { cls } from "./rules.ts"; export { native } from "./vanilla.css.ts";'
+      );
+
+      const combined = await compile(root, {
+        graph: true,
+        vanilla: true,
+        format
+      });
+
+      const combinedCss = cssAssets(combined)
+        .map((asset) => String(asset.source))
+        .join("\n");
+
+      for (const selector of gridSelectors)
+        expect(combinedCss).toContain(selector);
+
+      expect(combinedCss).toMatch(/padding:\s*17px/);
+
+      const entry = chunks(combined).find((chunk) => chunk.isEntry)!;
+
+      expect(
+        [
+          ...entry.code.matchAll(/["'](@native-proof\/[^"']+\/style\.css)["']/g)
+        ].map(([, specifier]) => specifier)
+      ).toEqual(
+        ["a", "b", "c", "d"].map((name) => `@native-proof/${name}/style.css`)
+      );
+    }, 60_000);
+  }
 
   it("keeps lazy CSS with its chunk and shares CSS across two entries", async () => {
     const root = await fixture({

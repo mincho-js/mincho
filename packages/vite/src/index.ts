@@ -54,6 +54,12 @@ interface LibraryCssSidecarContract {
   readonly packageGraph?: DefineRulesPackageGraph;
 }
 
+const extractedSidecarIdPrefix = "\0mincho-extracted-css:";
+
+function extractedSidecarModuleId(filePath: string): string {
+  return `${extractedSidecarIdPrefix}${filePath}.js`;
+}
+
 // Match both the old format and the new virtual format
 function extractedCssFileFilter(filePath: string) {
   const extractedIndex = filePath.indexOf("extracted_");
@@ -229,6 +235,16 @@ function createMinchoViteEnvironmentPlugin(_options?: MinchoVitePluginOptions) {
 
   const validatedUnsplitCssByDirectory = new Map<string, Set<string>>();
 
+  function ownedExtractedSidecarPath(id: string | undefined) {
+    if (!id?.startsWith(extractedSidecarIdPrefix) || !id.endsWith(".js")) {
+      return undefined;
+    }
+
+    const filePath = id.slice(extractedSidecarIdPrefix.length, -3);
+
+    return resolvers.has(filePath) ? filePath : undefined;
+  }
+
   function abortOutputLinkers(error: Error): void {
     for (const linker of outputLinkers.values()) linker.abort(error);
 
@@ -351,12 +367,17 @@ function createMinchoViteEnvironmentPlugin(_options?: MinchoVitePluginOptions) {
 
     for (const cssPath of cssPaths) {
       deleteLibraryCssContract(cssPath);
+
+      const moduleId = extractedSidecarModuleId(cssPath);
+      deleteLibraryCssContract(moduleId);
       resolvers.delete(cssPath);
       resolverCache.delete(cssPath);
       idToPluginData.delete(cssPath);
       idToPluginData.delete(customNormalize(cssPath));
+      idToPluginData.delete(moduleId);
       clearVirtualCssForSidecar(cssPath);
       invalidateViteModule(cssPath);
+      invalidateViteModule(moduleId);
     }
 
     ownerToCssPaths.delete(ownerId);
@@ -637,6 +658,10 @@ function createMinchoViteEnvironmentPlugin(_options?: MinchoVitePluginOptions) {
     },
 
     resolveId(id: string, importer?: string) {
+      if (id.startsWith(extractedSidecarIdPrefix)) {
+        return ownedExtractedSidecarPath(id) === undefined ? undefined : id;
+      }
+
       if (id.startsWith(virtualCssImportPrefix)) {
         const physicalPath = id.slice(virtualCssImportPrefix.length);
         const virtualCssId = `${virtualCssIdPrefix}${physicalPath}`;
@@ -667,15 +692,28 @@ function createMinchoViteEnvironmentPlugin(_options?: MinchoVitePluginOptions) {
 
       if (id.startsWith("\0")) return;
 
+      const physicalImporter = ownedExtractedSidecarPath(importer);
+
       if (extractedCssFileFilter(id)) {
         const normalizedId = id.startsWith("/") ? id.slice(1) : id;
-        const resolvedPath = normalizePath(join(importer!, "..", normalizedId));
+        const exactPath = normalizePath(id);
+        const resolvedPath = resolvers.has(exactPath)
+          ? exactPath
+          : importer === undefined
+            ? undefined
+            : normalizePath(
+                join(physicalImporter ?? importer, "..", normalizedId)
+              );
 
-        if (!resolvers.has(resolvedPath)) {
-          return;
+        if (resolvedPath === undefined || !resolvers.has(resolvedPath)) {
+          return physicalImporter === undefined
+            ? undefined
+            : this.resolve(id, physicalImporter, { skipSelf: true });
         }
 
-        return resolvedPath;
+        // Other CSS plugins must not re-evaluate this in-memory sidecar as
+        // a real .css.ts file. Its physical path remains compiler metadata.
+        return extractedSidecarModuleId(resolvedPath);
       }
 
       if (id.endsWith(virtualExt)) {
@@ -690,6 +728,10 @@ function createMinchoViteEnvironmentPlugin(_options?: MinchoVitePluginOptions) {
         if (cssMap.has(key)) {
           return key;
         }
+      }
+
+      if (physicalImporter !== undefined) {
+        return this.resolve(id, physicalImporter, { skipSelf: true });
       }
     },
 
@@ -727,13 +769,14 @@ function createMinchoViteEnvironmentPlugin(_options?: MinchoVitePluginOptions) {
         }
       }
 
-      if (id.startsWith("\0")) {
+      const sidecarPath = ownedExtractedSidecarPath(id);
+      if (id.startsWith("\0") && sidecarPath === undefined) {
         return null;
       }
 
       // Handle both old and new CSS file formats
-      if (extractedCssFileFilter(id)) {
-        const normalizedId = customNormalize(id);
+      if (sidecarPath !== undefined || extractedCssFileFilter(id)) {
+        const normalizedId = customNormalize(sidecarPath ?? id);
         const pluginData = idToPluginData.get(normalizedId);
 
         if (!pluginData) {
@@ -748,7 +791,7 @@ function createMinchoViteEnvironmentPlugin(_options?: MinchoVitePluginOptions) {
 
         idToPluginData.set(id, {
           ...idToPluginData.get(id),
-          filePath: id,
+          filePath: pluginData.path,
           originalPath: pluginData.mainFilePath
         });
 
@@ -774,10 +817,14 @@ function createMinchoViteEnvironmentPlugin(_options?: MinchoVitePluginOptions) {
       code: string,
       id: string
     ) {
-      if (id.startsWith("\0")) return;
+      const sidecarPath = ownedExtractedSidecarPath(id);
+      if (id.startsWith("\0") && sidecarPath === undefined) return;
 
       const epoch = transformEpoch;
-      const fileId = normalizeStaticCssEvalFileId(id, rootRealpath);
+      const fileId = normalizeStaticCssEvalFileId(
+        sidecarPath ?? id,
+        rootRealpath
+      );
 
       // A virtual provider may transform its owner while loading its source.
       // Keep that nested request from starting the same static prepass again.
@@ -794,7 +841,7 @@ function createMinchoViteEnvironmentPlugin(_options?: MinchoVitePluginOptions) {
         moduleInfo &&
         moduleInfo.originalPath &&
         moduleInfo.filePath &&
-        extractedCssFileFilter(id)
+        (sidecarPath !== undefined || extractedCssFileFilter(id))
       ) {
         try {
           resolverCache.delete(moduleInfo.originalPath);
@@ -901,7 +948,11 @@ function createMinchoViteEnvironmentPlugin(_options?: MinchoVitePluginOptions) {
         }
       }
 
-      if (/\.(j|t)sx?(\?used)?$/.test(id) && !id.endsWith(".vanilla.js")) {
+      if (
+        sidecarPath === undefined &&
+        /\.(j|t)sx?(\?used)?$/.test(id) &&
+        !id.endsWith(".vanilla.js")
+      ) {
         if (id.includes("node_modules") || /(^|\/)\.yarn\//.test(id)) return;
 
         if (id.endsWith(".css.ts")) {
@@ -1004,10 +1055,15 @@ function createMinchoViteEnvironmentPlugin(_options?: MinchoVitePluginOptions) {
         if (server && resolvers.has(resolvedCssPath)) {
           const { moduleGraph } = server;
 
-          const module = moduleGraph.getModuleById(resolvedCssPath);
+          for (const moduleId of [
+            resolvedCssPath,
+            extractedSidecarModuleId(resolvedCssPath)
+          ]) {
+            const module = moduleGraph.getModuleById(moduleId);
 
-          if (module) {
-            moduleGraph.invalidateModule(module);
+            if (module) {
+              moduleGraph.invalidateModule(module);
+            }
           }
         }
 
@@ -2563,7 +2619,16 @@ if (import.meta.vitest) {
       },
 
       resolveId(id: string, importer?: string) {
-        return plugin.resolveId?.(id, importer);
+        return plugin.resolveId?.call(
+          {
+            resolve:
+              resolveImport ??
+              ((source: string, importer?: string) =>
+                resolveViteHarnessImport(source, importer, resolvedConfig.root))
+          },
+          id,
+          importer
+        );
       },
 
       async transform(id: string, code: string) {
@@ -2685,7 +2750,10 @@ if (import.meta.vitest) {
 
     return {
       extractedId,
-      extractedSource
+      extractedSource,
+      physicalPath: normalizePath(
+        resolve(dirname(entryPath), extractedImportMatch[1])
+      )
     };
   }
 
@@ -3183,6 +3251,205 @@ if (import.meta.vitest) {
   });
 
   describe("minchoVitePlugin", () => {
+    it("keeps extracted module IDs opaque while compiling and resolving from the physical path", async () => {
+      const integrationModule = await import("@mincho-js/integration");
+      vi.spyOn(integrationModule, "babelTransformSource").mockResolvedValue({
+        code: 'import "extracted_owned.css.ts";',
+        result: ["extracted_owned.css.ts", "resolver contents"]
+      });
+
+      const compileSpy = vi
+        .spyOn(integrationModule, "compile")
+        .mockResolvedValue({
+          source: "compiled source",
+          watchFiles: []
+        } as unknown as Awaited<ReturnType<typeof compile>>);
+
+      const registrySpy = vi
+        .spyOn(integrationModule, "processDefineRulesPresetRegistryFile")
+        .mockResolvedValue(
+          createRegistryResult("export const local = 'local';")
+        );
+
+      const resolveImport = vi.fn(async () => ({ id: "/resolved/helper.js" }));
+      const harness = await createViteHarness({ resolve: resolveImport });
+      const fixture = await createExtractedCssFixture(harness);
+
+      expect(fixture.extractedId).toBe(
+        `${extractedSidecarIdPrefix}${fixture.physicalPath}.js`
+      );
+      expect(fixture.extractedId).not.toMatch(/\.css\.[cm]?[jt]sx?$/);
+      expect(harness.resolveId(fixture.physicalPath)).toBe(fixture.extractedId);
+      expect(harness.resolveId(fixture.extractedId)).toBe(fixture.extractedId);
+      expect(await harness.load(fixture.physicalPath)).toBe(
+        fixture.extractedSource
+      );
+
+      await harness.transform(fixture.extractedId, fixture.extractedSource);
+
+      expect(compileSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          filePath: fixture.physicalPath,
+          originalPath: viteConsumerEntryPath
+        })
+      );
+      expect(registrySpy).toHaveBeenCalledWith(
+        expect.objectContaining({ filePath: fixture.physicalPath })
+      );
+      expect(harness.watchFiles).not.toContain(fixture.extractedId);
+      await expect(
+        harness.resolveId("./helper.js", fixture.extractedId)
+      ).resolves.toEqual({ id: "/resolved/helper.js" });
+      expect(resolveImport).toHaveBeenLastCalledWith(
+        "./helper.js",
+        fixture.physicalPath,
+        { skipSelf: true }
+      );
+
+      await harness.resolveId("./extracted_user.css.ts", fixture.extractedId);
+
+      expect(resolveImport).toHaveBeenLastCalledWith(
+        "./extracted_user.css.ts",
+        fixture.physicalPath,
+        { skipSelf: true }
+      );
+
+      const unownedId = `${extractedSidecarIdPrefix}/unowned/extracted_fake.css.ts.js`;
+
+      expect(harness.resolveId(unownedId)).toBeUndefined();
+      await expect(harness.load(unownedId)).resolves.toBeNull();
+      await expect(harness.transform(unownedId, "")).resolves.toBeUndefined();
+    });
+
+    it.each(["compile", "registry"] as const)(
+      "skips Babel for owned extracted modules after a %s failure in dev",
+      async (failureStage: "compile" | "registry") => {
+        const integrationModule = await import("@mincho-js/integration");
+        const babelSpy = vi
+          .spyOn(integrationModule, "babelTransformSource")
+          .mockResolvedValue({
+            code: 'import "extracted_owned.css.ts";',
+            result: ["extracted_owned.css.ts", "resolver contents"]
+          });
+
+        const compileSpy = vi
+          .spyOn(integrationModule, "compile")
+          .mockResolvedValue({ source: "compiled source", watchFiles: [] });
+
+        const registrySpy = vi
+          .spyOn(integrationModule, "processDefineRulesPresetRegistryFile")
+          .mockResolvedValue(createRegistryResult("export {};"));
+
+        const failure = new Error(`${failureStage} failure`);
+        const consoleErrorSpy = vi
+          .spyOn(console, "error")
+          .mockImplementation(() => {});
+
+        if (failureStage === "compile") {
+          compileSpy.mockRejectedValueOnce(failure);
+        } else {
+          registrySpy.mockRejectedValueOnce(failure);
+        }
+
+        const harness = await createViteHarness({
+          configOverrides: { command: "serve", mode: "development" }
+        });
+
+        const fixture = await createExtractedCssFixture(harness);
+        babelSpy.mockClear();
+
+        const result = await harness.transform(
+          fixture.extractedId,
+          fixture.extractedSource
+        );
+
+        expect(compileSpy).toHaveBeenCalledTimes(1);
+        expect(registrySpy).toHaveBeenCalledTimes(
+          failureStage === "registry" ? 1 : 0
+        );
+        expect(consoleErrorSpy).toHaveBeenCalledWith(failure);
+        expect(babelSpy).not.toHaveBeenCalled();
+        expect(result).toBeNull();
+      }
+    );
+
+    it("invalidates and removes both extracted aliases and their output graph when the owner loses CSS", async () => {
+      const integrationModule = await import("@mincho-js/integration");
+      const babelSpy = vi
+        .spyOn(integrationModule, "babelTransformSource")
+        .mockResolvedValue({
+          code: 'import "extracted_owned.css.ts";',
+          result: ["extracted_owned.css.ts", "resolver contents"]
+        });
+
+      vi.spyOn(integrationModule, "compile").mockResolvedValue({
+        source: "compiled source",
+        watchFiles: []
+      } as unknown as Awaited<ReturnType<typeof compile>>);
+      vi.spyOn(
+        integrationModule,
+        "processDefineRulesPresetRegistryFile"
+      ).mockResolvedValue({
+        ...createRegistryResult("export const local = 'local';"),
+        ancestorStyleSpecifiers: ["ancestor/style.css"],
+        packageGraph: {
+          packages: [{ packageName: "ancestor", firstSeen: 0 }],
+          dependencies: [],
+          localPackages: []
+        }
+      });
+
+      const module = {};
+      const getModuleById = vi.fn(() => module);
+      const invalidateModule = vi.fn();
+      const harness = await createViteHarness({
+        configOverrides: { build: { lib: {}, watch: true } },
+        server: { moduleGraph: { getModuleById, invalidateModule } }
+      });
+
+      const fixture = await createExtractedCssFixture(harness);
+      await harness.load(fixture.physicalPath);
+      await harness.transform(fixture.extractedId, fixture.extractedSource);
+      await harness.transform(fixture.physicalPath, fixture.extractedSource);
+      await harness.transform(viteConsumerEntryPath, "owner source");
+
+      expect(getModuleById).toHaveBeenCalledWith(fixture.physicalPath);
+      expect(getModuleById).toHaveBeenCalledWith(fixture.extractedId);
+      expect(invalidateModule).toHaveBeenCalledWith(module);
+
+      await harness.buildStart();
+
+      expect(harness.resolveId(fixture.extractedId)).toBe(fixture.extractedId);
+
+      babelSpy.mockResolvedValue({ code: "export {};", result: ["", ""] });
+      await harness.transform(viteConsumerEntryPath, "export {};");
+
+      expect(harness.resolveId(fixture.extractedId)).toBeUndefined();
+      expect(harness.resolveId(fixture.physicalPath)).toBeUndefined();
+      await expect(harness.load(fixture.extractedId)).resolves.toBeNull();
+      await expect(harness.load(fixture.physicalPath)).resolves.toBeNull();
+      await expect(
+        harness.transform(fixture.extractedId, fixture.extractedSource)
+      ).resolves.toBeUndefined();
+
+      const entry: OutputBundleItem = {
+        type: "chunk",
+        code: "export const entry = true;",
+        fileName: "entry.js",
+        facadeModuleId: viteConsumerEntryPath,
+        isEntry: true,
+        moduleIds: [
+          viteConsumerEntryPath,
+          fixture.physicalPath,
+          fixture.extractedId
+        ]
+      };
+
+      await harness.generateBundle("es", { "entry.js": entry });
+
+      expect(entry.code).toBe("export const entry = true;");
+    });
+
     it("static css eval shared helpers normalize file ids and preserve source identity for Vite", async () => {
       const fixture = await createImportedCssPropViteFixture(
         "static-css-eval-shared-helper-identity-"
@@ -4957,7 +5224,7 @@ if (import.meta.vitest) {
       ) as Promise<string>;
 
       await vi.waitFor(() => {
-        expect(processOrder).toEqual([`start:${firstFixture.extractedId}`]);
+        expect(processOrder).toEqual([`start:${firstFixture.physicalPath}`]);
       });
 
       firstDeferred.resolve(createV5PresetBuildSource("provider-a_class"));
@@ -4970,9 +5237,9 @@ if (import.meta.vitest) {
 
       await vi.waitFor(() => {
         expect(processOrder).toEqual([
-          `start:${firstFixture.extractedId}`,
-          `end:${firstFixture.extractedId}`,
-          `start:${secondFixture.extractedId}`
+          `start:${firstFixture.physicalPath}`,
+          `end:${firstFixture.physicalPath}`,
+          `start:${secondFixture.physicalPath}`
         ]);
       });
 
@@ -4985,26 +5252,26 @@ if (import.meta.vitest) {
       );
 
       expect(processOrder).toEqual([
-        `start:${firstFixture.extractedId}`,
-        `end:${firstFixture.extractedId}`,
-        `start:${secondFixture.extractedId}`,
-        `end:${secondFixture.extractedId}`
+        `start:${firstFixture.physicalPath}`,
+        `end:${firstFixture.physicalPath}`,
+        `start:${secondFixture.physicalPath}`,
+        `end:${secondFixture.physicalPath}`
       ]);
       expect(registrySpy).toHaveBeenNthCalledWith(
         1,
         expect.objectContaining({
-          filePath: firstFixture.extractedId,
+          filePath: firstFixture.physicalPath,
           identOption: "short",
-          source: `compiled source:${firstFixture.extractedId}`,
+          source: `compiled source:${firstFixture.physicalPath}`,
           serializeVirtualCssPath: expect.any(Function)
         })
       );
       expect(registrySpy).toHaveBeenNthCalledWith(
         2,
         expect.objectContaining({
-          filePath: secondFixture.extractedId,
+          filePath: secondFixture.physicalPath,
           identOption: "short",
-          source: `compiled source:${secondFixture.extractedId}`,
+          source: `compiled source:${secondFixture.physicalPath}`,
           serializeVirtualCssPath: expect.any(Function)
         })
       );
@@ -5044,7 +5311,7 @@ if (import.meta.vitest) {
         );
 
       const harness = await createViteHarness();
-      const { extractedId, extractedSource } =
+      const { extractedId, extractedSource, physicalPath } =
         await createExtractedCssFixture(harness);
 
       const transformedExtractedCss = await harness.transform(
@@ -5059,7 +5326,7 @@ if (import.meta.vitest) {
 
       expect(registrySpy).toHaveBeenCalledWith(
         expect.objectContaining({
-          filePath: extractedId,
+          filePath: physicalPath,
           identOption: "short",
           source: "compiled source",
           serializeVirtualCssPath: expect.any(Function)
@@ -5165,7 +5432,7 @@ if (import.meta.vitest) {
 
       const harness = await createViteHarness();
       const fixture = await createExtractedCssFixture(harness);
-      const physicalPath = `${fixture.extractedId}.vanilla.css`;
+      const physicalPath = `${fixture.physicalPath}.vanilla.css`;
       const resolvedVirtualId = harness.resolveId(
         `mincho-virtual-css:${physicalPath}`,
         fixture.extractedId
@@ -5286,7 +5553,7 @@ if (import.meta.vitest) {
 
       const harness = await createViteHarness();
       const fixture = await createExtractedCssFixture(harness);
-      const physicalPath = `${fixture.extractedId}.vanilla.css`;
+      const physicalPath = `${fixture.physicalPath}.vanilla.css`;
       const importId = `mincho-virtual-css:${physicalPath}`;
       const resolvedVirtualId = harness.resolveId(
         importId,
@@ -6085,7 +6352,7 @@ if (import.meta.vitest) {
 
       await vi.waitFor(() => {
         expect(compileSpy).toHaveBeenCalledWith(
-          expect.objectContaining({ filePath: firstFixture.extractedId })
+          expect.objectContaining({ filePath: firstFixture.physicalPath })
         );
       });
       await harness.transform(
@@ -6093,7 +6360,7 @@ if (import.meta.vitest) {
         secondFixture.extractedSource
       );
       firstCompile.resolve({
-        source: `compiled source:${firstFixture.extractedId}`,
+        source: `compiled source:${firstFixture.physicalPath}`,
         watchFiles: []
       } as Awaited<ReturnType<typeof compile>>);
       await firstTransform;
@@ -6161,7 +6428,7 @@ if (import.meta.vitest) {
 
       vi.spyOn(integrationModule, "compile").mockResolvedValue(compileResult);
 
-      const ancestorStyleSpecifiersByModuleId = new Map<string, string[]>();
+      const ancestorStyleSpecifiersByFilePath = new Map<string, string[]>();
       vi.spyOn(
         integrationModule,
         "processDefineRulesPresetRegistryFile"
@@ -6180,7 +6447,7 @@ if (import.meta.vitest) {
           return {
             ...createRegistryResult("export const local = true;"),
             ancestorStyleSpecifiers:
-              ancestorStyleSpecifiersByModuleId.get(options.filePath) ?? []
+              ancestorStyleSpecifiersByFilePath.get(options.filePath) ?? []
           };
         }
       );
@@ -6192,13 +6459,13 @@ if (import.meta.vitest) {
       const firstSharedFixture = await createExtractedCssFixture(harness);
       const secondSharedFixture = await createExtractedCssFixture(harness);
       const dynamicFixture = await createExtractedCssFixture(harness);
-      ancestorStyleSpecifiersByModuleId.set(firstSharedFixture.extractedId, [
+      ancestorStyleSpecifiersByFilePath.set(firstSharedFixture.physicalPath, [
         "@scope/shared-first/style.css"
       ]);
-      ancestorStyleSpecifiersByModuleId.set(secondSharedFixture.extractedId, [
+      ancestorStyleSpecifiersByFilePath.set(secondSharedFixture.physicalPath, [
         "@scope/shared-second/style.css"
       ]);
-      ancestorStyleSpecifiersByModuleId.set(dynamicFixture.extractedId, [
+      ancestorStyleSpecifiersByFilePath.set(dynamicFixture.physicalPath, [
         "@scope/dynamic/style.css"
       ]);
       await harness.transform(
@@ -6431,7 +6698,7 @@ if (import.meta.vitest) {
 
         await harness.buildStart();
 
-        const { extractedId, extractedSource } =
+        const { extractedId, extractedSource, physicalPath } =
           await createExtractedCssFixture(harness);
 
         const transforming = harness.transform(extractedId, extractedSource);
@@ -6448,7 +6715,7 @@ if (import.meta.vitest) {
         expect(await transforming).toBeNull();
 
         const virtualId = harness.resolveId(
-          `mincho-virtual-css:${extractedId}.vanilla.css`,
+          `mincho-virtual-css:${physicalPath}.vanilla.css`,
           extractedId
         );
 
@@ -6929,7 +7196,7 @@ if (import.meta.vitest) {
           }
         });
 
-        const { extractedId, extractedSource } =
+        const { extractedId, extractedSource, physicalPath } =
           await createExtractedCssFixture(harness);
 
         const transformedExtractedCss = await harness.transform(
@@ -6944,7 +7211,7 @@ if (import.meta.vitest) {
 
         expect(registrySpy).toHaveBeenCalledWith(
           expect.objectContaining({
-            filePath: extractedId,
+            filePath: physicalPath,
             identOption: "short",
             serializeVirtualCssPath: expect.any(Function)
           })
@@ -7379,7 +7646,7 @@ if (import.meta.vitest) {
         }
       });
 
-      const { extractedId, extractedSource } =
+      const { extractedId, extractedSource, physicalPath } =
         await createExtractedCssFixture(harness);
 
       expect(extractedSource).toBe("resolver contents");
@@ -7430,7 +7697,7 @@ if (import.meta.vitest) {
       expect(registrySpy).toHaveBeenNthCalledWith(
         1,
         expect.objectContaining({
-          filePath: extractedId,
+          filePath: physicalPath,
           identOption: "debug",
           serializeVirtualCssPath: expect.any(Function)
         })
@@ -7472,7 +7739,7 @@ if (import.meta.vitest) {
       expect(registrySpy).toHaveBeenNthCalledWith(
         2,
         expect.objectContaining({
-          filePath: extractedId,
+          filePath: physicalPath,
           identOption: "debug",
           serializeVirtualCssPath: expect.any(Function)
         })
@@ -7802,7 +8069,7 @@ if (import.meta.vitest) {
         }
       });
 
-      const { extractedId, extractedSource } =
+      const { extractedId, extractedSource, physicalPath } =
         await createExtractedCssFixture(harness);
 
       const transformedExtractedCss = await harness.transform(
@@ -7840,7 +8107,7 @@ if (import.meta.vitest) {
       expect(hmrModule.lastHMRTimestamp).toBe(123);
       expect(registrySpy).toHaveBeenCalledWith(
         expect.objectContaining({
-          filePath: extractedId,
+          filePath: physicalPath,
           identOption: "debug",
           source: "compiled source",
           serializeVirtualCssPath: expect.any(Function)

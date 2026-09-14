@@ -130,6 +130,10 @@ async function main(): Promise<void> {
         join(consumerRoot, "fixture", "modules")
       );
       await runNode(
+        ["fixture/modules/library-css.mjs"],
+        join(consumerRoot, "fixture", "modules")
+      );
+      await runNode(
         ["fixture/modules/runtime.mjs"],
         join(consumerRoot, "fixture", "modules")
       );
@@ -182,6 +186,10 @@ async function main(): Promise<void> {
         join(consumerRoot, "fixture", "real")
       );
       await assertRealBuildArtifacts(consumerRoot);
+      await runNode(
+        ["fixture/real/cjs-worker.mjs"],
+        join(consumerRoot, "fixture", "real", "dist-vite-cjs-plugin")
+      );
     }
   } finally {
     if (process.env.MINCHO_KEEP_PACKAGE_CONTRACT !== "1") {

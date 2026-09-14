@@ -52,6 +52,70 @@ filename from a callback or patch finalized chunk strings to make that case
 appear supported. Applications retain Vite's normal CSS loading behavior;
 these sidecar hooks apply to library builds.
 
+## Coexistence with vanilla-extract
+
+Mincho's extracted authoring sources use private JavaScript virtual module IDs.
+Their physical compile paths and file-scope origins remain unchanged, preserving
+preset identities and generated classes. Relative imports resolve from those
+physical paths. Invalidation removes both the logical and virtual aliases.
+
+This prevents vanilla-extract from trying to reload a Mincho-owned virtual
+`extracted_*.css.ts` as a physical file. Real `.css.ts` modules continue to use
+vanilla-extract when both plugins are installed. Native ESM/CJS regressions and
+the packed CJS worker fixture cover both authoring paths in the same build.
+
+## Library consumers
+
+Use component or group entries when consumers need only part of a library. Set
+`build.cssCodeSplit: true` explicitly for separate entry styles:
+
+```ts
+export default {
+  plugins: [minchoVitePlugin()],
+  build: {
+    cssCodeSplit: true,
+    lib: {
+      entry: {
+        index: "src/index.ts",
+        button: "src/button.ts",
+        modal: "src/modal.ts",
+      },
+      formats: ["es", "cjs"],
+    },
+  },
+};
+```
+
+Each entry links the CSS in its static dependency scope, including shared and
+CSS-only dependencies. Component entries avoid unrelated components' styles;
+an entry that re-exports the whole library can aggregate the whole library's CSS.
+This contract preserves complete stylesheets and does not purge unused selectors.
+
+Expose the component entries as package subpaths and preserve CSS side effects:
+
+```json
+{
+  "sideEffects": ["**/*.css"],
+  "exports": {
+    ".": { "import": "./dist/index.mjs", "require": "./dist/index.cjs" },
+    "./button": {
+      "import": "./dist/button.mjs",
+      "require": "./dist/button.cjs"
+    },
+    "./modal": { "import": "./dist/modal.mjs", "require": "./dist/modal.cjs" }
+  }
+}
+```
+
+Match these paths to the actual emitted files, add the corresponding declarations,
+and retain any other real JavaScript side effects. Consumers need a CSS-aware
+bundler; plain Node cannot execute stylesheet imports. Both Vite and native
+esbuild can consume ESM/CJS component entries without the Mincho plugin. Native
+esbuild 0.27.7 retains unused component CSS even behind a pure ESM re-export
+barrel, so use component/group subpaths for selective loading. The installed
+consumer checks record that limitation and verify subpath CSS and dependency
+order. Small libraries can use the fixed single-stylesheet contract above.
+
 ## Package dependency analysis
 
 `libraryCss.analysis` accepts `"worker"` (the default) or `"inline"`. The worker

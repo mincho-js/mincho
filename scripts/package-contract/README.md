@@ -28,6 +28,13 @@ The pure `@mincho-js/integration/package-graph` subpath is imported and required
 at runtime and checked through both conditional declaration formats with direct
 API presets. Its ESM/CJS copies must produce equal package order and witnesses.
 
+`modules/library-css.mjs` produces a split component library using the installed
+Vite adapter. Plain Vite and native esbuild consumers load its ESM/CJS component
+entries, retaining shared, CSS-only, and extracted Mincho styles in dependency
+order while excluding the unused component. A separate pure ESM barrel records
+native esbuild's unused-CSS retention. Both npm and strict PnP run these checks;
+component subpaths are the supported selective-loading contract at this stage.
+
 The original unminified diamond fixtures remain static decoder and package
 contract regressions. Production minification runs separately; a passing
 unminified assertion does not establish a compression result.
@@ -50,6 +57,16 @@ An in-memory esbuild probe reads the JS exports with CSS imports ignored, while
 the browser separately loads the original stylesheet. Dynamic outputs remain separate; their
 bytes are reported individually, and shared selectors across output files are
 not treated as a global deduplication failure.
+
+An additional Vite build loads `minchoVitePlugin` through CommonJS `require`
+with the default worker analysis. Its separate TypeScript entry composes
+`css([rules.css(...)])` so Babel extraction reaches Mincho's registry graph;
+the comparison fixture's `.css.ts` file is handled by vanilla-extract. The
+additional build observes the native packaged CommonJS worker, requires a
+result for the actual consumer's A/B/C/D preset graph, and checks native CSS
+output and ancestor order. This runs in both isolated npm and strict PnP
+consumers with `cssCodeSplit: true`; its output is separate from the ESM plugin
+compression measurements.
 
 Size reports use raw bytes, gzip level 9, and Brotli quality 11 **per file**.
 Compare totals for the same loading scenario, including its required lazy CSS.

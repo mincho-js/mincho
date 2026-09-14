@@ -81,7 +81,7 @@ async function readCssPropOutput(
   const sidecar = ownerUrl.endsWith(".css.ts")
     ? owner
     : [...(owner?.importedModules ?? [])].find((module) =>
-        /\/extracted_[^/]+\.css\.ts$/.test(module.id ?? "")
+        module.id?.startsWith("\0mincho-extracted-css:")
       );
   if (!sidecar) throw new Error("Expected the owner to import extracted CSS");
 

@@ -920,6 +920,46 @@
     "expires": "2026-12-31"
   },
   {
+    "id": "contract-real-worker-ts-preset-d",
+    "file": "scripts/package-contract/fixture/real/src/worker.ts",
+    "type": "error",
+    "message": "Undeclared dependency on @mincho-js-proof/real-d",
+    "source": "import { preset } from \"@mincho-js-proof/real-d/preset\";",
+    "count": 1,
+    "reason": "This worker fixture is copied into isolated npm and strict PnP consumers. scripts/package-contract/real-producers.ts packs this real producer, and scripts/package-contract/index.ts explicitly declares every packed package in the ephemeral consumer manifest dependencies before executing the fixture.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "contract-real-worker-ts-import-b",
+    "file": "scripts/package-contract/fixture/real/src/worker.ts",
+    "type": "error",
+    "message": "Undeclared dependency on @mincho-js-proof/real-b",
+    "source": "export { className as b } from \"@mincho-js-proof/real-b\";",
+    "count": 1,
+    "reason": "This worker fixture is copied into isolated npm and strict PnP consumers. scripts/package-contract/real-producers.ts packs this real producer, and scripts/package-contract/index.ts explicitly declares every packed package in the ephemeral consumer manifest dependencies before executing the fixture.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "contract-real-worker-ts-import-c",
+    "file": "scripts/package-contract/fixture/real/src/worker.ts",
+    "type": "error",
+    "message": "Undeclared dependency on @mincho-js-proof/real-c",
+    "source": "export { className as c } from \"@mincho-js-proof/real-c\";",
+    "count": 1,
+    "reason": "This worker fixture is copied into isolated npm and strict PnP consumers. scripts/package-contract/real-producers.ts packs this real producer, and scripts/package-contract/index.ts explicitly declares every packed package in the ephemeral consumer manifest dependencies before executing the fixture.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "contract-real-worker-ts-import-d",
+    "file": "scripts/package-contract/fixture/real/src/worker.ts",
+    "type": "error",
+    "message": "Undeclared dependency on @mincho-js-proof/real-d",
+    "source": "export { className as d } from \"@mincho-js-proof/real-d\";",
+    "count": 1,
+    "reason": "This worker fixture is copied into isolated npm and strict PnP consumers. scripts/package-contract/real-producers.ts packs this real producer, and scripts/package-contract/index.ts explicitly declares every packed package in the ephemeral consumer manifest dependencies before executing the fixture.",
+    "expires": "2026-12-31"
+  },
+  {
     "id": "examples-react-babel-package-build-peer-01",
     "file": "examples/react-babel/package.json",
     "type": "error",
