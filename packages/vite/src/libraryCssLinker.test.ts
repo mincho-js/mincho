@@ -200,6 +200,7 @@ describe("library CSS linker", () => {
         }
       })
     ).rejects.toThrow("does not identify Vite's native unsplit CSS asset");
+
     expect(checked).toBe(true);
   });
 

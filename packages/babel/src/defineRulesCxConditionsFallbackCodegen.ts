@@ -20,30 +20,37 @@ export function optimizeFallbackChainPlan(
   if (insertionPoint === null) {
     return false;
   }
+
   const { programPath, programStatement } = insertionPoint;
 
   const hookPrefix = programPath.scope.generateUidIdentifier(
     "minchoDefineRulesCxHook"
   ).name;
+
   const resolvedIdentifiers = plan.resolvedWrites.map(() =>
     programPath.scope.generateUidIdentifier("minchoDefineRulesCxResolved")
   );
+
   const switchIdentifiers = plan.conditions.map(() =>
     programPath.scope.generateUidIdentifier("minchoDefineRulesCxSwitch")
   );
+
   const fallbackClassExpressions = createFallbackClassExpressions(
     plan.operands,
     plan.conditions
   );
+
   const switchClassExpressions = createSwitchClassExpressions(
     plan.conditions,
     switchIdentifiers
   );
+
   const resolvedDeclarations = createResolvedDeclarations(
     plan,
     resolvedIdentifiers,
     hookPrefix
   );
+
   const switchDeclarations = createSwitchDeclarations(
     plan,
     switchIdentifiers,
@@ -70,6 +77,7 @@ export function optimizeFallbackChainPlan(
     ...switchDeclarations
   ]);
   path.replaceWith(createClassNameJoinExpression(classExpressions));
+
   return true;
 }
 
@@ -158,6 +166,7 @@ function createResolvedStyleExpression(
       serializeFallbackExpression(value, hookPrefix)
     )
   );
+
   return t.objectExpression(properties);
 }
 
@@ -183,6 +192,7 @@ function collectFallbackExpressionConditionIndices(
 ): readonly number[] {
   const indices = new Set<number>();
   collectFallbackExpressionConditionIndex(expression, indices);
+
   return [...indices].sort((left, right) => left - right);
 }
 
@@ -249,6 +259,7 @@ function appendFallbackClassExpression(
   switch (operand.kind) {
     case "class":
       expressions.push(t.cloneNode(operand.classOperand.expression));
+
       return true;
     case "condition": {
       const condition = conditions[operand.conditionIndex];
@@ -264,6 +275,7 @@ function appendFallbackClassExpression(
           t.cloneNode(operand.classOperand.expression)
         )
       );
+
       return true;
     }
     case "ternary": {
@@ -280,6 +292,7 @@ function appendFallbackClassExpression(
           t.cloneNode(operand.alternate.expression)
         )
       );
+
       return true;
     }
     case "array":
@@ -288,6 +301,7 @@ function appendFallbackClassExpression(
           return false;
         }
       }
+
       return true;
   }
 }

@@ -15,21 +15,26 @@ import type {
 type StaticCssEvalProvider = NonNullable<
   PluginOptions["staticCssEvalProvider"]
 >;
+
 type StaticCssEvalProviderResult = ReturnType<
   StaticCssEvalProvider["getResolvedCssValue"]
 >;
+
 type StaticCssEvalMetadataDependency =
   MinchoStaticCssEvalMetadata["dependencies"][number] & {
     readonly sourceHash?: string;
     readonly sourceVersion?: string | number;
     readonly resolverKind?: string;
   };
+
 type StaticCssEvalMetadataDiagnostic =
   MinchoStaticCssEvalMetadata["diagnostics"][number];
+
 type StaticCssEvalMetadataCacheKey =
   MinchoStaticCssEvalMetadata["cacheKeys"][number] & {
     readonly resolverKind?: string;
   };
+
 type StaticCssEvalProviderMetadataSource = {
   dependencies?: readonly unknown[];
   diagnostics?: readonly StaticCssEvalMetadataDiagnostic[];
@@ -45,6 +50,7 @@ export function createObservingStaticCssEvalProvider(
     getResolvedCssValue(query): StaticCssEvalProviderResult {
       const result = provider.getResolvedCssValue(query);
       appendStaticCssEvalResultMetadata(metadata, result);
+
       return result;
     }
   };
@@ -58,9 +64,11 @@ function appendStaticCssEvalResultMetadata(
   const dependencies = (metadataSource.dependencies ?? []).filter(
     isStaticCssEvalResolutionDependency
   );
+
   const diagnostics =
     metadataSource.diagnostics ??
     (metadataSource.diagnostic ? [metadataSource.diagnostic] : []);
+
   const cacheKeys = metadataSource.cacheKey ? [metadataSource.cacheKey] : [];
 
   appendUniqueMetadataItems(
@@ -108,6 +116,7 @@ export function createStaticCssEvalTransformResult(
   const staticCssEvalMetadata = metadata
     ? cloneStaticCssEvalMetadata(metadata)
     : createEmptyStaticCssEvalMetadata();
+
   const hasMetadata =
     staticCssEvalMetadata.dependencies.length > 0 ||
     staticCssEvalMetadata.diagnostics.length > 0 ||

@@ -127,12 +127,14 @@ function createMinchoViteEnvironmentPlugin(_options?: MinchoVitePluginOptions) {
   let config: ResolvedConfig;
   let server: ViteDevServer;
   const staticCssEvalOwnerStack = new AsyncLocalStorage<ReadonlySet<string>>();
+
   const cssState = new ViteCssState({
     invalidateModule: invalidateViteModule,
     deleteContract: deleteLibraryCssContract
   });
 
   const { resolverCache } = cssState;
+
   const staticCssEvalProjectEngine = new internalMinchoProjectEngine();
   const libraryCssSidecarContracts = new Map<
     string,
@@ -146,6 +148,7 @@ function createMinchoViteEnvironmentPlugin(_options?: MinchoVitePluginOptions) {
   let graphGeneration = graphAnalysis.beginGeneration();
   let graphAnalysisClosed = false;
   let transformEpoch = Symbol("build");
+
   const outputLinkers = new Map<
     object,
     ReturnType<typeof createLibraryCssLinker>
@@ -2659,6 +2662,7 @@ if (import.meta.vitest) {
       await expect(
         harness.resolveId("./helper.js", fixture.extractedId)
       ).resolves.toEqual({ id: "/resolved/helper.js" });
+
       expect(resolveImport).toHaveBeenLastCalledWith(
         "./helper.js",
         fixture.physicalPath,
@@ -4292,6 +4296,7 @@ if (import.meta.vitest) {
         ).rejects.toThrow(
           "Cannot statically evaluate css prop value: provider virtual module"
         );
+
         expect(fallbackHarness.watchFiles).toEqual([]);
 
         const staticRuleHarness = await createViteHarness({
@@ -4309,6 +4314,7 @@ if (import.meta.vitest) {
             staticRuleFixture.source
           )
         ).rejects.toThrow("Cannot statically evaluate css prop value");
+
         expect(staticRuleHarness.watchFiles).toEqual([]);
       } finally {
         await Promise.all([
@@ -4359,6 +4365,7 @@ if (import.meta.vitest) {
         await expect(
           harness.transform(fixture.entryPath, fixture.entrySource)
         ).rejects.toThrow('import "./styles" could not be resolved');
+
         expect(await harness.load(redArtifact.extractedId)).toBeNull();
         expect(await harness.load(redArtifact.resolvedVirtualId)).toBeNull();
       } finally {
@@ -4441,6 +4448,7 @@ if (import.meta.vitest) {
         await expect(
           harness.transform(fixture.entryPath, fixture.source)
         ).resolves.toBeNull();
+
         expect(babelTransformSpy).toHaveBeenCalledTimes(1);
         expect(babelTransformSpy).toHaveBeenCalledWith(
           expect.objectContaining({
@@ -4840,6 +4848,7 @@ if (import.meta.vitest) {
       ).toBeUndefined();
       expect(harness.resolveId(importId, fixture.extractedId)).toBeUndefined();
       await expect(harness.load(virtualId)).resolves.toBeNull();
+
       expect(readFileSpy).not.toHaveBeenCalled();
     });
 
@@ -4938,6 +4947,7 @@ if (import.meta.vitest) {
       await harness.buildStart();
 
       await expect(harness.load(resolvedVirtualId)).resolves.not.toBeNull();
+
       expect(harness.resolveId(importId, fixture.extractedId)).toBe(
         resolvedVirtualId
       );
@@ -4993,6 +5003,7 @@ if (import.meta.vitest) {
           };
         }
       );
+
       vi.spyOn(integrationModule, "compile").mockResolvedValue({
         source: "compiled source",
         watchFiles: []
@@ -6523,6 +6534,7 @@ if (import.meta.vitest) {
       await expect(
         harness.transform(extractedId, extractedSource)
       ).rejects.toThrow("registry processing failure");
+
       expect(registrySpy).toHaveBeenCalledTimes(1);
       expect(consoleErrorSpy).not.toHaveBeenCalled();
     });
@@ -7221,6 +7233,7 @@ if (import.meta.vitest) {
             watchFiles: []
           }) as Awaited<ReturnType<typeof compile>>
       );
+
       vi.spyOn(
         integrationModule,
         "processDefineRulesPresetRegistryFile"

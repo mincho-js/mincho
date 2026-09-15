@@ -89,5 +89,6 @@ function getOrCreateDefineRulesCxConditionsMetadata(
 
   const metadata: DefineRulesCxConditionsMetadata = { calls: [] };
   state.file.metadata.minchoDefineRulesCxConditions = metadata;
+
   return metadata;
 }

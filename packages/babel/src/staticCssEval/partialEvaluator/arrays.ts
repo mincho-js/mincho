@@ -56,6 +56,7 @@ export function reduceArrayExpression(
           details: { deoptPath: [{ kind: "spread" }] }
         };
       }
+
       continue;
     }
 
@@ -99,6 +100,7 @@ export function getStaticArrayMemberValue(
   }
 
   const element = expression.elements[Number(memberName)];
+
   return element && t.isExpression(element) ? element : null;
 }
 
@@ -112,13 +114,16 @@ function pushArraySpreadElements(
   for (const spreadElement of spreadExpression.elements) {
     if (!spreadElement || t.isSpreadElement(spreadElement)) {
       elements.push(t.cloneNode(element));
+
       return true;
     }
+
     reducedElements.push(spreadElement);
   }
 
   elements.push(
     ...reducedElements.map((spreadElement) => t.cloneNode(spreadElement))
   );
+
   return false;
 }

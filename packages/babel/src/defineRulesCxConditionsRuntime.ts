@@ -44,6 +44,7 @@ export function resolveDefineRulesCxRuntime(
   }
 
   const providerValue = resolveProviderStaticValue(calleePath, state);
+
   return isDefineRulesCxRuntimeRecipe(providerValue)
     ? { callee: "provider-createDefineRulesCxRuntime" }
     : null;
@@ -61,6 +62,7 @@ export function isScopedCssCall(
 
   if (calleePath.isIdentifier()) {
     const binding = path.scope.getBinding(calleePath.node.name);
+
     return binding !== undefined && binding === runtime.cssBinding;
   }
 
@@ -75,6 +77,7 @@ export function isScopedCssCall(
   }
 
   const objectBinding = path.scope.getBinding(calleePath.node.object.name);
+
   return (
     objectBinding !== undefined && objectBinding === runtime.namespaceBinding
   );
@@ -93,6 +96,7 @@ function resolveLocalMemberCxRuntime(
 
   const binding = path.scope.getBinding(path.node.object.name);
   const initPath = binding ? getConstantBindingInitPath(binding) : null;
+
   return initPath !== null && isDefineRulesCall(initPath)
     ? { callee: "local-defineRules", namespaceBinding: binding }
     : null;
@@ -112,6 +116,7 @@ function resolveLocalIdentifierCxRuntime(
   }
 
   const initPath = getConstantBindingInitPath(binding);
+
   return initPath !== null && isCreateDefineRulesCxRuntimeCall(initPath)
     ? { callee: "local-createDefineRulesCxRuntime" }
     : null;
@@ -139,6 +144,7 @@ function resolveDestructuredDefineRulesRuntime(
   }
 
   const cssBinding = getObjectPatternPropertyBinding(declaratorPath, "css");
+
   return {
     callee: "local-defineRules",
     ...(cssBinding !== null ? { cssBinding } : {})
@@ -159,6 +165,7 @@ export function getConstantBindingInitPath(
   }
 
   const initPath = declaratorPath.get("init");
+
   return initPath.isExpression() ? initPath : null;
 }
 
@@ -198,6 +205,7 @@ function findVariableDeclaratorPath(
     if (current.isVariableDeclarator()) {
       return current;
     }
+
     current = current.parentPath;
   }
 
@@ -206,6 +214,7 @@ function findVariableDeclaratorPath(
 
 function isConstBinding(binding: Binding): boolean {
   const declaratorPath = findVariableDeclaratorPath(binding);
+
   return (
     binding.constant &&
     declaratorPath !== null &&

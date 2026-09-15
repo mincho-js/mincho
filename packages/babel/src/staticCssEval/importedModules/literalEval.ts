@@ -39,6 +39,7 @@ export function evaluateStaticCssLiteralExpression(
   const unwrappedExpression = unwrapTransparentCssRuleExpression(
     options.expression
   );
+
   options.literalState.count += 1;
 
   const countResult = enforceImportedStaticCssEvalLiteralCount(
@@ -118,6 +119,7 @@ export function evaluateStaticCssLiteralExpression(
     unwrappedExpression.expressions.length === 0
   ) {
     const [quasi] = unwrappedExpression.quasis;
+
     return {
       kind: "resolved",
       value: quasi?.value.cooked ?? quasi?.value.raw ?? ""

@@ -43,6 +43,7 @@ export function dependenciesPrecedeStatement(
     }
 
     const dependencyStart = dependency.node.start;
+
     return (
       typeof dependencyStart === "number" && dependencyStart < statementStart
     );

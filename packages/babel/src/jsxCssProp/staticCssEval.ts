@@ -75,6 +75,7 @@ export function evaluateInlineStaticCssExpression(
   );
 
   options.state.count += 1;
+
   const countResult = enforceStaticCssEvalLiteralNodeCount({
     ...createInlineStaticCssDiagnosticContext(options),
     literalNodeCount: options.state.count
@@ -394,6 +395,7 @@ export function evaluateInlineStaticCssArrayExpression(
 
         elements.push(t.cloneNode(spreadElement));
       }
+
       continue;
     }
 
@@ -475,6 +477,7 @@ export function resolveInlineSameFileStaticCssExpression(
     bindingName: reference.bindingName,
     memberPath: []
   };
+
   const currentKey = createInlineStaticCssLocalStackKey(currentFrame);
   const localStack = options.localStack ?? [];
 
@@ -516,6 +519,7 @@ function resolveSameFileNestedStaticCssExpression(
     programPath: options.programPath,
     scope: options.scope
   });
+
   const metadata = [...options.metadata, sameFileResult];
 
   if (sameFileResult.kind === "error") {
@@ -556,9 +560,11 @@ function createNestedStaticCssEvalWrapper(
   const wrapper = t.objectExpression([
     t.objectProperty(t.identifier("value"), t.cloneNode(expression))
   ]);
+
   wrapper.start = expression.start;
   wrapper.end = expression.end;
   wrapper.loc = expression.loc;
+
   return wrapper;
 }
 
@@ -676,6 +682,7 @@ function preserveObjectBooleanReferenceValues(
     const originalProperty = propertyName
       ? originalProperties.get(propertyName)
       : undefined;
+
     const nextProperty = t.cloneNode(property);
 
     if (
@@ -910,6 +917,7 @@ function normalizeInlineStaticCssPrimitiveLiteral(
 ): t.Expression {
   if (isInlineNoExpressionTemplateLiteral(expression)) {
     const [quasi] = expression.quasis;
+
     return t.stringLiteral(quasi?.value.cooked ?? quasi?.value.raw ?? "");
   }
 

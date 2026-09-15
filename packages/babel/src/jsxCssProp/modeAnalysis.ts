@@ -13,6 +13,7 @@ import { unwrapTransparentCssRuleExpression } from "../staticCssEval/candidates.
 import type { CssPropSidecarHoistability } from "./types.js";
 
 type AnalysisScope = NodePath<t.JSXOpeningElement>["scope"];
+
 type AnalysisBinding = NonNullable<ReturnType<AnalysisScope["getBinding"]>>;
 
 export function analyzeCssPropSidecarHoistability(options: {
@@ -25,10 +26,12 @@ export function analyzeCssPropSidecarHoistability(options: {
     reducedExpression,
     options.scope
   );
+
   const rawCssValueClassification = getSidecarCssRuleClassification(
     options.expression,
     options.scope
   );
+
   const preservedRawArraySpreadClassification =
     getPreservedRawArraySpreadCssRuleClassification({
       expression: options.expression,
@@ -201,6 +204,7 @@ function collectReturnStatements(
 ): void {
   if (t.isReturnStatement(statement)) {
     returns.push(statement);
+
     return;
   }
 
@@ -212,22 +216,27 @@ function collectReturnStatements(
     for (const child of statement.body) {
       collectReturnStatements(child, returns);
     }
+
     return;
   }
 
   if (t.isIfStatement(statement)) {
     collectReturnStatements(statement.consequent, returns);
+
     if (statement.alternate)
       collectReturnStatements(statement.alternate, returns);
+
     return;
   }
 
   if (t.isTryStatement(statement)) {
     collectReturnStatements(statement.block, returns);
+
     if (statement.handler)
       collectReturnStatements(statement.handler.body, returns);
     if (statement.finalizer)
       collectReturnStatements(statement.finalizer, returns);
+
     return;
   }
 
@@ -237,6 +246,7 @@ function collectReturnStatements(
         collectReturnStatements(child, returns);
       }
     }
+
     return;
   }
 

@@ -69,8 +69,10 @@ export class ViteCssState {
     const cssPaths = this.ownerToCssPaths.get(ownerId) ?? new Set<string>();
     cssPaths.add(cssPath);
     this.ownerToCssPaths.set(ownerId, cssPaths);
+
     this.sidecars.set(cssPath, source);
     this.resolverCache.delete(ownerId);
+
     this.moduleData.set(ownerId, { kind: "owner", mainFilePath: ownerId });
     this.moduleData.set(customNormalize(cssPath), {
       kind: "sidecar",
@@ -133,11 +135,13 @@ export class ViteCssState {
       const moduleId = extractedSidecarModuleId(cssPath);
       this.effects.deleteContract(cssPath);
       this.effects.deleteContract(moduleId);
+
       this.sidecars.delete(cssPath);
       this.resolverCache.delete(cssPath);
       this.moduleData.delete(cssPath);
       this.moduleData.delete(customNormalize(cssPath));
       this.moduleData.delete(moduleId);
+
       this.clearVirtualCssForSidecar(cssPath);
       this.effects.invalidateModule(cssPath);
       this.effects.invalidateModule(moduleId);

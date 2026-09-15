@@ -45,6 +45,7 @@ export function registerDynamicCssVariableRuntimeLowering(
   runtimeLowering: DynamicCssVariableRuntimeLowering
 ): DynamicCssVariableLowering {
   dynamicCssVariableRuntimeLowerings.set(lowering, runtimeLowering);
+
   return lowering;
 }
 
@@ -69,6 +70,7 @@ export function createClassNameExpression(
     normalizedElement.cssExpression,
     normalizedElement.cssValueClassification
   );
+
   const canEmitDirectly = canEmitCssClassNameDirectly(
     normalizedElement.cssExpression,
     normalizedElement.cssValueClassification,
@@ -186,6 +188,7 @@ export function lowerCssClassNameExpression(
       return lowerArrayElementCssResultClassNameExpression(request);
     default: {
       const exhaustive: never = request;
+
       return exhaustive;
     }
   }
@@ -269,6 +272,7 @@ function createArrayClassNameCallExpression(
   expression: t.ArrayExpression
 ): t.Expression {
   const cxIdentifier = registerImportMethod(path, "cx", cssModuleName);
+
   return t.callExpression(
     cxIdentifier,
     createArrayClassNameExpressions(path, expression)
@@ -395,6 +399,7 @@ export function createCssRuleClassNameExpression(
 ): t.Expression {
   const cssIdentifier = registerImportMethod(path, "css", cssModuleName);
   const cssRuleExpression = unwrapTransparentCssRuleExpression(cssExpression);
+
   return t.callExpression(cssIdentifier, [t.cloneNode(cssRuleExpression)]);
 }
 

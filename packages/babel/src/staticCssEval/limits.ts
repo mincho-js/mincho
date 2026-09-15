@@ -195,6 +195,7 @@ if (vitest) {
       });
 
       expect(result.ok).toBe(false);
+
       if (!result.ok) {
         expect(result.diagnostic).toMatchObject({
           code: "limit-exceeded",

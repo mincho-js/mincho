@@ -9,7 +9,9 @@ import {
 } from "./sidecarShape.js";
 
 type AnalysisScope = NodePath<t.JSXOpeningElement>["scope"];
+
 type SidecarBinding = NonNullable<ReturnType<AnalysisScope["getBinding"]>>;
+
 const buildTimeSafeGlobalNames = new Set([
   "Math",
   "Number",

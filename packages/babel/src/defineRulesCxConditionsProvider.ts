@@ -95,6 +95,7 @@ function getStaticReference(node: t.Expression): StaticReference | null {
   }
 
   const objectReference = getStaticReference(node.object);
+
   return objectReference === null
     ? null
     : {

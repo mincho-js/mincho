@@ -33,6 +33,7 @@ export function collectSupportedOperands(
     if (operand === null) {
       return null;
     }
+
     operands.push(operand);
   }
 
@@ -99,6 +100,7 @@ function collectArrayOperand(
     if (operand === null) {
       return null;
     }
+
     operands.push(operand);
   }
 
@@ -150,6 +152,7 @@ function collectTernaryOperand(
     runtime,
     state
   );
+
   const alternate = resolveKnownClassOperand(
     path.get("alternate"),
     runtime,
@@ -203,6 +206,7 @@ function resolveKnownClassOperand(
     ? { kind: "class", source: "local-css-call", ...range }
     : null;
 }
+
 function countOperandConditions(operand: DefineRulesCxOperandMetadata): number {
   switch (operand.kind) {
     case "class":

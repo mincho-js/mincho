@@ -41,6 +41,7 @@ export function getIdentifierParamName(
   index: number
 ): string | null {
   const param = helperFunction.params[index];
+
   return param && t.isIdentifier(param) ? param.name : null;
 }
 
@@ -52,6 +53,7 @@ export function getOnlyBodyStatement(
   }
 
   const [statement] = helperFunction.body.body;
+
   return helperFunction.body.body.length === 1 && statement ? statement : null;
 }
 
@@ -66,6 +68,7 @@ export function getReturnExpression(
   }
 
   const statement = getOnlyBodyStatement(helperFunction);
+
   return statement &&
     t.isReturnStatement(statement) &&
     t.isExpression(statement.argument)
@@ -85,6 +88,7 @@ export function getForInKeyName(
   }
 
   const [declaration] = left.declarations;
+
   return declaration && t.isIdentifier(declaration.id)
     ? declaration.id.name
     : null;
@@ -111,6 +115,7 @@ export function isObjectDefinePropertyReference(
   }
 
   const binding = scope.getBinding(expression.name);
+
   return (
     binding?.path.isVariableDeclarator() === true &&
     isObjectMethodReference(binding.path.node.init, "defineProperty", scope)

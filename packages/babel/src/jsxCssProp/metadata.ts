@@ -51,8 +51,10 @@ export function registerStaticCssEvalResultMetadata(
   const dependencies = (result.dependencies ?? []).filter(
     isResolutionDependency
   );
+
   const diagnostics =
     result.diagnostics ?? (result.diagnostic ? [result.diagnostic] : []);
+
   const cacheKeys = result.cacheKey ? [result.cacheKey] : [];
 
   if (
@@ -104,7 +106,9 @@ function getMinchoStaticCssEvalMetadata(
     cacheKeys: [],
     resolvedModuleIds: []
   };
+
   state.file.metadata.minchoStaticCssEval = nextMetadata;
+
   return nextMetadata;
 }
 

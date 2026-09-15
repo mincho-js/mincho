@@ -25,6 +25,7 @@ export function optimizeDefineRulesCxConditionsCallExpression(
   }
 
   const fallbackPlan = createFallbackChainPlan(path, operands, runtime);
+
   return fallbackPlan === null
     ? false
     : optimizeFallbackChainPlan(path, fallbackPlan);
@@ -48,11 +49,13 @@ function optimizeTablePlan(
   if (insertionPoint === null) {
     return false;
   }
+
   const { programPath, programStatement } = insertionPoint;
 
   const tableIdentifier = programPath.scope.generateUidIdentifier(
     "minchoDefineRulesCx"
   );
+
   const tableDeclaration = t.variableDeclaration("const", [
     t.variableDeclarator(tableIdentifier, createTableExpression(plan))
   ]);
@@ -65,6 +68,7 @@ function optimizeTablePlan(
       true
     )
   );
+
   return true;
 }
 
@@ -75,7 +79,9 @@ function createTableExpression(plan: TablePlan): t.ArrayExpression {
         t.cloneNode(plan.callee),
         entry.map((item) => t.cloneNode(item))
       );
+
       generatedOptimizedCalls.add(tableCall);
+
       return tableCall;
     })
   );
@@ -95,6 +101,7 @@ function createKeyExpression(
       t.numericLiteral(index)
     )
   );
+
   const first = expressions[0];
 
   if (first === undefined) {

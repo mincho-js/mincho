@@ -15,12 +15,14 @@ export function collectModuleReplacementOperations(options: {
   readonly state: StaticCssEvalCjsExportState;
 }): StaticCssEvalCjsExportMapOperation[] {
   options.state.exportsAliasSafe = false;
+
   const operations: StaticCssEvalCjsExportMapOperation[] = [
     { kind: "clear-cjs-exports" }
   ];
 
   if (t.isArrayExpression(options.expression.right)) {
     options.state.moduleObjectLike = false;
+
     return [
       ...operations,
       createExpressionSetOperation(
@@ -33,6 +35,7 @@ export function collectModuleReplacementOperations(options: {
 
   if (!t.isObjectExpression(options.expression.right)) {
     options.state.moduleObjectLike = false;
+
     return [
       ...operations,
       createExpressionSetOperation(
@@ -54,6 +57,7 @@ export function collectModuleReplacementOperations(options: {
   for (const property of options.expression.right.properties) {
     if (!t.isObjectProperty(property) || property.computed) {
       options.state.moduleObjectLike = false;
+
       return [
         ...operations,
         createUnsupportedOperation({
@@ -71,6 +75,7 @@ export function collectModuleReplacementOperations(options: {
 
     if (!exportName || !t.isExpression(property.value)) {
       options.state.moduleObjectLike = false;
+
       return [
         ...operations,
         createUnsupportedOperation({
@@ -94,5 +99,6 @@ export function collectModuleReplacementOperations(options: {
   }
 
   options.state.moduleObjectLike = true;
+
   return operations;
 }

@@ -99,6 +99,7 @@ describe("babelTransformSource", () => {
         file: filename,
         message: `${failure} failed`
       });
+
       expect(engine.getFileResult(filename)?.generatedArtifacts).toEqual([]);
       expect(engine.getFileResult(filename)?.dependencyFiles).not.toContain(
         "/stale.ts"
@@ -113,6 +114,7 @@ describe("babelTransformSource", () => {
     await expect(
       babelTransform(filename, { staticCssEvalProjectEngine: engine })
     ).rejects.toBeInstanceOf(BabelTransformError);
+
     expect(engine.getFileResult(filename)?.generatedArtifacts).toEqual([]);
   });
 });

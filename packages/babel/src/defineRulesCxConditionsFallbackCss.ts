@@ -42,6 +42,7 @@ export function createFallbackClassPlan(
   }
 
   builder.classPaths.push(path);
+
   return { expression: t.cloneNode(path.node), path, writes };
 }
 

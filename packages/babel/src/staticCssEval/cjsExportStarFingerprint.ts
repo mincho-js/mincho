@@ -58,6 +58,7 @@ function getForInKeyName(left: t.ForInStatement["left"]): string | null {
   }
 
   const [declaration] = left.declarations;
+
   return declaration && t.isIdentifier(declaration.id)
     ? declaration.id.name
     : null;
@@ -65,6 +66,7 @@ function getForInKeyName(left: t.ForInStatement["left"]): string | null {
 
 function getSingleIfStatement(statement: t.Statement): t.IfStatement | null {
   const bodyStatement = getSingleBodyStatement(statement);
+
   return bodyStatement &&
     t.isIfStatement(bodyStatement) &&
     bodyStatement.alternate === null
@@ -102,6 +104,7 @@ function isBoundCreateBindingHelper(
   scope: StaticCssEvalBabelScope
 ): boolean {
   const helperFunctions = getBoundHelperFunctions(helperName, scope);
+
   return (
     helperFunctions.length > 0 &&
     helperFunctions.every((helperFunction) =>

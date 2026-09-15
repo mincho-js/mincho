@@ -54,6 +54,7 @@ export function createFallbackChainPlan(
     if (operandPlan === null) {
       return null;
     }
+
     operandPlans.push(operandPlan);
   }
 
@@ -111,6 +112,7 @@ function createOperandPlan(
         runtime,
         builder
       );
+
       return classOperand === null ? null : { kind: "class", classOperand };
     }
     case "condition":
@@ -152,6 +154,7 @@ function createConditionOperandPlan(
   }
 
   builder.conditions.push(t.cloneNode(path.node.left));
+
   return { kind: "condition", conditionIndex, classOperand };
 }
 
@@ -172,6 +175,7 @@ function createTernaryOperandPlan(
     runtime,
     builder
   );
+
   const alternate = createFallbackClassPlan(
     path.get("alternate"),
     metadata.alternate,
@@ -184,6 +188,7 @@ function createTernaryOperandPlan(
   }
 
   builder.conditions.push(t.cloneNode(path.node.test));
+
   return { kind: "ternary", conditionIndex, consequent, alternate };
 }
 
@@ -228,6 +233,7 @@ function createArrayOperandPlan(
     if (operandPlan === null) {
       return null;
     }
+
     operandPlans.push(operandPlan);
   }
 

@@ -67,6 +67,7 @@ export function reduceObjectExpression(
           details: { deoptPath: [{ kind: "spread" }] }
         };
       }
+
       continue;
     }
 
@@ -99,6 +100,7 @@ export function reduceObjectExpression(
       depth: options.depth + 1,
       reductionContext: options.reductionContext
     });
+
     const nextProperty = t.cloneNode(property);
     nextProperty.key = createStaticObjectPropertyKey(keyResult.name);
     nextProperty.computed = false;
@@ -172,6 +174,7 @@ export function getStaticObjectPropertyName(
   if (t.isNumericLiteral(key)) {
     return String(key.value);
   }
+
   return null;
 }
 
@@ -263,14 +266,17 @@ function pushObjectSpreadProperties(
         property: t.cloneNode(options.property),
         propertyKeyIndexes: options.propertyKeyIndexes
       });
+
       return true;
     }
+
     pushObjectPropertyWithOverride({
       properties: options.properties,
       property: t.cloneNode(spreadProperty),
       propertyKeyIndexes: options.propertyKeyIndexes
     });
   }
+
   return false;
 }
 
@@ -289,8 +295,10 @@ function pushObjectPropertyWithOverride(options: {
 
     if (existingIndex !== undefined) {
       options.properties[existingIndex] = options.property;
+
       return;
     }
+
     options.propertyKeyIndexes.set(keyName, options.properties.length);
   }
 

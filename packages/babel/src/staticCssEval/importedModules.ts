@@ -108,9 +108,11 @@ if (import.meta.vitest) {
 
         return delegate.getParsedModule(source);
       },
+
       getExportMap(source) {
         return cache.getParsedModule(source).exportMap;
       },
+
       getExportMapEntry(source, exportName) {
         return cache.getParsedModule(source).exportMap.get(exportName) ?? null;
       }
@@ -268,6 +270,7 @@ if (import.meta.vitest) {
         resolutionChain: [],
         stack: []
       };
+
       const dependency = {
         file: stylesId,
         kind: "imported",
@@ -336,6 +339,7 @@ if (import.meta.vitest) {
         id: stylesId,
         source: `export const value = "red";`
       });
+
       const sky = createImportedStaticCssEvalModuleRecord({
         id: stylesId,
         source: `export const value = "sky";`
@@ -365,6 +369,7 @@ if (import.meta.vitest) {
       const delegate = createStaticCssModuleCache();
       const moduleCache: StaticCssModuleCache = {
         ...delegate,
+
         getParsedModule(source) {
           if (source.resolvedFile === stylesId) {
             throw parseFailure;
@@ -373,6 +378,7 @@ if (import.meta.vitest) {
           return delegate.getParsedModule(source);
         }
       };
+
       const provider = createProviderFromModules({
         modules: [
           {
@@ -467,6 +473,7 @@ if (import.meta.vitest) {
         id: ownerId,
         source: `const require = makeRequire(); const styles = require("./styles");`
       });
+
       const provider = createProvider(
         `export const button = { color: "red" } as const;`,
         `const require = makeRequire(); const styles = require("./styles"); <div css={styles.button} />;`
@@ -924,6 +931,7 @@ if (import.meta.vitest) {
           }
         ]
       });
+
       const cjsProvider = createProvider(
         `
           const tokens = require("./tokens");
@@ -951,6 +959,7 @@ if (import.meta.vitest) {
       const packageResult = expectResolvedResult(
         resolveFixture(packageProvider, "button")
       );
+
       const cjsResult = expectResolvedResult(
         resolveFixture(cjsProvider, "styles", ["button"])
       );
@@ -1305,6 +1314,7 @@ if (import.meta.vitest) {
           }
         ]
       });
+
       const buttonResult = expectResolvedResult(
         resolveFixture(provider, "button")
       );
@@ -1415,6 +1425,7 @@ if (import.meta.vitest) {
           }
         ]
       });
+
       const nonStaticNamespaceProvider = createProviderFromModules({
         modules: [
           {
@@ -1617,7 +1628,9 @@ if (import.meta.vitest) {
           importPath: "@scope/missing"
         }
       });
+
       const virtualResult = resolveFixture(provider, "virtualStyles");
+
       expect(virtualResult).toMatchObject({
         kind: "error",
         diagnostic: {
@@ -2174,6 +2187,7 @@ if (import.meta.vitest) {
           "button"
         )
       );
+
       const reexportResult = expectResolvedResult(
         resolveFixture(
           createProvider(
@@ -2183,9 +2197,11 @@ if (import.meta.vitest) {
           "button"
         )
       );
+
       const directDependency = directResult.dependencies.find(
         (dependency) => dependency.file === stylesId
       );
+
       const reexportDependency = reexportResult.dependencies.find(
         (dependency) => dependency.file === stylesId
       );
@@ -2227,6 +2243,7 @@ if (import.meta.vitest) {
             }
           ]
         });
+
       const red = expectResolvedResult(
         resolveFixture(
           createVersionedProvider(
@@ -2237,6 +2254,7 @@ if (import.meta.vitest) {
           "button"
         )
       );
+
       const blue = expectResolvedResult(
         resolveFixture(
           createVersionedProvider(
@@ -2260,6 +2278,7 @@ if (import.meta.vitest) {
 
     it("changes imported operand cache identity and static support version for expanded literals", () => {
       const { cache, missesByFile } = createCountingStaticCssModuleCache();
+
       const createVersionedProvider = (
         tokenSource: string,
         tokenHash: string,
@@ -2311,6 +2330,7 @@ if (import.meta.vitest) {
           "button"
         )
       );
+
       const blue = expectResolvedResult(
         resolveFixture(
           createVersionedProvider(
@@ -2556,13 +2576,16 @@ if (import.meta.vitest) {
         });
         module.exports = __toCommonJS(exports);
       `;
+
       const esbuildProvider = createProvider(
         esbuildStylesSource,
         `const styles = require("./styles"); <><div css={styles.button} /><div css={styles.default} /></>;`
       );
+
       const buttonResult = expectResolvedResult(
         resolveFixture(esbuildProvider, "styles", ["button"])
       );
+
       const defaultResult = expectResolvedResult(
         resolveFixture(esbuildProvider, "styles", ["default"])
       );
@@ -2965,6 +2988,7 @@ if (import.meta.vitest) {
       ).toEqual({
         kind: "not-candidate"
       });
+
       expectCjsUnsupportedFixture({
         stylesSource: `const exports = {}; exports.button = { color: "red" };`,
         ownerSource: `const styles = require("./styles"); <div css={styles.button} />;`,
@@ -2986,6 +3010,7 @@ if (import.meta.vitest) {
         }
         write({});
       `;
+
       const parameterShadowedExportsRecord =
         createImportedStaticCssEvalModuleRecord({
           id: stylesId,
@@ -2993,6 +3018,7 @@ if (import.meta.vitest) {
         });
 
       expect(parameterShadowedExportsRecord.exports.has("button")).toBe(false);
+
       expectCjsUnsupportedFixture({
         stylesSource: parameterShadowedExportsSource,
         ownerSource: `const styles = require("./styles"); <div css={styles.button} />;`,
@@ -3122,6 +3148,7 @@ if (import.meta.vitest) {
         `export const button = { color: "red" } as const;`,
         `import * as styles from "./styles"; <div css={styles[variant]} />;`
       );
+
       const diagnostic =
         findUnsupportedImportedStaticCssEvalReferenceDiagnostic({
           expression: t.memberExpression(

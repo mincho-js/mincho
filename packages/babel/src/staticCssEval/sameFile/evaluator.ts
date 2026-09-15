@@ -50,6 +50,7 @@ export function evaluateSameFileStaticLiteralExpression(
   const unwrappedExpression = unwrapTransparentCssRuleExpression(
     options.expression
   );
+
   options.state.count += 1;
 
   const countResult = enforceStaticCssEvalLiteralNodeCount({
@@ -431,6 +432,7 @@ function evaluateSameFileStaticArrayExpression(
 
         elements.push(t.cloneNode(spreadElement));
       }
+
       continue;
     }
 
@@ -606,6 +608,7 @@ function evaluateSameFileStaticTemplateLiteral(
     }
 
     metadata = interpolationResult.metadata;
+
     const primitiveValue = getTemplateInterpolationPrimitiveValue(
       interpolationResult.expression
     );

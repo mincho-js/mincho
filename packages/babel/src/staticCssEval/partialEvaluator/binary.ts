@@ -86,6 +86,7 @@ function foldBinaryPrimitiveValue(
       if (typeof leftValue === "string" || typeof rightValue === "string") {
         return { kind: "folded", value: `${leftValue}${rightValue}` };
       }
+
       return { kind: "unsupported" };
     case "-":
       return foldNumberBinaryPrimitiveValue(
@@ -159,6 +160,7 @@ function foldBinaryPrimitiveValue(
       return { kind: "unsupported" };
     default: {
       const exhaustive: never = operator;
+
       return exhaustive;
     }
   }

@@ -60,6 +60,7 @@ export function resolveSameModuleStaticLiteralReference(
 
   const declarationKind =
     getImportedStaticCssEvalBindingDeclarationKind(binding);
+
   const init = getImportedStaticCssEvalVariableBindingInitExpression(binding);
 
   if (!declarationKind || !init) {
@@ -85,6 +86,7 @@ export function resolveSameModuleStaticLiteralReference(
     bindingName: options.reference.bindingName,
     memberPath: [...options.reference.memberPath]
   };
+
   const cycleStartIndex = findImportedLocalAliasCycleStartIndex(
     options.localStack,
     currentFrame
@@ -114,6 +116,7 @@ export function resolveSameModuleStaticLiteralReference(
     init,
     options.reference.memberPath
   );
+
   const literalResult = evaluateStaticCssLiteralExpression({
     ...options,
     expression: selectedExpression.expression,
@@ -192,9 +195,11 @@ export function createDynamicRequireOperandDiagnostic(
   const binding = options.record.programPath.scope.getBinding(
     options.reference.bindingName
   );
+
   const init = binding
     ? getImportedStaticCssEvalVariableBindingInitExpression(binding)
     : null;
+
   const unwrappedInit = init ? unwrapTransparentCssRuleExpression(init) : null;
 
   if (
@@ -247,6 +252,7 @@ export function getImportedStaticCssEvalBindingDeclarationKind(
     }
 
     const { kind } = bindingPath.parentPath.node;
+
     return kind === "const" || kind === "let" || kind === "var" ? kind : null;
   }
 

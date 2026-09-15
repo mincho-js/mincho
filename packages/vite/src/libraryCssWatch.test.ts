@@ -118,6 +118,7 @@ it("retains cached entry CSS contracts during watch, updates CSS and removes sta
   watcher.on("change", (id, event) => {
     watchEvents.push(`${event.event}:${id}`);
   });
+
   watcher.on("event", (event) => {
     watchEvents.push(`${event.code}:outputs=${outputs.length}`);
 

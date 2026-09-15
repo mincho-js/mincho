@@ -36,6 +36,7 @@ describe("shared defineRules registry queue", () => {
       "Cannot enqueue a defineRules registry step from an active registry step"
     );
     await expect(following).resolves.toBe("following");
+
     expect(nestedCalls).toBe(0);
   });
 

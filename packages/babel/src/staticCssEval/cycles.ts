@@ -71,6 +71,7 @@ export function enterStaticCssEvalCycleFrame(
     ...options.stack.slice(cycleStartIndex).map(cloneCycleFrame),
     cloneCycleFrame(options.nextFrame)
   ];
+
   const importChain = cycle.map(formatStaticCssEvalCycleFrame);
   const dependency =
     options.nextFrame.location ??
@@ -78,6 +79,7 @@ export function enterStaticCssEvalCycleFrame(
     ({
       file: options.nextFrame.resolvedId
     } satisfies StaticCssEvalSourceLocation);
+
   const diagnostic = createStaticCssEvalDiagnostic({
     code: "cycle-detected",
     reason: "runtime-dynamic-value",
@@ -210,6 +212,7 @@ if (vitest) {
           location: { file: "/project/src/b.ts" }
         }
       ];
+
       const result = enterStaticCssEvalCycleFrame({
         owner,
         stack,
@@ -223,6 +226,7 @@ if (vitest) {
       });
 
       expect(result.ok).toBe(false);
+
       if (!result.ok) {
         expect(result.diagnostic).toMatchObject({
           code: "cycle-detected",

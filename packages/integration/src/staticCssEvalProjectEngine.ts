@@ -13,6 +13,7 @@ import {
 
 type StaticCssEvalDiagnostic =
   MinchoStaticCssEvalMetadata["diagnostics"][number];
+
 type StaticCssEvalCacheKey = MinchoStaticCssEvalMetadata["cacheKeys"][number];
 
 export type StaticEvalProjectEngineGeneratedArtifact = {
@@ -21,6 +22,7 @@ export type StaticEvalProjectEngineGeneratedArtifact = {
   readonly source: string;
   readonly kind: "sidecar-css-ts" | "virtual-css";
 };
+
 export type StaticEvalProjectEngineRefreshInput = {
   readonly fileId: string;
   readonly result?: StaticEvalProjectEngineStaticCssEvalLike;
@@ -29,6 +31,7 @@ export type StaticEvalProjectEngineRefreshInput = {
   readonly sourceVersion?: string | number;
   readonly preserveProviderRecords?: boolean;
 };
+
 export type StaticEvalProjectEngineProviderRecord =
   | {
       readonly kind: "resolve";
@@ -41,6 +44,7 @@ export type StaticEvalProjectEngineProviderRecord =
       readonly id: string;
       readonly result: StaticCssEvalLoadedSource | null;
     };
+
 type StaticEvalProjectEngineStaticCssEvalLike = {
   readonly dependencyFiles?: readonly string[];
   readonly dependencies?: InternalStaticCssEvalMetadataLike["dependencies"];
@@ -49,6 +53,7 @@ type StaticEvalProjectEngineStaticCssEvalLike = {
   readonly cacheKeys?: readonly StaticCssEvalCacheKey[];
   readonly resolvedModuleIds?: readonly string[];
 };
+
 export type StaticEvalProjectEngineFileResult = {
   readonly fileId: string;
   readonly dependencyFiles: readonly string[];
@@ -61,6 +66,7 @@ export type StaticEvalProjectEngineFileResult = {
   readonly sourceVersion?: string | number;
   readonly invalidated: boolean;
 };
+
 export type StaticEvalProjectEngineRefreshResult = {
   readonly fileId: string;
   readonly invalidatedFiles: readonly string[];
@@ -70,14 +76,20 @@ export interface StaticEvalProjectEngine {
   refreshFile(
     input: StaticEvalProjectEngineRefreshInput
   ): StaticEvalProjectEngineRefreshResult;
+
   removeFile(fileId: string): readonly string[];
+
   getFileResult(fileId: string): StaticEvalProjectEngineFileResult | undefined;
+
   getBabelStaticEvalProvider(
     fileId: string,
     sourceProvider?: StaticCssEvalSourceProvider
   ): StaticCssEvalSourceProvider;
+
   getGeneratedArtifacts(): readonly StaticEvalProjectEngineGeneratedArtifact[];
+
   getDiagnostics(): readonly StaticCssEvalDiagnostic[];
+
   invalidateByDependency(dependencyId: string): readonly string[];
 }
 
@@ -94,41 +106,53 @@ type FileState = {
 export class MinchoProjectEngine implements StaticEvalProjectEngine {
   private readonly files = new Map<string, FileState>();
   private readonly dependencyToOwners = new Map<string, Set<string>>();
+
   constructor(private readonly sourceProvider?: StaticCssEvalSourceProvider) {}
+
   refreshFile(
     input: StaticEvalProjectEngineRefreshInput
   ): StaticEvalProjectEngineRefreshResult {
     const invalidatedFiles = this.invalidateByDependency(input.fileId);
     this.forgetOwnerDependencies(input.fileId);
+
     const dependencyFiles = internalCollectStaticCssEvalDependencyIds(
       input.result
     ).sort();
+
     const providerRecords = input.preserveProviderRecords
       ? (this.files.get(input.fileId)?.providerRecords ?? [])
       : [];
+
     const state: FileState = {
       generatedArtifacts: [...(input.generatedArtifacts ?? [])],
       providerRecords: [...providerRecords],
       dependencyFiles,
       invalidated: false
     };
+
     if (input.result) state.result = input.result;
     if (input.sourceHash !== undefined) state.sourceHash = input.sourceHash;
     if (input.sourceVersion !== undefined)
       state.sourceVersion = input.sourceVersion;
+
     this.files.set(input.fileId, state);
     this.rememberOwnerDependencies(input.fileId, dependencyFiles);
+
     return { fileId: input.fileId, invalidatedFiles };
   }
+
   removeFile(fileId: string): readonly string[] {
     const invalidatedFiles = this.invalidateByDependency(fileId);
     this.forgetOwnerDependencies(fileId);
     this.files.delete(fileId);
+
     return invalidatedFiles;
   }
+
   getFileResult(fileId: string): StaticEvalProjectEngineFileResult | undefined {
     const state = this.files.get(fileId);
     if (!state) return undefined;
+
     return {
       fileId,
       dependencyFiles: [...state.dependencyFiles].sort(),
@@ -150,24 +174,29 @@ export class MinchoProjectEngine implements StaticEvalProjectEngine {
       invalidated: state.invalidated
     };
   }
+
   getBabelStaticEvalProvider(
     fileId: string,
     sourceProvider = this.sourceProvider
   ): StaticCssEvalSourceProvider {
     const state = this.getOrCreateState(fileId);
     state.providerRecords = [];
+
     return {
       resolve: async (importerId, importPath) => {
         const result =
           (await sourceProvider?.resolve(importerId, importPath)) ?? null;
+
         state.providerRecords.push({
           kind: "resolve",
           importerId,
           importPath,
           result: cloneResolution(result)
         });
+
         return result;
       },
+
       load: async (id) => {
         const result = (await sourceProvider?.load(id)) ?? null;
         state.providerRecords.push({
@@ -175,63 +204,79 @@ export class MinchoProjectEngine implements StaticEvalProjectEngine {
           id,
           result: cloneLoaded(result)
         });
+
         return result;
       }
     };
   }
+
   getGeneratedArtifacts(): readonly StaticEvalProjectEngineGeneratedArtifact[] {
     return [...this.files.values()]
       .flatMap((state) => state.generatedArtifacts)
       .sort(compareArtifact);
   }
+
   getDiagnostics(): readonly StaticCssEvalDiagnostic[] {
     return [...this.files.values()]
       .flatMap((state) => state.result?.diagnostics ?? [])
       .sort(compareDiagnostics);
   }
+
   invalidateByDependency(dependencyId: string): readonly string[] {
     const invalidatedFiles = [
       ...(this.dependencyToOwners.get(dependencyId) ?? [])
     ].sort();
+
     for (const owner of invalidatedFiles) {
       const state = this.files.get(owner);
+
       if (state) {
         state.invalidated = true;
         state.generatedArtifacts = [];
       }
     }
+
     return invalidatedFiles;
   }
+
   private getOrCreateState(fileId: string): FileState {
     const state = this.files.get(fileId);
     if (state) return state;
+
     const next: FileState = {
       generatedArtifacts: [],
       providerRecords: [],
       dependencyFiles: [],
       invalidated: false
     };
+
     this.files.set(fileId, next);
+
     return next;
   }
+
   private rememberOwnerDependencies(
     ownerId: string,
     dependencyFiles: readonly string[]
   ): void {
     for (const dependencyFile of dependencyFiles) {
       if (dependencyFile === ownerId) continue;
+
       const owners = this.dependencyToOwners.get(dependencyFile) ?? new Set();
       owners.add(ownerId);
       this.dependencyToOwners.set(dependencyFile, owners);
     }
   }
+
   private forgetOwnerDependencies(ownerId: string): void {
     const state = this.files.get(ownerId);
 
     for (const dependencyFile of state?.dependencyFiles ?? []) {
       const owners = this.dependencyToOwners.get(dependencyFile);
       if (!owners) continue;
+
       owners.delete(ownerId);
+
       if (owners.size === 0) this.dependencyToOwners.delete(dependencyFile);
     }
 
@@ -252,6 +297,7 @@ function cloneResolution(
       }
     : null;
 }
+
 function cloneLoaded(
   result: StaticCssEvalLoadedSource | null
 ): StaticCssEvalLoadedSource | null {
@@ -265,6 +311,7 @@ function cloneLoaded(
       }
     : null;
 }
+
 function compareArtifact(
   left: StaticEvalProjectEngineGeneratedArtifact,
   right: StaticEvalProjectEngineGeneratedArtifact
@@ -274,6 +321,7 @@ function compareArtifact(
     `${right.ownerFile}\0${right.artifactFile}\0${right.kind}`
   );
 }
+
 function compareResolvedDependencies(
   left: StaticCssEvalResolvedDependency,
   right: StaticCssEvalResolvedDependency
@@ -283,6 +331,7 @@ function compareResolvedDependencies(
     `${right.importerId}\0${right.specifier}\0${right.resolvedFile}`
   );
 }
+
 function compareDiagnostics(
   left: StaticCssEvalDiagnostic,
   right: StaticCssEvalDiagnostic
@@ -292,9 +341,11 @@ function compareDiagnostics(
     JSON.stringify([right.owner.file, right.id, right.code, right.message])
   );
 }
+
 function compareJson<T>(left: T, right: T): number {
   return text(JSON.stringify(left), JSON.stringify(right));
 }
+
 function text(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
 }
@@ -305,6 +356,7 @@ if (import.meta.vitest) {
   // eslint-disable-next-line @typescript-eslint/ban-ts-comment
   // @ts-ignore error TS1343: The 'import.meta' meta-property is only allowed when the '--module' option is 'es2020', 'es2022', 'esnext', 'system', 'node16', or 'nodenext'.
   const { describe, expect, it } = import.meta.vitest;
+
   const artifact = (
     ownerFile: string
   ): StaticEvalProjectEngineGeneratedArtifact => ({
@@ -313,6 +365,7 @@ if (import.meta.vitest) {
     source: "css({ color: token })",
     kind: "sidecar-css-ts"
   });
+
   const result = (
     fileId: string,
     dependencyFile: string,
@@ -372,8 +425,10 @@ if (import.meta.vitest) {
     ],
     resolvedModuleIds: [`test:${dependencyFile}`]
   });
+
   const cycle = "STATIC_CSS_EVAL_LOCAL_ALIAS_CYCLE";
   const unsupported = "STATIC_CSS_EVAL_PROVIDER_SOURCE_UNSUPPORTED";
+
   function providerEngine(): MinchoProjectEngine {
     return new MinchoProjectEngine({
       resolve: (importerId, importPath) => ({
@@ -382,6 +437,7 @@ if (import.meta.vitest) {
         normalizedPathKey: importPath,
         resolverKind: "test"
       }),
+
       load: (id) => ({
         sourceText: `export const id = ${JSON.stringify(id)};`,
         sourceIdentity: { sourceHash: `hash:${id}`, version: 1 },
@@ -389,6 +445,7 @@ if (import.meta.vitest) {
       })
     });
   }
+
   describe("static css eval project engine", () => {
     it("refreshes a file and updates only its contribution plus dependents", () => {
       const engine = new MinchoProjectEngine();
@@ -397,12 +454,14 @@ if (import.meta.vitest) {
         result: result("/project/Dependent.tsx", "/project/App.tsx", "green"),
         generatedArtifacts: [artifact("/project/Dependent.tsx")]
       });
+
       const refresh = engine.refreshFile({
         fileId: "/project/App.tsx",
         result: result("/project/App.tsx", "/project/tokens.ts", "blue"),
         sourceHash: "owner:blue",
         sourceVersion: 2
       });
+
       expect(refresh.invalidatedFiles).toEqual(["/project/Dependent.tsx"]);
       expect(engine.getFileResult("/project/App.tsx")?.sourceHash).toBe(
         "owner:blue"
@@ -412,6 +471,7 @@ if (import.meta.vitest) {
         engine.getFileResult("/project/Dependent.tsx")?.generatedArtifacts
       ).toEqual([]);
     });
+
     it("preserves source fingerprint hash and version together", () => {
       const engine = new MinchoProjectEngine();
       engine.refreshFile({
@@ -420,6 +480,7 @@ if (import.meta.vitest) {
         sourceHash: "hash:owner",
         sourceVersion: "version:owner"
       });
+
       expect(engine.getFileResult("/project/App.tsx")?.sourceHash).toBe(
         "hash:owner"
       );
@@ -427,6 +488,7 @@ if (import.meta.vitest) {
         "version:owner"
       );
     });
+
     it("removes a file and clears artifacts diagnostics while invalidating dependents", () => {
       const engine = new MinchoProjectEngine();
       engine.refreshFile({
@@ -439,6 +501,7 @@ if (import.meta.vitest) {
         ),
         generatedArtifacts: [artifact("/project/App.tsx")]
       });
+
       expect(engine.removeFile("/project/tokens.ts")).toEqual([
         "/project/App.tsx"
       ]);
@@ -450,17 +513,20 @@ if (import.meta.vitest) {
         engine.getFileResult("/project/App.tsx")?.diagnostics
       ).toHaveLength(1);
     });
+
     it("invalidates owners by dependency", () => {
       const engine = new MinchoProjectEngine();
       engine.refreshFile({
         fileId: "/project/App.tsx",
         result: result("/project/App.tsx", "/project/tokens.ts", "blue")
       });
+
       expect(engine.invalidateByDependency("/project/tokens.ts")).toEqual([
         "/project/App.tsx"
       ]);
       expect(engine.getFileResult("/project/App.tsx")?.invalidated).toBe(true);
     });
+
     it("returns deterministic diagnostics and artifacts", () => {
       const engine = new MinchoProjectEngine();
       engine.refreshFile({
@@ -478,6 +544,7 @@ if (import.meta.vitest) {
         result: result("/project/A.tsx", "/project/tokens-a.ts", "red", cycle),
         generatedArtifacts: [artifact("/project/A.tsx")]
       });
+
       expect(
         engine.getDiagnostics().map((diagnostic) => diagnostic.id)
       ).toEqual([cycle, unsupported]);
@@ -485,44 +552,55 @@ if (import.meta.vitest) {
         engine.getGeneratedArtifacts().map((item) => item.ownerFile)
       ).toEqual(["/project/A.tsx", "/project/B.tsx"]);
     });
+
     it("records deterministic provider artifacts snapshots", async () => {
       const engine = providerEngine();
       const provider = engine.getBabelStaticEvalProvider("/project/App.tsx");
       await provider.load("/project/tokens.ts");
       await provider.resolve("/project/App.tsx", "./tokens");
+
       const snapshot =
         engine.getFileResult("/project/App.tsx")?.providerSnapshot;
+
       expect(JSON.parse(JSON.stringify(snapshot))).toEqual(snapshot);
       expect(snapshot?.map((record) => record.kind)).toEqual([
         "load",
         "resolve"
       ]);
     });
+
     it("resets stale provider snapshot records across refresh cycles", async () => {
       const engine = providerEngine();
       const firstProvider =
         engine.getBabelStaticEvalProvider("/project/App.tsx");
+
       await firstProvider.load("/project/old-tokens.ts");
       engine.refreshFile({
         fileId: "/project/App.tsx",
         result: result("/project/App.tsx", "/project/tokens.ts", "blue")
       });
+
       expect(
         engine.getFileResult("/project/App.tsx")?.providerSnapshot
       ).toEqual([]);
+
       const secondProvider =
         engine.getBabelStaticEvalProvider("/project/App.tsx");
+
       await secondProvider.resolve("/project/App.tsx", "./tokens");
+
       expect(
         engine
           .getFileResult("/project/App.tsx")
           ?.providerSnapshot.map((record) => record.kind)
       ).toEqual(["resolve"]);
     });
+
     it("preserves only current-transform provider records", async () => {
       const engine = providerEngine();
       const firstProvider =
         engine.getBabelStaticEvalProvider("/project/App.tsx");
+
       await firstProvider.load("/project/old-tokens.ts");
       engine.refreshFile({
         fileId: "/project/App.tsx",
@@ -532,6 +610,7 @@ if (import.meta.vitest) {
 
       const secondProvider =
         engine.getBabelStaticEvalProvider("/project/App.tsx");
+
       await secondProvider.resolve("/project/App.tsx", "./tokens");
       engine.refreshFile({
         fileId: "/project/App.tsx",

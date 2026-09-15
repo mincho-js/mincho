@@ -73,6 +73,7 @@ export function createTablePlan(
     if (operandPlan === null) {
       return null;
     }
+
     operandPlans.push(operandPlan);
   }
 
@@ -156,6 +157,7 @@ function createConditionOperandPlan(
   }
 
   builder.conditions.push(t.cloneNode(conditionPath.node));
+
   return { kind: "condition", conditionIndex, classOperand };
 }
 
@@ -174,6 +176,7 @@ function createTernaryOperandPlan(
     metadata.consequent,
     builder
   );
+
   const alternate = createClassPlan(
     path.get("alternate"),
     metadata.alternate,
@@ -185,6 +188,7 @@ function createTernaryOperandPlan(
   }
 
   builder.conditions.push(t.cloneNode(path.node.test));
+
   return { kind: "ternary", conditionIndex, consequent, alternate };
 }
 
@@ -227,6 +231,7 @@ function createArrayOperandPlan(
     if (operandPlan === null) {
       return null;
     }
+
     operandPlans.push(operandPlan);
   }
 
@@ -247,6 +252,7 @@ function createClassPlan(
   }
 
   builder.classPaths.push(path);
+
   return { expression: t.cloneNode(path.node), path };
 }
 
@@ -262,6 +268,7 @@ function createPermutationEntries(
     for (const operand of operands) {
       appendOperandEntry(operand, { mask, output });
     }
+
     entries.push(output);
   }
 
@@ -275,11 +282,13 @@ function appendOperandEntry(
   switch (operand.kind) {
     case "class":
       context.output.push(t.cloneNode(operand.classOperand.expression));
+
       return;
     case "condition":
       if (isConditionEnabled(context.mask, operand.conditionIndex)) {
         context.output.push(t.cloneNode(operand.classOperand.expression));
       }
+
       return;
     case "ternary":
       context.output.push(
@@ -289,11 +298,13 @@ function appendOperandEntry(
             : operand.alternate.expression
         )
       );
+
       return;
     case "array":
       for (const child of operand.operands) {
         appendOperandEntry(child, context);
       }
+
       return;
   }
 }

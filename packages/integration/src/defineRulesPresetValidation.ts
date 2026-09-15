@@ -2,6 +2,7 @@ import type { DefineRulesRegistrySession } from "@mincho-js/css/defineRules/regi
 
 const DEFINE_RULES_REGISTRY_SERIALIZABLE_CONFIG_DIAGNOSTIC =
   "defineRules registry serialization does not support function-valued conditions, properties, or shortcuts";
+
 const DEFINE_RULES_REGISTRY_SERIALIZABLE_CONTEXT_DIAGNOSTIC =
   "defineRules registry serialization does not support non-serializable context";
 
@@ -61,8 +62,10 @@ export function validateSerializableConfigEntry(
     if (options.validatePlainSerializableValues === true) {
       throwSerializableConfigEntryDiagnostic(path, diagnosticContext, options);
     }
+
     return;
   }
+
   seenEntries.add(entry);
 
   try {
@@ -76,6 +79,7 @@ export function validateSerializableConfigEntry(
           seenEntries
         );
       }
+
       return;
     }
 

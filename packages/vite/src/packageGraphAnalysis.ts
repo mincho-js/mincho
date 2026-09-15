@@ -157,6 +157,7 @@ export function createPackageGraphAnalysis(
         new Error(`Package graph worker exited unexpectedly with code ${code}`)
       )
     );
+
     instance.postMessage({
       type: "reset",
       generation

@@ -2,6 +2,7 @@ import { types as t } from "@babel/core";
 import type { NodePath } from "@babel/core";
 
 export type StaticCssEvalBabelScope = NodePath<t.Node>["scope"];
+
 export type TscHelperFunction = t.FunctionDeclaration | t.FunctionExpression;
 
 export function getBoundHelperFunctions(
@@ -32,6 +33,7 @@ export function getBoundHelperFunctions(
 
   const helperFunctions: TscHelperFunction[] = [];
   collectFunctionExpressions(binding.path.node.init, helperFunctions);
+
   return helperFunctions;
 }
 
@@ -40,6 +42,7 @@ export function getIdentifierParamName(
   index: number
 ): string | null {
   const param = helperFunction.params[index];
+
   return param && t.isIdentifier(param) ? param.name : null;
 }
 
@@ -48,6 +51,7 @@ export function getSingleBodyStatement(
 ): t.Statement | null {
   if (t.isBlockStatement(statement)) {
     const [bodyStatement] = statement.body;
+
     return statement.body.length === 1 && bodyStatement ? bodyStatement : null;
   }
 
@@ -60,6 +64,7 @@ function collectFunctionExpressions(
 ): void {
   if (t.isFunctionExpression(expression)) {
     helperFunctions.push(expression);
+
     return;
   }
 
@@ -67,7 +72,9 @@ function collectFunctionExpressions(
     if (t.isExpression(expression.left)) {
       collectFunctionExpressions(expression.left, helperFunctions);
     }
+
     collectFunctionExpressions(expression.right, helperFunctions);
+
     return;
   }
 
@@ -75,11 +82,13 @@ function collectFunctionExpressions(
     collectFunctionExpressions(expression.test, helperFunctions);
     collectFunctionExpressions(expression.consequent, helperFunctions);
     collectFunctionExpressions(expression.alternate, helperFunctions);
+
     return;
   }
 
   if (t.isParenthesizedExpression(expression)) {
     collectFunctionExpressions(expression.expression, helperFunctions);
+
     return;
   }
 

@@ -16,6 +16,7 @@ export function isSupportedEsbuildExportHelper(
   scope: StaticCssEvalBabelScope
 ): boolean {
   const helperFunctions = getBoundEsbuildHelperFunctions(helperName, scope);
+
   return (
     helperFunctions.length > 0 &&
     helperFunctions.every((helperFunction) =>

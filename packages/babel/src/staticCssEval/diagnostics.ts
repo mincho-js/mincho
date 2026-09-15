@@ -285,6 +285,7 @@ export function createStaticCssEvalDiagnostic(
   const registry = options.id
     ? STATIC_CSS_EVAL_DIAGNOSTIC_REGISTRY[options.id]
     : undefined;
+
   const diagnostic: StaticCssEvalDiagnostic = {
     ...(options.id !== undefined ? { id: options.id } : {}),
     code: options.code,
@@ -853,6 +854,7 @@ function getStaticCssEvalPartialEvalDeoptDiagnosticCode(
       return "limit-exceeded";
     default: {
       const exhaustive: never = reason;
+
       return exhaustive;
     }
   }
@@ -889,6 +891,7 @@ function getStaticCssEvalPartialEvalDeoptDiagnosticId(
       return "STATIC_CSS_EVAL_PARTIAL_EVAL_NODE_COUNT_EXCEEDED";
     default: {
       const exhaustive: never = mappedReason;
+
       return exhaustive;
     }
   }
@@ -920,6 +923,7 @@ function getStaticCssEvalPartialEvalUnsupportedReason(
       return "failed-project-local-dependency";
     default: {
       const exhaustive: never = reason;
+
       return exhaustive;
     }
   }
@@ -1407,6 +1411,7 @@ if (import.meta.vitest) {
           "Cannot partially evaluate css prop value: object key is not statically known",
         owner
       });
+
       const dynamicSpread = createStaticCssEvalPartialEvalDeoptDiagnostic({
         code: "unsupported-syntax",
         reason: "unsupported-spread",
@@ -1414,6 +1419,7 @@ if (import.meta.vitest) {
           "Cannot partially evaluate css prop value: spread operand is not statically reducible",
         owner
       });
+
       const unsupportedCall = createStaticCssEvalPartialEvalDeoptDiagnostic({
         code: "unsupported-syntax",
         reason: "unsupported-call-expression",
@@ -1422,6 +1428,7 @@ if (import.meta.vitest) {
         owner,
         memberPath: ["props", "variant"]
       });
+
       const unsupportedDependency =
         createStaticCssEvalProviderSourceUnsupportedDiagnostic({
           owner,
@@ -1433,6 +1440,7 @@ if (import.meta.vitest) {
           sourceOrigin: "external",
           reason: "external-no-source"
         });
+
       const ambiguousExportStar =
         createStaticCssEvalAmbiguousExportStarDiagnostic(
           {
@@ -1442,6 +1450,7 @@ if (import.meta.vitest) {
           },
           "button"
         );
+
       const missingProviderDependency =
         createStaticCssEvalUnresolvedImportDiagnostic(
           { owner, dependency: { file: "/project/src/styles.ts" } },
@@ -1539,6 +1548,7 @@ if (import.meta.vitest) {
       });
 
       expect(cycleResult.ok).toBe(false);
+
       if (!cycleResult.ok) {
         expect(cycleResult.diagnostic).toMatchObject({
           id: "STATIC_CSS_EVAL_IMPORT_CYCLE",

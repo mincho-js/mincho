@@ -30,6 +30,7 @@ export function registerPartialEvalStructureTests(
       const button = expectObjectExpression(
         expectFixtureConfidentExpression(results, 0)
       );
+
       expectStringLiteralExpression(
         expectObjectPropertyExpression(button, "color"),
         "red"
@@ -99,16 +100,19 @@ export function registerPartialEvalStructureTests(
       `);
 
       const mutated = expectFixtureDeoptResult(results, 0);
+
       expect(mutated.reason).toBe("mutated-binding");
       expect(mutated.diagnostic.message).toContain("same-file binding");
 
       for (let index = 1; index < 3; index += 1) {
         const nonConst = expectFixtureDeoptResult(results, index);
+
         expect(nonConst.reason).toBe("runtime-css-shape");
         expect(nonConst.diagnostic.message).toContain("is not declared const");
       }
 
       const nestedMutated = expectFixtureDeoptResult(results, 3);
+
       expect(nestedMutated.diagnostic.detail).toContain(
         'same-file binding "nestedMutated" is mutated'
       );
@@ -121,6 +125,7 @@ export function registerPartialEvalStructureTests(
           capture(color);
         }
       `);
+
       const deopt = expectFixtureDeoptResult(results, 0);
 
       expect(t.isIdentifier(deopt.fallbackExpression)).toBe(true);
@@ -135,6 +140,7 @@ export function registerPartialEvalStructureTests(
 
         capture(a);
       `);
+
       const depthResults = reduceFixture(
         `
           const a = b;
@@ -223,6 +229,7 @@ export function registerPartialEvalStructureTests(
 
         capture(style);
       `);
+
       const deopt = expectFixtureDeoptResult(results, 0);
 
       expect(deopt.reason).toBe("unsupported-import");

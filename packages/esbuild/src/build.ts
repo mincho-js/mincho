@@ -69,6 +69,7 @@ export async function buildWithMincho(
   options: BuildWithMinchoOptions
 ): Promise<esbuild.BuildResult> {
   const { mincho, plugins, ...nativeOptions } = options;
+
   if (
     nativeOptions.write !== false &&
     !nativeOptions.outdir &&
@@ -124,6 +125,7 @@ export async function buildWithMincho(
   const analyzed = await run("analyze", new Map());
   const preludes = planPreludes(analyzed, analyzed.cwd);
   const emitted = await run("emit", preludes);
+
   assertSameGraphs(analyzed.transaction.graphs, emitted.transaction.graphs);
   assertSameNativeInputs(analyzed.result.metafile, emitted.result.metafile);
 
@@ -592,6 +594,7 @@ function createObserver(
 
         return result;
       });
+
       build.onLoad({ filter: /.*/, namespace: "file" }, async (args) => {
         const loader =
           args.with.type === "json"

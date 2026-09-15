@@ -26,6 +26,7 @@ describe("defineRules cx serialization", () => {
     // @ts-ignore error TS1343
     const cacheRoot = fileURLToPath(new URL("../.cache/", import.meta.url));
     await mkdir(cacheRoot, { recursive: true });
+
     const fixtureRoot = await mkdtemp(join(cacheRoot, "cx-serialization-"));
     const filePath = join(fixtureRoot, "fixture.css.ts");
     const outputPath = join(fixtureRoot, "fixture.mjs");
@@ -52,16 +53,21 @@ describe("defineRules cx serialization", () => {
         `,
         resolverCache: new Map()
       });
+
       const serialized = await processVanillaFile({
         source: compiled.source,
         filePath,
         identOption: "debug"
       });
+
       await writeFile(outputPath, serialized, "utf8");
+
       const imported: unknown = await import(pathToFileURL(outputPath).href);
 
       expect(hasScopedCx(imported)).toBe(true);
+
       if (!hasScopedCx(imported)) return;
+
       expect(imported.scopedCx("__proto__ owned")).toBe("owned");
     } finally {
       await rm(fixtureRoot, { recursive: true, force: true });

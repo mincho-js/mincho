@@ -23,6 +23,7 @@ import type {
 
 const keyAttributeName = "key";
 const refAttributeName = "ref";
+
 export function transformSpreadAggregatedCssProp(
   path: NodePath<t.JSXOpeningElement>,
   normalizedElement: NormalizedJsxCssPropElement
@@ -31,6 +32,7 @@ export function transformSpreadAggregatedCssProp(
 
   if (!statementPath) {
     transformNestedSpreadAggregatedCssProp(path, normalizedElement);
+
     return;
   }
 
@@ -38,6 +40,7 @@ export function transformSpreadAggregatedCssProp(
     path,
     normalizedElement
   );
+
   statementPath.insertBefore(lowering.declarations);
   path.node.attributes = lowering.attributes;
 }
@@ -58,8 +61,10 @@ export function transformNestedSpreadAggregatedCssProp(
     path,
     normalizedElement
   );
+
   const nextElement = t.cloneNode(jsxElementPath.node);
   nextElement.openingElement.attributes = lowering.attributes;
+
   const iifeExpression = t.callExpression(
     t.arrowFunctionExpression(
       [],
@@ -70,6 +75,7 @@ export function transformNestedSpreadAggregatedCssProp(
     ),
     []
   );
+
   const replacement = isJsxChildReplacementContext(jsxElementPath)
     ? t.jsxExpressionContainer(iifeExpression)
     : iifeExpression;
@@ -94,10 +100,12 @@ function containsAwaitOrYieldExpression(path: NodePath<t.Node>): boolean {
       hasControlFlowExpression = true;
       awaitPath.stop();
     },
+
     YieldExpression(yieldPath) {
       hasControlFlowExpression = true;
       yieldPath.stop();
     },
+
     Function(functionPath) {
       functionPath.skip();
     }
@@ -131,6 +139,7 @@ function createPreCssSpreadAggregatedCssPropLowering(
   const explicitKeyRefAttributesBeforeCss = getExplicitKeyRefAttributes(
     normalizedElement.attributesBeforeCss
   );
+
   const preCssBinding = createAggregatePropsBinding(
     path,
     getAggregateAttributes(normalizedElement.attributesBeforeCss),
@@ -140,6 +149,7 @@ function createPreCssSpreadAggregatedCssPropLowering(
   const classNameAttributeAfterCss = normalizedElement.attributesAfterCss.find(
     (attribute) => isNamedJsxAttribute(attribute, classNameAttributeName)
   );
+
   const nextClassNameExpression = createClassNameExpression(path, {
     cssExpression: normalizedElement.cssExpression,
     cssValueClassification: normalizedElement.cssValueClassification,
@@ -150,6 +160,7 @@ function createPreCssSpreadAggregatedCssPropLowering(
       preCssBinding.classNameIdentifier
     )
   });
+
   const classNameAttribute = t.jsxAttribute(
     t.jsxIdentifier(classNameAttributeName),
     t.jsxExpressionContainer(nextClassNameExpression)
@@ -183,9 +194,11 @@ function createPostCssSpreadAggregatedCssPropLowering(
   const explicitKeyRefAttributesBeforeCss = getExplicitKeyRefAttributes(
     normalizedElement.attributesBeforeCss
   );
+
   const explicitKeyRefAttributesAfterCss = getExplicitKeyRefAttributes(
     normalizedElement.attributesAfterCss
   );
+
   const preCssBinding =
     normalizedElement.attributesBeforeCss.length > 0
       ? createAggregatePropsBinding(
@@ -194,17 +207,21 @@ function createPostCssSpreadAggregatedCssPropLowering(
           "minchoPre"
         )
       : null;
+
   const postCssBinding = createAggregatePropsBinding(
     path,
     getAggregateAttributes(normalizedElement.attributesAfterCss),
     preCssBinding ? "minchoPost" : "mincho"
   );
+
   const canInlineExplicitCssClassName =
     t.isIdentifier(normalizedElement.cssExpression) ||
     t.isStringLiteral(normalizedElement.cssExpression);
+
   const explicitCssClassNameIdentifier = canInlineExplicitCssClassName
     ? null
     : path.scope.generateUidIdentifier("minchoCssClassName");
+
   const explicitCssClassNameDeclarations = explicitCssClassNameIdentifier
     ? [
         t.variableDeclaration("const", [
@@ -239,6 +256,7 @@ function createPostCssSpreadAggregatedCssPropLowering(
       postCssBinding.classNameIdentifier
     )
   });
+
   const classNameAttribute = t.jsxAttribute(
     t.jsxIdentifier(classNameAttributeName),
     t.jsxExpressionContainer(nextClassNameExpression)
@@ -281,9 +299,11 @@ function createDynamicCssVariableSpreadAggregatedCssPropLowering(
   const explicitKeyRefAttributesBeforeCss = getExplicitKeyRefAttributes(
     normalizedElement.attributesBeforeCss
   );
+
   const explicitKeyRefAttributesAfterCss = getExplicitKeyRefAttributes(
     normalizedElement.attributesAfterCss
   );
+
   const preCssBinding =
     normalizedElement.attributesBeforeCss.length > 0
       ? createAggregatePropsBindingWithStyle(
@@ -292,6 +312,7 @@ function createDynamicCssVariableSpreadAggregatedCssPropLowering(
           "minchoPre"
         )
       : null;
+
   const postCssBinding =
     normalizedElement.attributesAfterCss.length > 0
       ? createAggregatePropsBindingWithStyle(
@@ -300,6 +321,7 @@ function createDynamicCssVariableSpreadAggregatedCssPropLowering(
           preCssBinding ? "minchoPost" : "mincho"
         )
       : null;
+
   const classNameAttribute = t.jsxAttribute(
     t.jsxIdentifier(classNameAttributeName),
     t.jsxExpressionContainer(
@@ -310,6 +332,7 @@ function createDynamicCssVariableSpreadAggregatedCssPropLowering(
       )
     )
   );
+
   const styleAttribute = t.jsxAttribute(
     t.jsxIdentifier(styleAttributeName),
     t.jsxExpressionContainer(
@@ -407,12 +430,15 @@ export function createAggregatePropsBinding(
   const aggregateIdentifier = path.scope.generateUidIdentifier(
     `${uidPrefix}Props`
   );
+
   const cssPropIdentifier = path.scope.generateUidIdentifier(
     `${uidPrefix}CssProp`
   );
+
   const classNameIdentifier = path.scope.generateUidIdentifier(
     `${uidPrefix}ClassName`
   );
+
   const restIdentifier = path.scope.generateUidIdentifier(`${uidPrefix}Rest`);
 
   return {
@@ -454,12 +480,15 @@ function createAggregatePropsBindingWithStyle(
   const aggregateIdentifier = path.scope.generateUidIdentifier(
     `${uidPrefix}Props`
   );
+
   const cssPropIdentifier = path.scope.generateUidIdentifier(
     `${uidPrefix}CssProp`
   );
+
   const classNameIdentifier = path.scope.generateUidIdentifier(
     `${uidPrefix}ClassName`
   );
+
   const styleIdentifier = path.scope.generateUidIdentifier(`${uidPrefix}Style`);
   const restIdentifier = path.scope.generateUidIdentifier(`${uidPrefix}Rest`);
   const aggregateExpression = createAggregatePropsExpressionWithStyle(
@@ -616,6 +645,7 @@ function getExplicitKeyRefAttributes(
   const firstSpreadIndex = attributes.findIndex((attribute) =>
     t.isJSXSpreadAttribute(attribute)
   );
+
   const beforeSpread: t.JSXAttribute[] = [];
   const afterSpread: t.JSXAttribute[] = [];
 
@@ -653,6 +683,7 @@ function createAggregatePropsExpressionWithStyle(
       const spreadIdentifier = path.scope.generateUidIdentifier(
         `${uidPrefix}Spread`
       );
+
       declarations.push(
         t.variableDeclaration("let", [
           t.variableDeclarator(t.cloneNode(spreadIdentifier))
@@ -682,6 +713,7 @@ function createAggregatePropsExpressionWithStyle(
       const explicitStyleIdentifier = path.scope.generateUidIdentifier(
         `${uidPrefix}Style`
       );
+
       declarations.push(
         t.variableDeclaration("let", [
           t.variableDeclarator(t.cloneNode(explicitStyleIdentifier))

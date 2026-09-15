@@ -77,6 +77,7 @@ export function minchoEsbuildPlugin({
       const transaction = getBuildTransaction(build.initialOptions);
       const resolvers = new Map<string, string>();
       const resolverCache = new Map<string, string>();
+
       const staticCssEvalResolutionCache: StaticCssEvalResolutionCache =
         new Map();
 
@@ -84,7 +85,9 @@ export function minchoEsbuildPlugin({
         new Map();
 
       const staticCssEvalProjectEngine = new internalMinchoProjectEngine();
+
       const assets = new EsbuildAssets(build);
+
       build.onStart(() => assets.beginBuild());
       build.onResolve({ filter: /.*/ }, (args) =>
         args.kind === "url-token" ? assets.resolveCssUrl(args.path) : undefined

@@ -23,6 +23,7 @@ export function getStaticStringOrNumberMemberName(
   expression: t.Expression
 ): PartialEvalStringOrNumberMemberName | null {
   const value = getStaticPrimitiveValue(expression);
+
   return typeof value === "string" || typeof value === "number" ? value : null;
 }
 
@@ -64,6 +65,7 @@ export function createStaticPrimitiveExpression(
       return t.booleanLiteral(value);
     default: {
       const exhaustive: never = value;
+
       return exhaustive;
     }
   }

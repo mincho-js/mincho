@@ -22,6 +22,7 @@ export const STATIC_CSS_MODULE_CACHE_PARSER_OPTIONS = {
   jsx: true,
   typescript: true
 } as const satisfies StaticCssEvalParserOptionsKey;
+
 export interface StaticCssModuleSource {
   resolvedFile: string;
   source: string;
@@ -171,9 +172,11 @@ interface AddUnsupportedExportMapEntryOptions {
 
 export interface StaticCssModuleCache {
   getParsedModule(source: StaticCssModuleSource): ParsedStaticCssModule;
+
   getExportMap(
     source: StaticCssModuleSource
   ): ReadonlyMap<StaticCssEvalExportName, ExportMapEntry>;
+
   getExportMapEntry(
     source: StaticCssModuleSource,
     exportName: StaticCssEvalExportName
@@ -213,6 +216,7 @@ export function createStaticCssModuleCache(): StaticCssModuleCache {
 
       if (parsedModule) {
         instrumentation.hits += 1;
+
         return parsedModule;
       }
 
@@ -224,17 +228,21 @@ export function createStaticCssModuleCache(): StaticCssModuleCache {
 
       const nextParsedModule = parseStaticCssModule(source, cacheKey);
       parsedModules.set(formattedCacheKey, nextParsedModule);
+
       return nextParsedModule;
     },
+
     getExportMap(source) {
       return this.getParsedModule(source).exportMap;
     },
+
     getExportMapEntry(source, exportName) {
       return this.getParsedModule(source).exportMap.get(exportName) ?? null;
     }
   };
 
   cacheInstrumentation.set(cache, instrumentation);
+
   return cache;
 }
 
@@ -327,6 +335,7 @@ function getStaticCssModuleParserOptions(
   const typescript =
     /\.[cm]?tsx?$/.test(filePath) ||
     /^(?:\0?virtual:|pkg:|data:)/.test(filePath);
+
   const jsx = /\.[jt]sx$/.test(filePath);
 
   return {
@@ -386,11 +395,13 @@ function collectStaticCssModuleExportEntries(
 ): void {
   if (t.isExportAllDeclaration(declaration)) {
     collectExportAllDeclaration(declaration, state);
+
     return;
   }
 
   if (t.isExportDefaultDeclaration(declaration)) {
     collectDefaultExportEntry(declaration, state);
+
     return;
   }
 
@@ -400,11 +411,13 @@ function collectStaticCssModuleExportEntries(
 
   if (declaration.source) {
     collectDirectNamedReexportEntries(declaration, state);
+
     return;
   }
 
   if (declaration.declaration) {
     collectDeclaredExportEntries(declaration.declaration, state);
+
     return;
   }
 
@@ -438,6 +451,7 @@ function collectDefaultExportEntry(
       expression: declaration.declaration,
       declaration
     });
+
     return;
   }
 
@@ -481,6 +495,7 @@ function collectDeclaredExportEntries(
             reason: "runtime-dynamic-value"
           });
         }
+
         continue;
       }
 
@@ -492,6 +507,7 @@ function collectDeclaredExportEntries(
         declaration
       });
     }
+
     return;
   }
 
@@ -532,6 +548,7 @@ function collectLocalSpecifierExportEntries(
           reason: "runtime-dynamic-value"
         });
       }
+
       continue;
     }
 
@@ -553,6 +570,7 @@ function collectLocalSpecifierExportEntries(
           reason: "runtime-dynamic-value"
         });
       }
+
       continue;
     }
 
@@ -594,6 +612,7 @@ function collectDirectNamedReexportEntries(
           source: declaration.source?.value
         });
       }
+
       continue;
     }
 
@@ -658,6 +677,7 @@ function applyStaticCssEvalCjsExportMapOperation(
       for (const exportName of state.cjsExportNames) {
         state.exportMap.delete(exportName);
       }
+
       state.exportStarReexports = state.exportStarReexports.filter(
         (entry) => !state.cjsExportNames.has(entry.exportName)
       );
@@ -670,16 +690,19 @@ function applyStaticCssEvalCjsExportMapOperation(
           !state.cjsExportNames.has(entry.exportName)
       );
       state.cjsExportNames.clear();
+
       return;
     case "preserve-cjs-exports":
       return;
     case "set":
       state.cjsExportNames.add(operation.entry.exportName);
       addExportMapEntry(state, operation.entry);
+
       return;
     case "star-reexport":
       state.cjsExportNames.add(operation.entry.exportName);
       addExportStarReexportEntry(state, operation.entry);
+
       return;
     default:
       return assertNever(operation);
@@ -746,6 +769,7 @@ function addStarExportNameTableEntry(
       source: starEntry.source,
       entry: starEntry
     });
+
     return;
   }
 
@@ -763,6 +787,7 @@ function addStarExportNameTableEntry(
         sources: [existing.source, starEntry.source],
         starEntries: [existing.entry, starEntry]
       });
+
       return;
     case "ambiguous-star":
       if (existing.sources.includes(starEntry.source)) {
@@ -775,6 +800,7 @@ function addStarExportNameTableEntry(
         sources: [...existing.sources, starEntry.source],
         starEntries: [...existing.starEntries, starEntry]
       });
+
       return;
     default:
       return assertNever(existing);
@@ -1015,6 +1041,7 @@ if (import.meta.vitest) {
       });
 
       const instrumentation = getStaticCssModuleCacheInstrumentation(cache);
+
       expect(instrumentation.misses).toBe(1);
       expect(instrumentation.hits).toBe(1);
       expect(instrumentation.parseCountByFile.get(stylesId)).toBe(1);
@@ -1025,6 +1052,7 @@ if (import.meta.vitest) {
       const firstSource = createSource(
         `export const button = { color: "red" };`
       );
+
       const secondSource = createSource(
         `export const button = { color: "blue" };`,
         "hash:styles-v2"
@@ -1034,6 +1062,7 @@ if (import.meta.vitest) {
       cache.getParsedModule(secondSource);
 
       const instrumentation = getStaticCssModuleCacheInstrumentation(cache);
+
       expect(instrumentation.misses).toBe(2);
       expect(instrumentation.hits).toBe(0);
       expect(instrumentation.parseCountByFile.get(stylesId)).toBe(2);
@@ -1137,9 +1166,11 @@ if (import.meta.vitest) {
           card
         };
       `);
+
       const buttonEntry = expectExpressionEntry(
         cache.getExportMapEntry(source, "button")
       );
+
       const cardEntry = expectExpressionEntry(
         cache.getExportMapEntry(source, "card")
       );
@@ -1161,12 +1192,15 @@ if (import.meta.vitest) {
         exports.default = { color: "green" };
         exports.button = { color: "orange" };
       `);
+
       const buttonEntry = expectExpressionEntry(
         cache.getExportMapEntry(source, "button")
       );
+
       const cardEntry = expectExpressionEntry(
         cache.getExportMapEntry(source, "card")
       );
+
       const defaultEntry = expectExpressionEntry(
         cache.getExportMapEntry(source, "default")
       );
@@ -1198,9 +1232,11 @@ if (import.meta.vitest) {
           }
         });
       `);
+
       const buttonEntry = expectExpressionEntry(
         cache.getExportMapEntry(source, "button")
       );
+
       const cardEntry = expectExpressionEntry(
         cache.getExportMapEntry(source, "card")
       );
@@ -1324,6 +1360,7 @@ if (import.meta.vitest) {
         const styles = require("./styles");
         __createBinding(exports, styles, "button");
       `);
+
       const dynamicBindingSource = createSource(
         `
           ${createTscCreateBindingHelperSource()}
@@ -1332,6 +1369,7 @@ if (import.meta.vitest) {
         `,
         "hash:styles-dynamic-helper-source"
       );
+
       const alteredExportStarSource = createSource(
         `
           ${createTscCreateBindingHelperSource()}
@@ -1344,9 +1382,11 @@ if (import.meta.vitest) {
       const alteredCreateBindingEntry = expectUnsupportedEntry(
         cache.getExportMapEntry(alteredCreateBindingSource, "button")
       );
+
       const dynamicBindingEntry = expectUnsupportedEntry(
         cache.getExportMapEntry(dynamicBindingSource, "card")
       );
+
       const alteredExportStarModule = cache.getParsedModule(
         alteredExportStarSource
       );
@@ -1388,6 +1428,7 @@ if (import.meta.vitest) {
         )}
         __exportStar(require("./theme"), exports);
       `);
+
       const parsedModule = cache.getParsedModule(source);
 
       expect(parsedModule.exportStarReexports).toHaveLength(0);
@@ -1413,9 +1454,11 @@ if (import.meta.vitest) {
         __createBinding(exports, styles, "button");
         __exportStar(require("./theme"), exports);
       `);
+
       const bindingEntry = expectUnsupportedEntry(
         cache.getExportMapEntry(source, "button")
       );
+
       const parsedModule = cache.getParsedModule(source);
 
       expect(bindingEntry).toMatchObject({
@@ -1458,9 +1501,11 @@ if (import.meta.vitest) {
       const buttonEntry = expectExpressionEntry(
         cache.getExportMapEntry(source, "button")
       );
+
       const defaultEntry = expectExpressionEntry(
         cache.getExportMapEntry(source, "default")
       );
+
       const themedEntry = expectExpressionEntry(
         cache.getExportMapEntry(source, "themed")
       );
@@ -1544,6 +1589,7 @@ if (import.meta.vitest) {
 
       for (const source of sources) {
         expect(cache.getExportMapEntry(source, "button")).toBeNull();
+
         const unsupportedEntry = expectUnsupportedEntry(
           cache.getExportMapEntry(source, null)
         );
@@ -1570,6 +1616,7 @@ if (import.meta.vitest) {
         const button = { color: "red" };
         __export(exports, { button: () => button });
       `);
+
       const unsupportedEntry = expectUnsupportedEntry(
         cache.getExportMapEntry(source, null)
       );
@@ -1610,7 +1657,9 @@ if (import.meta.vitest) {
           `,
           sourceHash
         );
+
         expect(cache.getExportMapEntry(source, "button")).toBeNull();
+
         const unsupportedEntry = expectUnsupportedEntry(
           cache.getExportMapEntry(source, null)
         );
@@ -1817,6 +1866,7 @@ if (import.meta.vitest) {
           `,
           `hash:esbuild-copy-props-negative-${cases.indexOf(copyPropsSource)}`
         );
+
         const unsupportedEntry = expectUnsupportedEntry(
           cache.getExportMapEntry(source, null)
         );
@@ -1839,6 +1889,7 @@ if (import.meta.vitest) {
         module.exports = root;
         exports.button = { color: "red" };
       `);
+
       const safeSource = createSource(
         `
           module.exports = {};
@@ -1846,9 +1897,11 @@ if (import.meta.vitest) {
         `,
         "hash:styles-safe-module-exports-extension"
       );
+
       const unsafeEntry = expectUnsupportedEntry(
         cache.getExportMapEntry(unsafeSource, "button")
       );
+
       const safeEntry = expectExpressionEntry(
         cache.getExportMapEntry(safeSource, "button")
       );
@@ -1985,6 +2038,7 @@ if (import.meta.vitest) {
           exports.nested = button;
         }
       `);
+
       const parsedModule = cache.getParsedModule(source);
 
       const computedEntry = expectUnsupportedEntry(
@@ -1997,6 +2051,7 @@ if (import.meta.vitest) {
           id: "STATIC_CSS_EVAL_CJS_EXPORT_UNSUPPORTED"
         }
       });
+
       for (const exportName of ["spread", "setter", "getter", "nested"]) {
         const unsupportedEntry = expectUnsupportedEntry(
           cache.getExportMapEntry(source, exportName)
@@ -2010,6 +2065,7 @@ if (import.meta.vitest) {
           }
         });
       }
+
       expect(parsedModule.exportGraph).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
@@ -2085,6 +2141,7 @@ if (import.meta.vitest) {
         exports.b = b;
         exports.a = exports.b = value;
       `);
+
       const parsedModule = cache.getParsedModule(source);
       const unsupportedEntries = parsedModule.exportGraph.filter(
         (entry) => entry.kind === "unsupported" && entry.exportName === null
@@ -2131,6 +2188,7 @@ if (import.meta.vitest) {
       });
 
       const instrumentation = getStaticCssModuleCacheInstrumentation(cache);
+
       expect(instrumentation.misses).toBe(1);
       expect(instrumentation.hits).toBe(2);
       expect(instrumentation.parseCountByFile.get(stylesId)).toBe(1);
@@ -2219,6 +2277,7 @@ if (import.meta.vitest) {
         export { default as root } from "./button";
         export * from "./button";
       `);
+
       const parsedModule = cache.getParsedModule(source);
 
       expect(parsedModule.exportGraph).toEqual(
@@ -2274,6 +2333,7 @@ if (import.meta.vitest) {
         export { button } from "./button";
         export { default } from "./button";
       `);
+
       const parsedModule = cache.getParsedModule(source);
 
       expect(cache.getExportMapEntry(source, "button")).toMatchObject({
@@ -2311,6 +2371,7 @@ if (import.meta.vitest) {
         export * from "./button";
         export * from "./theme";
       `);
+
       const parsedModule = cache.getParsedModule(source);
       const [buttonStar, themeStar] = parsedModule.exportStarReexports;
 
@@ -2357,6 +2418,7 @@ if (import.meta.vitest) {
         export type * from "./types";
         export * as ns from "./button";
       `);
+
       const parsedModule = cache.getParsedModule(source);
 
       expect(cache.getExportMapEntry(source, "Foo")).toBeNull();
@@ -2385,6 +2447,7 @@ if (import.meta.vitest) {
         const tokens = { button: { color: "red" } };
         export const { button } = tokens;
       `);
+
       const buttonEntry = expectUnsupportedEntry(
         cache.getExportMapEntry(source, "button")
       );

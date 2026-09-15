@@ -273,6 +273,7 @@ function isFirstLevelArrayClassValueBranch(expression: t.Expression): boolean {
 }
 
 type ConditionalCssRuleBranchClassification = "css-rule" | "class-value";
+
 type ArrayClassNameBranchClassification =
   | ConditionalCssRuleBranchClassification
   | "array-class-value";
@@ -291,6 +292,7 @@ export function isConditionalCssRuleBranchExpression(
     unwrappedExpression.consequent,
     scope
   );
+
   const alternateClassification = classifyConditionalCssRuleBranch(
     unwrappedExpression.alternate,
     scope
@@ -320,6 +322,7 @@ export function isConditionalArrayClassNameBranchExpression(
     unwrappedExpression.consequent,
     scope
   );
+
   const alternateClassification = classifyArrayClassNameBranch(
     unwrappedExpression.alternate,
     scope
@@ -349,6 +352,7 @@ export function isLogicalCssRuleBranchExpression(
     unwrappedExpression.left,
     scope
   );
+
   const rightClassification = classifyLogicalCssRuleRightOperand(
     unwrappedExpression.right,
     scope
@@ -393,6 +397,7 @@ export function isLogicalArrayClassNameBranchExpression(
     unwrappedExpression.left,
     scope
   );
+
   const rightClassification = classifyArrayClassNameBranch(
     unwrappedExpression.right,
     scope

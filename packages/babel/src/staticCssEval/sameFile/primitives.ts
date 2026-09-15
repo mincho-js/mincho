@@ -93,6 +93,7 @@ export function normalizeSupportedStaticCssPrimitiveLiteral(
 
   if (isNoExpressionTemplateLiteral(unwrappedExpression)) {
     const [quasi] = unwrappedExpression.quasis;
+
     return t.stringLiteral(quasi?.value.cooked ?? quasi?.value.raw ?? "");
   }
 

@@ -36,8 +36,10 @@ export function registerPartialEvalSpreadKeyPrimitiveTests(
     propertyName: string
   ): t.ObjectProperty {
     const property = expectObjectProperty(expression, propertyName);
+
     expect(property.computed).toBe(false);
     expect(property.shorthand).toBe(false);
+
     return property;
   }
 
@@ -55,7 +57,9 @@ export function registerPartialEvalSpreadKeyPrimitiveTests(
       );
 
       expectNoSpreadElement(list);
+
       expect(list.elements).toHaveLength(4);
+
       expectStringLiteralExpression(
         expectArrayElementExpression(list, 0),
         "base"
@@ -197,6 +201,7 @@ export function registerPartialEvalSpreadKeyPrimitiveTests(
       const results = reduceFixture(`
         capture({ color: "red", color() { return "blue"; } });
       `);
+
       const fallback = expectObjectExpression(
         expectFixtureDeoptResult(results, 0).fallbackExpression
       );

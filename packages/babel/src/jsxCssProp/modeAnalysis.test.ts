@@ -32,6 +32,7 @@ function hasImportedArrayReference(source: string): boolean {
             if (!t.isJSXIdentifier(path.node.name, { name: "css" })) return;
 
             const value = path.node.value;
+
             if (
               t.isJSXExpressionContainer(value) &&
               t.isArrayExpression(value.expression)
@@ -48,6 +49,7 @@ function hasImportedArrayReference(source: string): boolean {
   });
 
   if (result === undefined) throw new TypeError("expected css array fixture");
+
   return result;
 }
 

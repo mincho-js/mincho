@@ -28,6 +28,7 @@ export function registerPartialEvalLiteralTests(
       );
 
       expectStringLiteralExpression(expression, "wrapped");
+
       expect(expression).not.toBe(wrappedExpression);
       expect(expression).not.toBe(literal);
     });
@@ -41,12 +42,15 @@ export function registerPartialEvalLiteralTests(
       const stringExpression = expectConfidentExpression(
         reduceForTest(stringLiteral)
       );
+
       const numericExpression = expectConfidentExpression(
         reduceForTest(numericLiteral)
       );
+
       const booleanExpression = expectConfidentExpression(
         reduceForTest(booleanLiteral)
       );
+
       const nullExpression = expectConfidentExpression(
         reduceForTest(nullLiteral)
       );
@@ -55,6 +59,7 @@ export function registerPartialEvalLiteralTests(
       expectNumericLiteralExpression(numericExpression, 4);
       expectBooleanLiteralExpression(booleanExpression, true);
       expectNullLiteralExpression(nullExpression);
+
       expect(stringExpression).not.toBe(stringLiteral);
       expect(numericExpression).not.toBe(numericLiteral);
       expect(booleanExpression).not.toBe(booleanLiteral);
@@ -130,6 +135,7 @@ export function registerPartialEvalLiteralTests(
         [createTemplateElement("", false), createTemplateElement("", true)],
         [t.objectExpression([])]
       );
+
       const deopt = expectDeoptResult(reduceForTest(templateLiteral));
 
       expect(deopt.reason).toBe("unsupported-template-interpolation");

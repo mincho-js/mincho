@@ -269,6 +269,7 @@ export class EsbuildAssets {
               path: "dynamic",
               namespace: "mincho-layout-chunk"
             }));
+
             build.onResolve({ filter: /.*/ }, async (args) => {
               if (args.kind !== "entry-point") return;
 
@@ -278,6 +279,7 @@ export class EsbuildAssets {
                 resolveDir: args.resolveDir
               });
             });
+
             build.onLoad({ filter: /.*/ }, (args) => ({
               contents:
                 args.namespace === "mincho-layout-chunk"
@@ -364,6 +366,7 @@ export class EsbuildAssets {
               path: "entry",
               namespace: "mincho-asset-helper"
             }));
+
             build.onLoad(
               { filter: /.*/, namespace: "mincho-asset-helper" },
               () => ({
@@ -371,11 +374,13 @@ export class EsbuildAssets {
                 loader: "js"
               })
             );
+
             build.onResolve({ filter: /^mincho:asset$/ }, () => ({
               path,
               suffix,
               namespace: "file"
             }));
+
             build.onLoad({ filter: /.*/, namespace: "file" }, (args) => {
               if (args.path !== path) return;
 

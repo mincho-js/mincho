@@ -373,11 +373,13 @@ describe("buildWithMincho transaction", () => {
                 namespace: "virtual",
                 suffix
               }));
+
               build.onLoad({ filter: /.*/, namespace: "virtual" }, () => ({
                 contents: `import ${JSON.stringify(join(root, "body.js"))};`,
                 loader: "js",
                 resolveDir: root
               }));
+
               build.onResolve(
                 { filter: /^@proof\/(a|b)\/style.css$/ },
                 (args) => ({
@@ -387,6 +389,7 @@ describe("buildWithMincho transaction", () => {
                   )
                 })
               );
+
               build.onLoad(
                 { filter: /body\.js$/, namespace: "file" },
                 (args) => {
@@ -493,6 +496,7 @@ describe("buildWithMincho transaction", () => {
           build.onResolve({ filter: /^@proof\/(a|b)\/style.css$/ }, (args) => ({
             path: join(root, args.path.includes("/a/") ? "a.css" : "b.css")
           }));
+
           build.onLoad({ filter: /entry\.ts$/ }, async (args) => {
             getBuildTransaction(build.initialOptions)?.graphs.set(
               args.path,
@@ -625,6 +629,7 @@ describe("buildWithMincho transaction", () => {
                     )
                   })
                 );
+
                 build.onLoad({ filter: /entry\.js$/ }, (args) => {
                   getBuildTransaction(build.initialOptions)!.graphs.set(
                     args.path,
@@ -689,6 +694,7 @@ describe("buildWithMincho transaction", () => {
                   )
                 })
               );
+
               build.onLoad({ filter: /entry\.js$/ }, (args) => {
                 getBuildTransaction(build.initialOptions)!.graphs.set(
                   args.path,
@@ -736,6 +742,7 @@ describe("buildWithMincho transaction", () => {
                   )
                 })
               );
+
               build.onLoad({ filter: /entry\.cjs$/ }, (args) => {
                 getBuildTransaction(build.initialOptions)!.graphs.set(
                   args.path,
@@ -850,6 +857,7 @@ describe("buildWithMincho transaction", () => {
                   )
                 })
               );
+
               build.onLoad({ filter: /entry\.js$/ }, (args) => {
                 getBuildTransaction(build.initialOptions)!.graphs.set(
                   args.path,
@@ -960,6 +968,7 @@ describe("buildWithMincho transaction", () => {
                   )
                 })
               );
+
               build.onLoad({ filter: /lazy\.js$/ }, (args) => {
                 getBuildTransaction(build.initialOptions)!.graphs.set(
                   args.path,
@@ -1039,6 +1048,7 @@ describe("buildWithMincho transaction", () => {
                 path: "value",
                 namespace: "virtual"
               }));
+
               build.onLoad({ filter: /.*/, namespace: "virtual" }, () => ({
                 contents: `export const value = ${phase === "analyze" ? 1 : 2}`
               }));

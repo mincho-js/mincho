@@ -14,6 +14,7 @@ export function isSidecarSafeFunctionLike(
   const localNames = new Set(state.localNames);
   collectPatternNames(node.params, localNames);
   collectStatementLocalNames(node.body, localNames);
+
   const nextState = { ...state, localNames };
 
   return t.isBlockStatement(node.body)

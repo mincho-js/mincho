@@ -24,13 +24,16 @@ describe("findChunkDirectivePrologueEnd", () => {
 
     expect(findChunkDirectivePrologueEnd(source)).toBe(0);
   });
+
   it("stops at an unterminated quoted string reaching end of source", () => {
     const source = '/* banner */ "unterminated';
+
     expect(findChunkDirectivePrologueEnd(source)).toBe(source.indexOf('"'));
   });
 
   it("treats U+2028 between statements as a line terminator", () => {
     const source = '"use client"\u2028export const value = true;';
+
     expect(source.slice(0, findChunkDirectivePrologueEnd(source))).toBe(
       '"use client"\u2028'
     );
@@ -46,7 +49,9 @@ describe("findChunkDirectivePrologueEnd", () => {
       expect(findChunkDirectivePrologueEnd(`"value"\n${keyword} object;`)).toBe(
         0
       );
+
       const source = `"use client"\n${keyword}Value();`;
+
       expect(source.slice(0, findChunkDirectivePrologueEnd(source))).toBe(
         '"use client"\n'
       );

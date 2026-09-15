@@ -153,6 +153,7 @@ describe("esbuild build contracts", () => {
                 path: args.path,
                 namespace: "virtual-provider"
               }));
+
               build.onLoad(
                 { filter: /.*/, namespace: "virtual-provider" },
                 () => ({ contents: "export const value = 42;", loader: "js" })
@@ -625,6 +626,7 @@ describe("native esbuild assets", () => {
                   ? assets.resolveCssUrl(args.path)
                   : undefined
               );
+
               build.onLoad(
                 { filter: /\.css$/, namespace: "file" },
                 async () => ({
@@ -632,6 +634,7 @@ describe("native esbuild assets", () => {
                   loader: "css"
                 })
               );
+
               build.onEnd((result) => assets.finishBuild(result));
             }
           }

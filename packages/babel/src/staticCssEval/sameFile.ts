@@ -97,6 +97,7 @@ if (import.meta.vitest) {
     source: string
   ): Extract<SameFileStaticCssEvalResult, { kind: "resolved" }> {
     const [result] = resolveSameFileFixture(source);
+
     expect(result?.kind).toBe("resolved");
 
     if (!result || result.kind !== "resolved") {
@@ -110,6 +111,7 @@ if (import.meta.vitest) {
     source: string
   ): Extract<SameFileStaticCssEvalResult, { kind: "not-candidate" }> {
     const [result] = resolveSameFileFixture(source);
+
     expect(result?.kind).toBe("not-candidate");
 
     if (!result || result.kind !== "not-candidate") {
@@ -129,6 +131,7 @@ if (import.meta.vitest) {
       (result?.kind === "not-candidate" && result.status === "unsupported")
         ? result.diagnostic
         : undefined;
+
     const diagnostics =
       result?.kind === "error" ||
       (result?.kind === "not-candidate" && result.status === "unsupported")
@@ -193,6 +196,7 @@ if (import.meta.vitest) {
       expect(
         expression.properties.some((property) => t.isSpreadElement(property))
       ).toBe(false);
+
       return;
     }
 
@@ -266,6 +270,7 @@ if (import.meta.vitest) {
       `);
 
       expectNoSpreadElement(resolved.expression);
+
       expect(
         t.isObjectExpression(resolved.expression)
           ? resolved.expression.properties.filter(
@@ -291,6 +296,7 @@ if (import.meta.vitest) {
       `);
 
       expectNoSpreadElement(resolved.expression);
+
       expect(getStringObjectProperty(resolved.expression, "color")).toBe(
         "blue"
       );
@@ -307,6 +313,7 @@ if (import.meta.vitest) {
       `);
 
       expectNoSpreadElement(resolved.expression);
+
       expect(t.isArrayExpression(resolved.expression)).toBe(true);
 
       if (!t.isArrayExpression(resolved.expression)) {
@@ -316,7 +323,9 @@ if (import.meta.vitest) {
       }
 
       expect(resolved.expression.elements).toHaveLength(2);
+
       const [firstRule, secondRule] = resolved.expression.elements;
+
       expect(
         firstRule && t.isObjectExpression(firstRule)
           ? getStringObjectProperty(firstRule, "display")
@@ -338,6 +347,7 @@ if (import.meta.vitest) {
       `);
 
       expectNoSpreadElement(resolved.expression);
+
       expect(t.isArrayExpression(resolved.expression)).toBe(true);
 
       if (!t.isArrayExpression(resolved.expression)) {
@@ -347,7 +357,9 @@ if (import.meta.vitest) {
       }
 
       expect(resolved.expression.elements).toHaveLength(2);
+
       const [firstRule, secondRule] = resolved.expression.elements;
+
       expect(
         firstRule && t.isObjectExpression(firstRule)
           ? getStringObjectProperty(firstRule, "display")

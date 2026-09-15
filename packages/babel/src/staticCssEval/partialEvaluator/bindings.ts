@@ -202,6 +202,7 @@ function createMutatedBindingDeopt(
 
 function isImportedBinding(binding: Binding): boolean {
   const bindingPath = binding.path;
+
   return (
     bindingPath.isImportSpecifier() ||
     bindingPath.isImportDefaultSpecifier() ||

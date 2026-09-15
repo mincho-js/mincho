@@ -73,18 +73,22 @@ function countOperandWriteProperties(
   switch (operand.kind) {
     case "class":
       countClassWriteProperties(operand.classOperand, counts);
+
       return;
     case "condition":
       countClassWriteProperties(operand.classOperand, counts);
+
       return;
     case "ternary":
       countClassWriteProperties(operand.consequent, counts);
       countClassWriteProperties(operand.alternate, counts);
+
       return;
     case "array":
       for (const child of operand.operands) {
         countOperandWriteProperties(child, counts);
       }
+
       return;
   }
 }
@@ -106,6 +110,7 @@ function applyOperandWrites(
   switch (operand.kind) {
     case "class":
       applyAlwaysWrites(operand.classOperand, candidateProperties, states);
+
       return true;
     case "condition":
       return applyConditionWrites(
@@ -122,6 +127,7 @@ function applyOperandWrites(
           return false;
         }
       }
+
       return true;
   }
 }

@@ -200,6 +200,7 @@ export function createExpressionOwnerLocation(
     ...(typeof expression.end === "number" ? { end: expression.end } : {})
   };
 }
+
 export function createUnsupportedLiteralDetail(
   exportName: StaticCssEvalExportName,
   expression: t.Expression

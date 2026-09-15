@@ -235,6 +235,7 @@ export class ImportedStaticCssEvalResolver {
         sourceOrigin: "unresolved",
         unsupportedReason: "unresolved"
       });
+
       addResolutionDependency(state, {
         file: request.specifier,
         kind: "unresolved",
@@ -299,6 +300,7 @@ export class ImportedStaticCssEvalResolver {
 
     if (!sourcePolicyResult.ok) {
       markResolutionDependencyInspected(state, resolvedImport.resolvedId);
+
       if (sourceMetadata.sourceKind === "unresolved") {
         return {
           kind: "error",
@@ -318,6 +320,7 @@ export class ImportedStaticCssEvalResolver {
           )
         };
       }
+
       return { kind: "error", diagnostic: sourcePolicyResult.diagnostic };
     }
 
@@ -377,6 +380,7 @@ export class ImportedStaticCssEvalResolver {
 
     if (!sourceSizeResult.ok) {
       markResolutionDependencyInspected(state, resolvedImport.resolvedId);
+
       return { kind: "error", diagnostic: sourceSizeResult.diagnostic };
     }
 
@@ -385,6 +389,7 @@ export class ImportedStaticCssEvalResolver {
 
     if (!record) {
       markResolutionDependencyInspected(state, resolvedImport.resolvedId);
+
       return {
         kind: "error",
         diagnostic: createStaticCssEvalUnresolvedImportDiagnostic(
@@ -406,6 +411,7 @@ export class ImportedStaticCssEvalResolver {
     }
 
     markResolutionDependencyInspected(state, resolvedImport.resolvedId);
+
     return { kind: "resolved", record };
   }
 
@@ -471,6 +477,7 @@ export class ImportedStaticCssEvalResolver {
       exportEntry.kind === "reexport" || exportEntry.kind === "unsupported"
         ? null
         : getStaticExportEntryCjsRequireSource(record, exportEntry);
+
     const effectiveRequest =
       exportEntry.kind === "reexport" || cjsReexportSource
         ? {
@@ -480,6 +487,7 @@ export class ImportedStaticCssEvalResolver {
             reexportName: formatExportName(exportEntry.exportName)
           }
         : request;
+
     const provenance = createBindingProvenance(record.id, effectiveRequest);
     state.resolutionChain.push({
       importer: effectiveRequest.importer,
@@ -557,6 +565,7 @@ export class ImportedStaticCssEvalResolver {
       state,
       true
     );
+
     const provenance = createBindingProvenance(record.id, request);
     const cacheKey = createImportedStaticCssEvalCacheKey(
       state.owner.file,
@@ -590,6 +599,7 @@ export class ImportedStaticCssEvalResolver {
         wholeNamespace: false,
         reexportName: formatExportName(exportName)
       };
+
       const exportResult = this.#resolveNamespaceTableEntry(
         record,
         tableEntry,
@@ -854,6 +864,7 @@ export class ImportedStaticCssEvalResolver {
       provenanceKind: "reexported" as const,
       reexportName: formatExportName(request.exportName)
     };
+
     const provenance = createBindingProvenance(record.id, effectiveRequest);
     state.resolutionChain.push({
       importer: effectiveRequest.importer,
@@ -897,6 +908,7 @@ export class ImportedStaticCssEvalResolver {
         candidatesResult.candidates
       )
     );
+
     const tableEntry = exportNameTable.get(effectiveRequest.exportName);
 
     if (!tableEntry) {
@@ -1067,6 +1079,7 @@ export class ImportedStaticCssEvalResolver {
         record.exports,
         createExportStarSources(request.exportName, candidatesResult.candidates)
       );
+
       const tableEntry = exportNameTable.get(request.exportName);
 
       if (!tableEntry) {
@@ -1111,6 +1124,7 @@ export class ImportedStaticCssEvalResolver {
       provenanceKind: "reexported",
       reexportName: formatExportName(exportEntry.exportName)
     };
+
     const importResult = this.#resolveProviderImport(
       reexportRequest,
       state.owner,
@@ -1146,10 +1160,12 @@ export class ImportedStaticCssEvalResolver {
       queryMemberPath: request.memberPath,
       reexportName: formatExportName(exportEntry.exportName)
     });
+
     const reexportRequest = createResolutionRequestFromCjsParts(
       record.id,
       reexportParts
     );
+
     const importResult = this.#resolveProviderImport(
       reexportRequest,
       state.owner,
@@ -1210,6 +1226,7 @@ export class ImportedStaticCssEvalResolver {
       exportName: request.exportName,
       memberPath: request.memberPath
     };
+
     const cycleResult = guardStaticCssEvalImportCycle({
       owner: state.owner,
       dependency: { file: record.id },
@@ -1413,13 +1430,16 @@ export class ImportedStaticCssEvalResolver {
         loadedModule,
         this.#moduleCache
       );
+
       this.#records.set(id, record);
+
       return record;
     } catch (error) {
       this.#parseFailures.set(
         id,
         error instanceof Error ? error.message : String(error)
       );
+
       return null;
     }
   }

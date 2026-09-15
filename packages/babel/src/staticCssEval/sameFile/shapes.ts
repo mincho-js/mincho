@@ -42,6 +42,7 @@ export function getStaticCssEvalBindingDeclarationKind(
     }
 
     const { kind } = bindingPath.parentPath.node;
+
     return kind === "const" || kind === "let" || kind === "var" ? kind : null;
   }
 
@@ -155,6 +156,7 @@ export function isStaticCssRuleLiteral(
   expression: t.Expression
 ): expression is t.ObjectExpression | t.ArrayExpression {
   const unwrappedExpression = unwrapTransparentCssRuleExpression(expression);
+
   return (
     t.isObjectExpression(unwrappedExpression) ||
     t.isArrayExpression(unwrappedExpression)

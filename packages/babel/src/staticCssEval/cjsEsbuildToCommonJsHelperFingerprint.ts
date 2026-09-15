@@ -23,6 +23,7 @@ export function isSupportedEsbuildToCommonJsHelper(
   scope: StaticCssEvalBabelScope
 ): boolean {
   const helperFunctions = getBoundEsbuildHelperFunctions(helperName, scope);
+
   return (
     helperFunctions.length > 0 &&
     helperFunctions.every((helperFunction) =>
@@ -55,6 +56,7 @@ function isCopyPropsWrapperExpression(options: {
   }
 
   const [target, source] = options.expression.arguments;
+
   return (
     t.isIdentifier(options.expression.callee) &&
     isSupportedEsbuildCopyPropsHelper(
@@ -72,6 +74,7 @@ function isSupportedEsbuildCopyPropsHelper(
   scope: StaticCssEvalBabelScope
 ): boolean {
   const helperFunctions = getBoundEsbuildHelperFunctions(helperName, scope);
+
   return (
     helperFunctions.length > 0 &&
     helperFunctions.every((helperFunction) =>

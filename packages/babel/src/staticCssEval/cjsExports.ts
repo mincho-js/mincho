@@ -37,6 +37,7 @@ export function collectStaticCssEvalCjsExportMapOperations(
     exportsAliasSafe: true,
     moduleObjectLike: true
   };
+
   const operations: StaticCssEvalCjsExportMapOperation[] = [];
   const cjsImports = collectStaticCssEvalCjsRequireBindings(
     options.programPath
@@ -47,6 +48,7 @@ export function collectStaticCssEvalCjsExportMapOperations(
       statementPath,
       state
     );
+
     const helperOperations =
       directOperations.length === 0
         ? collectTopLevelCjsHelperOperations({
@@ -114,6 +116,7 @@ function collectNestedCjsExportUnsupportedOperations(
         })
       );
     },
+
     CallExpression(path) {
       operations.push(
         ...collectDefinePropertyOperations({
