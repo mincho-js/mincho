@@ -2551,8 +2551,11 @@ __metadata:
     "@mincho-js/integration": "workspace:^"
     "@types/node": "npm:^25.6.2"
     "@vanilla-extract/css": "npm:^1.20.1"
+    "@vanilla-extract/dynamic": "npm:^2.1.5"
     "@vanilla-extract/esbuild-plugin": "npm:^2.3.22"
     "@vanilla-extract/integration": "npm:^8.0.10"
+    "@vanilla-extract/recipes": "npm:^0.5.7"
+    "@vanilla-extract/sprinkles": "npm:^1.7.1"
     esbuild: "npm:^0.27.7"
     eslint-config-custom: "workspace:^"
     magic-string: "npm:^0.30.21"
@@ -2679,8 +2682,10 @@ __metadata:
     "@types/babel__core": "npm:^7.20.5"
     "@types/node": "npm:^25.6.2"
     "@vanilla-extract/css": "npm:^1.20.1"
+    "@vanilla-extract/dynamic": "npm:^2.1.5"
     "@vanilla-extract/integration": "npm:^8.0.10"
     "@vanilla-extract/recipes": "npm:^0.5.7"
+    "@vanilla-extract/sprinkles": "npm:^1.7.1"
     "@vanilla-extract/vite-plugin": "npm:^5.2.2"
     eslint-config-custom: "workspace:^"
     magic-string: "npm:^0.30.21"
@@ -5298,6 +5303,15 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@vanilla-extract/dynamic@npm:^2.1.5":
+  version: 2.1.5
+  resolution: "@vanilla-extract/dynamic@npm:2.1.5"
+  dependencies:
+    "@vanilla-extract/private": "npm:^1.0.9"
+  checksum: 10/5954a7dc5c6b58341d68a849094e0a32e6182ae81a9a422caac7fa95bab489625a7868523498c365b42325d455b246cdae89d666833081075762a791d608d73e
+  languageName: node
+  linkType: hard
+
 "@vanilla-extract/esbuild-plugin@npm:^2.3.22":
   version: 2.3.22
   resolution: "@vanilla-extract/esbuild-plugin@npm:2.3.22"
@@ -5343,6 +5357,15 @@ __metadata:
   peerDependencies:
     "@vanilla-extract/css": ^1.0.0
   checksum: 10/cc57caea9f4072b718d91948e4072f6afbebc406f426c4c6c231234a4dc9d8e09863c9bcf40a734d9bc77b3752d3a6dc46ae28696a855dd2bbf4274d9b085ddc
+  languageName: node
+  linkType: hard
+
+"@vanilla-extract/sprinkles@npm:^1.7.1":
+  version: 1.7.1
+  resolution: "@vanilla-extract/sprinkles@npm:1.7.1"
+  peerDependencies:
+    "@vanilla-extract/css": ^1.0.0
+  checksum: 10/56fd0cfbc11d9eecbcffcd11e1f5110b7d167cc5ac00eccd0a4cb0c1647ddef7c9d62a73571bc6b576ba8275ea01f92033b8644119e304bde5dad7283abab2ee
   languageName: node
   linkType: hard
 

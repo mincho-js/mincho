@@ -74,13 +74,7 @@ export function getNearestIdentifier(path: NodePath<t.Node>) {
   return null;
 }
 
-export const extractionAPIs = [
-  // @mincho-js/css
-  "mincho$",
-  "css",
-  "globalCss",
-  "rules",
-  // @vanilla-extract/css
+const vanillaExtractAPIs = [
   "style",
   "styleVariants",
   "globalStyle",
@@ -88,27 +82,50 @@ export const extractionAPIs = [
   "createGlobalTheme",
   "createThemeContract",
   "createGlobalThemeContract",
-  "assignVars",
   "createVar",
-  "fallbackVar",
+  "createGlobalVar",
   "fontFace",
   "globalFontFace",
   "keyframes",
   "globalKeyframes",
-  "style",
-  "styleVariants",
-  "globalStyle",
-  "createTheme",
-  "createGlobalTheme",
-  "createThemeContract",
-  "createGlobalThemeContract",
-  "assignVars",
-  "createVar",
-  "fallbackVar",
-  "fontFace",
-  "globalFontFace",
-  "keyframes",
-  "globalKeyframes",
-  // @vanilla-extract/recipes
-  "recipe"
+  "layer",
+  "globalLayer",
+  "createContainer",
+  "createViewTransition",
+  "generateIdentifier"
 ];
+
+const sprinklesUtilityAPIs = ["createNormalizeValueFn", "createMapValueFn"];
+
+// Match both the imported binding and its source. Runtime helpers such as
+// assignInlineVars, composeStyles and calls to generated recipes stay in place.
+export const extractionAPIs: Readonly<Record<string, readonly string[]>> = {
+  "@mincho-js/css": [
+    "mincho$",
+    "css",
+    "globalCss",
+    "rules",
+    ...vanillaExtractAPIs,
+    // Preserve extraction of legacy Mincho re-exports.
+    "assignVars",
+    "fallbackVar",
+    "recipe"
+  ],
+  "@mincho-js/css/compat": [...vanillaExtractAPIs, "recipe"],
+  "@vanilla-extract/css": vanillaExtractAPIs,
+  "@vanilla-extract/recipes": ["recipe"],
+  "@vanilla-extract/sprinkles": [
+    "defineProperties",
+    "createSprinkles",
+    ...sprinklesUtilityAPIs,
+    "createAtomicStyles",
+    "createAtomsFn"
+  ],
+  "@vanilla-extract/sprinkles/createUtils": sprinklesUtilityAPIs
+};
+
+export function isExtractionCall(callee: NodePath<t.Node>): boolean {
+  return Object.entries(extractionAPIs).some(([source, apis]) =>
+    apis.some((api) => callee.referencesImport(source, api))
+  );
+}

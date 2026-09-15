@@ -1,7 +1,7 @@
 import { types as t } from "@babel/core";
 import type { NodePath } from "@babel/core";
 import type { Binding } from "@babel/traverse";
-import { extractionAPIs } from "../../utils.js";
+import { isExtractionCall } from "../../utils.js";
 import { STATIC_CSS_EVAL_LIMITS } from "../types.js";
 
 type ObjectPath = NodePath<
@@ -440,9 +440,8 @@ function isKnownReadOnlyCall(
 
   const callee = child(path, "callee");
   if (
-    [...extractionAPIs, "cx"].some((name) =>
-      callee.referencesImport("@mincho-js/css", name)
-    )
+    isExtractionCall(callee) ||
+    callee.referencesImport("@mincho-js/css", "cx")
   )
     return true;
   if (callee.referencesImport("@mincho-js/react", "styled")) return true;

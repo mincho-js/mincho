@@ -54,6 +54,9 @@ these sidecar hooks apply to library builds.
 
 ## Coexistence with vanilla-extract
 
+Mincho also extracts vanilla-extract CSS, Recipes and Sprinkles definitions
+from ordinary source modules. See the [supported APIs](vanilla-extract.md).
+
 Mincho's extracted authoring sources use private JavaScript virtual module IDs.
 Their physical compile paths and file-scope origins remain unchanged, preserving
 preset identities and generated classes. Relative imports resolve from those

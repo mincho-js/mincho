@@ -988,5 +988,45 @@
     "count": 1,
     "reason": "This regression fixture names a built-in esbuild syntax or text loader; the string is not a Webpack loader package or a dependency lookup.",
     "expires": "2026-12-31"
+  },
+  {
+    "id": "integration-fixtures-vanilla-extract-recipes-import-01",
+    "file": "packages/integration/src/__fixtures__/vanilla-extract/entry.ts",
+    "type": "error",
+    "message": "Undeclared dependency on @vanilla-extract/recipes",
+    "source": "import { recipe as createRecipe } from \"@vanilla-extract/recipes\";",
+    "count": 1,
+    "reason": "This shared source fixture is read as text and copied into packages/esbuild and packages/vite test directories before compilation. Both executing workspaces declare @vanilla-extract/recipes in devDependencies; integration excludes src/__fixtures__ from its TypeScript build.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "integration-fixtures-vanilla-extract-sprinkles-import-01",
+    "file": "packages/integration/src/__fixtures__/vanilla-extract/entry.ts",
+    "type": "error",
+    "message": "Undeclared dependency on @vanilla-extract/sprinkles",
+    "source": "import * as atomic from \"@vanilla-extract/sprinkles\";",
+    "count": 1,
+    "reason": "This shared source fixture is read as text and copied into packages/esbuild and packages/vite test directories before compilation. Both executing workspaces declare @vanilla-extract/sprinkles in devDependencies; integration excludes src/__fixtures__ from its TypeScript build.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "integration-fixtures-vanilla-extract-sprinkles-import-02",
+    "file": "packages/integration/src/__fixtures__/vanilla-extract/entry.ts",
+    "type": "error",
+    "message": "Undeclared dependency on @vanilla-extract/sprinkles",
+    "source": "import { createMapValueFn } from \"@vanilla-extract/sprinkles/createUtils\";",
+    "count": 1,
+    "reason": "This shared source fixture is read as text and copied into packages/esbuild and packages/vite test directories before compilation. Both executing workspaces declare @vanilla-extract/sprinkles, which supplies createUtils, in devDependencies; integration excludes src/__fixtures__ from its TypeScript build.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "integration-fixtures-vanilla-extract-dynamic-import-01",
+    "file": "packages/integration/src/__fixtures__/vanilla-extract/entry.ts",
+    "type": "error",
+    "message": "Undeclared dependency on @vanilla-extract/dynamic",
+    "source": "import { assignInlineVars, setElementVars } from \"@vanilla-extract/dynamic\";",
+    "count": 1,
+    "reason": "This shared source fixture is read as text and copied into packages/esbuild and packages/vite test directories before compilation. Both executing workspaces declare @vanilla-extract/dynamic in devDependencies; integration excludes src/__fixtures__ from its TypeScript build.",
+    "expires": "2026-12-31"
   }
 ]

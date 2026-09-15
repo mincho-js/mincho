@@ -108,6 +108,50 @@ async function readCssPropOutput(
 }
 
 describe("mincho with the Vite runtime", () => {
+  it.each([false, true])(
+    "extracts vanilla-extract definitions for client and SSR (vanilla plugin: %s)",
+    async (vanilla) => {
+      const source = await readFile(
+        join(
+          process.cwd(),
+          "../integration/src/__fixtures__/vanilla-extract/entry.ts"
+        ),
+        "utf8"
+      );
+
+      const root = await createFixture({ "src/entry.ts": source });
+      const server = await createFixtureServer(root, [
+        minchoVitePlugin(),
+        ...(vanilla ? vanillaExtractPlugin() : [])
+      ]);
+
+      for (const environment of [
+        server.environments.client!,
+        server.environments.ssr!
+      ]) {
+        const output = await readCssPropOutput(environment, "/src/entry.ts");
+
+        expect(output.css).toContain("padding: 13px");
+        expect(output.css).toContain("rebeccapurple");
+        expect(output.css).toContain("display: flex");
+        expect(output.css).toContain("opacity: 0.5");
+        expect(output.code).not.toContain("styles.globalLayer(");
+        expect(output.code).not.toContain("createRecipe(");
+        expect(output.code).not.toContain("atomic.defineProperties(");
+        expect(output.code).toContain("assignInlineVars");
+      }
+
+      const runtime = await server.ssrLoadModule("/src/entry.ts");
+      const quiet = runtime.render("quiet", "flex", "red");
+      const loud = runtime.render("loud", "grid", "blue");
+
+      expect(quiet.className).not.toBe(loud.className);
+      expect(quiet.inline).toEqual({ [Object.keys(quiet.inline)[0]!]: "red" });
+      expect(loud.inline).toEqual({ [Object.keys(quiet.inline)[0]!]: "blue" });
+      expect(quiet.mapped).toEqual({ mobile: 4, desktop: 8 });
+    }
+  );
+
   it("refreshes inherited rules after parent edits, deletion and failed evaluation", async () => {
     const parentSource = (color: string | undefined) =>
       [

@@ -3,6 +3,10 @@
 Use `minchoEsbuildPlugins()` to compile Mincho styles with esbuild. Set
 `jsxCssProp: true` to enable the JSX `css` prop.
 
+Calls from vanilla-extract CSS, Recipes and Sprinkles can also live in ordinary
+source files and are extracted into CSS sidecars. See the
+[supported APIs and runtime behavior](../../docs/vanilla-extract.md).
+
 ```ts
 import { build } from "esbuild";
 import { minchoEsbuildPlugins } from "@mincho-js/esbuild";

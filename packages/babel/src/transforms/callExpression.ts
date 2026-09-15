@@ -2,7 +2,7 @@ import { NodePath, types as t } from "@babel/core";
 import type { ProgramScope } from "../types.js";
 import { collectExtractionBindings } from "./extractionBindings.js";
 import {
-  extractionAPIs,
+  isExtractionCall,
   getNearestIdentifier,
   registerImportMethod
 } from "../utils.js";
@@ -14,14 +14,7 @@ import {
 export function transformCallExpression(path: NodePath<t.CallExpression>) {
   const callee = path.get("callee");
 
-  // Checks if the function call is from @mincho-js/css
-  if (
-    !extractionAPIs.some((api) =>
-      callee.referencesImport("@mincho-js/css", api)
-    )
-  ) {
-    return;
-  }
+  if (!isExtractionCall(callee)) return;
 
   const programParent = path.scope.getProgramParent() as ProgramScope;
 

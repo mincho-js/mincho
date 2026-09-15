@@ -1,5 +1,6 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join, posix } from "node:path";
+import { runInNewContext } from "node:vm";
 import { originalPositionFor, TraceMap } from "@jridgewell/trace-mapping";
 import { defineRules, type DefineRulesPresetArtifactV5 } from "@mincho-js/css";
 import {
@@ -206,6 +207,107 @@ function diamondArtifacts() {
 }
 
 describe("native library CSS in one Vite application build", () => {
+  it.each([false, true])(
+    "extracts official vanilla-extract packages (vanilla plugin: %s)",
+    async (vanilla) => {
+      const source = await readFile(
+        join(
+          process.cwd(),
+          "../integration/src/__fixtures__/vanilla-extract/entry.ts"
+        ),
+        "utf8"
+      );
+
+      const root = await fixture({
+        "entry.js": 'export * from "./styles.ts";',
+        "styles.ts": source
+      });
+
+      const output = await compile(root, { format: "cjs", vanilla });
+      const css = cssAssets(output)
+        .map((asset) => String(asset.source))
+        .join("\n");
+
+      const entry = chunks(output).find((chunk) => chunk.isEntry)!;
+      const module = {
+        exports: {} as {
+          render: (
+            tone: string,
+            display: string,
+            color: string
+          ) => {
+            className: string;
+            inline: Record<string, string>;
+            normalized: Record<string, string>;
+            mapped: Record<string, number>;
+            assigned: Record<string, string>;
+            fallback: string;
+          };
+          update: (element: unknown, color: string) => void;
+        }
+      };
+
+      const imports: string[] = [];
+      runInNewContext(entry.code, {
+        module,
+        exports: module.exports,
+        process: { env: { NODE_ENV: "production" } },
+
+        require: (id: string) => {
+          imports.push(id);
+        }
+      });
+
+      expect(imports).toHaveLength(1);
+      expect(imports[0]).toMatch(/\.css$/);
+
+      const quiet = module.exports.render("quiet", "flex", "red");
+      const loud = module.exports.render("loud", "grid", "blue");
+
+      expect(quiet.className).not.toBe(loud.className);
+
+      for (const className of `${quiet.className} ${loud.className}`.split(" "))
+        expect(css).toContain(`.${className}`);
+
+      expect(quiet.inline).toEqual({ [Object.keys(quiet.inline)[0]!]: "red" });
+      expect(loud.inline).toEqual({ [Object.keys(quiet.inline)[0]!]: "blue" });
+      expect(quiet.normalized).toEqual({ mobile: "flex", desktop: "grid" });
+      expect(loud.normalized).toEqual({ mobile: "grid", desktop: "grid" });
+      expect(quiet.mapped).toEqual({ mobile: 4, desktop: 8 });
+      expect(Object.values(loud.assigned)).toEqual(["blue"]);
+      expect(loud.fallback).toMatch(/^var\(--.+, blue\)$/);
+
+      const assigned: Record<string, string> = {};
+      module.exports.update(
+        {
+          style: {
+            setProperty: (name: string, value: string) => {
+              assigned[name] = value;
+            }
+          }
+        },
+        "green"
+      );
+
+      expect(assigned).toEqual({ [Object.keys(quiet.inline)[0]!]: "green" });
+
+      expect(css).toContain("padding: 13px");
+      expect(css).toContain("padding: 7px");
+      expect(css).toContain("@layer reset");
+      expect(css).toContain("@keyframes");
+      expect(css).toContain("view-transition-name:");
+
+      const bodyColors = [
+        ...css.matchAll(/body\s*\{\s*color:\s*([^;]+);/g)
+      ].map(([, value]) => value);
+
+      expect(bodyColors).toHaveLength(2);
+      expect(bodyColors[0]).toBe(Object.keys(quiet.assigned)[0]);
+      expect(bodyColors[1]).not.toBe(bodyColors[0]);
+    },
+    30_000
+  );
+
   for (const format of ["es", "cjs"] as const) {
     it(`${format}: hashes custom CSS references and preserves source positions`, async () => {
       const root = await fixture();

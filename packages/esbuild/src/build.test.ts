@@ -348,6 +348,96 @@ describe("buildWithMincho transaction", () => {
     }
   );
 
+  it("extracts vanilla-extract packages alongside Mincho and preserves their runtime APIs", async () => {
+    const source = await fs.readFile(
+      join(
+        process.cwd(),
+        "../integration/src/__fixtures__/vanilla-extract/entry.ts"
+      ),
+      "utf8"
+    );
+
+    const root = await fixture({ "entry.ts": source });
+    const result = await buildWithMincho({
+      entryPoints: [join(root, "entry.ts")],
+      outdir: join(root, "out"),
+      write: false,
+      format: "cjs"
+    });
+
+    const css = result.outputFiles!.find((file) =>
+      file.path.endsWith(".css")
+    )!.text;
+
+    const code = result.outputFiles!.find((file) =>
+      file.path.endsWith(".js")
+    )!.text;
+
+    const module = {
+      exports: {} as {
+        render: (
+          tone: string,
+          display: string,
+          color: string
+        ) => {
+          className: string;
+          inline: Record<string, string>;
+          normalized: Record<string, string>;
+          mapped: Record<string, number>;
+          assigned: Record<string, string>;
+          fallback: string;
+        };
+        update: (element: unknown, color: string) => void;
+      }
+    };
+
+    runInNewContext(code, { module, exports: module.exports });
+
+    const quiet = module.exports.render("quiet", "flex", "red");
+    const loud = module.exports.render("loud", "grid", "blue");
+
+    expect(quiet.className).not.toBe(loud.className);
+
+    for (const className of `${quiet.className} ${loud.className}`.split(" "))
+      expect(css).toContain(`.${className}`);
+
+    expect(quiet.inline).toEqual({ [Object.keys(quiet.inline)[0]!]: "red" });
+    expect(loud.inline).toEqual({ [Object.keys(quiet.inline)[0]!]: "blue" });
+    expect(quiet.normalized).toEqual({ mobile: "flex", desktop: "grid" });
+    expect(loud.normalized).toEqual({ mobile: "grid", desktop: "grid" });
+    expect(quiet.mapped).toEqual({ mobile: 4, desktop: 8 });
+    expect(Object.values(loud.assigned)).toEqual(["blue"]);
+    expect(loud.fallback).toMatch(/^var\(--.+, blue\)$/);
+
+    const assigned: Record<string, string> = {};
+    module.exports.update(
+      {
+        style: {
+          setProperty: (name: string, value: string) => {
+            assigned[name] = value;
+          }
+        }
+      },
+      "green"
+    );
+
+    expect(assigned).toEqual({ [Object.keys(quiet.inline)[0]!]: "green" });
+
+    expect(css).toContain("padding: 13px");
+    expect(css).toContain("padding: 7px");
+    expect(css).toContain("@layer reset");
+    expect(css).toContain("@keyframes");
+    expect(css).toContain("view-transition-name:");
+
+    const bodyColors = [...css.matchAll(/body\s*\{\s*color:\s*([^;]+);/g)].map(
+      ([, value]) => value
+    );
+
+    expect(bodyColors).toHaveLength(2);
+    expect(bodyColors[0]).toBe(Object.keys(quiet.assigned)[0]);
+    expect(bodyColors[1]).not.toBe(bodyColors[0]);
+  }, 30_000);
+
   it.each(["", "?variant"])(
     "orders CSS for virtual entries with suffix %s",
     async (suffix) => {

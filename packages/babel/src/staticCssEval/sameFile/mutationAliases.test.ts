@@ -87,6 +87,10 @@ describe("mutable object reference analysis", () => {
     `const { color } = style; unknownFunction(color);`,
     `Object.keys(style);`,
     `import { css as createCss } from '@mincho-js/css'; createCss(style);`,
+    `import { style as createStyle } from '@vanilla-extract/css'; createStyle(style);`,
+    `import * as vanilla from '@vanilla-extract/css'; vanilla.style(style);`,
+    `import { recipe } from '@vanilla-extract/recipes'; recipe({ base: style });`,
+    `import { defineProperties } from '@vanilla-extract/sprinkles'; defineProperties({ properties: { color: { red: style } } });`,
     `function local() { const style = { color: 'blue' }; style.color = 'green'; }`
   ])("retains read-only uses and independent objects: %s", (usage) => {
     expect(
