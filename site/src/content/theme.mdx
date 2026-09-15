@@ -13,15 +13,15 @@ The Theme layer enables:
 - Multiple theme support
 
 ```ts
-import { theme } from '@mincho-js/css'
+import { theme } from "@mincho-js/css";
 
 const [themeClass, vars, contract] = theme({
   color: {
-    primary: '#007bff',
-    secondary: '#6c757d'
+    primary: "#007bff",
+    secondary: "#6c757d",
   },
-  spacing: [4, 8, 16, 24, 32]
-})
+  spacing: [4, 8, 16, 24, 32],
+});
 ```
 
 ## Basic Usage
@@ -31,27 +31,25 @@ const [themeClass, vars, contract] = theme({
 The `theme()` function returns a tuple containing a className, resolved token references, and a structural `ThemeContract` used for contract-first replacement themes.
 
 ```ts
-import { theme } from '@mincho-js/css'
+import { theme } from "@mincho-js/css";
 
 const [themeClass, vars, contract] = theme({
   color: {
-    primary: '#007bff',
-    background: '#ffffff'
-  }
-})
+    primary: "#007bff",
+    background: "#ffffff",
+  },
+});
 
 // themeClass: Generated className to apply the theme
 // vars.color.primary: "var(--color-primary)"
 // vars.color.background: "var(--color-background)"
-// contract: ThemeContract object for theme(contract, nextTokens)
+// contract: ThemeContract object for theme.extends(contract, nextTokens)
 ```
 
 Apply the theme by adding the className to a container element:
 
 ```tsx
-<div className={themeClass}>
-  {/* Themed content */}
-</div>
+<div className={themeClass}>{/* Themed content */}</div>
 ```
 
 Create a replacement theme from the returned contract when you need a second class that reuses the same CSS custom properties:
@@ -59,34 +57,45 @@ Create a replacement theme from the returned contract when you need a second cla
 ```ts
 const tokens = {
   color: {
-    primary: '#007bff',
-    background: '#ffffff'
-  }
-}
+    primary: "#007bff",
+    background: "#ffffff",
+  },
+};
 const nextTokens = {
   color: {
-    primary: '#4dabff',
-    background: '#1a1a1a'
-  }
-}
+    primary: "#4dabff",
+    background: "#1a1a1a",
+  },
+};
 
-const [className, vars, contract] = theme(tokens)
-const [nextClassName, nextVars, nextContract] = theme(contract, nextTokens)
+const [className, vars, contract] = theme(tokens);
+const [nextClassName, nextVars, nextContract] = theme.extends(
+  contract,
+  nextTokens,
+);
 ```
+
+`theme()` and callable `theme.with<T>()` handles reserve the top-level shape
+`{ vars: {...}, values: {...}, cssVarByPath: {...} }` for structural theme contracts
+when all three fields are plain objects. This combination is rejected as direct
+token input by TypeScript and at runtime. Use `theme.extends()` for contracts;
+for token groups with those names, nest them under another key or rename a group.
+The individual names remain available, and using a primitive or array for any
+of the three fields does not form the reserved shape.
 
 ### globalTheme()
 
 Use `globalTheme()` to apply tokens to a specific selector globally.
 
 ```ts
-import { globalTheme } from '@mincho-js/css'
+import { globalTheme } from "@mincho-js/css";
 
-const vars = globalTheme(':root', {
+const vars = globalTheme(":root", {
   color: {
-    primary: '#007bff',
-    background: '#ffffff'
-  }
-})
+    primary: "#007bff",
+    background: "#ffffff",
+  },
+});
 
 // vars.color.primary: "var(--color-primary)"
 ```
@@ -108,10 +117,10 @@ Strings, numbers, and booleans are directly converted to CSS variables.
 
 ```ts
 const [, vars, contract] = theme({
-  color: 'red',
+  color: "red",
   size: 16,
-  enabled: true
-})
+  enabled: true,
+});
 
 // Generated:
 // --color: red;
@@ -126,8 +135,8 @@ Arrays create indexed CSS variables.
 ```ts
 const [, vars, contract] = theme({
   spacing: [4, 8, 16, 24, 32],
-  colors: ['#ff0000', '#00ff00', '#0000ff']
-})
+  colors: ["#ff0000", "#00ff00", "#0000ff"],
+});
 
 // Generated:
 // --spacing-0: 4;
@@ -148,16 +157,16 @@ Objects create hierarchically namespaced CSS variables.
 const [, vars, contract] = theme({
   color: {
     base: {
-      red: '#ff0000',
-      green: '#00ff00',
-      blue: '#0000ff'
+      red: "#ff0000",
+      green: "#00ff00",
+      blue: "#0000ff",
     },
     brand: {
-      primary: '#007bff',
-      secondary: '#6c757d'
-    }
-  }
-})
+      primary: "#007bff",
+      secondary: "#6c757d",
+    },
+  },
+});
 
 // Generated:
 // --color-base-red: #ff0000;
@@ -175,9 +184,9 @@ Objects with `value` and `unit` are formatted as CSS values.
 
 ```ts
 const [, vars, contract] = theme({
-  spacing: { value: 1.5, unit: 'rem' },
-  borderWidth: { value: 2, unit: 'px' }
-})
+  spacing: { value: 1.5, unit: "rem" },
+  borderWidth: { value: 2, unit: "px" },
+});
 
 // Generated:
 // --spacing: 1.5rem;
@@ -193,11 +202,11 @@ For more explicit token typing, use the DTCG (Design Tokens Community Group) for
 ```ts
 const [, vars, contract] = theme({
   brandColor: {
-    $type: 'color',
-    $value: '#ff5500',
-    $description: 'Primary brand color'
-  }
-})
+    $type: "color",
+    $value: "#ff5500",
+    $description: "Primary brand color",
+  },
+});
 
 // Generated:
 // --brand-color: #ff5500;
@@ -208,14 +217,14 @@ const [, vars, contract] = theme({
 ```ts
 const [, vars, contract] = theme({
   fontPrimary: {
-    $type: 'fontFamily',
-    $value: ['Inter', 'system-ui', 'sans-serif']
+    $type: "fontFamily",
+    $value: ["Inter", "system-ui", "sans-serif"],
   },
   fontSecondary: {
-    $type: 'fontFamily',
-    $value: 'Georgia, serif'
-  }
-})
+    $type: "fontFamily",
+    $value: "Georgia, serif",
+  },
+});
 
 // Generated:
 // --font-primary: Inter, system-ui, sans-serif;
@@ -227,14 +236,14 @@ const [, vars, contract] = theme({
 ```ts
 const [, vars, contract] = theme({
   transitionFast: {
-    $type: 'duration',
-    $value: { value: 200, unit: 'ms' }
+    $type: "duration",
+    $value: { value: 200, unit: "ms" },
   },
   transitionSlow: {
-    $type: 'duration',
-    $value: { value: 1, unit: 's' }
-  }
-})
+    $type: "duration",
+    $value: { value: 1, unit: "s" },
+  },
+});
 
 // Generated:
 // --transition-fast: 200ms;
@@ -246,14 +255,14 @@ const [, vars, contract] = theme({
 ```ts
 const [, vars, contract] = theme({
   easingDefault: {
-    $type: 'cubicBezier',
-    $value: [0.4, 0, 0.2, 1]
+    $type: "cubicBezier",
+    $value: [0.4, 0, 0.2, 1],
   },
   easingBounce: {
-    $type: 'cubicBezier',
-    $value: [0.68, -0.55, 0.265, 1.55]
-  }
-})
+    $type: "cubicBezier",
+    $value: [0.68, -0.55, 0.265, 1.55],
+  },
+});
 
 // Generated:
 // --easing-default: cubic-bezier(0.4, 0, 0.2, 1);
@@ -267,22 +276,22 @@ Font weight keywords are automatically converted to numeric values.
 ```ts
 const [, vars, contract] = theme({
   weightNormal: {
-    $type: 'fontWeight',
-    $value: 'normal'  // → 400
+    $type: "fontWeight",
+    $value: "normal", // → 400
   },
   weightBold: {
-    $type: 'fontWeight',
-    $value: 'bold'    // → 700
+    $type: "fontWeight",
+    $value: "bold", // → 700
   },
   weightSemiBold: {
-    $type: 'fontWeight',
-    $value: 'semi-bold'  // → 600
+    $type: "fontWeight",
+    $value: "semi-bold", // → 600
   },
   weightNumeric: {
-    $type: 'fontWeight',
-    $value: 300
-  }
-})
+    $type: "fontWeight",
+    $value: 300,
+  },
+});
 
 // Generated:
 // --weight-normal: 400;
@@ -296,14 +305,14 @@ const [, vars, contract] = theme({
 ```ts
 const [, vars, contract] = theme({
   lineHeightBase: {
-    $type: 'number',
-    $value: 1.5
+    $type: "number",
+    $value: 1.5,
   },
   zIndexModal: {
-    $type: 'number',
-    $value: 1000
-  }
-})
+    $type: "number",
+    $value: 1000,
+  },
+});
 
 // Generated:
 // --line-height-base: 1.5;
@@ -315,10 +324,10 @@ const [, vars, contract] = theme({
 ```ts
 const [, vars, contract] = theme({
   fontSize: {
-    $type: 'dimension',
-    $value: { value: 16, unit: 'px' }
-  }
-})
+    $type: "dimension",
+    $value: { value: 16, unit: "px" },
+  },
+});
 
 // Generated:
 // --font-size: 16px;
@@ -334,19 +343,19 @@ Use JavaScript getters to create semantic tokens that reference other tokens.
 const [, vars, contract] = theme({
   color: {
     base: {
-      blue: '#0000ff',
-      red: '#ff0000'
+      blue: "#0000ff",
+      red: "#ff0000",
     },
     semantic: {
       get primary() {
-        return this.color.base.blue
+        return this.color.base.blue;
       },
       get danger() {
-        return this.color.base.red
-      }
-    }
-  }
-})
+        return this.color.base.red;
+      },
+    },
+  },
+});
 
 // Generated:
 // --color-base-blue: #0000ff;
@@ -365,15 +374,15 @@ Use `this.fallbackVar()` to provide fallback values for CSS variables.
 const [, vars, contract] = theme({
   color: {
     base: {
-      blue: '#0000ff'
+      blue: "#0000ff",
     },
     semantic: {
       get primary() {
-        return this.fallbackVar(this.color.base.blue, '#007bff')
-      }
-    }
-  }
-})
+        return this.fallbackVar(this.color.base.blue, "#007bff");
+      },
+    },
+  },
+});
 
 // Generated:
 // --color-semantic-primary: var(--color-base-blue, #007bff);
@@ -387,24 +396,24 @@ Use `this.alias()` when you want to reference another token without creating a n
 const [, vars, contract] = theme({
   color: {
     base: {
-      blue: '#0000ff',
-      red: '#ff0000'
+      blue: "#0000ff",
+      red: "#ff0000",
     },
     semantic: {
       // Creates CSS variable (--color-semantic-secondary)
       get secondary() {
-        return this.color.base.blue
+        return this.color.base.blue;
       },
       // Does NOT create CSS variable, just references
       get primary() {
-        return this.alias(this.color.base.blue)
+        return this.alias(this.color.base.blue);
       },
       get danger() {
-        return this.alias(this.color.base.red)
-      }
-    }
-  }
-})
+        return this.alias(this.color.base.red);
+      },
+    },
+  },
+});
 
 // Generated (note: no --color-semantic-primary or --color-semantic-danger):
 // --color-base-blue: #0000ff;
@@ -425,19 +434,19 @@ Use `this.raw()` to get the actual value instead of a CSS variable reference.
 const [, vars, contract] = theme({
   color: {
     base: {
-      blue: '#0000ff',
-      red: '#ff0000'
+      blue: "#0000ff",
+      red: "#ff0000",
     },
     semantic: {
       get primary() {
-        return this.raw(this.color.base.blue)
+        return this.raw(this.color.base.blue);
       },
       get danger() {
-        return this.raw(this.color.base.red)
-      }
-    }
-  }
-})
+        return this.raw(this.color.base.red);
+      },
+    },
+  },
+});
 
 // Generated:
 // --color-base-blue: #0000ff;
@@ -457,15 +466,15 @@ const [, vars, contract] = theme({
   shadow: {
     light: {
       get resolved() {
-        return `${this.shadow.light.color} ${this.shadow.light.offsetX} ${this.shadow.light.offsetY} ${this.shadow.light.blur}`
+        return `${this.shadow.light.color} ${this.shadow.light.offsetX} ${this.shadow.light.offsetY} ${this.shadow.light.blur}`;
       },
-      color: '#00000080',
-      offsetX: { value: 0.5, unit: 'rem' },
-      offsetY: { value: 0.5, unit: 'rem' },
-      blur: { value: 1.5, unit: 'rem' }
-    }
-  }
-})
+      color: "#00000080",
+      offsetX: { value: 0.5, unit: "rem" },
+      offsetY: { value: 0.5, unit: "rem" },
+      blur: { value: 1.5, unit: "rem" },
+    },
+  },
+});
 
 // Generated:
 // --shadow-light: var(--shadow-light-color) var(--shadow-light-offset-x) var(--shadow-light-offset-y) var(--shadow-light-blur);
@@ -484,12 +493,12 @@ Place theme variables in a CSS layer using `@layer`.
 
 ```ts
 const [themeClass, vars, contract] = theme({
-  '@layer': 'tokens',
+  "@layer": "tokens",
   color: {
-    primary: '#007bff',
-    secondary: '#6c757d'
-  }
-})
+    primary: "#007bff",
+    secondary: "#6c757d",
+  },
+});
 ```
 
 This generates:
@@ -510,10 +519,10 @@ Add a debug identifier as the second argument for easier debugging.
 ```ts
 const [themeClass, vars, contract] = theme(
   {
-    color: { primary: '#007bff' }
+    color: { primary: "#007bff" },
   },
-  'myTheme'
-)
+  "myTheme",
+);
 
 // themeClass will include "myTheme" in development
 ```
@@ -523,21 +532,27 @@ const [themeClass, vars, contract] = theme(
 Create multiple themes by defining different token values.
 
 ```ts
-const [lightTheme, lightVars, lightContract] = theme({
-  color: {
-    background: '#ffffff',
-    text: '#000000',
-    primary: '#007bff'
-  }
-}, 'light')
+const [lightTheme, lightVars, lightContract] = theme(
+  {
+    color: {
+      background: "#ffffff",
+      text: "#000000",
+      primary: "#007bff",
+    },
+  },
+  "light",
+);
 
-const [darkTheme, darkVars, darkContract] = theme({
-  color: {
-    background: '#1a1a1a',
-    text: '#ffffff',
-    primary: '#4dabff'
-  }
-}, 'dark')
+const [darkTheme, darkVars, darkContract] = theme(
+  {
+    color: {
+      background: "#1a1a1a",
+      text: "#ffffff",
+      primary: "#4dabff",
+    },
+  },
+  "dark",
+);
 
 // Use lightVars or darkVars in your styles
 // Apply lightTheme or darkTheme className to switch themes
@@ -566,83 +581,83 @@ const button = css({
 Use theme variables in your `css()` calls.
 
 ```ts
-import { css, theme } from '@mincho-js/css'
+import { css, theme } from "@mincho-js/css";
 
 const [, vars, contract] = theme({
   color: {
-    primary: '#007bff',
-    text: '#333333'
+    primary: "#007bff",
+    text: "#333333",
   },
-  spacing: [4, 8, 16, 24, 32]
-})
+  spacing: [4, 8, 16, 24, 32],
+});
 
 const button = css({
   backgroundColor: vars.color.primary,
   color: vars.color.text,
-  padding: vars.spacing[2],  // 16px
+  padding: vars.spacing[2], // 16px
   _hover: {
-    opacity: 0.9
-  }
-})
+    opacity: 0.9,
+  },
+});
 ```
 
 ## Complete Example
 
 ```ts
-import { css, theme, globalTheme } from '@mincho-js/css'
+import { css, theme, globalTheme } from "@mincho-js/css";
 
 // Define global theme on :root
-const tokens = globalTheme(':root', {
+const tokens = globalTheme(":root", {
   color: {
     base: {
       gray: {
-        50: '#f9fafb',
-        100: '#f3f4f6',
-        900: '#111827'
+        50: "#f9fafb",
+        100: "#f3f4f6",
+        900: "#111827",
       },
       blue: {
-        500: '#3b82f6',
-        600: '#2563eb'
-      }
+        500: "#3b82f6",
+        600: "#2563eb",
+      },
     },
     semantic: {
       get background() {
-        return this.color.base.gray[50]
+        return this.color.base.gray[50];
       },
       get text() {
-        return this.color.base.gray[900]
+        return this.color.base.gray[900];
       },
       get primary() {
-        return this.color.base.blue[500]
+        return this.color.base.blue[500];
       },
       get primaryHover() {
-        return this.color.base.blue[600]
-      }
-    }
+        return this.color.base.blue[600];
+      },
+    },
   },
   spacing: [0, 4, 8, 12, 16, 24, 32, 48, 64],
   typography: {
     fontFamily: {
-      $type: 'fontFamily',
-      $value: ['Inter', 'system-ui', 'sans-serif']
+      $type: "fontFamily",
+      $value: ["Inter", "system-ui", "sans-serif"],
     },
     fontSize: {
-      sm: { value: 14, unit: 'px' },
-      base: { value: 16, unit: 'px' },
-      lg: { value: 18, unit: 'px' }
-    }
+      sm: { value: 14, unit: "px" },
+      base: { value: 16, unit: "px" },
+      lg: { value: 18, unit: "px" },
+    },
   },
   animation: {
     duration: {
-      $type: 'duration',
-      $value: { value: 200, unit: 'ms' }
+      $type: "duration",
+      $value: { value: 200, unit: "ms" },
     },
     easing: {
-      $type: 'cubicBezier',
-      $value: [0.4, 0, 0.2, 1]
-    }
-  }
-})
+      $type: "cubicBezier",
+      $value: [0.4, 0, 0.2, 1],
+    },
+  },
+});
 
 // Use tokens in styles
 const button = css({
@@ -653,9 +668,9 @@ const button = css({
   padding: `${tokens.spacing[2]} ${tokens.spacing[4]}`,
   transition: `background-color ${tokens.animation.duration} ${tokens.animation.easing}`,
   _hover: {
-    backgroundColor: tokens.color.semantic.primaryHover
-  }
-})
+    backgroundColor: tokens.color.semantic.primaryHover,
+  },
+});
 ```
 
 ## CamelCase to kebab-case
@@ -664,10 +679,10 @@ Token names are automatically converted from camelCase to kebab-case for CSS var
 
 ```ts
 const [, vars, contract] = theme({
-  backgroundColor: 'white',
-  fontSize: '16px',
-  lineHeight: 1.5
-})
+  backgroundColor: "white",
+  fontSize: "16px",
+  lineHeight: 1.5,
+});
 
 // Generated:
 // --background-color: white;
@@ -677,13 +692,23 @@ const [, vars, contract] = theme({
 
 ## Theme Helpers
 
-`theme.with<T>()` creates a typed theme factory and returns the same `[className, vars, contract]` tuple as `theme()`:
+`theme.with<T>()` creates a typed theme factory and returns the same `[className, vars, contract]` tuple as `theme()`. Its callable handle also extends a contract without repeating `T`:
 
 ```ts
-const createTheme = theme.with<{ color: { primary: string } }>()
-const [themeClass, vars, contract] = createTheme({
-  color: { primary: '#007bff' }
-})
+type MyTheme = { color: { primary: string } };
+
+const handle = theme.with<MyTheme>();
+const tokens = {
+  color: { primary: "#007bff" },
+};
+const [themeClass, vars, contract] = handle(tokens);
+
+const replacementTokens = {
+  color: { primary: "#4dabff" },
+};
+const optionalDebugId = "replacementTheme";
+const [replacementThemeClass, replacementVars, replacementContract] =
+  handle.extends(contract, replacementTokens, optionalDebugId);
 ```
 
 Additional helpers such as `theme.raw()` and `theme.multiple()` are planned for future releases. See [Literal CSS](/docs/literal#css-methods) and [Rules](/docs/rules#multiple-rules) for examples of how helper methods work with other APIs.
