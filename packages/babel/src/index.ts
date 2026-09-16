@@ -92,3 +92,12 @@ export {
   inspectCommonJs as internalInspectCommonJs,
   commonJsToEsmPlugin as internalCommonJsToEsmPlugin
 } from "./commonjs/esm.js";
+
+export {
+  createModuleGraph as internalCreateModuleGraph,
+  parseModuleProgram as internalParseModuleProgram,
+  type ModuleGraph as InternalModuleGraph,
+  type ModuleGraphFlow as InternalModuleGraphFlow,
+  type ModuleGraphRequest as InternalModuleGraphRequest,
+  type ModuleTarget as InternalModuleTarget
+} from "./moduleGraph.js";

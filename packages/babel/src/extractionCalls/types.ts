@@ -22,13 +22,7 @@ export interface ExtractCallsAnalysisOptions {
 }
 
 export type ExtractCallsRequest =
-  | {
-      kind: "resolve";
-      importer: string;
-      source: string;
-      mode?: "import" | "require";
-    }
-  | { kind: "load"; id: string };
+  import("../moduleGraph.js").ModuleGraphRequest;
 
 export type ExtractCallsAnalysis = Generator<
   ExtractCallsRequest,
