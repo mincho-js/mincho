@@ -109,6 +109,147 @@ async function readCssPropOutput(
 
 describe("mincho with the Vite runtime", () => {
   it.each([false, true])(
+    "supports local extractCalls in client, SSR and HMR (vanilla: %s)",
+    async (vanilla) => {
+      const sourceRoot = join(
+        process.cwd(),
+        "../integration/src/__fixtures__/extract-calls/"
+      );
+
+      const sources = Object.fromEntries(
+        await Promise.all(
+          ["entry.ts", "factory.ts", "implementation.ts", "helper.ts"].map(
+            async (name) => [
+              `src/${name}`,
+              await readFile(join(sourceRoot, name), "utf8")
+            ]
+          )
+        )
+      );
+
+      const root = await createFixture(sources);
+      let resolveReady!: () => void;
+      const ready = new Promise<void>((resolve) => {
+        resolveReady = resolve;
+      });
+
+      let updates = 0;
+      const server = await createFixtureServer(
+        root,
+        [
+          minchoVitePlugin({
+            // The top-level setting overrides the nested Babel setting.
+            babel: { extractCalls: { "./missing.ts": ["missing"] } },
+            extractCalls: { "./src/factory.ts": ["defineStyle", "makeRecipe"] }
+          }),
+          ...(vanilla ? vanillaExtractPlugin() : []),
+          {
+            name: "observe-extract-calls-hmr",
+
+            config() {
+              return {
+                server: {
+                  hotUpdateEnvironments: async (server, hmr) => {
+                    await Promise.all(
+                      Object.values(server.environments).map(hmr)
+                    );
+                    updates++;
+                  }
+                }
+              };
+            },
+
+            configureServer(server) {
+              server.watcher.once("ready", resolveReady);
+            }
+          }
+        ],
+        true
+      );
+
+      // The factory dependency can be transformed before any call sites.
+      const helper =
+        await server.environments.client!.transformRequest("/src/helper.ts");
+
+      expect(helper?.code).toContain("return style({");
+
+      for (const environment of [
+        server.environments.client!,
+        server.environments.ssr!
+      ]) {
+        const output = await readCssPropOutput(environment, "/src/entry.ts");
+
+        expect(output.css).toContain("color: tomato");
+        expect(output.css).toContain("border-width: 3px");
+        expect(output.code).not.toContain("defineStyle({");
+      }
+
+      const runtime = await server.ssrLoadModule("/src/entry.ts");
+
+      expect(runtime.render("quiet")).not.toBe(runtime.render("loud"));
+
+      const update = async (file: string, source: string) => {
+        await ready;
+
+        const previous = updates;
+        await writeFile(join(root, file), source);
+        await vi.waitFor(() => expect(updates).toBeGreaterThan(previous), {
+          timeout: 5_000
+        });
+      };
+
+      await update(
+        "src/helper.ts",
+        sources["src/helper.ts"]!.replace('"3px"', '"7px"')
+      );
+
+      for (const environment of [
+        server.environments.client!,
+        server.environments.ssr!
+      ]) {
+        const output = await readCssPropOutput(environment, "/src/entry.ts");
+
+        expect(output.css).toContain("border-width: 7px");
+        expect(output.css).not.toContain("border-width: 3px");
+      }
+
+      await update(
+        "src/factory.ts",
+        "export const defineStyle = 1; export const makeRecipe = 1;"
+      );
+
+      await expect(
+        server.environments.client!.transformRequest("/src/entry.ts")
+      ).rejects.toThrow(/extractCalls.*implementation/);
+
+      await update("src/factory.ts", sources["src/factory.ts"]!);
+
+      expect(
+        (await readCssPropOutput(server.environments.client!, "/src/entry.ts"))
+          .css
+      ).toContain("border-width: 7px");
+
+      await writeFile(
+        join(root, "src/alternate.ts"),
+        'import { style } from "@vanilla-extract/css"; export { makeRecipe } from "./implementation"; export const defineStyle = (rule) => style({ ...rule, borderWidth: "11px" });'
+      );
+      await update(
+        "src/factory.ts",
+        'export { defineStyle, makeRecipe } from "./alternate";'
+      );
+
+      const alternate = await readCssPropOutput(
+        server.environments.client!,
+        "/src/entry.ts"
+      );
+
+      expect(alternate.css).toContain("border-width: 11px");
+      expect(alternate.css).not.toContain("border-width: 7px");
+    },
+    30_000
+  );
+
+  it.each([false, true])(
     "extracts vanilla-extract definitions for client and SSR (vanilla plugin: %s)",
     async (vanilla) => {
       const source = await readFile(

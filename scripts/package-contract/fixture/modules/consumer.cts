@@ -7,12 +7,17 @@ import type { preset as packedPreset } from "@mincho-js-proof/real-d/preset" wit
 };
 import { defineRules } from "@mincho-js/css";
 import type { DefineRulesRegistrySession } from "@mincho-js/css/defineRules/registry";
-import { minchoBabelPlugin } from "@mincho-js/babel";
+import {
+  minchoBabelPlugin,
+  type ExtractCalls,
+  type PluginOptions
+} from "@mincho-js/babel";
 import {
   babelTransformSource,
   collectDefineRulesPackageGraph,
   getDefineRulesAncestorStyleSpecifiers,
   type BabelTransformSourceOptions,
+  type ExtractCalls as IntegrationExtractCalls,
   type InternalStaticCssEvalSourceProvider
 } from "@mincho-js/integration";
 import {
@@ -22,13 +27,29 @@ import {
   type DefineRulesPackageGraph,
   type DefineRulesPackageGraphArtifact
 } from "@mincho-js/integration/package-graph";
-import { minchoEsbuildPlugins } from "@mincho-js/esbuild";
+import {
+  minchoEsbuildPlugins,
+  type ExtractCalls as EsbuildExtractCalls
+} from "@mincho-js/esbuild";
 import { minchoVitePlugin } from "@mincho-js/vite";
-import type { MinchoVitePluginOptions } from "@mincho-js/vite";
+import type {
+  MinchoVitePluginOptions,
+  ExtractCalls as ViteExtractCalls
+} from "@mincho-js/vite";
 import type { Plugin as EsbuildPlugin } from "esbuild";
 import type { Plugin as VitePlugin } from "vite";
 
+const extractCalls = {
+  "./factory.ts": ["make"]
+} satisfies ExtractCalls &
+  IntegrationExtractCalls &
+  EsbuildExtractCalls &
+  ViteExtractCalls;
+
+const babelOptions: PluginOptions = { result: ["", ""], extractCalls };
+
 const options: BabelTransformSourceOptions = {
+  babel: { extractCalls },
   filename: "/virtual/consumer.ts",
   source: "export const answer: number = 42;",
   loader: "ts",
@@ -43,17 +64,26 @@ const provider: InternalStaticCssEvalSourceProvider = {
 
 const babelPlugin = minchoBabelPlugin();
 const esbuildPlugins: EsbuildPlugin[] = minchoEsbuildPlugins({
+  extractCalls,
   jsxCssProp: true
 });
 
 const viteOptions: MinchoVitePluginOptions = {
+  extractCalls,
   jsxCssProp: true,
   libraryCss: { fileName: "style.css", analysis: "inline" }
 };
 
 const vitePlugin: VitePlugin = minchoVitePlugin(viteOptions);
 
-export { options, provider, babelPlugin, esbuildPlugins, vitePlugin };
+export {
+  options,
+  provider,
+  babelPlugin,
+  babelOptions,
+  esbuildPlugins,
+  vitePlugin
+};
 
 export const transform = () => babelTransformSource(options);
 

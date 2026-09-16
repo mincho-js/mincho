@@ -16,7 +16,7 @@ import { endFileScope, setFileScope } from "@vanilla-extract/css/fileScope";
 import { vanillaExtractPlugin } from "@vanilla-extract/vite-plugin";
 import { build, type Plugin, type Rollup } from "vite";
 import { afterEach, describe, expect, it } from "vitest";
-import { minchoVitePlugin } from "./index.js";
+import { minchoVitePlugin, type ExtractCalls } from "./index.js";
 
 interface NativeBuildOutput {
   output: Array<Rollup.OutputAsset | Rollup.OutputChunk>;
@@ -59,6 +59,7 @@ async function compile(
     analysis = "worker",
     fileName,
     graph = false,
+    extractCalls,
     vanilla = false,
     assetNames = "assets/custom-[name]-[hash][extname]",
     entries = "entry.js"
@@ -68,6 +69,7 @@ async function compile(
     analysis?: "worker" | "inline";
     fileName?: string;
     graph?: boolean;
+    extractCalls?: ExtractCalls;
     vanilla?: boolean;
     assetNames?: string;
     entries?: string | Record<string, string>;
@@ -99,7 +101,7 @@ async function compile(
     logLevel: "silent",
     plugins: [
       observer,
-      minchoVitePlugin({ libraryCss: { analysis, fileName } }),
+      minchoVitePlugin({ libraryCss: { analysis, fileName }, extractCalls }),
       ...(vanilla ? vanillaExtractPlugin() : []),
       ...(graph
         ? [
@@ -207,6 +209,84 @@ function diamondArtifacts() {
 }
 
 describe("native library CSS in one Vite application build", () => {
+  it.each([false, true])(
+    "builds local extractCalls factories and serialized recipes (vanilla: %s)",
+    async (vanilla) => {
+      const sourceRoot = join(
+        process.cwd(),
+        "../integration/src/__fixtures__/extract-calls/"
+      );
+
+      const files = Object.fromEntries(
+        await Promise.all(
+          ["entry.ts", "factory.ts", "implementation.ts", "helper.ts"].map(
+            async (name) => [
+              name,
+              await readFile(join(sourceRoot, name), "utf8")
+            ]
+          )
+        )
+      );
+
+      const root = await fixture({
+        ...files,
+        "entry.js": 'export * from "./entry.ts";'
+      });
+
+      const output = await compile(root, {
+        format: "cjs",
+        vanilla,
+        extractCalls: { "./factory.ts": ["defineStyle", "makeRecipe"] }
+      });
+
+      const css = cssAssets(output)
+        .map((asset) => String(asset.source))
+        .join("\n");
+
+      const entry = chunks(output).find((chunk) => chunk.isEntry)!;
+      const module = {
+        exports: {} as {
+          className: string;
+          localClassName: string;
+          render: (tone: string) => string;
+        }
+      };
+
+      runInNewContext(entry.code, {
+        module,
+        exports: module.exports,
+        process: { env: { NODE_ENV: "production" } },
+
+        require: (id: string) => {
+          expect(id).toMatch(/\.css$/);
+        }
+      });
+
+      const quiet = module.exports.render("quiet");
+      const loud = module.exports.render("loud");
+
+      expect(quiet).not.toBe(loud);
+      expect(css).toContain(`.${module.exports.className}`);
+      expect(css).toContain(`.${module.exports.localClassName}`);
+      expect(css).toContain("color: orchid");
+
+      for (const name of quiet
+        .split(" ")
+        .filter((name) => !loud.split(" ").includes(name)))
+        expect(css).toContain(`.${name}`);
+
+      for (const name of loud
+        .split(" ")
+        .filter((name) => !quiet.split(" ").includes(name)))
+        expect(css).toContain(`.${name}`);
+
+      expect(css).toContain("color: tomato");
+      expect(css).toContain("border-width: 3px");
+      expect(css).toContain("outline-style: dotted");
+    },
+    30_000
+  );
+
   it.each([false, true])(
     "extracts official vanilla-extract packages (vanilla plugin: %s)",
     async (vanilla) => {

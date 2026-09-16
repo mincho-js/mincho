@@ -70,6 +70,9 @@ function extractedCssFileFilter(filePath: string) {
 export interface MinchoVitePluginOptions {
   babel?: BabelOptions;
   jsxCssProp?: boolean;
+
+  /** Additional build-time calls; local files are relative to root. Overrides babel.extractCalls. */
+  extractCalls?: BabelOptions["extractCalls"];
   libraryCss?: {
     /** Exact output-relative CSS filename when build.cssCodeSplit is false. */
     fileName?: string;
@@ -78,6 +81,8 @@ export interface MinchoVitePluginOptions {
     analysis?: "worker" | "inline";
   };
 }
+
+export type { ExtractCalls } from "@mincho-js/integration";
 
 export function minchoVitePlugin(_options?: MinchoVitePluginOptions) {
   const plugin = createMinchoViteEnvironmentPlugin(_options);
@@ -780,13 +785,20 @@ function createMinchoViteEnvironmentPlugin(_options?: MinchoVitePluginOptions) {
           return;
         }
 
-        const babelOptions: BabelOptions | undefined =
+        let babelOptions: BabelOptions | undefined =
           _options?.jsxCssProp === undefined
             ? _options?.babel
             : { ..._options.babel, jsxCssProp: _options.jsxCssProp };
 
+        if (_options?.extractCalls !== undefined)
+          babelOptions = {
+            ...babelOptions,
+            extractCalls: _options.extractCalls
+          };
+
         const transformBabelOptions: BabelOptions | undefined =
-          babelOptions?.jsxCssProp === true
+          babelOptions?.jsxCssProp === true ||
+          babelOptions?.extractCalls !== undefined
             ? {
                 ...babelOptions,
                 staticCssEvalProjectEngine,
@@ -813,6 +825,7 @@ function createMinchoViteEnvironmentPlugin(_options?: MinchoVitePluginOptions) {
             () =>
               babelTransformSource({
                 filename: fileId,
+                root: rootRealpath,
                 source: code,
                 loader: fileId.endsWith(".tsx")
                   ? "tsx"

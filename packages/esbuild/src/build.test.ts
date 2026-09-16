@@ -348,6 +348,100 @@ describe("buildWithMincho transaction", () => {
     }
   );
 
+  it("reports unserializable custom call results without falling back to runtime", async () => {
+    const root = await fixture({
+      "factory.ts": "export const make = () => () => 1;",
+      "entry.ts":
+        'import { make } from "./factory"; export const value = make();'
+    });
+
+    await expect(
+      buildWithMincho({
+        absWorkingDir: root,
+        entryPoints: ["entry.ts"],
+        outdir: "out",
+        write: false,
+        logLevel: "silent",
+        mincho: { extractCalls: { "./factory.ts": ["make"] } }
+      })
+    ).rejects.toThrow(/Invalid exports/);
+  }, 30_000);
+
+  it("extracts custom calls and protects local factory implementations across multiple entries", async () => {
+    const sourceRoot = join(
+      process.cwd(),
+      "../integration/src/__fixtures__/extract-calls/"
+    );
+
+    const files = Object.fromEntries(
+      await Promise.all(
+        ["entry.ts", "factory.ts", "implementation.ts", "helper.ts"].map(
+          async (name) => [
+            name,
+            await fs.readFile(join(sourceRoot, name), "utf8")
+          ]
+        )
+      )
+    );
+
+    const root = await fixture(files);
+    const result = await buildWithMincho({
+      absWorkingDir: root,
+      entryPoints: ["helper.ts", "entry.ts"],
+      outdir: "out",
+      write: false,
+      format: "cjs",
+      mincho: {
+        extractCalls: { "./factory.ts": ["defineStyle", "makeRecipe"] }
+      }
+    });
+
+    const css = result
+      .outputFiles!.filter((file) => file.path.endsWith(".css"))
+      .map((file) => file.text)
+      .join("\n");
+
+    const code = result.outputFiles!.find((file) =>
+      file.path.endsWith("/entry.js")
+    )!.text;
+
+    const module = {
+      exports: {} as {
+        className: string;
+        localClassName: string;
+        render: (tone: string) => string;
+      }
+    };
+
+    runInNewContext(code, {
+      module,
+      exports: module.exports,
+      process: { env: { NODE_ENV: "production" } }
+    });
+
+    const quiet = module.exports.render("quiet");
+    const loud = module.exports.render("loud");
+
+    expect(quiet).not.toBe(loud);
+    expect(css).toContain(`.${module.exports.className}`);
+    expect(css).toContain(`.${module.exports.localClassName}`);
+    expect(css).toContain("color: orchid");
+
+    for (const name of quiet
+      .split(" ")
+      .filter((name) => !loud.split(" ").includes(name)))
+      expect(css).toContain(`.${name}`);
+
+    for (const name of loud
+      .split(" ")
+      .filter((name) => !quiet.split(" ").includes(name)))
+      expect(css).toContain(`.${name}`);
+
+    expect(css).toContain("color: tomato");
+    expect(css).toContain("border-width: 3px");
+    expect(css).toContain("outline-style: dotted");
+  }, 30_000);
+
   it("extracts vanilla-extract packages alongside Mincho and preserves their runtime APIs", async () => {
     const source = await fs.readFile(
       join(

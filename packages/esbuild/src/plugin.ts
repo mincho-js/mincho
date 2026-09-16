@@ -50,6 +50,9 @@ const integrationHelpers = {
 export interface MinchoEsbuildPluginOptions {
   includeNodeModulesPattern?: RegExp;
   jsxCssProp?: boolean;
+
+  /** Additional build-time calls; local files are relative to absWorkingDir. */
+  extractCalls?: BabelOptions["extractCalls"];
 }
 
 /**
@@ -68,7 +71,8 @@ export interface MinchoEsbuildPluginOptions {
  */
 export function minchoEsbuildPlugin({
   includeNodeModulesPattern,
-  jsxCssProp
+  jsxCssProp,
+  extractCalls
 }: MinchoEsbuildPluginOptions = {}): EsbuildPlugin {
   return {
     name: "mincho-js-esbuild",
@@ -226,10 +230,13 @@ export function minchoEsbuildPlugin({
           : await fs.promises.readFile(args.path, "utf8");
 
         const babelOptions: BabelOptions | undefined =
-          jsxCssProp === undefined ? undefined : { jsxCssProp };
+          jsxCssProp === undefined && extractCalls === undefined
+            ? undefined
+            : { jsxCssProp, extractCalls };
 
         const transformBabelOptions: BabelOptions | undefined =
-          babelOptions?.jsxCssProp === true
+          babelOptions?.jsxCssProp === true ||
+          babelOptions?.extractCalls !== undefined
             ? {
                 ...babelOptions,
                 staticCssEvalProjectEngine,
@@ -253,6 +260,7 @@ export function minchoEsbuildPlugin({
           staticCssEval
         } = await integrationHelpers.babelTransformSource({
           filename: args.path,
+          root: await rootRealpath,
           source,
           loader,
           babel: transformBabelOptions,

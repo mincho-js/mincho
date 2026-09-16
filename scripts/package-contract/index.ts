@@ -33,6 +33,9 @@ async function writeConsumerManifest(
   const dependencies = { ...packedResolutions };
   Object.assign(dependencies, {
     "@vanilla-extract/css": "1.20.1",
+    "@vanilla-extract/dynamic": "2.1.5",
+    "@vanilla-extract/recipes": "0.5.7",
+    "@vanilla-extract/sprinkles": "1.7.1",
     "@vanilla-extract/vite-plugin": "5.2.2",
     esbuild: "0.27.7",
     vite: "7.3.3"
@@ -82,6 +85,14 @@ async function main(): Promise<void> {
       await cp(join(scriptRoot, "fixture"), join(consumerRoot, "fixture"), {
         recursive: true
       });
+
+      for (const name of ["vanilla-extract", "extract-calls"]) {
+        await cp(
+          join(repoRoot, "packages/integration/src/__fixtures__", name),
+          join(consumerRoot, "fixture/extraction", name),
+          { recursive: true }
+        );
+      }
 
       const yarnPath = join(repoRoot, ".yarn", "releases", "yarn-4.18.0.cjs");
 
@@ -136,6 +147,10 @@ async function main(): Promise<void> {
       await runNode(
         ["fixture/modules/runtime.mjs"],
         join(consumerRoot, "fixture", "modules")
+      );
+      await runNode(
+        ["fixture/modules/extraction.mjs"],
+        join(consumerRoot, "fixture", "extraction")
       );
       await runNode(
         [

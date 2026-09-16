@@ -1,5 +1,7 @@
 # vanilla-extract packages in Mincho source files
 
+To register your own style factories, see [configurable call extraction](extract-calls.md).
+
 Mincho's Babel, esbuild and Vite integrations extract calls imported from
 vanilla-extract's styling packages into the same CSS sidecar used for Mincho
 styles. These definitions can live in ordinary `.ts` and `.tsx` modules.
