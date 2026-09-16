@@ -26,6 +26,151 @@ function seedArtifacts(engine: MinchoProjectEngine) {
 }
 
 describe("babelTransformSource", () => {
+  it("forwards extractCalls separately from Babel core options and respects effective JSX loaders", async () => {
+    const transformed = await babelTransformSource({
+      filename: "/virtual/entry.js",
+      loader: "jsx",
+      source:
+        'import { make } from "custom-styles"; export const value = make({ color: "red" }); export const App = () => <div />;',
+      babel: { extractCalls: { "custom-styles": ["make"] } }
+    });
+
+    expect(transformed.code).not.toContain("make({");
+    expect(transformed.result[1]).toContain("make({");
+  });
+
+  it("matches owner bindings from the separately parsed extraction prepass", async () => {
+    const source = `
+      import { style } from "@vanilla-extract/css";
+      const make = (rule) => style(rule);
+      export { make as registered };
+      export const primary = make({ color: "red" });
+      export const shadowed = (make) => make({ color: "blue" });
+    `;
+    const load = vi.fn(() => null);
+    const transformed = await babelTransformSource({
+      filename: "/virtual/factory.ts",
+      root: "/virtual",
+      source,
+      babel: {
+        extractCalls: { "./factory.ts": ["registered"] },
+        staticCssEvalSourceProvider: {
+          resolve: (_importer, specifier) =>
+            specifier === "./factory.ts" ? { id: "/virtual/factory.ts" } : null,
+          load
+        }
+      }
+    });
+
+    expect(load).not.toHaveBeenCalled();
+    expect(transformed.result[1]).toContain('color: "red"');
+    expect(transformed.result[1]).toContain("style(rule)");
+    expect(transformed.result[1]).not.toContain('color: "blue"');
+    expect(transformed.code).not.toContain('color: "red"');
+    expect(transformed.code).toContain("style(rule)");
+    expect(transformed.code).toContain('color: "blue"');
+  });
+
+  it("uses bundler identities and load keys for local factories and tracks their dependencies", async () => {
+    const engine = new MinchoProjectEngine();
+    const files: Record<string, string> = {
+      "/virtual/factory.ts": 'export { make } from "@helper";',
+      "/virtual/helper.ts":
+        'import { style } from "@vanilla-extract/css"; export const make = (rule) => style(rule);'
+    };
+
+    const provider = {
+      resolve: vi.fn((_importer: string, specifier: string) => {
+        const file =
+          specifier === "./factory.ts" || specifier === "@styles"
+            ? "/virtual/factory.ts"
+            : specifier === "@helper"
+              ? "/virtual/helper.ts"
+              : null;
+
+        return file
+          ? {
+              resolvedFile: file,
+              normalizedPathKey: `load:${file}`,
+              watchFiles: ["/virtual/aliases.json"]
+            }
+          : null;
+      }),
+      load: vi.fn((key: string) => ({
+        sourceText: files[key.replace(/^load:/, "")],
+        watchFiles: ["/virtual/templates.json"]
+      }))
+    };
+
+    const babel = {
+      extractCalls: { "./factory.ts": ["make"] },
+      staticCssEvalSourceProvider: provider,
+      staticCssEvalProjectEngine: engine
+    };
+
+    const helper = await babelTransformSource({
+      filename: "/virtual/helper.ts",
+      root: "/virtual",
+      source: files["/virtual/helper.ts"]!,
+      babel
+    });
+
+    expect(helper.code).toContain("style(rule)");
+    expect(helper.result[1]).toBe("");
+
+    const transformed = await babelTransformSource({
+      filename: "/virtual/entry.ts",
+      root: "/virtual",
+      source:
+        'import { make } from "@styles"; export const value = make({ color: "red" });',
+      babel
+    });
+
+    expect(transformed.result[1]).toContain("make({");
+    expect(transformed.staticCssEval?.dependencyFiles).toEqual(
+      expect.arrayContaining([
+        "/virtual/factory.ts",
+        "/virtual/helper.ts",
+        "/virtual/aliases.json",
+        "/virtual/templates.json"
+      ])
+    );
+    expect(provider.load).toHaveBeenCalledWith("load:/virtual/factory.ts");
+    expect(engine.invalidateByDependency("/virtual/helper.ts")).toContain(
+      "/virtual/entry.ts"
+    );
+  });
+
+  it("keeps recovery dependencies when a registered implementation fails analysis", async () => {
+    await expect(
+      babelTransformSource({
+        filename: "/virtual/entry.ts",
+        root: "/virtual",
+        source: "export const value = 1;",
+        babel: {
+          extractCalls: { "./factory.ts": ["make"] },
+          staticCssEvalSourceProvider: {
+            resolve: () => ({
+              id: "/virtual/factory.ts",
+              watchFiles: ["/virtual/aliases.json"]
+            }),
+
+            load: () => ({ sourceText: "export const make = 1;" })
+          }
+        }
+      })
+    ).rejects.toMatchObject({
+      name: "BabelTransformError",
+      message: expect.stringMatching(/extractCalls.*make.*implementation/),
+      staticCssEval: {
+        dependencyFiles: expect.arrayContaining([
+          "/virtual/factory.ts",
+          "/virtual/aliases.json"
+        ])
+      }
+    });
+  });
+
   it("uses the supplied owner source for both the prepass and transformation", async () => {
     const load = vi.fn(() => {
       throw new Error("The owner must not be reloaded");

@@ -111,7 +111,8 @@ export function getStaticCssEvalMetadata(
 
 export function createStaticCssEvalTransformResult(
   prepassResult: StaticCssEvalPrepassResult | undefined,
-  metadata: MinchoStaticCssEvalMetadata | undefined
+  metadata: MinchoStaticCssEvalMetadata | undefined,
+  additionalDependencyFiles: readonly string[] = []
 ): StaticCssEvalTransformResult | undefined {
   const staticCssEvalMetadata = metadata
     ? cloneStaticCssEvalMetadata(metadata)
@@ -123,12 +124,23 @@ export function createStaticCssEvalTransformResult(
     staticCssEvalMetadata.cacheKeys.length > 0 ||
     staticCssEvalMetadata.resolvedModuleIds.length > 0;
 
-  if (!prepassResult && !hasMetadata) {
+  if (
+    !prepassResult &&
+    !hasMetadata &&
+    additionalDependencyFiles.length === 0
+  ) {
     return undefined;
   }
 
   return {
-    dependencyFiles: prepassResult?.dependencyFiles ?? [],
+    dependencyFiles: additionalDependencyFiles.length
+      ? [
+          ...new Set([
+            ...(prepassResult?.dependencyFiles ?? []),
+            ...additionalDependencyFiles
+          ])
+        ].sort()
+      : (prepassResult?.dependencyFiles ?? []),
     ownerToDependencies: prepassResult?.ownerToDependencies ?? new Map(),
     dependencyToOwners: prepassResult?.dependencyToOwners ?? new Map(),
     resolvedModuleCache: prepassResult?.resolvedModuleCache ?? new Map(),

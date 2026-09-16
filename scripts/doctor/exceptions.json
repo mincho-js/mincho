@@ -990,6 +990,26 @@
     "expires": "2026-12-31"
   },
   {
+    "id": "integration-babel-source-test-esbuild-loader-01",
+    "file": "packages/integration/src/babelSource.test.ts",
+    "type": "warning",
+    "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
+    "source": "loader: \"jsx\",",
+    "count": 1,
+    "reason": "This babelTransformSource option uses esbuild's JSX syntax name to test parser selection and extractCalls forwarding; it is not a Webpack loader dependency.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "integration-fixtures-extract-calls-recipes-import-01",
+    "file": "packages/integration/src/__fixtures__/extract-calls/implementation.ts",
+    "type": "error",
+    "message": "Undeclared dependency on @vanilla-extract/recipes",
+    "source": "import { recipe } from \"@vanilla-extract/recipes\";",
+    "count": 1,
+    "reason": "This shared source fixture is read as text and copied into packages/esbuild and packages/vite test directories before compilation. Both executing workspaces declare @vanilla-extract/recipes in devDependencies; integration excludes src/__fixtures__ from its TypeScript build.",
+    "expires": "2026-12-31"
+  },
+  {
     "id": "integration-fixtures-vanilla-extract-recipes-import-01",
     "file": "packages/integration/src/__fixtures__/vanilla-extract/entry.ts",
     "type": "error",

@@ -1,3 +1,4 @@
+export type { ExtractCalls } from "@mincho-js/babel";
 export {
   babelTransform,
   babelTransformSource,

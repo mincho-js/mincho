@@ -12,8 +12,10 @@ import {
   type MinchoStaticCssEvalMetadata,
   type PluginOptions,
   minchoBabelPlugin,
-  minchoStyledComponentPlugin
+  minchoStyledComponentPlugin,
+  InternalExtractCallsError
 } from "@mincho-js/babel";
+import { prepareExtractCalls } from "./extractCalls.js";
 import {
   createEmptyStaticCssEvalMetadata,
   createObservingStaticCssEvalProvider,
@@ -197,6 +199,7 @@ export type BabelOptions = Omit<
   | "sourceMaps"
   | "inputSourceMap"
 > & {
+  extractCalls?: PluginOptions["extractCalls"];
   jsxCssProp?: boolean;
   optimize?: PluginOptions["optimize"];
   staticCssEvalProvider?: PluginOptions["staticCssEvalProvider"];
@@ -216,6 +219,9 @@ export type BabelTransformResult = {
 
 export interface BabelTransformSourceOptions {
   filename: string;
+
+  /** Project root used to resolve root-relative extractCalls registrations. */
+  root?: string;
   source: string;
   loader?: "js" | "jsx" | "ts" | "tsx";
   babel?: BabelOptions;
@@ -242,6 +248,7 @@ export async function babelTransform(
 
 export async function babelTransformSource({
   filename: path,
+  root = process.cwd(),
   source,
   loader = inferScriptLoader(path),
   babel = {},
@@ -249,6 +256,7 @@ export async function babelTransformSource({
   inputSourceMap
 }: BabelTransformSourceOptions): Promise<BabelTransformResult> {
   const {
+    extractCalls,
     jsxCssProp = false,
     optimize,
     staticCssEvalProvider,
@@ -282,15 +290,33 @@ export async function babelTransformSource({
     | undefined;
 
   const observedStaticCssEvalMetadata = createEmptyStaticCssEvalMetadata();
+  const extractCallsDependencies = new Set<string>();
   const options: PluginOptions = {
     result: ["", ""],
     jsxCssProp,
+    ...(extractCalls !== undefined ? { extractCalls } : {}),
     ...(optimize ? { optimize } : {})
   };
 
   let result: BabelFileResult;
 
   try {
+    if (extractCalls !== undefined) {
+      options.preparedExtractCalls = await prepareExtractCalls(
+        {
+          extractCalls,
+          root,
+          filename: path,
+          source,
+          jsx: loader === "jsx" || loader === "tsx"
+        },
+        prepassSourceProvider
+      );
+
+      for (const file of options.preparedExtractCalls.dependencies)
+        extractCallsDependencies.add(file);
+    }
+
     staticCssEvalPrepass =
       jsxCssProp && prepassSourceProvider
         ? await createStaticCssEvalPrepass(path, prepassSourceProvider)
@@ -343,9 +369,13 @@ export async function babelTransformSource({
 
     result = transformed;
   } catch (error) {
+    if (error instanceof InternalExtractCallsError)
+      for (const file of error.dependencies) extractCallsDependencies.add(file);
+
     const staticCssEval = createStaticCssEvalTransformResult(
       staticCssEvalPrepass?.result,
-      observedStaticCssEvalMetadata
+      observedStaticCssEvalMetadata,
+      [...extractCallsDependencies]
     );
 
     projectEngine?.refreshFile({
@@ -364,7 +394,8 @@ export async function babelTransformSource({
 
   const staticCssEval = createStaticCssEvalTransformResult(
     staticCssEvalPrepass?.result,
-    staticCssEvalMetadata
+    staticCssEvalMetadata,
+    [...extractCallsDependencies]
   );
 
   projectEngine?.refreshFile({
