@@ -1,6 +1,7 @@
 import type { NodePath } from "@babel/core";
 import { types as t } from "@babel/core";
 import type { PluginState, ProgramScope } from "../types.js";
+import { isInsideExtractCallsImplementation } from "../extractionCalls/index.js";
 import {
   createClassNameAttributeValue,
   getDynamicCssVariableRuntimeLowering
@@ -59,6 +60,8 @@ export function preprocessJsxCssProp(
 
   path.traverse({
     JSXOpeningElement(openingElementPath) {
+      if (isInsideExtractCallsImplementation(openingElementPath)) return;
+
       const analyzedElement = analyzeOpeningElement(
         openingElementPath,
         path,

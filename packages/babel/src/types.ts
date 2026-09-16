@@ -7,14 +7,27 @@ import type {
   StaticCssEvalProvider
 } from "./staticCssEval/types.js";
 import type { DefineRulesCxConditionsMetadata } from "./defineRulesCxConditionsTypes.js";
+import type {
+  ExtractCalls,
+  PreparedExtractCalls
+} from "./extractionCalls/types.js";
+
+export type { ExtractCalls } from "./extractionCalls/types.js";
 
 export interface PluginOptions {
   result: [string, string];
+
+  /** Additional build-time calls; local files are relative to the Babel root. */
+  extractCalls?: ExtractCalls;
+
+  /** @internal Module identities and protected implementations from bundler analysis. */
+  preparedExtractCalls?: PreparedExtractCalls;
   jsxCssProp?: boolean;
   jsxCssPropTransformed?: boolean;
   optimize?: {
     defineRulesCxConditions?: boolean;
   };
+
   /** @internal Prepared sync provider supplied by bundler prepasses only. */
   staticCssEvalProvider?: StaticCssEvalProvider;
 }
@@ -45,6 +58,7 @@ export interface ProgramScope extends Scope {
     bindings: Array<NodePath<t.Node>>;
     nodes: Array<t.Node>;
     cssFile: string;
+    extractCalls?: PreparedExtractCalls;
   };
 }
 

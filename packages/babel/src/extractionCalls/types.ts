@@ -1,0 +1,41 @@
+import type { NodePath, types as t } from "@babel/core";
+
+/** Additional build-time calls, indexed by import source or root-relative file. */
+export type ExtractCalls = Readonly<Record<string, readonly string[]>>;
+
+export interface PreparedExtractCalls {
+  readonly imports: ExtractCalls;
+  readonly localBindings: readonly string[];
+  readonly fingerprint: string;
+  readonly protectedFunctions: readonly { start: number; end: number }[];
+  readonly dependencies: readonly string[];
+}
+
+export interface ExtractCallsAnalysisOptions {
+  readonly extractCalls: ExtractCalls;
+  readonly root: string;
+  readonly filename: string;
+  readonly source: string;
+  readonly jsx?: boolean;
+  readonly program?: NodePath<t.Program>;
+}
+
+export type ExtractCallsRequest =
+  | { kind: "resolve"; importer: string; source: string }
+  | { kind: "load"; id: string };
+
+export type ExtractCallsAnalysis = Generator<
+  ExtractCallsRequest,
+  PreparedExtractCalls,
+  string | null
+>;
+
+export class ExtractCallsError extends Error {
+  readonly dependencies: readonly string[];
+
+  constructor(message: string, dependencies: Iterable<string>) {
+    super(message);
+    this.name = "ExtractCallsError";
+    this.dependencies = [...dependencies].sort();
+  }
+}

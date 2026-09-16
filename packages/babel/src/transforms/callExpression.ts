@@ -1,17 +1,19 @@
 import { NodePath, types as t } from "@babel/core";
 import type { ProgramScope } from "../types.js";
 import { collectExtractionBindings } from "./extractionBindings.js";
+import { getNearestIdentifier, registerImportMethod } from "../utils.js";
 import {
   isExtractionCall,
-  getNearestIdentifier,
-  registerImportMethod
-} from "../utils.js";
+  isInsideExtractCallsImplementation
+} from "../extractionCalls/index.js";
 
 /**
  * Transforms a call expression to import the CSS
  * @param path - The path to transform
  */
 export function transformCallExpression(path: NodePath<t.CallExpression>) {
+  if (isInsideExtractCallsImplementation(path)) return;
+
   const callee = path.get("callee");
 
   if (!isExtractionCall(callee)) return;

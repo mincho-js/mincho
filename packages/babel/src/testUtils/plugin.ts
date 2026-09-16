@@ -21,15 +21,19 @@ import type {
 export function babelTransform(
   code: string,
   pluginOptions: Partial<
-    Pick<PluginOptions, "jsxCssProp" | "staticCssEvalProvider" | "optimize">
+    Pick<
+      PluginOptions,
+      "jsxCssProp" | "staticCssEvalProvider" | "optimize" | "extractCalls"
+    >
   > = {},
-  transformOptions: { filename?: string } = {}
+  transformOptions: { filename?: string; root?: string } = {}
 ) {
   const options: PluginOptions = { result: ["", ""], ...pluginOptions };
   const result = transformSync(code, {
     plugins: [[minchoBabelPlugin(), options], [styledComponentPlugin()]],
     presets: [typescriptPresetPath],
-    filename: transformOptions.filename ?? "test.tsx"
+    filename: transformOptions.filename ?? "test.tsx",
+    ...(transformOptions.root ? { root: transformOptions.root } : {})
   });
 
   if (result === null || result.code == null) {

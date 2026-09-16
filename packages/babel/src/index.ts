@@ -12,6 +12,7 @@ import { transformCallExpression } from "./transforms/callExpression.js";
 import postprocess from "./transforms/postprocess.js";
 import preprocess from "./transforms/preprocess.js";
 import type { PluginState } from "./types.js";
+import { prepareExtractCalls } from "./extractionCalls/index.js";
 
 export function minchoBabelPlugin(): PluginObj<PluginState> {
   return {
@@ -25,7 +26,7 @@ export function minchoBabelPlugin(): PluginObj<PluginState> {
             ] = true;
           }
 
-          preprocess(path);
+          preprocess(path, prepareExtractCalls(path, state));
           state.opts.jsxCssPropTransformed = preprocessJsxCssProp(path, state);
         },
 
@@ -71,7 +72,15 @@ export type {
 export { STATIC_CSS_EVAL_LIMITS as internalStaticCssEvalLimits } from "./staticCssEval/types.js";
 export { styledComponentPlugin as minchoStyledComponentPlugin } from "./styled.js";
 export type {
+  ExtractCalls,
   MinchoBabelFileMetadata,
   MinchoStaticCssEvalMetadata,
   PluginOptions
 } from "./types.js";
+export { analyzeExtractCalls as internalAnalyzeExtractCalls } from "./extractionCalls/analysis.js";
+export {
+  canonicalExtractCallsFile as internalCanonicalExtractCallsFile,
+  resolveExtractCallsFile as internalResolveExtractCallsFile
+} from "./extractionCalls/filesystem.js";
+export { ExtractCallsError as InternalExtractCallsError } from "./extractionCalls/types.js";
+export type { PreparedExtractCalls as InternalPreparedExtractCalls } from "./extractionCalls/types.js";
