@@ -32,7 +32,8 @@ export async function prepareExtractCalls(
         if (provider) {
           const resolved = await provider.resolve(
             request.importer,
-            request.source
+            request.source,
+            { kind: request.mode ?? "import" }
           );
 
           value =

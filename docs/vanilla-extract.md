@@ -54,3 +54,5 @@ The official bundler plugins and internal serialization entry points are not
 style definitions. Continue configuring plugins normally. Existing `.css.ts`
 files retain their existing processing path, including coexistence with the
 official vanilla-extract Vite plugin.
+
+CommonJS `require()` calls use the same API list. See [CommonJS sources](./extract-calls.md#commonjs-sources) for supported bindings, compiler output and Vite behavior.

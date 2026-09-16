@@ -1,4 +1,5 @@
 import type { NodePath, types as t } from "@babel/core";
+import { referencesModuleExport } from "../commonjs/bindings.js";
 
 const vanillaExtractAPIs = [
   "style",
@@ -52,8 +53,11 @@ export const builtInExtractionCalls: Readonly<
   "@vanilla-extract/sprinkles/createUtils": sprinklesUtilityAPIs
 };
 
-export function isBuiltInExtractionCall(callee: NodePath<t.Node>): boolean {
+export function isBuiltInExtractionCall(
+  callee: NodePath<t.Node>,
+  strict = false
+): boolean {
   return Object.entries(builtInExtractionCalls).some(([source, apis]) =>
-    apis.some((api) => callee.referencesImport(source, api))
+    apis.some((api) => referencesModuleExport(callee, source, api, strict))
   );
 }

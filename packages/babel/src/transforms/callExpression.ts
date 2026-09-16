@@ -16,19 +16,20 @@ export function transformCallExpression(path: NodePath<t.CallExpression>) {
 
   const callee = path.get("callee");
 
-  if (!isExtractionCall(callee)) return;
-
   const programParent = path.scope.getProgramParent() as ProgramScope;
 
   // Checks for special comments that say "mincho-js-ignore"
-  if (
+  const ignored = Boolean(
     path.node.leadingComments?.some(
       (comment) => comment.value.trim() === "mincho-js-ignore"
     ) ||
     path.parent.leadingComments?.some(
       (comment) => comment.value.trim() === "mincho-js-ignore"
     )
-  ) {
+  );
+  if (!isExtractionCall(callee, !ignored)) return;
+
+  if (ignored) {
     // Even if ignored, still collect bindings
     programParent.minchoData.nodes.push(
       ...collectExtractionBindings(path.get("callee"))

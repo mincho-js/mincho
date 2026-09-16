@@ -11,7 +11,7 @@ export function getBoundHelperFunctions(
 ): TscHelperFunction[] {
   const binding = scope.getBinding(helperName);
 
-  if (!binding) {
+  if (!binding?.constant) {
     return [];
   }
 

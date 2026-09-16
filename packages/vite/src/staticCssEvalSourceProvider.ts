@@ -6,6 +6,7 @@ import {
   type InternalStaticCssEvalSourceResolution as StaticCssEvalSourceResolution,
   internalCreateStaticCssEvalSourceHash as createStaticCssEvalSourceHash,
   internalCreateStaticCssEvalSourceIdentity as createStaticCssEvalSourceIdentity,
+  internalResolveFromModule as resolveFromModule,
   internalStaticCssEvalExternalResolutionPrefix as externalStaticCssEvalResolutionPrefix,
   internalGetExistingStaticCssEvalRealpath as getExistingRealpath,
   internalGetExistingStaticCssEvalStat as getExistingStat,
@@ -23,6 +24,7 @@ import { normalizePath } from "@rollup/pluginutils";
 import * as fs from "node:fs";
 import type { DevEnvironment, Rollup } from "vite";
 import { customNormalize } from "./cssState.js";
+import { commonJsRuntimeId } from "./commonJs.js";
 
 type PluginContext = Rollup.PluginContext;
 
@@ -34,17 +36,47 @@ export function createViteStaticCssEvalSourceProvider(
   devEnvironment?: DevEnvironment
 ): StaticCssEvalSourceProvider {
   return {
-    async resolve(importerId: string, importPath: string) {
-      const resolved = await pluginContext.resolve?.(importPath, importerId, {
-        skipSelf: true
-      });
+    async resolve(importerId, importPath, options) {
+      const resolveOptions = {
+        skipSelf: true,
+
+        // Analyze original sources without registering or reading optimizer output.
+        ...(devEnvironment ? { scan: true } : {}),
+        ...(options?.kind === "require"
+          ? { custom: { "node-resolve": { isRequire: true } } }
+          : {})
+      };
+
+      const resolved = devEnvironment?.pluginContainer.resolveId
+        ? await devEnvironment.pluginContainer.resolveId(
+            importPath,
+            importerId,
+            resolveOptions
+          )
+        : await pluginContext.resolve?.(importPath, importerId, resolveOptions);
 
       if (!resolved) {
         return null;
       }
 
       if (resolved.external) {
-        return createExternalStaticCssEvalResolution(resolved.id);
+        const resolution = createExternalStaticCssEvalResolution(resolved.id);
+
+        if (options?.kind === "require" && !resolved.id.startsWith("node:")) {
+          try {
+            const file = resolveFromModule(importerId, resolved.id);
+
+            if (file.startsWith("/") || /^[A-Za-z]:[\\/]/.test(file))
+              resolution.commonJsRuntimeId = commonJsRuntimeId(
+                file,
+                importPath
+              );
+          } catch {
+            // Preserve external resolver ownership when Node cannot resolve its id.
+          }
+        }
+
+        return resolution;
       }
 
       if (isVirtualStaticCssEvalId(resolved.id)) {
@@ -82,7 +114,19 @@ export function createViteStaticCssEvalSourceProvider(
         stat
       });
 
-      return { id: metadata.resolvedFile, ...metadata };
+      return {
+        id: metadata.resolvedFile,
+        ...metadata,
+        ...(options?.kind === "require" &&
+        metadata.sourceKind === "package-source"
+          ? {
+              commonJsRuntimeId: commonJsRuntimeId(
+                metadata.resolvedFile,
+                importPath
+              )
+            }
+          : {})
+      };
     },
 
     async load(id: string) {

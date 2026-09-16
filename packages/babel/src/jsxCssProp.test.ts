@@ -636,7 +636,7 @@ describe("minchoBabelPlugin", () => {
       expect.arrayContaining([
         expect.objectContaining({
           resolvedId: stylesFile,
-          staticEvalSupportVersion: "static-css-module-export-graph:v4"
+          staticEvalSupportVersion: "static-css-module-export-graph:v5"
         })
       ])
     );

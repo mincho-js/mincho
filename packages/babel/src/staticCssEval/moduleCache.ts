@@ -14,7 +14,7 @@ import type {
 
 export const STATIC_CSS_MODULE_CACHE_PARSER_VERSION = "babel-core-parser:v2";
 export const STATIC_CSS_MODULE_CACHE_SUPPORT_VERSION =
-  "static-css-module-export-graph:v4";
+  "static-css-module-export-graph:v5";
 
 export const STATIC_CSS_MODULE_CACHE_PARSER_OPTIONS = {
   plugins: ["jsx", "typescript"],

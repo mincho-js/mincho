@@ -66,6 +66,12 @@ export function collectEsbuildHelperOperations(options: {
     : null;
 
   if (
+    targetSurface === "pending" &&
+    isSupportedEsbuildExportHelper("__export", options.statementPath.scope)
+  )
+    return [{ kind: "preserve-cjs-exports" }];
+
+  if (
     !isSupportedEsbuildExportHelper("__export", options.statementPath.scope) ||
     !targetSurface ||
     (targetSurface === "exports"
@@ -94,12 +100,7 @@ function getEsbuildExportTargetSurface(
 
   const binding = scope.getBinding(target.name);
 
-  if (
-    !binding ||
-    !binding.constant ||
-    binding.kind !== "const" ||
-    !binding.path.isVariableDeclarator()
-  ) {
+  if (!binding || !binding.constant || !binding.path.isVariableDeclarator()) {
     return null;
   }
 
@@ -107,7 +108,7 @@ function getEsbuildExportTargetSurface(
   const programPath = statementPath.parentPath;
 
   if (
-    !declarationPath?.isVariableDeclaration({ kind: "const" }) ||
+    !declarationPath?.isVariableDeclaration() ||
     !programPath?.isProgram() ||
     declarationPath.parentPath?.node !== programPath.node
   ) {
@@ -123,6 +124,37 @@ function getEsbuildExportTargetSurface(
   }
 
   const { init } = binding.path.node;
+  if (
+    t.isObjectExpression(init) &&
+    init.properties.length === 0 &&
+    binding.referencePaths.every((reference) => {
+      const call = reference.parentPath;
+
+      return (
+        call?.isCallExpression() &&
+        call.node.arguments[0] === reference.node &&
+        t.isIdentifier(call.node.callee) &&
+        ["__export", "__toCommonJS"].includes(call.node.callee.name)
+      );
+    }) &&
+    statements.slice(statementIndex + 1).some(
+      (statement) =>
+        t.isExpressionStatement(statement) &&
+        t.isAssignmentExpression(statement.expression) &&
+        getCjsAssignmentTarget(statement.expression.left, scope).kind ===
+          "module-replacement" &&
+        t.isCallExpression(statement.expression.right) &&
+        t.isIdentifier(statement.expression.right.callee, {
+          name: "__toCommonJS"
+        }) &&
+        t.isIdentifier(statement.expression.right.arguments[0], {
+          name: target.name
+        }) &&
+        isSupportedEsbuildToCommonJsHelper("__toCommonJS", scope)
+    )
+  )
+    return "pending";
+
   const aliasSurface =
     init && t.isExpression(init)
       ? getCjsExportSurfaceExpression(init, binding.scope)
@@ -179,10 +211,94 @@ export function collectEsbuildModuleReplacementOperations(options: {
     return null;
   }
 
+  const previousState = { ...options.state };
   options.state.exportsAliasSafe = false;
   options.state.moduleObjectLike = false;
 
-  return isSupportedEsbuildToCommonJsHelper(right.callee.name, options.scope)
+  if (
+    isSupportedEsbuildToCommonJsHelper(right.callee.name, options.scope) &&
+    t.isIdentifier(right.arguments[0])
+  ) {
+    const name = right.arguments[0].name;
+    const binding = options.scope.getBinding(name);
+    const program = binding?.path.findParent((path) => path.isProgram());
+    const staged: StaticCssEvalCjsExportMapOperation[] = [];
+    const emptyStagingObject =
+      binding?.constant &&
+      binding.path.isVariableDeclarator() &&
+      t.isObjectExpression(binding.path.node.init) &&
+      binding.path.node.init.properties.length === 0 &&
+      binding.referencePaths.every((reference) => {
+        const call = reference.parentPath;
+
+        return (
+          call?.isCallExpression() &&
+          call.node.arguments[0] === reference.node &&
+          ((t.isIdentifier(call.node.callee, { name: "__toCommonJS" }) &&
+            isSupportedEsbuildToCommonJsHelper("__toCommonJS", call.scope)) ||
+            (t.isIdentifier(call.node.callee, { name: "__export" }) &&
+              isSupportedEsbuildExportHelper("__export", call.scope)))
+        );
+      });
+
+    if (program?.isProgram()) {
+      for (const statement of program.get("body")) {
+        if (statement.node === options.declaration) break;
+        if (
+          !statement.isExpressionStatement() ||
+          !t.isCallExpression(statement.node.expression)
+        )
+          continue;
+
+        const call = statement.node.expression;
+        if (
+          !t.isIdentifier(call.callee, { name: "__export" }) ||
+          !t.isIdentifier(call.arguments[0], { name }) ||
+          getEsbuildExportTargetSurface(call.arguments[0], statement) !==
+            "pending" ||
+          !isSupportedEsbuildExportHelper("__export", statement.scope) ||
+          !t.isObjectExpression(call.arguments[1])
+        )
+          continue;
+
+        for (const property of call.arguments[1].properties)
+          staged.push(
+            createEsbuildExportOperation({
+              expression: call,
+              property,
+              state: options.state,
+              statementPath: statement
+            })
+          );
+      }
+    }
+
+    if (staged.length || emptyStagingObject) {
+      options.state.moduleObjectLike = true;
+
+      return [{ kind: "clear-cjs-exports" }, ...staged];
+    }
+  }
+
+  const statement = options.scope
+    .getProgramParent()
+    .path.get("body")
+    .find((path) => path.node === options.declaration);
+
+  const surface =
+    statement?.isStatement() && t.isExpression(right.arguments[0])
+      ? getEsbuildExportTargetSurface(right.arguments[0], statement)
+      : null;
+
+  const supported =
+    isSupportedEsbuildToCommonJsHelper(right.callee.name, options.scope) &&
+    (surface === "exports"
+      ? previousState.exportsAliasSafe
+      : surface === "module.exports" && previousState.moduleObjectLike);
+
+  if (supported) options.state.moduleObjectLike = true;
+
+  return supported
     ? [{ kind: "preserve-cjs-exports" }]
     : [
         { kind: "clear-cjs-exports" },
@@ -269,6 +385,7 @@ function getEsbuildBundleRuntimeName(statement: t.Statement): string | null {
       const idName = t.isIdentifier(declaration.id)
         ? declaration.id.name
         : null;
+
       const calleeName = getCallCalleeName(declaration.init);
 
       if (idName && commonJsBundleRuntimeHelpers.has(idName)) {

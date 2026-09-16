@@ -30,7 +30,8 @@ export function isObjectHasOwnPropertyReference(
   const binding = scope.getBinding(expression.name);
 
   return (
-    binding?.path.isVariableDeclarator() === true &&
+    binding?.constant === true &&
+    binding.path.isVariableDeclarator() &&
     isObjectHasOwnPropertyMemberExpression(binding.path.node.init, scope)
   );
 }
@@ -51,7 +52,8 @@ function isObjectMethodReference(
   const binding = scope.getBinding(expression.name);
 
   return (
-    binding?.path.isVariableDeclarator() === true &&
+    binding?.constant === true &&
+    binding.path.isVariableDeclarator() &&
     isObjectMethodMemberExpression(binding.path.node.init, methodName, scope)
   );
 }

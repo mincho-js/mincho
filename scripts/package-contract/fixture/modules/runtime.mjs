@@ -49,6 +49,17 @@ for (const mode of ["import", "require"]) {
   assert.equal(result.jsxCssPropTransformed, true, mode);
   assert.match(result.result[1], /color: "red"/, mode);
   assert.deepEqual(result.map.sourcesContent, [source], mode);
+
+  const commonjs = await integration.babelTransformSource({
+    filename: join(import.meta.dirname, "source.cjs"),
+    source:
+      'const { style } = require("@vanilla-extract/css"); exports.cls = style({color: "blue"});',
+    babel: { babelrc: false, configFile: false }
+  });
+
+  assert.match(commonjs.result[1], /color: "blue"/, mode);
+  assert.match(commonjs.code, /require\("extracted_/, mode);
+  assert.doesNotMatch(commonjs.code, /color: "blue"/, mode);
 }
 
 const esmIntegration = await import("@mincho-js/integration");

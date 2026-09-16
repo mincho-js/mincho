@@ -31,16 +31,32 @@ for (const mode of ["import", "require"]) {
     )
   );
 
-  for (const name of ["vanilla-extract", "extract-calls"]) {
+  for (const name of [
+    "vanilla-extract",
+    "extract-calls",
+    "extract-calls-commonjs",
+    "commonjs-conditions"
+  ]) {
     const root = join(import.meta.dirname, "../extraction", name);
+    const commonjs = name === "extract-calls-commonjs";
+    const conditions = name === "commonjs-conditions";
+    const entry = commonjs
+      ? "with-css.cjs"
+      : conditions
+        ? "entry.js"
+        : "entry.ts";
     const extractCalls =
       name === "extract-calls"
         ? { "./factory.ts": ["defineStyle", "makeRecipe"] }
-        : undefined;
+        : commonjs
+          ? { "./factory.cjs": ["defineStyle", "makeRecipe"] }
+          : conditions
+            ? { "./import.cjs": ["make"], "./require.cjs": ["make"] }
+            : undefined;
 
     const esbuildResult = await esbuild.buildWithMincho({
       absWorkingDir: root,
-      entryPoints: ["entry.ts"],
+      entryPoints: [entry],
       outdir: "dist-esbuild",
       format: "cjs",
       write: false,
@@ -75,7 +91,7 @@ for (const mode of ["import", "require"]) {
           minify: false,
           cssMinify: false,
           rollupOptions: {
-            input: join(root, "entry.ts"),
+            input: join(root, entry),
             preserveEntrySignatures: "strict",
             output: { format: "cjs" }
           }
@@ -101,7 +117,12 @@ for (const mode of ["import", "require"]) {
     for (const { code, css, label } of outputs) {
       const runtime = evaluate(code);
 
-      if (name === "extract-calls") {
+      if (conditions) {
+        assert.notEqual(runtime.imported, runtime.required, label);
+        assertClasses(css, `${runtime.imported} ${runtime.required}`, label);
+        assert.match(css, /color:\s*red/, label);
+        assert.match(css, /color:\s*blue/, label);
+      } else if (name === "extract-calls" || commonjs) {
         const quiet = runtime.render("quiet");
         const loud = runtime.render("loud");
 
@@ -109,6 +130,14 @@ for (const mode of ["import", "require"]) {
         assertClasses(css, runtime.className, label);
         assertClasses(css, runtime.localClassName, label);
         assert.match(css, /color:\s*orchid/, label);
+
+        if (commonjs) {
+          assert.match(
+            css,
+            /\.commonjs-side-effect\s*\{[^}]*letter-spacing:\s*9px/,
+            label
+          );
+        }
 
         // Recipes without a base style still return a shared class with no rule.
         for (const [selected, other] of [
@@ -161,5 +190,5 @@ for (const mode of ["import", "require"]) {
 }
 
 console.log(
-  "[package-contract] installed ESM/CJS vanilla-extract and custom call extraction passed"
+  "[package-contract] installed ESM/CJS extraction, require conditions and stylesheet dependencies passed"
 );

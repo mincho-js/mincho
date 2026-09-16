@@ -44,7 +44,8 @@ async function createFixture(files: Record<string, string>) {
 async function createFixtureServer(
   root: string,
   plugins: Plugin[],
-  watch = false
+  watch = false,
+  optimizeCommonJs = false
 ) {
   const server = await createServer({
     root,
@@ -63,7 +64,10 @@ async function createFixtureServer(
           }
         : null
     },
-    optimizeDeps: { noDiscovery: true, include: [] },
+    optimizeDeps: {
+      noDiscovery: !optimizeCommonJs,
+      include: optimizeCommonJs ? ["@mincho-js/css"] : []
+    },
     plugins
   });
 
@@ -108,22 +112,62 @@ async function readCssPropOutput(
 }
 
 describe("mincho with the Vite runtime", () => {
-  it.each([false, true])(
-    "supports local extractCalls in client, SSR and HMR (vanilla: %s)",
-    async (vanilla) => {
+  it("keeps import and require package conditions distinct", async () => {
+    const directory = join(
+      process.cwd(),
+      "../integration/src/__fixtures__/commonjs-conditions"
+    );
+
+    const files = Object.fromEntries(
+      await Promise.all(
+        ["package.json", "entry.js", "import.cjs", "require.cjs"].map(
+          async (name) => [name, await readFile(join(directory, name), "utf8")]
+        )
+      )
+    );
+
+    const root = await createFixture(files);
+    const server = await createFixtureServer(root, [
+      minchoVitePlugin({
+        extractCalls: { "./import.cjs": ["make"], "./require.cjs": ["make"] }
+      })
+    ]);
+
+    for (const environment of [
+      server.environments.client!,
+      server.environments.ssr!
+    ]) {
+      const output = await readCssPropOutput(environment, "/entry.js");
+
+      expect(output.css).toContain("color: red");
+      expect(output.css).toContain("color: blue");
+    }
+
+    const runtime = await server.ssrLoadModule("/entry.js");
+
+    expect(runtime.imported).not.toBe(runtime.required);
+  });
+
+  it.each(
+    [false, true].flatMap((vanilla) =>
+      ["ts", "cjs"].map((extension) => [vanilla, extension] as const)
+    )
+  )(
+    "supports local extractCalls in client, SSR and HMR (vanilla: %s, %s)",
+    async (vanilla, extension) => {
       const sourceRoot = join(
         process.cwd(),
-        "../integration/src/__fixtures__/extract-calls/"
+        `../integration/src/__fixtures__/extract-calls${extension === "cjs" ? "-commonjs" : ""}/`
       );
 
       const sources = Object.fromEntries(
         await Promise.all(
-          ["entry.ts", "factory.ts", "implementation.ts", "helper.ts"].map(
-            async (name) => [
+          ["entry", "factory", "implementation", "helper"]
+            .map((name) => `${name}.${extension}`)
+            .map(async (name) => [
               `src/${name}`,
               await readFile(join(sourceRoot, name), "utf8")
-            ]
-          )
+            ])
         )
       );
 
@@ -140,7 +184,9 @@ describe("mincho with the Vite runtime", () => {
           minchoVitePlugin({
             // The top-level setting overrides the nested Babel setting.
             babel: { extractCalls: { "./missing.ts": ["missing"] } },
-            extractCalls: { "./src/factory.ts": ["defineStyle", "makeRecipe"] }
+            extractCalls: {
+              [`./src/factory.${extension}`]: ["defineStyle", "makeRecipe"]
+            }
           }),
           ...(vanilla ? vanillaExtractPlugin() : []),
           {
@@ -168,8 +214,9 @@ describe("mincho with the Vite runtime", () => {
       );
 
       // The factory dependency can be transformed before any call sites.
-      const helper =
-        await server.environments.client!.transformRequest("/src/helper.ts");
+      const helper = await server.environments.client!.transformRequest(
+        `/src/helper.${extension}`
+      );
 
       expect(helper?.code).toContain("return style({");
 
@@ -177,14 +224,17 @@ describe("mincho with the Vite runtime", () => {
         server.environments.client!,
         server.environments.ssr!
       ]) {
-        const output = await readCssPropOutput(environment, "/src/entry.ts");
+        const output = await readCssPropOutput(
+          environment,
+          `/src/entry.${extension}`
+        );
 
         expect(output.css).toContain("color: tomato");
         expect(output.css).toContain("border-width: 3px");
         expect(output.code).not.toContain("defineStyle({");
       }
 
-      const runtime = await server.ssrLoadModule("/src/entry.ts");
+      const runtime = await server.ssrLoadModule(`/src/entry.${extension}`);
 
       expect(runtime.render("quiet")).not.toBe(runtime.render("loud"));
 
@@ -199,48 +249,64 @@ describe("mincho with the Vite runtime", () => {
       };
 
       await update(
-        "src/helper.ts",
-        sources["src/helper.ts"]!.replace('"3px"', '"7px"')
+        `src/helper.${extension}`,
+        sources[`src/helper.${extension}`]!.replace('"3px"', '"7px"')
       );
 
       for (const environment of [
         server.environments.client!,
         server.environments.ssr!
       ]) {
-        const output = await readCssPropOutput(environment, "/src/entry.ts");
+        const output = await readCssPropOutput(
+          environment,
+          `/src/entry.${extension}`
+        );
 
         expect(output.css).toContain("border-width: 7px");
         expect(output.css).not.toContain("border-width: 3px");
       }
 
       await update(
-        "src/factory.ts",
-        "export const defineStyle = 1; export const makeRecipe = 1;"
+        `src/factory.${extension}`,
+        extension === "cjs"
+          ? "exports.defineStyle = 1; exports.makeRecipe = 1;"
+          : "export const defineStyle = 1; export const makeRecipe = 1;"
       );
 
       await expect(
-        server.environments.client!.transformRequest("/src/entry.ts")
+        server.environments.client!.transformRequest(`/src/entry.${extension}`)
       ).rejects.toThrow(/extractCalls.*implementation/);
 
-      await update("src/factory.ts", sources["src/factory.ts"]!);
+      await update(
+        `src/factory.${extension}`,
+        sources[`src/factory.${extension}`]!
+      );
 
       expect(
-        (await readCssPropOutput(server.environments.client!, "/src/entry.ts"))
-          .css
+        (
+          await readCssPropOutput(
+            server.environments.client!,
+            `/src/entry.${extension}`
+          )
+        ).css
       ).toContain("border-width: 7px");
 
       await writeFile(
-        join(root, "src/alternate.ts"),
-        'import { style } from "@vanilla-extract/css"; export { makeRecipe } from "./implementation"; export const defineStyle = (rule) => style({ ...rule, borderWidth: "11px" });'
+        join(root, `src/alternate.${extension}`),
+        extension === "cjs"
+          ? 'const {style} = require("@vanilla-extract/css"); exports.makeRecipe = require("./implementation.cjs").makeRecipe; exports.defineStyle = (rule) => style({ ...rule, borderWidth: "11px" });'
+          : 'import { style } from "@vanilla-extract/css"; export { makeRecipe } from "./implementation"; export const defineStyle = (rule) => style({ ...rule, borderWidth: "11px" });'
       );
       await update(
-        "src/factory.ts",
-        'export { defineStyle, makeRecipe } from "./alternate";'
+        `src/factory.${extension}`,
+        extension === "cjs"
+          ? 'module.exports = require("./alternate.cjs");'
+          : 'export { defineStyle, makeRecipe } from "./alternate";'
       );
 
       const alternate = await readCssPropOutput(
         server.environments.client!,
-        "/src/entry.ts"
+        `/src/entry.${extension}`
       );
 
       expect(alternate.css).toContain("border-width: 11px");
@@ -249,9 +315,13 @@ describe("mincho with the Vite runtime", () => {
     30_000
   );
 
-  it.each([false, true])(
-    "extracts vanilla-extract definitions for client and SSR (vanilla plugin: %s)",
-    async (vanilla) => {
+  it.each(
+    [false, true].flatMap((vanilla) =>
+      ["ts", "cjs"].map((extension) => [vanilla, extension] as const)
+    )
+  )(
+    "extracts vanilla-extract definitions for client and SSR (vanilla plugin: %s, %s)",
+    async (vanilla, extension) => {
       const source = await readFile(
         join(
           process.cwd(),
@@ -260,17 +330,33 @@ describe("mincho with the Vite runtime", () => {
         "utf8"
       );
 
-      const root = await createFixture({ "src/entry.ts": source });
-      const server = await createFixtureServer(root, [
-        minchoVitePlugin(),
-        ...(vanilla ? vanillaExtractPlugin() : [])
-      ]);
+      const root = await createFixture({
+        [`src/entry.${extension}`]:
+          extension === "cjs"
+            ? (
+                await transformWithEsbuild(source, "entry.ts", {
+                  loader: "ts",
+                  format: "cjs"
+                })
+              ).code
+            : source
+      });
+
+      const server = await createFixtureServer(
+        root,
+        [minchoVitePlugin(), ...(vanilla ? vanillaExtractPlugin() : [])],
+        false,
+        extension === "cjs"
+      );
 
       for (const environment of [
         server.environments.client!,
         server.environments.ssr!
       ]) {
-        const output = await readCssPropOutput(environment, "/src/entry.ts");
+        const output = await readCssPropOutput(
+          environment,
+          `/src/entry.${extension}`
+        );
 
         expect(output.css).toContain("padding: 13px");
         expect(output.css).toContain("rebeccapurple");
@@ -280,9 +366,25 @@ describe("mincho with the Vite runtime", () => {
         expect(output.code).not.toContain("createRecipe(");
         expect(output.code).not.toContain("atomic.defineProperties(");
         expect(output.code).toContain("assignInlineVars");
+
+        if (extension === "cjs" && environment.name === "client") {
+          const owner = await environment.moduleGraph.getModuleByUrl(
+            `/src/entry.${extension}`
+          );
+
+          const runtime = [...owner!.importedModules].find((module) =>
+            module.id?.includes("/.vite/deps/")
+          );
+
+          expect(runtime).toBeDefined();
+
+          const optimized = await environment.transformRequest(runtime!.url);
+
+          expect(optimized?.code).toMatch(/export\s+(default|\{)/);
+        }
       }
 
-      const runtime = await server.ssrLoadModule("/src/entry.ts");
+      const runtime = await server.ssrLoadModule(`/src/entry.${extension}`);
       const quiet = runtime.render("quiet", "flex", "red");
       const loud = runtime.render("loud", "grid", "blue");
 

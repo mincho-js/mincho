@@ -8,6 +8,8 @@ import {
   babelTransformSource,
   internalCollectStaticCssEvalDependencyIds as collectStaticCssEvalDependencyIds,
   compile,
+  internalGetScriptLoader as getScriptLoader,
+  internalInspectCommonJs as inspectCommonJs,
   internalCreateStaticCssEvalSourceIdentity as createStaticCssEvalSourceIdentity,
   internalGetStaticCssEvalRealpathOrResolvedPath as getRealpathOrResolvedPath,
   internalMinchoProjectEngine,
@@ -21,7 +23,7 @@ import { normalizePath } from "@rollup/pluginutils";
 import { AsyncLocalStorage } from "node:async_hooks";
 import * as fs from "node:fs";
 import { dirname, join, posix, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import type { Plugin, ResolvedConfig, Rollup, ViteDevServer } from "vite";
 import {
   ViteCssState,
@@ -32,6 +34,7 @@ import {
 import { createLibraryCssLinker } from "./libraryCssLinker.js";
 import { createPackageGraphAnalysis } from "./packageGraphAnalysis.js";
 import { createViteStaticCssEvalSourceProvider } from "./staticCssEvalSourceProvider.js";
+import { commonJsRuntimePrefix, commonJsRuntimeRequest } from "./commonJs.js";
 
 type PluginContext = Rollup.PluginContext;
 
@@ -281,6 +284,20 @@ function createMinchoViteEnvironmentPlugin(_options?: MinchoVitePluginOptions) {
     }
   }
 
+  const observedDependencySources = new Map<string, string>();
+
+  function observeStaticCssEvalSource(id: string, source: string): void {
+    const fileId = normalizeStaticCssEvalFileId(id, rootRealpath);
+    if (observedDependencySources.get(fileId) === source) return;
+    if (
+      observedDependencySources.has(fileId) &&
+      (config.command === "serve" || config.build.watch)
+    )
+      invalidateStaticCssEvalDependency(fileId);
+
+    observedDependencySources.set(fileId, source);
+  }
+
   function invalidateStaticCssEvalDependency(dependencyId: string): void {
     for (const ownerId of staticCssEvalProjectEngine.invalidateByDependency(
       dependencyId
@@ -514,6 +531,48 @@ function createMinchoViteEnvironmentPlugin(_options?: MinchoVitePluginOptions) {
     },
 
     resolveId(id: string, importer?: string) {
+      if (id.startsWith(commonJsRuntimePrefix)) {
+        const [file, specifier] = commonJsRuntimeRequest(id);
+        if (this.environment?.config.consumer === "server") return id;
+
+        const optimizer =
+          this.environment?.mode === "dev"
+            ? this.environment.depsOptimizer
+            : undefined;
+
+        if (optimizer) {
+          if (
+            optimizer.options.exclude?.some(
+              (excluded) =>
+                specifier === excluded || specifier.startsWith(`${excluded}/`)
+            )
+          )
+            throw new Error(
+              `Cannot load CommonJS runtime package ${specifier}: it is excluded from Vite optimizeDeps.`
+            );
+
+          const existing = Object.values(optimizer.metadata.optimized).find(
+            (dependency) => dependency.src === file
+          );
+          if (!existing && optimizer.options.noDiscovery)
+            throw new Error(
+              `Cannot load CommonJS runtime package ${specifier}: enable optimizeDeps.noDiscovery: false or include ${file} in optimizeDeps.include.`
+            );
+
+          const dependency =
+            existing ?? optimizer.registerMissingImport(file, file);
+
+          return optimizer.getOptimizedDepId(dependency);
+        }
+
+        if (this.environment?.mode === "dev")
+          throw new Error(
+            `Cannot load CommonJS runtime package ${specifier}: enable Vite dependency optimization with optimizeDeps.noDiscovery: false or optimizeDeps.include.`
+          );
+
+        return file;
+      }
+
       if (id.startsWith(extractedSidecarIdPrefix)) {
         return ownedExtractedSidecarPath(id) === undefined ? undefined : id;
       }
@@ -592,6 +651,28 @@ function createMinchoViteEnvironmentPlugin(_options?: MinchoVitePluginOptions) {
     },
 
     async load(id: string) {
+      if (id.startsWith(commonJsRuntimePrefix)) {
+        const [file] = commonJsRuntimeRequest(id);
+        const description = inspectCommonJs(
+          await fs.promises.readFile(file, "utf8"),
+          file
+        );
+
+        const named = description.exports.filter(
+          (name) => name !== "default" && name !== "__esModule"
+        );
+
+        return [
+          'import { createRequire } from "node:module";',
+          `const value = createRequire(${JSON.stringify(pathToFileURL(file).href)})(${JSON.stringify(file)});`,
+          "export default value;",
+          ...named.map(
+            (name, index) =>
+              `const exported${index} = value[${JSON.stringify(name)}]; export { exported${index} as ${JSON.stringify(name)} };`
+          )
+        ].join("\n");
+      }
+
       if (id.startsWith(virtualCssIdPrefix)) {
         if (!cssState.isAuthorizedVirtualCss(id)) {
           return null;
@@ -667,9 +748,7 @@ function createMinchoViteEnvironmentPlugin(_options?: MinchoVitePluginOptions) {
       // Keep that nested request from starting the same static prepass again.
       if (staticCssEvalOwnerStack.getStore()?.has(fileId)) return null;
 
-      if (config.command === "serve" || config.build.watch) {
-        invalidateStaticCssEvalDependency(fileId);
-      }
+      observeStaticCssEvalSource(fileId, code);
 
       const moduleInfo = cssState.getModuleData(id);
 
@@ -776,7 +855,7 @@ function createMinchoViteEnvironmentPlugin(_options?: MinchoVitePluginOptions) {
 
       if (
         sidecarPath === undefined &&
-        /\.(j|t)sx?(\?used)?$/.test(id) &&
+        /\.[cm]?[jt]sx?(\?used)?$/.test(id) &&
         !id.endsWith(".vanilla.js")
       ) {
         if (id.includes("node_modules") || /(^|\/)\.yarn\//.test(id)) return;
@@ -796,24 +875,34 @@ function createMinchoViteEnvironmentPlugin(_options?: MinchoVitePluginOptions) {
             extractCalls: _options.extractCalls
           };
 
-        const transformBabelOptions: BabelOptions | undefined =
-          babelOptions?.jsxCssProp === true ||
-          babelOptions?.extractCalls !== undefined
-            ? {
-                ...babelOptions,
-                staticCssEvalProjectEngine,
-                staticCssEvalSourceProvider:
-                  createViteStaticCssEvalSourceProvider(
-                    this,
-                    fileId,
-                    code,
-                    rootRealpath,
-                    this.environment?.mode === "dev"
-                      ? this.environment
-                      : undefined
-                  )
-              }
-            : babelOptions;
+        const sourceProvider = createViteStaticCssEvalSourceProvider(
+          this,
+          fileId,
+          code,
+          rootRealpath,
+          this.environment?.mode === "dev" ? this.environment : undefined
+        );
+
+        const transformBabelOptions: BabelOptions = {
+          ...babelOptions,
+          staticCssEvalProjectEngine,
+          staticCssEvalSourceProvider: {
+            ...sourceProvider,
+
+            async load(id) {
+              const loaded = await sourceProvider.load(id);
+              const source = loaded?.sourceText ?? loaded?.source;
+
+              if (source !== undefined)
+                observeStaticCssEvalSource(
+                  loaded?.realpath ?? loaded?.resolvedFile ?? id,
+                  source
+                );
+
+              return loaded;
+            }
+          }
+        };
 
         let transformResult: BabelTransformResult;
 
@@ -826,14 +915,9 @@ function createMinchoViteEnvironmentPlugin(_options?: MinchoVitePluginOptions) {
               babelTransformSource({
                 filename: fileId,
                 root: rootRealpath,
+                commonJsToEsm: true,
                 source: code,
-                loader: fileId.endsWith(".tsx")
-                  ? "tsx"
-                  : fileId.endsWith(".jsx")
-                    ? "jsx"
-                    : fileId.endsWith(".ts")
-                      ? "ts"
-                      : "js",
+                loader: getScriptLoader(fileId) ?? "js",
                 babel: transformBabelOptions,
 
                 // Vite composes this map with preceding plugin maps itself.
@@ -852,6 +936,7 @@ function createMinchoViteEnvironmentPlugin(_options?: MinchoVitePluginOptions) {
           code: transformedCode,
           map,
           jsxCssPropTransformed,
+          commonJsTransformed,
           result: [file, cssExtract],
           staticCssEval
         } = transformResult;
@@ -868,8 +953,9 @@ function createMinchoViteEnvironmentPlugin(_options?: MinchoVitePluginOptions) {
           }
 
           if (
-            babelOptions?.jsxCssProp === true &&
-            jsxCssPropTransformed === true
+            commonJsTransformed ||
+            (babelOptions?.jsxCssProp === true &&
+              jsxCssPropTransformed === true)
           ) {
             return {
               code: transformedCode,
@@ -4542,7 +4628,10 @@ if (import.meta.vitest) {
             expect.objectContaining({
               filename: fixture.entryPath,
               source: fixture.source,
-              babel: disabledCase.expectedOptions
+              babel: expect.objectContaining({
+                ...disabledCase.expectedOptions,
+                staticCssEvalSourceProvider: expect.any(Object)
+              })
             })
           );
         }

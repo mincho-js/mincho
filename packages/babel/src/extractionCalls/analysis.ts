@@ -1,4 +1,11 @@
 import { parseSync, traverse, types as t, type NodePath } from "@babel/core";
+import { getModuleReference } from "../commonjs/bindings.js";
+import {
+  commonJsExports,
+  findNodePath,
+  normalizeTypeScriptCommonJs
+} from "../commonjs/modules.js";
+import { getStaticCssEvalLiteralRequireImportPath } from "../staticCssEval/cjsBindings.js";
 import type { Binding } from "@babel/traverse";
 import { isAbsolute, relative, resolve } from "node:path";
 import { isLocalExtractCallsSource, normalizeExtractCalls } from "./config.js";
@@ -44,6 +51,8 @@ function parseProgram(
       }
     });
   if (!program) throw new Error(`Cannot parse extractCalls module ${id}`);
+
+  normalizeTypeScriptCommonJs(program);
 
   return program;
 }
@@ -93,12 +102,13 @@ export function* analyzeExtractCalls(
 
   function* resolveImport(
     importer: string,
-    source: string
+    source: string,
+    mode: "import" | "require" = "import"
   ): Flow<string | null> {
-    const key = JSON.stringify([importer, source]);
+    const key = JSON.stringify([importer, source, mode]);
 
     if (!resolutions.has(key))
-      resolutions.set(key, yield { kind: "resolve", importer, source });
+      resolutions.set(key, yield { kind: "resolve", importer, source, mode });
 
     return resolutions.get(key) ?? null;
   }
@@ -124,10 +134,12 @@ export function* analyzeExtractCalls(
   function* importTarget(
     module: Module,
     source: string,
-    name: string,
-    seen: Set<string>
+    name: string | null,
+    seen: Set<string>,
+    mode: "import" | "require" = "import",
+    interop = false
   ): Flow<Target | null> {
-    const id = yield* resolveImport(module.id, source);
+    const id = yield* resolveImport(module.id, source, mode);
 
     if (!id) {
       if (!isLocalExtractCallsSource(source)) return { external: true };
@@ -139,7 +151,23 @@ export function* analyzeExtractCalls(
 
     if (isExternal(id)) return { external: true };
 
-    return yield* resolveExport(yield* load(id), name, seen);
+    const imported = yield* load(id);
+
+    if (name === "default" && (mode === "import" || interop)) {
+      const shape = commonJsExports(imported.program, imported.id);
+      const marker = shape.exports.get("__esModule");
+      if (
+        shape.exports.has(null) &&
+        !(
+          interop &&
+          marker?.kind === "expression" &&
+          t.isBooleanLiteral(marker.expression, { value: true })
+        )
+      )
+        return yield* resolveExport(imported, null, seen);
+    }
+
+    return yield* resolveExport(imported, name, seen);
   }
 
   function* bindingTarget(
@@ -179,6 +207,23 @@ export function* analyzeExtractCalls(
     path: NodePath<t.Node>,
     seen: Set<string>
   ): Flow<Target | null> {
+    const reference = getModuleReference(path);
+
+    if (reference?.kind === "require") {
+      if (reference.unsafe) throw new Error(reference.unsafe);
+      if (reference.members.length > 1 || reference.members.includes(null))
+        throw new Error(`Cannot identify CommonJS helper in ${module.id}`);
+
+      return yield* importTarget(
+        module,
+        reference.source,
+        reference.members[0] ?? null,
+        seen,
+        "require",
+        reference.interop
+      );
+    }
+
     if (path.isVariableDeclarator()) {
       const init = path.get("init");
 
@@ -216,7 +261,7 @@ export function* analyzeExtractCalls(
 
   function* resolveExport(
     module: Module,
-    name: string,
+    name: string | null,
     seen: Set<string>
   ): Flow<Target | null> {
     const key = `${module.id}:export:${name}`;
@@ -242,6 +287,7 @@ export function* analyzeExtractCalls(
       const declaration = statement.get("declaration");
 
       if (
+        name !== null &&
         declaration.node &&
         Object.hasOwn(t.getOuterBindingIdentifiers(declaration.node), name)
       ) {
@@ -273,12 +319,59 @@ export function* analyzeExtractCalls(
       }
     }
 
-    if (name === "default") return null;
+    const commonjs = commonJsExports(module.program, module.id);
+    const entry = commonjs.exports.get(name);
+
+    if (entry) {
+      if (entry.kind === "unsupported")
+        throw new Error(
+          `Unsupported CommonJS export ${name} in ${module.id}: ${entry.cjsExportMutation ?? entry.cjsHelperName ?? entry.unsupportedKind}`
+        );
+      if (entry.kind === "reexport")
+        return yield* importTarget(
+          module,
+          entry.source,
+          entry.importedName,
+          next,
+          "require"
+        );
+
+      if (entry.kind === "local") {
+        const binding = module.program.scope.getBinding(entry.localName);
+
+        return binding ? yield* bindingTarget(module, binding, next) : null;
+      }
+
+      const expression = findNodePath(module.program, entry.expression);
+
+      return expression ? yield* valueTarget(module, expression, next) : null;
+    }
+
+    // module.exports = require("./impl") forwards its named exports as well.
+    const replacement = commonjs.exports.get(null);
+
+    if (name !== null && replacement?.kind === "expression") {
+      const expression = findNodePath(module.program, replacement.expression);
+      const reference = expression && getModuleReference(expression);
+      if (reference?.kind === "require" && reference.members.length === 0)
+        return yield* importTarget(
+          module,
+          reference.source,
+          name,
+          next,
+          "require"
+        );
+    }
+
+    if (name === "default" || name === null) return null;
 
     let found: Target | null = null;
 
-    for (const source of stars) {
-      const candidate = yield* importTarget(module, source, name, next);
+    for (const [source, mode] of [
+      ...stars.map((source) => [source, "import"] as const),
+      ...commonjs.stars.map((star) => [star.source, "require"] as const)
+    ]) {
+      const candidate = yield* importTarget(module, source, name, next, mode);
       if (!candidate) continue;
       if (
         found &&
@@ -347,8 +440,36 @@ export function* analyzeExtractCalls(
       }
     });
 
+    const inlineRequires: NodePath<t.Node>[] = [];
+    path.traverse({
+      CallExpression(call) {
+        if (getStaticCssEvalLiteralRequireImportPath(call.node, call.scope))
+          inlineRequires.push(
+            call.parentPath.isMemberExpression() ? call.parentPath : call
+          );
+      }
+    });
+
+    for (const call of inlineRequires) {
+      const dependency = yield* valueTarget(module, call, new Set());
+
+      if (dependency) yield* protect(dependency);
+    }
+
     for (const { binding, reference } of references) {
-      if (binding.path.isImportNamespaceSpecifier()) {
+      const cjs = getModuleReference(reference);
+
+      if (cjs?.kind === "require") {
+        const member =
+          reference.parentPath.isMemberExpression() &&
+          reference.parentPath.node.object === reference.node
+            ? reference.parentPath
+            : reference;
+
+        const dependency = yield* valueTarget(module, member, new Set());
+
+        if (dependency) yield* protect(dependency);
+      } else if (binding.path.isImportNamespaceSpecifier()) {
         const declaration = binding.path.parentPath;
         if (!declaration.isImportDeclaration()) continue;
 
@@ -431,6 +552,7 @@ export function* analyzeExtractCalls(
     const imports: Record<string, readonly string[]> = Object.create(null);
     const localBindings = new Set<string>();
     const localTargets = new Map<string, Set<string>>();
+    const requires: Record<string, readonly string[]> = Object.create(null);
     const owner = {
       id: options.filename,
       program:
@@ -443,6 +565,7 @@ export function* analyzeExtractCalls(
     for (const [source, names] of Object.entries(config)) {
       if (!isLocalExtractCallsSource(source)) {
         imports[source] = names;
+        requires[source] = names;
         continue;
       }
 
@@ -451,7 +574,8 @@ export function* analyzeExtractCalls(
 
       const id = yield* resolveImport(
         resolve(root, "__mincho_extract_calls__.ts"),
-        source
+        source,
+        "require"
       );
       if (!id) throw new Error(`Cannot resolve registered module from ${root}`);
 
@@ -463,25 +587,44 @@ export function* analyzeExtractCalls(
         registration = `extractCalls[${JSON.stringify(source)}]: export ${JSON.stringify(name)}`;
 
         registrationBindings = localBindings;
-        const target = yield* resolveExport(module, name, new Set());
+        const targets: Target[] = [];
+        const named = yield* resolveExport(module, name, new Set());
+
+        if (named) targets.push(named);
+
+        if (name === "default") {
+          const raw = yield* resolveExport(module, null, new Set());
+
+          if (raw && ("external" in raw || raw.path.isFunction()))
+            targets.push(raw);
+        }
+
         registrationBindings = undefined;
 
-        if (!target || (!("external" in target) && !target.path.isFunction()))
+        if (
+          !targets.length ||
+          targets.some(
+            (target) => !("external" in target) && !target.path.isFunction()
+          )
+        )
           throw new Error(
             `Cannot statically identify a function implementation in ${id}`
           );
 
-        // Named default functions resolve directly, without visiting a binding.
-        if (
-          !("external" in target) &&
-          target.module.id === owner.id &&
-          target.path.isFunctionDeclaration() &&
-          target.path.node.id
-        )
-          localBindings.add(target.path.node.id.name);
-
         exports.add(name);
-        yield* protect(target);
+
+        for (const target of targets) {
+          // Named default functions resolve directly, without visiting a binding.
+          if (
+            !("external" in target) &&
+            target.module.id === owner.id &&
+            target.path.isFunctionDeclaration() &&
+            target.path.node.id
+          )
+            localBindings.add(target.path.node.id.name);
+
+          yield* protect(target);
+        }
       }
     }
 
@@ -504,9 +647,34 @@ export function* analyzeExtractCalls(
       }
     }
 
+    const requireSources = new Set<string>();
+    owner.program.traverse({
+      CallExpression(path) {
+        const source = getStaticCssEvalLiteralRequireImportPath(
+          path.node,
+          path.scope
+        );
+
+        if (source) requireSources.add(source);
+      }
+    });
+
+    for (const source of requireSources) {
+      if (!localTargets.size) break;
+
+      const id = yield* resolveImport(owner.id, source, "require");
+      const names = id ? localTargets.get(id) : undefined;
+
+      if (names)
+        requires[source] = [
+          ...new Set([...(requires[source] ?? []), ...names])
+        ].sort();
+    }
+
     return {
       imports,
       localBindings: [...localBindings].sort(),
+      requires,
       fingerprint: Object.keys(config).length
         ? JSON.stringify([
             config,

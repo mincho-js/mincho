@@ -1,3 +1,4 @@
+import { types as t } from "@babel/core";
 import { unwrapTransparentCssRuleExpression } from "../candidates.js";
 import {
   createStaticCssEvalProviderSourceMetadata,
@@ -119,7 +120,11 @@ export class ImportedStaticCssEvalResolver {
 
     for (const resolution of options.importResolutions) {
       this.#importResolutions.set(
-        createImportResolutionKey(resolution.importerId, resolution.importPath),
+        createImportResolutionKey(
+          resolution.importerId,
+          resolution.importPath,
+          resolution.resolutionMode
+        ),
         {
           resolvedId: resolution.resolvedId,
           sourceMetadata: createStaticCssEvalProviderSourceMetadata(resolution)
@@ -226,7 +231,8 @@ export class ImportedStaticCssEvalResolver {
     | { kind: "error"; diagnostic: StaticCssEvalDiagnostic } {
     const resolvedImport = this.#resolveImport(
       request.importer,
-      request.specifier
+      request.specifier,
+      request.resolutionMode
     );
 
     if (!resolvedImport) {
@@ -1118,6 +1124,9 @@ export class ImportedStaticCssEvalResolver {
     const reexportRequest: ImportedStaticCssEvalResolutionRequest = {
       importer: record.id,
       specifier: exportEntry.source,
+      resolutionMode: t.isExportNamedDeclaration(exportEntry.declaration)
+        ? "import"
+        : "require",
       exportName: exportEntry.importedName,
       memberPath: [...request.memberPath],
       dependencyKind: "reexported",
@@ -1391,11 +1400,16 @@ export class ImportedStaticCssEvalResolver {
 
   #resolveImport(
     importerId: string,
-    importPath: string
+    importPath: string,
+    mode?: "import" | "require"
   ): ImportedStaticCssEvalResolvedImport | null {
-    const resolvedImport = this.#importResolutions.get(
-      createImportResolutionKey(importerId, importPath)
-    );
+    const resolvedImport =
+      this.#importResolutions.get(
+        createImportResolutionKey(importerId, importPath, mode)
+      ) ??
+      this.#importResolutions.get(
+        createImportResolutionKey(importerId, importPath)
+      );
 
     if (resolvedImport) {
       return resolvedImport;
