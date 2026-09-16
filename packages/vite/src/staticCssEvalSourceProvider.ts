@@ -6,6 +6,7 @@ import {
   type InternalStaticCssEvalSourceResolution as StaticCssEvalSourceResolution,
   internalCreateStaticCssEvalSourceHash as createStaticCssEvalSourceHash,
   internalCreateStaticCssEvalSourceIdentity as createStaticCssEvalSourceIdentity,
+  internalResolveFromModule as resolveFromModule,
   internalStaticCssEvalExternalResolutionPrefix as externalStaticCssEvalResolutionPrefix,
   internalGetExistingStaticCssEvalRealpath as getExistingRealpath,
   internalGetExistingStaticCssEvalStat as getExistingStat,
@@ -13,6 +14,7 @@ import {
   internalGetStaticCssEvalSourceOrigin as getViteStaticCssEvalSourceOrigin,
   internalHasStaticCssEvalNodeModulesSegment as hasNodeModulesSegment,
   internalIsMissingStaticCssEvalFileSystemEntryError as isMissingFileSystemEntryError,
+  internalIsProjectLocalStaticCssEvalImportPath as isProjectLocalImportPath,
   internalIsStaticCssEvalPathInsideRoot as isPathInsideRoot,
   internalIsStaticCssEvalStaticDataFile as isStaticCssEvalStaticDataFile,
   internalIsVirtualStaticCssEvalId as isVirtualStaticCssEvalId,
@@ -23,28 +25,60 @@ import { normalizePath } from "@rollup/pluginutils";
 import * as fs from "node:fs";
 import type { DevEnvironment, Rollup } from "vite";
 import { customNormalize } from "./cssState.js";
+import { commonJsRuntimeId } from "./commonJs.js";
 
 type PluginContext = Rollup.PluginContext;
 
 export function createViteStaticCssEvalSourceProvider(
   pluginContext: PluginContext,
   ownerId: string,
-  ownerSource: string,
+  ownerSource: string | undefined,
   rootRealpath: string,
   devEnvironment?: DevEnvironment
 ): StaticCssEvalSourceProvider {
   return {
-    async resolve(importerId: string, importPath: string) {
-      const resolved = await pluginContext.resolve?.(importPath, importerId, {
-        skipSelf: true
-      });
+    async resolve(importerId, importPath, options) {
+      const resolveOptions = {
+        skipSelf: true,
+
+        // Analyze original sources without registering or reading optimizer output.
+        ...(devEnvironment ? { scan: true } : {}),
+        ...(options?.kind === "require"
+          ? { custom: { "node-resolve": { isRequire: true } } }
+          : {})
+      };
+
+      const resolved = devEnvironment?.pluginContainer.resolveId
+        ? await devEnvironment.pluginContainer.resolveId(
+            importPath,
+            importerId,
+            resolveOptions
+          )
+        : await pluginContext.resolve?.(importPath, importerId, resolveOptions);
 
       if (!resolved) {
         return null;
       }
 
       if (resolved.external) {
-        return createExternalStaticCssEvalResolution(resolved.id);
+        const resolution = createExternalStaticCssEvalResolution(resolved.id);
+
+        if (options?.kind === "require" && !resolved.id.startsWith("node:")) {
+          try {
+            const file = resolveFromModule(importerId, resolved.id);
+
+            if (file.startsWith("/") || /^[A-Za-z]:[\\/]/.test(file))
+              resolution.commonJsRuntimeId = commonJsRuntimeId(
+                file,
+                resolved.id,
+                true
+              );
+          } catch {
+            // Preserve external resolver ownership when Node cannot resolve its id.
+          }
+        }
+
+        return resolution;
       }
 
       if (isVirtualStaticCssEvalId(resolved.id)) {
@@ -81,14 +115,35 @@ export function createViteStaticCssEvalSourceProvider(
         rootRealpath,
         stat
       });
+      // Local source outside the root still belongs to Vite's module graph.
+      // A native require wrapper would keep it in Node's cache across HMR.
+      const localSource =
+        isProjectLocalImportPath(importPath) &&
+        ![fileId, resolvedRealpath].some(
+          (file) =>
+            hasNodeModulesSegment(file) || /(^|[\\/])\.yarn[\\/]/.test(file)
+        );
 
-      return { id: metadata.resolvedFile, ...metadata };
+      return {
+        id: metadata.resolvedFile,
+        ...metadata,
+        ...(options?.kind === "require" &&
+        metadata.sourceKind === "package-source" &&
+        !localSource
+          ? {
+              commonJsRuntimeId: commonJsRuntimeId(
+                metadata.resolvedFile,
+                importPath
+              )
+            }
+          : {})
+      };
     },
 
     async load(id: string) {
       const fileId = normalizeStaticCssEvalFileId(id, rootRealpath);
 
-      if (fileId === ownerId) {
+      if (fileId === ownerId && ownerSource !== undefined) {
         const ownerRealpath = await getExistingRealpath(fileId);
         const stat = ownerRealpath
           ? await getExistingStat(ownerRealpath)

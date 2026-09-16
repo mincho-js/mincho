@@ -14,7 +14,7 @@ import {
 } from "@vanilla-extract/css/adapter";
 import { endFileScope, setFileScope } from "@vanilla-extract/css/fileScope";
 import { vanillaExtractPlugin } from "@vanilla-extract/vite-plugin";
-import { build, type Plugin, type Rollup } from "vite";
+import { build, transformWithEsbuild, type Plugin, type Rollup } from "vite";
 import { afterEach, describe, expect, it } from "vitest";
 import { minchoVitePlugin, type ExtractCalls } from "./index.js";
 
@@ -209,34 +209,40 @@ function diamondArtifacts() {
 }
 
 describe("native library CSS in one Vite application build", () => {
-  it.each([false, true])(
-    "builds local extractCalls factories and serialized recipes (vanilla: %s)",
-    async (vanilla) => {
+  it.each(
+    [false, true].flatMap((vanilla) =>
+      ["ts", "cjs"].map((extension) => [vanilla, extension] as const)
+    )
+  )(
+    "builds local extractCalls factories and serialized recipes (vanilla: %s, %s)",
+    async (vanilla, extension) => {
       const sourceRoot = join(
         process.cwd(),
-        "../integration/src/__fixtures__/extract-calls/"
+        `../integration/src/__fixtures__/extract-calls${extension === "cjs" ? "-commonjs" : ""}/`
       );
 
       const files = Object.fromEntries(
         await Promise.all(
-          ["entry.ts", "factory.ts", "implementation.ts", "helper.ts"].map(
-            async (name) => [
+          ["entry", "factory", "implementation", "helper"]
+            .map((name) => `${name}.${extension}`)
+            .map(async (name) => [
               name,
               await readFile(join(sourceRoot, name), "utf8")
-            ]
-          )
+            ])
         )
       );
 
       const root = await fixture({
         ...files,
-        "entry.js": 'export * from "./entry.ts";'
+        "entry.js": `export * from "./entry.${extension}";`
       });
 
       const output = await compile(root, {
         format: "cjs",
         vanilla,
-        extractCalls: { "./factory.ts": ["defineStyle", "makeRecipe"] }
+        extractCalls: {
+          [`./factory.${extension}`]: ["defineStyle", "makeRecipe"]
+        }
       });
 
       const css = cssAssets(output)
@@ -287,9 +293,13 @@ describe("native library CSS in one Vite application build", () => {
     30_000
   );
 
-  it.each([false, true])(
-    "extracts official vanilla-extract packages (vanilla plugin: %s)",
-    async (vanilla) => {
+  it.each(
+    [false, true].flatMap((vanilla) =>
+      ["ts", "cjs"].map((extension) => [vanilla, extension] as const)
+    )
+  )(
+    "extracts official vanilla-extract packages (vanilla plugin: %s, %s)",
+    async (vanilla, extension) => {
       const source = await readFile(
         join(
           process.cwd(),
@@ -299,8 +309,16 @@ describe("native library CSS in one Vite application build", () => {
       );
 
       const root = await fixture({
-        "entry.js": 'export * from "./styles.ts";',
-        "styles.ts": source
+        "entry.js": `export * from "./styles.${extension}";`,
+        [`styles.${extension}`]:
+          extension === "cjs"
+            ? (
+                await transformWithEsbuild(source, "styles.ts", {
+                  loader: "ts",
+                  format: "cjs"
+                })
+              ).code
+            : source
       });
 
       const output = await compile(root, { format: "cjs", vanilla });

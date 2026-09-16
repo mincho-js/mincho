@@ -1,3 +1,5 @@
+import { normalizeTypeScriptCommonJs } from "./commonjs/modules.js";
+import { referencesModuleExport } from "./commonjs/bindings.js";
 import { types as t } from "@babel/core";
 import type { NodePath, PluginObj } from "@babel/core";
 import type { PluginState, ProgramScope } from "./types.js";
@@ -16,7 +18,8 @@ export function styledComponentPlugin(): PluginObj<PluginState> {
     name: "mincho-js-babel:styled",
     visitor: {
       Program: {
-        enter(path) {
+        enter(path, state) {
+          normalizeTypeScriptCommonJs(path, state.file);
           (path.scope as ProgramScope).minchoData ??= {
             imports: new Map(),
             bindings: [],
@@ -75,6 +78,7 @@ function createStyledRuntimeCall(
     recipeIdentifier,
     originalCall
   );
+
   const callExpression = t.callExpression(styledIdentifier, [
     t.cloneNode(tag),
     recipeCallExpression,
@@ -125,7 +129,7 @@ function normalizeStyledCall(
   const args = callPath.node.arguments;
 
   if (callee.isIdentifier()) {
-    if (!callee.referencesImport("@mincho-js/react", "styled")) {
+    if (!referencesModuleExport(callee, "@mincho-js/react", "styled")) {
       return null;
     }
 
@@ -150,7 +154,7 @@ function normalizeStyledCall(
 
   if (
     !object.isIdentifier() ||
-    !object.referencesImport("@mincho-js/react", "styled")
+    !referencesModuleExport(object, "@mincho-js/react", "styled")
   ) {
     return null;
   }

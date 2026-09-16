@@ -6,6 +6,7 @@ export type ExtractCalls = Readonly<Record<string, readonly string[]>>;
 export interface PreparedExtractCalls {
   readonly imports: ExtractCalls;
   readonly localBindings: readonly string[];
+  readonly requires?: ExtractCalls;
   readonly fingerprint: string;
   readonly protectedFunctions: readonly { start: number; end: number }[];
   readonly dependencies: readonly string[];
@@ -21,7 +22,12 @@ export interface ExtractCallsAnalysisOptions {
 }
 
 export type ExtractCallsRequest =
-  | { kind: "resolve"; importer: string; source: string }
+  | {
+      kind: "resolve";
+      importer: string;
+      source: string;
+      mode?: "import" | "require";
+    }
   | { kind: "load"; id: string };
 
 export type ExtractCallsAnalysis = Generator<

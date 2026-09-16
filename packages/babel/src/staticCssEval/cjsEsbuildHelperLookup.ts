@@ -14,7 +14,7 @@ export function getBoundEsbuildHelperFunctions(
 ): EsbuildHelperFunction[] {
   const binding = scope.getBinding(helperName);
 
-  if (!binding) {
+  if (!binding?.constant) {
     return [];
   }
 
@@ -117,7 +117,8 @@ export function isObjectDefinePropertyReference(
   const binding = scope.getBinding(expression.name);
 
   return (
-    binding?.path.isVariableDeclarator() === true &&
+    binding?.constant === true &&
+    binding.path.isVariableDeclarator() &&
     isObjectMethodReference(binding.path.node.init, "defineProperty", scope)
   );
 }

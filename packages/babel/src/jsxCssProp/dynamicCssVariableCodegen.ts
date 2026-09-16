@@ -274,7 +274,7 @@ function createDynamicCssVariableValueExpression(
 function createDynamicCssVariableCssImportDeclaration(
   path: NodePath<t.JSXOpeningElement>,
   cssIdentifier: t.Identifier
-): t.ImportDeclaration {
+): t.ImportDeclaration | t.VariableDeclaration {
   const programParent = path.scope.getProgramParent() as ProgramScope;
   let cssBinding = programParent.getBinding(cssIdentifier.name);
 
@@ -291,6 +291,12 @@ function createDynamicCssVariableCssImportDeclaration(
   programParent.minchoData.bindings.push(cssBinding.path);
 
   const cssImportSpecifierPath = cssBinding.path;
+
+  if (cssImportSpecifierPath.isVariableDeclarator()) {
+    return t.variableDeclaration("var", [
+      t.cloneNode(cssImportSpecifierPath.node, true)
+    ]);
+  }
 
   invariant(
     cssImportSpecifierPath.isImportSpecifier(),

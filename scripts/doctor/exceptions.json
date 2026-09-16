@@ -1,5 +1,135 @@
 [
   {
+    "id": "babel-commonjs-esm-test-esbuild-loader-01",
+    "file": "packages/babel/src/commonjs/esm.test.ts",
+    "type": "warning",
+    "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
+    "source": "{ loader: \"ts\", format: \"cjs\" }",
+    "count": 1,
+    "reason": "This regression uses esbuild's built-in TypeScript parser to verify actual CommonJS compiler prologues; it does not resolve a Webpack loader package.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "vite-commonjs-ssr-test-node-modules-02",
+    "file": "packages/vite/src/commonJsSsr.test.ts",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": "return join(project, \"node_modules\", packageName, \"index.cjs\");",
+    "count": 1,
+    "reason": "This test-only resolver points to its synthetic package fixture so the ssr.noExternal deployment test exercises bundling under Yarn PnP; it is not application package resolution.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "vite-commonjs-client-test-node-modules-01",
+    "file": "packages/vite/src/commonJsClient.test.ts",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": "expect(transformed?.code).toContain(\"/node_modules/.vite/deps/\");",
+    "count": 1,
+    "reason": "This assertion verifies the browser receives a Vite optimized dependency URL when automatic discovery is disabled; it does not resolve a package through node_modules.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "integration-common-js-test-esbuild-loader-02",
+    "file": "packages/integration/src/commonJs.test.ts",
+    "type": "warning",
+    "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
+    "source": "loader: \"jsx\",",
+    "count": 1,
+    "reason": "This regression selects the built-in JSX parser for a .js CommonJS owner; it does not reference a Webpack loader package.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "vite-commonjs-ssr-test-node-modules-01",
+    "file": "packages/vite/src/commonJsSsr.test.ts",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": "const directory = join(root, \"node_modules\", packageName);",
+    "count": 1,
+    "reason": "This isolated SSR deployment fixture creates a native Node package outside the Yarn PnP graph, then deletes the original project to verify package resolution from the deployed output.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "integration-compile-plugins-test-esbuild-loader-04",
+    "file": "packages/integration/src/compilePlugins.test.ts",
+    "type": "warning",
+    "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
+    "source": "loader: { \".custom\": \"js\" },",
+    "count": 1,
+    "reason": "This CommonJS child-compilation regression selects an esbuild built-in JavaScript or TypeScript loader, including a custom extension or caller onLoad result; it does not reference a Webpack loader package.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "integration-compile-plugins-test-esbuild-loader-05",
+    "file": "packages/integration/src/compilePlugins.test.ts",
+    "type": "warning",
+    "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
+    "source": "loader: { \".custom\": \"ts\" },",
+    "count": 1,
+    "reason": "This CommonJS child-compilation regression selects an esbuild built-in JavaScript or TypeScript loader, including a custom extension or caller onLoad result; it does not reference a Webpack loader package.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "integration-compile-plugins-test-esbuild-loader-06",
+    "file": "packages/integration/src/compilePlugins.test.ts",
+    "type": "warning",
+    "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
+    "source": "loader: \"ts\"",
+    "count": 1,
+    "reason": "This CommonJS child-compilation regression selects an esbuild built-in JavaScript or TypeScript loader, including a custom extension or caller onLoad result; it does not reference a Webpack loader package.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "babel-commonjs-test-esbuild-loader-01",
+    "file": "packages/babel/src/commonjs.test.ts",
+    "type": "warning",
+    "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
+    "source": "loader: \"ts\",",
+    "count": 1,
+    "reason": "This Vite transformWithEsbuild option selects esbuild's built-in TypeScript parser for the CommonJS re-export fixture; it is not a Webpack loader dependency.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "esbuild-build-test-esbuild-loader-04",
+    "file": "packages/esbuild/src/build.test.ts",
+    "type": "warning",
+    "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
+    "source": "? (await transform(source, { loader: \"ts\", format: \"cjs\" })).code",
+    "count": 1,
+    "reason": "This esbuild transform option selects the built-in TypeScript parser when generating the CommonJS fixture; it does not resolve a loader package.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "integration-common-js-test-esbuild-loader-01",
+    "file": "packages/integration/src/commonJs.test.ts",
+    "type": "warning",
+    "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
+    "source": "loader: \"tsx\",",
+    "count": 1,
+    "reason": "This babelTransformSource option uses esbuild's TSX syntax name for a mixed ESM/CommonJS css-prop fixture; it is not a Webpack loader dependency.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "integration-fixtures-commonjs-conditions-import-01",
+    "file": "packages/integration/src/__fixtures__/commonjs-conditions/entry.js",
+    "type": "error",
+    "message": "Undeclared dependency on #factory",
+    "source": "import { make } from \"#factory\";",
+    "count": 1,
+    "reason": "The adjacent tracked package.json declares #factory in imports with separate import/require targets. packages/esbuild/src/build.test.ts and packages/vite/src/viteRuntime.test.ts copy that manifest with this source and verify both conditions; #factory is a package import alias, not an undeclared dependency.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "integration-fixtures-commonjs-conditions-import-02",
+    "file": "packages/integration/src/__fixtures__/commonjs-conditions/entry.js",
+    "type": "error",
+    "message": "Undeclared dependency on #factory",
+    "source": "const cjs = require(\"#factory\");",
+    "count": 1,
+    "reason": "The adjacent tracked package.json declares #factory in imports with separate import/require targets. packages/esbuild/src/build.test.ts and packages/vite/src/viteRuntime.test.ts copy that manifest with this source and verify both conditions; #factory is a package import alias, not an undeclared dependency.",
+    "expires": "2026-12-31"
+  },
+  {
     "id": "configs-eslint-config-custom-eslint-config-base-node-modules-01",
     "file": "configs/eslint-config-custom/eslint.config.base.js",
     "type": "warning",
@@ -174,9 +304,9 @@
     "file": "packages/esbuild/src/plugin.ts",
     "type": "warning",
     "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
-    "source": "if (args.path.includes(\"node_modules\")) {",
+    "source": "args.path.includes(\"node_modules\") ||",
     "count": 1,
-    "reason": "This filter applies includeNodeModules to node_modules paths supplied by esbuild; it does not locate packages on disk.",
+    "reason": "This filter applies includeNodeModules to node_modules and Yarn paths supplied by esbuild; it does not locate packages on disk.",
     "expires": "2026-12-31"
   },
   {
@@ -414,9 +544,19 @@
     "file": "packages/vite/src/index.ts",
     "type": "warning",
     "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
-    "source": "if (id.includes(\"node_modules\") || /(^|\\/)\\.yarn\\//.test(id)) return;",
+    "source": "if (id.includes(\"node_modules\") || /(^|[\\\\/])\\.yarn[\\\\/]/.test(id))",
     "count": 1,
     "reason": "This transform filter skips both node_modules and Yarn-managed dependency paths; it does not resolve a package location.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "vite-index-node-modules-09",
+    "file": "packages/vite/src/index.ts",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": "\"/project/node_modules/dependency/index.cjs\"",
+    "count": 1,
+    "reason": "This regression fixture verifies that dependency scripts are excluded from Babel transforms; it does not resolve a workspace dependency.",
     "expires": "2026-12-31"
   },
   {

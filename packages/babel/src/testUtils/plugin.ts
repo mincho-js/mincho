@@ -26,10 +26,17 @@ export function babelTransform(
       "jsxCssProp" | "staticCssEvalProvider" | "optimize" | "extractCalls"
     >
   > = {},
-  transformOptions: { filename?: string; root?: string } = {}
+  transformOptions: {
+    filename?: string;
+    root?: string;
+    sourceType?: "module" | "script" | "unambiguous";
+  } = {}
 ) {
   const options: PluginOptions = { result: ["", ""], ...pluginOptions };
   const result = transformSync(code, {
+    ...(transformOptions.sourceType
+      ? { sourceType: transformOptions.sourceType }
+      : {}),
     plugins: [[minchoBabelPlugin(), options], [styledComponentPlugin()]],
     presets: [typescriptPresetPath],
     filename: transformOptions.filename ?? "test.tsx",

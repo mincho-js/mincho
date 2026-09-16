@@ -172,6 +172,35 @@ describe("extractCalls configuration", () => {
 describe("local extractCalls implementations", () => {
   const extractCalls = { "./src/factory.ts": ["defineStyle", "default"] };
 
+  it("leaves dynamic inline members of external CommonJS factories alone", () => {
+    const project = fixture({
+      "factory.cjs":
+        'exports.make = (rule) => require("external-styles")[rule.kind](rule);',
+      "app.ts":
+        'import { make } from "./factory.cjs"; export const value = make({ color: "red" });'
+    });
+    const config = { "./factory.cjs": ["make"] };
+
+    expect(project.transform("app.ts", config).result[1]).toContain("make({");
+    expect(project.transform("factory.cjs", config).code).toContain(
+      'require("external-styles")[rule.kind](rule)'
+    );
+  });
+
+  it("still rejects dynamic inline members of local CommonJS factories", () => {
+    const project = fixture({
+      "factory.cjs":
+        'exports.make = (rule) => require("./helpers.cjs")[rule.kind](rule);',
+      "helpers.cjs": 'exports.make = (rule) => "class";',
+      "app.ts":
+        'import { make } from "./factory.cjs"; export const value = make({});'
+    });
+
+    expect(() =>
+      project.transform("app.ts", { "./factory.cjs": ["make"] })
+    ).toThrow(/Dynamic CommonJS member/);
+  });
+
   it("protects a factory before its caller is transformed and resolves imports by file identity", () => {
     const project = fixture({
       "src/factory.ts": `

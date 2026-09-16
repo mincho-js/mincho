@@ -52,8 +52,8 @@ export function createEsbuildStaticCssEvalSourceProvider(options: {
   const ownerId = normalizeStaticCssEvalFileId(options.ownerId);
 
   return {
-    async resolve(importerId: string, importPath: string) {
-      const cacheKey = `${getEsbuildStaticCssEvalCacheKey(importerId)}\0${importPath}`;
+    async resolve(importerId, importPath, resolveOptions) {
+      const cacheKey = `${getEsbuildStaticCssEvalCacheKey(importerId)}\0${importPath}\0${resolveOptions?.kind ?? "import"}`;
 
       if (options.resolutionCache.has(cacheKey)) {
         return options.resolutionCache.get(cacheKey) ?? null;
@@ -63,6 +63,7 @@ export function createEsbuildStaticCssEvalSourceProvider(options: {
         build: options.build,
         importerId,
         importPath,
+        kind: resolveOptions?.kind,
         rootRealpath: options.rootRealpath
       });
 
@@ -96,6 +97,7 @@ export function createEsbuildStaticCssEvalSourceProvider(options: {
 }
 
 async function resolveEsbuildStaticCssEvalImport(options: {
+  kind?: "import" | "require";
   build: PluginBuild;
   importerId: string;
   importPath: string;
@@ -104,7 +106,8 @@ async function resolveEsbuildStaticCssEvalImport(options: {
   const resolved = await resolveEsbuildImport(
     options.build,
     options.importerId,
-    options.importPath
+    options.importPath,
+    options.kind
   );
 
   if (resolved == null) {
@@ -134,13 +137,14 @@ async function resolveEsbuildStaticCssEvalImport(options: {
 async function resolveEsbuildImport(
   build: PluginBuild,
   importerId: string,
-  importPath: string
+  importPath: string,
+  kind: "import" | "require" = "import"
 ): Promise<ResolveResult | null> {
   if (typeof build.resolve === "function") {
     const resolved = await build.resolve(importPath, {
       importer: parseEsbuildStaticCssEvalLoadId(importerId).path,
       namespace: parseEsbuildStaticCssEvalLoadId(importerId).namespace,
-      kind: "import-statement",
+      kind: kind === "require" ? "require-call" : "import-statement",
       resolveDir: dirname(parseEsbuildStaticCssEvalLoadId(importerId).path)
     });
 

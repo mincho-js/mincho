@@ -1,0 +1,10 @@
+{
+  "private": true,
+  "type": "module",
+  "imports": {
+    "#factory": {
+      "import": "./import.cjs",
+      "require": "./require.cjs"
+    }
+  }
+}

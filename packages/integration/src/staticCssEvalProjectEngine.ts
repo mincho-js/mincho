@@ -183,9 +183,10 @@ export class MinchoProjectEngine implements StaticEvalProjectEngine {
     state.providerRecords = [];
 
     return {
-      resolve: async (importerId, importPath) => {
+      resolve: async (importerId, importPath, options) => {
         const result =
-          (await sourceProvider?.resolve(importerId, importPath)) ?? null;
+          (await sourceProvider?.resolve(importerId, importPath, options)) ??
+          null;
 
         state.providerRecords.push({
           kind: "resolve",

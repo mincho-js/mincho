@@ -14,7 +14,7 @@ import type {
 
 export const STATIC_CSS_MODULE_CACHE_PARSER_VERSION = "babel-core-parser:v2";
 export const STATIC_CSS_MODULE_CACHE_SUPPORT_VERSION =
-  "static-css-module-export-graph:v4";
+  "static-css-module-export-graph:v6";
 
 export const STATIC_CSS_MODULE_CACHE_PARSER_OPTIONS = {
   plugins: ["jsx", "typescript"],
@@ -1455,19 +1455,10 @@ if (import.meta.vitest) {
         __exportStar(require("./theme"), exports);
       `);
 
-      const bindingEntry = expectUnsupportedEntry(
-        cache.getExportMapEntry(source, "button")
-      );
-
       const parsedModule = cache.getParsedModule(source);
 
-      expect(bindingEntry).toMatchObject({
-        unsupportedKind: "cjs-helper",
-        diagnostic: {
-          id: "STATIC_CSS_EVAL_CJS_HELPER_UNSUPPORTED",
-          exportName: "button"
-        }
-      });
+      // The unverified star helper can overwrite any earlier named entry.
+      expect(cache.getExportMapEntry(source, "button")).toBeNull();
       expect(parsedModule.exportStarReexports).toHaveLength(0);
       expect(parsedModule.exportGraph).toEqual(
         expect.arrayContaining([
@@ -2001,7 +1992,7 @@ if (import.meta.vitest) {
       }
     });
 
-    it("leaves depth-three CommonJS member mutations out of export tracking", () => {
+    it("rejects stale values after deep CommonJS member mutations", () => {
       const cache = createStaticCssModuleCache();
       const source = createSource(
         `
@@ -2011,7 +2002,7 @@ if (import.meta.vitest) {
         "hash:depth-three-exports-property-mutation"
       );
 
-      expectExpressionEntry(cache.getExportMapEntry(source, "theme"));
+      expectUnsupportedEntry(cache.getExportMapEntry(source, "theme"));
     });
 
     it("records deterministic unsupported entries for unsafe CommonJS export descriptors", () => {
@@ -2148,7 +2139,7 @@ if (import.meta.vitest) {
       );
 
       expect(cache.getExportMapEntry(source, "a")).toBeNull();
-      expect(cache.getExportMapEntry(source, "b")).toBeNull();
+      expectUnsupportedEntry(cache.getExportMapEntry(source, "b"));
       expect(unsupportedEntries).toEqual([
         expect.objectContaining({
           unsupportedKind: "cjs-export",

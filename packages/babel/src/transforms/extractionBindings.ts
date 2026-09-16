@@ -94,6 +94,10 @@ export function collectExtractionBindings(path: NodePath<t.Node>): t.Node[] {
 
   const collect = (binding: Binding) => {
     const root = getRoot(binding.path);
+    if (!root.isStatement())
+      throw path.buildCodeFrameError(
+        `Cannot extract a call that captures runtime binding ${binding.identifier.name}. Register the local factory with extractCalls or use mincho-js-ignore.`
+      );
     if (state.completed.has(root.node) || state.visiting.has(root.node)) return;
 
     // Imports from this sidecar already have a matching generated local alias.

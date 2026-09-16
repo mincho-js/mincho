@@ -1,5 +1,9 @@
 export type { ExtractCalls } from "@mincho-js/babel";
 export {
+  internalInspectCommonJs,
+  internalResolveFromModule
+} from "@mincho-js/babel";
+export {
   babelTransform,
   babelTransformSource,
   type BabelOptions,

@@ -34,7 +34,7 @@ export function getCjsAssignmentTarget(
     return directTarget;
   }
 
-  const outerTarget = getDirectCjsAssignmentTarget(left.object, scope);
+  const outerTarget = getCjsAssignmentTarget(left.object, scope);
 
   if (outerTarget.kind === "unsupported") {
     return outerTarget;

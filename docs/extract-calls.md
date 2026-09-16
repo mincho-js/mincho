@@ -105,7 +105,7 @@ to be extracted normally. Protection also works when the implementation is
 transformed before the caller, or when there are multiple entry points.
 
 Supported implementations include function declarations, arrow functions,
-constant aliases, default exports and statically resolvable ESM re-exports.
+constant aliases, default exports and statically resolvable ESM or CommonJS re-exports.
 Captured callbacks and helpers in local modules are followed. Ambiguous
 re-exports, mutable implementation aliases, dynamically selected local namespace
 helpers and factory exports produced by another function call cannot be
@@ -138,4 +138,83 @@ reported without falling back to runtime execution.
 
 Registration does **not** declare a function read-only. Existing mutation checks
 for shared JSX CSS values still apply. This API does not accept AST callbacks,
-wildcards, computed export selection or CommonJS call registrations.
+wildcards or computed export selection.
+
+## CommonJS sources
+
+The same registrations work with `require()`, including object destructuring, aliases,
+namespace members and direct calls. Mincho and the supported official
+vanilla-extract packages need no additional registration.
+Array destructuring consumes iterator elements and does not identify registered
+module exports, so those calls remain in place.
+
+```js
+const { style: makeStyle } = require("@vanilla-extract/css");
+const factory = require("./style-factory.cjs");
+
+exports.native = makeStyle({ color: "red" });
+exports.custom = factory.defineStyle({ color: "blue" });
+```
+
+Register `"./style-factory.cjs": ["defineStyle"]` using the existing root-relative
+path rules. Local implementation protection follows `exports.name`,
+`module.exports.name`, object replacements, forwarding requires and verified
+getter/compiler re-exports. Unreassigned `var` and `let` bindings are supported.
+
+Use `"default"` for a directly exported function (`module.exports = fn`) or an
+explicit `exports.default` function. Direct `factory()` and `factory.default()`
+remain distinct calls; if both functions exist, both implementations are protected.
+
+Babel callers can select `sourceType: "unambiguous"` (or `"script"`) to retain
+CommonJS sidecar references. The bundler adapters detect CommonJS automatically.
+`.cjs` and `.cts` are supported, including TypeScript `import = require` and
+`export =` declarations. Import and require conditions are resolved separately.
+
+Vite converts supported project CommonJS modules to ESM for builds, the browser
+and SSR, including helpers that do not generate CSS. The default export of a
+normalized CommonJS module is its `module.exports` value; an explicit `.default`
+property remains part of that value. Registered implementation and re-export
+changes participate in HMR and recovery after an invalid export is corrected.
+Stylesheet dependencies loaded with `require()` remain in the bundler graph.
+Mincho leaves CSS, CSS Modules and preprocessor files (including query variants)
+to the consuming bundler instead of parsing them as JavaScript. Their handling
+still depends on the bundler configuration.
+
+External runtime CommonJS packages use Node loading in SSR. Packages owned by an
+SSR build, including `ssr.noExternal` dependencies, are bundled with that output.
+Local sources outside the project root stay in Vite's module graph for HMR.
+Browser development uses Vite dependency optimization. Keep automatic dependency
+discovery enabled, or explicitly include the require-condition entry in
+`optimizeDeps.include` when discovery is disabled.
+
+Supported compiler shapes include verified TypeScript `__createBinding` and
+`__exportStar`, static Babel/SWC getters, and esbuild `__export`/`__toCommonJS`.
+Verified Babel/TypeScript default-interop and esbuild namespace-interop helpers also work.
+Helper names alone are not trusted. Arbitrary helpers, dynamic requires,
+bundle bootstraps and cyclic CommonJS re-export initialization are unsupported.
+Vite normalization also rejects conditional or lazy runtime requires and requires
+that would move ahead of observable initialization, since ESM imports execute
+dependencies eagerly. Explicit ESM named exports are preserved in mixed modules;
+combining an ESM default export with CommonJS exports is unsupported because they
+need different default values. ESM modules without CommonJS exports retain
+guarded, dynamic or otherwise unsafe-to-hoist requires for the consumer runtime
+to handle. Safe eager requires still normalize to imports. Babel and esbuild
+retain their native CommonJS loading behavior.
+
+Leading literal require declarations, static member reads and simple object
+destructuring follow ESM import loading semantics. Their imported properties must
+not use getters with observable side effects. Defaults, computed destructuring
+keys and array iterators before a later require are rejected. Use native Babel or
+esbuild loading when dependency initialization relies on precise CommonJS getter
+or execution ordering.
+
+Static export analysis refuses unknown export keys, detached `exports` aliases
+and mutated export values instead of reusing an earlier value. Exporting an
+unrelated name does not invalidate a known export.
+
+Calls tied to a registered API through a reassigned binding, mutated/escaped
+namespace or dynamic member produce a diagnostic instead of silently remaining
+at runtime. `mincho-js-ignore` skips extraction and this call-level diagnostic;
+it does not validate an invalid registration or make unsupported CommonJS
+module structure executable in a browser. Registration still does not imply
+that a custom function is read-only.

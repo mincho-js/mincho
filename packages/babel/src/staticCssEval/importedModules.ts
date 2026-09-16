@@ -2346,10 +2346,10 @@ if (import.meta.vitest) {
       expect(blue.value).toEqual({ color: "blue" });
       expect(missesByFile.get(tokensId)).toBe(2);
       expect(red.cacheKey.staticEvalSupportVersion).toBe(
-        "static-css-module-export-graph:v4"
+        "static-css-module-export-graph:v6"
       );
       expect(STATIC_CSS_MODULE_CACHE_SUPPORT_VERSION).toBe(
-        "static-css-module-export-graph:v4"
+        "static-css-module-export-graph:v6"
       );
       expect(
         formatExportMapCacheKey(
@@ -2359,7 +2359,7 @@ if (import.meta.vitest) {
             sourceHash: "hash:styles-v1"
           })
         )
-      ).toContain('"supportVersion":"static-css-module-export-graph:v4"');
+      ).toContain('"supportVersion":"static-css-module-export-graph:v6"');
     });
 
     it("resolves limited namespace members from project-local literal chains", () => {

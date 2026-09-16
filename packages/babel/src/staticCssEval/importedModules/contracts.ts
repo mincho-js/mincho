@@ -98,6 +98,7 @@ export type ImportedStaticCssEvalProvenanceKind = Exclude<
 >;
 
 export interface ImportedStaticCssEvalResolutionRequest {
+  resolutionMode?: "import" | "require";
   importer: string;
   specifier: string;
   exportName: StaticCssEvalExportName;
@@ -173,6 +174,7 @@ export interface ImportedStaticCssEvalLoadedModule extends StaticCssEvalProvider
 }
 
 export interface ImportedStaticCssEvalImportResolution extends StaticCssEvalProviderSourcePolicyDescriptor {
+  resolutionMode?: "import" | "require";
   importerId: string;
   importPath: string;
   resolvedId: string;

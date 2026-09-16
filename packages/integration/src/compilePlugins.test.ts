@@ -1,6 +1,10 @@
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
+import { runInNewContext } from "node:vm";
+import * as vanillaCss from "@vanilla-extract/css";
+import * as vanillaFileScope from "@vanilla-extract/css/fileScope";
+import { addFileScope } from "@vanilla-extract/integration";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { compile } from "./compile.js";
 
@@ -78,7 +82,7 @@ describe("caller loaders in child compilation", () => {
       });
 
       expect(compiled.source).toContain(
-        `setFileScope)(${JSON.stringify(relative(process.cwd(), dependency))}`
+        JSON.stringify(relative(process.cwd(), dependency))
       );
       expect(compiled.source).toContain("$$styled");
       expect(compiled.source).toContain('var color = "red"');
@@ -130,8 +134,284 @@ describe("caller loaders in child compilation", () => {
         namespace === "file" ? contents : "virtual contents"
       );
       expect(compiled.source).not.toContain(
-        `setFileScope)(${JSON.stringify(relative(process.cwd(), dependency))}`
+        JSON.stringify(relative(process.cwd(), dependency))
       );
     }
   );
+});
+
+describe("CommonJS dependencies in child compilation", () => {
+  function evaluate(source: string) {
+    const events: string[] = [];
+    const module = { exports: {} as { load?: () => void; value?: string } };
+    runInNewContext(source, {
+      module,
+      exports: module.exports,
+      events,
+      require(id: string) {
+        if (id === "@vanilla-extract/css/fileScope")
+          return {
+            setFileScope() {},
+            endFileScope() {},
+            hasFileScope: () => false,
+            getAndIncrementRefCounter: () => 0
+          };
+        if (id === "lazy-package") {
+          events.push("lazy");
+          return {};
+        }
+        throw new Error(`Unexpected dependency: ${id}`);
+      }
+    });
+
+    return { events, exports: module.exports };
+  }
+
+  it("preserves statements before a late CommonJS dependency", async () => {
+    const { root } = await fixture();
+    await fs.writeFile(
+      join(root, "dependency.cjs"),
+      'exports.value = events.join(",");'
+    );
+
+    const compiled = await compile({
+      filePath: join(root, "entry.cjs"),
+      originalPath: join(root, "entry.cjs"),
+      contents:
+        'events.push("ready"); module.exports = require("./dependency.cjs");',
+      cwd: root,
+      resolverCache: new Map()
+    });
+
+    expect(evaluate(compiled.source).exports.value).toBe("ready");
+  });
+
+  it.each([false, true])(
+    "restores parent identifiers across nested and repeated CommonJS dependencies (pre-scoped: %s)",
+    async (prescoped) => {
+      const { root } = await fixture();
+      const entry = join(root, "entry.cjs");
+      const child = join(root, "child.cjs");
+      const styles = `const { style } = require("@vanilla-extract/css");
+      exports.first = style({color: "red"});
+      exports.second = style({color: "blue"});
+      exports.third = style({color: "green"});`;
+
+      const childSource = styles.replace(
+        "exports.second =",
+        'exports.grandchild = require("./grandchild.cjs"); exports.second ='
+      );
+      await fs.writeFile(join(root, "grandchild.cjs"), styles);
+      await fs.writeFile(
+        child,
+        prescoped
+          ? addFileScope({
+              source: childSource,
+              filePath: child,
+              rootPath: root,
+              packageName: "child-fixture"
+            })
+          : childSource
+      );
+
+      async function run(file: string, contents: string) {
+        const compiled = await compile({
+          filePath: file,
+          originalPath: file,
+          contents,
+          cwd: root,
+          resolverCache: new Map()
+        });
+        const module = { exports: {} as Record<string, unknown> };
+        runInNewContext(compiled.source, {
+          module,
+          exports: module.exports,
+          require(id: string) {
+            if (id === "@vanilla-extract/css") return vanillaCss;
+            if (id === "@vanilla-extract/css/fileScope")
+              return vanillaFileScope;
+            throw new Error(`Unexpected dependency: ${id}`);
+          }
+        });
+        expect(vanillaFileScope.hasFileScope()).toBe(false);
+        expect(vanillaFileScope.getAndIncrementRefCounter()).toBe(0);
+
+        return module.exports;
+      }
+
+      const expectedEntry = await run(entry, styles);
+      const expectedChild = await run(child, styles);
+      const result = await run(
+        entry,
+        styles
+          .replace(
+            "exports.second =",
+            'const fileScope = 1, parentCounter = 2, index = 3; exports.child = require("./child.cjs"); exports.second ='
+          )
+          .replace(
+            "exports.third =",
+            'exports.repeated = require("./child.cjs"); exports.locals = [fileScope, parentCounter, index]; exports.third ='
+          )
+      );
+
+      expect(result).toMatchObject(expectedEntry);
+      expect(result.child).toMatchObject(expectedChild);
+      expect(result.repeated).toBe(result.child);
+      expect(result.locals).toEqual([1, 2, 3]);
+    }
+  );
+
+  it("leaves tsconfig-enabled entry syntax for esbuild", async () => {
+    const { root } = await fixture();
+    await fs.writeFile(
+      join(root, "tsconfig.json"),
+      JSON.stringify({ compilerOptions: { experimentalDecorators: true } })
+    );
+    const compiled = await compile({
+      filePath: join(root, "entry.ts"),
+      originalPath: join(root, "entry.ts"),
+      contents: `
+        require("lazy-package");
+        function mark(_target: unknown, _key: unknown, index: number) {
+          events.push(String(index));
+        }
+        class Example { constructor(@mark value: string) {} }
+        exports.value = new Example("ok").constructor.name;
+      `,
+      cwd: root,
+      resolverCache: new Map(),
+      externals: ["lazy-package"],
+      plugins: [
+        {
+          name: "project-tsconfig",
+          setup(build) {
+            build.initialOptions.tsconfig = join(root, "tsconfig.json");
+          }
+        }
+      ]
+    });
+    const result = evaluate(compiled.source);
+
+    expect(result.exports.value).toBe("Example");
+    expect(result.events).toEqual(["lazy", "0"]);
+  });
+
+  it("reports invalid entry syntax through esbuild", async () => {
+    const { root } = await fixture();
+
+    await expect(
+      compile({
+        filePath: join(root, "entry.ts"),
+        originalPath: join(root, "entry.ts"),
+        contents: 'require("lazy-package"); const value = ;',
+        cwd: root,
+        resolverCache: new Map(),
+        externals: ["lazy-package"]
+      })
+    ).rejects.toThrow(/Unexpected/);
+  });
+
+  it.each(["entry", "dependency"])(
+    "keeps optional and lazy requires guarded in the %s",
+    async (location) => {
+      const { root, dependency } = await fixture();
+      const guarded = `
+        try { require("missing-optional-package"); } catch {}
+        exports.load = () => require("lazy-package");
+        if (false) require("unreachable-package");
+        class Unused { value = require("lazy-package"); }
+        events.push("evaluated");
+      `;
+      await fs.writeFile(dependency, guarded);
+      const compiled = await compile({
+        filePath: join(root, "entry.cjs"),
+        originalPath: join(root, "entry.cjs"),
+        contents:
+          location === "entry"
+            ? guarded
+            : 'module.exports = require("./dependency.custom");',
+        cwd: root,
+        resolverCache: new Map(),
+        loader: { ".custom": "js" },
+        externals: ["lazy-package"]
+      });
+      const result = evaluate(compiled.source);
+
+      expect(result.events).toEqual(["evaluated"]);
+      result.exports.load!();
+      expect(result.events).toEqual(["evaluated", "lazy"]);
+    }
+  );
+
+  it.each(["ts", "cts", "custom", "loaded"])(
+    "parses %s dependencies with their actual TypeScript loader",
+    async (extension) => {
+      const { root } = await fixture();
+      const dependency = join(root, `assertion.${extension}`);
+      const contents =
+        '// require is only a comment\nexport const value = <string>"ok";';
+      await fs.writeFile(dependency, contents);
+      const compiled = await compile({
+        filePath: join(root, "entry.tsx"),
+        originalPath: join(root, "entry.tsx"),
+        contents: `export { value } from "./assertion.${extension}";`,
+        cwd: root,
+        resolverCache: new Map(),
+        loader: { ".custom": "ts" },
+        plugins:
+          extension === "loaded"
+            ? [
+                {
+                  name: "caller-typescript",
+                  setup(build) {
+                    build.onLoad({ filter: /\.loaded$/ }, () => ({
+                      contents,
+                      loader: "ts"
+                    }));
+                  }
+                }
+              ]
+            : []
+      });
+
+      expect(evaluate(compiled.source).exports.value).toBe("ok");
+      expect(compiled.watchFiles).toContain(dependency);
+    }
+  );
+
+  it("does not resolve type-only import-equals dependencies", async () => {
+    const { root } = await fixture();
+    await fs.writeFile(
+      join(root, "types.cts"),
+      'import T = require("missing-type-package"); export const value: T = "ok";'
+    );
+    const compiled = await compile({
+      filePath: join(root, "entry.tsx"),
+      originalPath: join(root, "entry.tsx"),
+      contents: 'export { value } from "./types.cts";',
+      cwd: root,
+      resolverCache: new Map()
+    });
+
+    expect(evaluate(compiled.source).exports.value).toBe("ok");
+    expect(compiled.source).not.toContain("missing-type-package");
+  });
+
+  it("does not resolve type-only import-equals dependencies alongside JSX", async () => {
+    const { root } = await fixture();
+    await fs.writeFile(
+      join(root, "types.tsx"),
+      'import T = require("missing-type-package"); type Value = T.Member; const view = <div />; export const value = "ok";'
+    );
+    const compiled = await compile({
+      filePath: join(root, "entry.tsx"),
+      originalPath: join(root, "entry.tsx"),
+      contents: 'export { value } from "./types.tsx";',
+      cwd: root,
+      resolverCache: new Map()
+    });
+
+    expect(evaluate(compiled.source).exports.value).toBe("ok");
+    expect(compiled.source).not.toContain("missing-type-package");
+  });
 });

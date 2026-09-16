@@ -15,6 +15,7 @@ import {
   minchoStyledComponentPlugin,
   InternalExtractCallsError
 } from "@mincho-js/babel";
+import { inferCommonJsSourceType, transformCommonJsToEsm } from "./commonJs.js";
 import { prepareExtractCalls } from "./extractCalls.js";
 import {
   createEmptyStaticCssEvalMetadata,
@@ -99,6 +100,9 @@ export interface StaticCssEvalSourceResolution {
   /** Bundler graph id that should be preserved for callers, even when it differs from the file path. */
   canonicalModuleId?: string;
 
+  /** Adapter runtime import for a CommonJS package, separate from its analysis source. */
+  commonJsRuntimeId?: string;
+
   /** Stable provider load/cache key; integration passes this value back to `load()`. */
   normalizedPathKey?: string;
   realpath?: string;
@@ -140,7 +144,8 @@ export interface StaticCssEvalLoadedSource {
 export interface StaticCssEvalSourceProvider {
   resolve(
     importerId: string,
-    importPath: string
+    importPath: string,
+    options?: { kind: "import" | "require" }
   ): MaybePromise<StaticCssEvalSourceResolution | null>;
 
   load(id: string): MaybePromise<StaticCssEvalLoadedSource | null>;
@@ -210,6 +215,7 @@ export type BabelOptions = Omit<
 };
 
 export type BabelTransformResult = {
+  commonJsTransformed?: boolean;
   code: string;
   readonly map?: BabelFileResult["map"];
   readonly jsxCssPropTransformed?: boolean;
@@ -218,6 +224,8 @@ export type BabelTransformResult = {
 };
 
 export interface BabelTransformSourceOptions {
+  /** @internal Vite browser and SSR modules require an ESM surface. */
+  commonJsToEsm?: boolean;
   filename: string;
 
   /** Project root used to resolve root-relative extractCalls registrations. */
@@ -249,6 +257,7 @@ export async function babelTransform(
 export async function babelTransformSource({
   filename: path,
   root = process.cwd(),
+  commonJsToEsm = false,
   source,
   loader = inferScriptLoader(path),
   babel = {},
@@ -268,8 +277,8 @@ export async function babelTransformSource({
   const projectEngine = staticCssEvalProjectEngine;
   const sourceProvider: StaticCssEvalSourceProvider | undefined =
     staticCssEvalSourceProvider && {
-      resolve: (importerId, specifier) =>
-        staticCssEvalSourceProvider.resolve(importerId, specifier),
+      resolve: (importerId, specifier, options) =>
+        staticCssEvalSourceProvider.resolve(importerId, specifier, options),
 
       load: (id) =>
         id === path
@@ -299,6 +308,7 @@ export async function babelTransformSource({
   };
 
   let result: BabelFileResult;
+  let commonJsTransformed = false;
 
   try {
     if (extractCalls !== undefined) {
@@ -337,9 +347,13 @@ export async function babelTransformSource({
     }
 
     const transformed = await transformAsync(source, {
+      sourceType: "unambiguous",
       ...babelCoreOptions,
       filename: path,
       plugins: [
+        ...(babelCoreOptions.sourceType === undefined
+          ? [inferCommonJsSourceType()]
+          : []),
         ...(loader === "jsx" || loader === "tsx" ? [jsxSyntaxPluginPath] : []),
         ...(Array.isArray(babelCoreOptions.plugins)
           ? babelCoreOptions.plugins
@@ -368,6 +382,24 @@ export async function babelTransformSource({
     }
 
     result = transformed;
+
+    if (commonJsToEsm) {
+      const normalized = await transformCommonJsToEsm({
+        filename: path,
+        source: transformed.code,
+        provider: prepassSourceProvider,
+        dependencies: extractCallsDependencies,
+        sidecar: options.result[0],
+        sourceMaps,
+        parserPlugins: babelCoreOptions.parserOpts?.plugins,
+        inputSourceMap: transformed.map ?? undefined
+      });
+
+      if (normalized) {
+        result = { ...normalized, metadata: transformed.metadata };
+        commonJsTransformed = true;
+      }
+    }
   } catch (error) {
     if (error instanceof InternalExtractCallsError)
       for (const file of error.dependencies) extractCallsDependencies.add(file);
@@ -413,6 +445,7 @@ export async function babelTransformSource({
     code: result.code!,
     ...(sourceMaps ? { map: result.map } : {}),
     jsxCssPropTransformed: options.jsxCssPropTransformed === true,
+    ...(commonJsTransformed ? { commonJsTransformed: true } : {}),
     ...(staticCssEval ? { staticCssEval } : {})
   };
 }

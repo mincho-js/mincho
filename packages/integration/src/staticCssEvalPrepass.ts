@@ -104,6 +104,7 @@ interface StaticCssEvalPrepassExportRequest {
 }
 
 interface StaticCssEvalPrepassDependencyRequest {
+  mode?: "import" | "require";
   importPath: string;
   exportRequest: StaticCssEvalPrepassExportRequest | null;
 }
@@ -219,7 +220,8 @@ export async function createStaticCssEvalPrepass(
       const moduleRecord = await loadStaticCssEvalPrepassDependency(
         ownerId,
         dependencyRequest.importPath,
-        prepassContext
+        prepassContext,
+        dependencyRequest.mode
       );
 
       if (!moduleRecord) {
@@ -285,24 +287,31 @@ export async function createStaticCssEvalPrepass(
 async function loadStaticCssEvalPrepassDependency(
   importerId: string,
   importPath: string,
-  context: StaticCssEvalPrepassContext
+  context: StaticCssEvalPrepassContext,
+  mode: "import" | "require" = "import"
 ): Promise<ImportedStaticCssEvalModuleRecord | undefined> {
   const { sourceProvider, state } = context;
-  const resolvedImportKey = `${importerId}\0${importPath}`;
+  const resolvedImportKey = `${importerId}\0${importPath}\0${mode}`;
   let resolution = state.resolvedImports.get(resolvedImportKey);
 
   if (!state.resolvedImports.has(resolvedImportKey)) {
-    const sourceResolution = await sourceProvider.resolve(
-      importerId,
-      importPath
-    );
+    const sourceResolution =
+      mode === "require"
+        ? await sourceProvider.resolve(importerId, importPath, { kind: mode })
+        : await sourceProvider.resolve(importerId, importPath);
 
     resolution = sourceResolution
       ? normalizeStaticCssEvalSourceResolution(sourceResolution)
       : createUnresolvedStaticCssEvalSourceResolution(importPath);
     state.resolvedImports.set(resolvedImportKey, resolution);
 
-    state.dependencies.update(importerId, importPath, resolution);
+    state.dependencies.update(
+      importerId,
+      importPath,
+      resolution,
+      undefined,
+      mode
+    );
   }
 
   if (!resolution || resolution.sourceKind === "unresolved") {
@@ -348,7 +357,13 @@ async function loadStaticCssEvalPrepassDependency(
     const loadFailureResolution =
       createLoadFailureStaticCssEvalSourceResolution(resolution);
 
-    state.dependencies.update(importerId, importPath, loadFailureResolution);
+    state.dependencies.update(
+      importerId,
+      importPath,
+      loadFailureResolution,
+      undefined,
+      mode
+    );
 
     return undefined;
   }
@@ -364,7 +379,8 @@ async function loadStaticCssEvalPrepassDependency(
       importerId,
       importPath,
       resolution,
-      preparedSource.loadedSource
+      preparedSource.loadedSource,
+      mode
     );
 
     return undefined;
@@ -394,7 +410,8 @@ async function loadStaticCssEvalPrepassDependency(
       importerId,
       importPath,
       resolution,
-      unsupportedSource
+      unsupportedSource,
+      mode
     );
 
     return undefined;
@@ -404,7 +421,8 @@ async function loadStaticCssEvalPrepassDependency(
     importerId,
     importPath,
     resolution,
-    preparedSource.loadedSource
+    preparedSource.loadedSource,
+    mode
   );
   state.resolvedModuleCache.set(moduleRecord.id, moduleRecord);
   state.loadedModules.push(loadedModule);
@@ -438,6 +456,7 @@ function createStaticCssEvalPrepassDependencyRequest(
   return cjsBinding
     ? {
         importPath: cjsBinding.importPath,
+        mode: "require",
         exportRequest: createStaticCssEvalPrepassCjsExportRequest(
           cjsBinding,
           memberPath
@@ -852,7 +871,8 @@ async function loadStaticCssEvalPrepassRequireCallDependencies(
   const dependencyRecord = await loadStaticCssEvalPrepassDependency(
     options.moduleRecord.id,
     importPath,
-    options.context
+    options.context,
+    "require"
   );
 
   if (!dependencyRecord) {
@@ -1028,7 +1048,8 @@ async function loadStaticCssEvalPrepassReferenceDependencies(
   const dependencyRecord = await loadStaticCssEvalPrepassDependency(
     options.moduleRecord.id,
     dependencyRequest.importPath,
-    options.context
+    options.context,
+    dependencyRequest.mode
   );
 
   if (!dependencyRecord || !dependencyRequest.exportRequest) {
@@ -1375,7 +1396,8 @@ async function loadExportNamePrepassDependencies(
     const dependencyRecord = await loadStaticCssEvalPrepassDependency(
       moduleRecord.id,
       starEntry.source,
-      context
+      context,
+      t.isExportAllDeclaration(starEntry.declaration) ? "import" : "require"
     );
 
     if (!dependencyRecord) {
@@ -1421,7 +1443,8 @@ async function loadWholeNamespacePrepassDependencies(
     const dependencyRecord = await loadStaticCssEvalPrepassDependency(
       moduleRecord.id,
       starEntry.source,
-      context
+      context,
+      t.isExportAllDeclaration(starEntry.declaration) ? "import" : "require"
     );
 
     if (!dependencyRecord) {
@@ -1465,7 +1488,10 @@ async function loadExplicitExportEntryPrepassDependencies(
       const dependencyRecord = await loadStaticCssEvalPrepassDependency(
         moduleRecord.id,
         exportEntry.source,
-        context
+        context,
+        t.isExportNamedDeclaration(exportEntry.declaration)
+          ? "import"
+          : "require"
       );
 
       if (!dependencyRecord) {
