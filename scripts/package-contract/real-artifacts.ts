@@ -61,6 +61,7 @@ export async function assertRealBuildArtifacts(
 
       // Use the native entry's CSS ownership. A dynamic chunk can emit another
       // stylesheet containing shared rules; do not merge independent outputs.
+      const initialFiles = new Set<string>();
       let cssFile: string;
       let entryFile: string;
 
@@ -76,7 +77,18 @@ export async function assertRealBuildArtifacts(
             "utf8"
           )
         ) as {
-          outputs: Record<string, { entryPoint?: string; cssBundle?: string }>;
+          outputs: Record<
+            string,
+            {
+              entryPoint?: string;
+              cssBundle?: string;
+              imports?: Array<{
+                path: string;
+                kind: string;
+                external?: boolean;
+              }>;
+            }
+          >;
         };
 
         const entry = Object.entries(metadata.outputs).find(([, output]) =>
@@ -88,6 +100,22 @@ export async function assertRealBuildArtifacts(
           "Native esbuild entry has no CSS bundle"
         );
 
+        const visit = (file: string): void => {
+          const absolute = resolve(consumerRoot, "fixture", "real", file);
+          if (initialFiles.has(absolute)) return;
+
+          initialFiles.add(absolute);
+
+          const output = metadata.outputs[file];
+
+          if (output?.cssBundle) visit(output.cssBundle);
+
+          for (const imported of output?.imports ?? [])
+            if (!imported.external && imported.kind !== "dynamic-import")
+              visit(imported.path);
+        };
+
+        visit(entry[0]);
         entryFile = resolve(consumerRoot, "fixture", "real", entry[0]);
         cssFile = resolve(consumerRoot, "fixture", "real", entry[1].cssBundle);
       } else {
@@ -95,7 +123,12 @@ export async function assertRealBuildArtifacts(
           await readFile(join(directory, ".vite/manifest.json"), "utf8")
         ) as Record<
           string,
-          { file: string; isEntry?: boolean; css?: string[] }
+          {
+            file: string;
+            isEntry?: boolean;
+            css?: string[];
+            imports?: string[];
+          }
         >;
 
         const entry = Object.values(manifest).find((output) => output.isEntry);
@@ -106,6 +139,20 @@ export async function assertRealBuildArtifacts(
           "Fixture's native Vite entry CSS ownership changed"
         );
 
+        const visit = (output: (typeof manifest)[string]): void => {
+          const file = join(directory, output.file);
+          if (initialFiles.has(file)) return;
+
+          initialFiles.add(file);
+
+          for (const css of output.css ?? [])
+            initialFiles.add(join(directory, css));
+
+          for (const imported of output.imports ?? [])
+            if (manifest[imported]) visit(manifest[imported]);
+        };
+
+        visit(entry!);
         entryFile = join(directory, entry!.file);
         cssFile = join(directory, entry!.css![0]!);
       }
@@ -203,9 +250,15 @@ export async function assertRealBuildArtifacts(
       for (const output of await jsSources(directory))
         assertNoRuntimeGraph(output.source, `${bundler}/${output.label}`);
 
-      for (const output of cssFiles.sort()) {
+      const scriptFiles = (await jsSources(directory)).map((output) =>
+        join(directory, output.label)
+      );
+
+      for (const output of [...cssFiles, ...scriptFiles].sort()) {
         const outputBytes = await readFile(output);
         reports.push({
+          kind: output.endsWith(".css") ? "css" : "javascript",
+          loading: initialFiles.has(output) ? "initial" : "deferred",
           bundler,
           minified,
           file: relative(directory, output),
@@ -235,9 +288,17 @@ export async function assertRealBuildArtifacts(
 
   await writeFile(
     join(consumerRoot, "real-css-sizes.json"),
+    `${JSON.stringify(
+      reports.filter((report) => report.kind === "css"),
+      null,
+      2
+    )}\n`
+  );
+  await writeFile(
+    join(consumerRoot, "real-artifact-sizes.json"),
     `${JSON.stringify(reports, null, 2)}\n`
   );
   console.log(
-    `[package-contract] Real producer CSS: ${JSON.stringify(reports)}`
+    `[package-contract] Real producer JS/CSS: ${JSON.stringify(reports)}`
   );
 }

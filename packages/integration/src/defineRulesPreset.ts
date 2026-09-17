@@ -1,3 +1,4 @@
+import { measureCompilationPhase } from "./diagnostics.js";
 import {
   beginDefineRulesRegistrySession,
   endDefineRulesRegistrySession,
@@ -50,7 +51,10 @@ export async function processDefineRulesPresetRegistryFile(
   const registrySession = beginDefineRulesRegistrySession();
 
   try {
-    const source = await processVanillaFile(options);
+    const source = await measureCompilationPhase("vanilla-extract", () =>
+      processVanillaFile(options)
+    );
+
     const presetArtifacts =
       validateDefineRulesRegistrySessionArtifacts(registrySession);
 

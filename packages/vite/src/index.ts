@@ -1,5 +1,7 @@
 import {
   type BabelOptions,
+  type MinchoDiagnosticsOptions,
+  CompilationDiagnostics,
   type BabelTransformResult,
   type DefineRulesPackageGraph,
   type InternalStaticCssEvalLoadedSource as StaticCssEvalLoadedSource,
@@ -71,6 +73,7 @@ function extractedCssFileFilter(filePath: string) {
 }
 
 export interface MinchoVitePluginOptions {
+  diagnostics?: MinchoDiagnosticsOptions;
   babel?: BabelOptions;
   jsxCssProp?: boolean;
 
@@ -88,7 +91,12 @@ export interface MinchoVitePluginOptions {
 export type { ExtractCalls } from "@mincho-js/integration";
 
 export function minchoVitePlugin(_options?: MinchoVitePluginOptions) {
-  const plugin = createMinchoViteEnvironmentPlugin(_options);
+  const diagnostics = new CompilationDiagnostics(
+    _options?.diagnostics,
+    "client"
+  );
+
+  const plugin = createMinchoViteEnvironmentPlugin(_options, diagnostics);
   const pendingServerPlugins = new Set<
     ReturnType<typeof createMinchoViteEnvironmentPlugin>
   >();
@@ -117,10 +125,14 @@ export function minchoVitePlugin(_options?: MinchoVitePluginOptions) {
       pendingServerPlugins.clear();
     },
 
-    async applyToEnvironment() {
+    async applyToEnvironment(environment) {
       // Providers may resolve different CSS in client and SSR environments.
       // Extraction, dependency, and virtual CSS state belong to one environment.
-      const environmentPlugin = createMinchoViteEnvironmentPlugin(_options);
+      const environmentPlugin = createMinchoViteEnvironmentPlugin(
+        _options,
+        diagnostics.fork(environment.name)
+      );
+
       await environmentPlugin.configResolved(config);
 
       if (server) environmentPlugin.configureServer(server);
@@ -131,9 +143,54 @@ export function minchoVitePlugin(_options?: MinchoVitePluginOptions) {
   } satisfies Plugin;
 }
 
-function createMinchoViteEnvironmentPlugin(_options?: MinchoVitePluginOptions) {
+function createMinchoViteEnvironmentPlugin(
+  _options: MinchoVitePluginOptions | undefined,
+  diagnostics: CompilationDiagnostics
+) {
+  const tracedCompile = (options: Parameters<typeof compile>[0]) =>
+    diagnostics.run(options.originalPath, "sidecar-compile", () =>
+      compile(options)
+    );
+
+  const tracedTransform = (
+    options: Parameters<typeof babelTransformSource>[0]
+  ) =>
+    diagnostics.run(options.filename, "transform", () =>
+      babelTransformSource(options)
+    );
+
+  const tracedRegistry = (
+    options: Parameters<typeof processDefineRulesPresetViteFile>[0]
+  ) =>
+    diagnostics.run(options.filePath, "css-evaluation", () =>
+      processDefineRulesPresetViteFile(options)
+    );
+
   let config: ResolvedConfig;
   let server: ViteDevServer;
+  let diagnosticsFlushTimer: ReturnType<typeof setTimeout> | undefined;
+  let diagnosticsFlushPromise: Promise<void> | undefined;
+  let diagnosticsClosed = false;
+
+  function cancelDiagnosticsFlush(): void {
+    clearTimeout(diagnosticsFlushTimer);
+    diagnosticsFlushTimer = undefined;
+  }
+
+  function scheduleDiagnosticsFlush(): void {
+    if (!diagnostics.enabled || diagnosticsClosed || config.command !== "serve")
+      return;
+
+    cancelDiagnosticsFlush();
+    diagnosticsFlushTimer = setTimeout(() => {
+      diagnosticsFlushTimer = undefined;
+      diagnosticsFlushPromise = diagnostics
+        .flush(config.root)
+        .catch(console.error);
+    }, 200);
+    diagnosticsFlushTimer.unref();
+  }
+
   const staticCssEvalOwnerStack = new AsyncLocalStorage<ReadonlySet<string>>();
 
   const cssState = new ViteCssState({
@@ -477,6 +534,21 @@ function createMinchoViteEnvironmentPlugin(_options?: MinchoVitePluginOptions) {
       sequential: true,
 
       async handler(this: PluginContext) {
+        // Drain scheduled and queued writes before begin replaces the report.
+        if (diagnosticsFlushTimer !== undefined) {
+          cancelDiagnosticsFlush();
+          diagnosticsFlushPromise = diagnostics
+            .flush(config.root)
+            .catch(console.error);
+        }
+
+        if (diagnosticsFlushPromise !== undefined) {
+          await diagnosticsFlushPromise;
+          diagnosticsFlushPromise = undefined;
+        }
+
+        diagnosticsClosed = false;
+        diagnostics.begin();
         transformEpoch = Symbol("build");
 
         if (graphAnalysisClosed) {
@@ -545,6 +617,8 @@ function createMinchoViteEnvironmentPlugin(_options?: MinchoVitePluginOptions) {
     },
 
     async configResolved(this: void, resolvedConfig: ResolvedConfig) {
+      cancelDiagnosticsFlush();
+      diagnosticsClosed = false;
       config = resolvedConfig;
       rootRealpath = await getRealpathOrResolvedPath(config.root);
     },
@@ -813,7 +887,7 @@ function createMinchoViteEnvironmentPlugin(_options?: MinchoVitePluginOptions) {
           resolverCache.delete(moduleInfo.originalPath);
           cssState.clearVirtualCssForSidecar(moduleInfo.filePath, false);
 
-          const { source, watchFiles } = await compile({
+          const { source, watchFiles } = await tracedCompile({
             filePath: moduleInfo.filePath,
             cwd: config.root,
             originalPath: moduleInfo.originalPath,
@@ -837,7 +911,7 @@ function createMinchoViteEnvironmentPlugin(_options?: MinchoVitePluginOptions) {
           }
 
           let hasGeneratedVirtualCss = false;
-          const registryResult = await processDefineRulesPresetViteFile({
+          const registryResult = await tracedRegistry({
             source,
             filePath: moduleInfo.filePath,
             identOption: config.mode === "production" ? "short" : "debug",
@@ -902,6 +976,8 @@ function createMinchoViteEnvironmentPlugin(_options?: MinchoVitePluginOptions) {
           }
 
           console.error(error);
+        } finally {
+          scheduleDiagnosticsFlush();
         }
       }
 
@@ -965,13 +1041,15 @@ function createMinchoViteEnvironmentPlugin(_options?: MinchoVitePluginOptions) {
           transformResult = await staticCssEvalOwnerStack.run(
             activeOwners,
             () =>
-              babelTransformSource({
+              tracedTransform({
                 filename: fileId,
                 root: rootRealpath,
                 commonJsToEsm: true,
                 source: code,
                 loader: getScriptLoader(fileId) ?? "js",
-                babel: transformBabelOptions,
+                babel: diagnostics.enabled
+                  ? { ...transformBabelOptions, diagnostics: true }
+                  : transformBabelOptions,
 
                 // Vite composes this map with preceding plugin maps itself.
                 sourceMaps: true
@@ -981,6 +1059,8 @@ function createMinchoViteEnvironmentPlugin(_options?: MinchoVitePluginOptions) {
           addStaticCssEvalWatchFilesForOwner(this, fileId);
 
           throw error;
+        } finally {
+          scheduleDiagnosticsFlush();
         }
 
         if (epoch !== transformEpoch) return null;
@@ -1167,20 +1247,34 @@ function createMinchoViteEnvironmentPlugin(_options?: MinchoVitePluginOptions) {
     },
 
     async closeBundle() {
+      cancelDiagnosticsFlush();
+      diagnosticsClosed = true;
       transformEpoch = Symbol("closed");
-      abortOutputLinkers(new Error("Vite bundle closed"));
 
-      if (!config.build.watch) {
-        graphAnalysisClosed = true;
-        await graphAnalysis.close();
+      try {
+        await diagnostics.flush(config.root);
+      } finally {
+        abortOutputLinkers(new Error("Vite bundle closed"));
+
+        if (!config.build.watch) {
+          graphAnalysisClosed = true;
+          await graphAnalysis.close();
+        }
       }
     },
 
     async closeWatcher() {
+      cancelDiagnosticsFlush();
+      diagnosticsClosed = true;
       transformEpoch = Symbol("closed");
-      abortOutputLinkers(new Error("Vite watcher closed"));
-      graphAnalysisClosed = true;
-      await graphAnalysis.close();
+
+      try {
+        await diagnostics.flush(config.root);
+      } finally {
+        abortOutputLinkers(new Error("Vite watcher closed"));
+        graphAnalysisClosed = true;
+        await graphAnalysis.close();
+      }
     }
   } satisfies Plugin;
 }
@@ -1335,6 +1429,7 @@ if (import.meta.vitest) {
       | null
       | { code: string; map?: string }
       | Promise<string | null | { code: string; map?: string }>;
+    closeBundle?: () => Promise<void>;
     closeWatcher?: () => Promise<void>;
     renderChunk?: {
       order: "post";
@@ -2079,6 +2174,10 @@ if (import.meta.vitest) {
         await plugin.closeWatcher?.();
       },
 
+      async closeBundle() {
+        await plugin.closeBundle?.();
+      },
+
       async load(id: string) {
         return plugin.load?.(id);
       },
@@ -2765,6 +2864,411 @@ if (import.meta.vitest) {
   });
 
   describe("minchoVitePlugin", () => {
+    describe("development diagnostics", () => {
+      async function createDiagnosticsHarness(
+        enabled = true,
+        command = "serve"
+      ) {
+        const integrationModule = await import("@mincho-js/integration");
+        vi.spyOn(integrationModule, "babelTransformSource").mockResolvedValue({
+          code: 'import "extracted_diagnostics.css.ts"; export const entry = true;',
+          result: ["extracted_diagnostics.css.ts", "resolver contents"]
+        });
+        vi.spyOn(integrationModule, "compile").mockResolvedValue({
+          source: "compiled source",
+          watchFiles: []
+        } as Awaited<ReturnType<typeof compile>>);
+        vi.spyOn(
+          integrationModule,
+          "processDefineRulesPresetRegistryFile"
+        ).mockResolvedValue(createRegistryResult("export const entry = true;"));
+
+        const flush = vi
+          .spyOn(CompilationDiagnostics.prototype, "flush")
+          .mockResolvedValue();
+        const harness = await createViteHarness({
+          configOverrides: { command },
+          pluginOptions: { diagnostics: enabled ? { console: true } : {} }
+        });
+        await harness.buildStart();
+
+        return { harness, flush };
+      }
+
+      it("defers and coalesces JavaScript and sidecar report writes", async () => {
+        vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+        const { harness, flush } = await createDiagnosticsHarness();
+
+        try {
+          const fixture = await createExtractedCssFixture(harness);
+          expect(flush).not.toHaveBeenCalled();
+
+          await vi.advanceTimersByTimeAsync(150);
+          await harness.transform(fixture.extractedId, fixture.extractedSource);
+          await vi.advanceTimersByTimeAsync(199);
+          expect(flush).not.toHaveBeenCalled();
+
+          await vi.advanceTimersByTimeAsync(1);
+          expect(flush).toHaveBeenCalledExactlyOnceWith(viteConsumerRootPath);
+        } finally {
+          await harness.closeWatcher();
+          vi.useRealTimers();
+        }
+      });
+
+      it.each([false, true])(
+        "drains the previous generation before restarting with timer fired=%s",
+        async (timerFired: boolean) => {
+          vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+          const { harness, flush } = await createDiagnosticsHarness();
+          const run = vi.spyOn(CompilationDiagnostics.prototype, "run");
+          const pending = createDeferred<void>();
+          const reports: ReturnType<CompilationDiagnostics["snapshot"]>[] = [];
+          let rebuilding: Promise<void> | undefined;
+
+          flush.mockImplementation(function (this: CompilationDiagnostics) {
+            return pending.promise.then(() => {
+              reports.push(this.snapshot());
+            });
+          });
+
+          try {
+            await createExtractedCssFixture(harness);
+            const diagnostics: CompilationDiagnostics = run.mock.contexts[0]!;
+
+            if (timerFired) await vi.advanceTimersByTimeAsync(200);
+
+            rebuilding = harness.buildStart();
+            await Promise.resolve();
+
+            expect(flush).toHaveBeenCalledOnce();
+            expect(diagnostics.snapshot().builds[0]?.generation).toBe(1);
+            expect(reports).toEqual([]);
+
+            pending.resolve();
+            await rebuilding;
+
+            expect(reports[0]?.builds[0]).toMatchObject({
+              generation: 1,
+              events: expect.arrayContaining([
+                expect.objectContaining({
+                  file: viteConsumerEntryPath,
+                  phase: "transform",
+                  status: "ok"
+                })
+              ])
+            });
+            expect(diagnostics.snapshot().builds[0]).toMatchObject({
+              generation: 2,
+              events: []
+            });
+
+            await vi.advanceTimersByTimeAsync(500);
+            expect(flush).toHaveBeenCalledOnce();
+
+            await createExtractedCssFixture(harness);
+            await vi.advanceTimersByTimeAsync(200);
+            expect(reports[1]?.builds[0]?.generation).toBe(2);
+
+            await harness.buildStart();
+            expect(flush).toHaveBeenCalledTimes(2);
+          } finally {
+            pending.resolve();
+            await rebuilding;
+            await harness.closeWatcher();
+            vi.useRealTimers();
+          }
+        }
+      );
+
+      it("logs a failed pending report and continues the next generation", async () => {
+        vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+        const { harness, flush } = await createDiagnosticsHarness();
+        const failure = new Error("diagnostic output is unavailable");
+        const log = vi.spyOn(console, "error").mockImplementation(() => {});
+
+        try {
+          await createExtractedCssFixture(harness);
+          flush.mockRejectedValueOnce(failure);
+
+          await expect(harness.buildStart()).resolves.toBeUndefined();
+          expect(log).toHaveBeenCalledExactlyOnceWith(failure);
+          expect(flush).toHaveBeenCalledOnce();
+
+          const diagnostics: CompilationDiagnostics = flush.mock.contexts[0]!;
+
+          expect(diagnostics.snapshot().builds[0]).toMatchObject({
+            generation: 2,
+            events: []
+          });
+
+          await createExtractedCssFixture(harness);
+          await vi.advanceTimersByTimeAsync(200);
+          expect(flush).toHaveBeenCalledTimes(2);
+          expect(log).toHaveBeenCalledOnce();
+        } finally {
+          flush.mockReset().mockResolvedValue();
+          await harness.closeWatcher();
+          vi.useRealTimers();
+        }
+      });
+
+      it.each(["closeBundle", "closeWatcher"] as const)(
+        "drains reports and cancels the pending timer on %s",
+        async (close: "closeBundle" | "closeWatcher") => {
+          vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+          const { harness, flush } = await createDiagnosticsHarness();
+          const pending = createDeferred<void>();
+
+          try {
+            await createExtractedCssFixture(harness);
+            expect(flush).not.toHaveBeenCalled();
+            flush.mockReturnValueOnce(pending.promise);
+
+            let closed = false;
+            const closing = harness[close]().then(() => {
+              closed = true;
+            });
+            await Promise.resolve();
+            expect(closed).toBe(false);
+            pending.resolve();
+            await closing;
+            await vi.advanceTimersByTimeAsync(500);
+            expect(flush).toHaveBeenCalledOnce();
+          } finally {
+            pending.resolve();
+            await harness.closeWatcher();
+            vi.useRealTimers();
+          }
+        }
+      );
+
+      it("reports background write failures without rejecting transforms", async () => {
+        vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+        const { harness, flush } = await createDiagnosticsHarness();
+        const failure = new Error("diagnostic output is unavailable");
+        const log = vi.spyOn(console, "error").mockImplementation(() => {});
+
+        try {
+          await createExtractedCssFixture(harness);
+          flush.mockRejectedValueOnce(failure);
+          await vi.advanceTimersByTimeAsync(200);
+          expect(log).toHaveBeenCalledExactlyOnceWith(failure);
+          await expect(
+            createExtractedCssFixture(harness)
+          ).resolves.toBeDefined();
+        } finally {
+          await harness.closeWatcher();
+          vi.useRealTimers();
+        }
+      });
+
+      it.each(["compile", "registry", "transform"] as const)(
+        "flushes diagnostics after a failed %s without another transform",
+        async (stage: "compile" | "registry" | "transform") => {
+          vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+          const { harness, flush } = await createDiagnosticsHarness();
+          const integrationModule = await import("@mincho-js/integration");
+          const failure = new Error(`${stage} failed`);
+          vi.spyOn(console, "error").mockImplementation(() => {});
+
+          try {
+            const fixture = await createExtractedCssFixture(harness);
+            await vi.advanceTimersByTimeAsync(200);
+            flush.mockClear();
+
+            if (stage === "transform") {
+              vi.mocked(
+                integrationModule.babelTransformSource
+              ).mockRejectedValueOnce(failure);
+              await expect(
+                harness.transform(
+                  viteConsumerEntryPath,
+                  'import { css } from "@mincho-js/css"; export const style = css({ color: "red" });'
+                )
+              ).rejects.toBe(failure);
+            } else {
+              if (stage === "compile")
+                vi.mocked(integrationModule.compile).mockRejectedValueOnce(
+                  failure
+                );
+              else
+                vi.mocked(
+                  integrationModule.processDefineRulesPresetRegistryFile
+                ).mockRejectedValueOnce(failure);
+
+              await expect(
+                harness.transform(fixture.extractedId, fixture.extractedSource)
+              ).resolves.toBeNull();
+            }
+
+            await vi.advanceTimersByTimeAsync(199);
+            expect(flush).not.toHaveBeenCalled();
+            await vi.advanceTimersByTimeAsync(1);
+            expect(flush).toHaveBeenCalledOnce();
+
+            const diagnostics: CompilationDiagnostics = flush.mock.contexts[0]!;
+
+            expect(
+              diagnostics.snapshot().builds.flatMap((build) => build.events)
+            ).toEqual(
+              expect.arrayContaining([
+                expect.objectContaining({
+                  phase: {
+                    compile: "sidecar-compile",
+                    registry: "css-evaluation",
+                    transform: "transform"
+                  }[stage],
+                  status: "error"
+                })
+              ])
+            );
+          } finally {
+            await harness.closeWatcher();
+            vi.useRealTimers();
+          }
+        }
+      );
+
+      it.each([
+        ["closeBundle", false, true],
+        ["closeWatcher", true, true],
+        ["closeBundle", true, false]
+      ] as const)(
+        "cleans up after a failed report on %s with watch=%s",
+        async (
+          close: "closeBundle" | "closeWatcher",
+          watch: boolean,
+          closesAnalysis: boolean
+        ) => {
+          const graphModule = await import("./packageGraphAnalysis.js");
+          const analysis = graphModule.createPackageGraphAnalysis({
+            mode: "inline"
+          });
+          const closeAnalysis = vi.spyOn(analysis, "close");
+          vi.spyOn(
+            graphModule,
+            "createPackageGraphAnalysis"
+          ).mockReturnValueOnce(analysis);
+
+          const linkerModule = await import("./libraryCssLinker.js");
+          const linker = linkerModule.createLibraryCssLinker({
+            cssCodeSplit: true
+          });
+          const render = vi.spyOn(linker, "renderChunk");
+          vi.spyOn(linkerModule, "createLibraryCssLinker").mockReturnValueOnce(
+            linker
+          );
+
+          const flush = vi
+            .spyOn(CompilationDiagnostics.prototype, "flush")
+            .mockResolvedValue();
+          const plugin = minchoVitePlugin({
+            diagnostics: { console: true }
+          }) as unknown as Plugin;
+          await plugin.configResolved!(
+            createResolvedConfig({
+              build: { lib: {}, cssCodeSplit: true, watch }
+            })
+          );
+
+          const entry = {
+            type: "chunk" as const,
+            code: "export {};",
+            fileName: "entry.js",
+            facadeModuleId: viteConsumerEntryPath,
+            isEntry: true,
+            moduleIds: [viteConsumerEntryPath]
+          };
+          const shared = { ...entry, fileName: "shared.js", isEntry: false };
+          let renderFailure: unknown;
+          const rendering = plugin
+            .renderChunk!.handler.call(
+              {
+                getModuleInfo: () => null,
+                resolve: async () => ({ id: "/unused.css" })
+              },
+              entry.code,
+              entry,
+              { format: "es" },
+              { chunks: { "entry.js": entry, "shared.js": shared } }
+            )
+            .catch((error) => {
+              renderFailure = error;
+            });
+
+          try {
+            await vi.waitFor(() => expect(render).toHaveBeenCalledOnce());
+            const failure = new Error("diagnostic output is unavailable");
+            flush.mockRejectedValueOnce(failure);
+
+            await expect(plugin[close]!()).rejects.toBe(failure);
+            await vi.waitFor(() => expect(renderFailure).toBeInstanceOf(Error));
+            expect((renderFailure as Error).message).toBe(
+              close === "closeBundle"
+                ? "Vite bundle closed"
+                : "Vite watcher closed"
+            );
+            expect(closeAnalysis).toHaveBeenCalledTimes(closesAnalysis ? 1 : 0);
+          } finally {
+            await plugin.closeWatcher!();
+            await rendering;
+          }
+        }
+      );
+
+      it("does not reschedule reports when a transform finishes after shutdown", async () => {
+        vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+        const { harness, flush } = await createDiagnosticsHarness();
+        const integrationModule = await import("@mincho-js/integration");
+        const pending = createDeferred<BabelTransformResult>();
+        const transform = vi
+          .spyOn(integrationModule, "babelTransformSource")
+          .mockReturnValueOnce(pending.promise);
+
+        try {
+          const transforming = harness.transform(
+            viteConsumerEntryPath,
+            'import { css } from "@mincho-js/css"; export const style = css({ color: "red" });'
+          );
+          await vi.waitFor(() => expect(transform).toHaveBeenCalledOnce());
+          await harness.closeWatcher();
+          pending.resolve({ code: "export {};", result: ["", ""] });
+          await transforming;
+          await vi.advanceTimersByTimeAsync(500);
+          expect(flush).toHaveBeenCalledOnce();
+        } finally {
+          pending.resolve({ code: "export {};", result: ["", ""] });
+          await harness.closeWatcher();
+          vi.useRealTimers();
+        }
+      });
+
+      it.each([
+        [false, "serve"],
+        [true, "build"]
+      ] as const)(
+        "does not schedule reports for enabled=%s, command=%s",
+        async (enabled: boolean, command: string) => {
+          vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+          const { harness, flush } = await createDiagnosticsHarness(
+            enabled,
+            command
+          );
+
+          try {
+            await createExtractedCssFixture(harness);
+            await vi.advanceTimersByTimeAsync(500);
+            expect(flush).not.toHaveBeenCalled();
+            expect(vi.getTimerCount()).toBe(0);
+          } finally {
+            await harness.closeWatcher();
+            vi.useRealTimers();
+          }
+        }
+      );
+    });
+
     it.each([
       "/project/.yarn/cache/dependency.cjs",
       "C:\\project\\.yarn\\cache\\dependency.cts",

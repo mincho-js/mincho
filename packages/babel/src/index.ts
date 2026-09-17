@@ -17,11 +17,15 @@ import { prepareExtractCalls } from "./extractionCalls/index.js";
 import { normalizeTypeScriptCommonJs } from "./commonjs/modules.js";
 
 export function minchoBabelPlugin(): PluginObj<PluginState> {
+  const started = new WeakMap<PluginState, number>();
+
   return {
     name: "mincho-babel-plugin",
     visitor: {
       Program: {
         enter(path, state) {
+          if (state.opts.diagnostics) started.set(state, performance.now());
+
           normalizeTypeScriptCommonJs(path, state.file);
 
           if (isDefineRulesCxConditionsEnabled(state)) {
@@ -37,6 +41,21 @@ export function minchoBabelPlugin(): PluginObj<PluginState> {
         exit(path, state) {
           removeUnusedJsxCssPropCssModuleImports(path);
           postprocess(path, state);
+
+          const start = started.get(state);
+
+          if (start !== undefined) {
+            state.file.metadata.minchoCompilation = {
+              durationMs: performance.now() - start,
+              extractedCalls: (
+                path.scope as import("./types.js").ProgramScope
+              ).minchoData.nodes.filter(
+                (node) => node.type === "ExportNamedDeclaration"
+              ).length,
+              jsxCssProp: state.opts.jsxCssPropTransformed === true,
+              sidecar: state.opts.result[0]
+            };
+          }
         }
       },
 
@@ -78,6 +97,7 @@ export { styledComponentPlugin as minchoStyledComponentPlugin } from "./styled.j
 export type {
   ExtractCalls,
   MinchoBabelFileMetadata,
+  MinchoCompilationMetadata,
   MinchoStaticCssEvalMetadata,
   PluginOptions
 } from "./types.js";

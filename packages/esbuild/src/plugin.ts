@@ -1,5 +1,7 @@
 import {
   type BabelOptions,
+  type MinchoDiagnosticsOptions,
+  CompilationDiagnostics,
   type BabelTransformResult,
   type InternalStaticCssEvalLoadedSource as StaticCssEvalLoadedSource,
   type InternalStaticCssEvalMetadataLike as StaticCssEvalMetadata,
@@ -48,6 +50,7 @@ const integrationHelpers = {
 };
 
 export interface MinchoEsbuildPluginOptions {
+  diagnostics?: MinchoDiagnosticsOptions;
   includeNodeModulesPattern?: RegExp;
   jsxCssProp?: boolean;
 
@@ -71,6 +74,7 @@ export interface MinchoEsbuildPluginOptions {
  */
 export function minchoEsbuildPlugin({
   includeNodeModulesPattern,
+  diagnostics: diagnosticsOptions,
   jsxCssProp,
   extractCalls
 }: MinchoEsbuildPluginOptions = {}): EsbuildPlugin {
@@ -78,6 +82,32 @@ export function minchoEsbuildPlugin({
     name: "mincho-js-esbuild",
 
     setup(build) {
+      const diagnostics = new CompilationDiagnostics(
+        diagnosticsOptions,
+        "esbuild"
+      );
+
+      const traced = {
+        compile: (options: Parameters<typeof compile>[0]) =>
+          diagnostics.run(options.originalPath, "sidecar-compile", () =>
+            integrationHelpers.compile(options)
+          ),
+
+        babelTransformSource: (
+          options: Parameters<typeof babelTransformSource>[0]
+        ) =>
+          diagnostics.run(options.filename, "transform", () =>
+            integrationHelpers.babelTransformSource(options)
+          ),
+
+        processDefineRulesPresetRegistryFile: (
+          options: Parameters<typeof processDefineRulesPresetRegistryFile>[0]
+        ) =>
+          diagnostics.run(options.filePath, "css-evaluation", () =>
+            integrationHelpers.processDefineRulesPresetRegistryFile(options)
+          )
+      };
+
       const transaction = getBuildTransaction(build.initialOptions);
       const resolvers = new Map<string, string>();
       const resolverCache = new Map<string, string>();
@@ -92,7 +122,10 @@ export function minchoEsbuildPlugin({
 
       const assets = new EsbuildAssets(build);
 
-      build.onStart(() => assets.beginBuild());
+      build.onStart(() => {
+        diagnostics.begin();
+        assets.beginBuild();
+      });
       build.onResolve({ filter: /.*/ }, (args) =>
         args.kind === "url-token" ? assets.resolveCssUrl(args.path) : undefined
       );
@@ -101,13 +134,19 @@ export function minchoEsbuildPlugin({
         build.initialOptions.absWorkingDir ?? process.cwd()
       );
 
-      build.onEnd((result) => {
+      build.onEnd(async (result) => {
         resolvers.clear();
         resolverCache.clear();
         staticCssEvalResolutionCache.clear();
         staticCssEvalLoadedSourceCache.clear();
 
-        if (result) return assets.finishBuild(result);
+        try {
+          if (result) return await assets.finishBuild(result);
+        } finally {
+          await diagnostics.flush(
+            build.initialOptions.absWorkingDir ?? process.cwd()
+          );
+        }
       });
 
       build.onResolve({ filter: /^extracted_(.*)\.css\.ts$/ }, async (args) => {
@@ -132,7 +171,7 @@ export function minchoEsbuildPlugin({
         async ({ path, pluginData }) => {
           const resolverContents = resolvers.get(pluginData.path)!;
           const assetWatchFiles = new Set<string>();
-          const { source, watchFiles = [] } = await integrationHelpers.compile({
+          const { source, watchFiles = [] } = await traced.compile({
             esbuild: build.esbuild,
             filePath: path,
             originalPath: pluginData.mainFilePath!,
@@ -159,7 +198,7 @@ export function minchoEsbuildPlugin({
               source: registrySource,
               packageGraph
             } = await integrationHelpers.runDefineRulesPresetRegistryStep(() =>
-              integrationHelpers.processDefineRulesPresetRegistryFile({
+              traced.processDefineRulesPresetRegistryFile({
                 source,
                 filePath: path,
                 outputCss: undefined,
@@ -261,12 +300,14 @@ export function minchoEsbuildPlugin({
           map,
           result: [file, cssExtract],
           staticCssEval
-        } = await integrationHelpers.babelTransformSource({
+        } = await traced.babelTransformSource({
           filename: args.path,
           root: await rootRealpath,
           source,
           loader,
-          babel: transformBabelOptions,
+          babel: diagnostics.enabled
+            ? { ...transformBabelOptions, diagnostics: true }
+            : transformBabelOptions,
           sourceMaps: Boolean(build.initialOptions.sourcemap)
         });
 

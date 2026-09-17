@@ -1,3 +1,4 @@
+import { measureCompilationPhase } from "./diagnostics.js";
 import { transformSync } from "@babel/core";
 import { minchoStyledComponentPlugin } from "@mincho-js/babel";
 import { addFileScope, getPackageInfo } from "@vanilla-extract/integration";
@@ -278,32 +279,34 @@ export async function compile({
     resolverCache
   });
 
-  const result = await esbuild.build({
-    stdin: {
-      contents: source,
-      loader: "tsx",
-      resolveDir: dirname(filePath),
-      sourcefile: basename(filePath)
-    },
-    metafile: true,
-    bundle: true,
-    external: ["@vanilla-extract", "@mincho-js/css", ...externals],
-    platform: "node",
-    write: false,
-    absWorkingDir: cwd,
-    loader,
-    plugins: [
-      ...plugins.map((plugin) =>
-        scopeLoadedDependencies(plugin, packageInfo.name)
-      ),
-      createScopedOnLoadPlugin(
-        packageInfo.name,
-        loader,
-        readFile,
-        readFileBytes
-      )
-    ]
-  });
+  const result = await measureCompilationPhase("esbuild", () =>
+    esbuild.build({
+      stdin: {
+        contents: source,
+        loader: "tsx",
+        resolveDir: dirname(filePath),
+        sourcefile: basename(filePath)
+      },
+      metafile: true,
+      bundle: true,
+      external: ["@vanilla-extract", "@mincho-js/css", ...externals],
+      platform: "node",
+      write: false,
+      absWorkingDir: cwd,
+      loader,
+      plugins: [
+        ...plugins.map((plugin) =>
+          scopeLoadedDependencies(plugin, packageInfo.name)
+        ),
+        createScopedOnLoadPlugin(
+          packageInfo.name,
+          loader,
+          readFile,
+          readFileBytes
+        )
+      ]
+    })
+  );
 
   const compiledSource = assertSingleChildCompilationOutput(result.outputFiles);
 

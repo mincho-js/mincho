@@ -1,0 +1,122 @@
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, expect, it, vi } from "vitest";
+import {
+  CompilationDiagnostics,
+  measureCompilationPhase,
+  recordCompilationDiagnostic
+} from "./diagnostics.js";
+
+describe("compilation diagnostics", () => {
+  it("does not collect disabled instrumentation and preserves results", async () => {
+    const diagnostics = new CompilationDiagnostics();
+    const now = vi.spyOn(performance, "now");
+
+    try {
+      diagnostics.begin();
+      const result = Promise.resolve(42);
+
+      expect(diagnostics.run("file", "transform", () => result)).toBe(result);
+      expect(await measureCompilationPhase("parse", () => result)).toBe(42);
+      diagnostics.record("file", "cache-hit");
+      recordCompilationDiagnostic("cache-hit");
+
+      expect(now).not.toHaveBeenCalled();
+      expect(diagnostics.snapshot().builds).toEqual([]);
+    } finally {
+      now.mockRestore();
+    }
+  });
+
+  it("isolates overlapping environments and drops obsolete completions", async () => {
+    const diagnostics = new CompilationDiagnostics(
+      { json: "report.json" },
+      "client"
+    );
+
+    const server = diagnostics.fork("ssr");
+    let finish!: () => void;
+    const old = diagnostics.run(
+      "old.ts",
+      "transform",
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        })
+    );
+
+    diagnostics.begin();
+    await Promise.all([
+      diagnostics.run("client.ts", "transform", async () => {
+        await measureCompilationPhase("parse", async () => undefined);
+        recordCompilationDiagnostic("cache-miss", { reason: "source-changed" });
+      }),
+      server.run("server.ts", "transform", async () => undefined)
+    ]);
+    finish();
+    await old;
+
+    const report = diagnostics.snapshot();
+
+    expect(report.builds.map((build) => build.environment)).toEqual([
+      "client",
+      "ssr"
+    ]);
+    expect(report.builds[0]?.generation).toBe(2);
+    expect(report.builds[0]?.events.map((event) => event.phase)).toEqual([
+      "parse",
+      "cache-miss",
+      "transform"
+    ]);
+    expect(
+      report.builds
+        .flatMap((build) => build.events)
+        .some((event) => event.file === "old.ts")
+    ).toBe(false);
+  });
+
+  it("writes machine reports and trace events after failures without masking errors", async () => {
+    const root = await mkdtemp(join(tmpdir(), "mincho-diagnostics-"));
+
+    try {
+      const diagnostics = new CompilationDiagnostics({
+        json: "report.json",
+        trace: "trace.json"
+      });
+
+      const error = new Error("failed compilation");
+
+      await expect(
+        diagnostics.run("App.tsx", "babel", async () => {
+          throw error;
+        })
+      ).rejects.toBe(error);
+
+      await diagnostics.flush(root);
+
+      const report = JSON.parse(
+        await readFile(join(root, "report.json"), "utf8")
+      );
+
+      const trace = JSON.parse(
+        await readFile(join(root, "trace.json"), "utf8")
+      );
+
+      expect(report.version).toBe(1);
+      expect(report.builds[0].events[0]).toMatchObject({
+        file: "App.tsx",
+        phase: "babel",
+        status: "error"
+      });
+      expect(trace.traceEvents[0]).toMatchObject({
+        name: "babel",
+        ph: "X",
+        args: { status: "error" }
+      });
+      expect(trace.traceEvents[0].dur).toBeGreaterThanOrEqual(0);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});

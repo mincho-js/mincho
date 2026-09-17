@@ -14,7 +14,15 @@ import type {
 
 export type { ExtractCalls } from "./extractionCalls/types.js";
 
+export interface MinchoCompilationMetadata {
+  durationMs: number;
+  extractedCalls: number;
+  jsxCssProp: boolean;
+  sidecar: string;
+}
+
 export interface PluginOptions {
+  diagnostics?: boolean;
   result: [string, string];
 
   /** Additional build-time calls; local files are relative to the Babel root. */
@@ -40,6 +48,7 @@ export interface MinchoStaticCssEvalMetadata {
 }
 
 export interface MinchoBabelFileMetadata {
+  minchoCompilation?: MinchoCompilationMetadata;
   minchoStaticCssEval?: MinchoStaticCssEvalMetadata;
   minchoDefineRulesCxConditions?: DefineRulesCxConditionsMetadata;
   [key: string]: unknown;

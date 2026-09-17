@@ -1,3 +1,9 @@
+export {
+  CompilationDiagnostics,
+  measureCompilationPhase as internalMeasureCompilationPhase,
+  recordCompilationDiagnostic as internalRecordCompilationDiagnostic,
+  type MinchoDiagnosticsOptions
+} from "./diagnostics.js";
 export type { ExtractCalls } from "@mincho-js/babel";
 export {
   internalInspectCommonJs,

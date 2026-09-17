@@ -14,7 +14,7 @@ export async function reportCssSizes(consumerRoot: string): Promise<void> {
       const files = (
         await readdir(root, { recursive: true, withFileTypes: true })
       )
-        .filter((file) => file.isFile() && file.name.endsWith(".css"))
+        .filter((file) => file.isFile() && /\.(css|[cm]?js)$/.test(file.name))
         .map((file) => join(file.parentPath, file.name))
         .sort();
       if (files.length === 0)
@@ -24,8 +24,11 @@ export async function reportCssSizes(consumerRoot: string): Promise<void> {
 
       for (const file of files) {
         const bytes = await readFile(file);
-        sources.push(bytes.toString("utf8"));
+
+        if (file.endsWith(".css")) sources.push(bytes.toString("utf8"));
+
         reports.push({
+          kind: file.endsWith(".css") ? "css" : "javascript",
           bundler,
           minified: mode === "dist-minified",
           file: relative(root, file),
@@ -44,9 +47,17 @@ export async function reportCssSizes(consumerRoot: string): Promise<void> {
 
   await writeFile(
     join(consumerRoot, "css-sizes.json"),
+    `${JSON.stringify(
+      reports.filter((report) => report.kind === "css"),
+      null,
+      2
+    )}\n`
+  );
+  await writeFile(
+    join(consumerRoot, "artifact-sizes.json"),
     `${JSON.stringify(reports, null, 2)}\n`
   );
   console.log(
-    `[package-contract] CSS transfer sizes: ${JSON.stringify(reports)}`
+    `[package-contract] JS/CSS transfer sizes: ${JSON.stringify(reports)}`
   );
 }

@@ -1,3 +1,7 @@
+import {
+  measureCompilationPhase,
+  recordCompilationDiagnostic
+} from "./diagnostics.js";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { extname } from "node:path";
@@ -11,6 +15,7 @@ import {
   type InternalImportedStaticCssEvalModuleRecord as ImportedStaticCssEvalModuleRecord,
   type MinchoStaticCssEvalMetadata,
   type PluginOptions,
+  type MinchoCompilationMetadata,
   minchoBabelPlugin,
   minchoStyledComponentPlugin,
   InternalExtractCallsError
@@ -204,6 +209,7 @@ export type BabelOptions = Omit<
   | "sourceMaps"
   | "inputSourceMap"
 > & {
+  diagnostics?: boolean;
   extractCalls?: PluginOptions["extractCalls"];
   jsxCssProp?: boolean;
   optimize?: PluginOptions["optimize"];
@@ -215,6 +221,7 @@ export type BabelOptions = Omit<
 };
 
 export type BabelTransformResult = {
+  readonly diagnostics?: MinchoCompilationMetadata;
   commonJsTransformed?: boolean;
   code: string;
   readonly map?: BabelFileResult["map"];
@@ -265,6 +272,7 @@ export async function babelTransformSource({
   inputSourceMap
 }: BabelTransformSourceOptions): Promise<BabelTransformResult> {
   const {
+    diagnostics,
     extractCalls,
     jsxCssProp = false,
     optimize,
@@ -278,7 +286,9 @@ export async function babelTransformSource({
   const sourceProvider: StaticCssEvalSourceProvider | undefined =
     staticCssEvalSourceProvider && {
       resolve: (importerId, specifier, options) =>
-        staticCssEvalSourceProvider.resolve(importerId, specifier, options),
+        measureCompilationPhase("source-resolve", async () =>
+          staticCssEvalSourceProvider.resolve(importerId, specifier, options)
+        ),
 
       load: (id) =>
         id === path
@@ -286,7 +296,9 @@ export async function babelTransformSource({
               sourceText: source,
               sourceHash: createHash("sha256").update(source).digest("hex")
             }
-          : staticCssEvalSourceProvider.load(id)
+          : measureCompilationPhase("source-load", async () =>
+              staticCssEvalSourceProvider.load(id)
+            )
     };
 
   const prepassSourceProvider =
@@ -302,6 +314,7 @@ export async function babelTransformSource({
   const extractCallsDependencies = new Set<string>();
   const options: PluginOptions = {
     result: ["", ""],
+    diagnostics,
     jsxCssProp,
     ...(extractCalls !== undefined ? { extractCalls } : {}),
     ...(optimize ? { optimize } : {})
@@ -329,7 +342,9 @@ export async function babelTransformSource({
 
     staticCssEvalPrepass =
       jsxCssProp && prepassSourceProvider
-        ? await createStaticCssEvalPrepass(path, prepassSourceProvider)
+        ? await measureCompilationPhase("static-prepass", () =>
+            createStaticCssEvalPrepass(path, prepassSourceProvider)
+          )
         : undefined;
 
     observedStaticCssEvalMetadata.diagnostics.push(
@@ -346,37 +361,41 @@ export async function babelTransformSource({
       );
     }
 
-    const transformed = await transformAsync(source, {
-      sourceType: "unambiguous",
-      ...babelCoreOptions,
-      filename: path,
-      plugins: [
-        ...(babelCoreOptions.sourceType === undefined
-          ? [inferCommonJsSourceType()]
-          : []),
-        ...(loader === "jsx" || loader === "tsx" ? [jsxSyntaxPluginPath] : []),
-        ...(Array.isArray(babelCoreOptions.plugins)
-          ? babelCoreOptions.plugins
-          : []),
-        minchoStyledComponentPlugin(),
-        [minchoBabelPlugin(), options]
-      ],
-      presets: [
-        ...(Array.isArray(babelCoreOptions.presets)
-          ? babelCoreOptions.presets
-          : []),
-        ...(loader === "ts" || loader === "tsx"
-          ? [
-              [
-                typescriptPresetPath,
-                { allExtensions: true, isTSX: loader === "tsx" }
-              ] satisfies NonNullable<TransformOptions["presets"]>[number]
-            ]
-          : [])
-      ],
-      sourceMaps,
-      ...(inputSourceMap !== undefined ? { inputSourceMap } : {})
-    });
+    const transformed = await measureCompilationPhase("babel", () =>
+      transformAsync(source, {
+        sourceType: "unambiguous",
+        ...babelCoreOptions,
+        filename: path,
+        plugins: [
+          ...(babelCoreOptions.sourceType === undefined
+            ? [inferCommonJsSourceType()]
+            : []),
+          ...(loader === "jsx" || loader === "tsx"
+            ? [jsxSyntaxPluginPath]
+            : []),
+          ...(Array.isArray(babelCoreOptions.plugins)
+            ? babelCoreOptions.plugins
+            : []),
+          minchoStyledComponentPlugin(),
+          [minchoBabelPlugin(), options]
+        ],
+        presets: [
+          ...(Array.isArray(babelCoreOptions.presets)
+            ? babelCoreOptions.presets
+            : []),
+          ...(loader === "ts" || loader === "tsx"
+            ? [
+                [
+                  typescriptPresetPath,
+                  { allExtensions: true, isTSX: loader === "tsx" }
+                ] satisfies NonNullable<TransformOptions["presets"]>[number]
+              ]
+            : [])
+        ],
+        sourceMaps,
+        ...(inputSourceMap !== undefined ? { inputSourceMap } : {})
+      })
+    );
     if (!transformed || transformed.code == null) {
       throw new Error(`Failed to transform ${path}`);
     }
@@ -440,7 +459,19 @@ export async function babelTransformSource({
     preserveProviderRecords: true
   });
 
+  const compilation = (
+    result.metadata as { minchoCompilation?: MinchoCompilationMetadata }
+  )?.minchoCompilation;
+
+  if (compilation) recordCompilationDiagnostic("extraction", compilation);
+  if (staticCssEval)
+    recordCompilationDiagnostic("static-evaluation", {
+      dependencies: staticCssEval.dependencies,
+      diagnostics: staticCssEval.diagnostics
+    });
+
   return {
+    ...(compilation ? { diagnostics: compilation } : {}),
     result: options.result,
     code: result.code!,
     ...(sourceMaps ? { map: result.map } : {}),
