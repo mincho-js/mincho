@@ -19,7 +19,8 @@
         "dist/**",
         "**/package.json",
         "!package.json",
-        "!src/**/package.json"
+        "!src/**/package.json",
+        "!_release/**"
       ]
     },
     "lint": {
