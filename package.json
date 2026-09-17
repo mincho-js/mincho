@@ -28,6 +28,7 @@
     "check:peers": "yarn explain peer-requirements | grep -q '✘' && exit 1 || exit 0",
     "check:package-contract": "yarn vite-node scripts/package-contract/index.ts",
     "check:vite-native-css-contract": "yarn workspace @mincho-js/vite test src/libraryCssFinalization.test.ts --exclude '**/_release/**'",
+    "benchmark:compilation": "node scripts/benchmark-compilation.mjs",
     "check:pkgs": "yarn check:peers & yarn constraints",
     "doctor": "node scripts/doctor/index.mjs",
     "doctor:raw": "doctor",
