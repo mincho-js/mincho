@@ -84,3 +84,7 @@ export {
   type InternalStaticCssEvalMetadataLike,
   type InternalStaticCssEvalSourceIdentity
 } from "./staticCssEvalUtils.js";
+
+export { CompilationCache as InternalCompilationCache } from "./compilationCache.js";
+
+export type { CompileCacheBridge as InternalCompileCacheBridge } from "./compileCache.js";

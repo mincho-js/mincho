@@ -221,6 +221,33 @@ describe("esbuild build contracts", () => {
 });
 
 describe("native esbuild assets", () => {
+  it("replays CSS-only assets on unchanged cached builds", async () => {
+    const root = await fixture({
+      "entry.tsx":
+        'import { css } from "@mincho-js/css"; import image from "./icon.png?url"; export const className = css({ backgroundImage: `url("${image}")` });',
+      "icon.png": "asset bytes"
+    });
+
+    const buildContext = await context(
+      buildOptions(root, { loader: { ".png": "file" } })
+    );
+
+    try {
+      const first = await buildContext.rebuild();
+      const second = await buildContext.rebuild();
+
+      expect(second.outputFiles?.map((file) => [file.path, file.text])).toEqual(
+        first.outputFiles?.map((file) => [file.path, file.text])
+      );
+      expect(
+        second.outputFiles?.some((file) => file.path.endsWith(".png"))
+      ).toBe(true);
+      expect(outputText(second, ".css")).toContain("background-image");
+    } finally {
+      await buildContext.dispose();
+    }
+  });
+
   it("diagnoses output-dependent file strings and accepts publicPath or dataurl", async () => {
     const source =
       'import image from "./icon.png?url"; export const App = () => <div css={{vars:{"--asset-url":image}}} />;';

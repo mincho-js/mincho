@@ -1,10 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
+import { mkdir, mkdtemp, writeFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   BabelTransformError,
   babelTransform,
   babelTransformSource
 } from "./babel.js";
 import { MinchoProjectEngine } from "./staticCssEvalProjectEngine.js";
+import { CompilationCache } from "./compilationCache.js";
 
 const filename = "/virtual/mincho-owner.tsx";
 const source =
@@ -26,6 +30,66 @@ function seedArtifacts(engine: MinchoProjectEngine) {
 }
 
 describe("babelTransformSource", () => {
+  it.each(["cwd", "root", "default"] as const)(
+    "observes a sibling Babel configuration selected through %s",
+    async (selection) => {
+      const directory = await mkdtemp(join(tmpdir(), "mincho-babel-root-"));
+      const project = join(directory, "project");
+      const sourceRoot = join(directory, "source");
+      const config = join(project, "babel.config.json");
+      const cwd =
+        selection === "default"
+          ? vi.spyOn(process, "cwd").mockReturnValue(project)
+          : undefined;
+
+      try {
+        await Promise.all([mkdir(project), mkdir(sourceRoot)]);
+        for (const color of ["blue", "green"]) {
+          await writeFile(
+            join(project, `${color}.cjs`),
+            `module.exports = () => ({ parserOverride(code, options, parse) { return parse(code.replace('"red"', '"${color}"'), options); } });`
+          );
+        }
+
+        const options = {
+          filename: join(sourceRoot, "entry.ts"),
+          source:
+            'import { css } from "@mincho-js/css"; export const cls = css({ color: "red" });',
+          babel: {
+            compilationCache: new CompilationCache(),
+            ...(selection === "cwd" ? { cwd: project } : {}),
+            ...(selection === "root" ? { cwd: directory, root: "project" } : {})
+          }
+        };
+
+        expect((await babelTransformSource(options)).result[1]).toContain(
+          '"red"'
+        );
+        expect((await babelTransformSource(options)).result[1]).toContain(
+          '"red"'
+        );
+
+        for (const color of ["blue", "green"]) {
+          await writeFile(
+            config,
+            JSON.stringify({ plugins: [`./${color}.cjs`] })
+          );
+          expect((await babelTransformSource(options)).result[1]).toContain(
+            `"${color}"`
+          );
+        }
+
+        await rm(config);
+        expect((await babelTransformSource(options)).result[1]).toContain(
+          '"red"'
+        );
+      } finally {
+        cwd?.mockRestore();
+        await rm(directory, { recursive: true, force: true });
+      }
+    }
+  );
+
   it("forwards extractCalls separately from Babel core options and respects effective JSX loaders", async () => {
     const transformed = await babelTransformSource({
       filename: "/virtual/entry.js",

@@ -121,3 +121,5 @@ export {
   type ModuleGraphRequest as InternalModuleGraphRequest,
   type ModuleTarget as InternalModuleTarget
 } from "./moduleGraph.js";
+
+export { SourceAstCache as InternalSourceAstCache } from "./staticCssEval/moduleParser.js";

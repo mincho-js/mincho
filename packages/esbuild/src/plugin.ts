@@ -2,6 +2,7 @@ import {
   type BabelOptions,
   type MinchoDiagnosticsOptions,
   CompilationDiagnostics,
+  InternalCompilationCache,
   type BabelTransformResult,
   type InternalStaticCssEvalLoadedSource as StaticCssEvalLoadedSource,
   type InternalStaticCssEvalMetadataLike as StaticCssEvalMetadata,
@@ -51,6 +52,7 @@ const integrationHelpers = {
 
 export interface MinchoEsbuildPluginOptions {
   diagnostics?: MinchoDiagnosticsOptions;
+  cache?: boolean;
   includeNodeModulesPattern?: RegExp;
   jsxCssProp?: boolean;
 
@@ -75,6 +77,7 @@ export interface MinchoEsbuildPluginOptions {
 export function minchoEsbuildPlugin({
   includeNodeModulesPattern,
   diagnostics: diagnosticsOptions,
+  cache: enableCache = true,
   jsxCssProp,
   extractCalls
 }: MinchoEsbuildPluginOptions = {}): EsbuildPlugin {
@@ -82,6 +85,12 @@ export function minchoEsbuildPlugin({
     name: "mincho-js-esbuild",
 
     setup(build) {
+      const compilationCache = enableCache
+        ? new InternalCompilationCache()
+        : undefined;
+
+      build.onDispose?.(() => compilationCache?.clear());
+
       const diagnostics = new CompilationDiagnostics(
         diagnosticsOptions,
         "esbuild"
@@ -124,6 +133,7 @@ export function minchoEsbuildPlugin({
 
       build.onStart(() => {
         diagnostics.begin();
+        compilationCache?.begin();
         assets.beginBuild();
       });
       build.onResolve({ filter: /.*/ }, (args) =>
@@ -171,6 +181,7 @@ export function minchoEsbuildPlugin({
         async ({ path, pluginData }) => {
           const resolverContents = resolvers.get(pluginData.path)!;
           const assetWatchFiles = new Set<string>();
+          const assetBridge = assets.createCompileBridge(assetWatchFiles);
           const { source, watchFiles = [] } = await traced.compile({
             esbuild: build.esbuild,
             filePath: path,
@@ -179,7 +190,9 @@ export function minchoEsbuildPlugin({
             externals: [],
             cwd: build.initialOptions.absWorkingDir,
             loader: assets.getCompileLoaders(),
-            plugins: [assets.createCompilePlugin(assetWatchFiles)],
+            plugins: [assetBridge.plugin],
+            cacheBridge: assetBridge.cacheBridge,
+            cache: compilationCache,
             readFileBytes: transaction?.snapshot.readFile.bind(
               transaction.snapshot
             ),
@@ -305,9 +318,11 @@ export function minchoEsbuildPlugin({
           root: await rootRealpath,
           source,
           loader,
-          babel: diagnostics.enabled
-            ? { ...transformBabelOptions, diagnostics: true }
-            : transformBabelOptions,
+          babel: {
+            ...transformBabelOptions,
+            compilationCache,
+            ...(diagnostics.enabled ? { diagnostics: true } : {})
+          },
           sourceMaps: Boolean(build.initialOptions.sourcemap)
         });
 
@@ -3261,7 +3276,10 @@ if (import.meta.vitest) {
               filename: entryPath,
               source: expect.any(String),
               loader: "tsx",
-              babel: fixtureCase.expectedBabelOptions
+              babel: expect.objectContaining({
+                ...fixtureCase.expectedBabelOptions,
+                compilationCache: expect.any(InternalCompilationCache)
+              })
             })
           );
           expect(scriptLoadResult.loader).toBe("tsx");

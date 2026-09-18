@@ -1,3 +1,4 @@
+import type { SourceAstCache } from "../moduleParser.js";
 import { createStaticCssModuleCache } from "../moduleCache.js";
 import type { StaticCssEvalProvider } from "../types.js";
 import type {
@@ -21,10 +22,11 @@ export function createImportedStaticCssEvalProvider(
 }
 
 export function createImportedStaticCssEvalModuleRecord(
-  loadedModule: ImportedStaticCssEvalLoadedModule
+  loadedModule: ImportedStaticCssEvalLoadedModule,
+  parserCache?: SourceAstCache
 ): ImportedStaticCssEvalModuleRecord {
   return createImportedStaticCssEvalModuleRecordWithCache(
     loadedModule,
-    createStaticCssModuleCache()
+    createStaticCssModuleCache(parserCache)
   );
 }

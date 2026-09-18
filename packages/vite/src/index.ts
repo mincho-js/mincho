@@ -2,6 +2,7 @@ import {
   type BabelOptions,
   type MinchoDiagnosticsOptions,
   CompilationDiagnostics,
+  InternalCompilationCache,
   type BabelTransformResult,
   type DefineRulesPackageGraph,
   type InternalStaticCssEvalLoadedSource as StaticCssEvalLoadedSource,
@@ -74,6 +75,7 @@ function extractedCssFileFilter(filePath: string) {
 
 export interface MinchoVitePluginOptions {
   diagnostics?: MinchoDiagnosticsOptions;
+  cache?: boolean;
   babel?: BabelOptions;
   jsxCssProp?: boolean;
 
@@ -147,9 +149,12 @@ function createMinchoViteEnvironmentPlugin(
   _options: MinchoVitePluginOptions | undefined,
   diagnostics: CompilationDiagnostics
 ) {
+  const compilationCache =
+    _options?.cache === false ? undefined : new InternalCompilationCache();
+
   const tracedCompile = (options: Parameters<typeof compile>[0]) =>
     diagnostics.run(options.originalPath, "sidecar-compile", () =>
-      compile(options)
+      compile({ ...options, cache: compilationCache })
     );
 
   const tracedTransform = (
@@ -375,6 +380,8 @@ function createMinchoViteEnvironmentPlugin(
   }
 
   function invalidateStaticCssEvalDependency(dependencyId: string): void {
+    compilationCache?.invalidate(dependencyId);
+
     for (const ownerId of staticCssEvalProjectEngine.invalidateByDependency(
       dependencyId
     )) {
@@ -549,6 +556,7 @@ function createMinchoViteEnvironmentPlugin(
 
         diagnosticsClosed = false;
         diagnostics.begin();
+        compilationCache?.begin();
         transformEpoch = Symbol("build");
 
         if (graphAnalysisClosed) {
@@ -1014,6 +1022,7 @@ function createMinchoViteEnvironmentPlugin(
 
         const transformBabelOptions: BabelOptions = {
           ...babelOptions,
+          compilationCache,
           staticCssEvalProjectEngine,
           staticCssEvalSourceProvider: {
             ...sourceProvider,
@@ -1246,6 +1255,10 @@ function createMinchoViteEnvironmentPlugin(
       abortOutputLinkers(error ?? new Error("Vite rendering failed"));
     },
 
+    watchChange(id) {
+      compilationCache?.invalidate(id);
+    },
+
     async closeBundle() {
       cancelDiagnosticsFlush();
       diagnosticsClosed = true;
@@ -1257,6 +1270,7 @@ function createMinchoViteEnvironmentPlugin(
         abortOutputLinkers(new Error("Vite bundle closed"));
 
         if (!config.build.watch) {
+          compilationCache?.clear();
           graphAnalysisClosed = true;
           await graphAnalysis.close();
         }
@@ -1267,6 +1281,7 @@ function createMinchoViteEnvironmentPlugin(
       cancelDiagnosticsFlush();
       diagnosticsClosed = true;
       transformEpoch = Symbol("closed");
+      compilationCache?.clear();
 
       try {
         await diagnostics.flush(config.root);

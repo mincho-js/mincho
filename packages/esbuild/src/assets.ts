@@ -1,3 +1,4 @@
+import type { InternalCompileCacheBridge } from "@mincho-js/integration";
 import { parse } from "@babel/parser";
 import { getBuildTransaction } from "./buildInputSnapshot.js";
 import { createHash } from "node:crypto";
@@ -48,13 +49,15 @@ export class EsbuildAssets {
     this.layout = undefined;
   }
 
-  async load(path: string, suffix: string): Promise<string> {
+  async load(path: string, suffix: string, input?: Buffer): Promise<string> {
     const options = this.build.initialOptions;
     const loader = getAssetLoader(path, options);
     const transaction = getBuildTransaction(this.build.initialOptions);
-    const contents = await (transaction
-      ? transaction.snapshot.readFile(path)
-      : fs.readFile(path));
+    const contents =
+      input ??
+      (await (transaction
+        ? transaction.snapshot.readFile(path)
+        : fs.readFile(path)));
 
     const digest = createHash("sha256").update(contents).digest("hex");
     const layout = await (this.layout ??= this.getEntryLayout());
@@ -131,7 +134,26 @@ export class EsbuildAssets {
   }
 
   createCompilePlugin(watchFiles: Set<string>): Plugin {
-    return {
+    return this.createCompileBridge(watchFiles).plugin;
+  }
+
+  createCompileBridge(watchFiles: Set<string>): {
+    plugin: Plugin;
+    cacheBridge: InternalCompileCacheBridge;
+  } {
+    const requests: Array<{
+      path: string;
+      suffix: string;
+      raw: boolean;
+      value: string;
+      digest: string;
+    }> = [];
+
+    const readInput = (path: string) =>
+      getBuildTransaction(this.build.initialOptions)?.snapshot.readFile(path) ??
+      fs.readFile(path);
+
+    const plugin: Plugin = {
       name: "mincho-static-assets",
 
       setup: (build) => {
@@ -143,14 +165,19 @@ export class EsbuildAssets {
           const loader = findAssetLoader(args.path, this.build.initialOptions);
           if (!query.has("raw") && !query.has("url") && !loader) return;
 
-          const value =
-            query.has("raw") && !query.has("url")
-              ? await (getBuildTransaction(this.build.initialOptions)
-                  ?.snapshot.readFile(args.path)
-                  .then((bytes) => bytes.toString("utf8")) ??
-                  fs.readFile(args.path, "utf8"))
-              : await this.load(args.path, args.suffix);
+          const bytes = await readInput(args.path);
+          const raw = query.has("raw") && !query.has("url");
+          const value = raw
+            ? bytes.toString("utf8")
+            : await this.load(args.path, args.suffix, bytes);
 
+          requests.push({
+            path: args.path,
+            suffix: args.suffix,
+            raw,
+            value,
+            digest: createHash("sha256").update(bytes).digest("hex")
+          });
           watchFiles.add(args.path);
 
           return {
@@ -159,6 +186,55 @@ export class EsbuildAssets {
             watchFiles: [args.path]
           };
         });
+      }
+    };
+
+    const options = this.build.initialOptions;
+
+    return {
+      plugin,
+      cacheBridge: {
+        plugin,
+        key: JSON.stringify([
+          options.loader,
+          options.entryPoints,
+          options.stdin?.resolveDir,
+          options.outdir,
+          options.outfile,
+          options.outbase,
+          options.entryNames,
+          options.assetNames,
+          options.publicPath,
+          options.outExtension,
+          options.splitting
+        ]),
+
+        capture: () => ({
+          files: requests.map(({ path, digest }) => ({ path, digest })),
+          data: requests.map((request) => ({ ...request }))
+        }),
+
+        restore: async (data) => {
+          if (!Array.isArray(data)) return false;
+
+          for (const request of data as typeof requests) {
+            const bytes = await readInput(request.path);
+            if (
+              createHash("sha256").update(bytes).digest("hex") !==
+              request.digest
+            )
+              return false;
+
+            const value = request.raw
+              ? bytes.toString("utf8")
+              : await this.load(request.path, request.suffix, bytes);
+            if (value !== request.value) return false;
+
+            watchFiles.add(request.path);
+          }
+
+          return true;
+        }
       }
     };
   }

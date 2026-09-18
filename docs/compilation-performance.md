@@ -36,6 +36,20 @@ re-exports. It keeps import and require conditions separate and refuses mutable,
 ambiguous or cyclic definitions. Graph traversals own their scopes; later
 transforms do not reuse mutable Babel scopes from another traversal.
 
+Build integrations enable a bounded, in-memory `cache` by default. Set
+`cache: false` to compare uncached builds. Each Vite environment or esbuild
+context owns its cache; closing it releases all entries. Source ASTs are cloned
+before traversal. Transform reuse validates source-provider reads and resolutions;
+sidecar reuse checks dependency contents, resolution directories and ancestor
+configuration files. Pending work is shared only within a build generation.
+Failures are never retained, and stale completions cannot replace newer entries.
+
+Custom Babel configuration and unknown compilation plugins bypass reuse because
+their external inputs cannot be tracked. Cache hits restore dependency watches
+and native assets. CSS evaluation and registry publication still run for each
+build; their mutable state is not cached across builds. Diagnostics distinguish
+hits, misses, invalidations, pending work and bypasses.
+
 ## Reproducible compilation benchmark
 
 Build each revision with `PACKAGE_PUBLISH=true` before packaging it. Keep

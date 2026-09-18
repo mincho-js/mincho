@@ -1,6 +1,7 @@
 import type { NodePath } from "@babel/core";
 import { types as t } from "@babel/core";
 import {
+  type InternalSourceAstCache,
   internalCollectJsxCssPropStaticCssEvalCandidates as collectJsxCssPropStaticCssEvalCandidates,
   internalCreateImportedStaticCssEvalModuleRecord as createImportedStaticCssEvalModuleRecord,
   internalCreateImportedStaticCssEvalProvider as createImportedStaticCssEvalProvider,
@@ -50,6 +51,7 @@ class StaticCssEvalPrepassLimit extends Error {}
 export const STATIC_CSS_EVAL_PREPASS_MAX_TRAVERSED_NODES = 100_000;
 
 interface StaticCssEvalPrepassState {
+  parserCache?: InternalSourceAstCache;
   loadedModules: ImportedStaticCssEvalLoadedModule[];
   dependencies: StaticCssEvalPrepassDependencies;
   resolvedModuleCache: Map<string, ImportedStaticCssEvalModuleRecord>;
@@ -157,7 +159,8 @@ interface StaticCssEvalPrepassLocalBindingWalkOptions {
 
 export async function createStaticCssEvalPrepass(
   ownerId: string,
-  sourceProvider: StaticCssEvalSourceProvider
+  sourceProvider: StaticCssEvalSourceProvider,
+  parserCache?: InternalSourceAstCache
 ): Promise<PreparedStaticCssEvalPrepass> {
   const ownerSource = await sourceProvider.load(ownerId);
 
@@ -166,13 +169,18 @@ export async function createStaticCssEvalPrepass(
   }
 
   const ownerModule = createLoadedModule(ownerId, ownerSource);
-  const ownerRecord = createImportedStaticCssEvalModuleRecord(ownerModule);
+  const ownerRecord = createImportedStaticCssEvalModuleRecord(
+    ownerModule,
+    parserCache
+  );
+
   const candidates = collectJsxCssPropStaticCssEvalCandidates(
     ownerRecord.programPath,
     { importerId: ownerId }
   );
 
   const prepassState: StaticCssEvalPrepassState = {
+    parserCache,
     loadedModules: [ownerModule],
     dependencies: new StaticCssEvalPrepassDependencies(),
     resolvedModuleCache: new Map([[ownerRecord.id, ownerRecord]]),
@@ -395,7 +403,10 @@ async function loadStaticCssEvalPrepassDependency(
   let moduleRecord: ImportedStaticCssEvalModuleRecord;
 
   try {
-    moduleRecord = createImportedStaticCssEvalModuleRecord(loadedModule);
+    moduleRecord = createImportedStaticCssEvalModuleRecord(
+      loadedModule,
+      state.parserCache
+    );
   } catch (error) {
     if (!(error instanceof Error)) {
       throw error;

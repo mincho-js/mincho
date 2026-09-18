@@ -3,7 +3,10 @@ import type { NodePath } from "@babel/core";
 import { collectStaticCssEvalCjsExportMapOperations } from "./cjsExports.js";
 import type { StaticCssEvalCjsExportMapOperation } from "./cjsExports.js";
 import { createStaticCssEvalDiagnostic } from "./diagnostics.js";
-import { parseStaticCssModuleProgram } from "./moduleParser.js";
+import {
+  parseStaticCssModuleProgram,
+  type SourceAstCache
+} from "./moduleParser.js";
 import type {
   StaticCssEvalDiagnostic,
   StaticCssEvalExportName,
@@ -200,7 +203,9 @@ const cacheInstrumentation = new WeakMap<
   StaticCssModuleCacheInstrumentation
 >();
 
-export function createStaticCssModuleCache(): StaticCssModuleCache {
+export function createStaticCssModuleCache(
+  parserCache?: SourceAstCache
+): StaticCssModuleCache {
   const parsedModules = new Map<string, ParsedStaticCssModule>();
   const instrumentation: StaticCssModuleCacheInstrumentation = {
     hits: 0,
@@ -226,7 +231,12 @@ export function createStaticCssModuleCache(): StaticCssModuleCache {
         (instrumentation.parseCountByFile.get(source.resolvedFile) ?? 0) + 1
       );
 
-      const nextParsedModule = parseStaticCssModule(source, cacheKey);
+      const nextParsedModule = parseStaticCssModule(
+        source,
+        cacheKey,
+        parserCache
+      );
+
       parsedModules.set(formattedCacheKey, nextParsedModule);
 
       return nextParsedModule;
@@ -274,13 +284,17 @@ export function formatExportMapCacheKey(cacheKey: ExportMapCacheKey): string {
 
 function parseStaticCssModule(
   source: StaticCssModuleSource,
-  cacheKey: ExportMapCacheKey
+  cacheKey: ExportMapCacheKey,
+  parserCache?: SourceAstCache
 ): ParsedStaticCssModule {
-  const { ast, programPath } = parseStaticCssModuleProgram({
-    resolvedFile: source.resolvedFile,
-    source: source.source,
-    parserOptions: cacheKey.parserOptions
-  });
+  const { ast, programPath } = parseStaticCssModuleProgram(
+    {
+      resolvedFile: source.resolvedFile,
+      source: source.source,
+      parserOptions: cacheKey.parserOptions
+    },
+    parserCache
+  );
 
   const importDeclarations: t.ImportDeclaration[] = [];
   const exportDeclarations: StaticCssModuleExportDeclaration[] = [];

@@ -1,3 +1,5 @@
+import { cachedTransform } from "./transformCache.js";
+import type { CompilationCache } from "./compilationCache.js";
 import {
   measureCompilationPhase,
   recordCompilationDiagnostic
@@ -209,6 +211,8 @@ export type BabelOptions = Omit<
   | "sourceMaps"
   | "inputSourceMap"
 > & {
+  /** @internal Environment-owned memory cache. */
+  compilationCache?: CompilationCache;
   diagnostics?: boolean;
   extractCalls?: PluginOptions["extractCalls"];
   jsxCssProp?: boolean;
@@ -261,7 +265,17 @@ export async function babelTransform(
   return babelTransformSource({ filename: path, source, babel });
 }
 
-export async function babelTransformSource({
+export async function babelTransformSource(
+  options: BabelTransformSourceOptions
+): Promise<BabelTransformResult> {
+  const cache = options.babel?.compilationCache;
+
+  return cache
+    ? cachedTransform(cache, options, transformSourceUncached)
+    : transformSourceUncached(options);
+}
+
+async function transformSourceUncached({
   filename: path,
   root = process.cwd(),
   commonJsToEsm = false,
@@ -272,6 +286,7 @@ export async function babelTransformSource({
   inputSourceMap
 }: BabelTransformSourceOptions): Promise<BabelTransformResult> {
   const {
+    compilationCache,
     diagnostics,
     extractCalls,
     jsxCssProp = false,
@@ -343,7 +358,11 @@ export async function babelTransformSource({
     staticCssEvalPrepass =
       jsxCssProp && prepassSourceProvider
         ? await measureCompilationPhase("static-prepass", () =>
-            createStaticCssEvalPrepass(path, prepassSourceProvider)
+            createStaticCssEvalPrepass(
+              path,
+              prepassSourceProvider,
+              compilationCache?.parser
+            )
           )
         : undefined;
 

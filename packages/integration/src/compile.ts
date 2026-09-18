@@ -1,4 +1,7 @@
 import { measureCompilationPhase } from "./diagnostics.js";
+import { cacheDigest } from "./compilationCache.js";
+import type { CompilationCache } from "./compilationCache.js";
+import { cachedCompile, type CompileCacheBridge } from "./compileCache.js";
 import { transformSync } from "@babel/core";
 import { minchoStyledComponentPlugin } from "@mincho-js/babel";
 import { addFileScope, getPackageInfo } from "@vanilla-extract/integration";
@@ -13,7 +16,10 @@ import { jsxSyntaxPluginPath, typescriptPresetPath } from "./babelPreset.js";
 import { effectiveLoader, isScriptLoader } from "./scriptLoaders.js";
 import { internalStripStaticCssEvalRequestQuery } from "./staticCssEvalUtils.js";
 
-interface CompileOptions {
+export interface CompileOptions {
+  /** @internal Environment-owned compilation cache and native asset replay. */
+  cache?: CompilationCache;
+  cacheBridge?: CompileCacheBridge;
   esbuild?: PluginBuild["esbuild"];
   filePath: string;
   contents: string;
@@ -67,6 +73,11 @@ function addScopedSource(options: Parameters<typeof addFileScope>[0]): string {
     );
 }
 
+const scopedSourceInputs = new WeakMap<
+  Map<string, string>,
+  Map<string, string>
+>();
+
 function getScopedSourceWithCache({
   contents,
   originalPath,
@@ -80,7 +91,18 @@ function getScopedSourceWithCache({
   rootPath: string;
   resolverCache: Map<string, string>;
 }) {
-  if (resolverCache.has(originalPath)) {
+  const inputs =
+    scopedSourceInputs.get(resolverCache) ?? new Map<string, string>();
+
+  scopedSourceInputs.set(resolverCache, inputs);
+
+  const fingerprint = cacheDigest(
+    JSON.stringify([contents, packageName, rootPath])
+  );
+  if (
+    resolverCache.has(originalPath) &&
+    inputs.get(originalPath) === fingerprint
+  ) {
     return resolverCache.get(originalPath)!;
   }
 
@@ -92,6 +114,7 @@ function getScopedSourceWithCache({
   });
 
   resolverCache.set(originalPath, source);
+  inputs.set(originalPath, fingerprint);
 
   return source;
 }
@@ -256,7 +279,13 @@ function getWatchFiles(
   ];
 }
 
-export async function compile({
+export async function compile(options: CompileOptions) {
+  return options.cache
+    ? cachedCompile(options, compileUncached)
+    : compileUncached(options);
+}
+
+async function compileUncached({
   esbuild = defaultEsbuild,
   filePath,
   contents,
@@ -379,7 +408,7 @@ if (import.meta.vitest) {
   }
 
   describe("compile", () => {
-    it("compile reuses resolver cache and returns watch files", async () => {
+    it("compile refreshes changed resolver inputs and returns watch files", async () => {
       vi.spyOn(fs.promises, "readFile").mockResolvedValue(
         'export const child = "ok";'
       );
@@ -416,11 +445,11 @@ if (import.meta.vitest) {
       });
 
       expect(buildCalls).toHaveLength(2);
-      expect(buildCalls[0]!.stdin!.contents).toBe(
+      expect(buildCalls[0]!.stdin!.contents).not.toBe(
         buildCalls[1]!.stdin!.contents
       );
-      expect(first.source).toBe(second.source);
-      expect(resolverCache.get(originalPath)).toBe(first.source);
+      expect(first.source).not.toBe(second.source);
+      expect(resolverCache.get(originalPath)).toBe(second.source);
       expect(first.watchFiles).toEqual([
         join(cwd, "src/dependency.tsx"),
         join(cwd, "nested/child.ts")
