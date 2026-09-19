@@ -50,6 +50,9 @@ and native assets. CSS evaluation and registry publication still run for each
 build; their mutable state is not cached across builds. Diagnostics distinguish
 hits, misses, invalidations, pending work and bypasses.
 
+See [memory compilation cache](./memory-compilation-cache.md) for input-session
+validation, semantic dependency reuse and CSS publication behavior.
+
 ## Reproducible compilation benchmark
 
 Build each revision with `PACKAGE_PUBLISH=true` before packaging it. Keep
@@ -71,7 +74,8 @@ ESM loader; these must declare the measured tooling as direct dependencies.
 Use `--pack=... --candidate=... --linker=pnp` to prepare such a consumer.
 Use `--formats=esm,cjs`, `--bundlers=esbuild,vite,vite-dev` and `--cases` to select
 a subset. Cases cover static/mixed recipes, static/dynamic styled components,
-24/240 style modules, shared-token edits and 240 modules without styles.
+24/240 style modules, shared-token edits, 240 modules without styles,
+JavaScript-only edits, helper inputs, used/unused exports and client/SSR analysis.
 
 Each round starts a new Node process for each revision and fixture, alternates
 revision order, and rotates fixture order. esbuild measures the first build,

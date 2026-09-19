@@ -7,7 +7,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import { gzipSync, brotliCompressSync } from "node:zlib";
-import { entryName, edit, editShared } from "./fixture.mjs";
+import { entryName, edit, editShared, editedFileName } from "./fixture.mjs";
 
 const [consumer, directory, name, format, bundler, diagnosticFile] =
   process.argv.slice(2);
@@ -124,7 +124,8 @@ async function capture(label, js, css) {
   } else
     value = [
       exported.classes,
-      exported.dynamic?.({ size: "large", active: true })
+      exported.dynamic?.({ size: "large", active: true }),
+      exported.versions
     ];
 
   record.outputs[label] = {
@@ -258,6 +259,15 @@ try {
         () => compiler.rebuild(),
         save("edited-" + iteration)
       );
+
+      if (/^(logic|environments)-/.test(name)) {
+        const edited = record.outputs["edited-" + iteration];
+        const previous =
+          iteration === 0 ? first : record.outputs["edited-" + (iteration - 1)];
+
+        assert.equal(edited.cssHash, first.cssHash);
+        assert.notEqual(edited.valueHash, previous.valueHash);
+      }
     }
 
     if (name.startsWith("shared-"))
@@ -334,7 +344,7 @@ try {
 
       const entry = "/" + entryName(format, name);
 
-      const loadGraph = async () => {
+      const loadEnvironment = async (environment) => {
         const pending = [entry],
           visited = new Set();
 
@@ -343,9 +353,9 @@ try {
           if (visited.has(url)) continue;
 
           visited.add(url);
-          await server.transformRequest(url);
+          await environment.transformRequest(url);
 
-          const module = await server.moduleGraph.getModuleByUrl(url);
+          const module = await environment.moduleGraph.getModuleByUrl(url);
 
           for (const dependency of module?.importedModules ?? [])
             if (
@@ -357,6 +367,15 @@ try {
         }
       };
 
+      const environments = name.startsWith("environments-")
+        ? [server.environments.client, server.environments.ssr]
+        : [server.environments.client];
+
+      const loadGraph = async () => {
+        for (const environment of environments)
+          await loadEnvironment(environment);
+      };
+
       await measure("first", loadGraph);
 
       for (let iteration = 0; iteration < 3; iteration++)
@@ -365,31 +384,30 @@ try {
       for (let iteration = 0; iteration < 3; iteration++) {
         await edit(directory, name, format, iteration + 1);
 
-        const changed = join(
-          directory,
-          name.startsWith("plain-")
-            ? "plain0." + (format === "cjs" ? "cts" : "ts")
-            : "styles" +
-                (/^(styles|shared)-/.test(name) ? "0" : "") +
-                "." +
-                (format === "cjs" ? "cts" : "ts")
-        );
+        const changed = join(directory, editedFileName(name, format));
 
-        const module = server.moduleGraph.getModuleById(changed);
+        for (const environment of environments) {
+          // Extracted, build-time-only dependencies need the watcher hook too.
+          await environment.pluginContainer.watchChange(changed, {
+            event: "update"
+          });
 
-        if (module) server.moduleGraph.invalidateModule(module);
+          const module = environment.moduleGraph.getModuleById(changed);
 
-        const owner = server.moduleGraph.getModuleById(
-          join(directory, entryName(format, name))
-        );
+          if (module) environment.moduleGraph.invalidateModule(module);
 
-        if (owner) server.moduleGraph.invalidateModule(owner);
+          const owner = environment.moduleGraph.getModuleById(
+            join(directory, entryName(format, name))
+          );
+
+          if (owner) environment.moduleGraph.invalidateModule(owner);
+        }
 
         await measure("edited", loadGraph);
       }
 
       record.note =
-        "Development timings cover transformRequest and explicit graph invalidation; browser network/render latency is excluded.";
+        "Development timings cover transformRequest after watcher hooks and explicit graph invalidation; browser network/render latency is excluded.";
     }
   }
 

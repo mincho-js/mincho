@@ -9,8 +9,77 @@ export const cases = [
   "styles-24",
   "styles-240",
   "shared-24",
-  "plain-240"
+  "plain-240",
+  "logic-24",
+  "helpers-24",
+  "tokens-used-24",
+  "tokens-unused-24",
+  "environments-24"
 ];
+
+const incremental = /^(logic|helpers|tokens-used|tokens-unused|environments)-/;
+
+async function incrementalDependency(directory, name, format, iteration = 0) {
+  const extension = format === "cjs" ? "cts" : "ts";
+
+  const expose = (name, value) =>
+    format === "cjs"
+      ? `exports.${name}=${value};`
+      : `export const ${name}=${value};`;
+
+  const color =
+    name.startsWith("tokens-used-") && iteration % 2 ? "blue" : "red";
+
+  const unused = name.startsWith("tokens-unused-") ? iteration : 0;
+  const factor = name.startsWith("helpers-") ? 2 + iteration : 2;
+  const properties = Array.from(
+    { length: 48 },
+    (_, index) => `'--space-${index}':n*${index + 1}*factor`
+  ).join(",");
+
+  await writeFile(
+    join(directory, `tokens.${extension}`),
+    `const factor=${factor};` +
+      expose("base", `{color:'${color}'}`) +
+      expose("unused", unused) +
+      expose("make", `n=>({${properties},padding:n*factor})`)
+  );
+}
+
+async function incrementalOwner(directory, name, format, index, iteration = 0) {
+  const extension = format === "cjs" ? "cts" : "ts";
+
+  const importValue = (names, source) =>
+    format === "cjs"
+      ? `const {${names}}=require('${source}');`
+      : `import {${names}} from '${source}';`;
+
+  const expose = (name, value) =>
+    format === "cjs"
+      ? `exports.${name}=${value};`
+      : `export const ${name}=${value};`;
+
+  await writeFile(
+    join(directory, `styles${index}.${extension}`),
+    importValue("css", "@mincho-js/css") +
+      importValue("base,make", `./tokens.${extension}`) +
+      expose(
+        `button${index}`,
+        name.startsWith("helpers-") ? "css(make(4))" : "css(base)"
+      ) +
+      expose(`version${index}`, iteration)
+  );
+}
+
+export function editedFileName(name, format) {
+  const extension = format === "cjs" ? "cts" : "ts";
+  if (/^(tokens-|helpers-)/.test(name)) return `tokens.${extension}`;
+  if (incremental.test(name)) return `styles0.${extension}`;
+
+  return name.startsWith("plain-")
+    ? `plain0.${extension}`
+    : `styles${/^(styles|shared|vanilla)-/.test(name) ? "0" : ""}.${extension}`;
+}
 
 const style = (size, shared) =>
   "{base:" +
@@ -104,7 +173,33 @@ export async function prepare(root, name, format) {
 
   let entry;
 
-  if (name.startsWith("plain-")) {
+  if (incremental.test(name)) {
+    const count = Number(name.split("-").at(-1));
+    await incrementalDependency(directory, name, format);
+
+    const imports = [];
+
+    for (let index = 0; index < count; index++) {
+      await incrementalOwner(directory, name, format, index);
+      imports.push(
+        importValue(
+          `button${index},version${index}`,
+          `./styles${index}.${extension}`
+        )
+      );
+    }
+
+    entry =
+      imports.join("\n") +
+      exportValue(
+        "classes",
+        `[${Array.from({ length: count }, (_, index) => `button${index}`).join(",")}]`
+      ) +
+      exportValue(
+        "versions",
+        `[${Array.from({ length: count }, (_, index) => `version${index}`).join(",")}]`
+      );
+  } else if (name.startsWith("plain-")) {
     const count = Number(name.split("-")[1]);
     const imports = [];
 
@@ -204,7 +299,11 @@ export async function prepare(root, name, format) {
 }
 
 export async function edit(directory, name, format, value) {
-  if (name.startsWith("plain-")) {
+  if (/^(tokens-|helpers-)/.test(name)) {
+    await incrementalDependency(directory, name, format, value);
+  } else if (incremental.test(name)) {
+    await incrementalOwner(directory, name, format, 0, value);
+  } else if (name.startsWith("plain-")) {
     const source =
       format === "cjs" ? "exports.value0=" : "export const value0=";
 
