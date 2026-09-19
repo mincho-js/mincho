@@ -204,7 +204,8 @@ const cacheInstrumentation = new WeakMap<
 >();
 
 export function createStaticCssModuleCache(
-  parserCache?: SourceAstCache
+  parserCache?: SourceAstCache,
+  preparedProgram?: NodePath<t.Program>
 ): StaticCssModuleCache {
   const parsedModules = new Map<string, ParsedStaticCssModule>();
   const instrumentation: StaticCssModuleCacheInstrumentation = {
@@ -234,7 +235,8 @@ export function createStaticCssModuleCache(
       const nextParsedModule = parseStaticCssModule(
         source,
         cacheKey,
-        parserCache
+        parserCache,
+        preparedProgram
       );
 
       parsedModules.set(formattedCacheKey, nextParsedModule);
@@ -285,16 +287,19 @@ export function formatExportMapCacheKey(cacheKey: ExportMapCacheKey): string {
 function parseStaticCssModule(
   source: StaticCssModuleSource,
   cacheKey: ExportMapCacheKey,
-  parserCache?: SourceAstCache
+  parserCache?: SourceAstCache,
+  preparedProgram?: NodePath<t.Program>
 ): ParsedStaticCssModule {
-  const { ast, programPath } = parseStaticCssModuleProgram(
-    {
-      resolvedFile: source.resolvedFile,
-      source: source.source,
-      parserOptions: cacheKey.parserOptions
-    },
-    parserCache
-  );
+  const { ast, programPath } = preparedProgram
+    ? { ast: preparedProgram.parent as t.File, programPath: preparedProgram }
+    : parseStaticCssModuleProgram(
+        {
+          resolvedFile: source.resolvedFile,
+          source: source.source,
+          parserOptions: cacheKey.parserOptions
+        },
+        parserCache
+      );
 
   const importDeclarations: t.ImportDeclaration[] = [];
   const exportDeclarations: StaticCssModuleExportDeclaration[] = [];

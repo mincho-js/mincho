@@ -1,3 +1,4 @@
+import type { SourceAstCache } from "./staticCssEval/moduleParser.js";
 import { parseSync, traverse, types as t, type NodePath } from "@babel/core";
 import type { Binding } from "@babel/traverse";
 import { isAbsolute } from "node:path";
@@ -49,17 +50,29 @@ type Flow<T> = ModuleGraphFlow<T>;
 export function parseModuleProgram(
   id: string,
   source: string,
-  jsx = /\.(?:[jt]sx|[cm]?js)$/.test(id)
+  jsx = /\.(?:[jt]sx|[cm]?js)$/.test(id),
+  cache?: SourceAstCache
 ): NodePath<t.Program> {
-  const ast = parseSync(source, {
-    filename: id,
-    configFile: false,
-    babelrc: false,
-    parserOpts: {
-      sourceType: "unambiguous",
-      plugins: ["typescript", ...(jsx ? ["jsx" as const] : [])]
-    }
-  });
+  const ast = cache
+    ? cache.parse({
+        resolvedFile: id,
+        source,
+        parserOptions: {
+          plugins: jsx ? ["jsx", "typescript"] : ["typescript"],
+          sourceType: "unambiguous",
+          jsx,
+          typescript: true
+        }
+      })
+    : parseSync(source, {
+        filename: id,
+        configFile: false,
+        babelrc: false,
+        parserOpts: {
+          sourceType: "unambiguous",
+          plugins: ["typescript", ...(jsx ? ["jsx" as const] : [])]
+        }
+      });
 
   let program: NodePath<t.Program> | undefined;
 
@@ -103,6 +116,7 @@ export function createModuleGraph(
   const dependencies = new Set<string>();
   const modules = new Map<string, SourceModule>();
   const resolutions = new Map<string, string | null>();
+  const exportDemands = new Map<string, Set<string | null>>();
   const isExternal = options.isExternal ?? isExternalModule;
   const parseProgram = options.parse ?? parseModuleProgram;
 
@@ -294,6 +308,10 @@ export function createModuleGraph(
     seen: Set<string>
   ): Flow<Target | null> {
     const key = `${module.id}:export:${name}`;
+    const demanded = exportDemands.get(module.id) ?? new Set<string | null>();
+    demanded.add(name);
+    exportDemands.set(module.id, demanded);
+
     if (seen.has(key)) return null;
 
     const next = new Set([...seen, key]);
@@ -420,6 +438,7 @@ export function createModuleGraph(
     modules,
     dependencies,
     resolutions,
+    exportDemands,
     load,
     resolveImport,
     importTarget,

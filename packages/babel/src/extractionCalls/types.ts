@@ -1,4 +1,5 @@
 import type { NodePath, types as t } from "@babel/core";
+import type { SourceAstCache } from "../staticCssEval/moduleParser.js";
 
 /** Additional build-time calls, indexed by import source or root-relative file. */
 export type ExtractCalls = Readonly<Record<string, readonly string[]>>;
@@ -19,6 +20,7 @@ export interface ExtractCallsAnalysisOptions {
   readonly source: string;
   readonly jsx?: boolean;
   readonly program?: NodePath<t.Program>;
+  readonly parserCache?: SourceAstCache;
 }
 
 export type ExtractCallsRequest =

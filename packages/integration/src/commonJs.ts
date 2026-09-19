@@ -12,6 +12,7 @@ import {
 import { readFile } from "node:fs/promises";
 import { isBuiltin } from "node:module";
 import type { StaticCssEvalSourceProvider } from "./babel.js";
+import { cacheDigest, type CompilationCache } from "./compilationCache.js";
 
 type Description = ReturnType<typeof internalInspectCommonJs>;
 
@@ -69,19 +70,48 @@ export async function transformCommonJsToEsm(options: {
   sourceMaps: boolean;
   inputSourceMap?: TransformOptions["inputSourceMap"];
   parserPlugins?: NonNullable<TransformOptions["parserOpts"]>["plugins"];
+  cache?: CompilationCache;
 }) {
   // Escaped identifiers still take the parser path. Ordinary ESM has no CJS
   // bindings to inspect, and already passed through the configured Babel parser.
   if (!/\b(?:require|module|exports)\b|\\/.test(options.source)) return null;
 
+  async function inspect(
+    source: string,
+    filename: string,
+    parserPlugins = options.parserPlugins
+  ): Promise<Description> {
+    if (!options.cache)
+      return internalInspectCommonJs(source, filename, parserPlugins);
+
+    const description = await options.cache.run(
+      "commonjs:" +
+        cacheDigest(JSON.stringify([filename, source, parserPlugins ?? []])),
+      async () => {
+        const value = internalInspectCommonJs(source, filename, parserPlugins);
+
+        return {
+          value,
+          owner: filename,
+          dependencies: [filename],
+          bytes: Buffer.byteLength(JSON.stringify(value)),
+
+          valid: async () => true
+        };
+      }
+    );
+
+    // Re-export discovery extends the descriptor for the current graph only.
+    return structuredClone(description);
+  }
+
   const owner = {
     id: options.filename,
     source: options.source,
-    description: internalInspectCommonJs(
+    description: await inspect(
       options.source,
       options.filename,
-      // The owner already passed through Babel's TypeScript preset and may
-      // retain JSX enabled by a loader or syntax plugin, regardless of suffix.
+      // The owner is stripped TypeScript and may retain configured JSX.
       [...(options.parserPlugins ?? []), "jsx"]
     )
   };
@@ -222,11 +252,7 @@ export async function transformCommonJsToEsm(options: {
       id,
       commonJsRuntimeId: resolved?.commonJsRuntimeId,
       source: sourceText,
-      description: internalInspectCommonJs(
-        sourceText,
-        id,
-        options.parserPlugins
-      )
+      description: await inspect(sourceText, id)
     };
 
     modules.set(id, module);

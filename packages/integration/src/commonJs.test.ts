@@ -3,6 +3,7 @@ import { transform } from "esbuild";
 import { runInNewContext } from "node:vm";
 import * as minchoBabel from "@mincho-js/babel";
 import { transformCommonJsToEsm } from "./commonJs.js";
+import { CompilationCache } from "./compilationCache.js";
 import {
   babelTransformSource,
   type StaticCssEvalSourceProvider
@@ -116,6 +117,35 @@ describe("CommonJS browser normalization", () => {
     expect(output.answer ?? output.default).toBe(42);
   });
 
+  it("separates cached dependency descriptions by parser plugins", async () => {
+    const cache = new CompilationCache();
+    const normalize = (
+      parserPlugins?: Parameters<
+        typeof transformCommonJsToEsm
+      >[0]["parserPlugins"]
+    ) =>
+      transformCommonJsToEsm({
+        filename: "/project/entry.cjs",
+        source: 'module.exports = require("./dependency.js");',
+        dependencies: new Set(),
+        sidecar: "",
+        sourceMaps: false,
+        parserPlugins,
+        cache,
+        provider: {
+          resolve: () => ({ id: "/project/dependency.js" }),
+          load: () => ({
+            source: "@decorate class Example {} exports.Example = Example;"
+          })
+        }
+      });
+
+    const first = await normalize(["decorators"]);
+    expect(first?.code).toContain("Example");
+    await expect(normalize()).rejects.toThrow(/decorators/);
+    expect((await normalize(["decorators"]))?.code).toBe(first?.code);
+  });
+
   it.each([
     'module.exports = require("./helper.cjs") || 0;',
     'module.exports = require("./helper.cjs") && 42;',
@@ -148,6 +178,53 @@ describe("CommonJS browser normalization", () => {
     expect(result.code).toContain('from "/project/style.css"');
     expect(result.code).not.toContain('require("./style.css")');
     expect((await execute(result.code)).answer).toBe(42);
+  });
+
+  it("shares immutable descriptions while refreshing dependency export names", async () => {
+    let dependency = "exports.color = 'red';";
+    const cache = new CompilationCache();
+
+    const normalize = () =>
+      transformCommonJsToEsm({
+        filename: "/project/entry.cjs",
+        source: 'module.exports = require("./dependency.cjs");',
+        dependencies: new Set(),
+        sidecar: "",
+        sourceMaps: false,
+        cache,
+        provider: {
+          resolve: () => ({ id: "/project/dependency.cjs" }),
+
+          load: () => ({ source: dependency })
+        }
+      });
+
+    const first = await normalize();
+
+    expect((await normalize())?.code).toBe(first?.code);
+    expect(
+      await execute(first!.code!, {
+        "/project/dependency.cjs": {
+          __esModule: true,
+          default: { color: "red" },
+          color: "red"
+        }
+      })
+    ).toMatchObject({ color: "red" });
+
+    dependency = "exports.padding = 4;";
+
+    const changed = await normalize();
+    const output = await execute(changed!.code!, {
+      "/project/dependency.cjs": {
+        __esModule: true,
+        default: { padding: 4 },
+        padding: 4
+      }
+    });
+
+    expect(output).toMatchObject({ padding: 4 });
+    expect(output).not.toHaveProperty("color");
   });
 
   it("keeps a callable module value distinct from its default property", async () => {

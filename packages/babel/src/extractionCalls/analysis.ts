@@ -53,7 +53,9 @@ export function* analyzeExtractCalls(
     onResolveBinding(module, binding) {
       if (module.id === options.filename)
         registrationBindings?.add(binding.identifier.name);
-    }
+    },
+    parse: (id, source, jsx) =>
+      parseProgram(id, source, jsx, options.parserCache)
   });
 
   const protectedFunctions = new Map<
@@ -238,7 +240,11 @@ export function* analyzeExtractCalls(
   }
 
   try {
-    const config = normalizeExtractCalls(options.extractCalls);
+    const config = normalizeExtractCalls(
+      options.extractCalls,
+      options.parserCache
+    );
+
     const imports: Record<string, readonly string[]> = Object.create(null);
     const localBindings = new Set<string>();
     const localTargets = new Map<string, Set<string>>();
@@ -247,7 +253,12 @@ export function* analyzeExtractCalls(
       id: options.filename,
       program:
         options.program ??
-        parseProgram(options.filename, options.source, options.jsx)
+        parseProgram(
+          options.filename,
+          options.source,
+          options.jsx,
+          options.parserCache
+        )
     };
 
     modules.set(owner.id, owner);

@@ -88,3 +88,5 @@ export {
 export { CompilationCache as InternalCompilationCache } from "./compilationCache.js";
 
 export type { CompileCacheBridge as InternalCompileCacheBridge } from "./compileCache.js";
+
+export { canSkipMinchoTransform as internalCanSkipMinchoTransform } from "./transformEligibility.js";

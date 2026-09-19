@@ -160,7 +160,8 @@ interface StaticCssEvalPrepassLocalBindingWalkOptions {
 export async function createStaticCssEvalPrepass(
   ownerId: string,
   sourceProvider: StaticCssEvalSourceProvider,
-  parserCache?: InternalSourceAstCache
+  parserCache?: InternalSourceAstCache,
+  preparedProgram?: NodePath<t.Program>
 ): Promise<PreparedStaticCssEvalPrepass> {
   const ownerSource = await sourceProvider.load(ownerId);
 
@@ -171,7 +172,8 @@ export async function createStaticCssEvalPrepass(
   const ownerModule = createLoadedModule(ownerId, ownerSource);
   const ownerRecord = createImportedStaticCssEvalModuleRecord(
     ownerModule,
-    parserCache
+    parserCache,
+    preparedProgram
   );
 
   const candidates = collectJsxCssPropStaticCssEvalCandidates(

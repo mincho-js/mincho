@@ -1,42 +1,57 @@
 import { join, resolve } from "node:path";
-import { internalCreateImportedStaticCssEvalModuleRecord as createRecord } from "@mincho-js/babel";
+import { restoreTransform, snapshotTransform } from "./transformSnapshot.js";
 import type {
   BabelTransformResult,
   BabelTransformSourceOptions,
+  StaticCssEvalLoadedSource,
   StaticCssEvalSourceProvider
 } from "./babel.js";
-import {
-  cacheDigest,
-  configurationFiles,
-  fingerprintFiles,
-  unchangedFiles,
-  hasExternalBabelConfiguration,
-  type CompilationCache
-} from "./compilationCache.js";
+import { cacheDigest, type CompilationCache } from "./compilationCache.js";
 import { recordCompilationDiagnostic } from "./diagnostics.js";
+import {
+  semanticWitnesses,
+  unchangedSemanticSource,
+  sourcePolicy
+} from "./semanticDependencies.js";
 
 type Observation =
   | {
       kind: "resolve";
       args: Parameters<StaticCssEvalSourceProvider["resolve"]>;
       digest: string;
+      policy: string;
+      files: string[];
     }
   | {
       kind: "load";
       args: Parameters<StaticCssEvalSourceProvider["load"]>;
       digest: string;
+      policy: string;
+      files: string[];
     };
 
 function digest(value: unknown): string {
   return cacheDigest(JSON.stringify(value) ?? "undefined");
 }
 
-/** Never cache arbitrary Babel plugins or an opaque synchronous value provider. */
-export async function cachedTransform(
+export function cachedTransform(
   cache: CompilationCache,
   options: BabelTransformSourceOptions,
   transform: (
-    input: BabelTransformSourceOptions
+    input: BabelTransformSourceOptions,
+    reuseSourceAst?: boolean
+  ) => Promise<BabelTransformResult>
+): Promise<BabelTransformResult> {
+  return cache.withInputs(() => transformWithInputs(cache, options, transform));
+}
+
+/** Never cache arbitrary Babel plugins or an opaque synchronous value provider. */
+async function transformWithInputs(
+  cache: CompilationCache,
+  options: BabelTransformSourceOptions,
+  transform: (
+    input: BabelTransformSourceOptions,
+    reuseSourceAst?: boolean
   ) => Promise<BabelTransformResult>
 ): Promise<BabelTransformResult> {
   const {
@@ -72,17 +87,18 @@ export async function cachedTransform(
       "root" in babel && typeof babel.root === "string" ? babel.root : "."
     );
 
-    configurations = await fingerprintFiles(
-      configurationFiles([
+    configurations = await cache.fingerprint([
+      options.filename,
+      ...cache.configurationFiles([
         options.filename,
         join(babelRoot, "babel.config.js")
       ])
-    );
+    ]);
   } catch {
     return transform(options);
   }
 
-  if (await hasExternalBabelConfiguration(configurations)) {
+  if (await cache.hasExternalBabelConfiguration(configurations)) {
     recordCompilationDiagnostic("cache-bypass", {
       reason: "external-babel-configuration"
     });
@@ -107,30 +123,78 @@ export async function cachedTransform(
     key,
     async () => {
       const observations: Observation[] = [];
+      const loads = new Map<string, StaticCssEvalLoadedSource | null>();
+      const aliases = new Map<string, string[]>();
+      let cacheable = true;
       const observingProvider: StaticCssEvalSourceProvider | undefined =
         provider && {
           async resolve(...args) {
-            const value = await provider.resolve(...args);
-            observations.push({ kind: "resolve", args, digest: digest(value) });
+            try {
+              const value = await provider.resolve(...args);
+              const files = [
+                ...new Set(
+                  [
+                    value?.id,
+                    value?.resolvedFile,
+                    value?.canonicalModuleId,
+                    value?.normalizedPathKey,
+                    value?.realpath
+                  ].filter((id): id is string => !!id)
+                )
+              ];
 
-            return value;
+              for (const id of files) aliases.set(id, files);
+
+              observations.push({
+                kind: "resolve",
+                args,
+                digest: digest(value),
+                policy: sourcePolicy(value),
+                files
+              });
+
+              return value;
+            } catch (error) {
+              cacheable = false;
+
+              throw error;
+            }
           },
 
           async load(...args) {
-            const value = await provider.load(...args);
-            observations.push({ kind: "load", args, digest: digest(value) });
+            try {
+              const value = await provider.load(...args);
+              const files = aliases.get(args[0]) ?? [args[0]];
 
-            return value;
+              for (const file of files) loads.set(file, value);
+
+              observations.push({
+                kind: "load",
+                args,
+                digest: digest(value),
+                policy: sourcePolicy(value),
+                files
+              });
+
+              return value;
+            } catch (error) {
+              cacheable = false;
+
+              throw error;
+            }
           }
         };
 
-      const result = await transform({
-        ...options,
-        babel: {
-          ...options.babel,
-          staticCssEvalSourceProvider: observingProvider
-        }
-      });
+      const result = await transform(
+        {
+          ...options,
+          babel: {
+            ...options.babel,
+            staticCssEvalSourceProvider: observingProvider
+          }
+        },
+        true
+      );
 
       const files = [
         options.filename,
@@ -138,50 +202,47 @@ export async function cachedTransform(
         ...configurations.keys()
       ];
 
-      const modules = [
-        ...(result.staticCssEval?.resolvedModuleCache ?? [])
-      ].map(([id, record]) => {
-        const {
-          programPath: _path,
-          parsedModule: _parsed,
-          imports: _imports,
-          cjsImports: _cjs,
-          exports: _exports,
-          ...source
-        } = record;
+      const { result: snapshot, modules } = snapshotTransform(result);
+      const witnesses = semanticWitnesses(
+        result,
+        loads,
+        options.filename,
+        cache
+      );
 
-        return [id, source] as const;
-      });
-
-      const snapshot: BabelTransformResult = {
-        ...result,
-        ...(result.staticCssEval
-          ? {
-              staticCssEval: {
-                ...result.staticCssEval,
-                resolvedModuleCache: new Map()
-              }
-            }
-          : {})
-      };
+      const semanticFiles = witnesses.map(({ file }) => file);
+      const hardInputs = new Map(
+        [...configurations].filter(([file]) => !semanticFiles.includes(file))
+      );
 
       return {
-        value: { result: snapshot, modules, observations },
+        value: { result: snapshot, modules, observations, witnesses },
+        owner: options.filename,
         dependencies: files,
-        bytes: Buffer.byteLength(
-          JSON.stringify([
-            result.code,
-            result.result,
-            result.map,
-            modules,
-            observations
-          ])
-        ),
+        bytes: cacheable
+          ? Buffer.byteLength(
+              JSON.stringify([
+                result.code,
+                result.result,
+                result.map,
+                modules,
+                observations,
+                witnesses
+              ])
+            )
+          : Infinity,
 
-        valid: () => unchangedFiles(configurations)
+        valid: () => cache.unchanged(hardInputs),
+
+        ...(cacheable
+          ? { manifest: { fingerprints: [...hardInputs], semanticFiles } }
+          : {})
       };
     },
-    async ({ observations }) => {
+    async (snapshot) => {
+      const { observations, witnesses } = snapshot;
+      const fresh = new Map<string, StaticCssEvalLoadedSource>();
+      const changed = new Set<string>();
       const currentProvider =
         engine && provider
           ? engine.getBabelStaticEvalProvider(options.filename, provider)
@@ -194,7 +255,76 @@ export async function cachedTransform(
           observation.kind === "load"
             ? await currentProvider.load(...observation.args)
             : await currentProvider.resolve(...observation.args);
-        if (digest(value) !== observation.digest) return false;
+
+        if (digest(value) !== observation.digest) {
+          const witness = witnesses.find(({ file }) =>
+            observation.files.includes(file)
+          );
+          if (!witness || sourcePolicy(value) !== observation.policy)
+            return false;
+
+          if (observation.kind === "load") {
+            if (
+              !unchangedSemanticSource(
+                witness,
+                value as StaticCssEvalLoadedSource | null,
+                cache
+              )
+            )
+              return false;
+
+            changed.add(witness.file);
+          }
+        }
+
+        if (observation.kind === "load" && value)
+          for (const file of observation.files)
+            fresh.set(file, value as StaticCssEvalLoadedSource);
+      }
+
+      if (changed.size) {
+        await cache.fingerprint(changed);
+
+        for (const [id, module] of snapshot.modules) {
+          const value = fresh.get(id);
+          const source = value?.sourceText ?? value?.source;
+
+          if (source !== undefined && value)
+            Object.assign(module, {
+              source,
+              sourceHash:
+                value.sourceIdentity?.sourceHash ??
+                value.sourceHash ??
+                cacheDigest(source),
+              version: value.sourceIdentity?.version ?? value.version
+            });
+        }
+
+        const metadata = snapshot.result.staticCssEval;
+
+        if (metadata)
+          for (const item of [
+            ...metadata.dependencies,
+            ...metadata.resolvedDependencies,
+            ...metadata.cacheKeys
+          ]) {
+            const file = "file" in item ? item.file : item.resolvedFile;
+            const value = file ? fresh.get(file) : undefined;
+            const source = value?.sourceText ?? value?.source;
+
+            if (source !== undefined && value)
+              Object.assign(item, {
+                sourceHash:
+                  value.sourceIdentity?.sourceHash ??
+                  value.sourceHash ??
+                  cacheDigest(source),
+                sourceVersion: value.sourceIdentity?.version ?? value.version
+              });
+          }
+
+        recordCompilationDiagnostic("semantic-dependency-hit", {
+          files: [...changed]
+        });
       }
 
       return true;
@@ -202,15 +332,7 @@ export async function cachedTransform(
   );
 
   // Results include maps and mutable metadata. Each transform owns its copy.
-  const result = structuredClone(cached.result);
-
-  if (result.staticCssEval)
-    result.staticCssEval.resolvedModuleCache = new Map(
-      cached.modules.map(([id, source]) => [
-        id,
-        createRecord(source, cache.parser)
-      ])
-    );
+  const result = restoreTransform(cached, cache);
 
   engine?.refreshFile({
     fileId: options.filename,

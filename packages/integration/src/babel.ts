@@ -11,6 +11,8 @@ import { jsxSyntaxPluginPath, typescriptPresetPath } from "./babelPreset.js";
 import {
   type BabelFileResult,
   type TransformOptions,
+  types as t,
+  transformFromAstAsync,
   transformAsync
 } from "@babel/core";
 import {
@@ -18,6 +20,7 @@ import {
   type MinchoStaticCssEvalMetadata,
   type PluginOptions,
   type MinchoCompilationMetadata,
+  internalParseModuleProgram,
   minchoBabelPlugin,
   minchoStyledComponentPlugin,
   InternalExtractCallsError
@@ -213,6 +216,9 @@ export type BabelOptions = Omit<
 > & {
   /** @internal Environment-owned memory cache. */
   compilationCache?: CompilationCache;
+
+  /** @internal Resolver environment identity, separate from module source. */
+  compilationContext?: string;
   diagnostics?: boolean;
   extractCalls?: PluginOptions["extractCalls"];
   jsxCssProp?: boolean;
@@ -225,6 +231,13 @@ export type BabelOptions = Omit<
 };
 
 export type BabelTransformResult = {
+  /** @internal Statically inspected helper exports; runtime imports retain file dependencies. */
+  readonly semanticDemands?: readonly {
+    file: string;
+    name: string | null;
+    members: readonly string[];
+  }[];
+
   readonly diagnostics?: MinchoCompilationMetadata;
   commonJsTransformed?: boolean;
   code: string;
@@ -275,18 +288,22 @@ export async function babelTransformSource(
     : transformSourceUncached(options);
 }
 
-async function transformSourceUncached({
-  filename: path,
-  root = process.cwd(),
-  commonJsToEsm = false,
-  source,
-  loader = inferScriptLoader(path),
-  babel = {},
-  sourceMaps = false,
-  inputSourceMap
-}: BabelTransformSourceOptions): Promise<BabelTransformResult> {
+async function transformSourceUncached(
+  {
+    filename: path,
+    root = process.cwd(),
+    commonJsToEsm = false,
+    source,
+    loader = inferScriptLoader(path),
+    babel = {},
+    sourceMaps = false,
+    inputSourceMap
+  }: BabelTransformSourceOptions,
+  reuseSourceAst = false
+): Promise<BabelTransformResult> {
   const {
     compilationCache,
+    compilationContext: _compilationContext,
     diagnostics,
     extractCalls,
     jsxCssProp = false,
@@ -337,15 +354,26 @@ async function transformSourceUncached({
 
   let result: BabelFileResult;
   let commonJsTransformed = false;
+  let preparedProgram:
+    | ReturnType<typeof internalParseModuleProgram>
+    | undefined;
 
   try {
     if (extractCalls !== undefined) {
+      preparedProgram ??= internalParseModuleProgram(
+        path,
+        source,
+        loader === "jsx" || loader === "tsx",
+        compilationCache?.parser
+      );
       options.preparedExtractCalls = await prepareExtractCalls(
         {
           extractCalls,
           root,
           filename: path,
           source,
+          program: preparedProgram,
+          parserCache: compilationCache?.parser,
           jsx: loader === "jsx" || loader === "tsx"
         },
         prepassSourceProvider
@@ -361,7 +389,8 @@ async function transformSourceUncached({
             createStaticCssEvalPrepass(
               path,
               prepassSourceProvider,
-              compilationCache?.parser
+              compilationCache?.parser,
+              preparedProgram
             )
           )
         : undefined;
@@ -380,40 +409,50 @@ async function transformSourceUncached({
       );
     }
 
+    const transformOptions: TransformOptions = {
+      sourceType: "unambiguous",
+      ...babelCoreOptions,
+      filename: path,
+      plugins: [
+        ...(babelCoreOptions.sourceType === undefined
+          ? [inferCommonJsSourceType()]
+          : []),
+        ...(loader === "jsx" || loader === "tsx" ? [jsxSyntaxPluginPath] : []),
+        ...(Array.isArray(babelCoreOptions.plugins)
+          ? babelCoreOptions.plugins
+          : []),
+        minchoStyledComponentPlugin(),
+        [minchoBabelPlugin(), options]
+      ],
+      presets: [
+        ...(Array.isArray(babelCoreOptions.presets)
+          ? babelCoreOptions.presets
+          : []),
+        ...(loader === "ts" || loader === "tsx"
+          ? [
+              [
+                typescriptPresetPath,
+                { allExtensions: true, isTSX: loader === "tsx" }
+              ] satisfies NonNullable<TransformOptions["presets"]>[number]
+            ]
+          : [])
+      ],
+      sourceMaps,
+      ...(inputSourceMap !== undefined ? { inputSourceMap } : {})
+    };
+
     const transformed = await measureCompilationPhase("babel", () =>
-      transformAsync(source, {
-        sourceType: "unambiguous",
-        ...babelCoreOptions,
-        filename: path,
-        plugins: [
-          ...(babelCoreOptions.sourceType === undefined
-            ? [inferCommonJsSourceType()]
-            : []),
-          ...(loader === "jsx" || loader === "tsx"
-            ? [jsxSyntaxPluginPath]
-            : []),
-          ...(Array.isArray(babelCoreOptions.plugins)
-            ? babelCoreOptions.plugins
-            : []),
-          minchoStyledComponentPlugin(),
-          [minchoBabelPlugin(), options]
-        ],
-        presets: [
-          ...(Array.isArray(babelCoreOptions.presets)
-            ? babelCoreOptions.presets
-            : []),
-          ...(loader === "ts" || loader === "tsx"
-            ? [
-                [
-                  typescriptPresetPath,
-                  { allExtensions: true, isTSX: loader === "tsx" }
-                ] satisfies NonNullable<TransformOptions["presets"]>[number]
-              ]
-            : [])
-        ],
-        sourceMaps,
-        ...(inputSourceMap !== undefined ? { inputSourceMap } : {})
-      })
+      reuseSourceAst &&
+      preparedProgram &&
+      !babelCoreOptions.parserOpts &&
+      (!babelCoreOptions.sourceType ||
+        babelCoreOptions.sourceType === "unambiguous")
+        ? transformFromAstAsync(
+            preparedProgram.parent as t.File,
+            source,
+            transformOptions
+          )
+        : transformAsync(source, transformOptions)
     );
     if (!transformed || transformed.code == null) {
       throw new Error(`Failed to transform ${path}`);
@@ -425,6 +464,7 @@ async function transformSourceUncached({
       const normalized = await transformCommonJsToEsm({
         filename: path,
         source: transformed.code,
+        cache: compilationCache,
         provider: prepassSourceProvider,
         dependencies: extractCallsDependencies,
         sidecar: options.result[0],

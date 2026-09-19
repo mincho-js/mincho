@@ -223,3 +223,14 @@ export function recordCompilationDiagnostic(
     ...(detail === undefined ? {} : { detail })
   });
 }
+
+/** Preserve the caller's report when native services reuse older async contexts. */
+export function bindCompilationDiagnostics<A extends unknown[], T>(
+  operation: (...args: A) => T
+): (...args: A) => T {
+  const context = active.getStore();
+
+  return context
+    ? (...args) => active.run(context, () => operation(...args))
+    : operation;
+}

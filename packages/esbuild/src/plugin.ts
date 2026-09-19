@@ -151,6 +151,12 @@ export function minchoEsbuildPlugin({
         staticCssEvalLoadedSourceCache.clear();
 
         try {
+          await diagnostics.run(
+            await rootRealpath,
+            "input-validation",
+            async () => compilationCache?.end()
+          );
+
           if (result) return await assets.finishBuild(result);
         } finally {
           await diagnostics.flush(
@@ -282,7 +288,13 @@ export function minchoEsbuildPlugin({
 
         const source = transaction
           ? (await transaction.snapshot.readFile(args.path)).toString("utf8")
-          : await fs.promises.readFile(args.path, "utf8");
+          : compilationCache?.hasActiveInputs
+            ? Buffer.from(
+                await diagnostics.run(args.path, "source-read", () =>
+                  compilationCache.readFile(args.path)
+                )
+              ).toString("utf8")
+            : await fs.promises.readFile(args.path, "utf8");
 
         const babelOptions: BabelOptions | undefined =
           jsxCssProp === undefined && extractCalls === undefined

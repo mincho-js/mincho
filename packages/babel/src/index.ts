@@ -123,3 +123,8 @@ export {
 } from "./moduleGraph.js";
 
 export { SourceAstCache as InternalSourceAstCache } from "./staticCssEval/moduleParser.js";
+export { analyzeSource as internalAnalyzeSource } from "./sourceAnalysis.js";
+export {
+  semanticExports as internalSemanticExports,
+  type SemanticExportRequest as InternalSemanticExportRequest
+} from "./semanticExports.js";

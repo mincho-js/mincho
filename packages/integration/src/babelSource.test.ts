@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { parseSync } from "@babel/core";
 import { mkdir, mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -89,6 +90,55 @@ describe("babelTransformSource", () => {
       }
     }
   );
+
+  it("honors an automatically discovered ESM Babel parser configuration", async () => {
+    const root = await mkdtemp(join(tmpdir(), "mincho-parser-config-"));
+
+    try {
+      await writeFile(join(root, "package.json"), '{"name":"parser-config"}');
+      await writeFile(
+        join(root, ".babelrc.mjs"),
+        'export default { plugins: [() => ({ parserOverride(code, options, parse) { return parse(code.replace("red", "blue"), options); } })] };'
+      );
+
+      const result = await babelTransformSource({
+        filename: join(root, "entry.ts"),
+        root,
+        source:
+          'import { css } from "@mincho-js/css"; export const cls = css({ color: "red" });',
+        babel: { compilationCache: new CompilationCache(), cwd: root }
+      });
+
+      expect(result.result[1]).toContain('"blue"');
+      expect(result.result[1]).not.toContain('"red"');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("honors custom parsers even when the helper prepass has already parsed the source", async () => {
+    const parserOverride = vi.fn((code: string) =>
+      parseSync(code.replace('"red"', '"blue"'), {
+        configFile: false,
+        babelrc: false,
+        parserOpts: { plugins: ["jsx", "typescript"] }
+      })
+    );
+
+    const transformed = await babelTransformSource({
+      filename,
+      source:
+        'import { css } from "@mincho-js/css"; export const cls = css({ color: "red" });',
+      babel: {
+        compilationCache: new CompilationCache(),
+        plugins: [() => ({ parserOverride })]
+      }
+    });
+
+    expect(parserOverride).toHaveBeenCalled();
+    expect(transformed.result[1]).toContain('"blue"');
+    expect(transformed.result[1]).not.toContain('"red"');
+  });
 
   it("forwards extractCalls separately from Babel core options and respects effective JSX loaders", async () => {
     const transformed = await babelTransformSource({

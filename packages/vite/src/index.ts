@@ -382,11 +382,22 @@ function createMinchoViteEnvironmentPlugin(
   function invalidateStaticCssEvalDependency(dependencyId: string): void {
     compilationCache?.invalidate(dependencyId);
 
-    for (const ownerId of staticCssEvalProjectEngine.invalidateByDependency(
-      dependencyId
-    )) {
-      cssState.clearGeneratedCssForOwner(ownerId);
-      invalidateViteModule(ownerId);
+    const pending = [dependencyId];
+    const visited = new Set<string>();
+
+    while (pending.length) {
+      const dependency = pending.pop()!;
+      if (visited.has(dependency)) continue;
+
+      visited.add(dependency);
+
+      for (const ownerId of staticCssEvalProjectEngine.invalidateByDependency(
+        dependency
+      )) {
+        cssState.clearGeneratedCssForOwner(ownerId);
+        invalidateViteModule(ownerId);
+        pending.push(ownerId);
+      }
     }
   }
 
@@ -532,7 +543,7 @@ function createMinchoViteEnvironmentPlugin(
     };
   }
 
-  return {
+  const plugin = {
     name: "mincho-css-vite",
     enforce: "pre",
     buildStart: {
@@ -556,7 +567,9 @@ function createMinchoViteEnvironmentPlugin(
 
         diagnosticsClosed = false;
         diagnostics.begin();
-        compilationCache?.begin();
+
+        if (config.command === "build") compilationCache?.begin();
+
         transformEpoch = Symbol("build");
 
         if (graphAnalysisClosed) {
@@ -1023,6 +1036,11 @@ function createMinchoViteEnvironmentPlugin(
         const transformBabelOptions: BabelOptions = {
           ...babelOptions,
           compilationCache,
+          compilationContext: this.environment
+            ? this.environment.name +
+              ":" +
+              (this.environment.config?.consumer ?? "unknown")
+            : "legacy",
           staticCssEvalProjectEngine,
           staticCssEvalSourceProvider: {
             ...sourceProvider,
@@ -1227,7 +1245,11 @@ function createMinchoViteEnvironmentPlugin(
     generateBundle: {
       order: "post",
 
-      handler(outputOptions, bundle) {
+      async handler(outputOptions, bundle) {
+        await diagnostics.run(config.root, "input-validation", async () =>
+          compilationCache?.end()
+        );
+
         // Vite owns final asset naming, hashing and source-map composition.
         const directory = resolve(
           config.root,
@@ -1251,12 +1273,16 @@ function createMinchoViteEnvironmentPlugin(
       }
     },
 
+    buildEnd(error) {
+      if (error) compilationCache?.clear();
+    },
+
     renderError(error) {
       abortOutputLinkers(error ?? new Error("Vite rendering failed"));
     },
 
     watchChange(id) {
-      compilationCache?.invalidate(id);
+      invalidateStaticCssEvalDependency(id);
     },
 
     async closeBundle() {
@@ -1292,6 +1318,38 @@ function createMinchoViteEnvironmentPlugin(
       }
     }
   } satisfies Plugin;
+
+  async function runRequest<T>(
+    file: string,
+    phase: string,
+    operation: () => Promise<T>
+  ): Promise<T> {
+    try {
+      return await diagnostics.run(file, phase, () =>
+        compilationCache ? compilationCache.withInputs(operation) : operation()
+      );
+    } finally {
+      scheduleDiagnosticsFlush();
+    }
+  }
+
+  const transform = plugin.transform;
+  plugin.transform = function (
+    this: Rollup.TransformPluginContext,
+    code: string,
+    id: string
+  ) {
+    return runRequest(id, "transform-request", () =>
+      transform.call(this, code, id)
+    );
+  };
+
+  const load = plugin.load;
+  plugin.load = function (this: PluginContext, id: string) {
+    return runRequest(id, "load-request", () => load.call(this, id));
+  };
+
+  return plugin;
 }
 
 let collectDefineRulesPresetViteRegistrySource:

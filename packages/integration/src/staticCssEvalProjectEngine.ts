@@ -91,6 +91,9 @@ export interface StaticEvalProjectEngine {
   getDiagnostics(): readonly StaticCssEvalDiagnostic[];
 
   invalidateByDependency(dependencyId: string): readonly string[];
+
+  /** Internal adapters can retain published artifacts while validating replacement output. */
+  markDependencyDirty?(dependencyId: string): readonly string[];
 }
 
 type FileState = {
@@ -238,6 +241,20 @@ export class MinchoProjectEngine implements StaticEvalProjectEngine {
     }
 
     return invalidatedFiles;
+  }
+
+  markDependencyDirty(dependencyId: string): readonly string[] {
+    const owners = [
+      ...(this.dependencyToOwners.get(dependencyId) ?? [])
+    ].sort();
+
+    for (const owner of owners) {
+      const state = this.files.get(owner);
+
+      if (state) state.invalidated = true;
+    }
+
+    return owners;
   }
 
   private getOrCreateState(fileId: string): FileState {

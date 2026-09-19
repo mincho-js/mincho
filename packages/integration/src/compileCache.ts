@@ -1,14 +1,7 @@
-import { readFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import type { Plugin } from "esbuild";
 import type { CompileOptions } from "./compile.js";
-import {
-  cacheDigest,
-  configurationFiles,
-  fingerprintFiles,
-  unchangedFiles,
-  hasExternalBabelConfiguration
-} from "./compilationCache.js";
+import { cacheDigest } from "./compilationCache.js";
 import { recordCompilationDiagnostic } from "./diagnostics.js";
 
 export interface CompileCacheBridge {
@@ -25,8 +18,17 @@ export interface CompileCacheBridge {
 
 type Compiled = { source: string; watchFiles: string[] };
 
+export function cachedCompile(
+  options: CompileOptions,
+  compile: (options: CompileOptions) => Promise<Compiled>
+): Promise<Compiled> {
+  return options.cache
+    ? options.cache.withInputs(() => compileWithInputs(options, compile))
+    : compile(options);
+}
+
 /** Cache compilation only. CSS execution and registry publication remain per generation. */
-export async function cachedCompile(
+async function compileWithInputs(
   options: CompileOptions,
   compile: (options: CompileOptions) => Promise<Compiled>
 ): Promise<Compiled> {
@@ -48,8 +50,8 @@ export async function cachedCompile(
   let configurations: Map<string, string | null>;
 
   try {
-    configurations = await fingerprintFiles(
-      configurationFiles([
+    configurations = await cache.fingerprint(
+      cache.configurationFiles([
         options.originalPath,
         // Scoped dependency transforms also load Babel's root configuration.
         join(process.cwd(), "babel.config.js")
@@ -59,7 +61,7 @@ export async function cachedCompile(
     return compile(options);
   }
 
-  if (await hasExternalBabelConfiguration(configurations))
+  if (await cache.hasExternalBabelConfiguration(configurations))
     return compile(options);
 
   const cwd = options.cwd ?? process.cwd();
@@ -89,31 +91,37 @@ export async function cachedCompile(
 
       observed.set(file, digest);
 
-      const missing = configurationFiles([file]).filter(
-        (path) => !configurations.has(path)
-      );
+      const missing = cache
+        .configurationFiles([file])
+        .filter((path) => !configurations.has(path));
 
       try {
-        for (const [path, value] of await fingerprintFiles(missing))
+        for (const [path, value] of await cache.fingerprint(missing))
           configurations.set(path, value);
       } catch {
         cacheable = false;
       }
     };
 
-    const readText = async (file: string) => {
-      const text = await (options.readFile?.(file) ?? readFile(file, "utf8"));
+    const readText = cache.bindInputs(async (file: string) => {
+      const text = await (options.readFile?.(file) ??
+        cache
+          .readFile(file)
+          .then((bytes) => Buffer.from(bytes).toString("utf8")));
+
       await observe(file, text);
 
       return text;
-    };
+    });
 
-    const readBytes = async (file: string) => {
-      const bytes = await (options.readFileBytes?.(file) ?? readFile(file));
+    const readBytes = cache.bindInputs(async (file: string) => {
+      const bytes = await (options.readFileBytes?.(file) ??
+        cache.readFile(file));
+
       await observe(file, bytes);
 
       return bytes;
-    };
+    });
 
     const compiled = await compile({
       ...options,
@@ -138,14 +146,15 @@ export async function cachedCompile(
     const fingerprints = new Map([...configurations, ...observed]);
 
     try {
-      if (!(await unchangedFiles(fingerprints))) cacheable = false;
+      if (!(await cache.unchanged(fingerprints))) cacheable = false;
     } catch {
       cacheable = false;
     }
 
     // A source transform supplied by an external Babel configuration can read
     // arbitrary inputs. Its execution is deliberately not memoized.
-    if (await hasExternalBabelConfiguration(configurations)) cacheable = false;
+    if (await cache.hasExternalBabelConfiguration(configurations))
+      cacheable = false;
 
     const watches = [...configurations]
       .filter(
@@ -170,10 +179,11 @@ export async function cachedCompile(
 
     return {
       value,
+      owner: options.originalPath,
       dependencies: [options.originalPath, ...fingerprints.keys()],
       bytes: cacheable ? Buffer.byteLength(JSON.stringify(value)) : Infinity,
 
-      valid: () => unchangedFiles(fingerprints)
+      valid: () => cache.unchanged(fingerprints)
     };
   });
 

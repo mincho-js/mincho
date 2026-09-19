@@ -1,4 +1,5 @@
 import type { SourceAstCache } from "../moduleParser.js";
+import type { NodePath, types as t } from "@babel/core";
 import { createStaticCssModuleCache } from "../moduleCache.js";
 import type { StaticCssEvalProvider } from "../types.js";
 import type {
@@ -23,10 +24,11 @@ export function createImportedStaticCssEvalProvider(
 
 export function createImportedStaticCssEvalModuleRecord(
   loadedModule: ImportedStaticCssEvalLoadedModule,
-  parserCache?: SourceAstCache
+  parserCache?: SourceAstCache,
+  preparedProgram?: NodePath<t.Program>
 ): ImportedStaticCssEvalModuleRecord {
   return createImportedStaticCssEvalModuleRecordWithCache(
     loadedModule,
-    createStaticCssModuleCache(parserCache)
+    createStaticCssModuleCache(parserCache, preparedProgram)
   );
 }
