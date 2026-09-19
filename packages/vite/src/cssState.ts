@@ -24,6 +24,7 @@ export class ViteCssState {
   readonly resolverCache = new Map<string, string>();
   private readonly css = new Map<string, string>();
   private readonly sidecars = new Map<string, string>();
+  private readonly currentSidecars = new Map<string, string>();
   private readonly moduleData = new Map<string, CssModuleData>();
   private readonly ownerToCssPaths = new Map<string, Set<string>>();
   private readonly cssPathToVirtualCssIds = new Map<string, Set<string>>();
@@ -49,6 +50,14 @@ export class ViteCssState {
     return this.sidecars.has(path);
   }
 
+  getSidecar(path: string): string | undefined {
+    return this.sidecars.get(path);
+  }
+
+  isCurrentSidecar(ownerId: string, path: string): boolean {
+    return this.currentSidecars.get(ownerId) === path;
+  }
+
   getModuleData(id: string): CssModuleData | undefined {
     return this.moduleData.get(id);
   }
@@ -66,6 +75,8 @@ export class ViteCssState {
   }
 
   registerSidecar(ownerId: string, cssPath: string, source: string): void {
+    this.currentSidecars.set(ownerId, cssPath);
+
     const cssPaths = this.ownerToCssPaths.get(ownerId) ?? new Set<string>();
     cssPaths.add(cssPath);
     this.ownerToCssPaths.set(ownerId, cssPaths);
@@ -111,11 +122,80 @@ export class ViteCssState {
     this.css.set(virtualCssId, source);
   }
 
+  /** Publish validated output without invalidating CSS merely because a sidecar was renamed. */
+  commitVirtualCssForSidecar(
+    ownerId: string,
+    cssPath: string,
+    entries: ReadonlyMap<string, string>
+  ): { changed: number; unchanged: number; removed: number } {
+    const previousIds = new Set<string>();
+    const paths = this.ownerToCssPaths.get(ownerId) ?? new Set([cssPath]);
+
+    for (const path of paths)
+      for (const id of this.cssPathToVirtualCssIds.get(path) ?? [])
+        previousIds.add(id);
+
+    let changed = 0;
+    let unchanged = 0;
+    let removed = 0;
+    this.cssPathToVirtualCssIds.set(cssPath, new Set(entries.keys()));
+
+    for (const [id, source] of entries) {
+      if (this.css.get(id) === source) unchanged++;
+      else {
+        changed++;
+        this.effects.invalidateModule(id);
+      }
+
+      this.css.set(id, source);
+      this.authorizedVirtualCssIds.add(id);
+    }
+
+    for (const path of paths) {
+      if (path === cssPath) continue;
+
+      this.cssPathToVirtualCssIds.delete(path);
+      this.sidecars.delete(path);
+      this.resolverCache.delete(path);
+      this.moduleData.delete(path);
+      this.moduleData.delete(customNormalize(path));
+      this.moduleData.delete(extractedSidecarModuleId(path));
+      this.effects.deleteContract(path);
+      this.effects.deleteContract(extractedSidecarModuleId(path));
+      this.effects.invalidateModule(path);
+      this.effects.invalidateModule(extractedSidecarModuleId(path));
+    }
+
+    this.ownerToCssPaths.set(ownerId, new Set([cssPath]));
+
+    for (const id of previousIds) {
+      if (
+        entries.has(id) ||
+        [...this.cssPathToVirtualCssIds.values()].some((ids) => ids.has(id))
+      )
+        continue;
+
+      removed++;
+      this.css.set(id, "");
+      this.authorizedVirtualCssIds.delete(id);
+      this.effects.invalidateModule(id);
+    }
+
+    return { changed, unchanged, removed };
+  }
+
   clearVirtualCssForSidecar(cssPath: string, invalidateModules = true): void {
     const ids = this.cssPathToVirtualCssIds.get(cssPath);
     if (!ids) return;
 
     for (const id of ids) {
+      if (
+        [...this.cssPathToVirtualCssIds].some(
+          ([path, otherIds]) => path !== cssPath && otherIds.has(id)
+        )
+      )
+        continue;
+
       this.css.set(id, "");
       this.authorizedVirtualCssIds.delete(id);
 
@@ -126,6 +206,7 @@ export class ViteCssState {
   }
 
   clearGeneratedCssForOwner(ownerId: string): void {
+    this.currentSidecars.delete(ownerId);
     this.effects.deleteContract(ownerId);
 
     const paths = this.ownerToCssPaths.get(ownerId);

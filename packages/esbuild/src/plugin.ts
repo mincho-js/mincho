@@ -3,6 +3,7 @@ import {
   type MinchoDiagnosticsOptions,
   CompilationDiagnostics,
   InternalCompilationCache,
+  internalCanSkipMinchoTransform,
   type BabelTransformResult,
   type InternalStaticCssEvalLoadedSource as StaticCssEvalLoadedSource,
   type InternalStaticCssEvalMetadataLike as StaticCssEvalMetadata,
@@ -320,12 +321,7 @@ export function minchoEsbuildPlugin({
               }
             : babelOptions;
 
-        const {
-          code,
-          map,
-          result: [file, cssExtract],
-          staticCssEval
-        } = await traced.babelTransformSource({
+        const transformOptions = {
           filename: args.path,
           root: await rootRealpath,
           source,
@@ -336,7 +332,18 @@ export function minchoEsbuildPlugin({
             ...(diagnostics.enabled ? { diagnostics: true } : {})
           },
           sourceMaps: Boolean(build.initialOptions.sourcemap)
-        });
+        };
+
+        const transformed: BabelTransformResult =
+          (await internalCanSkipMinchoTransform(transformOptions))
+            ? { code: source, result: ["", ""] }
+            : await traced.babelTransformSource(transformOptions);
+        const {
+          code,
+          map,
+          result: [file, cssExtract],
+          staticCssEval
+        } = transformed;
 
         const staticCssEvalFileResult =
           staticCssEvalProjectEngine.getFileResult(args.path);
@@ -644,7 +651,7 @@ if (import.meta.vitest) {
           .spyOn(fs.promises, "readFile")
           .mockImplementation(((file: fs.PathLike, options: unknown) =>
             file === args.path
-              ? Promise.resolve("")
+              ? Promise.resolve('import { css } from "@mincho-js/css";')
               : readFile(
                   file,
                   options as "utf8"
@@ -3283,17 +3290,7 @@ if (import.meta.vitest) {
             pluginData: scriptLoadResult.pluginData
           });
 
-          expect(babelTransformSpy).toHaveBeenCalledWith(
-            expect.objectContaining({
-              filename: entryPath,
-              source: expect.any(String),
-              loader: "tsx",
-              babel: expect.objectContaining({
-                ...fixtureCase.expectedBabelOptions,
-                compilationCache: expect.any(InternalCompilationCache)
-              })
-            })
-          );
+          expect(babelTransformSpy).not.toHaveBeenCalled();
           expect(scriptLoadResult.loader).toBe("tsx");
           expect(scriptLoadResult.contents).toContain('className="base"');
           expect(scriptLoadResult.contents).toContain("css={{");

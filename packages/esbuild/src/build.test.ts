@@ -823,7 +823,7 @@ describe("buildWithMincho transaction", () => {
           }
         ]
       })
-    ).rejects.toThrow(/inputs changed (?:during compilation|between passes)/);
+    ).rejects.toThrow(/inputs? changed (?:during compilation|between passes)/);
     await expect(fs.stat(join(root, "out"))).rejects.toThrow();
   });
 
@@ -1320,7 +1320,7 @@ describe("buildWithMincho transaction", () => {
           }
         ]
       })
-    ).rejects.toThrow(/inputs changed (?:during compilation|between passes)/);
+    ).rejects.toThrow(/inputs? changed (?:during compilation|between passes)/);
     await expect(fs.stat(join(root, "out"))).rejects.toThrow();
 
     const rebuilt = await buildWithMincho({

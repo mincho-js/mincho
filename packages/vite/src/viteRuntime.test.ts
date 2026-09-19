@@ -291,8 +291,9 @@ describe("mincho with the Vite runtime", () => {
         ).css
       ).toContain("border-width: 7px");
 
-      await writeFile(
-        join(root, `src/alternate.${extension}`),
+      // Finish the new module's HMR cycle before waiting for the factory edit.
+      await update(
+        `src/alternate.${extension}`,
         extension === "cjs"
           ? 'const {style} = require("@vanilla-extract/css"); exports.makeRecipe = require("./implementation.cjs").makeRecipe; exports.defineStyle = (rule) => style({ ...rule, borderWidth: "11px" });'
           : 'import { style } from "@vanilla-extract/css"; export { makeRecipe } from "./implementation"; export const defineStyle = (rule) => style({ ...rule, borderWidth: "11px" });'

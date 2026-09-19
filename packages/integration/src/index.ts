@@ -90,3 +90,5 @@ export { CompilationCache as InternalCompilationCache } from "./compilationCache
 export type { CompileCacheBridge as InternalCompileCacheBridge } from "./compileCache.js";
 
 export { canSkipMinchoTransform as internalCanSkipMinchoTransform } from "./transformEligibility.js";
+
+export { InternalSourceAstCache } from "@mincho-js/babel";
