@@ -1,0 +1,2094 @@
+{
+  "note": "Wall time excludes diagnostics unless requested. Process readiness includes Node/package loading; phase timings exclude fixture preparation, compression and SSR checks. Development measures the application transform graph, not browser network or render latency.",
+  "revisions": {
+    "baseline": "pr10",
+    "candidate": "pr11"
+  },
+  "machine": {
+    "node": "v20.19.0",
+    "platform": "linux",
+    "arch": "x64",
+    "cpu": "Intel(R) Core(TM) i5-8265U CPU @ 1.60GHz",
+    "cores": 8,
+    "memoryGiB": 15.32076644897461
+  },
+  "diagnostics": true,
+  "rounds": 1,
+  "versions": {
+    "esbuild": "0.27.7",
+    "vite": "7.3.3",
+    "react": "19.2.6",
+    "react-dom": "19.2.6",
+    "@babel/core": "7.29.7",
+    "@vanilla-extract/css": "1.21.2"
+  },
+  "summary": {
+    "esbuild/esm/styles-24": {
+      "baseline": {
+        "first": {
+          "median": 1155.101385,
+          "min": 1155.101385,
+          "max": 1155.101385,
+          "q1": 1155.101385,
+          "q3": 1155.101385
+        },
+        "unchanged": {
+          "median": 313.9208739999999,
+          "min": 313.9208739999999,
+          "max": 313.9208739999999,
+          "q1": 313.9208739999999,
+          "q3": 313.9208739999999
+        },
+        "edited": {
+          "median": 268.04574300000013,
+          "min": 268.04574300000013,
+          "max": 268.04574300000013,
+          "q1": 268.04574300000013,
+          "q3": 268.04574300000013
+        },
+        "processFirstReady": {
+          "median": 2072.043413,
+          "min": 2072.043413,
+          "max": 2072.043413,
+          "q1": 2072.043413,
+          "q3": 2072.043413
+        },
+        "heapMiB": {
+          "median": 22.22876739501953,
+          "min": 22.22876739501953,
+          "max": 22.22876739501953,
+          "q1": 22.22876739501953,
+          "q3": 22.22876739501953
+        },
+        "rssMiB": {
+          "median": 165.6640625,
+          "min": 165.6640625,
+          "max": 165.6640625,
+          "q1": 165.6640625,
+          "q3": 165.6640625
+        },
+        "peakRssMiB": {
+          "median": 165.6640625,
+          "min": 165.6640625,
+          "max": 165.6640625,
+          "q1": 165.6640625,
+          "q3": 165.6640625
+        },
+        "output": {
+          "js": {
+            "raw": 6657,
+            "gzip": 1372,
+            "brotli": 1135
+          },
+          "css": {
+            "raw": 2676,
+            "gzip": 498,
+            "brotli": 358
+          },
+          "cssHash": "4f4d5c196a3996501bd40369138d3e43c3b2a3fb8691a6bc6be0b0a0812876d5",
+          "valueHash": "5bdba38dde35e0feb7e92084c7f64289293c266c7e4bf3e0405b0b527037e6c0"
+        }
+      },
+      "candidate": {
+        "first": {
+          "median": 1066.027258,
+          "min": 1066.027258,
+          "max": 1066.027258,
+          "q1": 1066.027258,
+          "q3": 1066.027258
+        },
+        "unchanged": {
+          "median": 293.930108,
+          "min": 293.930108,
+          "max": 293.930108,
+          "q1": 293.930108,
+          "q3": 293.930108
+        },
+        "edited": {
+          "median": 235.4332690000001,
+          "min": 235.4332690000001,
+          "max": 235.4332690000001,
+          "q1": 235.4332690000001,
+          "q3": 235.4332690000001
+        },
+        "processFirstReady": {
+          "median": 1671.628831,
+          "min": 1671.628831,
+          "max": 1671.628831,
+          "q1": 1671.628831,
+          "q3": 1671.628831
+        },
+        "heapMiB": {
+          "median": 27.147872924804688,
+          "min": 27.147872924804688,
+          "max": 27.147872924804688,
+          "q1": 27.147872924804688,
+          "q3": 27.147872924804688
+        },
+        "rssMiB": {
+          "median": 227.66796875,
+          "min": 227.66796875,
+          "max": 227.66796875,
+          "q1": 227.66796875,
+          "q3": 227.66796875
+        },
+        "peakRssMiB": {
+          "median": 227.66796875,
+          "min": 227.66796875,
+          "max": 227.66796875,
+          "q1": 227.66796875,
+          "q3": 227.66796875
+        },
+        "output": {
+          "js": {
+            "raw": 6657,
+            "gzip": 1372,
+            "brotli": 1135
+          },
+          "css": {
+            "raw": 2676,
+            "gzip": 498,
+            "brotli": 358
+          },
+          "cssHash": "4f4d5c196a3996501bd40369138d3e43c3b2a3fb8691a6bc6be0b0a0812876d5",
+          "valueHash": "5bdba38dde35e0feb7e92084c7f64289293c266c7e4bf3e0405b0b527037e6c0"
+        }
+      }
+    },
+    "esbuild/esm/tokens-unused-24": {
+      "baseline": {
+        "first": {
+          "median": 798.3074379999999,
+          "min": 798.3074379999999,
+          "max": 798.3074379999999,
+          "q1": 798.3074379999999,
+          "q3": 798.3074379999999
+        },
+        "unchanged": {
+          "median": 363.1555740000001,
+          "min": 363.1555740000001,
+          "max": 363.1555740000001,
+          "q1": 363.1555740000001,
+          "q3": 363.1555740000001
+        },
+        "edited": {
+          "median": 341.4026779999999,
+          "min": 341.4026779999999,
+          "max": 341.4026779999999,
+          "q1": 341.4026779999999,
+          "q3": 341.4026779999999
+        },
+        "processFirstReady": {
+          "median": 1202.6163579999993,
+          "min": 1202.6163579999993,
+          "max": 1202.6163579999993,
+          "q1": 1202.6163579999993,
+          "q3": 1202.6163579999993
+        },
+        "heapMiB": {
+          "median": 23.357513427734375,
+          "min": 23.357513427734375,
+          "max": 23.357513427734375,
+          "q1": 23.357513427734375,
+          "q3": 23.357513427734375
+        },
+        "rssMiB": {
+          "median": 167.29296875,
+          "min": 167.29296875,
+          "max": 167.29296875,
+          "q1": 167.29296875,
+          "q3": 167.29296875
+        },
+        "peakRssMiB": {
+          "median": 210.515625,
+          "min": 210.515625,
+          "max": 210.515625,
+          "q1": 210.515625,
+          "q3": 210.515625
+        },
+        "output": {
+          "js": {
+            "raw": 885,
+            "gzip": 487,
+            "brotli": 416
+          },
+          "css": {
+            "raw": 486,
+            "gzip": 191,
+            "brotli": 173
+          },
+          "cssHash": "66ac3680b0cf34322ee41211473f1980cd6eded19661403386f76193ba921736",
+          "valueHash": "2636f44b3ba90220f813b26f33c2e4ec50907a7fdf93fe7ffa62e8e3c3d7e28a"
+        }
+      },
+      "candidate": {
+        "first": {
+          "median": 965.6994649999999,
+          "min": 965.6994649999999,
+          "max": 965.6994649999999,
+          "q1": 965.6994649999999,
+          "q3": 965.6994649999999
+        },
+        "unchanged": {
+          "median": 247.52861400000006,
+          "min": 247.52861400000006,
+          "max": 247.52861400000006,
+          "q1": 247.52861400000006,
+          "q3": 247.52861400000006
+        },
+        "edited": {
+          "median": 438.7592060000002,
+          "min": 438.7592060000002,
+          "max": 438.7592060000002,
+          "q1": 438.7592060000002,
+          "q3": 438.7592060000002
+        },
+        "processFirstReady": {
+          "median": 1369.886790999999,
+          "min": 1369.886790999999,
+          "max": 1369.886790999999,
+          "q1": 1369.886790999999,
+          "q3": 1369.886790999999
+        },
+        "heapMiB": {
+          "median": 28.51367950439453,
+          "min": 28.51367950439453,
+          "max": 28.51367950439453,
+          "q1": 28.51367950439453,
+          "q3": 28.51367950439453
+        },
+        "rssMiB": {
+          "median": 223.51953125,
+          "min": 223.51953125,
+          "max": 223.51953125,
+          "q1": 223.51953125,
+          "q3": 223.51953125
+        },
+        "peakRssMiB": {
+          "median": 244.50390625,
+          "min": 244.50390625,
+          "max": 244.50390625,
+          "q1": 244.50390625,
+          "q3": 244.50390625
+        },
+        "output": {
+          "js": {
+            "raw": 885,
+            "gzip": 487,
+            "brotli": 416
+          },
+          "css": {
+            "raw": 486,
+            "gzip": 191,
+            "brotli": 173
+          },
+          "cssHash": "66ac3680b0cf34322ee41211473f1980cd6eded19661403386f76193ba921736",
+          "valueHash": "2636f44b3ba90220f813b26f33c2e4ec50907a7fdf93fe7ffa62e8e3c3d7e28a"
+        }
+      }
+    },
+    "vite-dev/esm/styles-24": {
+      "baseline": {
+        "first": {
+          "median": 649.984303,
+          "min": 649.984303,
+          "max": 649.984303,
+          "q1": 649.984303,
+          "q3": 649.984303
+        },
+        "unchanged": {
+          "median": 0.8938940000000457,
+          "min": 0.8938940000000457,
+          "max": 0.8938940000000457,
+          "q1": 0.8938940000000457,
+          "q3": 0.8938940000000457
+        },
+        "edited": {
+          "median": 29.02234199999998,
+          "min": 29.02234199999998,
+          "max": 29.02234199999998,
+          "q1": 29.02234199999998,
+          "q3": 29.02234199999998
+        },
+        "processFirstReady": {
+          "median": 1240.3515020000013,
+          "min": 1240.3515020000013,
+          "max": 1240.3515020000013,
+          "q1": 1240.3515020000013,
+          "q3": 1240.3515020000013
+        },
+        "heapMiB": {
+          "median": 31.996864318847656,
+          "min": 31.996864318847656,
+          "max": 31.996864318847656,
+          "q1": 31.996864318847656,
+          "q3": 31.996864318847656
+        },
+        "rssMiB": {
+          "median": 148.10546875,
+          "min": 148.10546875,
+          "max": 148.10546875,
+          "q1": 148.10546875,
+          "q3": 148.10546875
+        },
+        "peakRssMiB": {
+          "median": 148.10546875,
+          "min": 148.10546875,
+          "max": 148.10546875,
+          "q1": 148.10546875,
+          "q3": 148.10546875
+        }
+      },
+      "candidate": {
+        "first": {
+          "median": 1705.5657230000002,
+          "min": 1705.5657230000002,
+          "max": 1705.5657230000002,
+          "q1": 1705.5657230000002,
+          "q3": 1705.5657230000002
+        },
+        "unchanged": {
+          "median": 0.9807949999999437,
+          "min": 0.9807949999999437,
+          "max": 0.9807949999999437,
+          "q1": 0.9807949999999437,
+          "q3": 0.9807949999999437
+        },
+        "edited": {
+          "median": 78.47647899999993,
+          "min": 78.47647899999993,
+          "max": 78.47647899999993,
+          "q1": 78.47647899999993,
+          "q3": 78.47647899999993
+        },
+        "processFirstReady": {
+          "median": 2289.5219719999986,
+          "min": 2289.5219719999986,
+          "max": 2289.5219719999986,
+          "q1": 2289.5219719999986,
+          "q3": 2289.5219719999986
+        },
+        "heapMiB": {
+          "median": 34.17095947265625,
+          "min": 34.17095947265625,
+          "max": 34.17095947265625,
+          "q1": 34.17095947265625,
+          "q3": 34.17095947265625
+        },
+        "rssMiB": {
+          "median": 212.47265625,
+          "min": 212.47265625,
+          "max": 212.47265625,
+          "q1": 212.47265625,
+          "q3": 212.47265625
+        },
+        "peakRssMiB": {
+          "median": 219.37109375,
+          "min": 219.37109375,
+          "max": 219.37109375,
+          "q1": 219.37109375,
+          "q3": 219.37109375
+        }
+      }
+    },
+    "vite-dev/esm/tokens-unused-24": {
+      "baseline": {
+        "first": {
+          "median": 835.174497,
+          "min": 835.174497,
+          "max": 835.174497,
+          "q1": 835.174497,
+          "q3": 835.174497
+        },
+        "unchanged": {
+          "median": 1.2020850000001246,
+          "min": 1.2020850000001246,
+          "max": 1.2020850000001246,
+          "q1": 1.2020850000001246,
+          "q3": 1.2020850000001246
+        },
+        "edited": {
+          "median": 583.206328,
+          "min": 583.206328,
+          "max": 583.206328,
+          "q1": 583.206328,
+          "q3": 583.206328
+        },
+        "processFirstReady": {
+          "median": 1368.4876990000012,
+          "min": 1368.4876990000012,
+          "max": 1368.4876990000012,
+          "q1": 1368.4876990000012,
+          "q3": 1368.4876990000012
+        },
+        "heapMiB": {
+          "median": 54.61602020263672,
+          "min": 54.61602020263672,
+          "max": 54.61602020263672,
+          "q1": 54.61602020263672,
+          "q3": 54.61602020263672
+        },
+        "rssMiB": {
+          "median": 192.26171875,
+          "min": 192.26171875,
+          "max": 192.26171875,
+          "q1": 192.26171875,
+          "q3": 192.26171875
+        },
+        "peakRssMiB": {
+          "median": 192.26171875,
+          "min": 192.26171875,
+          "max": 192.26171875,
+          "q1": 192.26171875,
+          "q3": 192.26171875
+        }
+      },
+      "candidate": {
+        "first": {
+          "median": 1985.482997,
+          "min": 1985.482997,
+          "max": 1985.482997,
+          "q1": 1985.482997,
+          "q3": 1985.482997
+        },
+        "unchanged": {
+          "median": 1.0201219999999012,
+          "min": 1.0201219999999012,
+          "max": 1.0201219999999012,
+          "q1": 1.0201219999999012,
+          "q3": 1.0201219999999012
+        },
+        "edited": {
+          "median": 1032.6176880000003,
+          "min": 1032.6176880000003,
+          "max": 1032.6176880000003,
+          "q1": 1032.6176880000003,
+          "q3": 1032.6176880000003
+        },
+        "processFirstReady": {
+          "median": 2529.674296000001,
+          "min": 2529.674296000001,
+          "max": 2529.674296000001,
+          "q1": 2529.674296000001,
+          "q3": 2529.674296000001
+        },
+        "heapMiB": {
+          "median": 63.49542999267578,
+          "min": 63.49542999267578,
+          "max": 63.49542999267578,
+          "q1": 63.49542999267578,
+          "q3": 63.49542999267578
+        },
+        "rssMiB": {
+          "median": 332.015625,
+          "min": 332.015625,
+          "max": 332.015625,
+          "q1": 332.015625,
+          "q3": 332.015625
+        },
+        "peakRssMiB": {
+          "median": 352.078125,
+          "min": 352.078125,
+          "max": 352.078125,
+          "q1": 352.078125,
+          "q3": 352.078125
+        }
+      }
+    }
+  },
+  "measurements": [
+    {
+      "node": "v20.19.0",
+      "versions": {
+        "esbuild": "0.27.7",
+        "vite": "7.3.3",
+        "react": "19.2.6",
+        "react-dom": "19.2.6",
+        "@babel/core": "7.29.7",
+        "@vanilla-extract/css": "1.21.2"
+      },
+      "name": "styles-24",
+      "format": "esm",
+      "bundler": "esbuild",
+      "phases": {
+        "first": [1155.101385],
+        "unchanged": [313.9208739999999, 347.43275700000004, 271.7898530000002],
+        "edited": [246.85781499999985, 295.7349599999998, 268.04574300000013]
+      },
+      "outputs": {
+        "first": {
+          "js": {
+            "raw": 6657,
+            "gzip": 1372,
+            "brotli": 1135
+          },
+          "css": {
+            "raw": 2676,
+            "gzip": 498,
+            "brotli": 358
+          },
+          "cssHash": "4f4d5c196a3996501bd40369138d3e43c3b2a3fb8691a6bc6be0b0a0812876d5",
+          "valueHash": "5bdba38dde35e0feb7e92084c7f64289293c266c7e4bf3e0405b0b527037e6c0"
+        },
+        "unchanged": {
+          "js": {
+            "raw": 6657,
+            "gzip": 1372,
+            "brotli": 1135
+          },
+          "css": {
+            "raw": 2676,
+            "gzip": 498,
+            "brotli": 358
+          },
+          "cssHash": "4f4d5c196a3996501bd40369138d3e43c3b2a3fb8691a6bc6be0b0a0812876d5",
+          "valueHash": "5bdba38dde35e0feb7e92084c7f64289293c266c7e4bf3e0405b0b527037e6c0"
+        },
+        "edited-0": {
+          "js": {
+            "raw": 6657,
+            "gzip": 1375,
+            "brotli": 1136
+          },
+          "css": {
+            "raw": 2676,
+            "gzip": 498,
+            "brotli": 358
+          },
+          "cssHash": "4f4d5c196a3996501bd40369138d3e43c3b2a3fb8691a6bc6be0b0a0812876d5",
+          "valueHash": "c29d17ffcd715b366739e6a3b15abe399cb9dfdd40b84d36cadde87c7dd9769a"
+        },
+        "edited-1": {
+          "js": {
+            "raw": 6657,
+            "gzip": 1372,
+            "brotli": 1135
+          },
+          "css": {
+            "raw": 2676,
+            "gzip": 498,
+            "brotli": 358
+          },
+          "cssHash": "4f4d5c196a3996501bd40369138d3e43c3b2a3fb8691a6bc6be0b0a0812876d5",
+          "valueHash": "5bdba38dde35e0feb7e92084c7f64289293c266c7e4bf3e0405b0b527037e6c0"
+        },
+        "edited-2": {
+          "js": {
+            "raw": 6657,
+            "gzip": 1375,
+            "brotli": 1136
+          },
+          "css": {
+            "raw": 2676,
+            "gzip": 498,
+            "brotli": 358
+          },
+          "cssHash": "4f4d5c196a3996501bd40369138d3e43c3b2a3fb8691a6bc6be0b0a0812876d5",
+          "valueHash": "c29d17ffcd715b366739e6a3b15abe399cb9dfdd40b84d36cadde87c7dd9769a"
+        }
+      },
+      "compilerHashes": {
+        "@mincho-js/babel": "ceb7d87e100b7a5a29474165823bf0a0e6f2bd68433197e3ded6cd571a3be11c",
+        "@mincho-js/integration": "cbace65b5ee09eb09a344fdc5f36c9d5ed3c209c72cb2b80d543a4411fe3128f",
+        "@mincho-js/esbuild": "732d524f39e959627be8e47e2ba0a150c9e3fffc9100db1a8fc26e4008175ad9",
+        "@mincho-js/vite": "74100286d9ca76931ce839011a5ef91fa87d84d86c590cd9c78ed0c0526bd973"
+      },
+      "firstReadyMs": 1916.2347740000002,
+      "operations": {
+        "first": [
+          {
+            "readFile": 1,
+            "readFileSync": 96,
+            "readFilePromise": 25,
+            "createHash": 24
+          }
+        ],
+        "unchanged": [
+          {
+            "readFile": 0,
+            "readFileSync": 0,
+            "readFilePromise": 25,
+            "createHash": 24
+          },
+          {
+            "readFile": 0,
+            "readFileSync": 0,
+            "readFilePromise": 25,
+            "createHash": 24
+          },
+          {
+            "readFile": 0,
+            "readFileSync": 0,
+            "readFilePromise": 25,
+            "createHash": 24
+          }
+        ],
+        "edited": [
+          {
+            "readFile": 0,
+            "readFileSync": 0,
+            "readFilePromise": 25,
+            "createHash": 24
+          },
+          {
+            "readFile": 0,
+            "readFileSync": 0,
+            "readFilePromise": 25,
+            "createHash": 24
+          },
+          {
+            "readFile": 0,
+            "readFileSync": 0,
+            "readFilePromise": 25,
+            "createHash": 24
+          }
+        ]
+      },
+      "diagnostics": {
+        "first": [
+          {
+            "babel": 25,
+            "extraction": 25,
+            "transform": 25,
+            "esbuild": 24,
+            "sidecar-compile": 24,
+            "vanilla-extract": 24,
+            "css-evaluation": 24
+          }
+        ],
+        "unchanged": [
+          {
+            "babel": 25,
+            "extraction": 25,
+            "transform": 25,
+            "esbuild": 24,
+            "sidecar-compile": 24,
+            "vanilla-extract": 24,
+            "css-evaluation": 24
+          },
+          {
+            "babel": 25,
+            "extraction": 25,
+            "transform": 25,
+            "esbuild": 24,
+            "sidecar-compile": 24,
+            "vanilla-extract": 24,
+            "css-evaluation": 24
+          },
+          {
+            "babel": 25,
+            "extraction": 25,
+            "transform": 25,
+            "esbuild": 24,
+            "sidecar-compile": 24,
+            "vanilla-extract": 24,
+            "css-evaluation": 24
+          }
+        ],
+        "edited": [
+          {
+            "babel": 25,
+            "extraction": 25,
+            "transform": 25,
+            "esbuild": 24,
+            "sidecar-compile": 24,
+            "vanilla-extract": 24,
+            "css-evaluation": 24
+          },
+          {
+            "babel": 25,
+            "extraction": 25,
+            "transform": 25,
+            "esbuild": 24,
+            "sidecar-compile": 24,
+            "vanilla-extract": 24,
+            "css-evaluation": 24
+          },
+          {
+            "babel": 25,
+            "extraction": 25,
+            "transform": 25,
+            "esbuild": 24,
+            "sidecar-compile": 24,
+            "vanilla-extract": 24,
+            "css-evaluation": 24
+          }
+        ]
+      },
+      "heapMiB": 22.22876739501953,
+      "rssMiB": 165.6640625,
+      "peakRssMiB": 165.6640625,
+      "revision": "baseline",
+      "linker": "npm",
+      "round": 0,
+      "processFirstReadyMs": 2072.043413
+    },
+    {
+      "node": "v20.19.0",
+      "versions": {
+        "esbuild": "0.27.7",
+        "vite": "7.3.3",
+        "react": "19.2.6",
+        "react-dom": "19.2.6",
+        "@babel/core": "7.29.7",
+        "@vanilla-extract/css": "1.21.2"
+      },
+      "name": "styles-24",
+      "format": "esm",
+      "bundler": "esbuild",
+      "phases": {
+        "first": [1066.027258],
+        "unchanged": [357.6121659999999, 293.930108, 266.948797],
+        "edited": [235.4332690000001, 254.28444100000024, 231.90121299999964]
+      },
+      "outputs": {
+        "first": {
+          "js": {
+            "raw": 6657,
+            "gzip": 1372,
+            "brotli": 1135
+          },
+          "css": {
+            "raw": 2676,
+            "gzip": 498,
+            "brotli": 358
+          },
+          "cssHash": "4f4d5c196a3996501bd40369138d3e43c3b2a3fb8691a6bc6be0b0a0812876d5",
+          "valueHash": "5bdba38dde35e0feb7e92084c7f64289293c266c7e4bf3e0405b0b527037e6c0"
+        },
+        "unchanged": {
+          "js": {
+            "raw": 6657,
+            "gzip": 1372,
+            "brotli": 1135
+          },
+          "css": {
+            "raw": 2676,
+            "gzip": 498,
+            "brotli": 358
+          },
+          "cssHash": "4f4d5c196a3996501bd40369138d3e43c3b2a3fb8691a6bc6be0b0a0812876d5",
+          "valueHash": "5bdba38dde35e0feb7e92084c7f64289293c266c7e4bf3e0405b0b527037e6c0"
+        },
+        "edited-0": {
+          "js": {
+            "raw": 6657,
+            "gzip": 1375,
+            "brotli": 1136
+          },
+          "css": {
+            "raw": 2676,
+            "gzip": 498,
+            "brotli": 358
+          },
+          "cssHash": "4f4d5c196a3996501bd40369138d3e43c3b2a3fb8691a6bc6be0b0a0812876d5",
+          "valueHash": "c29d17ffcd715b366739e6a3b15abe399cb9dfdd40b84d36cadde87c7dd9769a"
+        },
+        "edited-1": {
+          "js": {
+            "raw": 6657,
+            "gzip": 1372,
+            "brotli": 1135
+          },
+          "css": {
+            "raw": 2676,
+            "gzip": 498,
+            "brotli": 358
+          },
+          "cssHash": "4f4d5c196a3996501bd40369138d3e43c3b2a3fb8691a6bc6be0b0a0812876d5",
+          "valueHash": "5bdba38dde35e0feb7e92084c7f64289293c266c7e4bf3e0405b0b527037e6c0"
+        },
+        "edited-2": {
+          "js": {
+            "raw": 6657,
+            "gzip": 1375,
+            "brotli": 1136
+          },
+          "css": {
+            "raw": 2676,
+            "gzip": 498,
+            "brotli": 358
+          },
+          "cssHash": "4f4d5c196a3996501bd40369138d3e43c3b2a3fb8691a6bc6be0b0a0812876d5",
+          "valueHash": "c29d17ffcd715b366739e6a3b15abe399cb9dfdd40b84d36cadde87c7dd9769a"
+        }
+      },
+      "compilerHashes": {
+        "@mincho-js/babel": "b952382b8bd2c56c1bc8344b16afca8afe737444bdc97845f2f25d09c3156c5f",
+        "@mincho-js/integration": "b4d8e53dc4d83f27ae1e17c59cbf94eca2916724d91a881435f857d79af5ba18",
+        "@mincho-js/esbuild": "c095f5b1a092a35d70fa5494b59c8679f105dfa87826014ed2b5bc6c519903b2",
+        "@mincho-js/vite": "9401d9a9b3fb385d2320bbff7253c42297c0296497e510b13519ad4e048ef0d4"
+      },
+      "firstReadyMs": 1576.527683,
+      "operations": {
+        "first": [
+          {
+            "readFile": 1,
+            "readFileSync": 96,
+            "readFilePromise": 388,
+            "createHash": 157
+          }
+        ],
+        "unchanged": [
+          {
+            "readFile": 0,
+            "readFileSync": 0,
+            "readFilePromise": 388,
+            "createHash": 133
+          },
+          {
+            "readFile": 0,
+            "readFileSync": 0,
+            "readFilePromise": 388,
+            "createHash": 133
+          },
+          {
+            "readFile": 0,
+            "readFileSync": 0,
+            "readFilePromise": 388,
+            "createHash": 133
+          }
+        ],
+        "edited": [
+          {
+            "readFile": 0,
+            "readFileSync": 0,
+            "readFilePromise": 388,
+            "createHash": 134
+          },
+          {
+            "readFile": 0,
+            "readFileSync": 0,
+            "readFilePromise": 388,
+            "createHash": 133
+          },
+          {
+            "readFile": 0,
+            "readFileSync": 0,
+            "readFilePromise": 388,
+            "createHash": 133
+          }
+        ]
+      },
+      "diagnostics": {
+        "first": [
+          {
+            "input-read": 194,
+            "input-hash": 56,
+            "source-read": 25,
+            "input-reuse": 12195,
+            "cache-miss:transform": 25,
+            "babel": 25,
+            "extraction": 25,
+            "transform": 25,
+            "cache-miss:compile": 24,
+            "esbuild": 24,
+            "sidecar-compile": 24,
+            "vanilla-extract": 24,
+            "css-evaluation": 24,
+            "input-validate": 194,
+            "input-validation": 1
+          }
+        ],
+        "unchanged": [
+          {
+            "input-read": 194,
+            "input-hash": 56,
+            "source-read": 25,
+            "input-reuse": 16445,
+            "cache-hit:transform": 25,
+            "transform": 25,
+            "cache-hit:compile": 24,
+            "sidecar-compile": 24,
+            "vanilla-extract": 24,
+            "css-evaluation": 24,
+            "input-validate": 194,
+            "input-validation": 1
+          },
+          {
+            "input-read": 194,
+            "input-hash": 56,
+            "source-read": 25,
+            "input-reuse": 16445,
+            "cache-hit:transform": 25,
+            "transform": 25,
+            "cache-hit:compile": 24,
+            "sidecar-compile": 24,
+            "vanilla-extract": 24,
+            "css-evaluation": 24,
+            "input-validate": 194,
+            "input-validation": 1
+          },
+          {
+            "input-read": 194,
+            "input-hash": 56,
+            "source-read": 25,
+            "input-reuse": 16445,
+            "cache-hit:transform": 25,
+            "transform": 25,
+            "cache-hit:compile": 24,
+            "sidecar-compile": 24,
+            "vanilla-extract": 24,
+            "css-evaluation": 24,
+            "input-validate": 194,
+            "input-validation": 1
+          }
+        ],
+        "edited": [
+          {
+            "input-read": 194,
+            "input-hash": 56,
+            "source-read": 25,
+            "input-reuse": 16275,
+            "cache-hit:transform": 24,
+            "transform": 25,
+            "cache-miss:transform": 1,
+            "babel": 1,
+            "extraction": 1,
+            "cache-miss:compile": 1,
+            "cache-hit:compile": 23,
+            "sidecar-compile": 24,
+            "vanilla-extract": 24,
+            "css-evaluation": 24,
+            "esbuild": 1,
+            "input-validate": 194,
+            "input-validation": 1
+          },
+          {
+            "input-read": 194,
+            "input-hash": 56,
+            "source-read": 25,
+            "input-reuse": 16445,
+            "cache-hit:transform": 25,
+            "transform": 25,
+            "cache-hit:compile": 24,
+            "sidecar-compile": 24,
+            "vanilla-extract": 24,
+            "css-evaluation": 24,
+            "input-validate": 194,
+            "input-validation": 1
+          },
+          {
+            "input-read": 194,
+            "input-hash": 56,
+            "source-read": 25,
+            "input-reuse": 16445,
+            "cache-hit:transform": 25,
+            "transform": 25,
+            "cache-hit:compile": 24,
+            "sidecar-compile": 24,
+            "vanilla-extract": 24,
+            "css-evaluation": 24,
+            "input-validate": 194,
+            "input-validation": 1
+          }
+        ]
+      },
+      "heapMiB": 27.147872924804688,
+      "rssMiB": 227.66796875,
+      "peakRssMiB": 227.66796875,
+      "revision": "candidate",
+      "linker": "npm",
+      "round": 0,
+      "processFirstReadyMs": 1671.628831
+    },
+    {
+      "node": "v20.19.0",
+      "versions": {
+        "esbuild": "0.27.7",
+        "vite": "7.3.3",
+        "react": "19.2.6",
+        "react-dom": "19.2.6",
+        "@babel/core": "7.29.7",
+        "@vanilla-extract/css": "1.21.2"
+      },
+      "name": "tokens-unused-24",
+      "format": "esm",
+      "bundler": "esbuild",
+      "phases": {
+        "first": [798.3074379999999],
+        "unchanged": [413.2658530000001, 361.18796900000007, 363.1555740000001],
+        "edited": [341.4026779999999, 336.5616950000003, 347.448449]
+      },
+      "outputs": {
+        "first": {
+          "js": {
+            "raw": 885,
+            "gzip": 487,
+            "brotli": 416
+          },
+          "css": {
+            "raw": 486,
+            "gzip": 191,
+            "brotli": 173
+          },
+          "cssHash": "66ac3680b0cf34322ee41211473f1980cd6eded19661403386f76193ba921736",
+          "valueHash": "2636f44b3ba90220f813b26f33c2e4ec50907a7fdf93fe7ffa62e8e3c3d7e28a"
+        },
+        "unchanged": {
+          "js": {
+            "raw": 885,
+            "gzip": 487,
+            "brotli": 416
+          },
+          "css": {
+            "raw": 486,
+            "gzip": 191,
+            "brotli": 173
+          },
+          "cssHash": "66ac3680b0cf34322ee41211473f1980cd6eded19661403386f76193ba921736",
+          "valueHash": "2636f44b3ba90220f813b26f33c2e4ec50907a7fdf93fe7ffa62e8e3c3d7e28a"
+        },
+        "edited-0": {
+          "js": {
+            "raw": 885,
+            "gzip": 487,
+            "brotli": 416
+          },
+          "css": {
+            "raw": 486,
+            "gzip": 191,
+            "brotli": 173
+          },
+          "cssHash": "66ac3680b0cf34322ee41211473f1980cd6eded19661403386f76193ba921736",
+          "valueHash": "2636f44b3ba90220f813b26f33c2e4ec50907a7fdf93fe7ffa62e8e3c3d7e28a"
+        },
+        "edited-1": {
+          "js": {
+            "raw": 885,
+            "gzip": 487,
+            "brotli": 416
+          },
+          "css": {
+            "raw": 486,
+            "gzip": 191,
+            "brotli": 173
+          },
+          "cssHash": "66ac3680b0cf34322ee41211473f1980cd6eded19661403386f76193ba921736",
+          "valueHash": "2636f44b3ba90220f813b26f33c2e4ec50907a7fdf93fe7ffa62e8e3c3d7e28a"
+        },
+        "edited-2": {
+          "js": {
+            "raw": 885,
+            "gzip": 487,
+            "brotli": 416
+          },
+          "css": {
+            "raw": 486,
+            "gzip": 191,
+            "brotli": 173
+          },
+          "cssHash": "66ac3680b0cf34322ee41211473f1980cd6eded19661403386f76193ba921736",
+          "valueHash": "2636f44b3ba90220f813b26f33c2e4ec50907a7fdf93fe7ffa62e8e3c3d7e28a"
+        }
+      },
+      "compilerHashes": {
+        "@mincho-js/babel": "ceb7d87e100b7a5a29474165823bf0a0e6f2bd68433197e3ded6cd571a3be11c",
+        "@mincho-js/integration": "cbace65b5ee09eb09a344fdc5f36c9d5ed3c209c72cb2b80d543a4411fe3128f",
+        "@mincho-js/esbuild": "732d524f39e959627be8e47e2ba0a150c9e3fffc9100db1a8fc26e4008175ad9",
+        "@mincho-js/vite": "74100286d9ca76931ce839011a5ef91fa87d84d86c590cd9c78ed0c0526bd973"
+      },
+      "firstReadyMs": 1121.993517,
+      "operations": {
+        "first": [
+          {
+            "readFile": 1,
+            "readFileSync": 97,
+            "readFilePromise": 49,
+            "createHash": 0
+          }
+        ],
+        "unchanged": [
+          {
+            "readFile": 0,
+            "readFileSync": 0,
+            "readFilePromise": 49,
+            "createHash": 0
+          },
+          {
+            "readFile": 0,
+            "readFileSync": 0,
+            "readFilePromise": 49,
+            "createHash": 0
+          },
+          {
+            "readFile": 0,
+            "readFileSync": 0,
+            "readFilePromise": 49,
+            "createHash": 0
+          }
+        ],
+        "edited": [
+          {
+            "readFile": 0,
+            "readFileSync": 0,
+            "readFilePromise": 49,
+            "createHash": 0
+          },
+          {
+            "readFile": 0,
+            "readFileSync": 0,
+            "readFilePromise": 49,
+            "createHash": 0
+          },
+          {
+            "readFile": 0,
+            "readFileSync": 0,
+            "readFilePromise": 49,
+            "createHash": 0
+          }
+        ]
+      },
+      "diagnostics": {
+        "first": [
+          {
+            "babel": 25,
+            "extraction": 25,
+            "transform": 25,
+            "esbuild": 24,
+            "sidecar-compile": 24,
+            "vanilla-extract": 24,
+            "css-evaluation": 24
+          }
+        ],
+        "unchanged": [
+          {
+            "babel": 25,
+            "extraction": 25,
+            "transform": 25,
+            "esbuild": 24,
+            "sidecar-compile": 24,
+            "vanilla-extract": 24,
+            "css-evaluation": 24
+          },
+          {
+            "babel": 25,
+            "extraction": 25,
+            "transform": 25,
+            "esbuild": 24,
+            "sidecar-compile": 24,
+            "vanilla-extract": 24,
+            "css-evaluation": 24
+          },
+          {
+            "babel": 25,
+            "extraction": 25,
+            "transform": 25,
+            "esbuild": 24,
+            "sidecar-compile": 24,
+            "vanilla-extract": 24,
+            "css-evaluation": 24
+          }
+        ],
+        "edited": [
+          {
+            "babel": 25,
+            "extraction": 25,
+            "transform": 25,
+            "esbuild": 24,
+            "sidecar-compile": 24,
+            "vanilla-extract": 24,
+            "css-evaluation": 24
+          },
+          {
+            "babel": 25,
+            "extraction": 25,
+            "transform": 25,
+            "esbuild": 24,
+            "sidecar-compile": 24,
+            "vanilla-extract": 24,
+            "css-evaluation": 24
+          },
+          {
+            "babel": 25,
+            "extraction": 25,
+            "transform": 25,
+            "esbuild": 24,
+            "sidecar-compile": 24,
+            "vanilla-extract": 24,
+            "css-evaluation": 24
+          }
+        ]
+      },
+      "heapMiB": 23.357513427734375,
+      "rssMiB": 167.29296875,
+      "peakRssMiB": 210.515625,
+      "revision": "baseline",
+      "linker": "npm",
+      "round": 0,
+      "processFirstReadyMs": 1202.6163579999993
+    },
+    {
+      "node": "v20.19.0",
+      "versions": {
+        "esbuild": "0.27.7",
+        "vite": "7.3.3",
+        "react": "19.2.6",
+        "react-dom": "19.2.6",
+        "@babel/core": "7.29.7",
+        "@vanilla-extract/css": "1.21.2"
+      },
+      "name": "tokens-unused-24",
+      "format": "esm",
+      "bundler": "esbuild",
+      "phases": {
+        "first": [965.6994649999999],
+        "unchanged": [
+          247.52861400000006, 249.10209499999996, 240.77523199999996
+        ],
+        "edited": [460.6720330000003, 438.7592060000002, 415.5056340000001]
+      },
+      "outputs": {
+        "first": {
+          "js": {
+            "raw": 885,
+            "gzip": 487,
+            "brotli": 416
+          },
+          "css": {
+            "raw": 486,
+            "gzip": 191,
+            "brotli": 173
+          },
+          "cssHash": "66ac3680b0cf34322ee41211473f1980cd6eded19661403386f76193ba921736",
+          "valueHash": "2636f44b3ba90220f813b26f33c2e4ec50907a7fdf93fe7ffa62e8e3c3d7e28a"
+        },
+        "unchanged": {
+          "js": {
+            "raw": 885,
+            "gzip": 487,
+            "brotli": 416
+          },
+          "css": {
+            "raw": 486,
+            "gzip": 191,
+            "brotli": 173
+          },
+          "cssHash": "66ac3680b0cf34322ee41211473f1980cd6eded19661403386f76193ba921736",
+          "valueHash": "2636f44b3ba90220f813b26f33c2e4ec50907a7fdf93fe7ffa62e8e3c3d7e28a"
+        },
+        "edited-0": {
+          "js": {
+            "raw": 885,
+            "gzip": 487,
+            "brotli": 416
+          },
+          "css": {
+            "raw": 486,
+            "gzip": 191,
+            "brotli": 173
+          },
+          "cssHash": "66ac3680b0cf34322ee41211473f1980cd6eded19661403386f76193ba921736",
+          "valueHash": "2636f44b3ba90220f813b26f33c2e4ec50907a7fdf93fe7ffa62e8e3c3d7e28a"
+        },
+        "edited-1": {
+          "js": {
+            "raw": 885,
+            "gzip": 487,
+            "brotli": 416
+          },
+          "css": {
+            "raw": 486,
+            "gzip": 191,
+            "brotli": 173
+          },
+          "cssHash": "66ac3680b0cf34322ee41211473f1980cd6eded19661403386f76193ba921736",
+          "valueHash": "2636f44b3ba90220f813b26f33c2e4ec50907a7fdf93fe7ffa62e8e3c3d7e28a"
+        },
+        "edited-2": {
+          "js": {
+            "raw": 885,
+            "gzip": 487,
+            "brotli": 416
+          },
+          "css": {
+            "raw": 486,
+            "gzip": 191,
+            "brotli": 173
+          },
+          "cssHash": "66ac3680b0cf34322ee41211473f1980cd6eded19661403386f76193ba921736",
+          "valueHash": "2636f44b3ba90220f813b26f33c2e4ec50907a7fdf93fe7ffa62e8e3c3d7e28a"
+        }
+      },
+      "compilerHashes": {
+        "@mincho-js/babel": "b952382b8bd2c56c1bc8344b16afca8afe737444bdc97845f2f25d09c3156c5f",
+        "@mincho-js/integration": "b4d8e53dc4d83f27ae1e17c59cbf94eca2916724d91a881435f857d79af5ba18",
+        "@mincho-js/esbuild": "c095f5b1a092a35d70fa5494b59c8679f105dfa87826014ed2b5bc6c519903b2",
+        "@mincho-js/vite": "9401d9a9b3fb385d2320bbff7253c42297c0296497e510b13519ad4e048ef0d4"
+      },
+      "firstReadyMs": 1293.1129090000002,
+      "operations": {
+        "first": [
+          {
+            "readFile": 1,
+            "readFileSync": 97,
+            "readFilePromise": 390,
+            "createHash": 158
+          }
+        ],
+        "unchanged": [
+          {
+            "readFile": 0,
+            "readFileSync": 0,
+            "readFilePromise": 390,
+            "createHash": 110
+          },
+          {
+            "readFile": 0,
+            "readFileSync": 0,
+            "readFilePromise": 390,
+            "createHash": 110
+          },
+          {
+            "readFile": 0,
+            "readFileSync": 0,
+            "readFilePromise": 390,
+            "createHash": 110
+          }
+        ],
+        "edited": [
+          {
+            "readFile": 0,
+            "readFileSync": 0,
+            "readFilePromise": 390,
+            "createHash": 158
+          },
+          {
+            "readFile": 0,
+            "readFileSync": 0,
+            "readFilePromise": 390,
+            "createHash": 158
+          },
+          {
+            "readFile": 0,
+            "readFileSync": 0,
+            "readFilePromise": 390,
+            "createHash": 158
+          }
+        ]
+      },
+      "diagnostics": {
+        "first": [
+          {
+            "input-read": 26,
+            "input-hash": 55,
+            "source-read": 25,
+            "input-reuse": 12239,
+            "cache-miss:transform": 24,
+            "babel": 24,
+            "extraction": 24,
+            "transform": 24,
+            "cache-miss:compile": 24,
+            "esbuild": 24,
+            "sidecar-compile": 24,
+            "vanilla-extract": 24,
+            "css-evaluation": 24,
+            "input-validate": 195,
+            "input-validation": 1
+          }
+        ],
+        "unchanged": [
+          {
+            "input-read": 26,
+            "input-hash": 55,
+            "source-read": 25,
+            "input-reuse": 16295,
+            "cache-hit:transform": 24,
+            "transform": 24,
+            "cache-hit:compile": 24,
+            "sidecar-compile": 24,
+            "vanilla-extract": 24,
+            "css-evaluation": 24,
+            "input-validate": 195,
+            "input-validation": 1
+          },
+          {
+            "input-read": 26,
+            "input-hash": 55,
+            "source-read": 25,
+            "input-reuse": 16295,
+            "cache-hit:transform": 24,
+            "transform": 24,
+            "cache-hit:compile": 24,
+            "sidecar-compile": 24,
+            "vanilla-extract": 24,
+            "css-evaluation": 24,
+            "input-validate": 195,
+            "input-validation": 1
+          },
+          {
+            "input-read": 26,
+            "input-hash": 55,
+            "source-read": 25,
+            "input-reuse": 16295,
+            "cache-hit:transform": 24,
+            "transform": 24,
+            "cache-hit:compile": 24,
+            "sidecar-compile": 24,
+            "vanilla-extract": 24,
+            "css-evaluation": 24,
+            "input-validate": 195,
+            "input-validation": 1
+          }
+        ],
+        "edited": [
+          {
+            "input-read": 26,
+            "input-hash": 55,
+            "source-read": 25,
+            "input-reuse": 20399,
+            "cache-hit:transform": 24,
+            "transform": 24,
+            "cache-invalidated:compile": 24,
+            "esbuild": 24,
+            "sidecar-compile": 24,
+            "vanilla-extract": 24,
+            "css-evaluation": 24,
+            "input-validate": 195,
+            "input-validation": 1
+          },
+          {
+            "input-read": 26,
+            "input-hash": 55,
+            "source-read": 25,
+            "input-reuse": 20399,
+            "cache-hit:transform": 24,
+            "transform": 24,
+            "cache-invalidated:compile": 24,
+            "esbuild": 24,
+            "sidecar-compile": 24,
+            "vanilla-extract": 24,
+            "css-evaluation": 24,
+            "input-validate": 195,
+            "input-validation": 1
+          },
+          {
+            "input-read": 26,
+            "input-hash": 55,
+            "source-read": 25,
+            "input-reuse": 20399,
+            "cache-hit:transform": 24,
+            "transform": 24,
+            "cache-invalidated:compile": 24,
+            "esbuild": 24,
+            "sidecar-compile": 24,
+            "vanilla-extract": 24,
+            "css-evaluation": 24,
+            "input-validate": 195,
+            "input-validation": 1
+          }
+        ]
+      },
+      "heapMiB": 28.51367950439453,
+      "rssMiB": 223.51953125,
+      "peakRssMiB": 244.50390625,
+      "revision": "candidate",
+      "linker": "npm",
+      "round": 0,
+      "processFirstReadyMs": 1369.886790999999
+    },
+    {
+      "node": "v20.19.0",
+      "versions": {
+        "esbuild": "0.27.7",
+        "vite": "7.3.3",
+        "react": "19.2.6",
+        "react-dom": "19.2.6",
+        "@babel/core": "7.29.7",
+        "@vanilla-extract/css": "1.21.2"
+      },
+      "name": "styles-24",
+      "format": "esm",
+      "bundler": "vite-dev",
+      "phases": {
+        "first": [649.984303],
+        "unchanged": [
+          0.8938940000000457, 1.0660710000001927, 0.8748370000000705
+        ],
+        "edited": [39.05817200000001, 27.65305400000011, 29.02234199999998]
+      },
+      "outputs": {},
+      "compilerHashes": {
+        "@mincho-js/babel": "ceb7d87e100b7a5a29474165823bf0a0e6f2bd68433197e3ded6cd571a3be11c",
+        "@mincho-js/integration": "cbace65b5ee09eb09a344fdc5f36c9d5ed3c209c72cb2b80d543a4411fe3128f",
+        "@mincho-js/esbuild": "732d524f39e959627be8e47e2ba0a150c9e3fffc9100db1a8fc26e4008175ad9",
+        "@mincho-js/vite": "74100286d9ca76931ce839011a5ef91fa87d84d86c590cd9c78ed0c0526bd973"
+      },
+      "firstReadyMs": 1170.102769,
+      "operations": {
+        "first": [
+          {
+            "readFile": 1,
+            "readFileSync": 101,
+            "readFilePromise": 28,
+            "createHash": 98
+          }
+        ],
+        "unchanged": [
+          {
+            "readFile": 0,
+            "readFileSync": 0,
+            "readFilePromise": 0,
+            "createHash": 0
+          },
+          {
+            "readFile": 0,
+            "readFileSync": 0,
+            "readFilePromise": 0,
+            "createHash": 0
+          },
+          {
+            "readFile": 0,
+            "readFileSync": 0,
+            "readFilePromise": 0,
+            "createHash": 0
+          }
+        ],
+        "edited": [
+          {
+            "readFile": 0,
+            "readFileSync": 0,
+            "readFilePromise": 2,
+            "createHash": 5
+          },
+          {
+            "readFile": 0,
+            "readFileSync": 0,
+            "readFilePromise": 2,
+            "createHash": 5
+          },
+          {
+            "readFile": 0,
+            "readFileSync": 0,
+            "readFilePromise": 2,
+            "createHash": 5
+          }
+        ]
+      },
+      "note": "Development timings cover transformRequest after watcher hooks and explicit graph invalidation; browser network/render latency is excluded.",
+      "heapMiB": 31.996864318847656,
+      "rssMiB": 148.10546875,
+      "peakRssMiB": 148.10546875,
+      "diagnostics": {
+        "first": [
+          {
+            "babel": 25,
+            "extraction": 25,
+            "transform": 25,
+            "esbuild": 24,
+            "sidecar-compile": 24,
+            "vanilla-extract": 24,
+            "css-evaluation": 24
+          }
+        ],
+        "unchanged": [{}, {}, {}],
+        "edited": [
+          {
+            "babel": 2,
+            "extraction": 2,
+            "transform": 2,
+            "esbuild": 1,
+            "sidecar-compile": 1,
+            "vanilla-extract": 1,
+            "css-evaluation": 1
+          },
+          {
+            "babel": 2,
+            "extraction": 2,
+            "transform": 2,
+            "esbuild": 1,
+            "sidecar-compile": 1,
+            "vanilla-extract": 1,
+            "css-evaluation": 1
+          },
+          {
+            "babel": 2,
+            "extraction": 2,
+            "transform": 2,
+            "esbuild": 1,
+            "sidecar-compile": 1,
+            "vanilla-extract": 1,
+            "css-evaluation": 1
+          }
+        ]
+      },
+      "revision": "baseline",
+      "linker": "npm",
+      "round": 0,
+      "processFirstReadyMs": 1240.3515020000013
+    },
+    {
+      "node": "v20.19.0",
+      "versions": {
+        "esbuild": "0.27.7",
+        "vite": "7.3.3",
+        "react": "19.2.6",
+        "react-dom": "19.2.6",
+        "@babel/core": "7.29.7",
+        "@vanilla-extract/css": "1.21.2"
+      },
+      "name": "styles-24",
+      "format": "esm",
+      "bundler": "vite-dev",
+      "phases": {
+        "first": [1705.5657230000002],
+        "unchanged": [
+          0.9832169999999678, 0.9324780000001738, 0.9807949999999437
+        ],
+        "edited": [80.20145199999979, 71.66032700000005, 78.47647899999993]
+      },
+      "outputs": {},
+      "compilerHashes": {
+        "@mincho-js/babel": "b952382b8bd2c56c1bc8344b16afca8afe737444bdc97845f2f25d09c3156c5f",
+        "@mincho-js/integration": "b4d8e53dc4d83f27ae1e17c59cbf94eca2916724d91a881435f857d79af5ba18",
+        "@mincho-js/esbuild": "c095f5b1a092a35d70fa5494b59c8679f105dfa87826014ed2b5bc6c519903b2",
+        "@mincho-js/vite": "9401d9a9b3fb385d2320bbff7253c42297c0296497e510b13519ad4e048ef0d4"
+      },
+      "firstReadyMs": 2217.301289,
+      "operations": {
+        "first": [
+          {
+            "readFile": 1,
+            "readFileSync": 100,
+            "readFilePromise": 16639,
+            "createHash": 614
+          }
+        ],
+        "unchanged": [
+          {
+            "readFile": 0,
+            "readFileSync": 0,
+            "readFilePromise": 0,
+            "createHash": 0
+          },
+          {
+            "readFile": 0,
+            "readFileSync": 0,
+            "readFilePromise": 0,
+            "createHash": 0
+          },
+          {
+            "readFile": 0,
+            "readFileSync": 0,
+            "readFilePromise": 0,
+            "createHash": 0
+          }
+        ],
+        "edited": [
+          {
+            "readFile": 0,
+            "readFileSync": 0,
+            "readFilePromise": 1020,
+            "createHash": 39
+          },
+          {
+            "readFile": 0,
+            "readFileSync": 0,
+            "readFilePromise": 1020,
+            "createHash": 38
+          },
+          {
+            "readFile": 0,
+            "readFileSync": 0,
+            "readFilePromise": 1020,
+            "createHash": 38
+          }
+        ]
+      },
+      "note": "Development timings cover transformRequest after watcher hooks and explicit graph invalidation; browser network/render latency is excluded.",
+      "heapMiB": 34.17095947265625,
+      "rssMiB": 212.47265625,
+      "peakRssMiB": 219.37109375,
+      "diagnostics": {
+        "first": [
+          {
+            "load-request": 74,
+            "analysis-cache-miss": 1,
+            "parse-cache-miss": 1,
+            "input-read": 8306,
+            "input-hash": 344,
+            "input-reuse": 4154,
+            "cache-miss:transform": 25,
+            "babel": 25,
+            "extraction": 25,
+            "transform": 25,
+            "input-validate": 8306,
+            "transform-request": 73,
+            "cache-miss:compile": 24,
+            "esbuild": 24,
+            "sidecar-compile": 24,
+            "vanilla-extract": 24,
+            "css-evaluation": 24,
+            "css-output": 24
+          }
+        ],
+        "unchanged": [{}, {}, {}],
+        "edited": [
+          {
+            "transform-request": 5,
+            "load-request": 4,
+            "analysis-cache-hit": 1,
+            "input-read": 509,
+            "input-hash": 22,
+            "input-reuse": 345,
+            "cache-hit:transform": 1,
+            "transform": 2,
+            "input-validate": 509,
+            "cache-miss:transform": 1,
+            "babel": 1,
+            "extraction": 1,
+            "cache-miss:compile": 1,
+            "esbuild": 1,
+            "sidecar-compile": 1,
+            "vanilla-extract": 1,
+            "css-evaluation": 1,
+            "css-output": 1
+          },
+          {
+            "load-request": 3,
+            "analysis-cache-hit": 1,
+            "input-read": 509,
+            "input-hash": 22,
+            "input-reuse": 345,
+            "cache-hit:transform": 1,
+            "transform": 2,
+            "input-validate": 509,
+            "transform-request": 3,
+            "cache-miss:transform": 1,
+            "babel": 1,
+            "extraction": 1,
+            "cache-miss:compile": 1,
+            "esbuild": 1,
+            "sidecar-compile": 1,
+            "vanilla-extract": 1,
+            "css-evaluation": 1,
+            "css-output": 1
+          },
+          {
+            "load-request": 3,
+            "analysis-cache-hit": 1,
+            "input-read": 509,
+            "input-hash": 22,
+            "input-reuse": 345,
+            "cache-hit:transform": 1,
+            "transform": 2,
+            "input-validate": 509,
+            "transform-request": 3,
+            "cache-miss:transform": 1,
+            "babel": 1,
+            "extraction": 1,
+            "cache-miss:compile": 1,
+            "esbuild": 1,
+            "sidecar-compile": 1,
+            "vanilla-extract": 1,
+            "css-evaluation": 1,
+            "css-output": 1
+          }
+        ]
+      },
+      "revision": "candidate",
+      "linker": "npm",
+      "round": 0,
+      "processFirstReadyMs": 2289.5219719999986
+    },
+    {
+      "node": "v20.19.0",
+      "versions": {
+        "esbuild": "0.27.7",
+        "vite": "7.3.3",
+        "react": "19.2.6",
+        "react-dom": "19.2.6",
+        "@babel/core": "7.29.7",
+        "@vanilla-extract/css": "1.21.2"
+      },
+      "name": "tokens-unused-24",
+      "format": "esm",
+      "bundler": "vite-dev",
+      "phases": {
+        "first": [835.174497],
+        "unchanged": [
+          1.8629450000000816, 1.2020850000001246, 1.0704940000000533
+        ],
+        "edited": [617.631699, 583.206328, 576.9486120000001]
+      },
+      "outputs": {},
+      "compilerHashes": {
+        "@mincho-js/babel": "ceb7d87e100b7a5a29474165823bf0a0e6f2bd68433197e3ded6cd571a3be11c",
+        "@mincho-js/integration": "cbace65b5ee09eb09a344fdc5f36c9d5ed3c209c72cb2b80d543a4411fe3128f",
+        "@mincho-js/esbuild": "732d524f39e959627be8e47e2ba0a150c9e3fffc9100db1a8fc26e4008175ad9",
+        "@mincho-js/vite": "74100286d9ca76931ce839011a5ef91fa87d84d86c590cd9c78ed0c0526bd973"
+      },
+      "firstReadyMs": 1299.906895,
+      "operations": {
+        "first": [
+          {
+            "readFile": 1,
+            "readFileSync": 100,
+            "readFilePromise": 51,
+            "createHash": 74
+          }
+        ],
+        "unchanged": [
+          {
+            "readFile": 0,
+            "readFileSync": 0,
+            "readFilePromise": 0,
+            "createHash": 0
+          },
+          {
+            "readFile": 0,
+            "readFileSync": 0,
+            "readFilePromise": 0,
+            "createHash": 0
+          },
+          {
+            "readFile": 0,
+            "readFileSync": 0,
+            "readFilePromise": 0,
+            "createHash": 0
+          }
+        ],
+        "edited": [
+          {
+            "readFile": 0,
+            "readFileSync": 0,
+            "readFilePromise": 49,
+            "createHash": 120
+          },
+          {
+            "readFile": 0,
+            "readFileSync": 0,
+            "readFilePromise": 49,
+            "createHash": 120
+          },
+          {
+            "readFile": 0,
+            "readFileSync": 0,
+            "readFilePromise": 50,
+            "createHash": 119
+          }
+        ]
+      },
+      "note": "Development timings cover transformRequest after watcher hooks and explicit graph invalidation; browser network/render latency is excluded.",
+      "heapMiB": 54.61602020263672,
+      "rssMiB": 192.26171875,
+      "peakRssMiB": 192.26171875,
+      "diagnostics": {
+        "first": [
+          {
+            "babel": 26,
+            "extraction": 26,
+            "transform": 26,
+            "esbuild": 24,
+            "sidecar-compile": 24,
+            "vanilla-extract": 24,
+            "css-evaluation": 24
+          }
+        ],
+        "unchanged": [{}, {}, {}],
+        "edited": [
+          {
+            "babel": 2,
+            "extraction": 2,
+            "transform": 2,
+            "esbuild": 47,
+            "sidecar-compile": 47,
+            "vanilla-extract": 47,
+            "css-evaluation": 47
+          },
+          {
+            "babel": 2,
+            "extraction": 2,
+            "transform": 2,
+            "esbuild": 47,
+            "sidecar-compile": 47,
+            "vanilla-extract": 47,
+            "css-evaluation": 47
+          },
+          {
+            "babel": 2,
+            "extraction": 2,
+            "transform": 2,
+            "esbuild": 47,
+            "sidecar-compile": 47,
+            "vanilla-extract": 47,
+            "css-evaluation": 47
+          }
+        ]
+      },
+      "revision": "baseline",
+      "linker": "npm",
+      "round": 0,
+      "processFirstReadyMs": 1368.4876990000012
+    },
+    {
+      "node": "v20.19.0",
+      "versions": {
+        "esbuild": "0.27.7",
+        "vite": "7.3.3",
+        "react": "19.2.6",
+        "react-dom": "19.2.6",
+        "@babel/core": "7.29.7",
+        "@vanilla-extract/css": "1.21.2"
+      },
+      "name": "tokens-unused-24",
+      "format": "esm",
+      "bundler": "vite-dev",
+      "phases": {
+        "first": [1985.482997],
+        "unchanged": [
+          1.035932999999659, 1.0201219999999012, 0.9897070000001804
+        ],
+        "edited": [971.4572010000002, 1032.6176880000003, 1095.617897]
+      },
+      "outputs": {},
+      "compilerHashes": {
+        "@mincho-js/babel": "b952382b8bd2c56c1bc8344b16afca8afe737444bdc97845f2f25d09c3156c5f",
+        "@mincho-js/integration": "b4d8e53dc4d83f27ae1e17c59cbf94eca2916724d91a881435f857d79af5ba18",
+        "@mincho-js/esbuild": "c095f5b1a092a35d70fa5494b59c8679f105dfa87826014ed2b5bc6c519903b2",
+        "@mincho-js/vite": "9401d9a9b3fb385d2320bbff7253c42297c0296497e510b13519ad4e048ef0d4"
+      },
+      "firstReadyMs": 2455.544717,
+      "operations": {
+        "first": [
+          {
+            "readFile": 1,
+            "readFileSync": 100,
+            "readFilePromise": 17023,
+            "createHash": 670
+          }
+        ],
+        "unchanged": [
+          {
+            "readFile": 0,
+            "readFileSync": 0,
+            "readFilePromise": 0,
+            "createHash": 0
+          },
+          {
+            "readFile": 0,
+            "readFileSync": 0,
+            "readFilePromise": 0,
+            "createHash": 0
+          },
+          {
+            "readFile": 0,
+            "readFileSync": 0,
+            "readFilePromise": 0,
+            "createHash": 0
+          }
+        ],
+        "edited": [
+          {
+            "readFile": 0,
+            "readFileSync": 0,
+            "readFilePromise": 8838,
+            "createHash": 382
+          },
+          {
+            "readFile": 0,
+            "readFileSync": 0,
+            "readFilePromise": 8838,
+            "createHash": 382
+          },
+          {
+            "readFile": 0,
+            "readFileSync": 0,
+            "readFilePromise": 8838,
+            "createHash": 382
+          }
+        ]
+      },
+      "note": "Development timings cover transformRequest after watcher hooks and explicit graph invalidation; browser network/render latency is excluded.",
+      "heapMiB": 63.49542999267578,
+      "rssMiB": 332.015625,
+      "peakRssMiB": 352.078125,
+      "diagnostics": {
+        "first": [
+          {
+            "load-request": 74,
+            "analysis-cache-miss": 2,
+            "parse-cache-miss": 2,
+            "input-read": 8498,
+            "input-hash": 396,
+            "input-reuse": 4180,
+            "transform-skipped": 2,
+            "input-validate": 8498,
+            "transform-request": 74,
+            "cache-miss:transform": 24,
+            "babel": 24,
+            "extraction": 24,
+            "transform": 24,
+            "cache-miss:compile": 24,
+            "esbuild": 24,
+            "sidecar-compile": 24,
+            "vanilla-extract": 24,
+            "css-evaluation": 24,
+            "css-output": 24
+          }
+        ],
+        "unchanged": [{}, {}, {}],
+        "edited": [
+          {
+            "load-request": 26,
+            "analysis-cache-hit": 1,
+            "input-read": 4418,
+            "input-hash": 204,
+            "input-reuse": 4132,
+            "transform-skipped": 2,
+            "input-validate": 4418,
+            "transform-request": 26,
+            "cache-miss:compile": 24,
+            "esbuild": 24,
+            "sidecar-compile": 24,
+            "vanilla-extract": 24,
+            "css-evaluation": 24,
+            "css-output": 24,
+            "analysis-cache-miss": 1,
+            "parse-cache-miss": 1
+          },
+          {
+            "load-request": 26,
+            "analysis-cache-hit": 1,
+            "input-read": 4418,
+            "input-hash": 204,
+            "input-reuse": 4132,
+            "transform-skipped": 2,
+            "input-validate": 4418,
+            "transform-request": 26,
+            "cache-miss:compile": 24,
+            "esbuild": 24,
+            "sidecar-compile": 24,
+            "vanilla-extract": 24,
+            "css-evaluation": 24,
+            "css-output": 24,
+            "analysis-cache-miss": 1,
+            "parse-cache-miss": 1
+          },
+          {
+            "load-request": 26,
+            "analysis-cache-hit": 1,
+            "input-read": 4418,
+            "input-hash": 204,
+            "input-reuse": 4132,
+            "transform-skipped": 2,
+            "input-validate": 4418,
+            "transform-request": 26,
+            "cache-miss:compile": 24,
+            "esbuild": 24,
+            "sidecar-compile": 24,
+            "vanilla-extract": 24,
+            "css-evaluation": 24,
+            "css-output": 24,
+            "analysis-cache-miss": 1,
+            "parse-cache-miss": 1
+          }
+        ]
+      },
+      "revision": "candidate",
+      "linker": "npm",
+      "round": 0,
+      "processFirstReadyMs": 2529.674296000001
+    }
+  ]
+}

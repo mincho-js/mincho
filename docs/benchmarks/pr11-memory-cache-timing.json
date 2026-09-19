@@ -1,0 +1,2217 @@
+{
+  "note": "Wall time excludes diagnostics unless requested. Process readiness includes Node/package loading; phase timings exclude fixture preparation, compression and SSR checks. Development measures the application transform graph, not browser network or render latency.",
+  "revisions": {
+    "baseline": "pr10",
+    "candidate": "pr11"
+  },
+  "machine": {
+    "node": "v20.19.0",
+    "platform": "linux",
+    "arch": "x64",
+    "cpu": "Intel(R) Core(TM) i5-8265U CPU @ 1.60GHz",
+    "cores": 8,
+    "memoryGiB": 15.32076644897461
+  },
+  "diagnostics": false,
+  "rounds": 3,
+  "versions": {
+    "esbuild": "0.27.7",
+    "vite": "7.3.3",
+    "react": "19.2.6",
+    "react-dom": "19.2.6",
+    "@babel/core": "7.29.7",
+    "@vanilla-extract/css": "1.21.2"
+  },
+  "summary": {
+    "esbuild/esm/styles-24": {
+      "baseline": {
+        "first": {
+          "median": 637.00536,
+          "min": 596.7271000000001,
+          "max": 1021.5974389999999,
+          "q1": 596.7271000000001,
+          "q3": 1021.5974389999999
+        },
+        "unchanged": {
+          "median": 259.22589000000016,
+          "min": 252.29619900000012,
+          "max": 265.50505599999974,
+          "q1": 252.29619900000012,
+          "q3": 265.50505599999974
+        },
+        "edited": {
+          "median": 213.27911499999982,
+          "min": 209.88360000000011,
+          "max": 223.23101799999995,
+          "q1": 209.88360000000011,
+          "q3": 223.23101799999995
+        },
+        "processFirstReady": {
+          "median": 1022.2262569999984,
+          "min": 998.323553000002,
+          "max": 1604.419245,
+          "q1": 998.323553000002,
+          "q3": 1604.419245
+        },
+        "heapMiB": {
+          "median": 22.154632568359375,
+          "min": 22.133453369140625,
+          "max": 22.365524291992188,
+          "q1": 22.133453369140625,
+          "q3": 22.365524291992188
+        },
+        "rssMiB": {
+          "median": 158.66015625,
+          "min": 157.8359375,
+          "max": 159.3671875,
+          "q1": 157.8359375,
+          "q3": 159.3671875
+        },
+        "peakRssMiB": {
+          "median": 158.66015625,
+          "min": 157.8359375,
+          "max": 159.3671875,
+          "q1": 157.8359375,
+          "q3": 159.3671875
+        },
+        "output": {
+          "js": {
+            "raw": 6657,
+            "gzip": 1372,
+            "brotli": 1135
+          },
+          "css": {
+            "raw": 2676,
+            "gzip": 498,
+            "brotli": 358
+          },
+          "cssHash": "4f4d5c196a3996501bd40369138d3e43c3b2a3fb8691a6bc6be0b0a0812876d5",
+          "valueHash": "5bdba38dde35e0feb7e92084c7f64289293c266c7e4bf3e0405b0b527037e6c0"
+        }
+      },
+      "candidate": {
+        "first": {
+          "median": 639.024211,
+          "min": 625.412346,
+          "max": 646.326589,
+          "q1": 625.412346,
+          "q3": 646.326589
+        },
+        "unchanged": {
+          "median": 131.28497399999992,
+          "min": 128.94164699999988,
+          "max": 134.58671300000015,
+          "q1": 128.94164699999988,
+          "q3": 134.58671300000015
+        },
+        "edited": {
+          "median": 122.93056100000013,
+          "min": 116.77624000000014,
+          "max": 129.74048300000004,
+          "q1": 116.77624000000014,
+          "q3": 129.74048300000004
+        },
+        "processFirstReady": {
+          "median": 997.6587419999996,
+          "min": 969.9207359999996,
+          "max": 1037.6670749999976,
+          "q1": 969.9207359999996,
+          "q3": 1037.6670749999976
+        },
+        "heapMiB": {
+          "median": 23.344688415527344,
+          "min": 23.10803985595703,
+          "max": 23.353225708007812,
+          "q1": 23.10803985595703,
+          "q3": 23.353225708007812
+        },
+        "rssMiB": {
+          "median": 137.1015625,
+          "min": 136.83203125,
+          "max": 137.7265625,
+          "q1": 136.83203125,
+          "q3": 137.7265625
+        },
+        "peakRssMiB": {
+          "median": 139.5234375,
+          "min": 139.19921875,
+          "max": 139.61328125,
+          "q1": 139.19921875,
+          "q3": 139.61328125
+        },
+        "output": {
+          "js": {
+            "raw": 6657,
+            "gzip": 1372,
+            "brotli": 1135
+          },
+          "css": {
+            "raw": 2676,
+            "gzip": 498,
+            "brotli": 358
+          },
+          "cssHash": "4f4d5c196a3996501bd40369138d3e43c3b2a3fb8691a6bc6be0b0a0812876d5",
+          "valueHash": "5bdba38dde35e0feb7e92084c7f64289293c266c7e4bf3e0405b0b527037e6c0"
+        }
+      }
+    },
+    "esbuild/esm/tokens-unused-24": {
+      "baseline": {
+        "first": {
+          "median": 743.232971,
+          "min": 720.165468,
+          "max": 771.551136,
+          "q1": 720.165468,
+          "q3": 771.551136
+        },
+        "unchanged": {
+          "median": 360.348219,
+          "min": 358.78523900000005,
+          "max": 383.672918,
+          "q1": 358.78523900000005,
+          "q3": 383.672918
+        },
+        "edited": {
+          "median": 337.6690199999998,
+          "min": 328.1527030000002,
+          "max": 348.66757899999993,
+          "q1": 328.1527030000002,
+          "q3": 348.66757899999993
+        },
+        "processFirstReady": {
+          "median": 1101.232097,
+          "min": 1076.6292089999997,
+          "max": 1190.9070930000016,
+          "q1": 1076.6292089999997,
+          "q3": 1190.9070930000016
+        },
+        "heapMiB": {
+          "median": 23.228164672851562,
+          "min": 23.21881866455078,
+          "max": 23.68439483642578,
+          "q1": 23.21881866455078,
+          "q3": 23.68439483642578
+        },
+        "rssMiB": {
+          "median": 163.6328125,
+          "min": 158.43359375,
+          "max": 229.52734375,
+          "q1": 158.43359375,
+          "q3": 229.52734375
+        },
+        "peakRssMiB": {
+          "median": 200.69140625,
+          "min": 189.046875,
+          "max": 229.52734375,
+          "q1": 189.046875,
+          "q3": 229.52734375
+        },
+        "output": {
+          "js": {
+            "raw": 885,
+            "gzip": 487,
+            "brotli": 416
+          },
+          "css": {
+            "raw": 486,
+            "gzip": 191,
+            "brotli": 173
+          },
+          "cssHash": "66ac3680b0cf34322ee41211473f1980cd6eded19661403386f76193ba921736",
+          "valueHash": "2636f44b3ba90220f813b26f33c2e4ec50907a7fdf93fe7ffa62e8e3c3d7e28a"
+        }
+      },
+      "candidate": {
+        "first": {
+          "median": 811.7875369999999,
+          "min": 765.823441,
+          "max": 814.3773809999999,
+          "q1": 765.823441,
+          "q3": 814.3773809999999
+        },
+        "unchanged": {
+          "median": 119.77889899999991,
+          "min": 118.11285699999985,
+          "max": 126.91811800000005,
+          "q1": 118.11285699999985,
+          "q3": 126.91811800000005
+        },
+        "edited": {
+          "median": 317.4431159999999,
+          "min": 305.6899330000001,
+          "max": 317.705741,
+          "q1": 305.6899330000001,
+          "q3": 317.705741
+        },
+        "processFirstReady": {
+          "median": 1173.2632719999965,
+          "min": 1129.1114180000004,
+          "max": 1383.9098220000014,
+          "q1": 1129.1114180000004,
+          "q3": 1383.9098220000014
+        },
+        "heapMiB": {
+          "median": 24.31096649169922,
+          "min": 24.273658752441406,
+          "max": 24.423507690429688,
+          "q1": 24.273658752441406,
+          "q3": 24.423507690429688
+        },
+        "rssMiB": {
+          "median": 178.890625,
+          "min": 176.22265625,
+          "max": 179.609375,
+          "q1": 176.22265625,
+          "q3": 179.609375
+        },
+        "peakRssMiB": {
+          "median": 178.890625,
+          "min": 176.22265625,
+          "max": 179.609375,
+          "q1": 176.22265625,
+          "q3": 179.609375
+        },
+        "output": {
+          "js": {
+            "raw": 885,
+            "gzip": 487,
+            "brotli": 416
+          },
+          "css": {
+            "raw": 486,
+            "gzip": 191,
+            "brotli": 173
+          },
+          "cssHash": "66ac3680b0cf34322ee41211473f1980cd6eded19661403386f76193ba921736",
+          "valueHash": "2636f44b3ba90220f813b26f33c2e4ec50907a7fdf93fe7ffa62e8e3c3d7e28a"
+        }
+      }
+    },
+    "vite-dev/esm/styles-24": {
+      "baseline": {
+        "first": {
+          "median": 635.2580479999999,
+          "min": 617.1774929999999,
+          "max": 674.374037,
+          "q1": 617.1774929999999,
+          "q3": 674.374037
+        },
+        "unchanged": {
+          "median": 0.8119650000001002,
+          "min": 0.6804909999998472,
+          "max": 0.857812999999851,
+          "q1": 0.6804909999998472,
+          "q3": 0.857812999999851
+        },
+        "edited": {
+          "median": 37.071492000000035,
+          "min": 34.541281000000026,
+          "max": 42.19111300000009,
+          "q1": 34.541281000000026,
+          "q3": 42.19111300000009
+        },
+        "processFirstReady": {
+          "median": 1196.0013629999958,
+          "min": 1146.2371500000008,
+          "max": 1218.3946940000023,
+          "q1": 1146.2371500000008,
+          "q3": 1218.3946940000023
+        },
+        "heapMiB": {
+          "median": 31.94415283203125,
+          "min": 31.906646728515625,
+          "max": 31.944419860839844,
+          "q1": 31.906646728515625,
+          "q3": 31.944419860839844
+        },
+        "rssMiB": {
+          "median": 145.46875,
+          "min": 144.4375,
+          "max": 147.91796875,
+          "q1": 144.4375,
+          "q3": 147.91796875
+        },
+        "peakRssMiB": {
+          "median": 145.46875,
+          "min": 144.4375,
+          "max": 147.91796875,
+          "q1": 144.4375,
+          "q3": 147.91796875
+        }
+      },
+      "candidate": {
+        "first": {
+          "median": 1548.243915,
+          "min": 1483.925359,
+          "max": 1706.2775379999998,
+          "q1": 1483.925359,
+          "q3": 1706.2775379999998
+        },
+        "unchanged": {
+          "median": 0.8526329999999689,
+          "min": 0.8142519999998967,
+          "max": 0.9511969999998655,
+          "q1": 0.8142519999998967,
+          "q3": 0.9511969999998655
+        },
+        "edited": {
+          "median": 76.41240799999969,
+          "min": 71.0789920000002,
+          "max": 77.21303499999976,
+          "q1": 71.0789920000002,
+          "q3": 77.21303499999976
+        },
+        "processFirstReady": {
+          "median": 2098.4543459999986,
+          "min": 2032.6713280000004,
+          "max": 2439.8605769999995,
+          "q1": 2032.6713280000004,
+          "q3": 2439.8605769999995
+        },
+        "heapMiB": {
+          "median": 30.882164001464844,
+          "min": 30.620010375976562,
+          "max": 34.86279296875,
+          "q1": 30.620010375976562,
+          "q3": 34.86279296875
+        },
+        "rssMiB": {
+          "median": 197.71484375,
+          "min": 194.48828125,
+          "max": 228.13671875,
+          "q1": 194.48828125,
+          "q3": 228.13671875
+        },
+        "peakRssMiB": {
+          "median": 197.71484375,
+          "min": 194.48828125,
+          "max": 228.13671875,
+          "q1": 194.48828125,
+          "q3": 228.13671875
+        }
+      }
+    },
+    "vite-dev/esm/tokens-unused-24": {
+      "baseline": {
+        "first": {
+          "median": 811.3157299999999,
+          "min": 800.9855860000001,
+          "max": 830.9653309999999,
+          "q1": 800.9855860000001,
+          "q3": 830.9653309999999
+        },
+        "unchanged": {
+          "median": 1.6603840000000218,
+          "min": 0.9790299999999661,
+          "max": 2.010155000000168,
+          "q1": 0.9790299999999661,
+          "q3": 2.010155000000168
+        },
+        "edited": {
+          "median": 596.5380339999997,
+          "min": 545.5188749999998,
+          "max": 601.212256,
+          "q1": 545.5188749999998,
+          "q3": 601.212256
+        },
+        "processFirstReady": {
+          "median": 1373.797971,
+          "min": 1332.1244810000007,
+          "max": 1419.1890980000026,
+          "q1": 1332.1244810000007,
+          "q3": 1419.1890980000026
+        },
+        "heapMiB": {
+          "median": 43.635108947753906,
+          "min": 29.52642059326172,
+          "max": 54.474464416503906,
+          "q1": 29.52642059326172,
+          "q3": 54.474464416503906
+        },
+        "rssMiB": {
+          "median": 186.328125,
+          "min": 184.48046875,
+          "max": 194.89453125,
+          "q1": 184.48046875,
+          "q3": 194.89453125
+        },
+        "peakRssMiB": {
+          "median": 194.0078125,
+          "min": 186.57421875,
+          "max": 194.89453125,
+          "q1": 186.57421875,
+          "q3": 194.89453125
+        }
+      },
+      "candidate": {
+        "first": {
+          "median": 1728.089543,
+          "min": 1721.4629679999998,
+          "max": 1733.1104169999999,
+          "q1": 1721.4629679999998,
+          "q3": 1733.1104169999999
+        },
+        "unchanged": {
+          "median": 0.950090999999702,
+          "min": 0.8614809999999125,
+          "max": 1.3149640000001455,
+          "q1": 0.8614809999999125,
+          "q3": 1.3149640000001455
+        },
+        "edited": {
+          "median": 764.3617860000004,
+          "min": 729.0492770000001,
+          "max": 1146.5277599999995,
+          "q1": 729.0492770000001,
+          "q3": 1146.5277599999995
+        },
+        "processFirstReady": {
+          "median": 2284.2666009999994,
+          "min": 2270.6314060000004,
+          "max": 2301.190398999999,
+          "q1": 2270.6314060000004,
+          "q3": 2301.190398999999
+        },
+        "heapMiB": {
+          "median": 30.948143005371094,
+          "min": 30.9219970703125,
+          "max": 33.1783447265625,
+          "q1": 30.9219970703125,
+          "q3": 33.1783447265625
+        },
+        "rssMiB": {
+          "median": 255.9765625,
+          "min": 227.7890625,
+          "max": 264.171875,
+          "q1": 227.7890625,
+          "q3": 264.171875
+        },
+        "peakRssMiB": {
+          "median": 264.984375,
+          "min": 259.7890625,
+          "max": 285.12890625,
+          "q1": 259.7890625,
+          "q3": 285.12890625
+        }
+      }
+    }
+  },
+  "measurements": [
+    {
+      "node": "v20.19.0",
+      "versions": {
+        "esbuild": "0.27.7",
+        "vite": "7.3.3",
+        "react": "19.2.6",
+        "react-dom": "19.2.6",
+        "@babel/core": "7.29.7",
+        "@vanilla-extract/css": "1.21.2"
+      },
+      "name": "styles-24",
+      "format": "esm",
+      "bundler": "esbuild",
+      "phases": {
+        "first": [1021.5974389999999],
+        "unchanged": [
+          267.2173580000001, 265.50505599999974, 209.11261100000002
+        ],
+        "edited": [202.64249699999982, 213.27911499999982, 229.14200699999992]
+      },
+      "outputs": {
+        "first": {
+          "js": {
+            "raw": 6657,
+            "gzip": 1372,
+            "brotli": 1135
+          },
+          "css": {
+            "raw": 2676,
+            "gzip": 498,
+            "brotli": 358
+          },
+          "cssHash": "4f4d5c196a3996501bd40369138d3e43c3b2a3fb8691a6bc6be0b0a0812876d5",
+          "valueHash": "5bdba38dde35e0feb7e92084c7f64289293c266c7e4bf3e0405b0b527037e6c0"
+        },
+        "unchanged": {
+          "js": {
+            "raw": 6657,
+            "gzip": 1372,
+            "brotli": 1135
+          },
+          "css": {
+            "raw": 2676,
+            "gzip": 498,
+            "brotli": 358
+          },
+          "cssHash": "4f4d5c196a3996501bd40369138d3e43c3b2a3fb8691a6bc6be0b0a0812876d5",
+          "valueHash": "5bdba38dde35e0feb7e92084c7f64289293c266c7e4bf3e0405b0b527037e6c0"
+        },
+        "edited-0": {
+          "js": {
+            "raw": 6657,
+            "gzip": 1375,
+            "brotli": 1136
+          },
+          "css": {
+            "raw": 2676,
+            "gzip": 498,
+            "brotli": 358
+          },
+          "cssHash": "4f4d5c196a3996501bd40369138d3e43c3b2a3fb8691a6bc6be0b0a0812876d5",
+          "valueHash": "c29d17ffcd715b366739e6a3b15abe399cb9dfdd40b84d36cadde87c7dd9769a"
+        },
+        "edited-1": {
+          "js": {
+            "raw": 6657,
+            "gzip": 1372,
+            "brotli": 1135
+          },
+          "css": {
+            "raw": 2676,
+            "gzip": 498,
+            "brotli": 358
+          },
+          "cssHash": "4f4d5c196a3996501bd40369138d3e43c3b2a3fb8691a6bc6be0b0a0812876d5",
+          "valueHash": "5bdba38dde35e0feb7e92084c7f64289293c266c7e4bf3e0405b0b527037e6c0"
+        },
+        "edited-2": {
+          "js": {
+            "raw": 6657,
+            "gzip": 1375,
+            "brotli": 1136
+          },
+          "css": {
+            "raw": 2676,
+            "gzip": 498,
+            "brotli": 358
+          },
+          "cssHash": "4f4d5c196a3996501bd40369138d3e43c3b2a3fb8691a6bc6be0b0a0812876d5",
+          "valueHash": "c29d17ffcd715b366739e6a3b15abe399cb9dfdd40b84d36cadde87c7dd9769a"
+        }
+      },
+      "compilerHashes": {
+        "@mincho-js/babel": "ceb7d87e100b7a5a29474165823bf0a0e6f2bd68433197e3ded6cd571a3be11c",
+        "@mincho-js/integration": "cbace65b5ee09eb09a344fdc5f36c9d5ed3c209c72cb2b80d543a4411fe3128f",
+        "@mincho-js/esbuild": "732d524f39e959627be8e47e2ba0a150c9e3fffc9100db1a8fc26e4008175ad9",
+        "@mincho-js/vite": "74100286d9ca76931ce839011a5ef91fa87d84d86c590cd9c78ed0c0526bd973"
+      },
+      "firstReadyMs": 1529.565712,
+      "heapMiB": 22.365524291992188,
+      "rssMiB": 157.8359375,
+      "peakRssMiB": 157.8359375,
+      "revision": "baseline",
+      "linker": "npm",
+      "round": 0,
+      "processFirstReadyMs": 1604.419245
+    },
+    {
+      "node": "v20.19.0",
+      "versions": {
+        "esbuild": "0.27.7",
+        "vite": "7.3.3",
+        "react": "19.2.6",
+        "react-dom": "19.2.6",
+        "@babel/core": "7.29.7",
+        "@vanilla-extract/css": "1.21.2"
+      },
+      "name": "styles-24",
+      "format": "esm",
+      "bundler": "esbuild",
+      "phases": {
+        "first": [625.412346],
+        "unchanged": [
+          129.89068799999984, 128.94164699999988, 124.2038379999999
+        ],
+        "edited": [126.69382299999984, 116.77624000000014, 112.66430200000013]
+      },
+      "outputs": {
+        "first": {
+          "js": {
+            "raw": 6657,
+            "gzip": 1372,
+            "brotli": 1135
+          },
+          "css": {
+            "raw": 2676,
+            "gzip": 498,
+            "brotli": 358
+          },
+          "cssHash": "4f4d5c196a3996501bd40369138d3e43c3b2a3fb8691a6bc6be0b0a0812876d5",
+          "valueHash": "5bdba38dde35e0feb7e92084c7f64289293c266c7e4bf3e0405b0b527037e6c0"
+        },
+        "unchanged": {
+          "js": {
+            "raw": 6657,
+            "gzip": 1372,
+            "brotli": 1135
+          },
+          "css": {
+            "raw": 2676,
+            "gzip": 498,
+            "brotli": 358
+          },
+          "cssHash": "4f4d5c196a3996501bd40369138d3e43c3b2a3fb8691a6bc6be0b0a0812876d5",
+          "valueHash": "5bdba38dde35e0feb7e92084c7f64289293c266c7e4bf3e0405b0b527037e6c0"
+        },
+        "edited-0": {
+          "js": {
+            "raw": 6657,
+            "gzip": 1375,
+            "brotli": 1136
+          },
+          "css": {
+            "raw": 2676,
+            "gzip": 498,
+            "brotli": 358
+          },
+          "cssHash": "4f4d5c196a3996501bd40369138d3e43c3b2a3fb8691a6bc6be0b0a0812876d5",
+          "valueHash": "c29d17ffcd715b366739e6a3b15abe399cb9dfdd40b84d36cadde87c7dd9769a"
+        },
+        "edited-1": {
+          "js": {
+            "raw": 6657,
+            "gzip": 1372,
+            "brotli": 1135
+          },
+          "css": {
+            "raw": 2676,
+            "gzip": 498,
+            "brotli": 358
+          },
+          "cssHash": "4f4d5c196a3996501bd40369138d3e43c3b2a3fb8691a6bc6be0b0a0812876d5",
+          "valueHash": "5bdba38dde35e0feb7e92084c7f64289293c266c7e4bf3e0405b0b527037e6c0"
+        },
+        "edited-2": {
+          "js": {
+            "raw": 6657,
+            "gzip": 1375,
+            "brotli": 1136
+          },
+          "css": {
+            "raw": 2676,
+            "gzip": 498,
+            "brotli": 358
+          },
+          "cssHash": "4f4d5c196a3996501bd40369138d3e43c3b2a3fb8691a6bc6be0b0a0812876d5",
+          "valueHash": "c29d17ffcd715b366739e6a3b15abe399cb9dfdd40b84d36cadde87c7dd9769a"
+        }
+      },
+      "compilerHashes": {
+        "@mincho-js/babel": "b952382b8bd2c56c1bc8344b16afca8afe737444bdc97845f2f25d09c3156c5f",
+        "@mincho-js/integration": "b4d8e53dc4d83f27ae1e17c59cbf94eca2916724d91a881435f857d79af5ba18",
+        "@mincho-js/esbuild": "c095f5b1a092a35d70fa5494b59c8679f105dfa87826014ed2b5bc6c519903b2",
+        "@mincho-js/vite": "9401d9a9b3fb385d2320bbff7253c42297c0296497e510b13519ad4e048ef0d4"
+      },
+      "firstReadyMs": 900.3723650000001,
+      "heapMiB": 23.10803985595703,
+      "rssMiB": 136.83203125,
+      "peakRssMiB": 139.61328125,
+      "revision": "candidate",
+      "linker": "npm",
+      "round": 0,
+      "processFirstReadyMs": 969.9207359999996
+    },
+    {
+      "node": "v20.19.0",
+      "versions": {
+        "esbuild": "0.27.7",
+        "vite": "7.3.3",
+        "react": "19.2.6",
+        "react-dom": "19.2.6",
+        "@babel/core": "7.29.7",
+        "@vanilla-extract/css": "1.21.2"
+      },
+      "name": "tokens-unused-24",
+      "format": "esm",
+      "bundler": "esbuild",
+      "phases": {
+        "first": [720.165468],
+        "unchanged": [383.672918, 364.30369999999994, 383.6953639999999],
+        "edited": [328.1527030000002, 355.2490210000001, 308.4656140000002]
+      },
+      "outputs": {
+        "first": {
+          "js": {
+            "raw": 885,
+            "gzip": 487,
+            "brotli": 416
+          },
+          "css": {
+            "raw": 486,
+            "gzip": 191,
+            "brotli": 173
+          },
+          "cssHash": "66ac3680b0cf34322ee41211473f1980cd6eded19661403386f76193ba921736",
+          "valueHash": "2636f44b3ba90220f813b26f33c2e4ec50907a7fdf93fe7ffa62e8e3c3d7e28a"
+        },
+        "unchanged": {
+          "js": {
+            "raw": 885,
+            "gzip": 487,
+            "brotli": 416
+          },
+          "css": {
+            "raw": 486,
+            "gzip": 191,
+            "brotli": 173
+          },
+          "cssHash": "66ac3680b0cf34322ee41211473f1980cd6eded19661403386f76193ba921736",
+          "valueHash": "2636f44b3ba90220f813b26f33c2e4ec50907a7fdf93fe7ffa62e8e3c3d7e28a"
+        },
+        "edited-0": {
+          "js": {
+            "raw": 885,
+            "gzip": 487,
+            "brotli": 416
+          },
+          "css": {
+            "raw": 486,
+            "gzip": 191,
+            "brotli": 173
+          },
+          "cssHash": "66ac3680b0cf34322ee41211473f1980cd6eded19661403386f76193ba921736",
+          "valueHash": "2636f44b3ba90220f813b26f33c2e4ec50907a7fdf93fe7ffa62e8e3c3d7e28a"
+        },
+        "edited-1": {
+          "js": {
+            "raw": 885,
+            "gzip": 487,
+            "brotli": 416
+          },
+          "css": {
+            "raw": 486,
+            "gzip": 191,
+            "brotli": 173
+          },
+          "cssHash": "66ac3680b0cf34322ee41211473f1980cd6eded19661403386f76193ba921736",
+          "valueHash": "2636f44b3ba90220f813b26f33c2e4ec50907a7fdf93fe7ffa62e8e3c3d7e28a"
+        },
+        "edited-2": {
+          "js": {
+            "raw": 885,
+            "gzip": 487,
+            "brotli": 416
+          },
+          "css": {
+            "raw": 486,
+            "gzip": 191,
+            "brotli": 173
+          },
+          "cssHash": "66ac3680b0cf34322ee41211473f1980cd6eded19661403386f76193ba921736",
+          "valueHash": "2636f44b3ba90220f813b26f33c2e4ec50907a7fdf93fe7ffa62e8e3c3d7e28a"
+        }
+      },
+      "compilerHashes": {
+        "@mincho-js/babel": "ceb7d87e100b7a5a29474165823bf0a0e6f2bd68433197e3ded6cd571a3be11c",
+        "@mincho-js/integration": "cbace65b5ee09eb09a344fdc5f36c9d5ed3c209c72cb2b80d543a4411fe3128f",
+        "@mincho-js/esbuild": "732d524f39e959627be8e47e2ba0a150c9e3fffc9100db1a8fc26e4008175ad9",
+        "@mincho-js/vite": "74100286d9ca76931ce839011a5ef91fa87d84d86c590cd9c78ed0c0526bd973"
+      },
+      "firstReadyMs": 1004.371076,
+      "heapMiB": 23.21881866455078,
+      "rssMiB": 158.43359375,
+      "peakRssMiB": 189.046875,
+      "revision": "baseline",
+      "linker": "npm",
+      "round": 0,
+      "processFirstReadyMs": 1076.6292089999997
+    },
+    {
+      "node": "v20.19.0",
+      "versions": {
+        "esbuild": "0.27.7",
+        "vite": "7.3.3",
+        "react": "19.2.6",
+        "react-dom": "19.2.6",
+        "@babel/core": "7.29.7",
+        "@vanilla-extract/css": "1.21.2"
+      },
+      "name": "tokens-unused-24",
+      "format": "esm",
+      "bundler": "esbuild",
+      "phases": {
+        "first": [765.823441],
+        "unchanged": [
+          153.69848500000012, 119.77889899999991, 111.38009899999997
+        ],
+        "edited": [305.6899330000001, 307.76593800000023, 275.4393890000001]
+      },
+      "outputs": {
+        "first": {
+          "js": {
+            "raw": 885,
+            "gzip": 487,
+            "brotli": 416
+          },
+          "css": {
+            "raw": 486,
+            "gzip": 191,
+            "brotli": 173
+          },
+          "cssHash": "66ac3680b0cf34322ee41211473f1980cd6eded19661403386f76193ba921736",
+          "valueHash": "2636f44b3ba90220f813b26f33c2e4ec50907a7fdf93fe7ffa62e8e3c3d7e28a"
+        },
+        "unchanged": {
+          "js": {
+            "raw": 885,
+            "gzip": 487,
+            "brotli": 416
+          },
+          "css": {
+            "raw": 486,
+            "gzip": 191,
+            "brotli": 173
+          },
+          "cssHash": "66ac3680b0cf34322ee41211473f1980cd6eded19661403386f76193ba921736",
+          "valueHash": "2636f44b3ba90220f813b26f33c2e4ec50907a7fdf93fe7ffa62e8e3c3d7e28a"
+        },
+        "edited-0": {
+          "js": {
+            "raw": 885,
+            "gzip": 487,
+            "brotli": 416
+          },
+          "css": {
+            "raw": 486,
+            "gzip": 191,
+            "brotli": 173
+          },
+          "cssHash": "66ac3680b0cf34322ee41211473f1980cd6eded19661403386f76193ba921736",
+          "valueHash": "2636f44b3ba90220f813b26f33c2e4ec50907a7fdf93fe7ffa62e8e3c3d7e28a"
+        },
+        "edited-1": {
+          "js": {
+            "raw": 885,
+            "gzip": 487,
+            "brotli": 416
+          },
+          "css": {
+            "raw": 486,
+            "gzip": 191,
+            "brotli": 173
+          },
+          "cssHash": "66ac3680b0cf34322ee41211473f1980cd6eded19661403386f76193ba921736",
+          "valueHash": "2636f44b3ba90220f813b26f33c2e4ec50907a7fdf93fe7ffa62e8e3c3d7e28a"
+        },
+        "edited-2": {
+          "js": {
+            "raw": 885,
+            "gzip": 487,
+            "brotli": 416
+          },
+          "css": {
+            "raw": 486,
+            "gzip": 191,
+            "brotli": 173
+          },
+          "cssHash": "66ac3680b0cf34322ee41211473f1980cd6eded19661403386f76193ba921736",
+          "valueHash": "2636f44b3ba90220f813b26f33c2e4ec50907a7fdf93fe7ffa62e8e3c3d7e28a"
+        }
+      },
+      "compilerHashes": {
+        "@mincho-js/babel": "b952382b8bd2c56c1bc8344b16afca8afe737444bdc97845f2f25d09c3156c5f",
+        "@mincho-js/integration": "b4d8e53dc4d83f27ae1e17c59cbf94eca2916724d91a881435f857d79af5ba18",
+        "@mincho-js/esbuild": "c095f5b1a092a35d70fa5494b59c8679f105dfa87826014ed2b5bc6c519903b2",
+        "@mincho-js/vite": "9401d9a9b3fb385d2320bbff7253c42297c0296497e510b13519ad4e048ef0d4"
+      },
+      "firstReadyMs": 1056.400618,
+      "heapMiB": 24.423507690429688,
+      "rssMiB": 176.22265625,
+      "peakRssMiB": 176.22265625,
+      "revision": "candidate",
+      "linker": "npm",
+      "round": 0,
+      "processFirstReadyMs": 1129.1114180000004
+    },
+    {
+      "node": "v20.19.0",
+      "versions": {
+        "esbuild": "0.27.7",
+        "vite": "7.3.3",
+        "react": "19.2.6",
+        "react-dom": "19.2.6",
+        "@babel/core": "7.29.7",
+        "@vanilla-extract/css": "1.21.2"
+      },
+      "name": "styles-24",
+      "format": "esm",
+      "bundler": "vite-dev",
+      "phases": {
+        "first": [617.1774929999999],
+        "unchanged": [
+          0.6510869999999613, 0.8476980000000367, 0.8119650000001002
+        ],
+        "edited": [42.19111300000009, 26.514073000000053, 42.86793699999998]
+      },
+      "outputs": {},
+      "compilerHashes": {
+        "@mincho-js/babel": "ceb7d87e100b7a5a29474165823bf0a0e6f2bd68433197e3ded6cd571a3be11c",
+        "@mincho-js/integration": "cbace65b5ee09eb09a344fdc5f36c9d5ed3c209c72cb2b80d543a4411fe3128f",
+        "@mincho-js/esbuild": "732d524f39e959627be8e47e2ba0a150c9e3fffc9100db1a8fc26e4008175ad9",
+        "@mincho-js/vite": "74100286d9ca76931ce839011a5ef91fa87d84d86c590cd9c78ed0c0526bd973"
+      },
+      "firstReadyMs": 1074.30287,
+      "note": "Development timings cover transformRequest after watcher hooks and explicit graph invalidation; browser network/render latency is excluded.",
+      "heapMiB": 31.944419860839844,
+      "rssMiB": 144.4375,
+      "peakRssMiB": 144.4375,
+      "revision": "baseline",
+      "linker": "npm",
+      "round": 0,
+      "processFirstReadyMs": 1146.2371500000008
+    },
+    {
+      "node": "v20.19.0",
+      "versions": {
+        "esbuild": "0.27.7",
+        "vite": "7.3.3",
+        "react": "19.2.6",
+        "react-dom": "19.2.6",
+        "@babel/core": "7.29.7",
+        "@vanilla-extract/css": "1.21.2"
+      },
+      "name": "styles-24",
+      "format": "esm",
+      "bundler": "vite-dev",
+      "phases": {
+        "first": [1483.925359],
+        "unchanged": [4.97797300000002, 0.807397999999921, 0.8142519999998967],
+        "edited": [78.91988100000003, 68.10076199999958, 71.0789920000002]
+      },
+      "outputs": {},
+      "compilerHashes": {
+        "@mincho-js/babel": "b952382b8bd2c56c1bc8344b16afca8afe737444bdc97845f2f25d09c3156c5f",
+        "@mincho-js/integration": "b4d8e53dc4d83f27ae1e17c59cbf94eca2916724d91a881435f857d79af5ba18",
+        "@mincho-js/esbuild": "c095f5b1a092a35d70fa5494b59c8679f105dfa87826014ed2b5bc6c519903b2",
+        "@mincho-js/vite": "9401d9a9b3fb385d2320bbff7253c42297c0296497e510b13519ad4e048ef0d4"
+      },
+      "firstReadyMs": 1952.187548,
+      "note": "Development timings cover transformRequest after watcher hooks and explicit graph invalidation; browser network/render latency is excluded.",
+      "heapMiB": 30.620010375976562,
+      "rssMiB": 194.48828125,
+      "peakRssMiB": 194.48828125,
+      "revision": "candidate",
+      "linker": "npm",
+      "round": 0,
+      "processFirstReadyMs": 2032.6713280000004
+    },
+    {
+      "node": "v20.19.0",
+      "versions": {
+        "esbuild": "0.27.7",
+        "vite": "7.3.3",
+        "react": "19.2.6",
+        "react-dom": "19.2.6",
+        "@babel/core": "7.29.7",
+        "@vanilla-extract/css": "1.21.2"
+      },
+      "name": "tokens-unused-24",
+      "format": "esm",
+      "bundler": "vite-dev",
+      "phases": {
+        "first": [811.3157299999999],
+        "unchanged": [
+          1.1379440000000614, 0.9790299999999661, 0.8975440000001527
+        ],
+        "edited": [644.367868, 527.538517, 545.5188749999998]
+      },
+      "outputs": {},
+      "compilerHashes": {
+        "@mincho-js/babel": "ceb7d87e100b7a5a29474165823bf0a0e6f2bd68433197e3ded6cd571a3be11c",
+        "@mincho-js/integration": "cbace65b5ee09eb09a344fdc5f36c9d5ed3c209c72cb2b80d543a4411fe3128f",
+        "@mincho-js/esbuild": "732d524f39e959627be8e47e2ba0a150c9e3fffc9100db1a8fc26e4008175ad9",
+        "@mincho-js/vite": "74100286d9ca76931ce839011a5ef91fa87d84d86c590cd9c78ed0c0526bd973"
+      },
+      "firstReadyMs": 1260.773478,
+      "note": "Development timings cover transformRequest after watcher hooks and explicit graph invalidation; browser network/render latency is excluded.",
+      "heapMiB": 29.52642059326172,
+      "rssMiB": 194.89453125,
+      "peakRssMiB": 194.89453125,
+      "revision": "baseline",
+      "linker": "npm",
+      "round": 0,
+      "processFirstReadyMs": 1332.1244810000007
+    },
+    {
+      "node": "v20.19.0",
+      "versions": {
+        "esbuild": "0.27.7",
+        "vite": "7.3.3",
+        "react": "19.2.6",
+        "react-dom": "19.2.6",
+        "@babel/core": "7.29.7",
+        "@vanilla-extract/css": "1.21.2"
+      },
+      "name": "tokens-unused-24",
+      "format": "esm",
+      "bundler": "vite-dev",
+      "phases": {
+        "first": [1728.089543],
+        "unchanged": [
+          1.3149640000001455, 1.2202339999998912, 3.3530579999996917
+        ],
+        "edited": [1016.9008239999998, 1146.5277599999995, 1222.7464359999994]
+      },
+      "outputs": {},
+      "compilerHashes": {
+        "@mincho-js/babel": "b952382b8bd2c56c1bc8344b16afca8afe737444bdc97845f2f25d09c3156c5f",
+        "@mincho-js/integration": "b4d8e53dc4d83f27ae1e17c59cbf94eca2916724d91a881435f857d79af5ba18",
+        "@mincho-js/esbuild": "c095f5b1a092a35d70fa5494b59c8679f105dfa87826014ed2b5bc6c519903b2",
+        "@mincho-js/vite": "9401d9a9b3fb385d2320bbff7253c42297c0296497e510b13519ad4e048ef0d4"
+      },
+      "firstReadyMs": 2212.107036,
+      "note": "Development timings cover transformRequest after watcher hooks and explicit graph invalidation; browser network/render latency is excluded.",
+      "heapMiB": 33.1783447265625,
+      "rssMiB": 227.7890625,
+      "peakRssMiB": 264.984375,
+      "revision": "candidate",
+      "linker": "npm",
+      "round": 0,
+      "processFirstReadyMs": 2284.2666009999994
+    },
+    {
+      "node": "v20.19.0",
+      "versions": {
+        "esbuild": "0.27.7",
+        "vite": "7.3.3",
+        "react": "19.2.6",
+        "react-dom": "19.2.6",
+        "@babel/core": "7.29.7",
+        "@vanilla-extract/css": "1.21.2"
+      },
+      "name": "tokens-unused-24",
+      "format": "esm",
+      "bundler": "esbuild",
+      "phases": {
+        "first": [814.3773809999999],
+        "unchanged": [
+          160.64394400000015, 122.77991499999985, 126.91811800000005
+        ],
+        "edited": [317.5115269999999, 317.4431159999999, 290.07351800000015]
+      },
+      "outputs": {
+        "first": {
+          "js": {
+            "raw": 885,
+            "gzip": 487,
+            "brotli": 416
+          },
+          "css": {
+            "raw": 486,
+            "gzip": 191,
+            "brotli": 173
+          },
+          "cssHash": "66ac3680b0cf34322ee41211473f1980cd6eded19661403386f76193ba921736",
+          "valueHash": "2636f44b3ba90220f813b26f33c2e4ec50907a7fdf93fe7ffa62e8e3c3d7e28a"
+        },
+        "unchanged": {
+          "js": {
+            "raw": 885,
+            "gzip": 487,
+            "brotli": 416
+          },
+          "css": {
+            "raw": 486,
+            "gzip": 191,
+            "brotli": 173
+          },
+          "cssHash": "66ac3680b0cf34322ee41211473f1980cd6eded19661403386f76193ba921736",
+          "valueHash": "2636f44b3ba90220f813b26f33c2e4ec50907a7fdf93fe7ffa62e8e3c3d7e28a"
+        },
+        "edited-0": {
+          "js": {
+            "raw": 885,
+            "gzip": 487,
+            "brotli": 416
+          },
+          "css": {
+            "raw": 486,
+            "gzip": 191,
+            "brotli": 173
+          },
+          "cssHash": "66ac3680b0cf34322ee41211473f1980cd6eded19661403386f76193ba921736",
+          "valueHash": "2636f44b3ba90220f813b26f33c2e4ec50907a7fdf93fe7ffa62e8e3c3d7e28a"
+        },
+        "edited-1": {
+          "js": {
+            "raw": 885,
+            "gzip": 487,
+            "brotli": 416
+          },
+          "css": {
+            "raw": 486,
+            "gzip": 191,
+            "brotli": 173
+          },
+          "cssHash": "66ac3680b0cf34322ee41211473f1980cd6eded19661403386f76193ba921736",
+          "valueHash": "2636f44b3ba90220f813b26f33c2e4ec50907a7fdf93fe7ffa62e8e3c3d7e28a"
+        },
+        "edited-2": {
+          "js": {
+            "raw": 885,
+            "gzip": 487,
+            "brotli": 416
+          },
+          "css": {
+            "raw": 486,
+            "gzip": 191,
+            "brotli": 173
+          },
+          "cssHash": "66ac3680b0cf34322ee41211473f1980cd6eded19661403386f76193ba921736",
+          "valueHash": "2636f44b3ba90220f813b26f33c2e4ec50907a7fdf93fe7ffa62e8e3c3d7e28a"
+        }
+      },
+      "compilerHashes": {
+        "@mincho-js/babel": "b952382b8bd2c56c1bc8344b16afca8afe737444bdc97845f2f25d09c3156c5f",
+        "@mincho-js/integration": "b4d8e53dc4d83f27ae1e17c59cbf94eca2916724d91a881435f857d79af5ba18",
+        "@mincho-js/esbuild": "c095f5b1a092a35d70fa5494b59c8679f105dfa87826014ed2b5bc6c519903b2",
+        "@mincho-js/vite": "9401d9a9b3fb385d2320bbff7253c42297c0296497e510b13519ad4e048ef0d4"
+      },
+      "firstReadyMs": 1252.750168,
+      "heapMiB": 24.273658752441406,
+      "rssMiB": 179.609375,
+      "peakRssMiB": 179.609375,
+      "revision": "candidate",
+      "linker": "npm",
+      "round": 1,
+      "processFirstReadyMs": 1383.9098220000014
+    },
+    {
+      "node": "v20.19.0",
+      "versions": {
+        "esbuild": "0.27.7",
+        "vite": "7.3.3",
+        "react": "19.2.6",
+        "react-dom": "19.2.6",
+        "@babel/core": "7.29.7",
+        "@vanilla-extract/css": "1.21.2"
+      },
+      "name": "tokens-unused-24",
+      "format": "esm",
+      "bundler": "esbuild",
+      "phases": {
+        "first": [743.232971],
+        "unchanged": [401.42499099999986, 360.348219, 334.41420800000014],
+        "edited": [319.51025500000014, 337.6690199999998, 341.6100630000001]
+      },
+      "outputs": {
+        "first": {
+          "js": {
+            "raw": 885,
+            "gzip": 487,
+            "brotli": 416
+          },
+          "css": {
+            "raw": 486,
+            "gzip": 191,
+            "brotli": 173
+          },
+          "cssHash": "66ac3680b0cf34322ee41211473f1980cd6eded19661403386f76193ba921736",
+          "valueHash": "2636f44b3ba90220f813b26f33c2e4ec50907a7fdf93fe7ffa62e8e3c3d7e28a"
+        },
+        "unchanged": {
+          "js": {
+            "raw": 885,
+            "gzip": 487,
+            "brotli": 416
+          },
+          "css": {
+            "raw": 486,
+            "gzip": 191,
+            "brotli": 173
+          },
+          "cssHash": "66ac3680b0cf34322ee41211473f1980cd6eded19661403386f76193ba921736",
+          "valueHash": "2636f44b3ba90220f813b26f33c2e4ec50907a7fdf93fe7ffa62e8e3c3d7e28a"
+        },
+        "edited-0": {
+          "js": {
+            "raw": 885,
+            "gzip": 487,
+            "brotli": 416
+          },
+          "css": {
+            "raw": 486,
+            "gzip": 191,
+            "brotli": 173
+          },
+          "cssHash": "66ac3680b0cf34322ee41211473f1980cd6eded19661403386f76193ba921736",
+          "valueHash": "2636f44b3ba90220f813b26f33c2e4ec50907a7fdf93fe7ffa62e8e3c3d7e28a"
+        },
+        "edited-1": {
+          "js": {
+            "raw": 885,
+            "gzip": 487,
+            "brotli": 416
+          },
+          "css": {
+            "raw": 486,
+            "gzip": 191,
+            "brotli": 173
+          },
+          "cssHash": "66ac3680b0cf34322ee41211473f1980cd6eded19661403386f76193ba921736",
+          "valueHash": "2636f44b3ba90220f813b26f33c2e4ec50907a7fdf93fe7ffa62e8e3c3d7e28a"
+        },
+        "edited-2": {
+          "js": {
+            "raw": 885,
+            "gzip": 487,
+            "brotli": 416
+          },
+          "css": {
+            "raw": 486,
+            "gzip": 191,
+            "brotli": 173
+          },
+          "cssHash": "66ac3680b0cf34322ee41211473f1980cd6eded19661403386f76193ba921736",
+          "valueHash": "2636f44b3ba90220f813b26f33c2e4ec50907a7fdf93fe7ffa62e8e3c3d7e28a"
+        }
+      },
+      "compilerHashes": {
+        "@mincho-js/babel": "ceb7d87e100b7a5a29474165823bf0a0e6f2bd68433197e3ded6cd571a3be11c",
+        "@mincho-js/integration": "cbace65b5ee09eb09a344fdc5f36c9d5ed3c209c72cb2b80d543a4411fe3128f",
+        "@mincho-js/esbuild": "732d524f39e959627be8e47e2ba0a150c9e3fffc9100db1a8fc26e4008175ad9",
+        "@mincho-js/vite": "74100286d9ca76931ce839011a5ef91fa87d84d86c590cd9c78ed0c0526bd973"
+      },
+      "firstReadyMs": 1030.502642,
+      "heapMiB": 23.228164672851562,
+      "rssMiB": 163.6328125,
+      "peakRssMiB": 200.69140625,
+      "revision": "baseline",
+      "linker": "npm",
+      "round": 1,
+      "processFirstReadyMs": 1101.232097
+    },
+    {
+      "node": "v20.19.0",
+      "versions": {
+        "esbuild": "0.27.7",
+        "vite": "7.3.3",
+        "react": "19.2.6",
+        "react-dom": "19.2.6",
+        "@babel/core": "7.29.7",
+        "@vanilla-extract/css": "1.21.2"
+      },
+      "name": "styles-24",
+      "format": "esm",
+      "bundler": "esbuild",
+      "phases": {
+        "first": [639.024211],
+        "unchanged": [
+          134.58671300000015, 136.90051900000003, 129.66975599999978
+        ],
+        "edited": [134.0612839999999, 122.93056100000013, 119.19324300000017]
+      },
+      "outputs": {
+        "first": {
+          "js": {
+            "raw": 6657,
+            "gzip": 1372,
+            "brotli": 1135
+          },
+          "css": {
+            "raw": 2676,
+            "gzip": 498,
+            "brotli": 358
+          },
+          "cssHash": "4f4d5c196a3996501bd40369138d3e43c3b2a3fb8691a6bc6be0b0a0812876d5",
+          "valueHash": "5bdba38dde35e0feb7e92084c7f64289293c266c7e4bf3e0405b0b527037e6c0"
+        },
+        "unchanged": {
+          "js": {
+            "raw": 6657,
+            "gzip": 1372,
+            "brotli": 1135
+          },
+          "css": {
+            "raw": 2676,
+            "gzip": 498,
+            "brotli": 358
+          },
+          "cssHash": "4f4d5c196a3996501bd40369138d3e43c3b2a3fb8691a6bc6be0b0a0812876d5",
+          "valueHash": "5bdba38dde35e0feb7e92084c7f64289293c266c7e4bf3e0405b0b527037e6c0"
+        },
+        "edited-0": {
+          "js": {
+            "raw": 6657,
+            "gzip": 1375,
+            "brotli": 1136
+          },
+          "css": {
+            "raw": 2676,
+            "gzip": 498,
+            "brotli": 358
+          },
+          "cssHash": "4f4d5c196a3996501bd40369138d3e43c3b2a3fb8691a6bc6be0b0a0812876d5",
+          "valueHash": "c29d17ffcd715b366739e6a3b15abe399cb9dfdd40b84d36cadde87c7dd9769a"
+        },
+        "edited-1": {
+          "js": {
+            "raw": 6657,
+            "gzip": 1372,
+            "brotli": 1135
+          },
+          "css": {
+            "raw": 2676,
+            "gzip": 498,
+            "brotli": 358
+          },
+          "cssHash": "4f4d5c196a3996501bd40369138d3e43c3b2a3fb8691a6bc6be0b0a0812876d5",
+          "valueHash": "5bdba38dde35e0feb7e92084c7f64289293c266c7e4bf3e0405b0b527037e6c0"
+        },
+        "edited-2": {
+          "js": {
+            "raw": 6657,
+            "gzip": 1375,
+            "brotli": 1136
+          },
+          "css": {
+            "raw": 2676,
+            "gzip": 498,
+            "brotli": 358
+          },
+          "cssHash": "4f4d5c196a3996501bd40369138d3e43c3b2a3fb8691a6bc6be0b0a0812876d5",
+          "valueHash": "c29d17ffcd715b366739e6a3b15abe399cb9dfdd40b84d36cadde87c7dd9769a"
+        }
+      },
+      "compilerHashes": {
+        "@mincho-js/babel": "b952382b8bd2c56c1bc8344b16afca8afe737444bdc97845f2f25d09c3156c5f",
+        "@mincho-js/integration": "b4d8e53dc4d83f27ae1e17c59cbf94eca2916724d91a881435f857d79af5ba18",
+        "@mincho-js/esbuild": "c095f5b1a092a35d70fa5494b59c8679f105dfa87826014ed2b5bc6c519903b2",
+        "@mincho-js/vite": "9401d9a9b3fb385d2320bbff7253c42297c0296497e510b13519ad4e048ef0d4"
+      },
+      "firstReadyMs": 927.5504370000001,
+      "heapMiB": 23.344688415527344,
+      "rssMiB": 137.1015625,
+      "peakRssMiB": 139.19921875,
+      "revision": "candidate",
+      "linker": "npm",
+      "round": 1,
+      "processFirstReadyMs": 997.6587419999996
+    },
+    {
+      "node": "v20.19.0",
+      "versions": {
+        "esbuild": "0.27.7",
+        "vite": "7.3.3",
+        "react": "19.2.6",
+        "react-dom": "19.2.6",
+        "@babel/core": "7.29.7",
+        "@vanilla-extract/css": "1.21.2"
+      },
+      "name": "styles-24",
+      "format": "esm",
+      "bundler": "esbuild",
+      "phases": {
+        "first": [637.00536],
+        "unchanged": [
+          313.65037299999995, 259.22589000000016, 217.32929599999989
+        ],
+        "edited": [207.7529669999999, 228.08634600000005, 209.88360000000011]
+      },
+      "outputs": {
+        "first": {
+          "js": {
+            "raw": 6657,
+            "gzip": 1372,
+            "brotli": 1135
+          },
+          "css": {
+            "raw": 2676,
+            "gzip": 498,
+            "brotli": 358
+          },
+          "cssHash": "4f4d5c196a3996501bd40369138d3e43c3b2a3fb8691a6bc6be0b0a0812876d5",
+          "valueHash": "5bdba38dde35e0feb7e92084c7f64289293c266c7e4bf3e0405b0b527037e6c0"
+        },
+        "unchanged": {
+          "js": {
+            "raw": 6657,
+            "gzip": 1372,
+            "brotli": 1135
+          },
+          "css": {
+            "raw": 2676,
+            "gzip": 498,
+            "brotli": 358
+          },
+          "cssHash": "4f4d5c196a3996501bd40369138d3e43c3b2a3fb8691a6bc6be0b0a0812876d5",
+          "valueHash": "5bdba38dde35e0feb7e92084c7f64289293c266c7e4bf3e0405b0b527037e6c0"
+        },
+        "edited-0": {
+          "js": {
+            "raw": 6657,
+            "gzip": 1375,
+            "brotli": 1136
+          },
+          "css": {
+            "raw": 2676,
+            "gzip": 498,
+            "brotli": 358
+          },
+          "cssHash": "4f4d5c196a3996501bd40369138d3e43c3b2a3fb8691a6bc6be0b0a0812876d5",
+          "valueHash": "c29d17ffcd715b366739e6a3b15abe399cb9dfdd40b84d36cadde87c7dd9769a"
+        },
+        "edited-1": {
+          "js": {
+            "raw": 6657,
+            "gzip": 1372,
+            "brotli": 1135
+          },
+          "css": {
+            "raw": 2676,
+            "gzip": 498,
+            "brotli": 358
+          },
+          "cssHash": "4f4d5c196a3996501bd40369138d3e43c3b2a3fb8691a6bc6be0b0a0812876d5",
+          "valueHash": "5bdba38dde35e0feb7e92084c7f64289293c266c7e4bf3e0405b0b527037e6c0"
+        },
+        "edited-2": {
+          "js": {
+            "raw": 6657,
+            "gzip": 1375,
+            "brotli": 1136
+          },
+          "css": {
+            "raw": 2676,
+            "gzip": 498,
+            "brotli": 358
+          },
+          "cssHash": "4f4d5c196a3996501bd40369138d3e43c3b2a3fb8691a6bc6be0b0a0812876d5",
+          "valueHash": "c29d17ffcd715b366739e6a3b15abe399cb9dfdd40b84d36cadde87c7dd9769a"
+        }
+      },
+      "compilerHashes": {
+        "@mincho-js/babel": "ceb7d87e100b7a5a29474165823bf0a0e6f2bd68433197e3ded6cd571a3be11c",
+        "@mincho-js/integration": "cbace65b5ee09eb09a344fdc5f36c9d5ed3c209c72cb2b80d543a4411fe3128f",
+        "@mincho-js/esbuild": "732d524f39e959627be8e47e2ba0a150c9e3fffc9100db1a8fc26e4008175ad9",
+        "@mincho-js/vite": "74100286d9ca76931ce839011a5ef91fa87d84d86c590cd9c78ed0c0526bd973"
+      },
+      "firstReadyMs": 947.42595,
+      "heapMiB": 22.154632568359375,
+      "rssMiB": 159.3671875,
+      "peakRssMiB": 159.3671875,
+      "revision": "baseline",
+      "linker": "npm",
+      "round": 1,
+      "processFirstReadyMs": 1022.2262569999984
+    },
+    {
+      "node": "v20.19.0",
+      "versions": {
+        "esbuild": "0.27.7",
+        "vite": "7.3.3",
+        "react": "19.2.6",
+        "react-dom": "19.2.6",
+        "@babel/core": "7.29.7",
+        "@vanilla-extract/css": "1.21.2"
+      },
+      "name": "tokens-unused-24",
+      "format": "esm",
+      "bundler": "vite-dev",
+      "phases": {
+        "first": [1733.1104169999999],
+        "unchanged": [0.950090999999702, 0.9630779999997685, 0.932589999999891],
+        "edited": [771.4907819999999, 704.0554030000003, 729.0492770000001]
+      },
+      "outputs": {},
+      "compilerHashes": {
+        "@mincho-js/babel": "b952382b8bd2c56c1bc8344b16afca8afe737444bdc97845f2f25d09c3156c5f",
+        "@mincho-js/integration": "b4d8e53dc4d83f27ae1e17c59cbf94eca2916724d91a881435f857d79af5ba18",
+        "@mincho-js/esbuild": "c095f5b1a092a35d70fa5494b59c8679f105dfa87826014ed2b5bc6c519903b2",
+        "@mincho-js/vite": "9401d9a9b3fb385d2320bbff7253c42297c0296497e510b13519ad4e048ef0d4"
+      },
+      "firstReadyMs": 2195.903589,
+      "note": "Development timings cover transformRequest after watcher hooks and explicit graph invalidation; browser network/render latency is excluded.",
+      "heapMiB": 30.948143005371094,
+      "rssMiB": 255.9765625,
+      "peakRssMiB": 259.7890625,
+      "revision": "candidate",
+      "linker": "npm",
+      "round": 1,
+      "processFirstReadyMs": 2270.6314060000004
+    },
+    {
+      "node": "v20.19.0",
+      "versions": {
+        "esbuild": "0.27.7",
+        "vite": "7.3.3",
+        "react": "19.2.6",
+        "react-dom": "19.2.6",
+        "@babel/core": "7.29.7",
+        "@vanilla-extract/css": "1.21.2"
+      },
+      "name": "tokens-unused-24",
+      "format": "esm",
+      "bundler": "vite-dev",
+      "phases": {
+        "first": [800.9855860000001],
+        "unchanged": [2.137476000000106, 2.010155000000168, 0.8438000000001011],
+        "edited": [634.9606679999999, 601.212256, 537.0874669999998]
+      },
+      "outputs": {},
+      "compilerHashes": {
+        "@mincho-js/babel": "ceb7d87e100b7a5a29474165823bf0a0e6f2bd68433197e3ded6cd571a3be11c",
+        "@mincho-js/integration": "cbace65b5ee09eb09a344fdc5f36c9d5ed3c209c72cb2b80d543a4411fe3128f",
+        "@mincho-js/esbuild": "732d524f39e959627be8e47e2ba0a150c9e3fffc9100db1a8fc26e4008175ad9",
+        "@mincho-js/vite": "74100286d9ca76931ce839011a5ef91fa87d84d86c590cd9c78ed0c0526bd973"
+      },
+      "firstReadyMs": 1300.010213,
+      "note": "Development timings cover transformRequest after watcher hooks and explicit graph invalidation; browser network/render latency is excluded.",
+      "heapMiB": 54.474464416503906,
+      "rssMiB": 186.328125,
+      "peakRssMiB": 194.0078125,
+      "revision": "baseline",
+      "linker": "npm",
+      "round": 1,
+      "processFirstReadyMs": 1373.797971
+    },
+    {
+      "node": "v20.19.0",
+      "versions": {
+        "esbuild": "0.27.7",
+        "vite": "7.3.3",
+        "react": "19.2.6",
+        "react-dom": "19.2.6",
+        "@babel/core": "7.29.7",
+        "@vanilla-extract/css": "1.21.2"
+      },
+      "name": "styles-24",
+      "format": "esm",
+      "bundler": "vite-dev",
+      "phases": {
+        "first": [1706.2775379999998],
+        "unchanged": [
+          0.826129999999921, 0.8526329999999689, 0.8925140000001193
+        ],
+        "edited": [82.40823600000022, 76.41240799999969, 66.89686200000006]
+      },
+      "outputs": {},
+      "compilerHashes": {
+        "@mincho-js/babel": "b952382b8bd2c56c1bc8344b16afca8afe737444bdc97845f2f25d09c3156c5f",
+        "@mincho-js/integration": "b4d8e53dc4d83f27ae1e17c59cbf94eca2916724d91a881435f857d79af5ba18",
+        "@mincho-js/esbuild": "c095f5b1a092a35d70fa5494b59c8679f105dfa87826014ed2b5bc6c519903b2",
+        "@mincho-js/vite": "9401d9a9b3fb385d2320bbff7253c42297c0296497e510b13519ad4e048ef0d4"
+      },
+      "firstReadyMs": 2353.528976,
+      "note": "Development timings cover transformRequest after watcher hooks and explicit graph invalidation; browser network/render latency is excluded.",
+      "heapMiB": 34.86279296875,
+      "rssMiB": 228.13671875,
+      "peakRssMiB": 228.13671875,
+      "revision": "candidate",
+      "linker": "npm",
+      "round": 1,
+      "processFirstReadyMs": 2439.8605769999995
+    },
+    {
+      "node": "v20.19.0",
+      "versions": {
+        "esbuild": "0.27.7",
+        "vite": "7.3.3",
+        "react": "19.2.6",
+        "react-dom": "19.2.6",
+        "@babel/core": "7.29.7",
+        "@vanilla-extract/css": "1.21.2"
+      },
+      "name": "styles-24",
+      "format": "esm",
+      "bundler": "vite-dev",
+      "phases": {
+        "first": [674.374037],
+        "unchanged": [
+          0.857812999999851, 0.8098849999998947, 0.9634060000000773
+        ],
+        "edited": [46.806332999999995, 29.88633600000003, 34.541281000000026]
+      },
+      "outputs": {},
+      "compilerHashes": {
+        "@mincho-js/babel": "ceb7d87e100b7a5a29474165823bf0a0e6f2bd68433197e3ded6cd571a3be11c",
+        "@mincho-js/integration": "cbace65b5ee09eb09a344fdc5f36c9d5ed3c209c72cb2b80d543a4411fe3128f",
+        "@mincho-js/esbuild": "732d524f39e959627be8e47e2ba0a150c9e3fffc9100db1a8fc26e4008175ad9",
+        "@mincho-js/vite": "74100286d9ca76931ce839011a5ef91fa87d84d86c590cd9c78ed0c0526bd973"
+      },
+      "firstReadyMs": 1147.91814,
+      "note": "Development timings cover transformRequest after watcher hooks and explicit graph invalidation; browser network/render latency is excluded.",
+      "heapMiB": 31.94415283203125,
+      "rssMiB": 147.91796875,
+      "peakRssMiB": 147.91796875,
+      "revision": "baseline",
+      "linker": "npm",
+      "round": 1,
+      "processFirstReadyMs": 1218.3946940000023
+    },
+    {
+      "node": "v20.19.0",
+      "versions": {
+        "esbuild": "0.27.7",
+        "vite": "7.3.3",
+        "react": "19.2.6",
+        "react-dom": "19.2.6",
+        "@babel/core": "7.29.7",
+        "@vanilla-extract/css": "1.21.2"
+      },
+      "name": "styles-24",
+      "format": "esm",
+      "bundler": "esbuild",
+      "phases": {
+        "first": [596.7271000000001],
+        "unchanged": [
+          274.4452309999999, 252.29619900000012, 243.20892900000013
+        ],
+        "edited": [218.01616699999977, 233.00340499999993, 223.23101799999995]
+      },
+      "outputs": {
+        "first": {
+          "js": {
+            "raw": 6657,
+            "gzip": 1372,
+            "brotli": 1135
+          },
+          "css": {
+            "raw": 2676,
+            "gzip": 498,
+            "brotli": 358
+          },
+          "cssHash": "4f4d5c196a3996501bd40369138d3e43c3b2a3fb8691a6bc6be0b0a0812876d5",
+          "valueHash": "5bdba38dde35e0feb7e92084c7f64289293c266c7e4bf3e0405b0b527037e6c0"
+        },
+        "unchanged": {
+          "js": {
+            "raw": 6657,
+            "gzip": 1372,
+            "brotli": 1135
+          },
+          "css": {
+            "raw": 2676,
+            "gzip": 498,
+            "brotli": 358
+          },
+          "cssHash": "4f4d5c196a3996501bd40369138d3e43c3b2a3fb8691a6bc6be0b0a0812876d5",
+          "valueHash": "5bdba38dde35e0feb7e92084c7f64289293c266c7e4bf3e0405b0b527037e6c0"
+        },
+        "edited-0": {
+          "js": {
+            "raw": 6657,
+            "gzip": 1375,
+            "brotli": 1136
+          },
+          "css": {
+            "raw": 2676,
+            "gzip": 498,
+            "brotli": 358
+          },
+          "cssHash": "4f4d5c196a3996501bd40369138d3e43c3b2a3fb8691a6bc6be0b0a0812876d5",
+          "valueHash": "c29d17ffcd715b366739e6a3b15abe399cb9dfdd40b84d36cadde87c7dd9769a"
+        },
+        "edited-1": {
+          "js": {
+            "raw": 6657,
+            "gzip": 1372,
+            "brotli": 1135
+          },
+          "css": {
+            "raw": 2676,
+            "gzip": 498,
+            "brotli": 358
+          },
+          "cssHash": "4f4d5c196a3996501bd40369138d3e43c3b2a3fb8691a6bc6be0b0a0812876d5",
+          "valueHash": "5bdba38dde35e0feb7e92084c7f64289293c266c7e4bf3e0405b0b527037e6c0"
+        },
+        "edited-2": {
+          "js": {
+            "raw": 6657,
+            "gzip": 1375,
+            "brotli": 1136
+          },
+          "css": {
+            "raw": 2676,
+            "gzip": 498,
+            "brotli": 358
+          },
+          "cssHash": "4f4d5c196a3996501bd40369138d3e43c3b2a3fb8691a6bc6be0b0a0812876d5",
+          "valueHash": "c29d17ffcd715b366739e6a3b15abe399cb9dfdd40b84d36cadde87c7dd9769a"
+        }
+      },
+      "compilerHashes": {
+        "@mincho-js/babel": "ceb7d87e100b7a5a29474165823bf0a0e6f2bd68433197e3ded6cd571a3be11c",
+        "@mincho-js/integration": "cbace65b5ee09eb09a344fdc5f36c9d5ed3c209c72cb2b80d543a4411fe3128f",
+        "@mincho-js/esbuild": "732d524f39e959627be8e47e2ba0a150c9e3fffc9100db1a8fc26e4008175ad9",
+        "@mincho-js/vite": "74100286d9ca76931ce839011a5ef91fa87d84d86c590cd9c78ed0c0526bd973"
+      },
+      "firstReadyMs": 922.331007,
+      "heapMiB": 22.133453369140625,
+      "rssMiB": 158.66015625,
+      "peakRssMiB": 158.66015625,
+      "revision": "baseline",
+      "linker": "npm",
+      "round": 2,
+      "processFirstReadyMs": 998.323553000002
+    },
+    {
+      "node": "v20.19.0",
+      "versions": {
+        "esbuild": "0.27.7",
+        "vite": "7.3.3",
+        "react": "19.2.6",
+        "react-dom": "19.2.6",
+        "@babel/core": "7.29.7",
+        "@vanilla-extract/css": "1.21.2"
+      },
+      "name": "styles-24",
+      "format": "esm",
+      "bundler": "esbuild",
+      "phases": {
+        "first": [646.326589],
+        "unchanged": [
+          144.8347799999999, 131.28497399999992, 129.04814699999997
+        ],
+        "edited": [135.1172899999999, 120.38868500000012, 129.74048300000004]
+      },
+      "outputs": {
+        "first": {
+          "js": {
+            "raw": 6657,
+            "gzip": 1372,
+            "brotli": 1135
+          },
+          "css": {
+            "raw": 2676,
+            "gzip": 498,
+            "brotli": 358
+          },
+          "cssHash": "4f4d5c196a3996501bd40369138d3e43c3b2a3fb8691a6bc6be0b0a0812876d5",
+          "valueHash": "5bdba38dde35e0feb7e92084c7f64289293c266c7e4bf3e0405b0b527037e6c0"
+        },
+        "unchanged": {
+          "js": {
+            "raw": 6657,
+            "gzip": 1372,
+            "brotli": 1135
+          },
+          "css": {
+            "raw": 2676,
+            "gzip": 498,
+            "brotli": 358
+          },
+          "cssHash": "4f4d5c196a3996501bd40369138d3e43c3b2a3fb8691a6bc6be0b0a0812876d5",
+          "valueHash": "5bdba38dde35e0feb7e92084c7f64289293c266c7e4bf3e0405b0b527037e6c0"
+        },
+        "edited-0": {
+          "js": {
+            "raw": 6657,
+            "gzip": 1375,
+            "brotli": 1136
+          },
+          "css": {
+            "raw": 2676,
+            "gzip": 498,
+            "brotli": 358
+          },
+          "cssHash": "4f4d5c196a3996501bd40369138d3e43c3b2a3fb8691a6bc6be0b0a0812876d5",
+          "valueHash": "c29d17ffcd715b366739e6a3b15abe399cb9dfdd40b84d36cadde87c7dd9769a"
+        },
+        "edited-1": {
+          "js": {
+            "raw": 6657,
+            "gzip": 1372,
+            "brotli": 1135
+          },
+          "css": {
+            "raw": 2676,
+            "gzip": 498,
+            "brotli": 358
+          },
+          "cssHash": "4f4d5c196a3996501bd40369138d3e43c3b2a3fb8691a6bc6be0b0a0812876d5",
+          "valueHash": "5bdba38dde35e0feb7e92084c7f64289293c266c7e4bf3e0405b0b527037e6c0"
+        },
+        "edited-2": {
+          "js": {
+            "raw": 6657,
+            "gzip": 1375,
+            "brotli": 1136
+          },
+          "css": {
+            "raw": 2676,
+            "gzip": 498,
+            "brotli": 358
+          },
+          "cssHash": "4f4d5c196a3996501bd40369138d3e43c3b2a3fb8691a6bc6be0b0a0812876d5",
+          "valueHash": "c29d17ffcd715b366739e6a3b15abe399cb9dfdd40b84d36cadde87c7dd9769a"
+        }
+      },
+      "compilerHashes": {
+        "@mincho-js/babel": "b952382b8bd2c56c1bc8344b16afca8afe737444bdc97845f2f25d09c3156c5f",
+        "@mincho-js/integration": "b4d8e53dc4d83f27ae1e17c59cbf94eca2916724d91a881435f857d79af5ba18",
+        "@mincho-js/esbuild": "c095f5b1a092a35d70fa5494b59c8679f105dfa87826014ed2b5bc6c519903b2",
+        "@mincho-js/vite": "9401d9a9b3fb385d2320bbff7253c42297c0296497e510b13519ad4e048ef0d4"
+      },
+      "firstReadyMs": 963.046748,
+      "heapMiB": 23.353225708007812,
+      "rssMiB": 137.7265625,
+      "peakRssMiB": 139.5234375,
+      "revision": "candidate",
+      "linker": "npm",
+      "round": 2,
+      "processFirstReadyMs": 1037.6670749999976
+    },
+    {
+      "node": "v20.19.0",
+      "versions": {
+        "esbuild": "0.27.7",
+        "vite": "7.3.3",
+        "react": "19.2.6",
+        "react-dom": "19.2.6",
+        "@babel/core": "7.29.7",
+        "@vanilla-extract/css": "1.21.2"
+      },
+      "name": "tokens-unused-24",
+      "format": "esm",
+      "bundler": "esbuild",
+      "phases": {
+        "first": [771.551136],
+        "unchanged": [430.5821940000001, 358.78523900000005, 331.7766640000002],
+        "edited": [354.3000490000004, 327.6754340000002, 348.66757899999993]
+      },
+      "outputs": {
+        "first": {
+          "js": {
+            "raw": 885,
+            "gzip": 487,
+            "brotli": 416
+          },
+          "css": {
+            "raw": 486,
+            "gzip": 191,
+            "brotli": 173
+          },
+          "cssHash": "66ac3680b0cf34322ee41211473f1980cd6eded19661403386f76193ba921736",
+          "valueHash": "2636f44b3ba90220f813b26f33c2e4ec50907a7fdf93fe7ffa62e8e3c3d7e28a"
+        },
+        "unchanged": {
+          "js": {
+            "raw": 885,
+            "gzip": 487,
+            "brotli": 416
+          },
+          "css": {
+            "raw": 486,
+            "gzip": 191,
+            "brotli": 173
+          },
+          "cssHash": "66ac3680b0cf34322ee41211473f1980cd6eded19661403386f76193ba921736",
+          "valueHash": "2636f44b3ba90220f813b26f33c2e4ec50907a7fdf93fe7ffa62e8e3c3d7e28a"
+        },
+        "edited-0": {
+          "js": {
+            "raw": 885,
+            "gzip": 487,
+            "brotli": 416
+          },
+          "css": {
+            "raw": 486,
+            "gzip": 191,
+            "brotli": 173
+          },
+          "cssHash": "66ac3680b0cf34322ee41211473f1980cd6eded19661403386f76193ba921736",
+          "valueHash": "2636f44b3ba90220f813b26f33c2e4ec50907a7fdf93fe7ffa62e8e3c3d7e28a"
+        },
+        "edited-1": {
+          "js": {
+            "raw": 885,
+            "gzip": 487,
+            "brotli": 416
+          },
+          "css": {
+            "raw": 486,
+            "gzip": 191,
+            "brotli": 173
+          },
+          "cssHash": "66ac3680b0cf34322ee41211473f1980cd6eded19661403386f76193ba921736",
+          "valueHash": "2636f44b3ba90220f813b26f33c2e4ec50907a7fdf93fe7ffa62e8e3c3d7e28a"
+        },
+        "edited-2": {
+          "js": {
+            "raw": 885,
+            "gzip": 487,
+            "brotli": 416
+          },
+          "css": {
+            "raw": 486,
+            "gzip": 191,
+            "brotli": 173
+          },
+          "cssHash": "66ac3680b0cf34322ee41211473f1980cd6eded19661403386f76193ba921736",
+          "valueHash": "2636f44b3ba90220f813b26f33c2e4ec50907a7fdf93fe7ffa62e8e3c3d7e28a"
+        }
+      },
+      "compilerHashes": {
+        "@mincho-js/babel": "ceb7d87e100b7a5a29474165823bf0a0e6f2bd68433197e3ded6cd571a3be11c",
+        "@mincho-js/integration": "cbace65b5ee09eb09a344fdc5f36c9d5ed3c209c72cb2b80d543a4411fe3128f",
+        "@mincho-js/esbuild": "732d524f39e959627be8e47e2ba0a150c9e3fffc9100db1a8fc26e4008175ad9",
+        "@mincho-js/vite": "74100286d9ca76931ce839011a5ef91fa87d84d86c590cd9c78ed0c0526bd973"
+      },
+      "firstReadyMs": 1110.384102,
+      "heapMiB": 23.68439483642578,
+      "rssMiB": 229.52734375,
+      "peakRssMiB": 229.52734375,
+      "revision": "baseline",
+      "linker": "npm",
+      "round": 2,
+      "processFirstReadyMs": 1190.9070930000016
+    },
+    {
+      "node": "v20.19.0",
+      "versions": {
+        "esbuild": "0.27.7",
+        "vite": "7.3.3",
+        "react": "19.2.6",
+        "react-dom": "19.2.6",
+        "@babel/core": "7.29.7",
+        "@vanilla-extract/css": "1.21.2"
+      },
+      "name": "tokens-unused-24",
+      "format": "esm",
+      "bundler": "esbuild",
+      "phases": {
+        "first": [811.7875369999999],
+        "unchanged": [
+          149.50277200000005, 118.11285699999985, 115.57467500000007
+        ],
+        "edited": [317.705741, 330.82219800000007, 289.6500809999998]
+      },
+      "outputs": {
+        "first": {
+          "js": {
+            "raw": 885,
+            "gzip": 487,
+            "brotli": 416
+          },
+          "css": {
+            "raw": 486,
+            "gzip": 191,
+            "brotli": 173
+          },
+          "cssHash": "66ac3680b0cf34322ee41211473f1980cd6eded19661403386f76193ba921736",
+          "valueHash": "2636f44b3ba90220f813b26f33c2e4ec50907a7fdf93fe7ffa62e8e3c3d7e28a"
+        },
+        "unchanged": {
+          "js": {
+            "raw": 885,
+            "gzip": 487,
+            "brotli": 416
+          },
+          "css": {
+            "raw": 486,
+            "gzip": 191,
+            "brotli": 173
+          },
+          "cssHash": "66ac3680b0cf34322ee41211473f1980cd6eded19661403386f76193ba921736",
+          "valueHash": "2636f44b3ba90220f813b26f33c2e4ec50907a7fdf93fe7ffa62e8e3c3d7e28a"
+        },
+        "edited-0": {
+          "js": {
+            "raw": 885,
+            "gzip": 487,
+            "brotli": 416
+          },
+          "css": {
+            "raw": 486,
+            "gzip": 191,
+            "brotli": 173
+          },
+          "cssHash": "66ac3680b0cf34322ee41211473f1980cd6eded19661403386f76193ba921736",
+          "valueHash": "2636f44b3ba90220f813b26f33c2e4ec50907a7fdf93fe7ffa62e8e3c3d7e28a"
+        },
+        "edited-1": {
+          "js": {
+            "raw": 885,
+            "gzip": 487,
+            "brotli": 416
+          },
+          "css": {
+            "raw": 486,
+            "gzip": 191,
+            "brotli": 173
+          },
+          "cssHash": "66ac3680b0cf34322ee41211473f1980cd6eded19661403386f76193ba921736",
+          "valueHash": "2636f44b3ba90220f813b26f33c2e4ec50907a7fdf93fe7ffa62e8e3c3d7e28a"
+        },
+        "edited-2": {
+          "js": {
+            "raw": 885,
+            "gzip": 487,
+            "brotli": 416
+          },
+          "css": {
+            "raw": 486,
+            "gzip": 191,
+            "brotli": 173
+          },
+          "cssHash": "66ac3680b0cf34322ee41211473f1980cd6eded19661403386f76193ba921736",
+          "valueHash": "2636f44b3ba90220f813b26f33c2e4ec50907a7fdf93fe7ffa62e8e3c3d7e28a"
+        }
+      },
+      "compilerHashes": {
+        "@mincho-js/babel": "b952382b8bd2c56c1bc8344b16afca8afe737444bdc97845f2f25d09c3156c5f",
+        "@mincho-js/integration": "b4d8e53dc4d83f27ae1e17c59cbf94eca2916724d91a881435f857d79af5ba18",
+        "@mincho-js/esbuild": "c095f5b1a092a35d70fa5494b59c8679f105dfa87826014ed2b5bc6c519903b2",
+        "@mincho-js/vite": "9401d9a9b3fb385d2320bbff7253c42297c0296497e510b13519ad4e048ef0d4"
+      },
+      "firstReadyMs": 1100.374086,
+      "heapMiB": 24.31096649169922,
+      "rssMiB": 178.890625,
+      "peakRssMiB": 178.890625,
+      "revision": "candidate",
+      "linker": "npm",
+      "round": 2,
+      "processFirstReadyMs": 1173.2632719999965
+    },
+    {
+      "node": "v20.19.0",
+      "versions": {
+        "esbuild": "0.27.7",
+        "vite": "7.3.3",
+        "react": "19.2.6",
+        "react-dom": "19.2.6",
+        "@babel/core": "7.29.7",
+        "@vanilla-extract/css": "1.21.2"
+      },
+      "name": "styles-24",
+      "format": "esm",
+      "bundler": "vite-dev",
+      "phases": {
+        "first": [635.2580479999999],
+        "unchanged": [
+          0.6804909999998472, 0.6716460000000097, 0.7236120000000028
+        ],
+        "edited": [43.63557000000014, 26.42309799999998, 37.071492000000035]
+      },
+      "outputs": {},
+      "compilerHashes": {
+        "@mincho-js/babel": "ceb7d87e100b7a5a29474165823bf0a0e6f2bd68433197e3ded6cd571a3be11c",
+        "@mincho-js/integration": "cbace65b5ee09eb09a344fdc5f36c9d5ed3c209c72cb2b80d543a4411fe3128f",
+        "@mincho-js/esbuild": "732d524f39e959627be8e47e2ba0a150c9e3fffc9100db1a8fc26e4008175ad9",
+        "@mincho-js/vite": "74100286d9ca76931ce839011a5ef91fa87d84d86c590cd9c78ed0c0526bd973"
+      },
+      "firstReadyMs": 1123.1595379999999,
+      "note": "Development timings cover transformRequest after watcher hooks and explicit graph invalidation; browser network/render latency is excluded.",
+      "heapMiB": 31.906646728515625,
+      "rssMiB": 145.46875,
+      "peakRssMiB": 145.46875,
+      "revision": "baseline",
+      "linker": "npm",
+      "round": 2,
+      "processFirstReadyMs": 1196.0013629999958
+    },
+    {
+      "node": "v20.19.0",
+      "versions": {
+        "esbuild": "0.27.7",
+        "vite": "7.3.3",
+        "react": "19.2.6",
+        "react-dom": "19.2.6",
+        "@babel/core": "7.29.7",
+        "@vanilla-extract/css": "1.21.2"
+      },
+      "name": "styles-24",
+      "format": "esm",
+      "bundler": "vite-dev",
+      "phases": {
+        "first": [1548.243915],
+        "unchanged": [
+          0.9511969999998655, 0.9168239999999059, 1.1522469999999885
+        ],
+        "edited": [86.31095499999992, 77.21303499999976, 66.38048200000003]
+      },
+      "outputs": {},
+      "compilerHashes": {
+        "@mincho-js/babel": "b952382b8bd2c56c1bc8344b16afca8afe737444bdc97845f2f25d09c3156c5f",
+        "@mincho-js/integration": "b4d8e53dc4d83f27ae1e17c59cbf94eca2916724d91a881435f857d79af5ba18",
+        "@mincho-js/esbuild": "c095f5b1a092a35d70fa5494b59c8679f105dfa87826014ed2b5bc6c519903b2",
+        "@mincho-js/vite": "9401d9a9b3fb385d2320bbff7253c42297c0296497e510b13519ad4e048ef0d4"
+      },
+      "firstReadyMs": 2023.8428889999998,
+      "note": "Development timings cover transformRequest after watcher hooks and explicit graph invalidation; browser network/render latency is excluded.",
+      "heapMiB": 30.882164001464844,
+      "rssMiB": 197.71484375,
+      "peakRssMiB": 197.71484375,
+      "revision": "candidate",
+      "linker": "npm",
+      "round": 2,
+      "processFirstReadyMs": 2098.4543459999986
+    },
+    {
+      "node": "v20.19.0",
+      "versions": {
+        "esbuild": "0.27.7",
+        "vite": "7.3.3",
+        "react": "19.2.6",
+        "react-dom": "19.2.6",
+        "@babel/core": "7.29.7",
+        "@vanilla-extract/css": "1.21.2"
+      },
+      "name": "tokens-unused-24",
+      "format": "esm",
+      "bundler": "vite-dev",
+      "phases": {
+        "first": [830.9653309999999],
+        "unchanged": [
+          2.080016999999998, 1.6603840000000218, 1.2025949999999739
+        ],
+        "edited": [657.7313899999999, 596.5380339999997, 559.3595409999998]
+      },
+      "outputs": {},
+      "compilerHashes": {
+        "@mincho-js/babel": "ceb7d87e100b7a5a29474165823bf0a0e6f2bd68433197e3ded6cd571a3be11c",
+        "@mincho-js/integration": "cbace65b5ee09eb09a344fdc5f36c9d5ed3c209c72cb2b80d543a4411fe3128f",
+        "@mincho-js/esbuild": "732d524f39e959627be8e47e2ba0a150c9e3fffc9100db1a8fc26e4008175ad9",
+        "@mincho-js/vite": "74100286d9ca76931ce839011a5ef91fa87d84d86c590cd9c78ed0c0526bd973"
+      },
+      "firstReadyMs": 1348.607531,
+      "note": "Development timings cover transformRequest after watcher hooks and explicit graph invalidation; browser network/render latency is excluded.",
+      "heapMiB": 43.635108947753906,
+      "rssMiB": 184.48046875,
+      "peakRssMiB": 186.57421875,
+      "revision": "baseline",
+      "linker": "npm",
+      "round": 2,
+      "processFirstReadyMs": 1419.1890980000026
+    },
+    {
+      "node": "v20.19.0",
+      "versions": {
+        "esbuild": "0.27.7",
+        "vite": "7.3.3",
+        "react": "19.2.6",
+        "react-dom": "19.2.6",
+        "@babel/core": "7.29.7",
+        "@vanilla-extract/css": "1.21.2"
+      },
+      "name": "tokens-unused-24",
+      "format": "esm",
+      "bundler": "vite-dev",
+      "phases": {
+        "first": [1721.4629679999998],
+        "unchanged": [
+          0.8614809999999125, 0.9356739999998354, 0.8468379999999343
+        ],
+        "edited": [832.2902939999999, 733.7398549999998, 764.3617860000004]
+      },
+      "outputs": {},
+      "compilerHashes": {
+        "@mincho-js/babel": "b952382b8bd2c56c1bc8344b16afca8afe737444bdc97845f2f25d09c3156c5f",
+        "@mincho-js/integration": "b4d8e53dc4d83f27ae1e17c59cbf94eca2916724d91a881435f857d79af5ba18",
+        "@mincho-js/esbuild": "c095f5b1a092a35d70fa5494b59c8679f105dfa87826014ed2b5bc6c519903b2",
+        "@mincho-js/vite": "9401d9a9b3fb385d2320bbff7253c42297c0296497e510b13519ad4e048ef0d4"
+      },
+      "firstReadyMs": 2230.523677,
+      "note": "Development timings cover transformRequest after watcher hooks and explicit graph invalidation; browser network/render latency is excluded.",
+      "heapMiB": 30.9219970703125,
+      "rssMiB": 264.171875,
+      "peakRssMiB": 285.12890625,
+      "revision": "candidate",
+      "linker": "npm",
+      "round": 2,
+      "processFirstReadyMs": 2301.190398999999
+    }
+  ]
+}

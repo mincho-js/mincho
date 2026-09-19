@@ -74,3 +74,7 @@ also has `logic-24`, `helpers-24`, `tokens-used-24`, `tokens-unused-24` and
 invalidating the module graph. Use an actual parent/candidate pair and record
 uninstrumented timings separately from `--diagnostics` counters; archived
 framework measurements do not describe this PR's performance.
+
+The [PR 10/11 comparison](./memory-compilation-cache-performance.md) records faster
+esbuild rebuilds and slower Vite development transforms, including raw samples
+and memory measurements. Measure your workload before choosing cache settings.
