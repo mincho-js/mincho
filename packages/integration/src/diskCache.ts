@@ -21,7 +21,7 @@ export interface PersistentEntry {
   readonly manifest: PersistentManifest;
 }
 
-const format = "mincho-compilation-v2";
+const format = "mincho-compilation-v3-runtime-canonical";
 
 const digest = (value: string | Uint8Array) =>
   createHash("sha256").update(value).digest("hex");
@@ -40,6 +40,9 @@ export function getCompilerIdentity(): Promise<string> {
         "@mincho-js/integration",
         "@mincho-js/babel",
         "@mincho-js/css",
+        "@mincho-js/css/classname",
+        "@mincho-js/css/rules/createRuntimeFn",
+        "@mincho-js/css/defineRules/createDefineRulesCxRuntime",
         "@babel/core",
         "esbuild",
         "@vanilla-extract/integration",
@@ -48,6 +51,10 @@ export function getCompilerIdentity(): Promise<string> {
     ];
 
     entries.push(
+      resolveFromModule(
+        resolveFromModule(moduleUrl, "@mincho-js/babel"),
+        "@mincho-js/transform-runtime"
+      ),
       resolveFromModule(
         resolveFromModule(moduleUrl, "@mincho-js/css"),
         "@mincho-js/transform-to-vanilla"

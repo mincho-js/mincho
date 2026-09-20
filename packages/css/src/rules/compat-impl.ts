@@ -90,8 +90,10 @@ export function recipe<
   } = options;
 
   type PureProps = Exclude<Props, undefined>;
+
   const propVars = {} as PropVars<PureProps>;
   const propStyles: CSSRule = {};
+
   if (Array.isArray(props)) {
     for (const prop of props) {
       if (typeof prop === "string") {
@@ -109,6 +111,7 @@ export function recipe<
   }
 
   let defaultClassName: string;
+
   if (!base || typeof base === "string") {
     const baseClassName = css([baseStyles, propStyles], debugId);
     defaultClassName = base ? `${baseClassName} ${base}` : baseClassName;
@@ -122,17 +125,22 @@ export function recipe<
   }
 
   type PureVariants = Exclude<Variants, undefined>;
+
   type PureToggleVariants = Exclude<ToggleVariants, undefined>;
+
   type CombinedVariants = ConditionalVariants<PureVariants, PureToggleVariants>;
+
   const mergedVariants = mergeObject(
     variants,
     transformToggleVariants(toggles)
   ) as CombinedVariants;
+
   // @ts-expect-error - Temporarily ignoring the error as the PatternResult type is not fully defined
   const variantClassNames: PatternResult<CombinedVariants>["variantClassNames"] =
     mapValues(mergedVariants, (variantGroup, variantGroupName) => {
       // Transform variant values before passing to css.multiple
       const transformedVariants: Record<string | number, ComplexCSSRule> = {};
+
       for (const key in variantGroup) {
         const styleRule = variantGroup[key];
         transformedVariants[key] =
@@ -177,7 +185,7 @@ export function recipe<
     >,
     {
       importPath: "@mincho-js/css/rules/createRuntimeFn",
-      importName: "createRuntimeFn",
+      importName: "createCompiledRuntimeFn",
       args: [config as Serializable]
     }
   );
@@ -242,6 +250,7 @@ if (import.meta.vitest) {
       optionValue: CompatCompoundVariant<Variants>
     ) {
       assertType(optionValue);
+
       return optionValue;
     }
 
@@ -271,6 +280,7 @@ if (import.meta.vitest) {
         }
       });
     });
+
     it("Invalid CompoundVariant with style value", () => {
       assertCompoundVariants({
         variants: {
@@ -294,6 +304,7 @@ if (import.meta.vitest) {
       assertType<CompatPatternOptions<Variants, ToggleVariants, Props>>(
         options
       );
+
       return options;
     }
 
@@ -377,6 +388,7 @@ if (import.meta.vitest) {
       disabled: { textDecoration: "line-through" },
       rounded: { borderRadius: 999 }
     } as const;
+
     const variants = {
       color: {
         brand: { color: "#FFFFA0" },
@@ -512,6 +524,7 @@ if (import.meta.vitest) {
         toggles: toggleVariants,
         variants
       });
+
       // Array compoundVariants
       assertValidOptions({
         compoundVariants: [
@@ -629,6 +642,7 @@ if (import.meta.vitest) {
           } satisfies VariantStyle<"true" | "false">
         }
       } as const;
+
       const result = recipe(variants, debugId);
 
       // Base check
@@ -703,15 +717,15 @@ if (import.meta.vitest) {
       expect(result({ size: "small", color: "brand" })).toMatch(
         identifierName(
           debugId,
-          `${debugId}_size_small`,
-          `${debugId}_color_brand`
+          `${debugId}_color_brand`,
+          `${debugId}_size_small`
         )
       );
       expect(result(["outlined", { color: "brand" }])).toMatch(
         identifierName(
           debugId,
-          `${debugId}_outlined_true`,
-          `${debugId}_color_brand`
+          `${debugId}_color_brand`,
+          `${debugId}_outlined_true`
         )
       );
       expect(result([{ color: "brand" }, "outlined"])).toMatch(
@@ -734,6 +748,7 @@ if (import.meta.vitest) {
 
       // Without debugId
       const resultWithoutDebugId = recipe(variants);
+
       expect(resultWithoutDebugId({ color: "brand" })).toMatch(
         identifierName(undefined, `color_brand`)
       );
@@ -806,8 +821,8 @@ if (import.meta.vitest) {
       expect(result(["rounded", "disabled"])).toMatch(
         identifierName(
           debugId,
-          `${debugId}_rounded_true`,
-          `${debugId}_disabled_true`
+          `${debugId}_disabled_true`,
+          `${debugId}_rounded_true`
         )
       );
     });
@@ -1002,15 +1017,15 @@ if (import.meta.vitest) {
       expect(result({ size: "small", color: "brand" })).toMatch(
         identifierName(
           debugId,
-          `${debugId}_size_small`,
-          `${debugId}_color_brand`
+          `${debugId}_color_brand`,
+          `${debugId}_size_small`
         )
       );
       expect(result(["outlined", { color: "brand" }])).toMatch(
         identifierName(
           debugId,
-          `${debugId}_outlined_true`,
           `${debugId}_color_brand`,
+          `${debugId}_outlined_true`,
           // Compound
           `${debugId}_compound_0`
         )
@@ -1027,9 +1042,9 @@ if (import.meta.vitest) {
       expect(result(["outlined", { color: "brand", size: "medium" }])).toMatch(
         identifierName(
           debugId,
-          `${debugId}_outlined_true`,
           `${debugId}_color_brand`,
           `${debugId}_size_medium`,
+          `${debugId}_outlined_true`,
           // Compound
           `${debugId}_compound_0`,
           `${debugId}_compound_1`
@@ -1074,8 +1089,8 @@ if (import.meta.vitest) {
       expect(result(["outlined", { color: "brand" }])).toMatch(
         identifierName(
           debugId,
-          `${debugId}_outlined_true`,
           `${debugId}_color_brand`,
+          `${debugId}_outlined_true`,
           `${debugId}_compound_0`
         )
       );
@@ -1115,6 +1130,7 @@ if (import.meta.vitest) {
         if (propValue === "red") {
           expect(varName).toMatch(identifierName(`--${debugId}_color`));
         }
+
         if (propValue === "blue") {
           expect(varName).toMatch(identifierName(`--${debugId}_background`));
         }
@@ -1138,6 +1154,7 @@ if (import.meta.vitest) {
         },
         debugId
       );
+
       Object.entries(
         result2.props({
           rounded: "999px",
@@ -1150,6 +1167,7 @@ if (import.meta.vitest) {
         if (propValue === "999px") {
           expect(varName).toMatch(identifierName(`--${debugId}_rounded`));
         }
+
         if (propValue === "2rem") {
           expect(varName).toMatch(identifierName(`--${debugId}_size`));
         }
@@ -1168,6 +1186,7 @@ if (import.meta.vitest) {
         },
         debugId
       );
+
       Object.entries(
         result3.props({
           color: "red",
@@ -1182,12 +1201,15 @@ if (import.meta.vitest) {
         if (propValue === "red") {
           expect(varName).toMatch(identifierName(`--${debugId}_color`));
         }
+
         if (propValue === "blue") {
           expect(varName).toMatch(identifierName(`--${debugId}_background`));
         }
+
         if (propValue === "999px") {
           expect(varName).toMatch(identifierName(`--${debugId}_rounded`));
         }
+
         if (propValue === "2rem") {
           expect(varName).toMatch(identifierName(`--${debugId}_size`));
         }
