@@ -27,6 +27,14 @@ function cxMultipleResult<T extends ClassMultipleInput>(
 }
 
 function createCx(cxImpl: (...inputs: ClassValue[]) => string): Cx {
+  return attachCxHelpers(cxImpl, (...inputs) => cxImpl(...inputs));
+}
+
+/** Internal: callable must be a fresh function owned by the creating factory. */
+export function attachCxHelpers(
+  cxImpl: (...inputs: ClassValue[]) => string,
+  callable: (...inputs: ClassValue[]) => string
+): Cx {
   function cxMultiple<T extends ClassMultipleInput>(
     map: T
   ): ClassMultipleResult<T> {
@@ -34,16 +42,20 @@ function createCx(cxImpl: (...inputs: ClassValue[]) => string): Cx {
   }
 
   function cxWith<const T extends ClassValue>(): CxWith<T>;
+
   function cxWith<const F extends CxWithCallback>(
     callback: F
   ): CxWithMixin<CxWithCallbackArgs<F>>;
+
   function cxWith<const Input>(
     callback: (params: Input) => ClassValue
   ): CxWithMixin<[params: Input]>;
+
   function cxWith<const T extends ClassValue, const F extends CxWithCallback>(
     callback?: ((params: T) => ClassValue) | F
   ): CxWith<T> & CxWithMixin<CxWithCallbackArgs<F>> {
     type CxWithRuntimeCallback = (...className: unknown[]) => ClassValue;
+
     const cxFunction = (callback ??
       ((...className: ClassValue[]) => className)) as CxWithRuntimeCallback;
 
@@ -59,6 +71,7 @@ function createCx(cxImpl: (...inputs: ClassValue[]) => string): Cx {
     >(classNameMap: ClassNameMap): ClassMultipleResult<ClassNameMap> {
       const transformedClassNameMap: Record<keyof ClassNameMap, ClassValue> =
         Object.create(null) as Record<keyof ClassNameMap, ClassValue>;
+
       for (const key in classNameMap) {
         const value = classNameMap[key];
         transformedClassNameMap[key] = Array.isArray(value)
@@ -74,7 +87,7 @@ function createCx(cxImpl: (...inputs: ClassValue[]) => string): Cx {
     }) as CxWith<T> & CxWithMixin<CxWithCallbackArgs<F>>;
   }
 
-  return Object.assign((...inputs: ClassValue[]) => cxImpl(...inputs), {
+  return Object.assign(callable, {
     multiple: cxMultiple,
     with: cxWith
   });
@@ -107,6 +120,7 @@ function createCx(cxImpl: (...inputs: ClassValue[]) => string): Cx {
  * // => 'foo bar hello world cya'
  */
 export const cx = createCx(cxImpl);
+
 export { createCx };
 
 // == Tests ====================================================================
@@ -122,6 +136,7 @@ if (import.meta.vitest) {
       const implementation = Object.freeze(
         vi.fn((...inputs: ClassValue[]) => clsx(...inputs))
       );
+
       const first = createCx(implementation);
       const firstMultiple = first.multiple;
       const firstWith = first.with;
@@ -151,6 +166,7 @@ if (import.meta.vitest) {
     it("handles conditional string inputs", () => {
       const isActive = true;
       const isHidden = false;
+
       expect(cx("foo", isActive && "bar", "baz")).toBe("foo bar baz");
       expect(cx("foo", isHidden && "bar", "baz")).toBe("foo baz");
       expect(cx("foo", null, "baz")).toBe("foo baz");
@@ -197,6 +213,7 @@ if (import.meta.vitest) {
 
     it("handles kitchen sink (mixed inputs with nesting)", () => {
       const isVisible = true;
+
       expect(
         cx(
           "foo",
@@ -289,6 +306,7 @@ if (import.meta.vitest) {
 
     it("handles empty map", () => {
       const result = cx.multiple({});
+
       expect(result).toEqual({});
     });
 
@@ -329,7 +347,9 @@ if (import.meta.vitest) {
 
     it("creates a typed constraint without transformer", () => {
       type LayoutDisplay = "flex" | "grid" | "block";
+
       type LayoutSpacing = `p-${number}` | `m-${number}`;
+
       const layout = cx.with<LayoutDisplay | LayoutSpacing>();
 
       expect(layout("flex", "p-4")).toBe("flex p-4");
@@ -338,7 +358,9 @@ if (import.meta.vitest) {
 
     it("creates a typed full constraint without transformer", () => {
       type LayoutDisplay = "flex" | "grid" | "block";
+
       type LayoutSpacing = `p-${number}` | `m-${number}`;
+
       const layout = cx.with<ClassValue<LayoutDisplay | LayoutSpacing>>();
 
       expect(layout("flex", "p-4", { block: true })).toBe("flex p-4 block");
@@ -355,6 +377,7 @@ if (import.meta.vitest) {
       assertType<(base: string, md?: string, lg?: string) => string>(
         responsive
       );
+
       expect(responsive("text-sm", "text-base", "text-lg")).toBe(
         "text-sm md:text-base lg:text-lg"
       );
@@ -395,6 +418,7 @@ if (import.meta.vitest) {
         base,
         active && "active"
       ]);
+
       const test = cx.with(callback);
 
       expect(test("base", true)).toBe("base active");
@@ -419,7 +443,9 @@ if (import.meta.vitest) {
 
     it("cx.with().multiple() processes a map with typed constraint", () => {
       type LayoutDisplay = "flex" | "grid" | "block";
+
       type LayoutSpacing = `p-${number}` | `m-${number}`;
+
       const layout = cx.with<LayoutDisplay | LayoutSpacing>();
 
       const result = layout.multiple({
@@ -452,6 +478,7 @@ if (import.meta.vitest) {
     it("cx.with().multiple() handles empty map", () => {
       const layout = cx.with<"flex" | "grid">();
       const result = layout.multiple({});
+
       expect(result).toEqual({});
     });
 

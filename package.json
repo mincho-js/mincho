@@ -29,6 +29,7 @@
     "check:package-contract": "yarn vite-node scripts/package-contract/index.ts",
     "check:vite-native-css-contract": "yarn workspace @mincho-js/vite test src/libraryCssFinalization.test.ts --exclude '**/_release/**'",
     "benchmark:compilation": "node scripts/benchmark-compilation.mjs",
+    "benchmark:cx": "node scripts/benchmark-cx.mjs",
     "check:pkgs": "yarn check:peers & yarn constraints",
     "doctor": "node scripts/doctor/index.mjs",
     "doctor:raw": "doctor",
