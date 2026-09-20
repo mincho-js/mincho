@@ -7,7 +7,7 @@ import { build } from "esbuild";
 
 const imports = `
   import { createRuntimeFn, createCompiledRuntimeFn } from "@mincho-js/css/rules/createRuntimeFn";
-  import { createDefineRulesCxRuntime } from "@mincho-js/css/defineRules/createDefineRulesCxRuntime";
+  import { createDefineRulesCxRuntime, createCompiledDefineRulesCxRuntime } from "@mincho-js/css/defineRules/createDefineRulesCxRuntime";
 `;
 
 const recipe =
@@ -46,7 +46,7 @@ for (const format of ["esm", "cjs"]) {
     const recipe = /*#__PURE__*/ createRuntimeFn(${recipe});
     const cx = /*#__PURE__*/ createDefineRulesCxRuntime({ classWrites: [] });
     const compiledRecipe = /*#__PURE__*/ createCompiledRuntimeFn(${recipe}, {});
-    const compiledCx = /*#__PURE__*/ createDefineRulesCxRuntime({ classWrites: [] });
+    const compiledCx = /*#__PURE__*/ createCompiledDefineRulesCxRuntime({ classWrites: [] });
     export const alive = "retained";
   `);
 
@@ -73,7 +73,7 @@ for (const format of ["esm", "cjs"]) {
 
   const compiled = await bundle(`${imports}
     const recipe = /*#__PURE__*/ createCompiledRuntimeFn(${recipe}, {});
-    const cx = /*#__PURE__*/ createDefineRulesCxRuntime({ classWrites: [] });
+    const cx = /*#__PURE__*/ createCompiledDefineRulesCxRuntime({ classWrites: [] });
     export const dynamic = input => cx(recipe(input), "extra");
   `);
 
@@ -204,6 +204,67 @@ for (const format of ["esm", "cjs"]) {
   assert.equal(merge(["active", false, "active"]), "base active active tail");
 
   console.log(`[classname-boundary] ${format}: ${size(classnameBundle)}`);
+
+  // Exercise actual import/require conditions for the scoped runtime too.
+  const scopedImport =
+    format === "esm"
+      ? `import { createCompiledDefineRulesCxRuntime } from "@mincho-js/css/defineRules/createDefineRulesCxRuntime"; export const scoped =`
+      : `const { createCompiledDefineRulesCxRuntime } = require("@mincho-js/css/defineRules/createDefineRulesCxRuntime"); exports.scoped =`;
+
+  const scopedBundle =
+    await bundle(`${scopedImport} createCompiledDefineRulesCxRuntime({
+    classWrites: [["a", 0], ["b", 0], ["c", 1]], segments: [["s", [0, 1]]]
+  });`);
+
+  const { scoped } = await executeBundle(scopedBundle, format);
+
+  assert.equal(scoped("s a c", "b"), "c b");
+  assert.equal(scoped("\ufeffx\t s a c b\nx"), "x c b x");
+  assert.equal(scoped("s:s c a"), "s:s c a");
+  assert.equal(scoped("s c a"), "s c a");
+
+  for (let index = 0; index < 512; index += 1) {
+    assert.equal(scoped("a", "b", `outside-${index}`), `b outside-${index}`);
+  }
+
+  let reads = 0;
+  let enabled = false;
+  const mutable = {
+    get a() {
+      reads += 1;
+
+      return true;
+    },
+
+    get b() {
+      return enabled;
+    }
+  };
+
+  assert.equal(scoped(mutable), "a");
+  assert.equal(scoped(mutable), "a");
+
+  enabled = true;
+
+  assert.equal(scoped([mutable]), "b");
+  assert.equal(reads, 3);
+
+  let calls = 0;
+  const mapped = scoped.with((value) => {
+    calls += 1;
+
+    return ["a", value];
+  });
+
+  assert.deepEqual(
+    { ...mapped.multiple({ first: "b", second: "b" }) },
+    { first: "b", second: "b" }
+  );
+  assert.equal(calls, 2);
+
+  console.log(
+    `[scoped-cx-contract] ${format}: ${size(scopedBundle)}, scalar/getter/marker/eviction parity passed`
+  );
 }
 
 const require = createRequire(import.meta.url);
