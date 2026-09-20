@@ -1,6 +1,7 @@
 import {
   type BabelOptions,
   type MinchoDiagnosticsOptions,
+  type MinchoCacheOptions,
   CompilationDiagnostics,
   InternalCompilationCache,
   internalCanSkipMinchoTransform,
@@ -53,7 +54,7 @@ const integrationHelpers = {
 
 export interface MinchoEsbuildPluginOptions {
   diagnostics?: MinchoDiagnosticsOptions;
-  cache?: boolean;
+  cache?: MinchoCacheOptions;
   includeNodeModulesPattern?: RegExp;
   jsxCssProp?: boolean;
 
@@ -78,7 +79,7 @@ export interface MinchoEsbuildPluginOptions {
 export function minchoEsbuildPlugin({
   includeNodeModulesPattern,
   diagnostics: diagnosticsOptions,
-  cache: enableCache = true,
+  cache: cacheOptions,
   jsxCssProp,
   extractCalls
 }: MinchoEsbuildPluginOptions = {}): EsbuildPlugin {
@@ -86,9 +87,17 @@ export function minchoEsbuildPlugin({
     name: "mincho-js-esbuild",
 
     setup(build) {
-      const compilationCache = enableCache
-        ? new InternalCompilationCache()
-        : undefined;
+      const compilationCache =
+        cacheOptions !== false ? new InternalCompilationCache() : undefined;
+
+      compilationCache?.configure(
+        cacheOptions,
+        join(
+          build.initialOptions.absWorkingDir ?? process.cwd(),
+          ".cache/mincho"
+        ),
+        "esbuild"
+      );
 
       build.onDispose?.(() => compilationCache?.clear());
 
@@ -155,7 +164,7 @@ export function minchoEsbuildPlugin({
           await diagnostics.run(
             await rootRealpath,
             "input-validation",
-            async () => compilationCache?.end()
+            async () => compilationCache?.end(!result?.errors.length)
           );
 
           if (result) return await assets.finishBuild(result);

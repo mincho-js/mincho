@@ -1,6 +1,7 @@
 import {
   type BabelOptions,
   type MinchoDiagnosticsOptions,
+  type MinchoCacheOptions,
   CompilationDiagnostics,
   InternalCompilationCache,
   InternalSourceAstCache,
@@ -78,7 +79,7 @@ function extractedCssFileFilter(filePath: string) {
 
 export interface MinchoVitePluginOptions {
   diagnostics?: MinchoDiagnosticsOptions;
-  cache?: boolean;
+  cache?: MinchoCacheOptions;
   babel?: BabelOptions;
   jsxCssProp?: boolean;
 
@@ -93,7 +94,7 @@ export interface MinchoVitePluginOptions {
   };
 }
 
-export type { ExtractCalls } from "@mincho-js/integration";
+export type { ExtractCalls, MinchoCacheOptions } from "@mincho-js/integration";
 
 export function minchoVitePlugin(_options?: MinchoVitePluginOptions) {
   const parser =
@@ -701,6 +702,14 @@ function createMinchoViteEnvironmentPlugin(
       diagnosticsClosed = false;
       config = resolvedConfig;
       rootRealpath = await getRealpathOrResolvedPath(config.root);
+      compilationCache?.configure(
+        _options?.cache,
+        join(
+          config.cacheDir ?? join(config.root, "node_modules/.vite"),
+          "mincho"
+        ),
+        `vite:${environment}:${config.command}:${config.mode}`
+      );
     },
 
     resolveId(id: string, importer?: string) {

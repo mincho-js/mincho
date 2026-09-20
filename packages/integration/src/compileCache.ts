@@ -8,6 +8,9 @@ export interface CompileCacheBridge {
   readonly plugin: Plugin;
   readonly key: string;
 
+  /** The bridge can replay its captured data after a process restart. */
+  readonly persistent?: boolean;
+
   capture(): {
     readonly files: readonly { path: string; digest: string }[];
     readonly data: unknown;
@@ -182,6 +185,9 @@ async function compileWithInputs(
       owner: options.originalPath,
       dependencies: [options.originalPath, ...fingerprints.keys()],
       bytes: cacheable ? Buffer.byteLength(JSON.stringify(value)) : Infinity,
+      ...(cacheable && (!cacheBridge || cacheBridge.persistent)
+        ? { manifest: { fingerprints: [...fingerprints] } }
+        : {}),
 
       valid: () => cache.unchanged(fingerprints)
     };

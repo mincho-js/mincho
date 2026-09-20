@@ -1,5 +1,12 @@
 import { InternalSourceAstCache } from "@mincho-js/babel";
 import { AsyncLocalStorage } from "node:async_hooks";
+import { resolve } from "node:path";
+import {
+  CompilationDiskCache,
+  getCompilerIdentity,
+  type PersistentManifest
+} from "./diskCache.js";
+import type { MinchoCacheOptions } from "./executionOptions.js";
 import {
   CompilationInputs,
   configurationFiles,
@@ -27,15 +34,16 @@ export interface CacheEntry<T> {
   readonly bytes: number;
   readonly dependencies: readonly string[];
   readonly valid: () => Promise<boolean>;
-  readonly manifest?: {
-    readonly fingerprints: readonly (readonly [string, string | null])[];
-    readonly semanticFiles?: readonly string[];
-  };
+
+  /** Only explicitly serializable producers may opt into persistence. */
+  readonly manifest?: PersistentManifest;
 }
 
 /** One environment owns this cache. No failures or stale writes survive a generation. */
 export class CompilationCache {
   readonly parser: InternalSourceAstCache;
+  private disk?: CompilationDiskCache;
+  private readonly costs = new WeakMap<CacheEntry<unknown>, number>();
   private readonly entries = new Map<string, CacheEntry<unknown>>();
   private readonly pending = new Map<string, Promise<unknown>>();
   private readonly dependencyEntries = new Map<string, Set<string>>();
@@ -67,6 +75,29 @@ export class CompilationCache {
       );
   }
 
+  configure(
+    options: MinchoCacheOptions | undefined,
+    directory: string,
+    environment: string
+  ): void {
+    if (
+      !options ||
+      typeof options !== "object" ||
+      options.type !== "filesystem"
+    ) {
+      this.disk = undefined;
+
+      return;
+    }
+
+    const filesystem = options;
+    this.disk = new CompilationDiskCache(
+      resolve(filesystem.directory ?? directory),
+      getCompilerIdentity().then((identity) => `${identity}:${environment}`),
+      filesystem.maxBytes
+    );
+  }
+
   begin(reader?: (file: string) => Promise<Uint8Array>): void {
     this.buildInputs?.cancel();
     this.buildInputs = new CompilationInputs(reader);
@@ -75,12 +106,14 @@ export class CompilationCache {
   }
 
   /** Builds validate once at their publication boundary. */
-  async end(): Promise<void> {
+  async end(success = true): Promise<void> {
     const inputs = this.buildInputs;
     if (!inputs) return;
 
     try {
       await this.validateInputs(inputs);
+
+      if (success) await this.publishInputs(inputs);
     } catch (error) {
       this.rollbackInputs(inputs);
 
@@ -95,6 +128,8 @@ export class CompilationCache {
 
   /** Standalone integrations get a fresh snapshot on every top-level call. */
   async withInputs<T>(operation: () => Promise<T>): Promise<T> {
+    // Create the cache directory before observing source-directory fingerprints.
+    if (this.disk) await this.disk.prepare();
     if (this.inputs) return operation();
 
     const inputs = new CompilationInputs();
@@ -103,6 +138,7 @@ export class CompilationCache {
       try {
         const result = await operation();
         await this.validateInputs(inputs);
+        await this.publishInputs(inputs);
 
         return result;
       } catch (error) {
@@ -182,6 +218,33 @@ export class CompilationCache {
       if (this.entries.get(key) === entry) this.remove(key);
   }
 
+  private async publishInputs(inputs: CompilationInputs): Promise<void> {
+    if (!this.disk || !inputs.active) return;
+
+    let published = false;
+
+    for (const [key, entry] of this.inputWrites.get(inputs) ?? []) {
+      if (
+        !entry.manifest ||
+        this.entries.get(key) !== entry ||
+        (this.costs.get(entry) ?? 0) < this.disk.minimumCost
+      )
+        continue;
+
+      await this.disk.put(key, {
+        value: entry.value,
+        owner: entry.owner,
+        dependencies: entry.dependencies,
+        bytes: entry.bytes,
+        manifest: entry.manifest
+      });
+      published = true;
+    }
+
+    // Cache hits do not increase disk usage or require an eviction scan.
+    if (published) await this.disk.flush();
+  }
+
   clear(): void {
     this.buildInputs?.cancel();
     this.buildInputs = undefined;
@@ -254,7 +317,19 @@ export class CompilationCache {
     }
 
     const operation = (async () => {
-      const previous = this.entries.get(key) as CacheEntry<T> | undefined;
+      let previous = this.entries.get(key) as CacheEntry<T> | undefined;
+
+      if (!previous && this.disk) {
+        const stored = await this.disk.get(key);
+
+        if (stored)
+          previous = {
+            ...stored,
+            value: stored.value as T,
+
+            valid: () => this.unchanged(new Map(stored.manifest.fingerprints))
+          };
+      }
 
       if (previous) {
         let valid = false;
@@ -268,8 +343,11 @@ export class CompilationCache {
         }
 
         if (valid && generation === this.generation) {
-          this.entries.delete(key);
-          this.entries.set(key, previous);
+          if (this.entries.has(key)) {
+            this.entries.delete(key);
+            this.entries.set(key, previous);
+          } else this.remember(key, previous);
+
           recordCompilationDiagnostic("cache-hit", { key });
 
           return previous.value;
@@ -282,15 +360,17 @@ export class CompilationCache {
         recordCompilationDiagnostic("cache-invalidated", { key });
       } else recordCompilationDiagnostic("cache-miss", { key });
 
+      const started = this.disk ? performance.now() : 0;
       const entry = await create();
+
+      if (this.disk) this.costs.set(entry, performance.now() - started);
 
       if (
         generation === this.generation &&
         entry.bytes <= this.maxBytes &&
         this.maxEntries > 0
       ) {
-        this.remove(key);
-        this.entries.set(key, entry);
+        this.remember(key, entry);
 
         const inputs = this.inputs;
 
@@ -300,20 +380,6 @@ export class CompilationCache {
           this.inputWrites.set(inputs, writes);
           this.writeInputs.set(entry, inputs);
         }
-
-        for (const file of entry.dependencies) {
-          const keys = this.dependencyEntries.get(file) ?? new Set<string>();
-          keys.add(key);
-          this.dependencyEntries.set(file, keys);
-        }
-
-        this.bytes += entry.bytes;
-
-        while (
-          this.entries.size > this.maxEntries ||
-          this.bytes > this.maxBytes
-        )
-          this.remove(this.entries.keys().next().value!);
       }
 
       return entry.value;
@@ -326,6 +392,25 @@ export class CompilationCache {
     } finally {
       if (this.pending.get(key) === operation) this.pending.delete(key);
     }
+  }
+
+  private remember(key: string, entry: CacheEntry<unknown>): void {
+    this.remove(key);
+
+    if (entry.bytes > this.maxBytes || this.maxEntries <= 0) return;
+
+    this.entries.set(key, entry);
+
+    for (const file of entry.dependencies) {
+      const keys = this.dependencyEntries.get(file) ?? new Set<string>();
+      keys.add(key);
+      this.dependencyEntries.set(file, keys);
+    }
+
+    this.bytes += entry.bytes;
+
+    while (this.entries.size > this.maxEntries || this.bytes > this.maxBytes)
+      this.remove(this.entries.keys().next().value!);
   }
 
   private remove(key: string): void {

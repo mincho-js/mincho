@@ -18,6 +18,7 @@ import {
   getDefineRulesAncestorStyleSpecifiers,
   type BabelTransformSourceOptions,
   type ExtractCalls as IntegrationExtractCalls,
+  type MinchoCacheOptions as IntegrationCacheOptions,
   type InternalStaticCssEvalSourceProvider
 } from "@mincho-js/integration";
 import {
@@ -29,12 +30,14 @@ import {
 } from "@mincho-js/integration/package-graph";
 import {
   minchoEsbuildPlugins,
-  type ExtractCalls as EsbuildExtractCalls
+  type ExtractCalls as EsbuildExtractCalls,
+  type MinchoCacheOptions as EsbuildCacheOptions
 } from "@mincho-js/esbuild";
 import { minchoVitePlugin } from "@mincho-js/vite";
 import type {
   MinchoVitePluginOptions,
-  ExtractCalls as ViteExtractCalls
+  ExtractCalls as ViteExtractCalls,
+  MinchoCacheOptions as ViteCacheOptions
 } from "@mincho-js/vite";
 import type { Plugin as EsbuildPlugin } from "esbuild";
 import type { Plugin as VitePlugin } from "vite";
@@ -45,6 +48,11 @@ const extractCalls = {
   IntegrationExtractCalls &
   EsbuildExtractCalls &
   ViteExtractCalls;
+
+const cache = {
+  type: "filesystem",
+  maxBytes: 1024 * 1024
+} satisfies IntegrationCacheOptions & EsbuildCacheOptions & ViteCacheOptions;
 
 const babelOptions: PluginOptions = { result: ["", ""], extractCalls };
 
@@ -64,11 +72,13 @@ const provider: InternalStaticCssEvalSourceProvider = {
 
 const babelPlugin = minchoBabelPlugin();
 const esbuildPlugins: EsbuildPlugin[] = minchoEsbuildPlugins({
+  cache,
   extractCalls,
   jsxCssProp: true
 });
 
 const viteOptions: MinchoVitePluginOptions = {
+  cache,
   extractCalls,
   jsxCssProp: true,
   libraryCss: { fileName: "style.css", analysis: "worker" }

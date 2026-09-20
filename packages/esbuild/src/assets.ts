@@ -195,6 +195,7 @@ export class EsbuildAssets {
       plugin,
       cacheBridge: {
         plugin,
+        persistent: true,
         key: JSON.stringify([
           options.loader,
           options.entryPoints,

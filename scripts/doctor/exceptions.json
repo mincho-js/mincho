@@ -1198,5 +1198,15 @@
     "count": 1,
     "reason": "This esbuild rebuild fixture selects the built-in file asset loader for PNG files; it is not a Webpack loader dependency.",
     "expires": "2026-12-31"
+  },
+  {
+    "id": "vite-index-node-modules-cache-directory",
+    "file": "packages/vite/src/index.ts",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": "config.cacheDir ?? join(config.root, \"node_modules/.vite\"),",
+    "count": 1,
+    "reason": "This fallback names Vite's cache storage directory, not a dependency resolution path. Resolved Vite configurations supply cacheDir directly, including strict PnP builds; require.resolve cannot select a writable cache directory.",
+    "expires": "2026-12-31"
   }
 ]
