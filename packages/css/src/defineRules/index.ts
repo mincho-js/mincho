@@ -33,14 +33,19 @@ import {
 
 const DEFINE_RULES_SERIALIZED_CSS_FUNCTION_CONFIG_DIAGNOSTIC =
   "defineRules serialized css does not support function-valued conditions, properties, or shortcuts";
+
 const DEFINE_RULES_SERIALIZED_CSS_CONTEXT_DIAGNOSTIC =
   "defineRules serialized css does not support non-serializable context";
+
 const DEFINE_RULES_RUNTIME_IMPORT_PATH =
   "@mincho-js/css/defineRules/createDefineRulesCssRuntime";
+
 const DEFINE_RULES_RUNTIME_IMPORT_NAME = "createDefineRulesCssRuntime";
 const DEFINE_RULES_CX_RUNTIME_IMPORT_PATH =
   "@mincho-js/css/defineRules/createDefineRulesCxRuntime";
-const DEFINE_RULES_CX_RUNTIME_IMPORT_NAME = "createDefineRulesCxRuntime";
+
+const DEFINE_RULES_CX_RUNTIME_IMPORT_NAME =
+  "createCompiledDefineRulesCxRuntime";
 
 // == Define Rules =============================================================
 function defineRulesImpl<
@@ -57,6 +62,7 @@ function defineRulesImpl<
 ): DefineRulesRuntimeResult<Properties, Shortcuts, Conditions, Context> {
   const functionValuedRegistryBlockerPath =
     getFunctionValuedDefineRulesConfigPath(config);
+
   const result = createDefineRulesRuntime<
     Properties,
     Shortcuts,
@@ -65,8 +71,10 @@ function defineRulesImpl<
   >(config, {
     registerPreset: functionValuedRegistryBlockerPath == null
   });
+
   const getSerializedConfig = (): Serializable =>
     ({ ...config, presets: result.preset }) as Serializable;
+
   const getSerializerDiagnostic = () =>
     getDefineRulesSerializerConfigDiagnostic(
       config,
@@ -90,6 +98,7 @@ function defineRulesImpl<
       Conditions,
       Context
     >["css"],
+
     get preset() {
       return result.preset;
     }
@@ -117,6 +126,7 @@ function createDefineRulesCxSerializerRecipe(
   return {
     importPath: DEFINE_RULES_CX_RUNTIME_IMPORT_PATH,
     importName: DEFINE_RULES_CX_RUNTIME_IMPORT_NAME,
+
     get args(): ReadonlyArray<Serializable> {
       return [getArtifact() as Serializable];
     }
@@ -130,6 +140,7 @@ function createDefineRulesSerializerRecipe(
   return {
     importPath: DEFINE_RULES_RUNTIME_IMPORT_PATH,
     importName: DEFINE_RULES_RUNTIME_IMPORT_NAME,
+
     get args(): ReadonlyArray<Serializable> {
       return getDefineRulesSerializerRecipeArgs(
         getSerializedConfig(),
@@ -236,6 +247,7 @@ function getFunctionValuedEntriesPath(
   if (seenEntries.has(entry)) {
     return undefined;
   }
+
   seenEntries.add(entry);
 
   if (Array.isArray(entry)) {
@@ -247,6 +259,7 @@ function getFunctionValuedEntriesPath(
       );
       if (nestedPath != null) return nestedPath;
     }
+
     return undefined;
   }
 
@@ -290,6 +303,7 @@ function getNonSerializableContextPath(
   }
 
   ancestors.add(entry);
+
   try {
     if (Array.isArray(entry)) {
       for (let index = 0; index < entry.length; index += 1) {
@@ -300,6 +314,7 @@ function getNonSerializableContextPath(
         );
         if (nestedPath != null) return nestedPath;
       }
+
       return undefined;
     }
 
@@ -373,21 +388,28 @@ if (import.meta.vitest) {
   const segmentMarkerPattern = new RegExp(
     `^${SEGMENT_MARKER_PREFIX}[A-Za-z0-9_-]+$`
   );
+
   const splitClassNames = (className: string) =>
     className.split(/\s+/).filter(Boolean);
+
   const getSegmentMarkers = (className: string) =>
     splitClassNames(className).filter((token) =>
       segmentMarkerPattern.test(token)
     );
+
   const getAtomicClassNames = (className: string) =>
     splitClassNames(className).filter(
       (token) => !segmentMarkerPattern.test(token)
     );
+
   const withoutSegmentMarkers = (className: string) =>
     getAtomicClassNames(className).join(" ");
+
   const expectSingleSegmentMarker = (className: string) => {
     const markers = getSegmentMarkers(className);
+
     expect(markers).toHaveLength(1);
+
     const marker = markers[0];
 
     if (marker == null) {
@@ -396,6 +418,7 @@ if (import.meta.vitest) {
 
     return marker;
   };
+
   const expectFirstAtomicClassName = (className: string) => {
     const atomicClassName = getAtomicClassNames(className)[0];
 
@@ -405,6 +428,7 @@ if (import.meta.vitest) {
 
     return atomicClassName;
   };
+
   const getOwnPresetNode = (preset: DefineRulesPresetArtifactV5) => {
     const node = preset.nodes.find(
       (entry) => entry.nodeId === preset.rootNodeId
@@ -416,6 +440,7 @@ if (import.meta.vitest) {
 
     return node;
   };
+
   const hasSerializedRecipe = (
     value: unknown
   ): value is {
@@ -428,7 +453,9 @@ if (import.meta.vitest) {
       return false;
     }
     if (!("__recipe__" in value)) return false;
+
     const recipe = value.__recipe__;
+
     return (
       typeof recipe === "object" &&
       recipe !== null &&
@@ -436,6 +463,7 @@ if (import.meta.vitest) {
       Array.isArray(recipe.args)
     );
   };
+
   const isDefineRulesPresetArtifactV5 = (
     value: unknown
   ): value is DefineRulesPresetArtifactV5 =>
@@ -468,10 +496,12 @@ if (import.meta.vitest) {
   type DefineRulesAuthoringShapeOwner = ReturnType<
     typeof createDefineRulesAuthoringShapeOwner
   >;
+
   type DefineRulesAuthoringShapeBindings = Pick<
     DefineRulesAuthoringShapeOwner,
     "css" | "cx" | "preset"
   >;
+
   type DefineRulesAuthoringShapeInput = Parameters<
     DefineRulesAuthoringShapeOwner["css"]
   >[0];
@@ -496,6 +526,7 @@ if (import.meta.vitest) {
     expect(bindings.cx("external external", "external")).toBe(
       cx("external external", "external")
     );
+
     const className = bindings.css({ display: "flex" });
 
     expect(bindings.cx(className, "external")).toBe(
@@ -508,6 +539,7 @@ if (import.meta.vitest) {
     if (!hasSerializedRecipe(bindings.css)) {
       throw new Error("Expected serialized defineRules css recipe");
     }
+
     const recipeConfig = bindings.css.__recipe__.args[0];
     if (
       typeof recipeConfig !== "object" ||
@@ -517,6 +549,7 @@ if (import.meta.vitest) {
     ) {
       throw new Error("Expected serialized defineRules preset recipe input");
     }
+
     expect(getOwnPresetNode(recipeConfig.presets).atoms).toHaveLength(1);
   }
 
@@ -542,6 +575,7 @@ if (import.meta.vitest) {
             text: "var(--colors-text)"
           }
         } as const;
+
         const arraySource = ["red", "blue"] as const;
         const objectSource = themeVars.colors;
         const wrapperArraySource = [themeVars.colors] as const;
@@ -552,12 +586,14 @@ if (import.meta.vitest) {
             properties: ["color", "backgroundColor"] as const
           }
         ]);
+
         const objectProperties = defineRules.propertyValues([
           {
             source: objectSource,
             properties: ["color"] as const
           }
         ]);
+
         const wrapperArrayProperties = defineRules.propertyValues([
           {
             source: wrapperArraySource,
@@ -599,6 +635,7 @@ if (import.meta.vitest) {
           defineRules.propertyValues([
             {
               source: ["red"] as const,
+
               // @ts-expect-error propertyValues targets CSS property names only.
               properties: ["madeUpProperty"] as const
             }
@@ -615,6 +652,7 @@ if (import.meta.vitest) {
           accent: "rebeccapurple",
           text: "black"
         } as const;
+
         const result = defineRules.propertyValues([
           {
             source,
@@ -643,6 +681,7 @@ if (import.meta.vitest) {
         const sourceObject = {
           accent: "var(--colors-accent)"
         } as const;
+
         const source = [sourceObject] as const;
         const result = defineRules.propertyValues([
           {
@@ -665,6 +704,7 @@ if (import.meta.vitest) {
         const source = {
           accent: "rebeccapurple"
         } as const;
+
         const result = defineRules.propertyValues([
           {
             source,
@@ -679,9 +719,11 @@ if (import.meta.vitest) {
         const firstSource = {
           accent: "rebeccapurple"
         } as const;
+
         const secondSource = {
           accent: "orange"
         } as const;
+
         const result = defineRules.propertyValues([
           {
             source: firstSource,
@@ -732,9 +774,11 @@ if (import.meta.vitest) {
         const getter = vi.fn(() => {
           throw new Error("source getter invoked");
         });
+
         const source = Object.defineProperty({}, "accent", {
           get: getter
         });
+
         const result = defineRules.propertyValues([
           {
             source,
@@ -781,38 +825,46 @@ if (import.meta.vitest) {
         const themeVars = await createPropertyValuesThemeVars(
           "propertyValuesLeafTheme"
         );
+
         const leafColorSource = [
           themeVars.colors.text.default,
           themeVars.colors.text.muted
         ] as const;
+
         const helperProperties = defineRules.propertyValues([
           {
             source: leafColorSource,
             properties: ["color", "backgroundColor"] as const
           }
         ]);
+
         const manualProperties = {
           color: leafColorSource,
           backgroundColor: leafColorSource
         } as const;
+
         const { css: helperCss } = defineRules({
           debugId: "propertyValuesLeafHelper",
           properties: helperProperties
         });
+
         const { css: manualCss } = defineRules({
           debugId: "propertyValuesLeafManual",
           properties: manualProperties
         });
+
         const input = {
           color: themeVars.colors.text.muted,
           backgroundColor: themeVars.colors.text.default
         } as const;
+
         const missingArrayValue = "var(--property-values-runtime-color)";
         const missingArrayValueInput = {
           color: missingArrayValue
         } as never;
 
         assertType<string>(helperCss({ color: themeVars.colors.text.muted }));
+
         expect({ ...helperProperties }).toEqual(manualProperties);
         expect(helperCss.raw(input)).toEqual(manualCss.raw(input));
         expect(helperCss.raw(input)).toEqual(input);
@@ -833,29 +885,36 @@ if (import.meta.vitest) {
         const themeVars = await createPropertyValuesThemeVars(
           "propertyValuesObjectMapTheme"
         );
+
         const colorMapSource = {
           muted: themeVars.colors.text.muted
         } as const;
+
         const helperProperties = defineRules.propertyValues([
           {
             source: colorMapSource,
             properties: ["color"] as const
           }
         ]);
+
         const manualProperties = {
           color: colorMapSource
         } as const;
+
         const { css: helperCss } = defineRules({
           debugId: "propertyValuesObjectMapHelper",
           properties: helperProperties
         });
+
         const { css: manualCss } = defineRules({
           debugId: "propertyValuesObjectMapManual",
           properties: manualProperties
         });
+
         const input = { color: "muted" } as const;
 
         assertType<string>(helperCss(input));
+
         expect({ ...helperProperties }).toEqual(manualProperties);
         expect(helperCss.raw(input)).toEqual(manualCss.raw(input));
         expect(helperCss.raw(input)).toEqual({
@@ -870,36 +929,44 @@ if (import.meta.vitest) {
         const themeVars = await createPropertyValuesThemeVars(
           "propertyValuesSpacingTheme"
         );
+
         const customSpacingVariable =
           "var(--property-values-custom-spacing)" as const;
+
         const spacingSource = [
           ...themeVars.space,
           customSpacingVariable
         ] as const;
+
         const helperProperties = defineRules.propertyValues([
           {
             source: spacingSource,
             properties: ["padding", "margin"] as const
           }
         ]);
+
         const manualProperties = {
           padding: spacingSource,
           margin: spacingSource
         } as const;
+
         const { css: helperCss } = defineRules({
           debugId: "propertyValuesSpacingHelper",
           properties: helperProperties
         });
+
         const { css: manualCss } = defineRules({
           debugId: "propertyValuesSpacingManual",
           properties: manualProperties
         });
+
         const input = {
           padding: customSpacingVariable,
           margin: themeVars.space[1]
         } as const;
 
         assertType<string>(helperCss(input));
+
         expect({ ...helperProperties }).toEqual(manualProperties);
         expect(helperCss.raw(input)).toEqual(manualCss.raw(input));
         expect(helperCss.raw(input)).toEqual(input);
@@ -913,19 +980,24 @@ if (import.meta.vitest) {
         const themeVars = await createPropertyValuesThemeVars(
           "propertyValuesSerializerTheme"
         );
+
         const customSpacingVariable =
           "var(--property-values-serializer-spacing)" as const;
+
         const leafColorSource = [
           themeVars.colors.text.default,
           themeVars.colors.text.muted
         ] as const;
+
         const objectMapSource = {
           muted: themeVars.colors.text.muted
         } as const;
+
         const spacingSource = [
           ...themeVars.space,
           customSpacingVariable
         ] as const;
+
         const helperProperties = defineRules.propertyValues([
           {
             source: leafColorSource,
@@ -940,10 +1012,12 @@ if (import.meta.vitest) {
             properties: ["padding", "margin"] as const
           }
         ]);
+
         const { css } = defineRules({
           debugId: "propertyValuesSerializer",
           properties: helperProperties
         });
+
         let recipeArgs: readonly unknown[] | undefined;
 
         expect(() => {
@@ -953,6 +1027,7 @@ if (import.meta.vitest) {
         const recipeConfig = recipeArgs?.[0] as
           | { properties?: Record<string, unknown> }
           | undefined;
+
         const recipeProperties = recipeConfig?.properties;
 
         expect(recipeProperties).toBe(helperProperties);
@@ -968,12 +1043,15 @@ if (import.meta.vitest) {
       it("1. owner-object form: export const presetOwner = defineRules({...})", () => {
         const presetOwner =
           createDefineRulesAuthoringShapeOwner("ownerObjectShape");
+
         const className = presetOwner.css({ display: "flex" });
 
         assertType<DefineRulesAuthoringShapeOwner>(presetOwner);
+
         expect(presetOwner.cx(className, "external")).toBe(
           `${withoutSegmentMarkers(className)} external`
         );
+
         expectDefineRulesAuthoringShapeBindings(presetOwner);
       });
 
@@ -981,14 +1059,17 @@ if (import.meta.vitest) {
         const { css, cx, preset } = createDefineRulesAuthoringShapeOwner(
           "directDestructuringShape"
         );
+
         const className = css({ display: "flex" });
 
         assertType<DefineRulesAuthoringShapeOwner["css"]>(css);
         assertType<DefineRulesAuthoringShapeOwner["cx"]>(cx);
         assertType<DefineRulesPresetArtifactV5>(preset);
+
         expect(cx(className, "external")).toBe(
           `${withoutSegmentMarkers(className)} external`
         );
+
         expectDefineRulesAuthoringShapeBindings({ css, cx, preset });
       });
 
@@ -998,14 +1079,17 @@ if (import.meta.vitest) {
           cx: compose,
           preset: sharedPreset
         } = createDefineRulesAuthoringShapeOwner("aliasedDestructuringShape");
+
         const className = sharedCss({ display: "flex" });
 
         assertType<DefineRulesAuthoringShapeOwner["css"]>(sharedCss);
         assertType<DefineRulesAuthoringShapeOwner["cx"]>(compose);
         assertType<DefineRulesPresetArtifactV5>(sharedPreset);
+
         expect(compose(className, "external")).toBe(
           `${withoutSegmentMarkers(className)} external`
         );
+
         expectDefineRulesAuthoringShapeBindings({
           css: sharedCss,
           cx: compose,
@@ -1017,6 +1101,7 @@ if (import.meta.vitest) {
         const presetOwner = createDefineRulesAuthoringShapeOwner(
           "ownerMemberExportsShape"
         );
+
         const css = presetOwner.css;
         const compose = presetOwner.cx;
         const preset = presetOwner.preset;
@@ -1024,7 +1109,9 @@ if (import.meta.vitest) {
         assertType<DefineRulesAuthoringShapeOwner["css"]>(css);
         assertType<DefineRulesAuthoringShapeOwner["cx"]>(compose);
         assertType<DefineRulesPresetArtifactV5>(preset);
+
         expect(preset).toBe(presetOwner.preset);
+
         expectDefineRulesAuthoringShapeBindings({ css, cx: compose, preset });
       });
 
@@ -1032,12 +1119,15 @@ if (import.meta.vitest) {
         const presetOwner = createDefineRulesAuthoringShapeOwner(
           "exportedOwnerDestructuringShape"
         );
+
         const { css, cx: compose, preset } = presetOwner;
 
         assertType<DefineRulesAuthoringShapeOwner["css"]>(css);
         assertType<DefineRulesAuthoringShapeOwner["cx"]>(compose);
         assertType<DefineRulesPresetArtifactV5>(preset);
+
         expect(preset).toBe(presetOwner.preset);
+
         expectDefineRulesAuthoringShapeBindings({ css, cx: compose, preset });
       });
 
@@ -1075,14 +1165,18 @@ if (import.meta.vitest) {
               inline: { color: "brand" }
             }
           });
+
           const contextCssCallbackInput = (ctx: { readonly tone: "brand" }) => {
             expectTypeOf(ctx).not.toBeAny();
             expectTypeOf(ctx).toEqualTypeOf<{ readonly tone: "brand" }>();
+
             return { color: ctx.tone };
           };
+
           const contextRawCallbackInput = (ctx: { readonly tone: "brand" }) => {
             expectTypeOf(ctx).not.toBeAny();
             expectTypeOf(ctx).toEqualTypeOf<{ readonly tone: "brand" }>();
+
             return { color: ctx.tone };
           };
 
@@ -1095,6 +1189,7 @@ if (import.meta.vitest) {
             contextRules.css((ctx) => {
               expectTypeOf(ctx).not.toBeAny();
               expectTypeOf(ctx).toEqualTypeOf<{ readonly tone: "brand" }>();
+
               return { color: ctx.tone };
             })
           );
@@ -1102,6 +1197,7 @@ if (import.meta.vitest) {
             contextRules.css.raw((ctx) => {
               expectTypeOf(ctx).not.toBeAny();
               expectTypeOf(ctx).toEqualTypeOf<{ readonly tone: "brand" }>();
+
               return { color: ctx.tone };
             })
           );
@@ -1114,14 +1210,19 @@ if (import.meta.vitest) {
 
           // @ts-expect-error callback return must match configured defineRules input.
           contextRules.css((ctx) => ({ display: ctx.tone }));
+
           // @ts-expect-error raw callback return must match configured defineRules input.
           contextRules.css.raw((ctx) => ({ display: ctx.tone }));
+
           // @ts-expect-error nested callback returns are unsupported.
           contextRules.css(() => () => ({ color: "red" }));
+
           // @ts-expect-error nested raw callback returns are unsupported.
           contextRules.css.raw(() => () => ({ color: "red" }));
+
           // @ts-expect-error array-contained callbacks are unsupported.
           contextRules.css([() => ({ color: "red" })]);
+
           // @ts-expect-error array-contained raw callbacks are unsupported.
           contextRules.css.raw([() => ({ color: "red" })]);
         };
@@ -1132,9 +1233,11 @@ if (import.meta.vitest) {
               color: true
             }
           });
+
           const noContextCssCallbackInput = (ctx: undefined) => {
             expectTypeOf(ctx).not.toBeAny();
             expectTypeOf(ctx).toEqualTypeOf<undefined>();
+
             return { color: ctx };
           };
 
@@ -1144,6 +1247,7 @@ if (import.meta.vitest) {
             noContextRules.css((ctx) => {
               expectTypeOf(ctx).not.toBeAny();
               expectTypeOf(ctx).toEqualTypeOf<undefined>();
+
               return { color: ctx };
             })
           );
@@ -1169,8 +1273,10 @@ if (import.meta.vitest) {
             color: true
           }
         });
+
         const callback = vi.fn((ctx: typeof context) => {
           expect(ctx).toBe(context);
+
           return { color: ctx.color };
         });
 
@@ -1187,8 +1293,10 @@ if (import.meta.vitest) {
             color: true
           }
         });
+
         const callback = vi.fn((ctx: typeof context) => {
           expect(ctx).toBe(context);
+
           return { color: ctx.color };
         });
 
@@ -1218,22 +1326,26 @@ if (import.meta.vitest) {
             pill: "999px"
           }
         });
+
         const conditions = {
           desktop: {
             "@media": "screen and (min-width: 1024px)"
           }
         } as const;
+
         const properties = {
           backgroundColor: true,
           borderRadius: true,
           color: true,
           padding: true
         } as const;
+
         const { css, cx: scopedCx } = defineRules({
           context: themeVars,
           conditions,
           properties
         });
+
         const cardInput = (themeContext: typeof themeVars) => ({
           backgroundColor: themeContext.colors.surface.card,
           borderRadius: themeContext.radii.card,
@@ -1247,6 +1359,7 @@ if (import.meta.vitest) {
             color: themeContext.colors.text.inverse
           }
         });
+
         const expectedRaw = {
           backgroundColor: themeVars.colors.surface.card,
           borderRadius: themeVars.radii.card,
@@ -1260,15 +1373,18 @@ if (import.meta.vitest) {
             }
           }
         };
+
         type DefineRulesRecipe = {
           readonly args?: readonly unknown[];
         };
+
         const getRecipeArgs = (fn: object) =>
           (
             fn as unknown as {
               readonly __recipe__?: DefineRulesRecipe;
             }
           ).__recipe__?.args;
+
         let cssRecipeArgs: readonly unknown[] | undefined;
         let cxRecipeArgs: readonly unknown[] | undefined;
 
@@ -1319,12 +1435,16 @@ if (import.meta.vitest) {
             color: true
           }
         });
+
         const cssCallback = vi.fn((ctx: undefined) => {
           expect(ctx).toBeUndefined();
+
           return { color: "red" };
         });
+
         const rawCallback = vi.fn((ctx: undefined) => {
           expect(ctx).toBeUndefined();
+
           return { color: "blue" };
         });
 
@@ -1381,6 +1501,7 @@ if (import.meta.vitest) {
             color: true
           }
         });
+
         const nestedCallback = () => ({ color: "red" as const });
 
         expect(() => css([nestedCallback] as never)).toThrow(
@@ -1572,6 +1693,7 @@ if (import.meta.vitest) {
             color: true
           }
         });
+
         const desktopPrimary = css({ _desktop: { color: "primary" } });
         const desktopInverse = css({ _desktop: { color: "inverse" } });
 
@@ -1580,6 +1702,7 @@ if (import.meta.vitest) {
         expect(withoutSegmentMarkers(result)).toBe(
           withoutSegmentMarkers(desktopInverse)
         );
+
         expectSingleSegmentMarker(result);
       });
 
@@ -1596,6 +1719,7 @@ if (import.meta.vitest) {
             color: true
           }
         });
+
         const mobileMuted = css({ _mobile: { color: "muted" } });
         const desktopInverse = css({ _desktop: { color: "inverse" } });
 
@@ -1606,6 +1730,7 @@ if (import.meta.vitest) {
             desktopInverse
           )}`
         );
+
         expectSingleSegmentMarker(result);
       });
 
@@ -1616,6 +1741,7 @@ if (import.meta.vitest) {
             color: true
           }
         });
+
         const colorRed = owner.css({ color: "red" });
 
         expect(owner.cx("external external", colorRed, "external")).toBe(
@@ -1640,6 +1766,7 @@ if (import.meta.vitest) {
             background: true
           }
         });
+
         const providerColor = provider.css({ color: "red" });
         const providerBackground = provider.css({ background: "blue" });
         const consumer = defineRules({
@@ -1661,12 +1788,15 @@ if (import.meta.vitest) {
         expect(withoutSegmentMarkers(deduped)).toBe(
           withoutSegmentMarkers(providerColor)
         );
+
         expectSingleSegmentMarker(deduped);
+
         expect(withoutSegmentMarkers(merged)).toBe(
           `${withoutSegmentMarkers(providerBackground)} ${withoutSegmentMarkers(
             providerColor
           )}`
         );
+
         expectSingleSegmentMarker(merged);
       });
 
@@ -1694,6 +1824,7 @@ if (import.meta.vitest) {
         expect(withoutSegmentMarkers(result.active)).toBe(
           withoutSegmentMarkers(displayFlex)
         );
+
         expectSingleSegmentMarker(result.base);
         expectSingleSegmentMarker(result.active);
       });
@@ -1706,6 +1837,7 @@ if (import.meta.vitest) {
           base,
           override
         ]);
+
         const composed = owner.cx.with(callback);
 
         const composedResult = composed(displayNone, displayFlex);
@@ -1717,7 +1849,9 @@ if (import.meta.vitest) {
         expect(withoutSegmentMarkers(composedResult)).toBe(
           withoutSegmentMarkers(displayFlex)
         );
+
         expectSingleSegmentMarker(composedResult);
+
         expect(callback).toHaveBeenNthCalledWith(1, displayNone, displayFlex);
         expect(withoutSegmentMarkers(composedMultiple.inactive)).toBe(
           withoutSegmentMarkers(displayNone)
@@ -1725,8 +1859,10 @@ if (import.meta.vitest) {
         expect(withoutSegmentMarkers(composedMultiple.active)).toBe(
           withoutSegmentMarkers(displayFlex)
         );
+
         expectSingleSegmentMarker(composedMultiple.inactive);
         expectSingleSegmentMarker(composedMultiple.active);
+
         expect(callback).toHaveBeenNthCalledWith(2, displayNone);
         expect(callback).toHaveBeenNthCalledWith(3, displayNone, displayFlex);
       });
@@ -1740,10 +1876,12 @@ if (import.meta.vitest) {
               display: ["none", "flex"]
             }
           });
+
           const className = owner.css({ color: "red", display: "flex" });
           const tokens = splitClassNames(className);
 
           expectSingleSegmentMarker(className);
+
           for (const atomicClassName of Object.values(
             getOwnPresetNode(owner.preset).atoms.map((atom) => atom.className)
           )) {
@@ -1758,6 +1896,7 @@ if (import.meta.vitest) {
               color: true
             }
           });
+
           const className = owner.css({ color: "red" });
           const marker = expectSingleSegmentMarker(className);
 
@@ -1780,6 +1919,7 @@ if (import.meta.vitest) {
           expect(owner.css.raw({ "--mincho-cx-hook": "" })).toEqual({
             vars: { "--mincho-cx-hook": "" }
           });
+
           expectSingleSegmentMarker(owner.css({ "--mincho-cx-hook": "" }));
         });
 
@@ -1797,10 +1937,12 @@ if (import.meta.vitest) {
               display: ["none", "flex"]
             }
           });
+
           const providerClassName = provider.css({
             color: "red",
             display: "flex"
           });
+
           const consumerA = defineRules({
             debugId: "cxMarkerStableConsumerA",
             presets: provider.preset,
@@ -1809,6 +1951,7 @@ if (import.meta.vitest) {
               display: ["none", "flex"]
             }
           });
+
           const consumerB = defineRules({
             debugId: "cxMarkerStableConsumerB",
             presets: [provider.preset],
@@ -1837,6 +1980,7 @@ if (import.meta.vitest) {
           const result = owner.cx(displayNone, displayFlex);
 
           expectSingleSegmentMarker(result);
+
           expect(result).not.toContain(expectFirstAtomicClassName(displayNone));
           expect(result).toContain(expectFirstAtomicClassName(displayFlex));
           expect(result).not.toContain(expectSingleSegmentMarker(displayNone));
@@ -1850,6 +1994,7 @@ if (import.meta.vitest) {
               color: true
             }
           });
+
           const colorRed = owner.css({ color: "red" });
           const backgroundBlue = owner.css({ background: "blue" });
           const colorGreen = owner.css({ color: "green" });
@@ -1860,6 +2005,7 @@ if (import.meta.vitest) {
           );
 
           expect(nested).toBe(flat);
+
           expectSingleSegmentMarker(nested);
         });
 
@@ -1867,6 +2013,7 @@ if (import.meta.vitest) {
           const owner = createDefineRulesAuthoringShapeOwner(
             "cxInterpolatedMarker"
           );
+
           const colorRed = owner.css({ color: "red" });
           const result = owner.cx(`before ${colorRed} external`);
           const tokens = splitClassNames(result);
@@ -1888,6 +2035,7 @@ if (import.meta.vitest) {
           const owner = createDefineRulesAuthoringShapeOwner(
             "cxMarkerUnknownOnly"
           );
+
           const result = owner.cx("external", ["external"], { active: true });
 
           expect(result).toBe(cx("external", ["external"], { active: true }));
@@ -1897,6 +2045,7 @@ if (import.meta.vitest) {
         it("preserves unregistered marker-looking user class tokens safely", () => {
           const owner =
             createDefineRulesAuthoringShapeOwner("cxMarkerCollision");
+
           const markerLikeClassName = "__mincho_seg_user_supplied";
           const displayNone = owner.css({ display: "none" });
           const displayFlex = owner.css({ display: "flex" });
@@ -1905,6 +2054,7 @@ if (import.meta.vitest) {
             displayNone,
             displayFlex
           );
+
           const tokens = splitClassNames(result);
 
           expect(tokens).toContain(markerLikeClassName);
@@ -1916,16 +2066,19 @@ if (import.meta.vitest) {
           const owner = createDefineRulesAuthoringShapeOwner(
             "cxMarkerMultipleWith"
           );
+
           const displayNone = owner.css({ display: "none" });
           const displayFlex = owner.css({ display: "flex" });
           const composed = owner.cx.with((base: string, override?: string) => [
             base,
             override
           ]);
+
           const multiple = owner.cx.multiple({
             base: displayNone,
             active: [displayNone, displayFlex]
           });
+
           const composedResult = composed(displayNone, displayFlex);
           const composedMultiple = composed.multiple({
             base: [displayNone],
@@ -1937,6 +2090,7 @@ if (import.meta.vitest) {
           expectSingleSegmentMarker(composedResult);
           expectSingleSegmentMarker(composedMultiple.base);
           expectSingleSegmentMarker(composedMultiple.active);
+
           expect(multiple.active).toBe(composedResult);
           expect(composedMultiple.active).toBe(composedResult);
         });
@@ -1950,6 +2104,7 @@ if (import.meta.vitest) {
             color: true
           }
         });
+
         const colorRed = owner.css({ color: "red" });
         const colorBlue = owner.css({ color: "blue" });
         const backgroundBlue = owner.css({ background: "blue" });
@@ -1984,6 +2139,7 @@ if (import.meta.vitest) {
         const constrained = owner.cx.with<LayoutClass>();
 
         assertType<(...classNames: LayoutClass[]) => string>(constrained);
+
         expect(constrained("flex", "grid")).toBe("flex grid");
 
         const composed = owner.cx.with((base: string, active?: string) => [
@@ -1992,6 +2148,7 @@ if (import.meta.vitest) {
         ]);
 
         assertType<(base: string, active?: string) => string>(composed);
+
         expect(composed("btn", "primary")).toBe("btn active-primary");
       });
     });
@@ -2079,6 +2236,7 @@ if (import.meta.vitest) {
               }
             }
           };
+
           const contextOwner = defineRules<
             { readonly color: true },
             Record<never, never>,
@@ -2090,6 +2248,7 @@ if (import.meta.vitest) {
               color: true
             }
           });
+
           const functionPropertyOwner = defineRules({
             properties: {
               color(value: string) {
@@ -2097,6 +2256,7 @@ if (import.meta.vitest) {
               }
             }
           });
+
           const functionShortcutOwner = defineRules({
             properties: {
               color: true
@@ -2156,6 +2316,7 @@ if (import.meta.vitest) {
             color: true
           }
         });
+
         const parentColor = parent.css({ color: "red" });
         const parentPreset = parent.preset;
         const child = defineRules({
@@ -2190,7 +2351,9 @@ if (import.meta.vitest) {
             color: true
           }
         });
+
         parent.css({ color: "red" });
+
         const parentSnapshot = parent.preset;
         const firstChild = defineRules({
           debugId: "v5FirstChild",
@@ -2200,6 +2363,7 @@ if (import.meta.vitest) {
             background: true
           }
         });
+
         const secondChild = defineRules({
           debugId: "v5SecondChild",
           presets: parentSnapshot,
@@ -2208,6 +2372,7 @@ if (import.meta.vitest) {
             background: true
           }
         });
+
         const parentJson = JSON.stringify(parentSnapshot);
 
         firstChild.css({ background: "blue" });
@@ -2322,6 +2487,7 @@ if (import.meta.vitest) {
       it("keeps serialized runtime V5 preset handles live for later static css calls", async () => {
         const { createDefineRulesCssRuntime } =
           await import("./createDefineRulesCssRuntime.js");
+
         const preset = createEmptyPresetArtifact();
         const css = createDefineRulesCssRuntime({
           debugId: "serializedRuntimePresetHandle",
@@ -2340,6 +2506,7 @@ if (import.meta.vitest) {
       it("serializes context and reconstructs css runtime callbacks", async () => {
         const { createDefineRulesCssRuntime } =
           await import("./createDefineRulesCssRuntime.js");
+
         const context = {
           color: "red" as const,
           tokens: Object.assign(Object.create(null) as { color: "red" }, {
@@ -2351,6 +2518,7 @@ if (import.meta.vitest) {
           },
           list: ["token", 2, false, null, undefined] as const
         };
+
         const { css, preset } = defineRules({
           context,
           properties: {
@@ -2359,6 +2527,7 @@ if (import.meta.vitest) {
         });
 
         const recipeConfig = getDefineRulesRecipeConfig<typeof context>(css);
+
         expect(recipeConfig).toEqual(expect.any(Object));
         expect(recipeConfig?.context).toBe(context);
         expect(recipeConfig?.presets).toBe(preset);
@@ -2371,6 +2540,7 @@ if (import.meta.vitest) {
         expect(preset).not.toHaveProperty("context");
 
         if (recipeConfig == null) return;
+
         const reconstructedCss = createDefineRulesCssRuntime(recipeConfig);
 
         expect(reconstructedCss).toEqual(expect.any(Function));
@@ -2385,11 +2555,13 @@ if (import.meta.vitest) {
       it("serializes scoped cx as compact global write tables", async () => {
         const { createDefineRulesCxRuntime } =
           await import("./createDefineRulesCxRuntime.js");
+
         const { css, cx: scopedCx } = defineRules({
           properties: {
             color: true
           }
         });
+
         const red = css({ color: "red" });
         const blue = css({ color: "blue" });
 
@@ -2433,6 +2605,7 @@ if (import.meta.vitest) {
             }
           }
         };
+
         const { css, cx: scopedCx } = defineRules({
           context,
           properties: {
@@ -2460,12 +2633,16 @@ if (import.meta.vitest) {
 
         const customPrototype = Object.create(null) as { kind?: string };
         customPrototype.kind = "palette";
+
         const customPrototypeContext = Object.create(customPrototype) as {
           color?: string;
         };
+
         customPrototypeContext.color = "red";
+
         const cyclicContext: Record<string, unknown> = {};
         cyclicContext.self = cyclicContext;
+
         const cases = [
           {
             name: "Date",
@@ -2516,6 +2693,7 @@ if (import.meta.vitest) {
               color: true
             }
           });
+
           const diagnostic = expectedNonSerializableContextDiagnostic(path);
 
           expect(() => getDefineRulesRecipe(css)?.args, path).toThrow(
@@ -2533,10 +2711,12 @@ if (import.meta.vitest) {
         const context = { color: "red" as const };
         Object.defineProperty(context, "resolve", {
           enumerable: false,
+
           value() {
             return "blue";
           }
         });
+
         const { css, cx: scopedCx } = defineRules({
           context,
           properties: {
@@ -2562,6 +2742,7 @@ if (import.meta.vitest) {
 
           return () => recipe?.args;
         };
+
         const createSerializerArgsReader = (config: unknown) => {
           const recipe = createDefineRulesSerializerRecipe(
             () => ({}) as Serializable,
@@ -2777,6 +2958,7 @@ if (import.meta.vitest) {
                 return "gray";
               }
             },
+
             otherColor(arg: "primary" | "secondary") {
               if (arg === "primary") {
                 return { color: "red" } as const;
@@ -2809,6 +2991,7 @@ if (import.meta.vitest) {
             color: true
           }
         });
+
         const undefinedColor: { color?: "red" } = {};
         const nullColor: { color?: "red" } = {};
         Object.assign(undefinedColor, { color: undefined });
@@ -2827,6 +3010,7 @@ if (import.meta.vitest) {
               if (arg === "primary") {
                 return { color: "blue" } as const;
               }
+
               return undefined;
             }
           }
@@ -2854,17 +3038,20 @@ if (import.meta.vitest) {
 
               return "gray";
             },
+
             tone(value: "brand" | "neutral") {
               return {
                 color: value === "brand" ? "blue" : "gray"
               } as const;
             },
+
             display: ["none", "flex"],
             paddingLeft: [0, 4, 8],
             paddingRight: [0, 4, 8]
           },
           shortcuts: {
             px: ["paddingLeft", "paddingRight"],
+
             center(value: "none" | "flex") {
               return {
                 display: value,
@@ -2901,6 +3088,7 @@ if (import.meta.vitest) {
             background: true
           }
         });
+
         const colorRed = css({ color: "red" });
         const backgroundBlue = css({ background: "blue" });
         const combined = css({ color: "red", background: "blue" });
@@ -2934,6 +3122,7 @@ if (import.meta.vitest) {
             zIndex: true
           }
         });
+
         const candidates = [
           { color: "red" },
           { background: "blue" },
@@ -2942,17 +3131,21 @@ if (import.meta.vitest) {
           { opacity: 0.5 },
           { zIndex: 1 }
         ] as const;
+
         const entries = candidates.map((input) => ({
           input,
           className: css(input)
         }));
+
         const [lexicographicFirst, sourceFirst] = [...entries].sort((a, b) =>
           a.className.localeCompare(b.className)
         );
 
         expect(sourceFirst).toBeDefined();
         expect(lexicographicFirst).toBeDefined();
+
         if (sourceFirst == null || lexicographicFirst == null) return;
+
         expect(sourceFirst.className > lexicographicFirst.className).toBe(true);
 
         expect(
@@ -2992,6 +3185,7 @@ if (import.meta.vitest) {
             background: { red: 255, blue: 255 }
           })
         );
+
         const blueFirstClassNames = getAtomicClassNames(
           css({
             background: { blue: 255, red: 255 }
@@ -3020,6 +3214,7 @@ if (import.meta.vitest) {
 
       it("Last one wins for properties while preserving sibling vars", () => {
         const alpha = "--alpha";
+
         const createCss = () =>
           defineRules({
             properties: {
@@ -3046,10 +3241,12 @@ if (import.meta.vitest) {
         const fullRed = getAtomicClassNames(
           cssFullFirst({ background: "red" })
         );
+
         const prunedAfterFull = cssFullFirst([
           { background: "red" },
           { background: "blue" }
         ]);
+
         const prunedAfterFullClassNames = getAtomicClassNames(prunedAfterFull);
 
         expect(fullRed).toHaveLength(2);
@@ -3061,6 +3258,7 @@ if (import.meta.vitest) {
         const prunedBeforeFull = getAtomicClassNames(
           cssPrunedFirst([{ background: "red" }, { background: "blue" }])
         );
+
         const fullAfterPruned = getAtomicClassNames(
           cssPrunedFirst({ background: "red" })
         );
@@ -3254,6 +3452,7 @@ if (import.meta.vitest) {
           },
           shortcuts: {
             px: ["paddingLeft", "paddingRight"],
+
             center(arg: "none" | "inline" | "block") {
               return {
                 display: arg,

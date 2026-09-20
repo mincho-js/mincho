@@ -1,19 +1,62 @@
 import { cx as rootCx, createCx } from "../classname/cx.js";
+import { RuntimeCache } from "../runtime/cache.js";
 import type { ClassValue } from "../classname/types.js";
 import type { Cx } from "../classname/index.js";
 import type { DefineRulesCxRuntimeArtifact } from "./cxRuntimeArtifact.js";
 
-type RuntimeEntry =
-  | {
-      readonly kind: "known";
-      readonly className: string;
-      readonly writeId: number;
-    }
-  | { readonly kind: "unknown"; readonly className: string };
+type CxIndexes = {
+  classWrites: Map<string, number>;
+  segments: Map<string, readonly number[]>;
+  markerByWrites: Map<string, string>;
+};
 
+type CachedResult = string | readonly number[];
+
+/* @__NO_SIDE_EFFECTS__ */
 export const createDefineRulesCxRuntime = (
   artifact: DefineRulesCxRuntimeArtifact
 ): Cx => {
+  // Preserve eager snapshots for the directly callable mutable factory.
+  const indexes = createIndexes(artifact);
+
+  return createCx((...inputs) => mergeClassNames(rootCx(...inputs), indexes));
+};
+
+/** Compiler-only factory: serialized artifacts are private and immutable. */
+/* @__NO_SIDE_EFFECTS__ */
+export const createCompiledDefineRulesCxRuntime = (
+  artifact: DefineRulesCxRuntimeArtifact
+): Cx => {
+  let indexes: CxIndexes | undefined;
+  let cache: RuntimeCache<CachedResult> | undefined;
+
+  return createCx((...inputs: ClassValue[]) => {
+    // clsx may invoke getters or callbacks; normalization must run on cache hits.
+    const input = rootCx(...inputs);
+    indexes ??= createIndexes(artifact);
+    cache ??= new RuntimeCache();
+
+    const cacheable = input.length <= 4096;
+    const key = `r:${input}`;
+
+    if (cacheable) {
+      const cached = cache.get(key);
+      if (typeof cached === "string") return cached;
+    }
+
+    const result = mergeClassNames(
+      input,
+      indexes,
+      cacheable ? cache : undefined
+    );
+
+    if (cacheable) cache.set(key, result, result.length);
+
+    return result;
+  });
+};
+
+function createIndexes(artifact: DefineRulesCxRuntimeArtifact): CxIndexes {
   const classWrites = new Map(artifact.classWrites);
   const segments = new Map(artifact.segments ?? []);
   const markerByWrites = new Map<string, string>();
@@ -27,114 +70,104 @@ export const createDefineRulesCxRuntime = (
     }
   }
 
-  const cxImpl = (...inputs: ClassValue[]) => {
-    const entries = collectEntries(rootCx(...inputs), classWrites, segments);
-    const seenWrites = new Set<number>();
-    const kept: RuntimeEntry[] = [];
+  return { classWrites, segments, markerByWrites };
+}
 
-    for (let index = entries.length - 1; index >= 0; index -= 1) {
-      const entry = entries[index];
-
-      if (entry === undefined) {
-        continue;
-      }
-
-      if (entry.kind === "unknown") {
-        kept.push(entry);
-        continue;
-      }
-
-      if (!seenWrites.has(entry.writeId)) {
-        seenWrites.add(entry.writeId);
-        kept.push(entry);
-      }
-    }
-
-    const merged = kept.reverse();
-    const className = merged.map((entry) => entry.className).join(" ");
-
-    if (merged.some((entry) => entry.kind === "unknown")) {
-      return className;
-    }
-
-    const marker = markerByWrites.get(getKnownWriteIds(merged).join(","));
-    return marker === undefined ? className : `${marker} ${className}`;
-  };
-
-  return createCx(cxImpl) as Cx;
-};
-
-function collectEntries(
-  className: string,
-  classWrites: ReadonlyMap<string, number>,
-  segments: ReadonlyMap<string, readonly number[]>
-): RuntimeEntry[] {
-  const entries: RuntimeEntry[] = [];
-  const tokens = className.trim().split(/\s+/);
+function mergeClassNames(
+  input: string,
+  { classWrites, segments, markerByWrites }: CxIndexes,
+  cache?: RuntimeCache<CachedResult>
+): string {
+  const tokens = input.trim().split(/\s+/);
+  const classNames: string[] = [];
+  const writeIds: (number | undefined)[] = [];
 
   for (let index = 0; index < tokens.length; index += 1) {
     const token = tokens[index];
-
-    if (token === undefined || token.length === 0) {
-      continue;
-    }
+    if (token.length === 0) continue;
 
     const segment = segments.get(token);
 
     if (segment === undefined) {
-      appendClassEntry(entries, token, classWrites);
+      classNames.push(token);
+      writeIds.push(classWrites.get(token));
       continue;
     }
 
-    const payload = tokens.slice(index + 1, index + segment.length + 1);
+    const valid = validateSegment(tokens, index, segment, classWrites, cache);
 
-    if (
-      payload.length !== segment.length ||
-      !payload.every(
-        (value, payloadIndex) =>
-          classWrites.get(value) === segment[payloadIndex]
-      )
-    ) {
-      entries.push({ kind: "unknown", className: token });
+    if (!valid) {
+      classNames.push(token);
+      writeIds.push(undefined);
       continue;
     }
 
-    for (const [payloadIndex, value] of payload.entries()) {
-      const writeId = segment[payloadIndex];
-
-      if (writeId !== undefined) {
-        entries.push({ kind: "known", className: value, writeId });
+    for (let offset = 0; offset < segment.length; offset += 1) {
+      // Match the legacy treatment of sparse segment arrays.
+      if (segment[offset] !== undefined) {
+        classNames.push(tokens[index + offset + 1]);
+        writeIds.push(segment[offset]);
       }
     }
+
     index += segment.length;
   }
 
-  return entries;
-}
+  const seenWrites = new Set<number>();
+  const kept: string[] = [];
+  const keptWrites: number[] = [];
+  let hasUnknown = false;
 
-function appendClassEntry(
-  entries: RuntimeEntry[],
-  className: string,
-  classWrites: ReadonlyMap<string, number>
-): void {
-  const writeId = classWrites.get(className);
+  for (let index = classNames.length - 1; index >= 0; index -= 1) {
+    const writeId = writeIds[index];
 
-  if (writeId === undefined) {
-    entries.push({ kind: "unknown", className });
-    return;
-  }
-
-  entries.push({ kind: "known", className, writeId });
-}
-
-function getKnownWriteIds(entries: readonly RuntimeEntry[]): number[] {
-  const writeIds: number[] = [];
-
-  for (const entry of entries) {
-    if (entry.kind === "known") {
-      writeIds.push(entry.writeId);
+    if (writeId === undefined) {
+      hasUnknown = true;
+      kept.push(classNames[index]);
+    } else if (!seenWrites.has(writeId)) {
+      seenWrites.add(writeId);
+      kept.push(classNames[index]);
+      keptWrites.push(writeId);
     }
   }
 
-  return writeIds;
+  const className = kept.reverse().join(" ");
+  if (hasUnknown) return className;
+
+  const marker = markerByWrites.get(keptWrites.reverse().join(","));
+
+  return marker === undefined ? className : `${marker} ${className}`;
+}
+
+function validateSegment(
+  tokens: readonly string[],
+  start: number,
+  writes: readonly number[],
+  classWrites: ReadonlyMap<string, number>,
+  cache?: RuntimeCache<CachedResult>
+): boolean {
+  if (start + writes.length >= tokens.length) return false;
+
+  let key = "";
+
+  if (cache !== undefined) {
+    key = `s:${tokens[start]}`;
+
+    for (let offset = 0; offset < writes.length; offset += 1) {
+      key += ` ${tokens[start + offset + 1]}`;
+    }
+
+    if (cache.get(key) !== undefined) return true;
+  }
+
+  for (let offset = 0; offset < writes.length; offset += 1) {
+    if (classWrites.get(tokens[start + offset + 1]) !== writes[offset]) {
+      return false;
+    }
+  }
+
+  // Tokens are retained by the key; writes reference the immutable artifact.
+  cache?.set(key, writes, 0);
+
+  return true;
 }

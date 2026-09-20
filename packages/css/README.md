@@ -407,10 +407,13 @@ For an equivalent Atom, later visited nodes select the class used for subsequent
 
 Other classes representing that same Atom remain registered for scoped `cx`, and their originating stylesheets remain necessary. A child does not rename or invalidate a parent's existing classes. Missing parents, conflicting revisions of one origin, inconsistent class/Atom mappings, and altered hashes are rejected; hashes are validated against content, not trusted as labels.
 
-#### Compact dynamic and static cx
+#### Scoped cx and CSS conflicts
 
-- **Dynamic Scoped cx**: Dynamic `cx` runtime outputs are optimized to exclude the full V5 graph. They carry only a compact `classWrites` lookup mapping valid classes to internal write IDs, plus optional marker `segments`. Segments are optimization prefixes: payloads must match their recorded write IDs or are handled as ordinary class tokens; duplicate sequences are safe and the last write wins.
-- **Static cx**: When classes can be statically resolved at build time, `cx` emits static class literals with zero runtime table footprint or hydration overhead.
+`rules.cx(...)` first flattens values using the same clsx-compatible input handling as the root `cx`. Among registered writes with the **same normalized condition tuple and expanded property**, the last input write wins. The tuple contains `layer`, `supports`, `media`, `container` and `selector`. This input-token order is separate from preset parent order: `D.cx(bRed, cRed)` and `D.cx(cRed, bRed)` can select different classes even when D's preset is unchanged.
+
+The root `cx` export joins inputs without preset conflict metadata. Plain string concatenation also performs no conflict resolution and does not provide clsx's conditional/array handling. Unknown and external class tokens are preserved, including repetitions and their relative order. Internal segment markers are opaque implementation metadata; do not edit or depend on their spelling.
+
+Exact-condition matching does not infer overlapping media ranges, selector equivalence, container relationships, or precedence across layers. Property matching does not model shorthand/longhand overlap or `!important` priority. For example, registered `margin` and `marginLeft` writes are distinct, while two `color` writes under the same tuple conflict even if the earlier declaration contains `!important`. Scoped `cx` is an explicit last-write composition API, not a browser cascade simulator. Keep declarations that must be evaluated together by the browser outside this conflict-elimination operation.
 
 #### Local authoring and V5 serialization
 

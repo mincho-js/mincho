@@ -433,28 +433,20 @@ const { css } = defineRules({
 });
 ```
 
-## Class Name Merge (Coming Soon)
+## Scoped Class Name Merge
 
-Intelligent class name merging like tailwind-merge:
+`defineRules().cx` uses registered class metadata. For the same normalized condition tuple and expanded property, the last input write wins:
 
 ```typescript
-// Future API
-const { cx, css, rules } = defineRules({
-  properties: {
-    margin: [0, 4, 8],
-    paddingLeft: [8, 16],
-    paddingRight: [8, 16],
-  },
-  shortcuts: {
-    px: ["paddingLeft", "paddingRight"],
-  },
-});
-
-const className = cx(
-  "margin-8",
-  { "margin-0": true }, // margin-0 wins over margin-8
-);
+const rules = defineRules({ properties: { margin: [0, 8] } });
+const wide = rules.css({ margin: 8 });
+const narrow = rules.css({ margin: 0 });
+const className = rules.cx(wide, narrow, "external");
 ```
+
+This keeps the registered `margin: 0` write and the external class. Reversing `wide` and `narrow` changes the selected write. Unknown class names are preserved; spelling a token `"margin-8"` does not register it.
+
+Conditions match exactly after normalization: layer, supports, media, container and selector. Scoped merging does not infer overlapping queries, shorthand/longhand conflicts or `!important` priority. The root `cx` only joins clsx-compatible inputs, while string concatenation simply joins strings; neither applies preset conflict metadata.
 
 ## Theme Specification (Coming Soon)
 
