@@ -6,7 +6,7 @@ import { gzipSync } from "node:zlib";
 import { build } from "esbuild";
 
 const imports = `
-  import { createRuntimeFn } from "@mincho-js/css/rules/createRuntimeFn";
+  import { createRuntimeFn, createCompiledRuntimeFn } from "@mincho-js/css/rules/createRuntimeFn";
   import { createDefineRulesCxRuntime } from "@mincho-js/css/defineRules/createDefineRulesCxRuntime";
 `;
 
@@ -45,6 +45,8 @@ for (const format of ["esm", "cjs"]) {
   const unused = await bundle(`${imports}
     const recipe = /*#__PURE__*/ createRuntimeFn(${recipe});
     const cx = /*#__PURE__*/ createDefineRulesCxRuntime({ classWrites: [] });
+    const compiledRecipe = /*#__PURE__*/ createCompiledRuntimeFn(${recipe}, {});
+    const compiledCx = /*#__PURE__*/ createDefineRulesCxRuntime({ classWrites: [] });
     export const alive = "retained";
   `);
 
@@ -69,9 +71,97 @@ for (const format of ["esm", "cjs"]) {
 
   assert.equal(dynamic({ size: "large" }), "base large extra");
 
-  console.log(
-    `[runtime-boundaries] ${format}: unused=${size(unused)}, direct=${size(used)}`
+  const compiled = await bundle(`${imports}
+    const recipe = /*#__PURE__*/ createCompiledRuntimeFn(${recipe}, {});
+    const cx = /*#__PURE__*/ createDefineRulesCxRuntime({ classWrites: [] });
+    export const dynamic = input => cx(recipe(input), "extra");
+  `);
+
+  assert.doesNotMatch(
+    compiled,
+    /vanilla-extract|setFileScope|registerDefineRulesRegistryInstance|appendCss|document/
   );
+
+  const compiledExports = await executeBundle(compiled, format);
+
+  assert.equal(compiledExports.dynamic({ size: "large" }), "base large extra");
+
+  console.log(
+    `[runtime-boundaries] ${format}: unused=${size(unused)}, direct=${size(used)}, compiled=${size(compiled)}`
+  );
+
+  for (const helper of ["mapVarProps", "createClassRuntimeFn"]) {
+    const name =
+      helper === "mapVarProps" ? helper : "createCompiledClassRuntimeFn";
+
+    const source =
+      format === "esm"
+        ? `import {${name}} from "@mincho-js/css/rules/${helper}"; export {${name} as run};`
+        : `exports.run = require("@mincho-js/css/rules/${helper}").${name};`;
+
+    const result = await build({
+      stdin: { contents: source, resolveDir: process.cwd() },
+      bundle: true,
+      write: false,
+      format,
+      minify: true,
+      metafile: true,
+      logLevel: "silent"
+    });
+
+    const output = result.outputFiles[0].text;
+    const inputs = Object.keys(result.metafile.inputs);
+
+    assert.ok(
+      !inputs.some((id) =>
+        /vanilla-extract|react\/|registry|transform-to-vanilla/.test(id)
+      ),
+      inputs.join("\n")
+    );
+
+    if (helper === "mapVarProps") {
+      assert.ok(
+        !inputs.some((id) => /recipes|createRuntimeFn|runtime\/cache/.test(id)),
+        inputs.join("\n")
+      );
+
+      const { run } = await executeBundle(output, format);
+      const events = [];
+      const input = {
+        get unknown() {
+          events.push("unknown");
+
+          return 4;
+        },
+
+        get width() {
+          events.push("width");
+
+          return null;
+        }
+      };
+
+      assert.deepEqual(run({ width: "--width" }, input), { "--width": null });
+      assert.deepEqual(events, ["unknown", "width"]);
+      assert.notEqual(run({}, {}), run({}, {}));
+    } else {
+      assert.ok(
+        !inputs.some((id) => /mapVarProps|createRuntimeFn\./.test(id)),
+        inputs.join("\n")
+      );
+
+      const { run } = await executeBundle(output, format);
+      const recipe = run({
+        defaultClassName: "base",
+        variantClassNames: { size: { large: "large" } },
+        defaultVariants: {},
+        compoundVariants: []
+      });
+
+      assert.equal(recipe({ size: "large" }), "base large");
+      assert.equal("props" in recipe, false);
+    }
+  }
 
   const classnameSource =
     format === "esm"
@@ -117,7 +207,6 @@ for (const format of ["esm", "cjs"]) {
 }
 
 const require = createRequire(import.meta.url);
-
 for (const entry of [
   "@mincho-js/css/classname",
   "@mincho-js/css/rules/createRuntimeFn",
