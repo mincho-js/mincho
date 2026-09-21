@@ -1,19 +1,11 @@
 import { internalResolveFromModule as resolveFromModule } from "@mincho-js/babel";
-import { createHash, randomUUID } from "node:crypto";
-import {
-  mkdir,
-  readFile,
-  readdir,
-  rename,
-  rm,
-  stat,
-  utimes,
-  writeFile
-} from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, readFile, readdir, rm, stat, utimes } from "node:fs/promises";
 import { dirname, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { deserialize, serialize } from "node:v8";
 import { recordCompilationDiagnostic } from "./diagnostics.js";
+import { CoalescedAtomicWriter } from "./coalescedWriter.js";
 
 export interface PersistentManifest {
   readonly fingerprints: readonly (readonly [string, string | null])[];
@@ -97,7 +89,8 @@ export function getCompilerIdentity(): Promise<string> {
 }
 
 export class CompilationDiskCache {
-  private writes: Promise<void> = Promise.resolve();
+  private readonly writes = new Set<Promise<void>>();
+  private readonly writer: CoalescedAtomicWriter;
   private disabled = false;
   private ready?: Promise<void>;
 
@@ -107,6 +100,8 @@ export class CompilationDiskCache {
     private readonly maxBytes = 256 * 1024 * 1024,
     readonly minimumCost = 0
   ) {
+    this.writer = new CoalescedAtomicWriter();
+
     if (!Number.isSafeInteger(maxBytes) || maxBytes < 1)
       throw new TypeError("cache.maxBytes must be a positive integer");
 
@@ -176,33 +171,48 @@ export class CompilationDiskCache {
     }
   }
 
-  put(key: string, entry: PersistentEntry): Promise<void> {
+  put(
+    key: string,
+    entry: PersistentEntry,
+    isCurrent: () => boolean = () => true
+  ): Promise<void> {
     if (this.disabled) return Promise.resolve();
 
-    const operation = this.writes.then(async () => {
-      let temporary: string | undefined;
-
+    const operation = (async () => {
       try {
         const namespace = await this.namespace;
-        const payload = serialize({ format, namespace, key, entry });
-        if (payload.length + 65 > this.maxBytes) return;
 
-        const bytes = Buffer.concat([
-          Buffer.from(digest(payload) + "\n"),
-          payload
-        ]);
+        if (!isCurrent()) {
+          recordCompilationDiagnostic("disk-cache-write-stale", { key });
 
-        await mkdir(this.directory, { recursive: true });
+          return;
+        }
 
-        const file = await this.path(key);
-        temporary = `${file}.${process.pid}.${randomUUID()}.tmp`;
-        await writeFile(temporary, bytes, { flag: "wx" });
-        await rename(temporary, file);
-        temporary = undefined;
-        recordCompilationDiagnostic("disk-cache-write", {
-          key,
-          bytes: bytes.length
-        });
+        if (this.disabled) return;
+
+        await this.writer.write(
+          await this.path(key),
+          () => {
+            const payload = serialize({ format, namespace, key, entry });
+            if (payload.length + 65 > this.maxBytes) return;
+
+            return Buffer.concat([
+              Buffer.from(digest(payload) + "\n"),
+              payload
+            ]);
+          },
+          {
+            isCurrent: () => !this.disabled && isCurrent(),
+
+            observe: ({ kind, bytes }) =>
+              recordCompilationDiagnostic(
+                kind === "written"
+                  ? "disk-cache-write"
+                  : `disk-cache-write-${kind}`,
+                { key, bytes }
+              )
+          }
+        );
       } catch (error) {
         // A read-only filesystem or incompatible payload never breaks compilation.
         recordCompilationDiagnostic("disk-cache-bypass", {
@@ -215,19 +225,19 @@ export class CompilationDiskCache {
           )
         )
           this.disabled = true;
-      } finally {
-        if (temporary)
-          await rm(temporary, { force: true }).catch(() => undefined);
       }
-    });
+    })();
 
-    this.writes = operation;
+    this.writes.add(operation);
+    void operation.finally(() => this.writes.delete(operation));
 
     return operation;
   }
 
   async flush(): Promise<void> {
-    await this.writes;
+    while (this.writes.size) await Promise.all([...this.writes]);
+
+    await this.writer.flush();
 
     if (this.disabled) return;
 

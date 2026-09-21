@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import { mkdir, rename, writeFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { resolve } from "node:path";
+import { CoalescedAtomicWriter } from "./coalescedWriter.js";
 
 export interface MinchoDiagnosticsOptions {
   console?: boolean;
@@ -25,8 +25,7 @@ interface CompilationReport {
 
 interface DiagnosticOutput {
   reports: Map<string, CompilationReport>;
-  writes: Promise<void>;
-  sequence: number;
+  writer: CoalescedAtomicWriter;
 }
 
 const active = new AsyncLocalStorage<{
@@ -46,8 +45,7 @@ export class CompilationDiagnostics {
     private readonly environment = "default",
     private readonly output: DiagnosticOutput = {
       reports: new Map(),
-      writes: Promise.resolve(),
-      sequence: 0
+      writer: new CoalescedAtomicWriter()
     }
   ) {
     this.enabled = Boolean(options.console || options.json || options.trace);
@@ -108,6 +106,13 @@ export class CompilationDiagnostics {
     const write = async () => {
       const report = this.snapshot();
 
+      const isCurrent = () =>
+        report.builds.every(
+          (build) =>
+            this.output.reports.get(build.environment)?.generation ===
+            build.generation
+        );
+
       if (this.options.console) {
         const phases = new Map<
           string,
@@ -132,51 +137,62 @@ export class CompilationDiagnostics {
       const writes: Array<Promise<void>> = [];
 
       if (this.options.json)
-        writes.push(this.write(root, this.options.json, report));
+        writes.push(this.write(root, this.options.json, report, isCurrent));
       if (this.options.trace)
         writes.push(
-          this.write(root, this.options.trace, {
-            traceEvents: report.builds.flatMap((build, thread) =>
-              build.events.map((event) => ({
-                name: event.phase,
-                cat: "mincho",
-                ph: "X",
-                pid: process.pid,
-                tid: thread,
-                ts: event.start * 1000,
-                dur: event.duration * 1000,
-                args: {
-                  file: event.file,
-                  environment: build.environment,
-                  generation: build.generation,
-                  status: event.status,
-                  detail: event.detail
-                }
-              }))
-            )
-          })
+          this.write(
+            root,
+            this.options.trace,
+            {
+              traceEvents: report.builds.flatMap((build, thread) =>
+                build.events.map((event) => ({
+                  name: event.phase,
+                  cat: "mincho",
+                  ph: "X",
+                  pid: process.pid,
+                  tid: thread,
+                  ts: event.start * 1000,
+                  dur: event.duration * 1000,
+                  args: {
+                    file: event.file,
+                    environment: build.environment,
+                    generation: build.generation,
+                    status: event.status,
+                    detail: event.detail
+                  }
+                }))
+              )
+            },
+            isCurrent
+          )
         );
 
       await Promise.all(writes);
+      await this.output.writer.flush();
     };
 
-    const pending = this.output.writes.then(write);
-    this.output.writes = pending.catch(() => undefined);
-
-    return pending;
+    return write();
   }
 
   private async write(
     root: string,
     file: string,
-    value: unknown
+    value: unknown,
+    isCurrent: () => boolean
   ): Promise<void> {
-    const path = resolve(root, file);
-    await mkdir(dirname(path), { recursive: true });
+    await this.output.writer.write(
+      resolve(root, file),
+      () => `${JSON.stringify(value, null, 2)}\n`,
+      {
+        isCurrent,
 
-    const temporary = `${path}.${process.pid}.${++this.output.sequence}.tmp`;
-    await writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`);
-    await rename(temporary, path);
+        observe: (event) =>
+          recordCompilationDiagnostic(`diagnostic-write-${event.kind}`, {
+            path: event.path,
+            bytes: event.bytes
+          })
+      }
+    );
   }
 }
 

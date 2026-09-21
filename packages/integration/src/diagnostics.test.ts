@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -9,6 +9,50 @@ import {
 } from "./diagnostics.js";
 
 describe("compilation diagnostics", () => {
+  it("publishes the latest generation to each output and preserves identical files", async () => {
+    const root = await mkdtemp(join(tmpdir(), "mincho-diagnostics-writes-"));
+
+    try {
+      const diagnostics = new CompilationDiagnostics({
+        json: "report.json",
+        trace: "trace.json"
+      });
+
+      diagnostics.begin();
+      diagnostics.record("old.ts", "old");
+
+      const old = diagnostics.flush(root);
+      diagnostics.begin();
+      diagnostics.record("new.ts", "new");
+      await Promise.all([old, diagnostics.flush(root)]);
+
+      const json = join(root, "report.json");
+      const trace = join(root, "trace.json");
+      const report = JSON.parse(await readFile(json, "utf8"));
+
+      expect(report.builds[0].generation).toBe(2);
+      expect(
+        report.builds[0].events.map((event: { phase: string }) => event.phase)
+      ).toEqual(["new"]);
+      expect(
+        JSON.parse(await readFile(trace, "utf8")).traceEvents[0].name
+      ).toBe("new");
+
+      const jsonBefore = await stat(json);
+      const traceBefore = await stat(trace);
+      await diagnostics.flush(root);
+
+      expect((await stat(json)).ino).toBe(jsonBefore.ino);
+      expect((await stat(trace)).ino).toBe(traceBefore.ino);
+      expect((await readdir(root)).sort()).toEqual([
+        "report.json",
+        "trace.json"
+      ]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("does not collect disabled instrumentation and preserves results", async () => {
     const diagnostics = new CompilationDiagnostics();
     const now = vi.spyOn(performance, "now");

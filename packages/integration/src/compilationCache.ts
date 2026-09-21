@@ -221,6 +221,7 @@ export class CompilationCache {
   private async publishInputs(inputs: CompilationInputs): Promise<void> {
     if (!this.disk || !inputs.active) return;
 
+    const generation = this.generation;
     let published = false;
 
     for (const [key, entry] of this.inputWrites.get(inputs) ?? []) {
@@ -231,13 +232,20 @@ export class CompilationCache {
       )
         continue;
 
-      await this.disk.put(key, {
-        value: entry.value,
-        owner: entry.owner,
-        dependencies: entry.dependencies,
-        bytes: entry.bytes,
-        manifest: entry.manifest
-      });
+      await this.disk.put(
+        key,
+        {
+          value: entry.value,
+          owner: entry.owner,
+          dependencies: entry.dependencies,
+          bytes: entry.bytes,
+          manifest: entry.manifest
+        },
+        () =>
+          inputs.active &&
+          generation === this.generation &&
+          this.entries.get(key) === entry
+      );
       published = true;
     }
 

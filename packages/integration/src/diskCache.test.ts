@@ -5,6 +5,7 @@ import { createHash } from "node:crypto";
 import { deserialize, serialize } from "node:v8";
 import { afterEach, expect, it } from "vitest";
 import { CompilationDiskCache, type PersistentEntry } from "./diskCache.js";
+import { CompilationDiagnostics } from "./diagnostics.js";
 
 const directories: string[] = [];
 
@@ -142,4 +143,58 @@ it("ignores an interrupted writer's temporary file and can publish again", async
   await cache.flush();
 
   expect((await cache.get("key"))?.value).toBe("recovered");
+});
+
+it("coalesces repeated keys, keeps distinct entries and skips identical bytes", async () => {
+  const path = await directory();
+  const cache = new CompilationDiskCache(path, "compiler");
+  const diagnostics = new CompilationDiagnostics({ console: true });
+  await diagnostics.run("source.ts", "publish", async () => {
+    await Promise.all([
+      cache.put("same", entry("old")),
+      cache.put("same", entry("latest")),
+      cache.put("different", entry("other"))
+    ]);
+    await cache.put("same", entry("latest"));
+    await cache.flush();
+  });
+
+  expect(await cache.get("same")).toEqual(entry("latest"));
+  expect(await cache.get("different")).toEqual(entry("other"));
+  expect(await readdir(path)).toHaveLength(2);
+
+  const events = diagnostics.snapshot().builds.flatMap((build) => build.events);
+
+  expect(
+    events.filter((event) => event.phase === "disk-cache-write")
+  ).toHaveLength(2);
+  expect(
+    events.some((event) => event.phase === "disk-cache-write-coalesced")
+  ).toBe(true);
+  expect(
+    events.some((event) => event.phase === "disk-cache-write-unchanged")
+  ).toBe(true);
+});
+
+it("does not persist a generation invalidated while the namespace is loading", async () => {
+  const path = await directory();
+  let release!: (value: string) => void;
+  const namespace = new Promise<string>((resolve) => {
+    release = resolve;
+  });
+
+  const cache = new CompilationDiskCache(path, namespace);
+  let valid = true;
+  const pending = cache.put("key", entry("stale"), () => valid);
+  valid = false;
+  release("compiler");
+  await pending;
+  await cache.flush();
+
+  expect(await readdir(path)).toEqual([]);
+
+  valid = true;
+  await cache.put("key", entry("current"), () => valid);
+
+  expect(await cache.get("key")).toEqual(entry("current"));
 });
