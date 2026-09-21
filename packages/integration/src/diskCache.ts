@@ -42,6 +42,8 @@ export function getCompilerIdentity(): Promise<string> {
         "@mincho-js/css",
         "@mincho-js/css/classname",
         "@mincho-js/css/rules/createRuntimeFn",
+        "@mincho-js/css/rules/createClassRuntimeFn",
+        "@mincho-js/css/rules/mapVarProps",
         "@mincho-js/css/defineRules/createDefineRulesCxRuntime",
         "@babel/core",
         "esbuild",

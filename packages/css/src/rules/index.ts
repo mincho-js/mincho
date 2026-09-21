@@ -226,25 +226,24 @@ export function rulesImpl<
     });
   }
 
-  const config: PatternResult<CombinedVariants, PureProps> = {
+  const config: Omit<PatternResult<CombinedVariants, PureProps>, "propVars"> = {
     defaultClassName,
     variantClassNames,
     defaultVariants: transformVariantSelection(defaultVariants),
-    compoundVariants: compounds,
-    propVars
+    compoundVariants: compounds
   };
 
   return addFunctionSerializer<
     RuntimeFn<ConditionalVariants<Variants, ToggleVariants>, PureProps>
   >(
-    createRuntimeFn(config) as RuntimeFn<
+    createRuntimeFn({ ...config, propVars }) as RuntimeFn<
       ConditionalVariants<Variants, ToggleVariants>,
       PureProps
     >,
     {
       importPath: "@mincho-js/css/rules/createRuntimeFn",
       importName: "createCompiledRuntimeFn",
-      args: [config as Serializable]
+      args: [config as Serializable, propVars]
     }
   );
 }

@@ -1,7 +1,27 @@
 import { describe, expect, it, vi } from "vitest";
-import { createCompiledRuntimeFn, createRuntimeFn } from "./createRuntimeFn.js";
+import {
+  createCompiledRuntimeFn as compiledFactory,
+  createRuntimeFn,
+  type CompiledRuntimeFeatures
+} from "./createRuntimeFn.js";
 import { RuntimeCache } from "../runtime/cache.js";
-import type { PatternResult } from "./types.js";
+import type {
+  PatternResult,
+  VariantGroups,
+  ComplexPropDefinitions,
+  PropTarget
+} from "./types.js";
+
+function createCompiledRuntimeFn<
+  V extends VariantGroups,
+  P extends ComplexPropDefinitions<PropTarget | undefined>
+>(config: PatternResult<V, P>, features?: CompiledRuntimeFeatures) {
+  return compiledFactory(
+    config,
+    features?.props === false ? undefined : config.propVars,
+    features
+  );
+}
 
 type TestVariants = {
   tone: Record<"brand" | "neutral", string>;
@@ -32,6 +52,72 @@ const makeComplexConfig = (): PatternResult<TestVariants, TestProps> => ({
     { tone: index % 2 === 0 ? "brand" : "neutral", active: index % 2 === 0 },
     `compound-${index}`
   ])
+});
+
+it.each([undefined, { props: true }])(
+  "maps inputs with no property variables to fresh empty results (features: %j)",
+  (features) => {
+    const recipe = compiledFactory<TestVariants, TestProps>(
+      makeConfig(),
+      undefined,
+      features
+    );
+    const reads: string[] = [];
+    const input = {
+      get gap() {
+        reads.push("gap");
+
+        return 4;
+      },
+      get unknown() {
+        reads.push("unknown");
+
+        return 8;
+      }
+    };
+    const first = recipe.props(input);
+    const second = recipe.props(input);
+
+    expect(first).toEqual({});
+    expect(second).toEqual({});
+    expect(second).not.toBe(first);
+    expect(reads).toEqual(["gap", "unknown", "gap", "unknown"]);
+  }
+);
+
+it("reads a mutable direct mapping accessor after all input getters, once per key", () => {
+  const events: string[] = [];
+  let variables: { gap: "--gap" | "--changed" } = { gap: "--gap" };
+  const config = {
+    ...makeConfig(),
+
+    get propVars() {
+      events.push("table");
+
+      return variables;
+    }
+  };
+
+  const runtime = createRuntimeFn(config);
+  events.length = 0;
+
+  const result = runtime.props({
+    get gap() {
+      events.push("gap");
+      variables = { gap: "--changed" };
+
+      return 4;
+    },
+
+    get unknown() {
+      events.push("unknown");
+
+      return 8;
+    }
+  } as { gap: number });
+
+  expect(result).toEqual({ "--changed": 4 });
+  expect(events).toEqual(["gap", "unknown", "table", "table"]);
 });
 
 describe.each([
