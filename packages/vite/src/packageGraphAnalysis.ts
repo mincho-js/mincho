@@ -16,10 +16,11 @@ export type {
   PackageGraphAnalysisResult
 } from "./packageGraphAnalysisCore.js";
 
-export type PackageGraphAnalysisMode = "worker" | "inline";
+export type PackageGraphAnalysisMode = "auto" | "worker" | "inline";
 
 export interface PackageGraphAnalysisOptions {
   readonly mode?: PackageGraphAnalysisMode;
+  readonly onAnalysis?: (mode: "worker" | "inline", bytes: number) => void;
 }
 
 export interface PackageGraphAnalysis {
@@ -92,12 +93,15 @@ function workerFileName(): string {
 export function createPackageGraphAnalysis(
   options: PackageGraphAnalysisOptions = {}
 ): PackageGraphAnalysis {
-  const mode = options.mode ?? "worker";
-  if (mode !== "worker" && mode !== "inline") {
-    throw new TypeError("Package graph analysis mode must be worker or inline");
+  const mode = options.mode ?? "auto";
+  if (mode !== "auto" && mode !== "worker" && mode !== "inline") {
+    throw new TypeError(
+      "Package graph analysis mode must be auto, worker or inline"
+    );
   }
 
   const graphs = new Map<string, DefineRulesPackageGraph>();
+  const sizes = new Map<string, number>();
   const pending = new Map<number, PendingAnalysis>();
   let generation = 0;
   let requestId = 0;
@@ -162,6 +166,15 @@ export function createPackageGraphAnalysis(
       type: "reset",
       generation
     } satisfies PackageGraphWorkerCommand);
+
+    for (const [moduleId, graph] of graphs)
+      instance.postMessage({
+        type: "register",
+        generation,
+        moduleId,
+        graph
+      } satisfies PackageGraphWorkerCommand);
+
     instance.unref();
 
     return instance;
@@ -186,6 +199,7 @@ export function createPackageGraphAnalysis(
 
       generation++;
       graphs.clear();
+      sizes.clear();
       rejectPending(staleGenerationError());
       workerFailure = undefined;
 
@@ -197,8 +211,17 @@ export function createPackageGraphAnalysis(
     register(record) {
       if (closed || record.generation !== generation) return false;
 
+      sizes.set(
+        record.moduleId,
+        Buffer.byteLength(JSON.stringify(record.graph))
+      );
+
       if (mode === "worker") send({ type: "register", ...record });
-      else graphs.set(record.moduleId, structuredClone(record.graph));
+      else {
+        graphs.set(record.moduleId, structuredClone(record.graph));
+
+        if (worker) send({ type: "register", ...record });
+      }
 
       return true;
     },
@@ -206,11 +229,14 @@ export function createPackageGraphAnalysis(
     remove(record) {
       if (closed || record.generation !== generation) return false;
 
-      if (mode === "worker") {
-        if (worker !== undefined || workerFailure !== undefined) {
-          send({ type: "remove", ...record });
-        }
-      } else graphs.delete(record.moduleId);
+      sizes.delete(record.moduleId);
+      graphs.delete(record.moduleId);
+
+      if (
+        worker !== undefined ||
+        (mode === "worker" && workerFailure !== undefined)
+      )
+        send({ type: "remove", ...record });
 
       return true;
     },
@@ -221,16 +247,25 @@ export function createPackageGraphAnalysis(
         return Promise.reject(staleGenerationError());
       }
 
+      const bytes = [...new Set(request.moduleIds)].reduce(
+        (sum, id) => sum + (sizes.get(id) ?? 0),
+        0
+      );
+
+      const useWorker =
+        mode === "worker"
+          ? worker !== undefined || workerFailure !== undefined
+          : mode === "auto" && bytes > 512 * 1024;
+
+      options.onAnalysis?.(useWorker ? "worker" : "inline", bytes);
+
       const id = ++requestId;
 
       return new Promise((resolve, reject) => {
         pending.set(id, { generation, resolve, reject });
 
         // With no registered graphs there is no worker queue to wait for.
-        if (
-          mode === "worker" &&
-          (worker !== undefined || workerFailure !== undefined)
-        ) {
+        if (useWorker) {
           try {
             const instance = ensureWorker();
             instance.ref();
@@ -279,6 +314,7 @@ export function createPackageGraphAnalysis(
 
       closed = true;
       graphs.clear();
+      sizes.clear();
       rejectPending(closedError());
 
       const instance = worker;

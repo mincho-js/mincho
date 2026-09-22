@@ -82,7 +82,7 @@ function chain(packages: readonly string[]): DefineRulesPackageGraph {
   };
 }
 
-describe.each(["inline", "worker"] as const)(
+describe.each(["auto", "inline", "worker"] as const)(
   "%s package graph analysis",
   (mode) => {
     it("uses output declaration order rather than registration arrival order", async () => {
@@ -422,5 +422,50 @@ describe.each([
     } finally {
       await worker.terminate();
     }
+  });
+});
+
+describe("automatic analysis", () => {
+  it("uses selected graph bytes, keeps the boundary inline and lazily reuses workers", async () => {
+    const analysis = create("auto");
+    const generation = analysis.beginGeneration();
+    const large = chain(["large", "app"]);
+    const witness = large.dependencies[0]!.witnesses[0]! as { owner: string };
+    witness.owner += "x".repeat(
+      512 * 1024 - Buffer.byteLength(JSON.stringify(large))
+    );
+    analysis.register({ generation, moduleId: "boundary", graph: large });
+    await analysis.analyze({ generation, moduleIds: ["boundary", "boundary"] });
+
+    expect(tracked.workers).toHaveLength(0);
+
+    witness.owner += "x";
+    analysis.register({ generation, moduleId: "large", graph: large });
+    analysis.register({
+      generation,
+      moduleId: "small",
+      graph: chain(["small", "app"])
+    });
+
+    expect(
+      (await analysis.analyze({ generation, moduleIds: ["small"] }))
+        .styleSpecifiers
+    ).toEqual(["small/style.css"]);
+    expect(tracked.workers).toHaveLength(0);
+    expect(
+      (await analysis.analyze({ generation, moduleIds: ["large"] }))
+        .styleSpecifiers
+    ).toEqual(["large/style.css"]);
+
+    await analysis.analyze({ generation, moduleIds: ["large"] });
+
+    expect(tracked.workers).toHaveLength(1);
+
+    analysis.remove({ generation, moduleId: "large" });
+
+    expect(
+      (await analysis.analyze({ generation, moduleIds: ["large", "small"] }))
+        .styleSpecifiers
+    ).toEqual(["small/style.css"]);
   });
 });

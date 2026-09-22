@@ -89,8 +89,8 @@ export interface MinchoVitePluginOptions {
     /** Exact output-relative CSS filename when build.cssCodeSplit is false. */
     fileName?: string;
 
-    /** Analyze package graphs in a reusable worker, or in the main thread. */
-    analysis?: "worker" | "inline";
+    /** Use inline analysis up to 512 KiB, or choose an explicit execution mode. */
+    analysis?: "auto" | "worker" | "inline";
   };
 }
 
@@ -251,7 +251,10 @@ function createMinchoViteEnvironmentPlugin(
   >();
 
   let graphAnalysis = createPackageGraphAnalysis({
-    mode: _options?.libraryCss?.analysis ?? "worker"
+    mode: _options?.libraryCss?.analysis ?? "auto",
+
+    onAnalysis: (mode, bytes) =>
+      diagnostics.record("", "graph-analysis-mode", { mode, bytes })
   });
 
   let graphGeneration = graphAnalysis.beginGeneration();
@@ -634,7 +637,10 @@ function createMinchoViteEnvironmentPlugin(
 
         if (graphAnalysisClosed) {
           graphAnalysis = createPackageGraphAnalysis({
-            mode: _options?.libraryCss?.analysis ?? "worker"
+            mode: _options?.libraryCss?.analysis ?? "auto",
+
+            onAnalysis: (mode, bytes) =>
+              diagnostics.record("", "graph-analysis-mode", { mode, bytes })
           });
           graphAnalysisClosed = false;
         }

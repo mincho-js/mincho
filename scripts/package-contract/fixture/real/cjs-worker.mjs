@@ -31,7 +31,10 @@ try {
     root: import.meta.dirname,
     configFile: false,
     logLevel: "silent",
-    plugins: [minchoVitePlugin(), vanillaExtractPlugin()],
+    plugins: [
+      minchoVitePlugin({ libraryCss: { analysis: "worker" } }),
+      vanillaExtractPlugin()
+    ],
     build: {
       manifest: true,
       outDir: "dist-vite-cjs-plugin",
@@ -60,7 +63,7 @@ try {
         JSON.stringify(result.styleSpecifiers) ===
         JSON.stringify(expectedStyles)
     ),
-    "The default worker must analyze the actual consumer's preset ancestors"
+    "The explicit worker must analyze the actual consumer's preset ancestors"
   );
 
   const outputs = (Array.isArray(built) ? built : [built]).flatMap(
@@ -98,7 +101,7 @@ try {
   );
 
   console.log(
-    "[package-contract] CommonJS Vite default worker: actual preset graph and CSS passed"
+    "[package-contract] CommonJS Vite explicit worker: actual preset graph and CSS passed"
   );
 } finally {
   workerThreads.Worker = NativeWorker;
