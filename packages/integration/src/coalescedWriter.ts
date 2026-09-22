@@ -2,6 +2,7 @@ import { AsyncResource } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 import { mkdir, open, rename, rm, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
+import { getCompilationIoPool, type CompilationIoPool } from "./ioPool.js";
 
 export type AtomicWriteResult = "written" | "unchanged" | "stale" | "skipped";
 
@@ -23,6 +24,7 @@ interface PendingWrite {
     | undefined
     | Promise<string | Uint8Array | undefined>;
   options: WriteOptions;
+  io: CompilationIoPool;
   promise: Promise<AtomicWriteResult>;
 
   resolve(result: AtomicWriteResult): void;
@@ -82,6 +84,10 @@ async function sameContents(path: string, bytes: Buffer): Promise<boolean> {
 export class CoalescedAtomicWriter {
   private readonly pending = new Set<Promise<AtomicWriteResult>>();
 
+  constructor(
+    private readonly io: CompilationIoPool = getCompilationIoPool()
+  ) {}
+
   write(
     path: string,
     bytes: PendingWrite["bytes"],
@@ -104,6 +110,9 @@ export class CoalescedAtomicWriter {
       // A caller waiting on an older value also waits for its replacement.
       state.pending.bytes = bytes;
       state.pending.options = bound;
+      // The latest submitter's pool controls publication. Writers sharing a
+      // path should share a pool if they need the same concurrency limit.
+      state.pending.io = this.io;
       bound.observe?.({ kind: "coalesced", path });
 
       return this.track(state.pending.promise);
@@ -119,6 +128,7 @@ export class CoalescedAtomicWriter {
     const pending = {
       bytes,
       options: bound,
+      io: this.io,
       promise,
       resolve,
       reject
@@ -206,30 +216,32 @@ export class CoalescedAtomicWriter {
         : Buffer.from(value);
     if (!current()) return { kind: "stale", bytes: bytes.length };
 
-    let temporary: string | undefined;
+    return request.io.run(async () => {
+      let temporary: string | undefined;
 
-    try {
-      if (!current()) return { kind: "stale", bytes: bytes.length };
+      try {
+        if (!current()) return { kind: "stale", bytes: bytes.length };
 
-      await mkdir(dirname(path), { recursive: true });
+        await mkdir(dirname(path), { recursive: true });
 
-      const identical = await sameContents(path, bytes);
-      if (!current()) return { kind: "stale", bytes: bytes.length };
-      if (identical) return { kind: "unchanged", bytes: bytes.length };
+        const identical = await sameContents(path, bytes);
+        if (!current()) return { kind: "stale", bytes: bytes.length };
+        if (identical) return { kind: "unchanged", bytes: bytes.length };
 
-      temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
-      await writeFile(temporary, bytes, { flag: "wx" });
+        temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
+        await writeFile(temporary, bytes, { flag: "wx" });
 
-      // No stale or superseded value may be published after awaited I/O.
-      if (!current()) return { kind: "stale", bytes: bytes.length };
+        // No stale or superseded value may be published after awaited I/O.
+        if (!current()) return { kind: "stale", bytes: bytes.length };
 
-      await rename(temporary, path);
-      temporary = undefined;
+        await rename(temporary, path);
+        temporary = undefined;
 
-      return { kind: "written", bytes: bytes.length };
-    } finally {
-      if (temporary)
-        await rm(temporary, { force: true }).catch(() => undefined);
-    }
+        return { kind: "written", bytes: bytes.length };
+      } finally {
+        if (temporary)
+          await rm(temporary, { force: true }).catch(() => undefined);
+      }
+    });
   }
 }

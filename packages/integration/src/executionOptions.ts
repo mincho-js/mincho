@@ -1,3 +1,12 @@
+export interface MinchoExecutionOptions {
+  /** Defaults to auto: graph workers only until compiler workers pass timing gates.
+   * A positive number enables compiler workers; zero keeps all CPU work inline. */
+  workers?: "auto" | number;
+
+  /** Optional cap on concurrent leaf filesystem operations. */
+  ioConcurrency?: number;
+}
+
 /** Omitted or true uses memory only. Filesystem caching is opt-in. */
 export type MinchoCacheOptions =
   | boolean

@@ -6,6 +6,7 @@ import {
   getCompilerIdentity,
   type PersistentManifest
 } from "./diskCache.js";
+import { getCompilationIoPool, type CompilationIoPool } from "./ioPool.js";
 import type { MinchoCacheOptions } from "./executionOptions.js";
 import {
   CompilationInputs,
@@ -42,6 +43,7 @@ export interface CacheEntry<T> {
 /** One environment owns this cache. No failures or stale writes survive a generation. */
 export class CompilationCache {
   readonly parser: InternalSourceAstCache;
+  private io = getCompilationIoPool();
   private disk?: CompilationDiskCache;
   private readonly costs = new WeakMap<CacheEntry<unknown>, number>();
   private readonly entries = new Map<string, CacheEntry<unknown>>();
@@ -78,8 +80,11 @@ export class CompilationCache {
   configure(
     options: MinchoCacheOptions | undefined,
     directory: string,
-    environment: string
+    environment: string,
+    io?: CompilationIoPool
   ): void {
+    if (io) this.io = io;
+
     if (
       !options ||
       typeof options !== "object" ||
@@ -94,13 +99,14 @@ export class CompilationCache {
     this.disk = new CompilationDiskCache(
       resolve(filesystem.directory ?? directory),
       getCompilerIdentity().then((identity) => `${identity}:${environment}`),
-      filesystem.maxBytes
+      filesystem.maxBytes,
+      this.io
     );
   }
 
   begin(reader?: (file: string) => Promise<Uint8Array>): void {
     this.buildInputs?.cancel();
-    this.buildInputs = new CompilationInputs(reader);
+    this.buildInputs = new CompilationInputs(reader, this.io);
     this.generation++;
     this.pending.clear();
   }
@@ -132,7 +138,7 @@ export class CompilationCache {
     if (this.disk) await this.disk.prepare();
     if (this.inputs) return operation();
 
-    const inputs = new CompilationInputs();
+    const inputs = new CompilationInputs(undefined, this.io);
 
     return this.requestInputs.run(inputs, async () => {
       try {
@@ -179,11 +185,11 @@ export class CompilationCache {
   }
 
   fingerprint(files: Iterable<string>): Promise<Map<string, string | null>> {
-    return this.inputs?.fingerprint(files) ?? fingerprintFiles(files);
+    return this.inputs?.fingerprint(files) ?? fingerprintFiles(files, this.io);
   }
 
   unchanged(files: ReadonlyMap<string, string | null>): Promise<boolean> {
-    return this.inputs?.unchanged(files) ?? unchangedFiles(files);
+    return this.inputs?.unchanged(files) ?? unchangedFiles(files, this.io);
   }
 
   hasExternalBabelConfiguration(
@@ -191,12 +197,14 @@ export class CompilationCache {
   ): Promise<boolean> {
     return (
       this.inputs?.hasExternalBabelConfiguration(files) ??
-      hasExternalBabelConfiguration(files)
+      hasExternalBabelConfiguration(files, this.io)
     );
   }
 
   async readFile(file: string): Promise<Uint8Array> {
-    return (this.inputs ?? new CompilationInputs()).readFile(file);
+    return (this.inputs ?? new CompilationInputs(undefined, this.io)).readFile(
+      file
+    );
   }
 
   private async validateInputs(inputs: CompilationInputs): Promise<void> {

@@ -11,8 +11,67 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { CompilationCache } from "./compilationCache.js";
+import { fingerprintFiles } from "./compilationInputs.js";
+import { CompilationIoPool } from "./ioPool.js";
 
 describe("compilation input sessions", () => {
+  it.each([
+    "fingerprint",
+    "unchanged",
+    "hasExternalBabelConfiguration"
+  ] as const)(
+    "uses the configured I/O limit for %s outside an input session",
+    async (operation) => {
+      const root = await mkdtemp(join(tmpdir(), "mincho-inputs-"));
+
+      try {
+        const files = [join(root, "package.json"), join(root, "tokens.ts")];
+        await writeFile(files[0]!, '{"babel":{}}');
+        await writeFile(files[1]!, 'export const color = "red";');
+        const fingerprints = await fingerprintFiles(files);
+        let active = 0;
+        let peak = 0;
+        class ObservedIoPool extends CompilationIoPool {
+          override run<T>(read: () => Promise<T>): Promise<T> {
+            return super.run(async () => {
+              active++;
+              peak = Math.max(peak, active);
+
+              try {
+                await new Promise<void>((resolve) => setImmediate(resolve));
+
+                return await read();
+              } finally {
+                active--;
+              }
+            });
+          }
+        }
+        const cache = new CompilationCache();
+        cache.configure(
+          { type: "memory" },
+          root,
+          "test",
+          new ObservedIoPool(1)
+        );
+
+        if (operation === "fingerprint")
+          expect(await cache.fingerprint(files)).toEqual(fingerprints);
+        else if (operation === "unchanged")
+          expect(await cache.unchanged(fingerprints)).toBe(true);
+        else
+          expect(await cache.hasExternalBabelConfiguration(fingerprints)).toBe(
+            true
+          );
+
+        expect(peak).toBe(1);
+        expect(active).toBe(0);
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    }
+  );
+
   it("checks a concurrent caller's inputs before sharing completed work", async () => {
     const cache = new CompilationCache();
     let valid = true;

@@ -2579,6 +2579,7 @@ __metadata:
     "@mincho-js/babel": "workspace:^"
     "@mincho-js/css": "workspace:^"
     "@mincho-js/debug-log": "workspace:^"
+    "@supercharge/promise-pool": "npm:^3.2.0"
     "@types/babel__core": "npm:^7.20.5"
     "@types/node": "npm:^25.6.2"
     "@vanilla-extract/css": "npm:^1.20.1"
@@ -2586,6 +2587,7 @@ __metadata:
     esbuild: "npm:^0.27.7"
     eslint-config-custom: "workspace:^"
     prettier-config-custom: "workspace:^"
+    tinypool: "npm:^2.1.0"
     tsconfig-custom: "workspace:^"
     vite: "npm:^7.3.3"
     vite-config-custom: "workspace:^"
@@ -14481,6 +14483,13 @@ __metadata:
   version: 2.0.0
   resolution: "tinylogic@npm:2.0.0"
   checksum: 10/6467b1ed9b602dae035726ee3faf2682bddffb5389b42fdb4daf13878037420ed9981a572ca7db467bd26c4ab00fb4eefe654f24e35984ec017fb5e83081db97
+  languageName: node
+  linkType: hard
+
+"tinypool@npm:^2.1.0":
+  version: 2.1.2
+  resolution: "tinypool@npm:2.1.2"
+  checksum: 10/0493f5c4eef99272e888d9e8a973a0472671f88fbe474d5964ececfc5426a86c84f617efba514765039c851fa7abb6a5a8a18f92116405dce676eac1406830cb
   languageName: node
   linkType: hard
 

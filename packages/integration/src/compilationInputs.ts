@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { readFile, readdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { recordCompilationDiagnostic } from "./diagnostics.js";
+import { getCompilationIoPool, type CompilationIoPool } from "./ioPool.js";
 
 type Input = { digest: string | null; bytes?: Uint8Array };
 
@@ -31,7 +32,10 @@ export class CompilationInputs {
     this.packages.clear();
   }
 
-  constructor(private readonly reader: Reader = readFile) {}
+  constructor(
+    private readonly reader: Reader = readFile,
+    private readonly io: CompilationIoPool = getCompilationIoPool()
+  ) {}
 
   cancel(): void {
     this.cancelled = true;
@@ -42,9 +46,8 @@ export class CompilationInputs {
 
     if (!pending) {
       recordCompilationDiagnostic("input-read", { file });
-      pending = readInput(
-        file,
-        this.directories.has(file) ? readFile : this.reader
+      pending = this.io.run(() =>
+        readInput(file, this.directories.has(file) ? readFile : this.reader)
       );
       this.inputs.set(file, pending);
       void pending.catch(() => {
@@ -60,7 +63,7 @@ export class CompilationInputs {
     if (input.bytes) return input.bytes;
 
     // Preserve the native error, including the original path and error code.
-    return this.reader(file);
+    return this.io.run(() => this.reader(file));
   }
 
   async fingerprint(
@@ -146,7 +149,7 @@ export class CompilationInputs {
         const previous = await pending;
         recordCompilationDiagnostic("input-validate", { file });
 
-        const current = await fileDigest(file);
+        const current = await fileDigest(file, this.io);
 
         if (current !== previous.digest)
           (previous.digest?.startsWith("directory:")
@@ -195,8 +198,11 @@ async function readInput(file: string, reader: Reader): Promise<Input> {
   }
 }
 
-export async function fileDigest(file: string): Promise<string | null> {
-  return (await readInput(file, readFile)).digest;
+export async function fileDigest(
+  file: string,
+  io = getCompilationIoPool()
+): Promise<string | null> {
+  return (await io.run(() => readInput(file, readFile))).digest;
 }
 
 export function configurationFiles(files: Iterable<string>): string[] {
@@ -244,21 +250,23 @@ export function configurationFiles(files: Iterable<string>): string[] {
 }
 
 export async function fingerprintFiles(
-  files: Iterable<string>
+  files: Iterable<string>,
+  io = getCompilationIoPool()
 ): Promise<Map<string, string | null>> {
   return new Map(
     await Promise.all(
       [...new Set(files)].map(
-        async (file) => [file, await fileDigest(file)] as const
+        async (file) => [file, await fileDigest(file, io)] as const
       )
     )
   );
 }
 
 export async function unchangedFiles(
-  fingerprints: ReadonlyMap<string, string | null>
+  fingerprints: ReadonlyMap<string, string | null>,
+  io = getCompilationIoPool()
 ): Promise<boolean> {
-  const current = await fingerprintFiles(fingerprints.keys());
+  const current = await fingerprintFiles(fingerprints.keys(), io);
 
   return [...fingerprints].every(
     ([file, digest]) => current.get(file) === digest
@@ -266,7 +274,10 @@ export async function unchangedFiles(
 }
 
 export async function hasExternalBabelConfiguration(
-  files: ReadonlyMap<string, string | null>
+  files: ReadonlyMap<string, string | null>,
+  io = getCompilationIoPool()
 ): Promise<boolean> {
-  return new CompilationInputs().hasExternalBabelConfiguration(files);
+  return new CompilationInputs(undefined, io).hasExternalBabelConfiguration(
+    files
+  );
 }

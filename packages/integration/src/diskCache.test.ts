@@ -6,6 +6,7 @@ import { deserialize, serialize } from "node:v8";
 import { afterEach, expect, it } from "vitest";
 import { CompilationDiskCache, type PersistentEntry } from "./diskCache.js";
 import { CompilationDiagnostics } from "./diagnostics.js";
+import { CompilationIoPool } from "./ioPool.js";
 
 const directories: string[] = [];
 
@@ -31,6 +32,43 @@ const entry = (value: unknown): PersistentEntry => ({
   dependencies: ["/source.ts"],
   manifest: { fingerprints: [["/source.ts", "hash"]] }
 });
+
+it.each(["resolve", "reject"] as const)(
+  "leaves I/O capacity available while a cache namespace is pending (%s)",
+  async (outcome) => {
+    const path = await directory();
+    const original = entry("compiled");
+    await new CompilationDiskCache(path, "compiler").put("key", original);
+
+    let release!: () => void;
+    const namespace = new Promise<string>((resolve, reject) => {
+      release = () =>
+        outcome === "resolve"
+          ? resolve("compiler")
+          : reject(new Error("Compiler identity unavailable"));
+    });
+    const io = new CompilationIoPool(1);
+    const cache = new CompilationDiskCache(path, namespace, undefined, io);
+    const read = cache.get("key");
+    let leafCompleted = false;
+    const leaf = io.run(async () => {
+      leafCompleted = true;
+    });
+
+    try {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+
+      expect(leafCompleted).toBe(true);
+    } finally {
+      release();
+      await Promise.all([read, leaf]);
+    }
+
+    await expect(read).resolves.toEqual(
+      outcome === "resolve" ? original : undefined
+    );
+  }
+);
 
 it("reuses structured data across cache instances and isolates compiler identities", async () => {
   const path = await directory();

@@ -13,6 +13,7 @@ import {
   CoalescedAtomicWriter,
   type AtomicWriteEvent
 } from "./coalescedWriter.js";
+import { CompilationIoPool } from "./ioPool.js";
 
 const directories: string[] = [];
 
@@ -102,25 +103,24 @@ describe("coalesced atomic writes", () => {
     expect(await writer.write(file, () => "same")).toBe("written");
   });
 
-  it("rejects stale publication after asynchronous serialization and drains the valid successor", async () => {
+  it("rejects stale publication after queued I/O and drains the valid successor", async () => {
     const root = await directory();
+    const io = new CompilationIoPool();
     const started = gate();
     const blocked = gate();
-    const writer = new CoalescedAtomicWriter();
+    vi.spyOn(io, "run").mockImplementationOnce(async (operation) => {
+      started.release();
+      await blocked.promise;
+
+      return operation();
+    });
+
+    const writer = new CoalescedAtomicWriter(io);
     let generation = 1;
     const file = join(root, "result");
-    const first = writer.write(
-      file,
-      async () => {
-        started.release();
-        await blocked.promise;
-
-        return "old";
-      },
-      {
-        isCurrent: () => generation === 1
-      }
-    );
+    const first = writer.write(file, () => "old", {
+      isCurrent: () => generation === 1
+    });
 
     await started.promise;
     generation = 2;

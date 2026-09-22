@@ -4,6 +4,7 @@ import { mkdir, readFile, readdir, rm, stat, utimes } from "node:fs/promises";
 import { dirname, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { deserialize, serialize } from "node:v8";
+import { getCompilationIoPool, type CompilationIoPool } from "./ioPool.js";
 import { recordCompilationDiagnostic } from "./diagnostics.js";
 import { CoalescedAtomicWriter } from "./coalescedWriter.js";
 
@@ -98,9 +99,10 @@ export class CompilationDiskCache {
     readonly directory: string,
     private readonly namespace: string | Promise<string>,
     private readonly maxBytes = 256 * 1024 * 1024,
+    private readonly io: CompilationIoPool = getCompilationIoPool(),
     readonly minimumCost = 0
   ) {
-    this.writer = new CoalescedAtomicWriter();
+    this.writer = new CoalescedAtomicWriter(io);
 
     if (!Number.isSafeInteger(maxBytes) || maxBytes < 1)
       throw new TypeError("cache.maxBytes must be a positive integer");
@@ -118,23 +120,30 @@ export class CompilationDiskCache {
   }
 
   prepare(): Promise<void> {
-    return (this.ready ??= mkdir(this.directory, { recursive: true }).then(
-      () => undefined,
-      () => {
-        this.disabled = true;
-      }
-    ));
+    return (this.ready ??= this.io
+      .run(() => mkdir(this.directory, { recursive: true }))
+      .then(
+        () => undefined,
+        () => {
+          this.disabled = true;
+        }
+      ));
   }
 
   async get(key: string): Promise<PersistentEntry | undefined> {
     if (this.disabled) return;
 
     try {
+      const namespace = await this.namespace;
       const file = await this.path(key);
-      const info = await stat(file);
-      if (info.size > this.maxBytes) return;
+      const bytes = await this.io.run(async () => {
+        const info = await stat(file);
+        if (info.size > this.maxBytes) return;
 
-      const bytes = await readFile(file);
+        return readFile(file);
+      });
+      if (!bytes) return;
+
       const payload = bytes.subarray(65);
       if (
         bytes[64] !== 10 ||
@@ -150,14 +159,14 @@ export class CompilationDiskCache {
       };
       if (
         record.format !== format ||
-        record.namespace !== (await this.namespace) ||
+        record.namespace !== namespace ||
         record.key !== key ||
         !validEntry(record.entry)
       )
         return;
 
       const now = new Date();
-      await utimes(file, now, now).catch(() => undefined);
+      await this.io.run(() => utimes(file, now, now)).catch(() => undefined);
       recordCompilationDiagnostic("disk-cache-hit", {
         key,
         bytes: bytes.length
@@ -248,7 +257,7 @@ export class CompilationDiskCache {
         if (extname(name) !== ".mincho-cache") continue;
 
         const file = join(this.directory, name);
-        const info = await stat(file).catch(() => undefined);
+        const info = await this.io.run(() => stat(file)).catch(() => undefined);
 
         if (info?.isFile())
           files.push({ file, bytes: info.size, used: info.mtimeMs });
@@ -259,7 +268,7 @@ export class CompilationDiskCache {
       for (const file of files.sort((a, b) => a.used - b.used)) {
         if (bytes <= this.maxBytes) break;
 
-        await rm(file.file, { force: true });
+        await this.io.run(() => rm(file.file, { force: true }));
         bytes -= file.bytes;
       }
     } catch {
