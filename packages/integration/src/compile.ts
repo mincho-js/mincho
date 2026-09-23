@@ -119,19 +119,21 @@ function getScopedSourceWithCache({
   return source;
 }
 
-function transformScopedDependencySource({
-  contents,
-  filePath,
-  loader,
-  packageName,
-  rootPath
-}: {
+export interface ScopedDependencyOptions {
   contents: string;
   filePath: string;
   loader: "js" | "jsx" | "ts" | "tsx";
   packageName: string;
   rootPath: string;
-}) {
+}
+
+export function transformScopedDependencySource({
+  contents,
+  filePath,
+  loader,
+  packageName,
+  rootPath
+}: ScopedDependencyOptions) {
   let source = addScopedSource({
     source: contents,
     filePath,
