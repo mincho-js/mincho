@@ -426,6 +426,86 @@ describe.each([
 });
 
 describe("automatic analysis", () => {
+  it.each(["worker", "inline"] as const)(
+    "preserves snapshots while shared CPU scheduling selects %s",
+    async (selected) => {
+      let release!: () => void;
+      const ready = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+
+      const analysis = createPackageGraphAnalysis({
+        mode: "worker",
+
+        schedule: async (_bytes, worker, inline) => {
+          await ready;
+
+          return selected === "worker" ? worker() : inline();
+        }
+      });
+
+      sessions.push(analysis);
+
+      const generation = analysis.beginGeneration();
+      analysis.register({
+        generation,
+        moduleId: "owner",
+        graph: chain(["before", "app"])
+      });
+
+      const request = { generation, moduleIds: ["owner"] };
+      const pending = analysis.analyze(request);
+      request.moduleIds.length = 0;
+      analysis.register({
+        generation,
+        moduleId: "owner",
+        graph: chain(["after", "app"])
+      });
+      release();
+
+      expect((await pending).styleSpecifiers).toEqual(["before/style.css"]);
+      expect(
+        (await analysis.analyze({ generation, moduleIds: ["owner"] }))
+          .styleSpecifiers
+      ).toEqual(["after/style.css"]);
+    }
+  );
+
+  it("rejects analysis closed while waiting for the CPU budget", async () => {
+    let release!: () => void;
+    const ready = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    const analysis = createPackageGraphAnalysis({
+      mode: "worker",
+
+      schedule: async (_bytes, worker) => {
+        await ready;
+
+        return worker();
+      }
+    });
+
+    sessions.push(analysis);
+
+    const generation = analysis.beginGeneration();
+    analysis.register({
+      generation,
+      moduleId: "owner",
+      graph: chain(["a", "app"])
+    });
+
+    const pending = analysis.analyze({ generation, moduleIds: ["owner"] });
+    const rejected = expect(pending).rejects.toMatchObject({
+      name: "PackageGraphAnalysisClosedError"
+    });
+
+    await analysis.close();
+    release();
+    await rejected;
+  });
+
   it("uses selected graph bytes, keeps the boundary inline and lazily reuses workers", async () => {
     const analysis = create("auto");
     const generation = analysis.beginGeneration();

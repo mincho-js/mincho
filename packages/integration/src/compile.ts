@@ -1,4 +1,5 @@
 import { measureCompilationPhase } from "./diagnostics.js";
+import { executeScopedTransform } from "./compilationExecution.js";
 import { cacheDigest } from "./compilationCache.js";
 import type { CompilationCache } from "./compilationCache.js";
 import { cachedCompile, type CompileCacheBridge } from "./compileCache.js";
@@ -11,6 +12,7 @@ import defaultEsbuild, {
   type PluginBuild
 } from "esbuild";
 import * as fs from "node:fs";
+import { AsyncResource } from "node:async_hooks";
 import { basename, dirname, join, resolve } from "node:path";
 import { jsxSyntaxPluginPath, typescriptPresetPath } from "./babelPreset.js";
 import { effectiveLoader, isScriptLoader } from "./scriptLoaders.js";
@@ -175,7 +177,7 @@ function createScopedOnLoadPlugin(
     setup(build: PluginBuild) {
       build.onLoad(
         { filter: /.*/, namespace: "file" },
-        async (args: { path: string }) => {
+        AsyncResource.bind(async (args: { path: string }) => {
           const loader = effectiveLoader(args.path, loaders);
 
           if (!isScriptLoader(loader)) {
@@ -192,18 +194,22 @@ function createScopedOnLoadPlugin(
 
           const contents = await readFile(args.path);
 
+          const input: ScopedDependencyOptions = {
+            contents,
+            filePath: args.path,
+            loader,
+            rootPath: build.initialOptions.absWorkingDir!,
+            packageName
+          };
+
           return {
-            contents: transformScopedDependencySource({
-              contents,
-              filePath: args.path,
-              loader,
-              rootPath: build.initialOptions.absWorkingDir!,
-              packageName
-            }),
+            contents: await executeScopedTransform(input, () =>
+              transformScopedDependencySource(input)
+            ),
             loader,
             resolveDir: dirname(args.path)
           };
-        }
+        })
       );
     }
   };
@@ -216,31 +222,26 @@ function scopeLoadedDependencies(plugin: Plugin, packageName: string): Plugin {
       return plugin.setup({
         ...build,
         onLoad(options, callback) {
-          build.onLoad(options, async (args) => {
-            const result = await callback(args);
-            if (
-              args.namespace !== "file" ||
-              result?.contents === undefined ||
-              result.errors?.length
-            ) {
-              return result;
-            }
+          build.onLoad(
+            options,
+            AsyncResource.bind(async (args) => {
+              const result = await callback(args);
+              if (
+                args.namespace !== "file" ||
+                result?.contents === undefined ||
+                result.errors?.length
+              ) {
+                return result;
+              }
 
-            // esbuild defaults plugin-provided contents to JS, regardless of
-            // the extension's configured loader.
-            const loader = result.loader ?? "js";
-            if (
-              loader !== "js" &&
-              loader !== "jsx" &&
-              loader !== "ts" &&
-              loader !== "tsx"
-            ) {
-              return result;
-            }
+              // esbuild defaults plugin-provided contents to JS, regardless of
+              // the extension's configured loader.
+              const loader = result.loader ?? "js";
+              if (!isScriptLoader(loader)) {
+                return result;
+              }
 
-            return {
-              ...result,
-              contents: transformScopedDependencySource({
+              const input: ScopedDependencyOptions = {
                 contents:
                   typeof result.contents === "string"
                     ? result.contents
@@ -249,9 +250,16 @@ function scopeLoadedDependencies(plugin: Plugin, packageName: string): Plugin {
                 loader,
                 rootPath: build.initialOptions.absWorkingDir!,
                 packageName
-              })
-            };
-          });
+              };
+
+              return {
+                ...result,
+                contents: await executeScopedTransform(input, () =>
+                  transformScopedDependencySource(input)
+                )
+              };
+            })
+          );
         }
       });
     }

@@ -21,6 +21,11 @@ export type PackageGraphAnalysisMode = "auto" | "worker" | "inline";
 export interface PackageGraphAnalysisOptions {
   readonly mode?: PackageGraphAnalysisMode;
   readonly onAnalysis?: (mode: "worker" | "inline", bytes: number) => void;
+  readonly schedule?: (
+    bytes: number,
+    worker: () => Promise<PackageGraphAnalysisResult>,
+    inline: () => Promise<PackageGraphAnalysisResult>
+  ) => Promise<PackageGraphAnalysisResult>;
 }
 
 export interface PackageGraphAnalysis {
@@ -105,6 +110,7 @@ export function createPackageGraphAnalysis(
   const pending = new Map<number, PendingAnalysis>();
   let generation = 0;
   let requestId = 0;
+  let revision = 0;
   let worker: NodeWorker | undefined;
   let workerFailure: Error | undefined;
   let closed = false;
@@ -198,6 +204,7 @@ export function createPackageGraphAnalysis(
       if (closed) throw closedError();
 
       generation++;
+      revision++;
       graphs.clear();
       sizes.clear();
       rejectPending(staleGenerationError());
@@ -211,23 +218,25 @@ export function createPackageGraphAnalysis(
     register(record) {
       if (closed || record.generation !== generation) return false;
 
+      revision++;
+
       sizes.set(
         record.moduleId,
         Buffer.byteLength(JSON.stringify(record.graph))
       );
 
-      if (mode === "worker") send({ type: "register", ...record });
-      else {
+      if (mode !== "worker" || options.schedule)
         graphs.set(record.moduleId, structuredClone(record.graph));
-
-        if (worker) send({ type: "register", ...record });
-      }
+      if (worker || (mode === "worker" && !options.schedule))
+        send({ type: "register", ...record });
 
       return true;
     },
 
     remove(record) {
       if (closed || record.generation !== generation) return false;
+
+      revision++;
 
       sizes.delete(record.moduleId);
       graphs.delete(record.moduleId);
@@ -254,59 +263,76 @@ export function createPackageGraphAnalysis(
 
       const useWorker =
         mode === "worker"
-          ? worker !== undefined || workerFailure !== undefined
+          ? bytes > 0 || worker !== undefined || workerFailure !== undefined
           : mode === "auto" && bytes > 512 * 1024;
 
-      options.onAnalysis?.(useWorker ? "worker" : "inline", bytes);
-
       const id = ++requestId;
+      const selectedRevision = revision;
+      const snapshot = structuredClone(request);
+      const selectedGraphs = new Map<string, DefineRulesPackageGraph>();
 
-      return new Promise((resolve, reject) => {
-        pending.set(id, { generation, resolve, reject });
+      for (const moduleId of snapshot.moduleIds) {
+        const graph = graphs.get(moduleId);
 
-        // With no registered graphs there is no worker queue to wait for.
-        if (useWorker) {
-          try {
-            const instance = ensureWorker();
-            instance.ref();
-            send({ ...request, type: "analyze", requestId: id });
-          } catch (error) {
-            pending.delete(id);
-            reject(error);
+        if (graph !== undefined) selectedGraphs.set(moduleId, graph);
+      }
+
+      const execute = (
+        requestedWorker: boolean
+      ): Promise<PackageGraphAnalysisResult> =>
+        new Promise((resolve, reject) => {
+          if (closed) return reject(closedError());
+          if (snapshot.generation !== generation)
+            return reject(staleGenerationError());
+
+          // Preserve the request snapshot if registrations changed while waiting
+          // for the shared CPU budget, without retransmitting unchanged graphs.
+          const useWorker = requestedWorker && selectedRevision === revision;
+          options.onAnalysis?.(useWorker ? "worker" : "inline", bytes);
+          pending.set(id, { generation, resolve, reject });
+
+          // With no registered graphs there is no worker queue to wait for.
+          if (useWorker) {
+            try {
+              const instance = ensureWorker();
+              instance.ref();
+              send({ ...snapshot, type: "analyze", requestId: id });
+            } catch (error) {
+              pending.delete(id);
+              reject(error);
+            }
+
+            return;
           }
 
-          return;
-        }
+          // Match worker request snapshots and cancellation at message boundaries.
+          queueMicrotask(() => {
+            const current = pending.get(id);
+            if (current === undefined) return;
 
-        // Match worker request snapshots and cancellation at message boundaries.
-        const snapshot = structuredClone(request);
-        const selectedGraphs = new Map<string, DefineRulesPackageGraph>();
-
-        for (const moduleId of snapshot.moduleIds) {
-          const graph = graphs.get(moduleId);
-
-          if (graph !== undefined) selectedGraphs.set(moduleId, graph);
-        }
-
-        queueMicrotask(() => {
-          const current = pending.get(id);
-          if (current === undefined) return;
-
-          try {
-            finish({
-              type: "result",
-              generation: snapshot.generation,
-              requestId: id,
-              result: analyzeRegisteredPackageGraphs(selectedGraphs, snapshot)
-            });
-          } catch (error) {
-            pending.delete(id);
-            current.reject(
-              error instanceof Error ? error : new Error(String(error))
-            );
-          }
+            try {
+              finish({
+                type: "result",
+                generation: snapshot.generation,
+                requestId: id,
+                result: analyzeRegisteredPackageGraphs(selectedGraphs, snapshot)
+              });
+            } catch (error) {
+              pending.delete(id);
+              current.reject(
+                error instanceof Error ? error : new Error(String(error))
+              );
+            }
+          });
         });
-      });
+
+      return useWorker && options.schedule
+        ? options.schedule(
+            bytes,
+            () => execute(true),
+            () => execute(false)
+          )
+        : execute(useWorker);
     },
 
     close() {

@@ -10,6 +10,7 @@ export default (viteConfigEnv: ConfigEnv) => {
       lib: {
         entry: {
           index: join(process.cwd(), "src", "index.ts"),
+          compilerWorker: join(process.cwd(), "src", "compilerWorker.ts"),
           "package-graph": join(process.cwd(), "src", "package-graph.ts")
         }
       }

@@ -1,12 +1,14 @@
 import {
   type BabelOptions,
   type MinchoDiagnosticsOptions,
-  type MinchoCacheOptions,
   CompilationDiagnostics,
   InternalCompilationCache,
   InternalSourceAstCache,
   internalCanSkipMinchoTransform,
   internalRecordCompilationDiagnostic,
+  InternalCompilationExecution,
+  type MinchoExecutionOptions,
+  type MinchoCacheOptions,
   type BabelTransformResult,
   type DefineRulesPackageGraph,
   type InternalStaticCssEvalLoadedSource as StaticCssEvalLoadedSource,
@@ -80,6 +82,7 @@ function extractedCssFileFilter(filePath: string) {
 export interface MinchoVitePluginOptions {
   diagnostics?: MinchoDiagnosticsOptions;
   cache?: MinchoCacheOptions;
+  execution?: MinchoExecutionOptions;
   babel?: BabelOptions;
   jsxCssProp?: boolean;
 
@@ -94,7 +97,11 @@ export interface MinchoVitePluginOptions {
   };
 }
 
-export type { ExtractCalls, MinchoCacheOptions } from "@mincho-js/integration";
+export type {
+  ExtractCalls,
+  MinchoExecutionOptions,
+  MinchoCacheOptions
+} from "@mincho-js/integration";
 
 export function minchoVitePlugin(_options?: MinchoVitePluginOptions) {
   const parser =
@@ -174,6 +181,11 @@ function createMinchoViteEnvironmentPlugin(
   environment = "client",
   sharedAnalysis?: { parser: InternalSourceAstCache; owners: Set<symbol> }
 ) {
+  const execution = new InternalCompilationExecution(
+    _options?.execution,
+    _options?.cache !== false
+  );
+
   const compilationCache =
     _options?.cache === false
       ? undefined
@@ -191,23 +203,25 @@ function createMinchoViteEnvironmentPlugin(
     if (!sharedAnalysis?.owners.size) sharedAnalysis?.parser.clear();
   }
 
+  execution.compilationCache = compilationCache;
+
   const tracedCompile = (options: Parameters<typeof compile>[0]) =>
     diagnostics.run(options.originalPath, "sidecar-compile", () =>
-      compile({ ...options, cache: compilationCache })
+      execution.run(() => compile({ ...options, cache: compilationCache }))
     );
 
   const tracedTransform = (
     options: Parameters<typeof babelTransformSource>[0]
   ) =>
     diagnostics.run(options.filename, "transform", () =>
-      babelTransformSource(options)
+      execution.run(() => babelTransformSource(options))
     );
 
   const tracedRegistry = (
     options: Parameters<typeof processDefineRulesPresetViteFile>[0]
   ) =>
     diagnostics.run(options.filePath, "css-evaluation", () =>
-      processDefineRulesPresetViteFile(options)
+      execution.run(() => processDefineRulesPresetViteFile(options))
     );
 
   let config: ResolvedConfig;
@@ -252,6 +266,9 @@ function createMinchoViteEnvironmentPlugin(
 
   let graphAnalysis = createPackageGraphAnalysis({
     mode: _options?.libraryCss?.analysis ?? "auto",
+
+    schedule: (bytes, worker, inline) =>
+      execution.externalCpu(bytes, worker, inline),
 
     onAnalysis: (mode, bytes) =>
       diagnostics.record("", "graph-analysis-mode", { mode, bytes })
@@ -629,6 +646,7 @@ function createMinchoViteEnvironmentPlugin(
         }
 
         diagnosticsClosed = false;
+        execution.begin();
         diagnostics.begin();
 
         if (config.command === "build") compilationCache?.begin();
@@ -638,6 +656,9 @@ function createMinchoViteEnvironmentPlugin(
         if (graphAnalysisClosed) {
           graphAnalysis = createPackageGraphAnalysis({
             mode: _options?.libraryCss?.analysis ?? "auto",
+
+            schedule: (bytes, worker, inline) =>
+              execution.externalCpu(bytes, worker, inline),
 
             onAnalysis: (mode, bytes) =>
               diagnostics.record("", "graph-analysis-mode", { mode, bytes })
@@ -714,7 +735,8 @@ function createMinchoViteEnvironmentPlugin(
           config.cacheDir ?? join(config.root, "node_modules/.vite"),
           "mincho"
         ),
-        `vite:${environment}:${config.command}:${config.mode}`
+        `vite:${environment}:${config.command}:${config.mode}`,
+        execution.io
       );
     },
 
@@ -1439,6 +1461,7 @@ function createMinchoViteEnvironmentPlugin(
         abortOutputLinkers(new Error("Vite bundle closed"));
 
         if (!config.build.watch) {
+          await execution.close();
           compilationCache?.clear();
           releaseAnalysis();
           observedProviderSources.clear();
@@ -1455,6 +1478,7 @@ function createMinchoViteEnvironmentPlugin(
       cancelDiagnosticsFlush();
       diagnosticsClosed = true;
       transformEpoch = Symbol("closed");
+      await execution.close();
       compilationCache?.clear();
       releaseAnalysis();
       observedProviderSources.clear();

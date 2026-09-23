@@ -1,10 +1,12 @@
 import {
   type BabelOptions,
   type MinchoDiagnosticsOptions,
-  type MinchoCacheOptions,
   CompilationDiagnostics,
   InternalCompilationCache,
   internalCanSkipMinchoTransform,
+  InternalCompilationExecution,
+  type MinchoExecutionOptions,
+  type MinchoCacheOptions,
   type BabelTransformResult,
   type InternalStaticCssEvalLoadedSource as StaticCssEvalLoadedSource,
   type InternalStaticCssEvalMetadataLike as StaticCssEvalMetadata,
@@ -55,6 +57,7 @@ const integrationHelpers = {
 export interface MinchoEsbuildPluginOptions {
   diagnostics?: MinchoDiagnosticsOptions;
   cache?: MinchoCacheOptions;
+  execution?: MinchoExecutionOptions;
   includeNodeModulesPattern?: RegExp;
   jsxCssProp?: boolean;
 
@@ -80,6 +83,7 @@ export function minchoEsbuildPlugin({
   includeNodeModulesPattern,
   diagnostics: diagnosticsOptions,
   cache: cacheOptions,
+  execution: executionOptions,
   jsxCssProp,
   extractCalls
 }: MinchoEsbuildPluginOptions = {}): EsbuildPlugin {
@@ -87,6 +91,11 @@ export function minchoEsbuildPlugin({
     name: "mincho-js-esbuild",
 
     setup(build) {
+      const execution = new InternalCompilationExecution(
+        executionOptions,
+        cacheOptions !== false
+      );
+
       const compilationCache =
         cacheOptions !== false ? new InternalCompilationCache() : undefined;
 
@@ -96,10 +105,15 @@ export function minchoEsbuildPlugin({
           build.initialOptions.absWorkingDir ?? process.cwd(),
           ".cache/mincho"
         ),
-        "esbuild"
+        "esbuild",
+        execution.io
       );
+      execution.compilationCache = compilationCache;
 
-      build.onDispose?.(() => compilationCache?.clear());
+      build.onDispose?.(async () => {
+        await execution.close();
+        compilationCache?.clear();
+      });
 
       const diagnostics = new CompilationDiagnostics(
         diagnosticsOptions,
@@ -109,21 +123,25 @@ export function minchoEsbuildPlugin({
       const traced = {
         compile: (options: Parameters<typeof compile>[0]) =>
           diagnostics.run(options.originalPath, "sidecar-compile", () =>
-            integrationHelpers.compile(options)
+            execution.run(() => integrationHelpers.compile(options))
           ),
 
         babelTransformSource: (
           options: Parameters<typeof babelTransformSource>[0]
         ) =>
           diagnostics.run(options.filename, "transform", () =>
-            integrationHelpers.babelTransformSource(options)
+            execution.run(() =>
+              integrationHelpers.babelTransformSource(options)
+            )
           ),
 
         processDefineRulesPresetRegistryFile: (
           options: Parameters<typeof processDefineRulesPresetRegistryFile>[0]
         ) =>
           diagnostics.run(options.filePath, "css-evaluation", () =>
-            integrationHelpers.processDefineRulesPresetRegistryFile(options)
+            execution.run(() =>
+              integrationHelpers.processDefineRulesPresetRegistryFile(options)
+            )
           )
       };
 
@@ -142,6 +160,7 @@ export function minchoEsbuildPlugin({
       const assets = new EsbuildAssets(build);
 
       build.onStart(() => {
+        execution.begin();
         diagnostics.begin();
         compilationCache?.begin();
         assets.beginBuild();

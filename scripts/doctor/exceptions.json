@@ -1,5 +1,15 @@
 [
   {
+    "id": "integration-compiler-execution-test-script-loader",
+    "file": "packages/integration/src/compilationExecution.test.ts",
+    "type": "warning",
+    "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
+    "source": "loader: \"ts\",",
+    "count": 1,
+    "reason": "This scoped compiler fallback fixture selects the built-in TypeScript script loader. It does not refer to a Webpack loader package or dependency.",
+    "expires": "2026-12-31"
+  },
+  {
     "id": "babel-commonjs-esm-test-esbuild-loader-01",
     "file": "packages/babel/src/commonjs/esm.test.ts",
     "type": "warning",

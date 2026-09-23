@@ -124,14 +124,14 @@ order. Small libraries can use the fixed single-stylesheet contract above.
 `libraryCss.analysis` accepts `"auto"` (the default), `"worker"` or `"inline"`.
 Auto runs inline when the sum of the selected, unique graph snapshots is at most
 512 KiB of serialized UTF-8 JSON. Larger requests lazily start a reusable worker.
-Unselected graphs do not affect the choice. Explicit worker mode starts on first
-registration; inline mode never starts workers. Diagnostics report the chosen
-mode and byte count.
+Unselected graphs do not affect the choice. Explicit worker mode requests a
+worker for every nonempty analysis, subject to the shared CPU budget; inline
+mode never starts workers. Diagnostics report the chosen mode and byte count.
 
 The main build resolves modules and validates V5 presets through the existing
-integration pipeline. Worker mode sends graph snapshots and actual Vite module identities
-to a separate Node worker. Auto retains snapshots locally until a request needs
-the worker, then replays the current generation. Once output roots are
+integration pipeline. Graph snapshots and actual Vite module identities are
+retained locally until an analysis request starts a worker, then the current
+generation is replayed to that worker. Once output roots are
 known, each root requests the graph of its static dependency scope and awaits
 the ordered style imports before its final chunk is returned. Independent
 outputs and dynamic roots are not merged into a global graph. The worker does

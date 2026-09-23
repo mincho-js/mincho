@@ -86,11 +86,14 @@ export {
 } from "./staticCssEvalUtils.js";
 
 export { CompilationCache as InternalCompilationCache } from "./compilationCache.js";
+export { CompilationExecution as InternalCompilationExecution } from "./compilationExecution.js";
+export type {
+  MinchoExecutionOptions,
+  MinchoCacheOptions
+} from "./executionOptions.js";
 
 export type { CompileCacheBridge as InternalCompileCacheBridge } from "./compileCache.js";
 
 export { canSkipMinchoTransform as internalCanSkipMinchoTransform } from "./transformEligibility.js";
 
 export { InternalSourceAstCache } from "@mincho-js/babel";
-
-export type { MinchoCacheOptions } from "./executionOptions.js";

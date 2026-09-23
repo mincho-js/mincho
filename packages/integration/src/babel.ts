@@ -1,3 +1,4 @@
+import { executeTransform } from "./compilationExecution.js";
 import { cachedTransform } from "./transformCache.js";
 import type { CompilationCache } from "./compilationCache.js";
 import {
@@ -283,12 +284,21 @@ export async function babelTransformSource(
 ): Promise<BabelTransformResult> {
   const cache = options.babel?.compilationCache;
 
+  const transform = (
+    input: BabelTransformSourceOptions,
+    reuseSourceAst = false
+  ) =>
+    executeTransform(input, () =>
+      transformSourceUncached(input, reuseSourceAst)
+    );
+
   return cache
-    ? cachedTransform(cache, options, transformSourceUncached)
-    : transformSourceUncached(options);
+    ? cachedTransform(cache, options, transform)
+    : transform(options);
 }
 
-async function transformSourceUncached(
+/** @internal Worker entry; bundler callers must use babelTransformSource. */
+export async function transformSourceUncached(
   {
     filename: path,
     root = process.cwd(),

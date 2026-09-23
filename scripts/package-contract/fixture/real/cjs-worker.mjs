@@ -32,7 +32,10 @@ try {
     configFile: false,
     logLevel: "silent",
     plugins: [
-      minchoVitePlugin({ libraryCss: { analysis: "worker" } }),
+      minchoVitePlugin({
+        execution: { workers: 1 },
+        libraryCss: { analysis: "worker" }
+      }),
       vanillaExtractPlugin()
     ],
     build: {
