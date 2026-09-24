@@ -5,6 +5,10 @@ import type {
 } from "./babel.js";
 import type { ScopedDependencyOptions } from "./compile.js";
 import type { TransformSnapshot } from "./transformSnapshot.js";
+import type {
+  CompilerPayloadReference,
+  CompilerSourcePayload
+} from "./compilerPayload.js";
 
 export type CompilerJob = {
   environment: string;
@@ -12,20 +16,36 @@ export type CompilerJob = {
   cache: boolean;
   cachePartitions: number;
   port: MessagePort;
+  sourcePayload?: CompilerSourcePayload;
+  batchProviderRequests?: boolean;
 } & (
   | { kind: "transform"; input: BabelTransformSourceOptions; provider: boolean }
   | { kind: "scoped"; input: ScopedDependencyOptions }
 );
 
-export type ProviderRequest = {
-  id: number;
-} & (
+export type ProviderRequestMessage =
   | {
       kind: "resolve";
       args: Parameters<StaticCssEvalSourceProvider["resolve"]>;
     }
   | { kind: "load"; args: Parameters<StaticCssEvalSourceProvider["load"]> }
-);
+  | { kind: "payload"; reference: CompilerPayloadReference };
+
+export type ProviderRequest = { id: number } & ProviderRequestMessage;
+
+export interface CompilerTransportMetrics {
+  protocol: string;
+  payloadHits: number;
+  payloadMisses: number;
+  payloadBytes: number;
+  providerRequests: number;
+  providerBatches: number;
+}
+
+export interface ProviderBatch {
+  kind: "batch";
+  requests: ProviderRequest[];
+}
 
 export interface WorkerFailure {
   name: string;
@@ -43,7 +63,10 @@ export type ProviderResponse = { id: number } & (
   | { ok: false; error: WorkerFailure }
 );
 
-export type CompilerResponse = { duration: number } & (
+export type CompilerResponse = {
+  duration: number;
+  transport?: CompilerTransportMetrics;
+} & (
   | { ok: true; value: string | TransformSnapshot }
   | { ok: false; error: WorkerFailure }
 );

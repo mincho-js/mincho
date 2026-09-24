@@ -25,6 +25,7 @@ import {
   serializeWorkerError,
   type CompilerJob,
   type CompilerResponse,
+  type ProviderBatch,
   type ProviderRequest,
   type ProviderResponse
 } from "./compilerProtocol.js";
@@ -34,6 +35,17 @@ import {
   hasExternalBabelConfiguration
 } from "./compilationInputs.js";
 import type { CompilationCache } from "./compilationCache.js";
+import { getCompilerIdentity } from "./diskCache.js";
+import {
+  CompilerPayloadCache,
+  compilerCacheBytes,
+  compilerPayloadBytes,
+  compilerPayloadMinimumBytes,
+  compilerPayloadProtocol,
+  compilerPayloadContext,
+  sameCompilerPayload,
+  type CompilerSourcePayload
+} from "./compilerPayload.js";
 
 const active = new AsyncLocalStorage<CompilationExecution>();
 const providerRequest = new AsyncLocalStorage<boolean>();
@@ -45,6 +57,8 @@ interface SharedPool {
   owners: Map<CompilationExecution, number>;
   active: number;
   waiting: (() => void)[];
+  payloads?: CompilerPayloadCache;
+  payloadReady?: boolean;
 }
 
 const poolsKey = Symbol.for("@mincho-js/integration/compiler-pools/v1");
@@ -111,17 +125,12 @@ export class CompilationExecution {
       return Promise.reject(
         new Error("Mincho compilation execution is closed")
       );
-    if (
-      this.evaluation === "fresh" &&
-      (this.workers === "auto" || this.workers === 0) &&
-      !active.getStore()
-    )
-      return operation();
 
     return active.run(this, operation);
   }
 
   begin(): void {
+    this.shared?.payloads?.reset(this.environment);
     this.abort.abort();
     this.abort = new AbortController();
     this.closed = false;
@@ -135,6 +144,7 @@ export class CompilationExecution {
   }
 
   async close(): Promise<void> {
+    this.shared?.payloads?.reset(this.environment);
     this.closed = true;
     this.generation++;
     this.abort.abort();
@@ -224,7 +234,9 @@ export class CompilationExecution {
     if (!external)
       this.compilationCache?.parser.resize(
         Math.max(1, Math.floor(512 / (budget.budget + 1))),
-        Math.floor((64 * 1024 * 1024) / (budget.budget + 1))
+        Math.floor(
+          (compilerCacheBytes - compilerPayloadBytes) / (budget.budget + 1)
+        )
       );
 
     let filename: string;
@@ -366,17 +378,114 @@ export class CompilationExecution {
     pool: Tinypool,
     partitions: number
   ): Promise<CompilerResponse> {
+    const generation = this.generation;
+    const source = "source" in input ? input.source : input.contents;
+    const sourceBytes = Buffer.byteLength(source);
+    const maximum = Math.floor(compilerPayloadBytes / partitions);
+    const shared = this.shared;
+    let sourcePayload: CompilerSourcePayload | undefined;
+
+    if (
+      this.cacheEnabled &&
+      shared &&
+      shared.payloadReady !== false &&
+      sourceBytes >= compilerPayloadMinimumBytes &&
+      source.length * 2 < maximum
+    ) {
+      if (shared.payloads?.maxBytes !== maximum)
+        shared.payloads = new CompilerPayloadCache(
+          maximum,
+          Math.max(1, Math.floor(128 / partitions))
+        );
+
+      const options = {
+        ...input,
+        ...("source" in input ? { source: undefined } : { contents: undefined })
+      };
+
+      let identity: string | undefined;
+
+      try {
+        identity = await getCompilerIdentity();
+      } catch (error) {
+        shared.payloadReady = false;
+        recordCompilationDiagnostic("worker-ipc-bypass", {
+          reason: "compiler-identity-unavailable",
+          error: String(error)
+        });
+      }
+
+      this.stale(generation);
+
+      if (identity) {
+        const context = compilerPayloadContext([
+          identity,
+          shared.filename,
+          kind,
+          options
+        ]);
+
+        sourcePayload = shared.payloads.prepare(
+          { environment: this.environment, generation, context },
+          source
+        );
+
+        if (sourcePayload && !shared.payloadReady) sourcePayload.inline = true;
+      }
+    }
+
+    const transferredInput =
+      sourcePayload && !sourcePayload.inline
+        ? {
+            ...input,
+            ...("source" in input ? { source: "" } : { contents: "" })
+          }
+        : input;
+
+    recordCompilationDiagnostic("worker-ipc-source", {
+      sourceBytes: sourcePayload && !sourcePayload.inline ? 0 : sourceBytes,
+      originalBytes: sourceBytes,
+      referenceBytes: sourcePayload
+        ? Buffer.byteLength(JSON.stringify(sourcePayload))
+        : 0,
+      mode: sourcePayload
+        ? sourcePayload.inline
+          ? "seed"
+          : "reference"
+        : "direct"
+    });
+
     const { port1, port2 } = new MessageChannel();
     const respond = AsyncResource.bind(async (request: ProviderRequest) => {
       let response: ProviderResponse;
 
       try {
-        const value = await providerRequest.run(true, () =>
-          request.kind === "resolve"
-            ? provider!.resolve(...request.args)
-            : provider!.load(...request.args)
-        );
+        this.stale(generation);
 
+        let value: unknown;
+
+        if (request.kind === "payload") {
+          if (
+            !sourcePayload ||
+            !sameCompilerPayload(sourcePayload.reference, request.reference)
+          )
+            throw new Error("Unknown compiler source payload reference");
+
+          // Keep the original job string alive until completion. An arbitrary
+          // worker can miss even when the shared sender cache has already evicted it.
+          value = source;
+          recordCompilationDiagnostic("worker-ipc-fetch", {
+            bytes: sourceBytes
+          });
+        } else {
+          value = await providerRequest.run(true, () =>
+            request.kind === "resolve"
+              ? provider!.resolve(...request.args)
+              : provider!.load(...request.args)
+          );
+        }
+
+        this.stale(generation);
         response = { id: request.id, ok: true, value };
       } catch (error) {
         response = {
@@ -397,8 +506,12 @@ export class CompilationExecution {
       }
     });
 
-    port1.on("message", (request: ProviderRequest) => {
-      void respond(request);
+    port1.on("message", (request: ProviderRequest | ProviderBatch) => {
+      // Batching changes transport only. Every provider call still runs in the
+      // original order, including its project-engine registry bookkeeping.
+      if (request.kind === "batch")
+        for (const item of request.requests) void respond(item);
+      else void respond(request);
     });
 
     try {
@@ -413,12 +526,14 @@ export class CompilationExecution {
         .run(
           {
             kind,
-            input,
+            input: transferredInput,
             provider: !!provider,
             environment: this.environment,
-            generation: this.generation,
+            generation,
             cache: this.cacheEnabled,
             cachePartitions: partitions,
+            sourcePayload,
+            batchProviderRequests: this.cacheEnabled,
             port: port2
           } as CompilerJob,
           { transferList, signal: this.abort.signal }
@@ -442,6 +557,24 @@ export class CompilationExecution {
         milliseconds: response.duration,
         kind
       });
+
+      if (response.transport)
+        recordCompilationDiagnostic("worker-ipc-result", response.transport);
+
+      if (this.shared) {
+        this.shared.payloadReady =
+          this.shared.payloadReady !== false &&
+          response.transport?.protocol === compilerPayloadProtocol;
+
+        if (!this.shared.payloadReady)
+          this.shared.payloads?.reset(this.environment);
+        else if (sourcePayload && !sourcePayload.inline && response.transport)
+          this.shared.payloads?.feedback(
+            sourcePayload.reference,
+            response.transport.payloadHits > 0
+          );
+      }
+
       recordCompilationDiagnostic("worker-overhead", {
         milliseconds: Math.max(
           0,
