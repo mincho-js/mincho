@@ -158,6 +158,10 @@ async function main(): Promise<void> {
         join(consumerRoot, "fixture", "extraction")
       );
       await runNode(
+        ["fixture/modules/compiler-execution.mjs"],
+        join(consumerRoot, "fixture", "modules")
+      );
+      await runNode(
         ["fixture/modules/persistent-cache.mjs"],
         join(consumerRoot, "fixture", "modules")
       );

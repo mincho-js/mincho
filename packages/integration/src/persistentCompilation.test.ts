@@ -48,12 +48,13 @@ it.each<MinchoCacheOptions>([{ type: "filesystem" }])(
     const { root, filename, source, create } = await fixture(cacheOptions);
     const diagnostics = new CompilationDiagnostics({ console: true });
 
+    // Other tests create workspace directories; observe only this fixture.
     const transform = (cache: CompilationCache) =>
       diagnostics.run(filename, "test", () =>
         babelTransformSource({
           filename,
           source,
-          babel: { compilationCache: cache }
+          babel: { cwd: root, compilationCache: cache }
         })
       );
 

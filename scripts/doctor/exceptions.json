@@ -1218,5 +1218,15 @@
     "count": 1,
     "reason": "This fallback names Vite's cache storage directory, not a dependency resolution path. Resolved Vite configurations supply cacheDir directly, including strict PnP builds; require.resolve cannot select a writable cache directory.",
     "expires": "2026-12-31"
+  },
+  {
+    "id": "integration-compiler-transport-test-script-loader",
+    "file": "packages/integration/src/compilerTransport.test.ts",
+    "type": "warning",
+    "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
+    "source": "loader: \"ts\",",
+    "count": 1,
+    "reason": "This scoped compiler transport fixture selects the built-in TypeScript script loader. It does not refer to a Webpack loader package or dependency.",
+    "expires": "2026-12-31"
   }
 ]

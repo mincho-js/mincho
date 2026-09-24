@@ -28,6 +28,12 @@ The pure `@mincho-js/integration/package-graph` subpath is imported and required
 at runtime and checked through both conditional declaration formats with direct
 API presets. Its ESM/CJS copies must produce equal package order and witnesses.
 
+`modules/compiler-execution.mjs` checks reusable compiler workers through both
+ESM and CommonJS entry points. It compares transformed JS, source maps and
+dependency metadata with inline execution, observes a verified source payload
+hit, and checks equivalent CSS from worker-enabled Vite and esbuild builds.
+Both installed consumers also type-check the public execution settings.
+
 `modules/library-css.mjs` produces a split component library using the installed
 Vite adapter. Plain Vite and native esbuild consumers load its ESM/CJS component
 entries, retaining shared, CSS-only, and extracted Mincho styles in dependency
@@ -59,7 +65,7 @@ bytes are reported individually, and shared selectors across output files are
 not treated as a global deduplication failure.
 
 An additional Vite build loads `minchoVitePlugin` through CommonJS `require`
-with the default worker analysis. Its separate TypeScript entry composes
+with explicitly enabled worker analysis. Its separate TypeScript entry composes
 `css([rules.css(...)])` so Babel extraction reaches Mincho's registry graph;
 the comparison fixture's `.css.ts` file is handled by vanilla-extract. The
 additional build observes the native packaged CommonJS worker, requires a
