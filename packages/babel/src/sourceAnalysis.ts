@@ -17,7 +17,7 @@ export function analyzeSource(
 ): SourceAnalysis {
   const jsx = !/\.[cm]?ts$/.test(filename);
 
-  return (cache ?? new SourceAstCache(undefined, 0, 0)).analyze(
+  return (cache ?? new SourceAstCache(undefined, 0, 0)).analyzeSyntax(
     {
       resolvedFile: filename,
       source,

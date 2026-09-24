@@ -54,6 +54,16 @@ export class SourceAstCache {
     { value: unknown; bytes: number }
   >();
   private bytes = 0;
+  private readonly inputKeys = new WeakMap<
+    StaticCssModuleParserInput,
+    {
+      source: string;
+      filename: string;
+      options: string;
+      syntax: string;
+      file: string;
+    }
+  >();
 
   constructor(
     private readonly observe?: (hit: boolean, kind?: string) => void,
@@ -115,31 +125,85 @@ export class SourceAstCache {
     return reusable ? cloneAst(ast) : ast;
   }
 
+  private keys(input: StaticCssModuleParserInput) {
+    const source = input.source;
+    const filename = input.resolvedFile;
+    const options = JSON.stringify(input.parserOptions);
+    const previous = this.inputKeys.get(input);
+    if (
+      previous?.source === source &&
+      previous.filename === filename &&
+      previous.options === options
+    )
+      return previous;
+
+    // Hash code units directly, rather than allocating an escaped JSON copy.
+    // UTF-8 would collapse different lone surrogates to the replacement char.
+    const syntax = createHash("sha256")
+      .update(options)
+      .update("\0")
+      .update(source, "utf16le")
+      .digest("hex");
+
+    const file = createHash("sha256")
+      .update(JSON.stringify(filename))
+      .update(syntax)
+      .digest("hex");
+
+    const value = { source, filename, options, syntax, file };
+    this.inputKeys.set(input, value);
+
+    return value;
+  }
+
+  /** Only filename-independent immutable summaries may use this cache. ASTs,
+   * NodePaths, resolution and code frames remain file-specific.
+   */
+  analyzeSyntax<T>(
+    input: StaticCssModuleParserInput,
+    name: string,
+    inspect: (ast: t.File) => T
+  ): T {
+    return this.inspect(
+      input,
+      `syntax:${name}:${this.keys(input).syntax}`,
+      inspect,
+      false
+    );
+  }
+
   /** Inspect the immutable parse without allocating a second AST or Babel scopes. */
   analyze<T>(
     input: StaticCssModuleParserInput,
     name: string,
     inspect: (ast: t.File) => T
   ): T {
-    const key =
-      `analysis:${name}:` +
-      createHash("sha256").update(JSON.stringify(input)).digest("hex");
+    return this.inspect(
+      input,
+      `analysis:${name}:${this.keys(input).file}`,
+      inspect
+    );
+  }
 
+  private inspect<T>(
+    input: StaticCssModuleParserInput,
+    key: string,
+    inspect: (ast: t.File) => T,
+    retainAst = true
+  ): T {
     const previous = this.get<T>(key);
     this.observeResult("analysis", previous !== undefined);
 
     if (previous !== undefined) return previous;
 
-    const result = inspect(this.read(input, false));
+    const result = inspect(this.read(input, retainAst));
     this.set(key, result, Buffer.byteLength(JSON.stringify(result)));
 
     return result;
   }
 
   private read(input: StaticCssModuleParserInput, retainAst = true): t.File {
-    const key =
-      "ast:" + createHash("sha256").update(JSON.stringify(input)).digest("hex");
-
+    const key = `ast:${this.keys(input).file}`;
     let cached = this.get<t.File>(key);
     this.observe?.(Boolean(cached));
 
