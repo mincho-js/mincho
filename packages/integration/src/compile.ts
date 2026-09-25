@@ -1,3 +1,4 @@
+import { scopedFileScopeRuntime } from "./fileScopeRuntime.js";
 import { measureCompilationPhase } from "./diagnostics.js";
 import { executeScopedTransform } from "./compilationExecution.js";
 import { cacheDigest } from "./compilationCache.js";
@@ -44,34 +45,17 @@ function addScopedSource(options: Parameters<typeof addFileScope>[0]): string {
   // scope boundary. Restore the parent's counter without hoisting its requires.
   // The public API has no setter, so restoration costs one increment per prior
   // parent identifier. Closure locals add no bindings to the caller's source.
-  const scopedRuntime = `((fileScope) => {
-    let parentCounter = 0;
-    return {
-      setFileScope(...args) {
-        parentCounter = fileScope.hasFileScope()
-          ? fileScope.getAndIncrementRefCounter()
-          : 0;
-        fileScope.setFileScope(...args);
-      },
-      endFileScope() {
-        fileScope.endFileScope();
-        for (let index = 0; index < parentCounter; index++) {
-          fileScope.getAndIncrementRefCounter();
-        }
-      }
-    };
-  })(require("@vanilla-extract/css/fileScope"))`;
 
   // Upgrade standard generated boilerplate even when the source arrived scoped.
   // Custom scope wrappers with renamed bindings are not rewritten.
   return source
     .replace(
       /^import \{ setFileScope, endFileScope \} from "@vanilla-extract\/css\/fileScope";/,
-      `const { setFileScope, endFileScope } = ${scopedRuntime};`
+      `const { setFileScope, endFileScope } = ${scopedFileScopeRuntime};`
     )
     .replace(
       /^const __vanilla_filescope__ = require\("@vanilla-extract\/css\/fileScope"\);/,
-      `const __vanilla_filescope__ = ${scopedRuntime};`
+      `const __vanilla_filescope__ = ${scopedFileScopeRuntime};`
     );
 }
 

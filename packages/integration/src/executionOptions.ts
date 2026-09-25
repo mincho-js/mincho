@@ -5,6 +5,9 @@ export interface MinchoExecutionOptions {
 
   /** Optional cap on concurrent leaf filesystem operations. */
   ioConcurrency?: number;
+
+  /** Defaults to fresh. Auto reuses only contexts passing the compatibility proof. */
+  evaluation?: "auto" | "fresh";
 }
 
 /** Omitted or true uses memory only. Filesystem caching is opt-in. */

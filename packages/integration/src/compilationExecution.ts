@@ -94,6 +94,7 @@ export class CompilationExecution {
   compilationCache?: CompilationCache;
   readonly io;
   readonly environment = `${process.pid}:${++environmentId}`;
+  readonly evaluation: "auto" | "fresh";
   readonly cacheEnabled: boolean;
   private readonly workers: "auto" | number;
   private budget?: Promise<CpuBudget>;
@@ -115,6 +116,11 @@ export class CompilationExecution {
       throw new TypeError(
         "execution.workers must be auto or a non-negative integer"
       );
+
+    this.evaluation = options.evaluation ?? "fresh";
+
+    if (!["auto", "fresh"].includes(this.evaluation))
+      throw new TypeError("execution.evaluation must be auto or fresh");
 
     this.io = getCompilationIoPool(options.ioConcurrency);
     this.cacheEnabled = cacheEnabled;
