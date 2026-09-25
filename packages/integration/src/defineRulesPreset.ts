@@ -8,6 +8,7 @@ import {
 } from "@mincho-js/css/defineRules/registry";
 import { defineRules } from "@mincho-js/css";
 import { processVanillaFile } from "@vanilla-extract/integration";
+import { processVanillaWithExecution } from "./vanillaEvaluation.js";
 import {
   collectDefineRulesPackageGraph,
   getDefineRulesPackageStyleSpecifiers,
@@ -51,24 +52,24 @@ export async function processDefineRulesPresetRegistryFile(
   const registrySession = beginDefineRulesRegistrySession();
 
   try {
-    const source = await measureCompilationPhase("vanilla-extract", () =>
-      processVanillaFile(options)
+    return await measureCompilationPhase("vanilla-extract", () =>
+      processVanillaWithExecution(options, (source) => {
+        const presetArtifacts =
+          validateDefineRulesRegistrySessionArtifacts(registrySession);
+
+        const packageGraph = collectDefineRulesPackageGraph(presetArtifacts, {
+          owner: options.filePath
+        });
+
+        return {
+          source,
+          registrySession,
+          packageGraph,
+          ancestorStyleSpecifiers:
+            getDefineRulesPackageStyleSpecifiers(packageGraph)
+        };
+      })
     );
-
-    const presetArtifacts =
-      validateDefineRulesRegistrySessionArtifacts(registrySession);
-
-    const packageGraph = collectDefineRulesPackageGraph(presetArtifacts, {
-      owner: options.filePath
-    });
-
-    return {
-      source,
-      registrySession,
-      packageGraph,
-      ancestorStyleSpecifiers:
-        getDefineRulesPackageStyleSpecifiers(packageGraph)
-    };
   } finally {
     endDefineRulesRegistrySession();
   }

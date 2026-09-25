@@ -51,6 +51,7 @@
     "directory": "_release/package"
   },
   "files": [
+    "THIRD_PARTY_NOTICES.md",
     "dist",
     "src",
     "**/package.json"
