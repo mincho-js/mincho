@@ -117,7 +117,7 @@ export class CompilationExecution {
         "execution.workers must be auto or a non-negative integer"
       );
 
-    this.evaluation = options.evaluation ?? "fresh";
+    this.evaluation = options.evaluation ?? "auto";
 
     if (!["auto", "fresh"].includes(this.evaluation))
       throw new TypeError("execution.evaluation must be auto or fresh");

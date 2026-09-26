@@ -42,7 +42,11 @@ async function fixture(options?: MinchoCacheOptions) {
   return { root, filename, source, create };
 }
 
-it.each<MinchoCacheOptions>([{ type: "filesystem" }])(
+it.each<MinchoCacheOptions | undefined>([
+  undefined,
+  true,
+  { type: "filesystem" }
+])(
   "restores real Babel results and revalidates virtual providers with cache %j",
   async (cacheOptions) => {
     const { root, filename, source, create } = await fixture(cacheOptions);
@@ -104,12 +108,7 @@ it.each<MinchoCacheOptions>([{ type: "filesystem" }])(
   }
 );
 
-it.each<MinchoCacheOptions | undefined>([
-  undefined,
-  true,
-  false,
-  { type: "memory" }
-])(
+it.each<MinchoCacheOptions>([false, { type: "memory" }])(
   "does not persist results when filesystem caching is disabled with %j",
   async (options) => {
     const { root, filename, source, create } = await fixture(options);

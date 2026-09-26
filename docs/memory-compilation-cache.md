@@ -14,7 +14,7 @@ resolutions, dependency watches, registry sessions and generated CSS remain
 specific to the environment. Mutable Babel ASTs and restored transform metadata
 are copied before use.
 
-To reuse validated results after a process restart, opt into the
+Validated results can also be reused after a process restart through the
 [filesystem compilation cache](./persistent-compilation-cache.md).
 
 ## Validation and lifetime

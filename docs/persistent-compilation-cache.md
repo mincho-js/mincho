@@ -1,16 +1,16 @@
 # Filesystem compilation cache
 
-Mincho keeps its in-memory compilation cache enabled by default. Vite and
-esbuild can opt into a filesystem cache to reuse validated Babel transforms and
-compiled CSS sidecars after a process restart:
+Vite and esbuild enable memory and filesystem compilation caches by default to
+reuse validated Babel transforms and compiled CSS sidecars after a process
+restart. Explicit filesystem configuration is also supported:
 
 ```ts
 minchoVitePlugin({ cache: { type: "filesystem" } });
 minchoEsbuildPlugins({ cache: { type: "filesystem" } });
 ```
 
-`cache: true`, an omitted option, and `{ type: "memory" }` retain memory-only
-caching. `cache: false` disables both layers. The filesystem cache also retains
+`cache: true` and an omitted option enable both layers. `{ type: "memory" }`
+retains memory-only caching. `cache: false` disables both layers. The filesystem cache also retains
 the bounded memory cache described in [Memory compilation cache](./memory-compilation-cache.md).
 
 The default directory is `<Vite cacheDir>/mincho` for Vite and
@@ -24,8 +24,8 @@ minchoVitePlugin({
   cache: {
     type: "filesystem",
     directory: "/tmp/my-project-mincho-cache",
-    maxBytes: 128 * 1024 * 1024
-  }
+    maxBytes: 128 * 1024 * 1024,
+  },
 });
 ```
 
@@ -53,5 +53,5 @@ serialization format and are not an interchange format for untrusted artifacts.
 
 Enable `diagnostics: { json: "mincho-build.json" }` to inspect `disk-cache-hit`,
 `cache-hit`, invalidation and write events. A disk read alone does not prove
-successful reuse: `cache-hit` records reuse after validation. No production
-default change or performance improvement is claimed by this opt-in feature.
+successful reuse: `cache-hit` records reuse after validation. See [Compilation performance](./compilation-performance.md) for the defaults
+and measurement scope. A cache hit alone does not imply a performance improvement.

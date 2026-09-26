@@ -83,8 +83,8 @@ enabling workers: startup and transfer can outweigh parallel execution.
 
 ## Guarded vanilla-extract evaluation
 
-Evaluation defaults to `"fresh"`. Opt in to guarded VM reuse through either
-bundler's execution options:
+Evaluation defaults to `"auto"`. Both bundlers accept explicit evaluation
+settings; `"fresh"` opts out of context and serialized result reuse:
 
 ```ts
 minchoVitePlugin({ execution: { evaluation: "auto" } });

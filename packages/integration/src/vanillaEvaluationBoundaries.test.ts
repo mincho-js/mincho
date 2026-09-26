@@ -38,8 +38,8 @@ async function options() {
 }
 
 describe("guarded evaluation boundaries", () => {
-  it("keeps fresh evaluation as the default", async () => {
-    const runtime = new CompilationExecution();
+  it("supports explicit fresh evaluation", async () => {
+    const runtime = new CompilationExecution({ evaluation: "fresh" });
     executions.push(runtime);
     const input = await options();
     const diagnostics = new CompilationDiagnostics({ console: true });

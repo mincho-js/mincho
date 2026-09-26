@@ -33,8 +33,8 @@ ESM and CommonJS entry points. It compares transformed JS, source maps and
 dependency metadata with inline execution, observes a verified source payload
 hit, and checks equivalent CSS from worker-enabled Vite and esbuild builds.
 Both installed consumers also type-check the public execution settings.
-`modules/guarded-evaluation.mjs` checks the default fresh evaluator and opt-in
-context reuse through ESM and CommonJS. It compares emitted CSS and package
+`modules/guarded-evaluation.mjs` checks default guarded context reuse and explicit
+fresh evaluation through ESM and CommonJS. It compares emitted CSS and package
 graphs, verifies serialized result replay uses isolated registry sessions, and
 checks that disabling evaluation result caching still allows context reuse.
 The consumer pins vanilla-extract integration 8.0.10, matching the workspace

@@ -13,9 +13,23 @@ afterEach(async () => {
   );
 });
 
-it.each(["esm/index.mjs", "cjs/index.cjs"])(
-  "restores compiled CSS and native assets in a new process through %s",
-  async (entry) => {
+const configurations = [
+  { name: "omitted", cache: undefined, persistent: true },
+  { name: "enabled", cache: true, persistent: true },
+  { name: "filesystem", cache: { type: "filesystem" }, persistent: true },
+  { name: "memory", cache: { type: "memory" }, persistent: false },
+  { name: "disabled", cache: false, persistent: false }
+];
+
+it.each(
+  ["development", "production"].flatMap((mode) =>
+    ["esm/index.mjs", "cjs/index.cjs"].flatMap((entry) =>
+      configurations.map((configuration) => ({ ...configuration, mode, entry }))
+    )
+  )
+)(
+  "revalidates CSS and assets through $entry with $name cache in $mode",
+  async ({ entry, mode, cache, persistent }) => {
     const parent = join(process.cwd(), ".cache");
     await mkdir(parent, { recursive: true });
 
@@ -44,11 +58,12 @@ it.each(["esm/index.mjs", "cjs/index.cjs"])(
         write: false,
         metafile: true,
         format: "esm",
+        define: { "process.env.NODE_ENV": ${JSON.stringify(JSON.stringify(mode))} },
         logLevel: "silent",
         external: ["@mincho-js/css"],
         loader: { ".png": "file" },
         plugins: minchoEsbuildPlugins({
-          cache: { type: "filesystem" },
+          cache: ${JSON.stringify(cache)},
           diagnostics: { json: "reports/build.json" }
         })
       });
@@ -82,12 +97,18 @@ it.each(["esm/index.mjs", "cjs/index.cjs"])(
     const warm = await run();
 
     expect(warm.files).toEqual(cold.files);
-    expect(warm.hits, "validated transform and sidecar hits").toEqual(
-      expect.arrayContaining([
-        expect.stringMatching(/^transform:/),
-        expect.stringMatching(/^compile:/)
-      ])
-    );
+
+    if (persistent) {
+      expect(warm.hits, "validated transform and sidecar hits").toEqual(
+        expect.arrayContaining([
+          expect.stringMatching(/^transform:/),
+          expect.stringMatching(/^compile:/)
+        ])
+      );
+    } else {
+      expect(warm.hits).toEqual([]);
+    }
+
     expect(
       warm.files.some(
         ([path, text]) =>

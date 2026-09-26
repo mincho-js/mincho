@@ -77,10 +77,10 @@ describe("compatible vanilla-extract evaluation", () => {
         .builds.flatMap((build) => build.events);
 
       expect(events.some((event) => event.phase === "vm-context-reuse")).toBe(
-        evaluation === "auto"
+        evaluation !== "fresh"
       );
       expect(events.some((event) => event.phase === "vm-script-hit")).toBe(
-        evaluation === "auto"
+        evaluation !== "fresh"
       );
     }
   );

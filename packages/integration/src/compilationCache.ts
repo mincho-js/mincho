@@ -98,20 +98,19 @@ export class CompilationCache {
       throw new TypeError("cache.evaluationResults must be boolean");
 
     if (
-      !options ||
-      typeof options !== "object" ||
-      options.type !== "filesystem"
+      options === false ||
+      (typeof options === "object" && options.type === "memory")
     ) {
       this.disk = undefined;
 
       return;
     }
 
-    const filesystem = options;
+    const filesystem = typeof options === "object" ? options : undefined;
     this.disk = new CompilationDiskCache(
-      resolve(filesystem.directory ?? directory),
+      resolve(filesystem?.directory ?? directory),
       getCompilerIdentity().then((identity) => `${identity}:${environment}`),
-      filesystem.maxBytes,
+      filesystem?.maxBytes,
       this.io
     );
   }

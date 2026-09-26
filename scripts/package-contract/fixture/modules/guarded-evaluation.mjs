@@ -96,15 +96,15 @@ try {
             events.filter((event) => event.phase === phase).length;
           assert.equal(
             count("vm-evaluate"),
-            evaluation === "auto" ? (evaluationResults ? 1 : 2) : 0
+            evaluation !== "fresh" ? (evaluationResults ? 1 : 2) : 0
           );
           assert.equal(
             count("vm-context-reuse"),
-            evaluation === "auto" && !evaluationResults ? 1 : 0
+            evaluation !== "fresh" && !evaluationResults ? 1 : 0
           );
           assert.equal(
             count("evaluation-result-hit"),
-            evaluation === "auto" && evaluationResults ? 1 : 0
+            evaluation !== "fresh" && evaluationResults ? 1 : 0
           );
         } finally {
           await execution.close();
