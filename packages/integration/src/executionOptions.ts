@@ -19,4 +19,7 @@ export type MinchoCacheOptions =
       directory?: string;
       /** Maximum total filesystem cache bytes; defaults to 256 MiB. */
       maxBytes?: number;
+
+      /** Reuse proved serialized evaluations when evaluation is auto. Defaults to true. */
+      evaluationResults?: boolean;
     };

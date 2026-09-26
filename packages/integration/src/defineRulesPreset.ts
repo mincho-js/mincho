@@ -8,7 +8,7 @@ import {
 } from "@mincho-js/css/defineRules/registry";
 import { defineRules } from "@mincho-js/css";
 import { processVanillaFile } from "@vanilla-extract/integration";
-import { processVanillaWithExecution } from "./vanillaEvaluation.js";
+import { processCachedEvaluation } from "./evaluationResultCache.js";
 import {
   collectDefineRulesPackageGraph,
   getDefineRulesPackageStyleSpecifiers,
@@ -53,7 +53,7 @@ export async function processDefineRulesPresetRegistryFile(
 
   try {
     return await measureCompilationPhase("vanilla-extract", () =>
-      processVanillaWithExecution(options, (source) => {
+      processCachedEvaluation(options, registrySession, (source) => {
         const presetArtifacts =
           validateDefineRulesRegistrySessionArtifacts(registrySession);
 

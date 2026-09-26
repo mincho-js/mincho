@@ -1,4 +1,4 @@
-# Compiler execution and worker transport
+# Compiler execution
 
 Vite and esbuild accept the same optional execution settings:
 
@@ -80,6 +80,39 @@ Diagnostics include `cpu-budget`, `worker-wait`, `worker-pool-initialize`,
 `worker-ipc-fetch` and `worker-ipc-result`. Transport byte counts cover payload
 fields, not complete structured-clone framing. Measure end-to-end builds before
 enabling workers: startup and transfer can outweigh parallel execution.
+
+## Guarded vanilla-extract evaluation
+
+Evaluation defaults to `"fresh"`. Opt in to guarded VM reuse through either
+bundler's execution options:
+
+```ts
+minchoVitePlugin({ execution: { evaluation: "auto" } });
+minchoEsbuildPlugins({ execution: { evaluation: "auto" } });
+```
+
+`"auto"` reuses a context only after a closed AST proof accepts the stylesheet.
+The proof recognizes exact compiler helper and file-scope wrapper bodies,
+literal data, and a bounded set of CSS library calls. Unknown effects, global
+or prototype access, getters, timers, and dynamic property access use the
+upstream fresh evaluator. Adapter reuse also requires the tested
+`@vanilla-extract/integration` 8.0.10/8.0.11 protocol and shared adapter/file-scope
+module instances. An active file scope or an occupied context uses fresh
+evaluation as well.
+
+Each compilation execution owns its context and a script cache capped at
+512 entries and 64 MiB of source. Closing the owner clears that state.
+Evaluation, serialization, and registry validation failures discard the
+context. File-scope, adapter, and `NODE_ENV` cleanup completes before asynchronous
+artifact serialization starts.
+
+Proved evaluations can also reuse serialized CSS and exports. Input fingerprints
+and compiler/environment identity validate entries; every replay uses the
+current CSS serializer and a separately cloned registry snapshot. Opaque
+registry values and custom identifier callbacks execute normally on each call.
+Use `cache: { type: "memory", evaluationResults: false }` to evaluate each
+stylesheet while retaining guarded context/script reuse. `cache: false` or
+`execution: { evaluation: "fresh" }` disables evaluation reuse entirely.
 
 ## Verification
 

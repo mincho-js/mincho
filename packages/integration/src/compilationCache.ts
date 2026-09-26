@@ -43,6 +43,7 @@ export interface CacheEntry<T> {
 /** One environment owns this cache. No failures or stale writes survive a generation. */
 export class CompilationCache {
   readonly parser: InternalSourceAstCache;
+  evaluationResults = true;
   private io = getCompilationIoPool();
   private disk?: CompilationDiskCache;
   private readonly costs = new WeakMap<CacheEntry<unknown>, number>();
@@ -84,6 +85,17 @@ export class CompilationCache {
     io?: CompilationIoPool
   ): void {
     if (io) this.io = io;
+
+    this.evaluationResults =
+      options !== false &&
+      (typeof options !== "object" || options.evaluationResults !== false);
+
+    if (
+      typeof options === "object" &&
+      options.evaluationResults !== undefined &&
+      typeof options.evaluationResults !== "boolean"
+    )
+      throw new TypeError("cache.evaluationResults must be boolean");
 
     if (
       !options ||

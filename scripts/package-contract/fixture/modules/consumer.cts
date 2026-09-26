@@ -54,12 +54,14 @@ const extractCalls = {
 
 const cache = {
   type: "filesystem",
-  maxBytes: 1024 * 1024
+  maxBytes: 1024 * 1024,
+  evaluationResults: false
 } satisfies IntegrationCacheOptions & EsbuildCacheOptions & ViteCacheOptions;
 
 const execution = {
   workers: 1,
-  ioConcurrency: 2
+  ioConcurrency: 2,
+  evaluation: "auto"
 } satisfies IntegrationExecutionOptions &
   EsbuildExecutionOptions &
   ViteExecutionOptions;

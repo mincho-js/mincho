@@ -33,6 +33,7 @@ async function writeConsumerManifest(
   const dependencies = { ...packedResolutions };
   Object.assign(dependencies, {
     "@vanilla-extract/css": "1.20.1",
+    "@vanilla-extract/integration": "8.0.10",
     "@vanilla-extract/dynamic": "2.1.5",
     "@vanilla-extract/recipes": "0.5.7",
     "@vanilla-extract/sprinkles": "1.7.1",
@@ -51,7 +52,13 @@ async function writeConsumerManifest(
         dependencies,
         // Yarn resolves transitive semver descriptors separately from root file
         // dependencies. Keep the complete test closure on these exact tarballs.
-        resolutions: packedResolutions,
+        resolutions: {
+          ...packedResolutions,
+          "@vanilla-extract/integration": "8.0.10"
+        },
+        overrides: {
+          "@vanilla-extract/integration": "$@vanilla-extract/integration"
+        },
         devDependencies: { typescript: "5.9.3", "@types/node": "25.6.2" }
       },
       null,
@@ -159,6 +166,10 @@ async function main(): Promise<void> {
       );
       await runNode(
         ["fixture/modules/compiler-execution.mjs"],
+        join(consumerRoot, "fixture", "modules")
+      );
+      await runNode(
+        ["fixture/modules/guarded-evaluation.mjs"],
         join(consumerRoot, "fixture", "modules")
       );
       await runNode(
