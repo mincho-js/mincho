@@ -12,6 +12,7 @@ import {
   type ViteDevServer
 } from "vite";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { vanillaExtractPlugin } from "@vanilla-extract/vite-plugin";
 import { minchoVitePlugin } from "./index.js";
 
 const roots: string[] = [];
@@ -40,12 +41,28 @@ async function createFixture(files: Record<string, string>) {
   return root;
 }
 
-async function createFixtureServer(root: string, plugins: Plugin[]) {
+async function createFixtureServer(
+  root: string,
+  plugins: Plugin[],
+  watch = false
+) {
   const server = await createServer({
     root,
     configFile: false,
     logLevel: "silent",
-    server: { middlewareMode: true, watch: null },
+    server: {
+      middlewareMode: true,
+      watch: watch
+        ? {
+            usePolling: true,
+            interval: 20,
+
+            // Deliver complete edits instead of discarding rapid writes in the
+            // watcher's 50 ms change throttle. Both Vite watchers inherit this.
+            awaitWriteFinish: { stabilityThreshold: 50, pollInterval: 10 }
+          }
+        : null
+    },
     optimizeDeps: { noDiscovery: true, include: [] },
     plugins
   });
@@ -55,31 +72,204 @@ async function createFixtureServer(root: string, plugins: Plugin[]) {
   return server;
 }
 
-async function readCssPropOutput(environment: DevEnvironment) {
-  const result = await environment.transformRequest("/src/entry.tsx");
-  const owner = await environment.moduleGraph.getModuleByUrl("/src/entry.tsx");
-  const sidecar = [...(owner?.importedModules ?? [])].find((module) =>
-    /\/extracted_[^/]+\.css\.ts$/.test(module.id ?? "")
-  );
+async function readCssPropOutput(
+  environment: DevEnvironment,
+  ownerUrl = "/src/entry.tsx"
+) {
+  const result = await environment.transformRequest(ownerUrl);
+  const owner = await environment.moduleGraph.getModuleByUrl(ownerUrl);
+  const sidecar = ownerUrl.endsWith(".css.ts")
+    ? owner
+    : [...(owner?.importedModules ?? [])].find((module) =>
+        /\/extracted_[^/]+\.css\.ts$/.test(module.id ?? "")
+      );
   if (!sidecar) throw new Error("Expected the owner to import extracted CSS");
 
   await environment.transformRequest(sidecar.url);
 
-  const virtualCss = [...sidecar.importedModules].find((module) =>
-    module.id?.startsWith("\0mincho-virtual-css:")
+  const virtualCss = [...sidecar.importedModules].filter(
+    (module) =>
+      module.id?.startsWith("\0mincho-virtual-css:") ||
+      module.id?.includes(".vanilla.css")
   );
-  if (!virtualCss?.id)
+  if (virtualCss.length === 0)
     throw new Error("Expected the sidecar to import virtual CSS");
 
-  const loaded = await environment.pluginContainer.load(virtualCss.id);
+  const loaded = await Promise.all(
+    virtualCss.map((module) => environment.pluginContainer.load(module.id!))
+  );
 
   return {
     code: result?.code,
-    css: typeof loaded === "string" ? loaded : loaded?.code
+    css: loaded
+      .map((source) => (typeof source === "string" ? source : source?.code))
+      .join("\n")
   };
 }
 
 describe("mincho with the Vite runtime", () => {
+  it("refreshes inherited rules after parent edits, deletion and failed evaluation", async () => {
+    const parentSource = (color: string | undefined) =>
+      [
+        'import { defineRules } from "@mincho-js/css";',
+        "const rules = defineRules({ properties: { color: true } });",
+        ...(color === undefined
+          ? []
+          : [`rules.css({ color: ${JSON.stringify(color)} });`]),
+        "export const preset = rules.preset;"
+      ].join("\n");
+
+    const root = await createFixture({
+      "src/parent.css.ts": parentSource("red"),
+      "src/entry.css.ts": [
+        'import { defineRules } from "@mincho-js/css";',
+        'import { preset } from "./parent.css";',
+        "const rules = defineRules({ presets: preset, properties: { color: true } });",
+        'export const cls = rules.css({ color: "green" });',
+        "export const childPreset = rules.preset;"
+      ].join("\n")
+    });
+
+    let resolveWatcherReady!: () => void;
+    const watcherReady = new Promise<void>((resolve) => {
+      resolveWatcherReady = resolve;
+    });
+
+    let completedUpdates = 0;
+    const server = await createFixtureServer(
+      root,
+      [
+        minchoVitePlugin(),
+        ...vanillaExtractPlugin(),
+        {
+          name: "observe-hmr-completion",
+
+          config() {
+            return {
+              server: {
+                hotUpdateEnvironments: async (server, hmr) => {
+                  await Promise.all(
+                    Object.values(server.environments).map(hmr)
+                  );
+                  completedUpdates++;
+                }
+              }
+            };
+          },
+
+          configureServer(server) {
+            server.watcher.once("ready", () => resolveWatcherReady());
+          }
+        }
+      ],
+      true
+    );
+
+    const client = server.environments.client!;
+    const hotMessages = vi.spyOn(client.hot, "send");
+    const parent = join(root, "src/parent.css.ts");
+
+    const updateParent = async (source: string) => {
+      await watcherReady;
+
+      const previous = completedUpdates;
+      await writeFile(parent, source);
+
+      // Request after Vite has completed HMR invalidation in every environment.
+      await vi.waitFor(
+        () => {
+          expect(
+            completedUpdates,
+            JSON.stringify({ source, calls: hotMessages.mock.calls })
+          ).toBeGreaterThan(previous);
+        },
+        { timeout: 5_000 }
+      );
+    };
+
+    const readOutput = async () => {
+      const result = await readCssPropOutput(client, "/src/entry.css.ts");
+      const entry =
+        await client.moduleGraph.getModuleByUrl("/src/entry.css.ts");
+
+      for (const module of entry?.importedModules ?? []) {
+        if (module.id?.includes(".vanilla.css"))
+          await client.transformRequest(module.url);
+      }
+
+      return result;
+    };
+
+    const snapshotRoot = (code: string | undefined) => {
+      const root = code?.match(
+        /\brootNodeId\s*:\s*["']([a-f0-9]{64})["']/
+      )?.[1];
+
+      expect(root).toBeDefined();
+
+      return root;
+    };
+
+    const initial = await readOutput();
+
+    expect(initial.css).toContain("color: red;");
+    expect(initial.css).toContain("color: green;");
+
+    const initialRoot = snapshotRoot(initial.code);
+
+    await updateParent(parentSource("blue"));
+    await vi.waitFor(
+      async () => {
+        const next = await readOutput();
+
+        expect(next.css).toContain("color: blue;");
+        expect(next.css).not.toContain("color: red;");
+        expect(next.css).toContain("color: green;");
+      },
+      { timeout: 5_000 }
+    );
+
+    await updateParent(parentSource(undefined));
+    await vi.waitFor(
+      async () => {
+        const next = await readOutput();
+
+        expect(next.css).not.toContain("color: blue;");
+        expect(next.css).toContain("color: green;");
+        expect(next.code?.match(/\batomId\s*:/g)).toHaveLength(1);
+      },
+      { timeout: 5_000 }
+    );
+
+    await updateParent(
+      `${parentSource("purple")}\nthrow new Error("parent evaluation failed");`
+    );
+    await vi.waitFor(
+      async () => {
+        await expect(
+          client.transformRequest("/src/entry.css.ts")
+        ).rejects.toThrow("parent evaluation failed");
+      },
+      { timeout: 5_000 }
+    );
+
+    await updateParent(parentSource("orange"));
+    await vi.waitFor(
+      async () => {
+        const next = await readOutput();
+
+        expect(next.css).toContain("color: orange;");
+        expect(next.css).toContain("color: green;");
+        expect(next.css).not.toMatch(/color: (?:red|blue|purple);/);
+
+        // The exported snapshot is regenerated along with its CSS.
+        expect(snapshotRoot(next.code)).not.toBe(initialRoot);
+        expect(next.code?.match(/\batomId\s*:/g)).toHaveLength(2);
+      },
+      { timeout: 5_000 }
+    );
+  });
+
   it("preserves preceding pre transforms and composes their source maps", async () => {
     const source = [
       'import { css } from "@mincho-js/css";',

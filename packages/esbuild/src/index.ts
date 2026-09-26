@@ -8,6 +8,11 @@ import {
   type ResolveResult
 } from "esbuild";
 import { EsbuildAssets } from "./assets.js";
+export { buildWithMincho, type BuildWithMinchoOptions } from "./build.js";
+import {
+  getBuildTransaction,
+  recordPackageGraph
+} from "./buildInputSnapshot.js";
 import {
   type BabelOptions,
   type InternalStaticCssEvalSourceUnsupportedReason as StaticCssEvalSourceUnsupportedReason,
@@ -189,6 +194,11 @@ function createEsbuildStaticCssEvalSourceProvider(options: {
         ownerId,
         ownerSource: options.ownerSource,
         assets: options.assets,
+        readFile: getBuildTransaction(
+          options.build.initialOptions
+        )?.snapshot.readFile.bind(
+          getBuildTransaction(options.build.initialOptions)!.snapshot
+        ),
         rootRealpath: options.rootRealpath
       });
 
@@ -269,6 +279,7 @@ async function loadEsbuildStaticCssEvalSource(options: {
   ownerSource: string;
   assets: EsbuildAssets;
   rootRealpath: Promise<string>;
+  readFile?: (path: string) => Promise<Buffer>;
 }): Promise<StaticCssEvalLoadedSource | null> {
   const fileId = normalizeStaticCssEvalFileId(options.id);
 
@@ -329,7 +340,9 @@ async function loadEsbuildStaticCssEvalSource(options: {
 
   try {
     [source, stat] = await Promise.all([
-      fs.promises.readFile(realpath, "utf8"),
+      options.readFile
+        ? options.readFile(realpath).then((bytes) => bytes.toString("utf8"))
+        : fs.promises.readFile(realpath, "utf8"),
       fs.promises.stat(realpath)
     ]);
   } catch (error) {
@@ -703,7 +716,7 @@ function createStaticCssEvalResolveResult(path: string): ResolveResult {
   };
 }
 
-interface MinchoEsbuildPluginOptions {
+export interface MinchoEsbuildPluginOptions {
   includeNodeModulesPattern?: RegExp;
   jsxCssProp?: boolean;
 }
@@ -730,6 +743,7 @@ export function minchoEsbuildPlugin({
     name: "mincho-js-esbuild",
 
     setup(build) {
+      const transaction = getBuildTransaction(build.initialOptions);
       const resolvers = new Map<string, string>();
       const resolverCache = new Map<string, string>();
       const staticCssEvalResolutionCache: StaticCssEvalResolutionCache =
@@ -789,19 +803,47 @@ export function minchoEsbuildPlugin({
             cwd: build.initialOptions.absWorkingDir,
             loader: assets.getCompileLoaders(),
             plugins: [assets.createCompilePlugin(assetWatchFiles)],
+            readFileBytes: transaction?.snapshot.readFile.bind(
+              transaction.snapshot
+            ),
+            readFile: transaction
+              ? (filePath: string) =>
+                  transaction.snapshot
+                    .readFile(filePath)
+                    .then((bytes) => bytes.toString("utf8"))
+              : undefined,
             resolverCache
           });
 
           try {
-            const { ancestorStyleSpecifiers, source: registrySource } =
-              await integrationHelpers.runDefineRulesPresetRegistryStep(() =>
-                integrationHelpers.processDefineRulesPresetRegistryFile({
-                  source,
-                  filePath: path,
-                  outputCss: undefined,
-                  identOption: build.initialOptions.minify ? "short" : "debug"
-                })
+            const {
+              ancestorStyleSpecifiers,
+              source: registrySource,
+              packageGraph
+            } = await integrationHelpers.runDefineRulesPresetRegistryStep(() =>
+              integrationHelpers.processDefineRulesPresetRegistryFile({
+                source,
+                filePath: path,
+                outputCss: undefined,
+                identOption: build.initialOptions.minify ? "short" : "debug"
+              })
+            );
+
+            if (transaction) {
+              if (!packageGraph)
+                throw new Error(
+                  "Mincho build requires package graph metadata from the registry."
+                );
+
+              // Babel currently emits one extracted module per source. Keep
+              // multiple extraction identities complete and order-independent.
+              recordPackageGraph(
+                transaction,
+                pluginData.mainFilePath,
+                path,
+                packageGraph
               );
+            }
 
             const contents = `${ancestorStyleSpecifiers
               .map((specifier) => `import ${JSON.stringify(specifier)};`)
@@ -843,7 +885,10 @@ export function minchoEsbuildPlugin({
           if (!includeNodeModulesPattern.test(args.path)) return;
         }
 
-        const source = await fs.promises.readFile(args.path, "utf8");
+        const source = transaction
+          ? (await transaction.snapshot.readFile(args.path)).toString("utf8")
+          : await fs.promises.readFile(args.path, "utf8");
+
         const babelOptions: MinchoBabelOptionsWithStaticCssEval | undefined =
           jsxCssProp === undefined ? undefined : { jsxCssProp };
 

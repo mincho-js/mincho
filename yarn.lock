@@ -163,6 +163,16 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@ampproject/remapping@npm:^2.3.0":
+  version: 2.3.0
+  resolution: "@ampproject/remapping@npm:2.3.0"
+  dependencies:
+    "@jridgewell/gen-mapping": "npm:^0.3.5"
+    "@jridgewell/trace-mapping": "npm:^0.3.24"
+  checksum: 10/f3451525379c68a73eb0a1e65247fbf28c0cccd126d93af21c75fceff77773d43c0d4a2d51978fb131aff25b5f2cb41a9fe48cc296e61ae65e679c4f6918b0ab
+  languageName: node
+  linkType: hard
+
 "@antfu/install-pkg@npm:^1.1.0":
   version: 1.1.0
   resolution: "@antfu/install-pkg@npm:1.1.0"
@@ -2533,7 +2543,9 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@mincho-js/esbuild@workspace:packages/esbuild"
   dependencies:
+    "@ampproject/remapping": "npm:^2.3.0"
     "@babel/parser": "npm:^7.29.0"
+    "@jridgewell/trace-mapping": "npm:^0.3.31"
     "@mincho-js/css": "workspace:^"
     "@mincho-js/debug-log": "workspace:^"
     "@mincho-js/integration": "workspace:^"
@@ -2543,6 +2555,7 @@ __metadata:
     "@vanilla-extract/integration": "npm:^8.0.10"
     esbuild: "npm:^0.27.7"
     eslint-config-custom: "workspace:^"
+    magic-string: "npm:^0.30.21"
     prettier-config-custom: "workspace:^"
     tsconfig-custom: "workspace:^"
     vite: "npm:^7.3.3"
@@ -2657,6 +2670,7 @@ __metadata:
   resolution: "@mincho-js/vite@workspace:packages/vite"
   dependencies:
     "@babel/core": "npm:^7.29.0"
+    "@jridgewell/trace-mapping": "npm:^0.3.31"
     "@mincho-js/css": "workspace:^"
     "@mincho-js/debug-log": "workspace:^"
     "@mincho-js/integration": "workspace:^"
@@ -2667,6 +2681,7 @@ __metadata:
     "@vanilla-extract/css": "npm:^1.20.1"
     "@vanilla-extract/integration": "npm:^8.0.10"
     "@vanilla-extract/recipes": "npm:^0.5.7"
+    "@vanilla-extract/vite-plugin": "npm:^5.2.2"
     eslint-config-custom: "workspace:^"
     prettier-config-custom: "workspace:^"
     tsconfig-custom: "workspace:^"
