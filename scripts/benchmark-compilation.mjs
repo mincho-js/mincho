@@ -2,12 +2,23 @@
 // --pack=/repository --candidate=/consumer packages an already built revision.
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { access, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import {
+  access,
+  mkdir,
+  readFile,
+  readdir,
+  rm,
+  writeFile
+} from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { cpus, platform, arch, totalmem } from "node:os";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { cases, prepare } from "./benchmark-compilation/fixture.mjs";
+import {
+  cpuTopology,
+  observeProcessTree
+} from "./benchmark-compilation/resources.mjs";
 
 const { values } = parseArgs({
   options: {
@@ -15,6 +26,11 @@ const { values } = parseArgs({
     candidate: { type: "string" },
     "baseline-label": { type: "string", default: "baseline" },
     "candidate-label": { type: "string", default: "candidate" },
+    "baseline-options": { type: "string", default: "{}" },
+    "candidate-options": { type: "string", default: "{}" },
+    restart: { type: "boolean", default: false },
+    "first-only": { type: "boolean", default: false },
+    resources: { type: "boolean", default: false },
     pack: { type: "string" },
     linker: { type: "string", default: "npm" },
     output: { type: "string", default: ".cache/compilation-benchmark" },
@@ -50,6 +66,11 @@ async function execute(command, args, cwd, ready, options = {}) {
     stdio: ["ignore", "pipe", "pipe"]
   });
 
+  const stopObserving =
+    ready && values.resources && process.platform === "linux"
+      ? observeProcessTree(child.pid)
+      : undefined;
+
   let stdout = "",
     stderr = "",
     line = "",
@@ -82,7 +103,13 @@ async function execute(command, args, cwd, ready, options = {}) {
       command + " failed (" + status + ")\n" + stdout + "\n" + stderr
     );
 
-  return { stdout, stderr, firstReadyMs };
+  return {
+    stdout,
+    stderr,
+    firstReadyMs,
+    processMs: performance.now() - started,
+    resources: await stopObserving?.()
+  };
 }
 
 if (values.pack) {
@@ -277,6 +304,17 @@ if (values.pack) {
             const consumer = resolve(values[revision]);
             const root = join(consumer, ".mincho-compilation-benchmark");
             const directory = await prepare(root, name, format);
+
+            // Defaults may persist too. Every measured cold build starts empty;
+            // only its explicit restart keeps these fixture-owned caches.
+            await Promise.all(
+              [
+                join(directory, ".cache", "mincho"),
+                join(directory, "node_modules", ".vite"),
+                join(directory, "node_modules", ".vite-mincho-benchmark")
+              ].map((path) => rm(path, { recursive: true, force: true }))
+            );
+
             const pnp = await exists(join(consumer, ".pnp.cjs"));
             const loaders = pnp
               ? ["--require", join(consumer, ".pnp.cjs")]
@@ -290,19 +328,37 @@ if (values.pack) {
               ? join(output, stem + "-diagnostics.json")
               : "";
 
+            const pluginOptions = JSON.parse(values[revision + "-options"]);
+
+            if (pluginOptions.cache?.type === "filesystem") {
+              pluginOptions.cache.directory = join(
+                consumer,
+                ".mincho-compilation-benchmark-cache",
+                stem
+              );
+              await rm(pluginOptions.cache.directory, {
+                recursive: true,
+                force: true
+              });
+            }
+
+            const workerArgs = [
+              "--expose-gc",
+              ...loaders,
+              worker,
+              consumer,
+              directory,
+              name,
+              format,
+              bundler,
+              diagnosticFile,
+              JSON.stringify(pluginOptions),
+              ...(values["first-only"] ? ["true"] : [])
+            ];
+
             const processResult = await execute(
               process.execPath,
-              [
-                "--expose-gc",
-                ...loaders,
-                worker,
-                consumer,
-                directory,
-                name,
-                format,
-                bundler,
-                diagnosticFile
-              ],
+              workerArgs,
               consumer,
               true
             );
@@ -315,6 +371,44 @@ if (values.pack) {
             record.linker = pnp ? "pnp" : "npm";
             record.round = round;
             record.processFirstReadyMs = processResult.firstReadyMs;
+            record.processMs = processResult.processMs;
+            record.resources = processResult.resources;
+            record.options = pluginOptions;
+
+            if (values.restart) {
+              await prepare(root, name, format);
+
+              const restarted = await execute(
+                process.execPath,
+                [...workerArgs, "first-only"],
+                consumer,
+                true
+              );
+
+              const warm = JSON.parse(
+                restarted.stdout.trim().split("\n").at(-1)
+              );
+
+              record.phases.restart = warm.phases.first;
+              record.restart = {
+                processFirstReadyMs: restarted.firstReadyMs,
+                processMs: restarted.processMs,
+                resources: restarted.resources,
+                diagnostics: warm.diagnostics
+              };
+
+              // Development measures graph transforms without bundle outputs.
+              if (record.outputs.first) {
+                assert.deepEqual(
+                  warm.outputs.first,
+                  record.outputs.first,
+                  "Restart changed output: " + stem
+                );
+
+                record.outputs.restart = warm.outputs.first;
+              }
+            }
+
             await writeFile(
               join(output, stem + ".json"),
               JSON.stringify(record, null, 2)
@@ -424,6 +518,8 @@ if (values.pack) {
           memoryGiB: totalmem() / 1024 ** 3
         },
         diagnostics: values.diagnostics,
+        resources: values.resources,
+        cpuTopology: await cpuTopology(),
         rounds,
         versions: measurements[0].versions,
         summary,

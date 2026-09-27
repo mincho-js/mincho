@@ -9,9 +9,18 @@ import { pathToFileURL } from "node:url";
 import { gzipSync, brotliCompressSync } from "node:zlib";
 import { entryName, edit, editShared, editedFileName } from "./fixture.mjs";
 
-const [consumer, directory, name, format, bundler, diagnosticFile] =
-  process.argv.slice(2);
+const [
+  consumer,
+  directory,
+  name,
+  format,
+  bundler,
+  diagnosticFile,
+  pluginOptions = "{}",
+  firstOnly
+] = process.argv.slice(2);
 
+const iterations = firstOnly ? 0 : 3;
 const require = createRequire(join(consumer, "package.json"));
 const operationCounts = {
   readFile: 0,
@@ -64,7 +73,11 @@ for (const id of [
 ])
   versions[id] = require(id + "/package.json").version;
 
-const options = diagnosticFile ? { diagnostics: { json: diagnosticFile } } : {};
+const options = {
+  ...JSON.parse(pluginOptions),
+  ...(diagnosticFile ? { diagnostics: { json: diagnosticFile } } : {})
+};
+
 const record = {
   node: process.version,
   versions,
@@ -246,13 +259,13 @@ try {
 
     const first = record.outputs.first;
 
-    for (let iteration = 0; iteration < 3; iteration++) {
+    for (let iteration = 0; iteration < iterations; iteration++) {
       await measure("unchanged", () => compiler.rebuild(), save("unchanged"));
 
       assert.deepEqual(record.outputs.unchanged, first);
     }
 
-    for (let iteration = 0; iteration < 3; iteration++) {
+    for (let iteration = 0; iteration < iterations; iteration++) {
       await edit(directory, name, format, iteration + 1);
       await measure(
         "edited",
@@ -271,7 +284,7 @@ try {
     }
 
     if (name.startsWith("shared-"))
-      for (let iteration = 0; iteration < 3; iteration++) {
+      for (let iteration = 0; iteration < iterations; iteration++) {
         await editShared(directory, format, iteration + 1);
         await measure(
           "shared",
@@ -284,6 +297,9 @@ try {
     const { minchoVitePlugin } = require("@mincho-js/vite");
     const common = {
       root: directory,
+
+      // Pin Vite's package-root-derived default to this isolated fixture.
+      cacheDir: join(directory, "node_modules", ".vite"),
       configFile: false,
       logLevel: "silent",
       plugins: [minchoVitePlugin(options)],
@@ -330,12 +346,7 @@ try {
     } else {
       const server = await vite.createServer({
         ...common,
-        cacheDir: join(
-          consumer,
-          "node_modules",
-          ".vite-mincho-benchmark",
-          String(process.pid)
-        ),
+        cacheDir: join(directory, "node_modules", ".vite-mincho-benchmark"),
         server: { middlewareMode: true, watch: null },
         optimizeDeps: { noDiscovery: format !== "cjs", entries: [] }
       });
@@ -378,10 +389,10 @@ try {
 
       await measure("first", loadGraph);
 
-      for (let iteration = 0; iteration < 3; iteration++)
+      for (let iteration = 0; iteration < iterations; iteration++)
         await measure("unchanged", loadGraph);
 
-      for (let iteration = 0; iteration < 3; iteration++) {
+      for (let iteration = 0; iteration < iterations; iteration++) {
         await edit(directory, name, format, iteration + 1);
 
         const changed = join(directory, editedFileName(name, format));
@@ -416,7 +427,11 @@ try {
   record.rssMiB = process.memoryUsage().rss / 1024 / 1024;
   record.peakRssMiB = process.resourceUsage().maxRSS / 1024;
 } finally {
+  const start = performance.now();
+
   for (const close of callbacks.reverse()) await close();
+
+  record.closeMs = performance.now() - start;
 }
 
 if (deferredDiagnosticPhases.length) {

@@ -9,6 +9,8 @@ export const cases = [
   "styles-24",
   "styles-240",
   "shared-24",
+  "vanilla-24",
+  "vanilla-240",
   "plain-240",
   "logic-24",
   "helpers-24",
@@ -106,7 +108,8 @@ export async function producer(
   index = 0
 ) {
   const styled = name.includes("styled");
-  const multiple = /^(styles|shared)-/.test(name);
+  const multiple = /^(styles|shared|vanilla)-/.test(name);
+  const vanilla = name.startsWith("vanilla-");
   const shared = name.startsWith("shared-");
   const symbol = styled ? "Button" : "button" + (multiple ? index : "");
   const extension = format === "cjs" ? "cts" : "ts";
@@ -115,8 +118,11 @@ export async function producer(
     "styles" + (multiple ? index : "") + "." + extension
   );
 
-  const source = "@mincho-js/" + (styled ? "react" : "css");
-  const api = styled ? "styled" : "rules";
+  const source = vanilla
+    ? "@vanilla-extract/css"
+    : "@mincho-js/" + (styled ? "react" : "css");
+
+  const api = vanilla ? "style" : styled ? "styled" : "rules";
   const imports =
     format === "cjs"
       ? "const {" + api + "}=require('" + source + "');"
@@ -135,9 +141,11 @@ export async function producer(
       "const " +
       symbol +
       "=" +
-      (styled ? "styled.button" : "rules") +
+      (styled ? "styled.button" : api) +
       "(" +
-      style(size, shared) +
+      (vanilla
+        ? "{color:'red',padding:" + (size === "small" ? 4 : 8) + "}"
+        : style(size, shared)) +
       ");" +
       (format === "cjs"
         ? "exports." + symbol + "=" + symbol + ";"
@@ -223,7 +231,7 @@ export async function prepare(root, name, format) {
           ) +
           "]"
       );
-  } else if (/^(styles|shared)-/.test(name)) {
+  } else if (/^(styles|shared|vanilla)-/.test(name)) {
     const count = Number(name.split("-")[1]);
 
     if (name.startsWith("shared-"))
@@ -248,7 +256,8 @@ export async function prepare(root, name, format) {
         "[" +
           Array.from(
             { length: count },
-            (_, index) => "button" + index + "()"
+            (_, index) =>
+              "button" + index + (name.startsWith("vanilla-") ? "" : "()")
           ).join(",") +
           "]"
       );
