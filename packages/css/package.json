@@ -101,6 +101,26 @@
         "types": "./dist/cjs/rules/createRuntimeFn.d.cts",
         "default": "./dist/cjs/runtime/createRuntimeFn.cjs"
       }
+    },
+    "./rules/createClassRuntimeFn": {
+      "import": {
+        "types": "./dist/esm/rules/createClassRuntimeFn.d.ts",
+        "default": "./dist/esm/runtime/createClassRuntimeFn.mjs"
+      },
+      "require": {
+        "types": "./dist/cjs/rules/createClassRuntimeFn.d.cts",
+        "default": "./dist/cjs/runtime/createClassRuntimeFn.cjs"
+      }
+    },
+    "./rules/mapVarProps": {
+      "import": {
+        "types": "./dist/esm/rules/mapVarProps.d.ts",
+        "default": "./dist/esm/runtime/mapVarProps.mjs"
+      },
+      "require": {
+        "types": "./dist/cjs/rules/mapVarProps.d.cts",
+        "default": "./dist/cjs/runtime/mapVarProps.cjs"
+      }
     }
   },
   "publishConfig": {

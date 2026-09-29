@@ -32,6 +32,18 @@ export default (viteConfigEnv: ConfigEnv) => {
             "defineRules",
             "registry.ts"
           ),
+          "runtime/createClassRuntimeFn": join(
+            packageDir,
+            "src",
+            "rules",
+            "createClassRuntimeFn.ts"
+          ),
+          "runtime/mapVarProps": join(
+            packageDir,
+            "src",
+            "rules",
+            "mapVarProps.ts"
+          ),
           "runtime/createRuntimeFn": join(
             packageDir,
             "src",
@@ -50,7 +62,7 @@ export default (viteConfigEnv: ConfigEnv) => {
     onlyExplicitManualChunks: true,
 
     manualChunks(id: string) {
-      if (/\/src\/rules\/(?:createRuntimeFn|utils)\.ts$/.test(id))
+      if (/\/src\/rules\/(?:createClassRuntimeFn|utils)\.ts$/.test(id))
         return "runtime/recipes";
       if (/\/src\/classname\/cx\.ts$/.test(id)) return "runtime/classnames";
       if (/\/src\/runtime\/cache\.ts$/.test(id)) return "runtime/cache";
