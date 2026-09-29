@@ -53,6 +53,7 @@ export default (viteConfigEnv: ConfigEnv) => {
       if (/\/src\/rules\/(?:createRuntimeFn|utils)\.ts$/.test(id))
         return "runtime/recipes";
       if (/\/src\/classname\/cx\.ts$/.test(id)) return "runtime/classnames";
+      if (/\/src\/runtime\/cache\.ts$/.test(id)) return "runtime/cache";
       if (/\/src\/defineRules\/createDefineRulesCxRuntime\.ts$/.test(id))
         return "runtime/conditions";
     },
