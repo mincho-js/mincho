@@ -338,7 +338,11 @@ export function localDefineRulesCxRuntimeTransformPlugin(): PluginObj {
   return {
     visitor: {
       ImportDeclaration(importPath) {
-        if (importPath.node.source.value !== "@mincho-js/css") {
+        if (
+          !["@mincho-js/css", "@mincho-js/css/classname"].includes(
+            importPath.node.source.value
+          )
+        ) {
           return;
         }
 
@@ -787,7 +791,11 @@ export function jsxRuntimeTransformPlugin(): PluginObj {
           return;
         }
 
-        if (importPath.node.source.value !== "@mincho-js/css") {
+        if (
+          !["@mincho-js/css", "@mincho-js/css/classname"].includes(
+            importPath.node.source.value
+          )
+        ) {
           return;
         }
 

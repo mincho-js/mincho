@@ -42,6 +42,16 @@
         "default": "./dist/cjs/index.cjs"
       }
     },
+    "./classname": {
+      "import": {
+        "types": "./dist/esm/classname/index.d.ts",
+        "default": "./dist/esm/runtime/classname.mjs"
+      },
+      "require": {
+        "types": "./dist/cjs/classname/index.d.cts",
+        "default": "./dist/cjs/runtime/classname.cjs"
+      }
+    },
     "./compat": {
       "import": {
         "types": "./dist/esm/compat.d.ts",

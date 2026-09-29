@@ -15,6 +15,7 @@ import type { PluginState } from "./types.js";
 import { prepareExtractCalls } from "./extractionCalls/index.js";
 
 import { normalizeTypeScriptCommonJs } from "./commonjs/modules.js";
+import { removeUnusedGeneratedImports } from "./optimizations/runtimeCodegen.js";
 
 export function minchoBabelPlugin(): PluginObj<PluginState> {
   const started = new WeakMap<PluginState, number>();
@@ -39,8 +40,9 @@ export function minchoBabelPlugin(): PluginObj<PluginState> {
         },
 
         exit(path, state) {
-          removeUnusedJsxCssPropCssModuleImports(path);
           postprocess(path, state);
+          removeUnusedJsxCssPropCssModuleImports(path);
+          removeUnusedGeneratedImports(path);
 
           const start = started.get(state);
 

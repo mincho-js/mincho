@@ -2471,6 +2471,8 @@ __metadata:
     vite: "npm:^7.3.3"
     vite-config-custom: "workspace:^"
     vitest: "npm:^4.1.5"
+  peerDependencies:
+    "@mincho-js/css": "workspace:^"
   languageName: unknown
   linkType: soft
 

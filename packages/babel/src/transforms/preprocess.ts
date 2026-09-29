@@ -25,6 +25,17 @@ export default function preprocess(
   // Initialize the program scope with the CSS file path
   (path.scope as ProgramScope).minchoData = {
     imports: new Map(),
+    effectImports: new Set(
+      t.isProgram(path.node)
+        ? path.node.body.flatMap((statement) =>
+            t.isImportDeclaration(statement) &&
+            statement.importKind !== "type" &&
+            !statement.specifiers.length
+              ? [statement.source.value]
+              : []
+          )
+        : []
+    ),
     cssFile: cssFilePath,
     nodes: [],
     bindings: [],

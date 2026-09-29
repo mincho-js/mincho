@@ -64,6 +64,7 @@ export interface PluginState extends PluginPass {
 export interface ProgramScope extends Scope {
   minchoData: {
     imports: Map<string, t.Identifier>;
+    effectImports?: Set<string>;
     bindings: Array<NodePath<t.Node>>;
     nodes: Array<t.Node>;
     cssFile: string;

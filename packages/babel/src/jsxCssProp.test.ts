@@ -1457,7 +1457,9 @@ describe("minchoBabelPlugin", () => {
     expect(result).toMatchSnapshot();
     expect(code).toMatchSnapshot();
     expect(code).not.toContain(" css=");
-    expect(code).toContain('import { cx as _cx } from "@mincho-js/css"');
+    expect(code).toContain(
+      'import { cx as _cx } from "@mincho-js/css/classname"'
+    );
     expect(code).toContain('<div className="base" />');
     expect(code).toContain("<div className={_cx(styleA)} />");
     expect(code).not.toContain('_cx("base")');

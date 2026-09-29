@@ -98,7 +98,11 @@ export function createClassNameExpression(
     return cssClassNameExpressions[0];
   }
 
-  const cxIdentifier = registerImportMethod(path, "cx", cssModuleName);
+  const cxIdentifier = registerImportMethod(
+    path,
+    "cx",
+    "@mincho-js/css/classname"
+  );
 
   if (
     !normalizedElement.preAggregateClassNameExpression &&
@@ -271,7 +275,11 @@ function createArrayClassNameCallExpression(
   path: NodePath<t.JSXOpeningElement>,
   expression: t.ArrayExpression
 ): t.Expression {
-  const cxIdentifier = registerImportMethod(path, "cx", cssModuleName);
+  const cxIdentifier = registerImportMethod(
+    path,
+    "cx",
+    "@mincho-js/css/classname"
+  );
 
   return t.callExpression(
     cxIdentifier,

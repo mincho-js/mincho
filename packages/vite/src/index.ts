@@ -3001,7 +3001,7 @@ if (import.meta.vitest) {
 
   function extractCxIdentifierFromSource(source: string): string {
     const cxImportMatch =
-      /import\s+\{\s*[^}]*\bcx(?:\s+as\s+([A-Za-z_$][\w$]*))?[^}]*\}\s+from\s+["']@mincho-js\/css["'];?/.exec(
+      /import\s+\{\s*[^}]*\bcx(?:\s+as\s+([A-Za-z_$][\w$]*))?[^}]*\}\s+from\s+["']@mincho-js\/css\/classname["'];?/.exec(
         source
       );
 

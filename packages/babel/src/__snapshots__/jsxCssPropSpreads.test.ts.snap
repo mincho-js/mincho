@@ -3,7 +3,7 @@
 exports[`minchoBabelPlugin > aggregates multiple spreads and className before inline object css prop 1`] = `
 [
   "extracted_17cnpin.css.ts",
-  "import { css as _css, cx as _cx } from "@mincho-js/css";
+  "import { css as _css } from "@mincho-js/css";
 export var _$mincho$$App = _css({
   color: "red"
 });
@@ -13,7 +13,7 @@ var _$mincho$$App2 = _$mincho$$App;",
 
 exports[`minchoBabelPlugin > aggregates multiple spreads and className before inline object css prop 2`] = `
 "import { _$mincho$$App as _$mincho$$App2 } from "extracted_17cnpin.css.ts";
-import { css as _css, cx as _cx } from "@mincho-js/css";
+import { cx as _cx } from "@mincho-js/css/classname";
 const a = {
   id: "a"
 };
@@ -43,7 +43,7 @@ exports[`minchoBabelPlugin > aggregates spread props before explicit class-value
 `;
 
 exports[`minchoBabelPlugin > aggregates spread props before explicit class-value css prop 2`] = `
-"import { cx as _cx } from "@mincho-js/css";
+"import { cx as _cx } from "@mincho-js/css/classname";
 const styleA = "style-a";
 const props = {
   className: "base",

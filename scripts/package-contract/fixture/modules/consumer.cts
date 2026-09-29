@@ -6,6 +6,7 @@ import type { preset as packedPreset } from "@mincho-js-proof/real-d/preset" wit
   "resolution-mode": "import"
 };
 import { defineRules } from "@mincho-js/css";
+import { cx, type ClassValue } from "@mincho-js/css/classname";
 import type { DefineRulesRegistrySession } from "@mincho-js/css/defineRules/registry";
 import {
   minchoBabelPlugin,
@@ -110,6 +111,8 @@ export {
 };
 
 export const transform = () => babelTransformSource(options);
+
+export const runtimeClasses = (value: ClassValue): string => cx("base", value);
 
 // Direct API artifacts must cross either conditional declaration format.
 export function collectDirectPreset() {

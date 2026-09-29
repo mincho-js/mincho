@@ -755,7 +755,7 @@ function createDynamicCssVariableCxExportDeclaration(
   return t.exportNamedDeclaration(
     null,
     [t.exportSpecifier(t.identifier("cx"), t.cloneNode(exportedIdentifier))],
-    t.stringLiteral(cssModuleName)
+    t.stringLiteral("@mincho-js/css/classname")
   );
 }
 

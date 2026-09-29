@@ -213,7 +213,14 @@ export function removeUnusedJsxCssPropCssModuleImports(
     }
 
     if (retainedSpecifiers.length === 0) {
-      statementPath.remove();
+      if (
+        programScope.minchoData.effectImports?.has(
+          statementPath.node.source.value
+        )
+      )
+        statementPath.node.specifiers = [];
+      else statementPath.remove();
+
       continue;
     }
 

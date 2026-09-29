@@ -1524,7 +1524,7 @@ if (import.meta.vitest) {
 
   function extractCxIdentifierFromSource(source: string): string {
     const cxImportMatch =
-      /import \{ [^}]*\bcx(?: as ([A-Za-z_$][\w$]*))?[^}]*\} from "@mincho-js\/css";/.exec(
+      /import \{ [^}]*\bcx(?: as ([A-Za-z_$][\w$]*))?[^}]*\} from "@mincho-js\/css\/classname";/.exec(
         source
       );
 
@@ -1766,7 +1766,7 @@ if (import.meta.vitest) {
           extractCssPropSidecarImport(scriptLoadResult.contents);
 
         const cxImportMatch =
-          /import \{ [^}]*\bcx(?: as ([A-Za-z_$][\w$]*))?[^}]*\} from "@mincho-js\/css";/.exec(
+          /import \{ [^}]*\bcx(?: as ([A-Za-z_$][\w$]*))?[^}]*\} from "@mincho-js\/css\/classname";/.exec(
             scriptLoadResult.contents
           );
 

@@ -980,7 +980,7 @@ if (import.meta.vitest) {
       ].map(([, importedName, localName]) => localName ?? importedName);
 
       const cxImportMatch =
-        /import \{ [^}]*\bcx(?: as ([A-Za-z_$][\w$]*))?[^}]*\} from "@mincho-js\/css";/.exec(
+        /import \{ [^}]*\bcx(?: as ([A-Za-z_$][\w$]*))?[^}]*\} from "@mincho-js\/css\/classname";/.exec(
           code
         );
 
@@ -1183,7 +1183,7 @@ if (import.meta.vitest) {
       const [sidecarFile, sidecarSource] = result;
       const exportedDeclarations = sidecarSource.match(/export var/g) ?? [];
       const cxImportMatch =
-        /import \{ [^}]*\bcx(?: as ([A-Za-z_$][\w$]*))?[^}]*\} from "@mincho-js\/css";/.exec(
+        /import \{ [^}]*\bcx(?: as ([A-Za-z_$][\w$]*))?[^}]*\} from "@mincho-js\/css\/classname";/.exec(
           code
         );
 
@@ -4271,7 +4271,7 @@ if (import.meta.vitest) {
       ].map(([, importedName, localName]) => localName ?? importedName);
 
       const cxImportMatch =
-        /import \{ [^}]*\bcx(?: as ([A-Za-z_$][\w$]*))?[^}]*\} from "@mincho-js\/css";/.exec(
+        /import \{ [^}]*\bcx(?: as ([A-Za-z_$][\w$]*))?[^}]*\} from "@mincho-js\/css\/classname";/.exec(
           code
         );
 
@@ -4382,7 +4382,7 @@ if (import.meta.vitest) {
       ].map(([, importedName, localName]) => localName ?? importedName);
 
       const cxImportMatch =
-        /import \{ [^}]*\bcx(?: as ([A-Za-z_$][\w$]*))?[^}]*\} from "@mincho-js\/css";/.exec(
+        /import \{ [^}]*\bcx(?: as ([A-Za-z_$][\w$]*))?[^}]*\} from "@mincho-js\/css\/classname";/.exec(
           code
         );
 
