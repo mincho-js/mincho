@@ -65,6 +65,22 @@ document.write(`
 
 ## API
 
+### Runtime class names
+
+Use the runtime-only entry when joining classes in application code:
+
+```typescript
+import { cx, type ClassValue } from "@mincho-js/css/classname";
+
+const optionalClass: ClassValue = { active: true };
+cx("button", optionalClass);
+```
+
+This entry exports the same `cx` function and types as the root package, including
+`cx.multiple` and `cx.with`, without importing CSS authoring or registry modules.
+Both ES modules and CommonJS are supported. The root entry keeps its authoring
+side effects; importing `css`, `rules`, or themes still uses `@mincho-js/css`.
+
 ### css()
 
 The `css()` function takes a style object and generates a unique class name for the given styles.
