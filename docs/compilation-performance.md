@@ -90,6 +90,18 @@ keeps compiler transforms inline and retains the existing large package-graph
 analysis threshold; `0` disables workers. This default change does not enable
 additional compiler workers or change CSS and runtime optimization settings.
 
+## Runtime package boundaries
+
+The existing `@mincho-js/css/rules/createRuntimeFn` and
+`@mincho-js/css/defineRules/createDefineRulesCxRuntime` exports resolve to a
+separate runtime directory whose package boundary declares `sideEffects: false`.
+Their shared chunks contain only recipe and class-name helpers. Unused serialized
+runtime factories can therefore disappear together with their configuration.
+The CSS authoring entry and registry retain their existing effect declarations;
+`createDefineRulesCssRuntime` also stays outside the pure boundary because it
+registers definitions. The package contract checks unused and dynamic runtime
+bundles in both ESM and CommonJS output formats.
+
 ## Reproducible compilation benchmark
 
 Build each revision with `PACKAGE_PUBLISH=true` before packaging it. Keep

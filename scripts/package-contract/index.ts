@@ -177,6 +177,10 @@ async function main(): Promise<void> {
         join(consumerRoot, "fixture", "modules")
       );
       await runNode(
+        ["fixture/modules/runtime-treeshaking.mjs"],
+        join(consumerRoot, "fixture", "modules")
+      );
+      await runNode(
         [
           join(
             installedPackageDirectory(consumerRoot, "typescript"),
