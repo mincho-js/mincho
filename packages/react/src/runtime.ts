@@ -9,22 +9,27 @@ import {
   type ComponentProps,
   type ComponentType,
   type ElementType,
+  type Ref,
   createElement,
   forwardRef
 } from "react";
 
+type StyledRecipe = RuntimeFn<
+  VariantGroups,
+  ComplexPropDefinitions<PropTarget | undefined>
+>;
+
+type StyledProps = {
+  as?: ElementType;
+  className?: string;
+  [key: string]: unknown;
+};
+
 export function $$styled<T extends ComponentType<unknown>>(
   component: T,
-  styles: RuntimeFn<
-    VariantGroups,
-    ComplexPropDefinitions<PropTarget | undefined>
-  >
+  styles: StyledRecipe
 ) {
-  type Props = ComponentProps<typeof component> & {
-    as?: ElementType;
-    className?: string;
-    [key: string]: unknown;
-  };
+  type Props = ComponentProps<typeof component> & StyledProps;
 
   const variantKeys = getVariantKeys(styles);
 
@@ -32,20 +37,16 @@ export function $$styled<T extends ComponentType<unknown>>(
     ({ as, className: classNameProp, ...props }, ref) => {
       const componentToRender = as ?? component;
 
-      const [variantSelection, otherProps] = splitVariantProps(
+      const variantSelection: VariantObjectSelection<VariantGroups> = {};
+      const otherProps: Record<string, unknown> = {};
+      const canReuseProps = splitVariantProps(
         props,
-        variantKeys
+        variantKeys,
+        variantSelection,
+        otherProps
       );
 
       const className = [styles(variantSelection), classNameProp].join(" ");
-
-      if (typeof componentToRender === "string") {
-        return createElement(componentToRender, {
-          ...otherProps,
-          className,
-          ref
-        });
-      }
 
       return createElement(
         componentToRender as ComponentType<{
@@ -53,11 +54,7 @@ export function $$styled<T extends ComponentType<unknown>>(
           ref?: unknown;
           [key: string]: unknown;
         }>,
-        {
-          ...otherProps,
-          className,
-          ref
-        }
+        withClassNameAndRef(otherProps, className, ref, canReuseProps)
       );
     }
   );
@@ -65,33 +62,99 @@ export function $$styled<T extends ComponentType<unknown>>(
   return StyledComponent;
 }
 
-function getVariantKeys(
-  styles: RuntimeFn<
-    VariantGroups,
-    ComplexPropDefinitions<PropTarget | undefined>
-  >
+/** @internal Emitted only for a compiler-proven local styled chain. */
+export function $$styledChain(
+  component: string,
+  stages: readonly {
+    styles: StyledRecipe;
+    variantKeys: readonly string[];
+  }[]
 ) {
+  const compiledStages = stages.map(({ styles, variantKeys }) => ({
+    styles,
+    variantKeys: new Set(variantKeys)
+  }));
+
+  return forwardRef<unknown, StyledProps>(
+    ({ as, className: classNameProp, ...props }, ref) => {
+      let remainingProps = props;
+      let className = classNameProp;
+      let canReuseProps = false;
+
+      // An outer `as` bypasses its styled parent, as in an ordinary chain.
+      const stageCount = as == null ? compiledStages.length : 1;
+
+      for (let index = 0; index < stageCount; index += 1) {
+        const { styles, variantKeys } = compiledStages[index]!;
+        const variantSelection: VariantObjectSelection<VariantGroups> = {};
+        const otherProps: Record<string, unknown> = {};
+        canReuseProps = splitVariantProps(
+          remainingProps,
+          variantKeys,
+          variantSelection,
+          otherProps
+        );
+        remainingProps = otherProps;
+        className = [styles(variantSelection), className].join(" ");
+      }
+
+      return createElement(
+        (as ?? component) as ComponentType<StyledProps>,
+        withClassNameAndRef(remainingProps, className, ref, canReuseProps)
+      );
+    }
+  );
+}
+
+function getVariantKeys(styles: StyledRecipe) {
   return new Set(styles.variants());
 }
 
 function splitVariantProps(
   props: Record<string, unknown>,
-  variantKeys: ReadonlySet<string>
-): [VariantObjectSelection<VariantGroups>, Record<string, unknown>] {
-  const variantSelection: VariantObjectSelection<VariantGroups> = {};
-  const otherProps: Record<string, unknown> = {};
+  variantKeys: ReadonlySet<string>,
+  variantSelection: VariantObjectSelection<VariantGroups>,
+  otherProps: Record<string, unknown>
+): boolean {
+  const keys = Object.keys(props);
 
-  for (const key of Object.keys(props)) {
+  // Keep larger dynamic shapes on the engine's optimized object-spread path.
+  let canReuseProps = keys.length <= 1;
+
+  for (const key of keys) {
     const value = props[key];
 
     if (variantKeys.has(key)) {
       variantSelection[key] = value as string | undefined;
     } else {
+      canReuseProps &&= !(key in otherProps);
       otherProps[key] = value;
     }
   }
 
-  return [variantSelection, otherProps];
+  return canReuseProps;
+}
+
+function withClassNameAndRef(
+  props: Record<string, unknown>,
+  className: unknown,
+  ref: Ref<unknown>,
+  canReuseProps: boolean
+): Record<string, unknown> {
+  // Inherited assignments may change the prototype or install accessors. Keep
+  // the original spread in that case, and when reserved props are inherited.
+  if (
+    canReuseProps &&
+    !("className" in props) &&
+    (!("ref" in props) || Object.prototype.hasOwnProperty.call(props, "ref"))
+  ) {
+    props.className = className;
+    props.ref = ref;
+
+    return props;
+  }
+
+  return { ...props, className, ref };
 }
 
 // Ignore errors when compiling to CommonJS.
