@@ -10,8 +10,7 @@ import {
   type ComponentType,
   type ElementType,
   createElement,
-  forwardRef,
-  useMemo
+  forwardRef
 } from "react";
 
 export function $$styled<T extends ComponentType<unknown>>(
@@ -33,9 +32,10 @@ export function $$styled<T extends ComponentType<unknown>>(
     ({ as, className: classNameProp, ...props }, ref) => {
       const componentToRender = as ?? component;
 
-      const [variantSelection, otherProps] = useMemo(() => {
-        return splitVariantProps(props, variantKeys);
-      }, [props, variantKeys]);
+      const [variantSelection, otherProps] = splitVariantProps(
+        props,
+        variantKeys
+      );
 
       const className = [styles(variantSelection), classNameProp].join(" ");
 
@@ -81,7 +81,9 @@ function splitVariantProps(
   const variantSelection: VariantObjectSelection<VariantGroups> = {};
   const otherProps: Record<string, unknown> = {};
 
-  for (const [key, value] of Object.entries(props)) {
+  for (const key of Object.keys(props)) {
+    const value = props[key];
+
     if (variantKeys.has(key)) {
       variantSelection[key] = value as string | undefined;
     } else {
@@ -110,6 +112,7 @@ if (vitest) {
     classByVariant: Record<string, Record<string, string>> = {}
   ) {
     const selections: Array<VariantObjectSelection<VariantGroups>> = [];
+
     const styles = ((selection: VariantObjectSelection<VariantGroups>) => {
       selections.push({ ...selection });
 
@@ -137,6 +140,7 @@ if (vitest) {
         color: { brand: "color-brand" },
         size: { small: "size-small" }
       });
+
       const Button = $$styled(
         "button" as unknown as ComponentType<unknown>,
         styles
@@ -166,6 +170,7 @@ if (vitest) {
       const { styles, selections } = createTestStyles(["disabled"], {
         disabled: { false: "disabled-false" }
       });
+
       const Panel = $$styled(
         "section" as unknown as ComponentType<unknown>,
         styles

@@ -4,11 +4,11 @@ Vite and esbuild accept the same optional execution settings:
 
 ```ts
 minchoVitePlugin({
-  execution: { workers: 2, ioConcurrency: 16 },
+  execution: { workers: 2, ioConcurrency: 16 }
 });
 
 minchoEsbuildPlugins({
-  execution: { workers: 2, ioConcurrency: 16 },
+  execution: { workers: 2, ioConcurrency: 16 }
 });
 ```
 

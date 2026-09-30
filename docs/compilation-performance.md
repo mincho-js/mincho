@@ -31,6 +31,10 @@ identifier mode, minification and source-map settings equal. Package contract
 reports measure raw, gzip and Brotli transfer sizes per artifact; compression
 of concatenated files is not a loading-size measurement.
 
+The styled runtime computes variant keys once per component and splits props
+once per render. It does not memoize against the newly allocated rest-props
+object. Polymorphic `as`, refs and explicit class-name ordering remain unchanged.
+
 Module analysis shares one lexical resolver for imports, require bindings and
 re-exports. It keeps import and require conditions separate and refuses mutable,
 ambiguous or cyclic definitions. Graph traversals own their scopes; later
