@@ -212,6 +212,34 @@ function createMinchoViteEnvironmentPlugin(
 
   // Keep our serialized imports before Vite rewrites them for the dev server.
   const runtimeModules = new Map<string, string>();
+  let runtimeModuleBytes = 0;
+
+  function forgetRuntimeModule(id: string) {
+    const previous = runtimeModules.get(id);
+
+    if (previous !== undefined)
+      runtimeModuleBytes -= Buffer.byteLength(previous);
+
+    runtimeModules.delete(id);
+  }
+
+  function rememberRuntimeModule(id: string, source: string) {
+    forgetRuntimeModule(id);
+
+    const bytes = Buffer.byteLength(source);
+    if (bytes > 64 * 1024 * 1024) return;
+
+    runtimeModules.set(id, source);
+    runtimeModuleBytes += bytes;
+
+    while (runtimeModules.size > 512 || runtimeModuleBytes > 64 * 1024 * 1024)
+      forgetRuntimeModule(runtimeModules.keys().next().value!);
+  }
+
+  function clearRuntimeModules() {
+    runtimeModules.clear();
+    runtimeModuleBytes = 0;
+  }
 
   const tracedCompile = (options: Parameters<typeof compile>[0]) =>
     diagnostics.run(options.originalPath, "sidecar-compile", () =>
@@ -678,7 +706,7 @@ function createMinchoViteEnvironmentPlugin(
         if (config.command === "build") compilationCache?.begin();
 
         runtimeOptimizations.clear();
-        runtimeModules.clear();
+        clearRuntimeModules();
         transformEpoch = Symbol("build");
 
         if (graphAnalysisClosed) {
@@ -1161,7 +1189,7 @@ function createMinchoViteEnvironmentPlugin(
           if (publication) publication.publish = publish;
           else publish();
 
-          runtimeModules.set(id, registryResult.source);
+          rememberRuntimeModule(id, registryResult.source);
 
           return registryResult.source;
         } catch (error) {
@@ -1212,7 +1240,16 @@ function createMinchoViteEnvironmentPlugin(
         const transformBabelOptions: BabelOptions = {
           ...babelOptions,
           ...(_options?.optimize
-            ? { optimize: { ...babelOptions?.optimize, ..._options.optimize } }
+            ? {
+                optimize: {
+                  ...babelOptions?.optimize,
+                  ...Object.fromEntries(
+                    Object.entries(_options.optimize).filter(
+                      ([, value]) => value !== undefined
+                    )
+                  )
+                }
+              }
             : {}),
           compilationCache,
           compilationContext: this.environment
@@ -1314,7 +1351,7 @@ function createMinchoViteEnvironmentPlugin(
           cssState.registerSidecar(fileId, resolvedCssPath, cssExtract);
         }
 
-        runtimeModules.set(id, transformResult.code);
+        rememberRuntimeModule(id, transformResult.code);
 
         if (typeof this.load === "function" && !runtimeOwners.has(id)) {
           runtimeOwners.add(id);
@@ -1552,7 +1589,7 @@ function createMinchoViteEnvironmentPlugin(
       observedTransformInputs.delete(fileId);
       invalidateStaticCssEvalDependency(fileId, change?.event === "delete");
       runtimeOptimizations.clear();
-      runtimeModules.delete(id);
+      forgetRuntimeModule(id);
     },
 
     async closeBundle() {
@@ -1574,7 +1611,7 @@ function createMinchoViteEnvironmentPlugin(
           ownerVersions.clear();
           ownerRequests.clear();
           runtimeOptimizations.clear();
-          runtimeModules.clear();
+          clearRuntimeModules();
           graphAnalysisClosed = true;
           await graphAnalysis.close();
         }
@@ -1593,7 +1630,7 @@ function createMinchoViteEnvironmentPlugin(
       ownerVersions.clear();
       ownerRequests.clear();
       runtimeOptimizations.clear();
-      runtimeModules.clear();
+      clearRuntimeModules();
 
       try {
         await diagnostics.flush(config.root);
@@ -5774,6 +5811,28 @@ if (import.meta.vitest) {
             babel: { optimize: { defineRulesCxConditions: false } }
           },
           expectedOptions: { optimize: { defineRulesCxConditions: false } }
+        },
+        {
+          label: "only defined top-level optimization fields override Babel",
+          pluginOptions: {
+            babel: {
+              optimize: {
+                pureFunctions: false,
+                staticRecipes: false,
+                styledComponents: false,
+                defineRulesCxConditions: true
+              }
+            },
+            optimize: { pureFunctions: undefined, styledComponents: true }
+          },
+          expectedOptions: {
+            optimize: {
+              pureFunctions: false,
+              staticRecipes: false,
+              styledComponents: true,
+              defineRulesCxConditions: true
+            }
+          }
         },
         {
           label: "explicit false",

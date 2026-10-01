@@ -139,6 +139,33 @@ export function applyPureFunctions(
 ): void {
   if (!prepared.replacements.length) return;
 
+  preserveModuleEffects(program, () => {
+    const replacements = new Map(
+      prepared.replacements.map((item) => [item.key, item.expression])
+    );
+
+    const locations = new Set(
+      [...replacements.keys()].map((key) => key.split("\0")[0])
+    );
+
+    program.traverse({
+      Expression(path) {
+        if (!path.node.loc || !locations.has(locationKey(path.node))) return;
+
+        const replacement = replacements.get(expressionKey(path));
+        if (!replacement) return;
+
+        path.replaceWith(t.cloneNode(replacement, true));
+        path.skip();
+      }
+    });
+  });
+}
+
+export function preserveModuleEffects(
+  program: NodePath<t.Program>,
+  transform: () => void
+): void {
   const usedImports = program
     .get("body")
     .filter(
@@ -151,25 +178,7 @@ export function applyPureFunctions(
         )
     );
 
-  const replacements = new Map(
-    prepared.replacements.map((item) => [item.key, item.expression])
-  );
-
-  const locations = new Set(
-    [...replacements.keys()].map((key) => key.split("\0")[0])
-  );
-
-  program.traverse({
-    Expression(path) {
-      if (!path.node.loc || !locations.has(locationKey(path.node))) return;
-
-      const replacement = replacements.get(expressionKey(path));
-      if (!replacement) return;
-
-      path.replaceWith(t.cloneNode(replacement, true));
-      path.skip();
-    }
-  });
+  transform();
   program.scope.crawl();
 
   // TypeScript import elision must not erase the original module's effects.

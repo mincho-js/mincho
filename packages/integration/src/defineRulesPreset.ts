@@ -1,3 +1,4 @@
+import { internalAnnotateRecipeFactories } from "@mincho-js/babel";
 import { measureCompilationPhase } from "./diagnostics.js";
 import {
   beginDefineRulesRegistrySession,
@@ -62,7 +63,7 @@ export async function processDefineRulesPresetRegistryFile(
         });
 
         return {
-          source,
+          source: internalAnnotateRecipeFactories(source, options.filePath),
           registrySession,
           packageGraph,
           ancestorStyleSpecifiers:

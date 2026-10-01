@@ -215,7 +215,13 @@ export function* evaluateStaticExpression(
       if (
         (t.isObjectExpression(result) || t.isArrayExpression(result)) &&
         (target.module !== module ||
-          declaration?.parentPath?.parentPath?.isExportNamedDeclaration())
+          declaration?.parentPath?.parentPath?.isExportNamedDeclaration() ||
+          binding.path.getFunctionParent() !== path.getFunctionParent() ||
+          binding.referencePaths.some(
+            (reference) =>
+              reference.parentPath?.isExportSpecifier() ||
+              reference.parentPath?.isExportDefaultDeclaration()
+          ))
       )
         return deopt();
 
@@ -414,8 +420,9 @@ export function* evaluateStaticExpression(
   } else if (path.isMemberExpression()) {
     // Namespace values use the same ESM/CommonJS export resolver as functions.
     const target = yield* graph.valueTarget(module, path, new Set());
-    if (target && !("external" in target) && target.path.node !== path.node)
-      return yield* evaluateStaticExpression(
+
+    if (target && !("external" in target) && target.path.node !== path.node) {
+      const value = yield* evaluateStaticExpression(
         graph,
         target.module,
         target.path,
@@ -423,6 +430,12 @@ export function* evaluateStaticExpression(
         environment,
         depth + 1
       );
+
+      // Namespace imports must not bypass the aggregate escape guard above.
+      return t.isObjectExpression(value) || t.isArrayExpression(value)
+        ? deopt()
+        : value;
+    }
 
     expression = t.memberExpression(
       yield* child(path.get("object")),

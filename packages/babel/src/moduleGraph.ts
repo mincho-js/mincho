@@ -288,7 +288,7 @@ export function createModuleGraph(
         seen
       );
 
-    if (path.isIdentifier()) {
+    if (path.isIdentifier() || path.isJSXIdentifier()) {
       const key = `${module.id}:binding:${path.node.name}`;
       if (seen.has(key)) return null;
 

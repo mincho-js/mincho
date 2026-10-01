@@ -160,6 +160,7 @@ export {
 export { analyzePureFunctions as internalAnalyzePureFunctions } from "./optimizations/pureFunctions.js";
 
 export {
+  annotateRecipeFactories as internalAnnotateRecipeFactories,
   analyzeRuntimeExpressions as internalAnalyzeRuntimeExpressions,
   applyRuntimeExpressions as internalApplyRuntimeExpressions
 } from "./optimizations/runtimeExpressions.js";

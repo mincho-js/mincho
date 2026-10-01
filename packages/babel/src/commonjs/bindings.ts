@@ -45,6 +45,13 @@ function namespaceMutation(
       })
     )
       continue;
+    if (
+      parent?.isJSXMemberExpression() &&
+      parent.node.object === reference.node
+    )
+      continue;
+    if (parent?.isJSXOpeningElement() || parent?.isJSXClosingElement())
+      continue;
 
     if (parent?.isMemberExpression() && parent.node.object === reference.node) {
       let member: NodePath<t.Node> = parent;
@@ -172,14 +179,16 @@ export function getModuleReference(
     return null;
   }
 
-  if (path.isMemberExpression()) {
+  if (path.isMemberExpression() || path.isJSXMemberExpression()) {
     const reference = getModuleReference(
       path.get("object") as NodePath<t.Node>,
       next
     );
     if (!reference) return null;
 
-    const member = staticMemberName(path.node);
+    const member = t.isJSXMemberExpression(path.node)
+      ? path.node.property.name
+      : staticMemberName(path.node);
 
     return {
       ...reference,
@@ -188,7 +197,7 @@ export function getModuleReference(
     };
   }
 
-  if (!path.isIdentifier()) return null;
+  if (!path.isIdentifier() && !path.isJSXIdentifier()) return null;
 
   const binding = path.scope.getBinding(path.node.name);
   if (!binding) return null;

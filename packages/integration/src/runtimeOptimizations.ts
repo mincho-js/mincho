@@ -28,7 +28,12 @@ export class RuntimeOptimizations {
     result: BabelTransformResult,
     provider: StaticCssEvalSourceProvider
   ): Promise<BabelTransformResult> {
-    if (options.babel?.optimize?.staticRecipes === false) return result;
+    const optimize = options.babel?.optimize;
+    if (
+      optimize?.staticRecipes === false &&
+      optimize.styledComponents === false
+    )
+      return result;
 
     const dependencies = new Set<string>();
     const analysis = await measureCompilationPhase("static-recipes", () =>
@@ -37,7 +42,9 @@ export class RuntimeOptimizations {
           filename: options.filename,
           source: result.code,
           parserCache: options.babel?.compilationCache?.parser,
-          pureFunctions: options.babel?.optimize?.pureFunctions
+          pureFunctions: optimize?.pureFunctions,
+          staticRecipes: optimize?.staticRecipes,
+          styledComponents: optimize?.styledComponents
         }),
         provider,
         dependencies
@@ -46,8 +53,19 @@ export class RuntimeOptimizations {
     if (!analysis) return result;
 
     const replacements: Array<{ key: string; value: string }> = [];
+    const elements: Array<{
+      key: string;
+      tag: string;
+      variants: readonly string[];
+      className: string;
+    }> = [];
 
-    for (const call of analysis.calls) {
+    const observed = [
+      ...analysis.calls.map((call) => ({ call, element: undefined })),
+      ...analysis.elements.map((element) => ({ call: element, element }))
+    ];
+
+    for (const { call, element } of observed) {
       // The implementation is the same pure runtime used by the serialized sidecar.
       // Configurations are literal data; no producer/component module is evaluated.
       const key = cacheDigest(
@@ -71,20 +89,31 @@ export class RuntimeOptimizations {
         if (this.values.size < 4096) this.values.set(key, value);
       }
 
-      replacements.push({ key: call.key, value });
+      if (element)
+        elements.push({
+          key: call.key,
+          tag: element.tag,
+          variants: element.variants,
+          className: `${value} ${element.className}`
+        });
+      else replacements.push({ key: call.key, value });
     }
 
     recordCompilationDiagnostic("static-recipes-result", {
       folded: replacements.length,
       observed: this.values.size
     });
+    recordCompilationDiagnostic("styled-components-result", {
+      flattened: elements.length
+    });
 
-    if (!replacements.length) return result;
+    if (!replacements.length && !elements.length) return result;
 
     const transformed = internalApplyRuntimeExpressions({
       filename: options.filename,
       source: result.code,
       replacements,
+      elements,
       sourceMaps: options.sourceMaps,
       inputSourceMap: result.map ?? undefined
     });
