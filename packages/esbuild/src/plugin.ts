@@ -58,6 +58,7 @@ export interface MinchoEsbuildPluginOptions {
   diagnostics?: MinchoDiagnosticsOptions;
   cache?: MinchoCacheOptions;
   execution?: MinchoExecutionOptions;
+  optimize?: BabelOptions["optimize"];
   includeNodeModulesPattern?: RegExp;
   jsxCssProp?: boolean;
 
@@ -84,6 +85,7 @@ export function minchoEsbuildPlugin({
   diagnostics: diagnosticsOptions,
   cache: cacheOptions,
   execution: executionOptions,
+  optimize,
   jsxCssProp,
   extractCalls
 }: MinchoEsbuildPluginOptions = {}): EsbuildPlugin {
@@ -356,6 +358,7 @@ export function minchoEsbuildPlugin({
           loader,
           babel: {
             ...transformBabelOptions,
+            optimize,
             compilationCache,
             ...(diagnostics.enabled ? { diagnostics: true } : {})
           },

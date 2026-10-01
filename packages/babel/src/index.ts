@@ -1,3 +1,7 @@
+import {
+  analyzePureFunctions,
+  applyPureFunctions
+} from "./optimizations/pureFunctions.js";
 import { type PluginObj } from "@babel/core";
 import {
   analyzeDefineRulesCxConditionsCallExpression,
@@ -33,6 +37,28 @@ export function minchoBabelPlugin(): PluginObj<PluginState> {
             state.file.metadata[
               defineRulesCxConditionsOptimizationMetadataKey
             ] = true;
+          }
+
+          if (state.opts.optimize?.pureFunctions !== false) {
+            let prepared = state.opts.preparedPureFunctions;
+
+            if (!prepared) {
+              const flow = analyzePureFunctions({
+                filename: state.file.opts.filename ?? "/__mincho__.tsx",
+                source: state.file.code,
+                program: path,
+                jsxCssProp: state.opts.jsxCssProp
+              });
+
+              let step = flow.next();
+
+              while (!step.done) step = flow.next(null);
+
+              prepared = step.value;
+            }
+
+            applyPureFunctions(path, prepared);
+            state.file.metadata.minchoPureFunctions = prepared.diagnostics;
           }
 
           preprocess(path, prepareExtractCalls(path, state));
@@ -130,3 +156,5 @@ export {
   semanticExports as internalSemanticExports,
   type SemanticExportRequest as InternalSemanticExportRequest
 } from "./semanticExports.js";
+
+export { analyzePureFunctions as internalAnalyzePureFunctions } from "./optimizations/pureFunctions.js";

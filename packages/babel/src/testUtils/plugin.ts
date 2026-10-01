@@ -32,7 +32,14 @@ export function babelTransform(
     sourceType?: "module" | "script" | "unambiguous";
   } = {}
 ) {
-  const options: PluginOptions = { result: ["", ""], ...pluginOptions };
+  // These characterization fixtures cover extraction and its conservative fallback.
+  // Optimizer defaults and enabled behavior have their own semantic tests.
+  const options: PluginOptions = {
+    result: ["", ""],
+    ...pluginOptions,
+    optimize: { pureFunctions: false, ...pluginOptions.optimize }
+  };
+
   const result = transformSync(code, {
     ...(transformOptions.sourceType
       ? { sourceType: transformOptions.sourceType }
@@ -1262,7 +1269,14 @@ export function captureJsxCssPropFailure(
   error: Error;
   metadata: MinchoBabelFileMetadata;
 } {
-  const options: PluginOptions = { result: ["", ""], ...pluginOptions };
+  // These characterization fixtures cover extraction and its conservative fallback.
+  // Optimizer defaults and enabled behavior have their own semantic tests.
+  const options: PluginOptions = {
+    result: ["", ""],
+    ...pluginOptions,
+    optimize: { pureFunctions: false, ...pluginOptions.optimize }
+  };
+
   let capturedError: Error | null = null;
   let capturedMetadata: MinchoBabelFileMetadata = {};
   const capturePlugin: PluginObj<PluginState> = {

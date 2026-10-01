@@ -1,3 +1,4 @@
+import { driveModuleGraph } from "./moduleGraph.js";
 import { executeTransform } from "./compilationExecution.js";
 import { cachedTransform } from "./transformCache.js";
 import type { CompilationCache } from "./compilationCache.js";
@@ -24,7 +25,8 @@ import {
   internalParseModuleProgram,
   minchoBabelPlugin,
   minchoStyledComponentPlugin,
-  InternalExtractCallsError
+  InternalExtractCallsError,
+  internalAnalyzePureFunctions
 } from "@mincho-js/babel";
 import { inferCommonJsSourceType, transformCommonJsToEsm } from "./commonJs.js";
 import { prepareExtractCalls } from "./extractCalls.js";
@@ -325,22 +327,56 @@ export async function transformSourceUncached(
   } = babel;
 
   const projectEngine = staticCssEvalProjectEngine;
+  const sourceLoads = new Map<
+    string,
+    ReturnType<StaticCssEvalSourceProvider["load"]>
+  >();
+
+  const sourceResolutions = new Map<
+    string,
+    ReturnType<StaticCssEvalSourceProvider["resolve"]>
+  >();
+
   const sourceProvider: StaticCssEvalSourceProvider | undefined =
     staticCssEvalSourceProvider && {
-      resolve: (importerId, specifier, options) =>
-        measureCompilationPhase("source-resolve", async () =>
-          staticCssEvalSourceProvider.resolve(importerId, specifier, options)
-        ),
+      resolve: (importerId, specifier, options) => {
+        const key = JSON.stringify([
+          importerId,
+          specifier,
+          options?.kind ?? "import"
+        ]);
 
-      load: (id) =>
-        id === path
-          ? {
-              sourceText: source,
-              sourceHash: createHash("sha256").update(source).digest("hex")
-            }
-          : measureCompilationPhase("source-load", async () =>
+        if (!sourceResolutions.has(key))
+          sourceResolutions.set(
+            key,
+            measureCompilationPhase("source-resolve", async () =>
+              staticCssEvalSourceProvider.resolve(
+                importerId,
+                specifier,
+                options
+              )
+            )
+          );
+
+        return sourceResolutions.get(key)!;
+      },
+
+      load: (id) => {
+        if (id === path)
+          return {
+            sourceText: source,
+            sourceHash: createHash("sha256").update(source).digest("hex")
+          };
+        if (!sourceLoads.has(id))
+          sourceLoads.set(
+            id,
+            measureCompilationPhase("source-load", async () =>
               staticCssEvalSourceProvider.load(id)
             )
+          );
+
+        return sourceLoads.get(id)!;
+      }
     };
 
   const prepassSourceProvider =
@@ -369,6 +405,36 @@ export async function transformSourceUncached(
     | undefined;
 
   try {
+    if (
+      optimize?.pureFunctions !== false &&
+      /@(?:mincho-js|vanilla-extract)\/|\bcss\b/.test(source)
+    ) {
+      options.preparedPureFunctions = await measureCompilationPhase(
+        "pure-functions",
+        () =>
+          driveModuleGraph(
+            internalAnalyzePureFunctions({
+              filename: path,
+              source,
+              jsxCssProp,
+              parserCache: compilationCache?.parser
+            }),
+            prepassSourceProvider,
+            extractCallsDependencies
+          )
+      );
+
+      for (const file of options.preparedPureFunctions.dependencies)
+        extractCallsDependencies.add(file);
+
+      recordCompilationDiagnostic("pure-functions-result", {
+        folded: options.preparedPureFunctions.replacements.length,
+        deopt: options.preparedPureFunctions.diagnostics.filter(
+          (item) => item.result === "deopt"
+        ).length
+      });
+    }
+
     if (extractCalls !== undefined) {
       preparedProgram ??= internalParseModuleProgram(
         path,
@@ -1067,7 +1133,7 @@ if (import.meta.vitest) {
       expect(sidecarSource).toContain('color: "red"');
     });
 
-    it("emits sidecar build-time call-valued leaf and spread call css prop rules", async () => {
+    it("folds pure call-valued leaves and spread calls in css prop rules", async () => {
       const fixturePath = await createBabelFixture(
         `
           function makeRule(color = "red") {
@@ -1099,11 +1165,12 @@ if (import.meta.vitest) {
       expect(code).not.toMatch(/\bcss\(/);
       expect(code).not.toContain("_cx(makeRule");
       expect(code).not.toContain("_cx(makeColor");
-      expect(sidecarSource).toContain('_css(makeRule("red"))');
-      expect(sidecarSource).toMatch(/_css\(\{\s+color: makeColor\(\)\s+\}\)/);
-      expect(sidecarSource).toMatch(
-        /_css\(\{\s+\.\.\.makeRule\("green"\)\s+\}\)/
-      );
+
+      for (const color of ["red", "blue", "green"])
+        expect(sidecarSource).toContain(`color: "${color}"`);
+
+      expect(sidecarSource).not.toContain("makeRule");
+      expect(sidecarSource).not.toContain("makeColor");
     });
 
     it("preserves direct object and class-value css props without a static source provider", async () => {
@@ -1289,7 +1356,8 @@ if (import.meta.vitest) {
 
       const [, sidecarSource] = result;
 
-      expect(sidecarSource).toContain("cx({");
+      expect(sidecarSource).toContain('color: "red"');
+      expect(sidecarSource).not.toContain("cx({");
       expect(code).not.toContain(" css=");
     });
 

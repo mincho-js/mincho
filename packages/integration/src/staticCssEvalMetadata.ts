@@ -137,9 +137,9 @@ export function createStaticCssEvalTransformResult(
       ? [
           ...new Set([
             ...(prepassResult?.dependencyFiles ?? []),
-            ...additionalDependencyFiles
+            ...[...additionalDependencyFiles].sort()
           ])
-        ].sort()
+        ]
       : (prepassResult?.dependencyFiles ?? []),
     ownerToDependencies: prepassResult?.ownerToDependencies ?? new Map(),
     dependencyToOwners: prepassResult?.dependencyToOwners ?? new Map(),

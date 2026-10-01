@@ -30,10 +30,14 @@ export interface PluginOptions {
 
   /** @internal Module identities and protected implementations from bundler analysis. */
   preparedExtractCalls?: PreparedExtractCalls;
+
+  /** @internal Prepared pure helper results; values are fresh literal ASTs. */
+  preparedPureFunctions?: import("./optimizations/pureFunctions.js").PreparedPureFunctions;
   jsxCssProp?: boolean;
   jsxCssPropTransformed?: boolean;
   optimize?: {
     defineRulesCxConditions?: boolean;
+    pureFunctions?: boolean;
   };
 
   /** @internal Prepared sync provider supplied by bundler prepasses only. */

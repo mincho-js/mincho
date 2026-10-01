@@ -94,6 +94,21 @@ keeps compiler transforms inline and retains the existing large package-graph
 analysis threshold; `0` disables workers. This default change does not enable
 additional compiler workers or change CSS and runtime optimization settings.
 
+`optimize.pureFunctions` defaults to `true`. CSS arguments and JSX `css`
+rules can use helpers resolved through ESM or CommonJS imports and reexports.
+The compiler interprets function declarations and const arrows/functions with
+identifier parameters, static defaults, local const declarations and one return.
+It supports the existing literal operators, objects, arrays, conditionals and
+nested proved helpers. It never executes component modules for this pass.
+Mutation, getters, `this`, async code, loops, recursion and unknown calls prevent
+folding. Each expression has a shared budget of 50 levels and 10,000 visited
+nodes across helper calls. Unproved expressions retain their existing behavior.
+
+Both build adapters accept `optimize`. Vite merges explicitly specified top-level
+fields over `babel.optimize`; `defineRulesCxConditions` retains its existing
+opt-in behavior. Babel supports same-file helpers directly, while integration
+prepares asynchronous cross-module results and retains their dependency watches.
+
 ## Runtime package boundaries
 
 The existing `@mincho-js/css/rules/createRuntimeFn` and

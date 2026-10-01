@@ -83,6 +83,7 @@ export interface MinchoVitePluginOptions {
   diagnostics?: MinchoDiagnosticsOptions;
   cache?: MinchoCacheOptions;
   execution?: MinchoExecutionOptions;
+  optimize?: BabelOptions["optimize"];
   babel?: BabelOptions;
   jsxCssProp?: boolean;
 
@@ -1181,6 +1182,9 @@ function createMinchoViteEnvironmentPlugin(
 
         const transformBabelOptions: BabelOptions = {
           ...babelOptions,
+          ...(_options?.optimize
+            ? { optimize: { ...babelOptions?.optimize, ..._options.optimize } }
+            : {}),
           compilationCache,
           compilationContext: this.environment
             ? this.environment.name +

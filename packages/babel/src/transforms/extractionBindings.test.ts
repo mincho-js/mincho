@@ -5,7 +5,11 @@ import { minchoBabelPlugin } from "../index.js";
 import type { PluginOptions } from "../types.js";
 
 function extract(source: string) {
-  const options: PluginOptions = { result: ["", ""] };
+  const options: PluginOptions = {
+    result: ["", ""],
+    optimize: { pureFunctions: false }
+  };
+
   const result = transformSync(source, {
     filename: "extraction.ts",
     configFile: false,
