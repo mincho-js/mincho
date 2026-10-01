@@ -121,6 +121,20 @@ The CSS authoring entry and registry retain their existing effect declarations;
 registers definitions. The package contract checks unused and dynamic runtime
 bundles in both ESM and CommonJS output formats.
 
+`optimize.staticRecipes` defaults to `true` in build integrations. Calls to
+Mincho `rules` with proved static arguments become class-name literals, including
+calls through local imports and reexports. The pass reads serialized configuration
+from the normal extracted sidecar and invokes only the known pure recipe runtime.
+It does not evaluate component modules or enumerate possible variant combinations.
+Repeated observed arguments share results within a build generation, and the
+native sidecar pipeline evaluates each sidecar once per build.
+
+Dynamic calls, public recipe methods and CSS imports remain intact. CommonJS
+exports can retain their recipe runtime even when a particular call is folded;
+replacing a call with a string does not always reduce bundle size. Vanilla Extract
+recipes and sprinkles keep their normal extraction support but are not folded by
+this pass. Standalone `.css.ts` authoring modules also keep their existing behavior.
+
 ## Reproducible compilation benchmark
 
 Build each revision with `PACKAGE_PUBLISH=true` before packaging it. Keep

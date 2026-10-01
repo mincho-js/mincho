@@ -314,7 +314,7 @@
     "file": "packages/esbuild/src/plugin.ts",
     "type": "warning",
     "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
-    "source": "args.path.includes(\"node_modules\") ||",
+    "source": "path.includes(\"node_modules\") ||",
     "count": 1,
     "reason": "This filter applies includeNodeModules to node_modules and Yarn paths supplied by esbuild; it does not locate packages on disk.",
     "expires": "2026-12-31"

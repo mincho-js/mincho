@@ -38,6 +38,7 @@ export interface PluginOptions {
   optimize?: {
     defineRulesCxConditions?: boolean;
     pureFunctions?: boolean;
+    staticRecipes?: boolean;
   };
 
   /** @internal Prepared sync provider supplied by bundler prepasses only. */

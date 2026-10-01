@@ -7,6 +7,7 @@ import {
   InternalCompilationExecution,
   type MinchoExecutionOptions,
   type MinchoCacheOptions,
+  InternalRuntimeOptimizations,
   type BabelTransformResult,
   type InternalStaticCssEvalLoadedSource as StaticCssEvalLoadedSource,
   type InternalStaticCssEvalMetadataLike as StaticCssEvalMetadata,
@@ -25,6 +26,7 @@ import {
 import { vanillaExtractPlugin } from "@vanilla-extract/esbuild-plugin";
 import {
   type Plugin as EsbuildPlugin,
+  type OnLoadResult,
   type Loader,
   type PluginBuild,
   type ResolveResult
@@ -112,9 +114,25 @@ export function minchoEsbuildPlugin({
       );
       execution.compilationCache = compilationCache;
 
+      const runtimeOptimizations = new InternalRuntimeOptimizations();
+      const preparedScripts = new Map<
+        string,
+        ReturnType<typeof prepareUncachedScript>
+      >();
+
+      const sidecarOwners = new Map<
+        string,
+        { path: string; mainFilePath: string }
+      >();
+
+      const sidecarLoads = new Map<string, Promise<OnLoadResult>>();
       build.onDispose?.(async () => {
         await execution.close();
         compilationCache?.clear();
+        runtimeOptimizations.clear();
+        preparedScripts.clear();
+        sidecarOwners.clear();
+        sidecarLoads.clear();
       });
 
       const diagnostics = new CompilationDiagnostics(
@@ -165,6 +183,10 @@ export function minchoEsbuildPlugin({
         execution.begin();
         diagnostics.begin();
         compilationCache?.begin();
+        runtimeOptimizations.clear();
+        preparedScripts.clear();
+        sidecarOwners.clear();
+        sidecarLoads.clear();
         assets.beginBuild();
       });
       build.onResolve({ filter: /.*/ }, (args) =>
@@ -180,6 +202,10 @@ export function minchoEsbuildPlugin({
         resolverCache.clear();
         staticCssEvalResolutionCache.clear();
         staticCssEvalLoadedSourceCache.clear();
+        preparedScripts.clear();
+        sidecarOwners.clear();
+        sidecarLoads.clear();
+        runtimeOptimizations.clear();
 
         try {
           await diagnostics.run(
@@ -213,190 +239,278 @@ export function minchoEsbuildPlugin({
         };
       });
 
-      build.onLoad(
-        { filter: /.*/, namespace: "extracted-css" },
-        async ({ path, pluginData }) => {
-          const resolverContents = resolvers.get(pluginData.path)!;
-          const assetWatchFiles = new Set<string>();
-          const assetBridge = assets.createCompileBridge(assetWatchFiles);
-          const { source, watchFiles = [] } = await traced.compile({
-            esbuild: build.esbuild,
-            filePath: path,
-            originalPath: pluginData.mainFilePath!,
-            contents: resolverContents,
-            externals: [],
-            cwd: build.initialOptions.absWorkingDir,
-            loader: assets.getCompileLoaders(),
-            plugins: [assetBridge.plugin],
-            cacheBridge: assetBridge.cacheBridge,
-            cache: compilationCache,
-            readFileBytes: transaction?.snapshot.readFile.bind(
-              transaction.snapshot
-            ),
-            readFile: transaction
-              ? (filePath: string) =>
-                  transaction.snapshot
-                    .readFile(filePath)
-                    .then((bytes) => bytes.toString("utf8"))
-              : undefined,
-            resolverCache
-          });
+      async function compileSidecar(
+        path: string,
+        pluginData: { path: string; mainFilePath: string }
+      ): Promise<OnLoadResult> {
+        const resolverContents = resolvers.get(pluginData.path)!;
+        const assetWatchFiles = new Set<string>();
+        const assetBridge = assets.createCompileBridge(assetWatchFiles);
+        const { source, watchFiles = [] } = await traced.compile({
+          esbuild: build.esbuild,
+          filePath: path,
+          originalPath: pluginData.mainFilePath!,
+          contents: resolverContents,
+          externals: [],
+          cwd: build.initialOptions.absWorkingDir,
+          loader: assets.getCompileLoaders(),
+          plugins: [assetBridge.plugin],
+          cacheBridge: assetBridge.cacheBridge,
+          cache: compilationCache,
+          readFileBytes: transaction?.snapshot.readFile.bind(
+            transaction.snapshot
+          ),
+          readFile: transaction
+            ? (filePath: string) =>
+                transaction.snapshot
+                  .readFile(filePath)
+                  .then((bytes) => bytes.toString("utf8"))
+            : undefined,
+          resolverCache
+        });
 
-          try {
-            const {
-              ancestorStyleSpecifiers,
-              source: registrySource,
-              packageGraph
-            } = await integrationHelpers.runDefineRulesPresetRegistryStep(() =>
-              traced.processDefineRulesPresetRegistryFile({
-                source,
-                filePath: path,
-                outputCss: undefined,
-                identOption: build.initialOptions.minify ? "short" : "debug"
-              })
-            );
+        try {
+          const {
+            ancestorStyleSpecifiers,
+            source: registrySource,
+            packageGraph
+          } = await integrationHelpers.runDefineRulesPresetRegistryStep(() =>
+            traced.processDefineRulesPresetRegistryFile({
+              source,
+              filePath: path,
+              outputCss: undefined,
+              identOption: build.initialOptions.minify ? "short" : "debug"
+            })
+          );
 
-            if (transaction) {
-              if (!packageGraph)
-                throw new Error(
-                  "Mincho build requires package graph metadata from the registry."
-                );
-
-              // Babel currently emits one extracted module per source. Keep
-              // multiple extraction identities complete and order-independent.
-              recordPackageGraph(
-                transaction,
-                pluginData.mainFilePath,
-                path,
-                packageGraph
+          if (transaction) {
+            if (!packageGraph)
+              throw new Error(
+                "Mincho build requires package graph metadata from the registry."
               );
-            }
 
-            const contents = `${ancestorStyleSpecifiers
-              .map((specifier) => `import ${JSON.stringify(specifier)};`)
-              .join(
-                "\n"
-              )}${ancestorStyleSpecifiers.length === 0 ? "" : "\n"}${registrySource}`;
-
-            return {
-              contents,
-              loader: "js",
-              resolveDir: dirname(path),
-              watchFiles: [...new Set([...watchFiles, ...assetWatchFiles])]
-            };
-          } catch (error) {
-            if (error instanceof ReferenceError) {
-              return {
-                errors: [
-                  {
-                    text: error.toString(),
-                    detail:
-                      "This usually happens if you use a browser api at the top level of a file being imported."
-                  }
-                ]
-              };
-            }
-
-            throw error;
+            // Babel currently emits one extracted module per source. Keep
+            // multiple extraction identities complete and order-independent.
+            recordPackageGraph(
+              transaction,
+              pluginData.mainFilePath,
+              path,
+              packageGraph
+            );
           }
+
+          const contents = `${ancestorStyleSpecifiers
+            .map((specifier) => `import ${JSON.stringify(specifier)};`)
+            .join(
+              "\n"
+            )}${ancestorStyleSpecifiers.length === 0 ? "" : "\n"}${registrySource}`;
+
+          return {
+            contents,
+            loader: "js",
+            resolveDir: dirname(path),
+            watchFiles: [...new Set([...watchFiles, ...assetWatchFiles])]
+          };
+        } catch (error) {
+          if (error instanceof ReferenceError) {
+            return {
+              errors: [
+                {
+                  text: error.toString(),
+                  detail:
+                    "This usually happens if you use a browser api at the top level of a file being imported."
+                }
+              ]
+            };
+          }
+
+          throw error;
         }
+      }
+
+      async function loadSidecar(
+        path: string,
+        supplied?: { path: string; mainFilePath: string }
+      ): Promise<OnLoadResult> {
+        const cached = sidecarLoads.get(path);
+        if (cached) return cached;
+
+        const owner = sidecarOwners.get(path) ?? supplied;
+        if (!owner) return {};
+
+        const pending = compileSidecar(path, owner);
+        sidecarLoads.set(path, pending);
+
+        try {
+          const result = await pending;
+
+          if (result.errors?.length) sidecarLoads.delete(path);
+
+          return result;
+        } catch (error) {
+          sidecarLoads.delete(path);
+
+          throw error;
+        }
+      }
+
+      build.onLoad({ filter: /.*/, namespace: "extracted-css" }, (args) =>
+        loadSidecar(args.path, args.pluginData)
       );
 
-      build.onLoad({ filter: /.*/, namespace: "file" }, async (args) => {
-        if (args.with?.type === "json" || args.with?.type === "bytes") return;
-
-        const loader = getScriptLoader(args.path, build.initialOptions.loader);
-        if (!loader) return;
-        if (args.path.endsWith(".css.ts")) return;
+      async function prepareScript(path: string) {
+        const loader = getScriptLoader(path, build.initialOptions.loader);
+        if (!loader || path.endsWith(".css.ts")) return;
 
         if (
-          args.path.includes("node_modules") ||
-          /(^|[\\/])\.yarn[\\/]/.test(args.path)
+          path.includes("node_modules") ||
+          /(^|[\\/])\.yarn[\\/]/.test(path)
         ) {
-          if (!includeNodeModulesPattern) return;
-          if (!includeNodeModulesPattern.test(args.path)) return;
+          if (
+            !includeNodeModulesPattern ||
+            !includeNodeModulesPattern.test(path)
+          )
+            return;
         }
 
         const source = transaction
-          ? (await transaction.snapshot.readFile(args.path)).toString("utf8")
+          ? (await transaction.snapshot.readFile(path)).toString("utf8")
           : compilationCache?.hasActiveInputs
             ? Buffer.from(
-                await diagnostics.run(args.path, "source-read", () =>
-                  compilationCache.readFile(args.path)
+                await diagnostics.run(path, "source-read", () =>
+                  compilationCache.readFile(path)
                 )
               ).toString("utf8")
-            : await fs.promises.readFile(args.path, "utf8");
+            : await fs.promises.readFile(path, "utf8");
 
-        const babelOptions: BabelOptions | undefined =
-          jsxCssProp === undefined && extractCalls === undefined
-            ? undefined
-            : { jsxCssProp, extractCalls };
+        const key = path + "\0" + source;
+        const cached = preparedScripts.get(key);
+        if (cached) return cached;
 
-        const transformBabelOptions: BabelOptions | undefined =
-          babelOptions?.jsxCssProp === true ||
-          babelOptions?.extractCalls !== undefined
-            ? {
-                ...babelOptions,
-                staticCssEvalProjectEngine,
-                staticCssEvalSourceProvider:
-                  createEsbuildStaticCssEvalSourceProvider({
-                    build,
-                    ownerId: args.path,
-                    ownerSource: source,
-                    assets,
-                    rootRealpath,
-                    resolutionCache: staticCssEvalResolutionCache,
-                    loadedSourceCache: staticCssEvalLoadedSourceCache
-                  })
-              }
-            : babelOptions;
+        const pending = prepareUncachedScript(path, source, loader);
+        preparedScripts.set(key, pending);
 
-        const transformOptions = {
-          filename: args.path,
+        try {
+          return await pending;
+        } catch (error) {
+          preparedScripts.delete(key);
+
+          throw error;
+        }
+      }
+
+      async function prepareUncachedScript(
+        path: string,
+        source: string,
+        loader: NonNullable<ReturnType<typeof getScriptLoader>>
+      ) {
+        const provider = createEsbuildStaticCssEvalSourceProvider({
+          build,
+          ownerId: path,
+          ownerSource: source,
+          assets,
+          rootRealpath,
+          resolutionCache: staticCssEvalResolutionCache,
+          loadedSourceCache: staticCssEvalLoadedSourceCache
+        });
+
+        const options = {
+          filename: path,
           root: await rootRealpath,
           source,
           loader,
           babel: {
-            ...transformBabelOptions,
+            jsxCssProp,
+            extractCalls,
             optimize,
             compilationCache,
+            staticCssEvalSourceProvider: provider,
+            staticCssEvalProjectEngine,
             ...(diagnostics.enabled ? { diagnostics: true } : {})
           },
           sourceMaps: Boolean(build.initialOptions.sourcemap)
         };
 
-        const transformed: BabelTransformResult =
-          (await internalCanSkipMinchoTransform(transformOptions))
+        const result: BabelTransformResult =
+          (await internalCanSkipMinchoTransform(options))
             ? { code: source, result: ["", ""] }
-            : await traced.babelTransformSource(transformOptions);
-        const {
-          code,
-          map,
-          result: [file, cssExtract],
-          staticCssEval
-        } = transformed;
+            : await traced.babelTransformSource(options);
+        const [file, cssExtract] = result.result;
 
-        const staticCssEvalFileResult =
-          staticCssEvalProjectEngine.getFileResult(args.path);
+        if (file && cssExtract && cssExtract !== result.code) {
+          if (resolvers.get(file) !== cssExtract)
+            sidecarLoads.delete(join(path, "..", file));
 
-        // the extracted code and original are the same -> no css extracted
-        if (file && cssExtract && cssExtract != code) {
           resolvers.set(file, cssExtract);
-          resolverCache.delete(args.path);
+          sidecarOwners.set(join(path, "..", file), {
+            path: file,
+            mainFilePath: path
+          });
+          resolverCache.delete(path);
         }
+
+        return { result, options, provider, loader };
+      }
+
+      build.onLoad({ filter: /.*/, namespace: "file" }, async (args) => {
+        if (args.with?.type === "json" || args.with?.type === "bytes") return;
+
+        const prepared = await prepareScript(args.path);
+        if (!prepared) return;
+
+        const { options, loader, provider } = prepared;
+        const result = await diagnostics.run(
+          args.path,
+          "runtime-optimization",
+          () =>
+            runtimeOptimizations.transform(options, prepared.result, {
+              resolve: (importer, specifier, options) => {
+                const sidecar = join(importer, "..", specifier);
+
+                return sidecarOwners.has(sidecar)
+                  ? { id: sidecar }
+                  : provider.resolve(importer, specifier, options);
+              },
+
+              load: async (id) => {
+                if (sidecarOwners.has(id)) {
+                  const loaded = await loadSidecar(id);
+
+                  return loaded.errors?.length ||
+                    typeof loaded.contents !== "string"
+                    ? null
+                    : { source: loaded.contents };
+                }
+
+                if (id === args.path) return null;
+
+                const script = await prepareScript(id);
+
+                return script ? { source: script.result.code } : null;
+              }
+            })
+        );
+
+        const { code, map, staticCssEval } = result;
+        const existingDependencies =
+          staticCssEvalProjectEngine.getFileResult(args.path)
+            ?.dependencyFiles ?? [];
 
         return {
           contents: map
             ? `${code}\n//# sourceMappingURL=data:application/json;base64,${Buffer.from(JSON.stringify(map)).toString("base64")}`
             : code,
           loader,
-          pluginData: {
-            mainFilePath: args.path
-          },
+          pluginData: { mainFilePath: args.path },
           watchFiles: getWatchableStaticCssEvalDependencyFiles(
             await rootRealpath,
-            staticCssEvalFileResult ?? {
-              dependencyFiles: collectStaticCssEvalDependencyIds(staticCssEval)
+            {
+              dependencyFiles: [
+                ...new Set([
+                  ...existingDependencies,
+                  ...collectStaticCssEvalDependencyIds(staticCssEval)
+                ])
+              ]
             },
             args.path
           )

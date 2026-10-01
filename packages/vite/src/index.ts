@@ -9,6 +9,7 @@ import {
   InternalCompilationExecution,
   type MinchoExecutionOptions,
   type MinchoCacheOptions,
+  InternalRuntimeOptimizations,
   type BabelTransformResult,
   type DefineRulesPackageGraph,
   type InternalStaticCssEvalLoadedSource as StaticCssEvalLoadedSource,
@@ -206,6 +207,12 @@ function createMinchoViteEnvironmentPlugin(
 
   execution.compilationCache = compilationCache;
 
+  const runtimeOptimizations = new InternalRuntimeOptimizations();
+  const runtimeOwners = new Set<string>();
+
+  // Keep our serialized imports before Vite rewrites them for the dev server.
+  const runtimeModules = new Map<string, string>();
+
   const tracedCompile = (options: Parameters<typeof compile>[0]) =>
     diagnostics.run(options.originalPath, "sidecar-compile", () =>
       execution.run(() => compile({ ...options, cache: compilationCache }))
@@ -390,11 +397,29 @@ function createMinchoViteEnvironmentPlugin(
 
   function refreshStaticCssEvalProjectEngineFromAdapterResult(
     ownerId: string,
-    staticCssEval: StaticCssEvalMetadata | undefined
+    staticCssEval: StaticCssEvalMetadata | undefined,
+    runtimeOptimized = false
   ): void {
     const fileResult = staticCssEvalProjectEngine.getFileResult(ownerId);
 
-    if (staticCssEval && !fileResult) {
+    if (staticCssEval && fileResult && runtimeOptimized) {
+      staticCssEvalProjectEngine.refreshFile({
+        fileId: ownerId,
+        result: {
+          ...fileResult,
+          dependencyFiles: [
+            ...new Set([
+              ...fileResult.dependencyFiles,
+              ...collectStaticCssEvalDependencyIds(staticCssEval)
+            ])
+          ]
+        },
+        generatedArtifacts: fileResult.generatedArtifacts,
+        sourceHash: fileResult.sourceHash,
+        sourceVersion: fileResult.sourceVersion,
+        preserveProviderRecords: true
+      });
+    } else if (staticCssEval && !fileResult) {
       staticCssEvalProjectEngine.refreshFile({
         fileId: ownerId,
         result: {
@@ -652,6 +677,8 @@ function createMinchoViteEnvironmentPlugin(
 
         if (config.command === "build") compilationCache?.begin();
 
+        runtimeOptimizations.clear();
+        runtimeModules.clear();
         transformEpoch = Symbol("build");
 
         if (graphAnalysisClosed) {
@@ -1134,6 +1161,8 @@ function createMinchoViteEnvironmentPlugin(
           if (publication) publication.publish = publish;
           else publish();
 
+          runtimeModules.set(id, registryResult.source);
+
           return registryResult.source;
         } catch (error) {
           if (current())
@@ -1255,12 +1284,103 @@ function createMinchoViteEnvironmentPlugin(
           scheduleDiagnosticsFlush();
         }
 
+        if (!current())
+          return { code: transformResult.code, map: transformResult.map ?? null };
+
+        const [file, cssExtract] = transformResult.result;
+
+        if (file && cssExtract) {
+          if (config.command === "build" && config.build.watch) {
+            this.addWatchFile(file);
+          }
+
+          const resolvedCssPath = normalizePath(join(fileId, "..", file));
+
+          if (server && cssState.hasSidecar(resolvedCssPath)) {
+            const { moduleGraph } = server;
+
+            for (const moduleId of [
+              resolvedCssPath,
+              extractedSidecarModuleId(resolvedCssPath)
+            ]) {
+              const module = moduleGraph.getModuleById(moduleId);
+
+              if (module) {
+                moduleGraph.invalidateModule(module);
+              }
+            }
+          }
+
+          cssState.registerSidecar(fileId, resolvedCssPath, cssExtract);
+        }
+
+        runtimeModules.set(id, transformResult.code);
+
+        if (typeof this.load === "function" && !runtimeOwners.has(id)) {
+          runtimeOwners.add(id);
+
+          try {
+            transformResult = await diagnostics.run(
+              fileId,
+              "runtime-optimization",
+              () =>
+                runtimeOptimizations.transform(
+                  {
+                    filename: fileId,
+                    source: code,
+                    sourceMaps: true,
+                    babel: transformBabelOptions
+                  },
+                  transformResult,
+                  {
+                    resolve: async (importerId, source, options) => {
+                      const resolution = await this.resolve(
+                        source,
+                        importerId,
+                        {
+                          skipSelf: false,
+                          ...(options?.kind === "require"
+                            ? {
+                                custom: { "node-resolve": { isRequire: true } }
+                              }
+                            : {})
+                        }
+                      );
+                      if (!resolution || resolution.external) return null;
+
+                      return { id: resolution.id };
+                    },
+
+                    load: async (moduleId) => {
+                      if (runtimeOwners.has(moduleId)) {
+                        const source = runtimeModules.get(moduleId);
+
+                        return source ? { source } : null;
+                      }
+
+                      const loaded =
+                        this.environment?.mode === "dev"
+                          ? await this.environment.transformRequest(moduleId)
+                          : await this.load({ id: moduleId });
+
+                      const source =
+                        runtimeModules.get(moduleId) ?? loaded?.code;
+
+                      return source ? { source } : null;
+                    }
+                  }
+                )
+            );
+          } finally {
+            runtimeOwners.delete(id);
+          }
+        }
+
         const {
           code: transformedCode,
           map,
           jsxCssPropTransformed,
           commonJsTransformed,
-          result: [file, cssExtract],
           staticCssEval
         } = transformResult;
 
@@ -1268,7 +1388,8 @@ function createMinchoViteEnvironmentPlugin(
 
         refreshStaticCssEvalProjectEngineFromAdapterResult(
           fileId,
-          staticCssEval
+          staticCssEval,
+          transformResult.runtimeOptimized
         );
         addStaticCssEvalWatchFilesForOwner(this, fileId);
 
@@ -1277,6 +1398,7 @@ function createMinchoViteEnvironmentPlugin(
 
           if (
             commonJsTransformed ||
+            transformResult.runtimeOptimized ||
             (babelOptions?.jsxCssProp === true &&
               jsxCssPropTransformed === true)
           ) {
@@ -1288,29 +1410,6 @@ function createMinchoViteEnvironmentPlugin(
 
           return null;
         }
-
-        if (config.command === "build" && config.build.watch) {
-          this.addWatchFile(file);
-        }
-
-        const resolvedCssPath = normalizePath(join(fileId, "..", file));
-
-        if (server && cssState.hasSidecar(resolvedCssPath)) {
-          const { moduleGraph } = server;
-
-          for (const moduleId of [
-            resolvedCssPath,
-            extractedSidecarModuleId(resolvedCssPath)
-          ]) {
-            const module = moduleGraph.getModuleById(moduleId);
-
-            if (module) {
-              moduleGraph.invalidateModule(module);
-            }
-          }
-        }
-
-        cssState.registerSidecar(fileId, resolvedCssPath, cssExtract);
 
         return {
           code: transformedCode,
@@ -1452,6 +1551,8 @@ function createMinchoViteEnvironmentPlugin(
       observedProviderSources.delete(fileId);
       observedTransformInputs.delete(fileId);
       invalidateStaticCssEvalDependency(fileId, change?.event === "delete");
+      runtimeOptimizations.clear();
+      runtimeModules.delete(id);
     },
 
     async closeBundle() {
@@ -1472,6 +1573,8 @@ function createMinchoViteEnvironmentPlugin(
           observedTransformInputs.clear();
           ownerVersions.clear();
           ownerRequests.clear();
+          runtimeOptimizations.clear();
+          runtimeModules.clear();
           graphAnalysisClosed = true;
           await graphAnalysis.close();
         }
@@ -1489,6 +1592,8 @@ function createMinchoViteEnvironmentPlugin(
       observedTransformInputs.clear();
       ownerVersions.clear();
       ownerRequests.clear();
+      runtimeOptimizations.clear();
+      runtimeModules.clear();
 
       try {
         await diagnostics.flush(config.root);

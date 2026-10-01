@@ -220,6 +220,105 @@ describe("esbuild build contracts", () => {
   }, 20000);
 });
 
+describe("static recipe bundles", () => {
+  it("reuses one CSS evaluation and refreshes recipes between rebuilds", async () => {
+    const producer = (size: string) =>
+      `import { rules } from "@mincho-js/css"; export const button = rules({ variants: { size: { large: { padding: 8 }, small: { padding: 4 } } }, defaultVariants: { size: "${size}" } });`;
+
+    const root = await fixture({
+      "entry.tsx":
+        'import { button } from "./styles"; export const className = button();',
+      "styles.ts": producer("large")
+    });
+
+    const buildContext = await context(
+      buildOptions(root, {
+        plugins: minchoEsbuildPlugins({
+          diagnostics: { json: "out/diagnostics.json" }
+        })
+      })
+    );
+
+    try {
+      const first = await buildContext.rebuild();
+      const repeated = await buildContext.rebuild();
+
+      expect(outputText(repeated, ".js")).toBe(outputText(first, ".js"));
+
+      const report = JSON.parse(
+        await fs.readFile(join(root, "out/diagnostics.json"), "utf8")
+      );
+
+      const events = report.builds.flatMap(
+        (build: { events: Array<{ phase: string }> }) => build.events
+      );
+
+      expect(
+        events.filter(
+          (event: { phase: string }) => event.phase === "css-evaluation"
+        )
+      ).toHaveLength(1);
+
+      await fs.writeFile(join(root, "styles.ts"), producer("small"));
+
+      const edited = await buildContext.rebuild();
+
+      expect(outputText(edited, ".js")).not.toBe(outputText(first, ".js"));
+      expect(outputText(edited, ".css")).toBe(outputText(first, ".css"));
+    } finally {
+      await buildContext.dispose();
+    }
+  });
+
+  it.each(["esm", "commonjs"])(
+    "folds %s reexports and preserves CSS",
+    async (mode) => {
+      const extension = mode === "esm" ? "ts" : "cjs";
+      const root = await fixture({
+        [`entry.${extension}`]:
+          mode === "esm"
+            ? 'import { button } from "./barrel.ts"; export const className = button({ size: "large" });'
+            : 'const { button } = require("./barrel.cjs"); exports.className = button({ size: "large" });',
+        [`barrel.${extension}`]:
+          mode === "esm"
+            ? 'export { button } from "./styles.ts";'
+            : 'module.exports = require("./styles.cjs");',
+        [`styles.${extension}`]: `${mode === "esm" ? 'import { rules } from "@mincho-js/css"; export const button' : 'const { rules } = require("@mincho-js/css"); exports.button'} = rules({ base: { color: "red" }, variants: { size: { large: { padding: 8 }, small: { padding: 4 } } } });`
+      });
+
+      const options = {
+        entryPoints: [join(root, `entry.${extension}`)],
+        minify: true
+      };
+
+      const baseline = await build(
+        buildOptions(root, {
+          ...options,
+          plugins: minchoEsbuildPlugins({ optimize: { staticRecipes: false } })
+        })
+      );
+
+      const optimized = await build(buildOptions(root, options));
+
+      expect(outputText(optimized, ".css")).toBe(outputText(baseline, ".css"));
+      expect(outputText(optimized, ".css")).toContain("padding:8px");
+      expect(outputText(optimized, ".js")).not.toMatch(
+        /\w+\(\{size:"large"\}\)/
+      );
+
+      // CommonJS exports remain observable and retain their runtime API.
+      if (mode === "esm") {
+        expect(outputText(optimized, ".js")).not.toMatch(
+          /defaultVariants|compoundVariants/
+        );
+        expect(outputText(optimized, ".js").length).toBeLessThan(
+          outputText(baseline, ".js").length
+        );
+      }
+    }
+  );
+});
+
 describe("native esbuild assets", () => {
   it("replays CSS-only assets on unchanged cached builds", async () => {
     const root = await fixture({

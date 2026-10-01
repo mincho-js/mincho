@@ -243,6 +243,7 @@ export type BabelTransformResult = {
 
   readonly diagnostics?: MinchoCompilationMetadata;
   commonJsTransformed?: boolean;
+  runtimeOptimized?: boolean;
   code: string;
   readonly map?: BabelFileResult["map"];
   readonly jsxCssPropTransformed?: boolean;

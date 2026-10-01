@@ -158,3 +158,8 @@ export {
 } from "./semanticExports.js";
 
 export { analyzePureFunctions as internalAnalyzePureFunctions } from "./optimizations/pureFunctions.js";
+
+export {
+  analyzeRuntimeExpressions as internalAnalyzeRuntimeExpressions,
+  applyRuntimeExpressions as internalApplyRuntimeExpressions
+} from "./optimizations/runtimeExpressions.js";
