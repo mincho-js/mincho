@@ -11,6 +11,11 @@ import {
   reducePartialEvalExpression
 } from "../staticCssEval/partialEvaluator/index.js";
 import { getStaticPrimitiveValue } from "../staticCssEval/partialEvaluator/literals.js";
+import type { SourceAstCache } from "../staticCssEval/moduleParser.js";
+import {
+  pureFunctionMemoKey,
+  type PureFunctionMemoValue
+} from "./pureFunctionMemo.js";
 
 export class StaticExpressionDeopt extends Error {}
 
@@ -20,14 +25,19 @@ export interface StaticExpressionBudget {
   readonly bindingMutations: WeakMap<Binding, boolean>;
   readonly active: Set<t.Node>;
   readonly proved: Set<t.Node>;
+  readonly memo?: SourceAstCache;
 }
 
-export const createStaticExpressionBudget = (): StaticExpressionBudget => ({
+export const createStaticExpressionBudget = (
+  memo?: SourceAstCache,
+  bindingMutations = new WeakMap<Binding, boolean>()
+): StaticExpressionBudget => ({
   nodes: 0,
   calls: 0,
-  bindingMutations: new WeakMap(),
+  bindingMutations,
   active: new Set(),
-  proved: new Set()
+  proved: new Set(),
+  memo
 });
 
 type Environment = ReadonlyMap<Binding, t.Expression>;
@@ -270,6 +280,38 @@ export function* evaluateStaticExpression(
       args.push(yield* child(arg));
     }
 
+    const memoKey =
+      budget.memo && budget.active.size === 0
+        ? yield* pureFunctionMemoKey(
+            graph,
+            target.module,
+            fn,
+            args,
+            environment,
+            depth
+          )
+        : null;
+
+    const previous = memoKey
+      ? budget.memo?.get<PureFunctionMemoValue>(memoKey)
+      : undefined;
+
+    if (memoKey) budget.memo?.observeResult("helper", !!previous);
+
+    if (previous) {
+      budget.nodes += previous.nodes;
+      budget.calls += previous.calls;
+
+      if (budget.nodes > 10000) return deopt();
+
+      const result = t.cloneNode(previous.result, true, true);
+      result.loc = path.node.loc;
+
+      return result;
+    }
+
+    const beforeNodes = budget.nodes;
+    const beforeCalls = budget.calls;
     const local = new Map(environment);
 
     const inside = (value: NodePath<t.Node>) =>
@@ -336,6 +378,22 @@ export function* evaluateStaticExpression(
       } else result = yield* inside(body);
 
       budget.calls++;
+
+      if (memoKey && budget.memo) {
+        const value: PureFunctionMemoValue = {
+          result: t.cloneNode(result, true, true),
+          nodes: budget.nodes - beforeNodes,
+          calls: budget.calls - beforeCalls
+        };
+
+        budget.memo.set(
+          memoKey,
+          value,
+          Buffer.byteLength(JSON.stringify(value))
+        );
+        result = t.cloneNode(value.result, true, true);
+        result.loc = path.node.loc;
+      }
 
       return result;
     } finally {

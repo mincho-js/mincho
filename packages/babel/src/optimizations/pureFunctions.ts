@@ -1,4 +1,5 @@
 import { types as t, type NodePath } from "@babel/core";
+import type { Binding } from "@babel/traverse";
 import { referencesModuleExport } from "../commonjs/bindings.js";
 import { isBuiltInExtractionCall } from "../extractionCalls/builtins.js";
 import {
@@ -18,6 +19,11 @@ export interface PreparedPureFunctions {
     expression: t.Expression;
   }>;
   readonly dependencies: readonly string[];
+  readonly exportDemands?: readonly {
+    file: string;
+    name: string | null;
+    members: readonly string[];
+  }[];
   readonly diagnostics: ReadonlyArray<{
     key: string;
     result: "folded" | "deopt";
@@ -102,13 +108,18 @@ export function* analyzePureFunctions(options: {
 
   const replacements: Array<{ key: string; expression: t.Expression }> = [];
   const diagnostics: Array<{ key: string; result: "folded" | "deopt" }> = [];
+  // Candidates share a read-only graph, but retain independent evaluation limits.
+  const bindingMutations = new WeakMap<Binding, boolean>();
 
   for (const path of candidates) {
     // Literal data cannot contain a helper invocation, including through imports.
     if (isLiteralData(path.node) || containsFunctionData(path.node)) continue;
 
     const key = expressionKey(path);
-    const budget = createStaticExpressionBudget();
+    const budget = createStaticExpressionBudget(
+      options.parserCache,
+      bindingMutations
+    );
 
     try {
       const expression = yield* evaluateStaticExpression(
@@ -133,7 +144,14 @@ export function* analyzePureFunctions(options: {
     }
   }
 
-  return { replacements, diagnostics, dependencies: [...graph.dependencies] };
+  return {
+    replacements,
+    diagnostics,
+    dependencies: [...graph.dependencies],
+    exportDemands: [...graph.exportDemands].flatMap(([file, names]) =>
+      [...names].map((name) => ({ file, name, members: [] }))
+    )
+  };
 }
 
 function isLiteralData(node: t.Node): boolean {

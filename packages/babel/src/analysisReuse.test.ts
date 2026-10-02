@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
+import { types as t } from "@babel/core";
 import { SourceAstCache } from "./staticCssEval/moduleParser.js";
 import { analyzeSource } from "./sourceAnalysis.js";
 import { semanticExports } from "./semanticExports.js";
+import { analyzePureFunctions } from "./optimizations/pureFunctions.js";
 
 describe("immutable source analysis", () => {
   it.each(["ts", "cts", "mts"])(
@@ -229,4 +231,42 @@ describe("semantic export fingerprints", () => {
   ])("retains full invalidation for unknown effects: %s", (source) =>
     expect(fingerprint(source)).toBeNull()
   );
+});
+
+describe("pure helper memoization", () => {
+  it("reuses closed calls, isolates returned ASTs and invalidates changed captures", () => {
+    const observe = vi.fn();
+    const cache = new SourceAstCache(observe);
+    const source = `import {css} from '@mincho-js/css'; const factor = 2; function pad(n) { return {padding:n*factor}; } export const box = css(pad(4));`;
+
+    const analyze = (source: string) => {
+      const next = analyzePureFunctions({
+        filename: "/style.ts",
+        source,
+        parserCache: cache
+      }).next();
+      if (!next.done) throw new Error("unexpected module request");
+
+      return next.value;
+    };
+
+    const first = analyze(source);
+
+    expect(first.diagnostics.some((item) => item.result === "folded")).toBe(
+      true
+    );
+
+    const expected = structuredClone(first.replacements);
+    const expression = first.replacements[0].expression;
+    if (!t.isObjectExpression(expression))
+      throw new Error("expected literal object");
+
+    expression.properties.length = 0;
+
+    expect(analyze(source).replacements).toEqual(expected);
+    expect(observe).toHaveBeenCalledWith(true, "helper");
+    expect(
+      analyze(source.replace("factor = 2", "factor = 3")).replacements
+    ).not.toEqual(expected);
+  });
 });
