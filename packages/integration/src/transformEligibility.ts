@@ -10,7 +10,7 @@ export async function canSkipMinchoTransform(
 ): Promise<boolean> {
   const cache = options.babel?.compilationCache;
 
-  // Inspect eligibility in the same validated input session as compilation.
+  // Initialize disk storage before reading resolution-directory fingerprints.
   return cache
     ? cache.withInputs(() => inspectTransformEligibility(options))
     : inspectTransformEligibility(options);
@@ -22,7 +22,7 @@ async function inspectTransformEligibility(
   const {
     compilationCache: cache,
     compilationContext: _context,
-    optimize: _optimize,
+    optimize,
     jsxCssProp,
     diagnostics: _diagnostics,
     staticCssEvalSourceProvider: _provider,
@@ -53,8 +53,8 @@ async function inspectTransformEligibility(
         /^@(?:mincho-js|vanilla-extract)\//.test(source)
       ) ||
       (jsxCssProp && facts.cssJsx) ||
-      facts.calls ||
-      facts.componentJsx
+      (optimize?.staticRecipes !== false && facts.calls) ||
+      (optimize?.styledComponents !== false && facts.componentJsx)
     )
       return false;
 

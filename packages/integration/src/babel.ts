@@ -635,6 +635,7 @@ export async function transformSourceUncached(
       : {}),
     ...(compilation ? { diagnostics: compilation } : {}),
     result: options.result,
+    semanticDemands: options.preparedPureFunctions?.exportDemands,
     code: result.code!,
     ...(sourceMaps ? { map: result.map } : {}),
     jsxCssPropTransformed: options.jsxCssPropTransformed === true,

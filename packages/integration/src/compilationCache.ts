@@ -281,7 +281,9 @@ export class CompilationCache {
     for (const key of this.entries.keys()) this.remove(key);
 
     this.dependencyEntries.clear();
+
     if (!this.sharedParser) this.parser.clear();
+
     this.bytes = 0;
   }
 

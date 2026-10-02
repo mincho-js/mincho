@@ -6,6 +6,7 @@ export {
 } from "./diagnostics.js";
 export type { ExtractCalls } from "@mincho-js/babel";
 export {
+  InternalSourceAstCache,
   internalInspectCommonJs,
   internalResolveFromModule
 } from "@mincho-js/babel";
@@ -24,6 +25,7 @@ export {
   type StaticCssEvalSourceUnsupportedReason as InternalStaticCssEvalSourceUnsupportedReason
 } from "./babel.js";
 export { compile } from "./compile.js";
+export { canSkipMinchoTransform as internalCanSkipMinchoTransform } from "./transformEligibility.js";
 export {
   collectDefineRulesPackageGraph,
   getDefineRulesPackageStyleSpecifiers,
@@ -94,9 +96,6 @@ export type {
 
 export type { CompileCacheBridge as InternalCompileCacheBridge } from "./compileCache.js";
 
-export { canSkipMinchoTransform as internalCanSkipMinchoTransform } from "./transformEligibility.js";
-
-export { InternalSourceAstCache } from "@mincho-js/babel";
 export { RuntimeOptimizations as InternalRuntimeOptimizations } from "./runtimeOptimizations.js";
 export {
   resolveOptimizationOptions as internalResolveOptimizationOptions,

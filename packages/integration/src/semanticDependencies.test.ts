@@ -30,6 +30,7 @@ describe("semantic transform dependencies", () => {
             cwd: root,
             compilationCache: cache,
             jsxCssProp: true,
+            optimize: { pureFunctions: false },
             staticCssEvalSourceProvider: {
               resolve: () => ({ id: file, version: source }),
 
@@ -75,5 +76,53 @@ describe("semantic transform dependencies", () => {
     await run();
 
     expect(events().filter((event) => event.phase === "babel")).toHaveLength(3);
+  });
+
+  it("tracks the implementation and captures of imported pure helpers", async ({
+    onTestFinished
+  }) => {
+    const root = await mkdtemp(join(tmpdir(), "mincho-semantic-helper-"));
+    onTestFinished(() => rm(root, { recursive: true, force: true }));
+    const file = join(root, "helper.ts");
+    let source =
+      "const factor = 2; export function make(n) { return {padding:n*factor}; } export const unused = 1;";
+
+    const cache = new CompilationCache();
+    const diagnostics = new CompilationDiagnostics({ console: true });
+
+    const run = () =>
+      diagnostics.run("/style.ts", "test", () =>
+        babelTransformSource({
+          filename: join(root, "style.ts"),
+          source:
+            'import {css} from "@mincho-js/css"; import {make} from "./helper"; export const box = css(make(4));',
+          babel: {
+            cwd: root,
+            compilationCache: cache,
+            staticCssEvalSourceProvider: {
+              resolve: () => ({ id: file }),
+
+              load: () => ({ sourceText: source })
+            }
+          }
+        })
+      );
+
+    const first = await run();
+    source = source.replace("unused = 1", "unused = 2");
+    cache.invalidate(file);
+
+    expect((await run()).result).toEqual(first.result);
+    expect(
+      diagnostics
+        .snapshot()
+        .builds.flatMap((build) => build.events)
+        .filter((event) => event.phase === "babel")
+    ).toHaveLength(1);
+
+    source = source.replace("factor = 2", "factor = 3");
+    cache.invalidate(file);
+
+    expect((await run()).result).not.toEqual(first.result);
   });
 });

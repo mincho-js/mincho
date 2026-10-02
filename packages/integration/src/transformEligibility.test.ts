@@ -122,4 +122,48 @@ describe("adapter transform eligibility", () => {
 
     expect(observe).toHaveBeenCalledWith(true, "analysis");
   });
+
+  it("retains first-build entries when eligibility initializes disk storage", async () => {
+    const root = await mkdtemp(join(tmpdir(), "mincho-eligibility-disk-"));
+    directories.push(root);
+
+    const cache = new CompilationCache();
+    cache.configure(
+      { type: "filesystem", directory: join(root, ".cache", "mincho") },
+      root,
+      "test"
+    );
+
+    const create = vi.fn(async () => {
+      const fingerprints = await cache.fingerprint([root]);
+
+      return {
+        value: "compiled",
+        bytes: 8,
+        dependencies: [root],
+        manifest: { fingerprints: [...fingerprints] },
+
+        valid: () => cache.unchanged(fingerprints)
+      };
+    });
+
+    for (let build = 0; build < 2; build++) {
+      cache.begin();
+
+      expect(
+        await canSkipMinchoTransform({
+          filename: join(root, "plain.ts"),
+          source: "export const value = 1",
+          babel: { compilationCache: cache }
+        })
+      ).toBe(true);
+
+      await cache.withInputs(() => cache.run("compiled", create));
+      await cache.end();
+    }
+
+    expect(create).toHaveBeenCalledTimes(1);
+
+    cache.clear();
+  });
 });
