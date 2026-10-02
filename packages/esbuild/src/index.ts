@@ -1,8 +1,9 @@
 export { buildWithMincho, type BuildWithMinchoOptions } from "./build.js";
 export type {
   ExtractCalls,
-  MinchoCacheOptions,
-  MinchoExecutionOptions
+  OptimizationMode,
+  MinchoExecutionOptions,
+  MinchoCacheOptions
 } from "@mincho-js/integration";
 export {
   minchoEsbuildPlugin,

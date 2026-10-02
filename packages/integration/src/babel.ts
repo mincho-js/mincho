@@ -22,6 +22,8 @@ import {
   type MinchoStaticCssEvalMetadata,
   type PluginOptions,
   type MinchoCompilationMetadata,
+  type InternalRuntimeCandidates,
+  internalCollectRuntimeCandidates,
   internalParseModuleProgram,
   minchoBabelPlugin,
   minchoStyledComponentPlugin,
@@ -241,6 +243,8 @@ export type BabelTransformResult = {
     members: readonly string[];
   }[];
 
+  /** @internal Optional-pass eligibility collected from the final extraction AST. */
+  readonly runtimeCandidates?: InternalRuntimeCandidates;
   readonly diagnostics?: MinchoCompilationMetadata;
   commonJsTransformed?: boolean;
   runtimeOptimized?: boolean;
@@ -410,11 +414,26 @@ export async function transformSourceUncached(
       optimize?.pureFunctions !== false &&
       /@(?:mincho-js|vanilla-extract)\/|\bcss\b/.test(source)
     ) {
+      try {
+        preparedProgram = internalParseModuleProgram(
+          path,
+          source,
+          loader === "jsx" || loader === "tsx",
+          compilationCache?.parser
+        );
+      } catch {
+        // The optional pre-pass must defer syntax errors to configured Babel.
+        preparedProgram = undefined;
+      }
+    }
+
+    if (preparedProgram && optimize?.pureFunctions !== false) {
       options.preparedPureFunctions = await measureCompilationPhase(
         "pure-functions",
         () =>
           driveModuleGraph(
             internalAnalyzePureFunctions({
+              program: preparedProgram,
               filename: path,
               source,
               jsxCssProp,
@@ -515,6 +534,9 @@ export async function transformSourceUncached(
           : [])
       ],
       sourceMaps,
+      ast:
+        optimize?.staticRecipes !== false ||
+        optimize?.styledComponents !== false,
       ...(inputSourceMap !== undefined ? { inputSourceMap } : {})
     };
 
@@ -542,6 +564,7 @@ export async function transformSourceUncached(
         filename: path,
         source: transformed.code,
         cache: compilationCache,
+        collectRuntimeCandidates: transformOptions.ast === true,
         provider: prepassSourceProvider,
         dependencies: extractCallsDependencies,
         sidecar: options.result[0],
@@ -607,6 +630,9 @@ export async function transformSourceUncached(
     });
 
   return {
+    ...(result.ast?.type === "File"
+      ? { runtimeCandidates: internalCollectRuntimeCandidates(result.ast) }
+      : {}),
     ...(compilation ? { diagnostics: compilation } : {}),
     result: options.result,
     code: result.code!,

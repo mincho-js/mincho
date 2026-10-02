@@ -71,6 +71,7 @@ export async function transformCommonJsToEsm(options: {
   inputSourceMap?: TransformOptions["inputSourceMap"];
   parserPlugins?: NonNullable<TransformOptions["parserOpts"]>["plugins"];
   cache?: CompilationCache;
+  collectRuntimeCandidates?: boolean;
 }) {
   // Escaped identifiers still take the parser path. Ordinary ESM has no CJS
   // bindings to inspect, and already passed through the configured Babel parser.
@@ -339,6 +340,7 @@ export async function transformCommonJsToEsm(options: {
       })
     ],
     sourceMaps: options.sourceMaps,
+    ast: options.collectRuntimeCandidates,
     ...(options.inputSourceMap
       ? { inputSourceMap: options.inputSourceMap }
       : {})

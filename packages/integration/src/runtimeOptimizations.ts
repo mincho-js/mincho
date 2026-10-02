@@ -9,11 +9,27 @@ import type {
   StaticCssEvalSourceProvider
 } from "./babel.js";
 import { driveModuleGraph } from "./moduleGraph.js";
-import { cacheDigest } from "./compilationCache.js";
+import { cacheDigest, type CompilationCache } from "./compilationCache.js";
 import {
   measureCompilationPhase,
   recordCompilationDiagnostic
 } from "./diagnostics.js";
+
+type Observation =
+  | {
+      kind: "resolve";
+      args: Parameters<StaticCssEvalSourceProvider["resolve"]>;
+      digest: string;
+    }
+  | {
+      kind: "load";
+      args: Parameters<StaticCssEvalSourceProvider["load"]>;
+      digest: string;
+    };
+
+function digest(value: unknown): string {
+  return cacheDigest(JSON.stringify(value) ?? "undefined");
+}
 
 /** Per-generation observed arguments only. Never retain evaluated CSS or registry state here. */
 export class RuntimeOptimizations {
@@ -29,12 +45,154 @@ export class RuntimeOptimizations {
     provider: StaticCssEvalSourceProvider
   ): Promise<BabelTransformResult> {
     const optimize = options.babel?.optimize;
-    if (
-      optimize?.staticRecipes === false &&
-      optimize.styledComponents === false
-    )
-      return result;
 
+    if (
+      (optimize?.staticRecipes === false &&
+        optimize.styledComponents === false) ||
+      (result.runtimeCandidates &&
+        (!result.runtimeCandidates.recipes ||
+          optimize?.staticRecipes === false) &&
+        (!result.runtimeCandidates.styled ||
+          optimize?.styledComponents === false))
+    ) {
+      recordCompilationDiagnostic("runtime-analysis-skipped", {
+        file: options.filename
+      });
+
+      return result;
+    }
+
+    const cache = options.babel?.compilationCache;
+
+    return cache
+      ? cache.withInputs(() =>
+          this.cachedTransform(cache, options, result, provider)
+        )
+      : this.prepare(options, result, provider, () => {});
+  }
+
+  private async cachedTransform(
+    cache: CompilationCache,
+    options: BabelTransformSourceOptions,
+    result: BabelTransformResult,
+    provider: StaticCssEvalSourceProvider
+  ): Promise<BabelTransformResult> {
+    const key =
+      "runtime:" +
+      digest([
+        options.filename,
+        result.code,
+        result.map,
+        options.sourceMaps,
+        options.babel?.optimize,
+        options.babel?.compilationContext,
+        result.staticCssEval?.dependencyFiles
+      ]);
+
+    const cached = await cache.run(
+      key,
+      async () => {
+        const observations: Observation[] = [];
+        let cacheable = true;
+        const observing: StaticCssEvalSourceProvider = {
+          async resolve(...args) {
+            try {
+              const value = await provider.resolve(...args);
+              observations.push({
+                kind: "resolve",
+                args,
+                digest: digest(value)
+              });
+
+              return value;
+            } catch (error) {
+              cacheable = false;
+
+              throw error;
+            }
+          },
+
+          async load(...args) {
+            try {
+              const value = await provider.load(...args);
+              observations.push({ kind: "load", args, digest: digest(value) });
+
+              return value;
+            } catch (error) {
+              cacheable = false;
+
+              throw error;
+            }
+          }
+        };
+
+        const transformed = await this.prepare(
+          options,
+          result,
+          observing,
+          () => {
+            cacheable = false;
+          }
+        );
+
+        const output =
+          transformed === result
+            ? null
+            : {
+                code: transformed.code,
+                map: transformed.map,
+                dependencies: transformed.staticCssEval?.dependencyFiles ?? []
+              };
+
+        const dependencies = new Set([
+          options.filename,
+          ...(output?.dependencies ?? [])
+        ]);
+
+        for (const observation of observations)
+          if (observation.kind === "load")
+            dependencies.add(observation.args[0]);
+
+        const value = { output, observations };
+
+        return {
+          owner: options.filename,
+          value,
+          dependencies: [...dependencies],
+          bytes: cacheable
+            ? Buffer.byteLength(JSON.stringify(value))
+            : Infinity,
+
+          valid: async () => true
+        };
+      },
+      async ({ observations }) => {
+        // Loading sidecars here runs this generation's normal CSS evaluation.
+        // An analysis hit never substitutes old registry state or CSS results.
+        for (const observation of observations) {
+          const current =
+            observation.kind === "load"
+              ? await provider.load(...observation.args)
+              : await provider.resolve(...observation.args);
+          if (digest(current) !== observation.digest) return false;
+        }
+
+        return true;
+      }
+    );
+
+    return cached.output
+      ? this.withOutput(result, structuredClone(cached.output))
+      : result;
+  }
+
+  private async prepare(
+    options: BabelTransformSourceOptions,
+    result: BabelTransformResult,
+    provider: StaticCssEvalSourceProvider,
+    failed: () => void
+  ): Promise<BabelTransformResult> {
+    const optimize = options.babel?.optimize;
     const dependencies = new Set<string>();
     const analysis = await measureCompilationPhase("static-recipes", () =>
       driveModuleGraph(
@@ -49,7 +207,11 @@ export class RuntimeOptimizations {
         provider,
         dependencies
       )
-    ).catch(() => null);
+    ).catch(() => {
+      failed();
+
+      return null;
+    });
     if (!analysis) return result;
 
     const replacements: Array<{ key: string; value: string }> = [];
@@ -110,6 +272,7 @@ export class RuntimeOptimizations {
     if (!replacements.length && !elements.length) return result;
 
     const transformed = internalApplyRuntimeExpressions({
+      ast: analysis.ast,
       filename: options.filename,
       source: result.code,
       replacements,
@@ -121,12 +284,27 @@ export class RuntimeOptimizations {
 
     for (const file of analysis.dependencies) dependencies.add(file);
 
+    return this.withOutput(result, {
+      code: transformed.code,
+      ...(options.sourceMaps ? { map: transformed.map } : {}),
+      dependencies: [...dependencies]
+    });
+  }
+
+  private withOutput(
+    result: BabelTransformResult,
+    output: {
+      code: string;
+      map?: BabelTransformResult["map"];
+      dependencies: readonly string[];
+    }
+  ): BabelTransformResult {
     const previous = result.staticCssEval;
 
     return {
       ...result,
-      code: transformed.code,
-      ...(options.sourceMaps ? { map: transformed.map } : {}),
+      code: output.code,
+      ...(output.map !== undefined ? { map: output.map } : {}),
       runtimeOptimized: true,
       staticCssEval: {
         dependencies: [],
@@ -139,7 +317,10 @@ export class RuntimeOptimizations {
         resolvedDependencies: [],
         ...previous,
         dependencyFiles: [
-          ...new Set([...(previous?.dependencyFiles ?? []), ...dependencies])
+          ...new Set([
+            ...(previous?.dependencyFiles ?? []),
+            ...output.dependencies
+          ])
         ]
       }
     };

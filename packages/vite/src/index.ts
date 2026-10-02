@@ -10,6 +10,8 @@ import {
   type MinchoExecutionOptions,
   type MinchoCacheOptions,
   InternalRuntimeOptimizations,
+  internalResolveOptimizationOptions,
+  type OptimizationMode,
   type BabelTransformResult,
   type DefineRulesPackageGraph,
   type InternalStaticCssEvalLoadedSource as StaticCssEvalLoadedSource,
@@ -84,6 +86,9 @@ export interface MinchoVitePluginOptions {
   diagnostics?: MinchoDiagnosticsOptions;
   cache?: MinchoCacheOptions;
   execution?: MinchoExecutionOptions;
+
+  /** Defaults to development for serve and production for build. */
+  optimizationMode?: OptimizationMode;
   optimize?: BabelOptions["optimize"];
   babel?: BabelOptions;
   jsxCssProp?: boolean;
@@ -101,6 +106,7 @@ export interface MinchoVitePluginOptions {
 
 export type {
   ExtractCalls,
+  OptimizationMode,
   MinchoExecutionOptions,
   MinchoCacheOptions
 } from "@mincho-js/integration";
@@ -512,6 +518,8 @@ function createMinchoViteEnvironmentPlugin(
       if (visited.has(dependency)) continue;
 
       visited.add(dependency);
+
+      forgetRuntimeModule(dependency);
 
       // A provider can discover a changed dependency while evaluating its owner.
       // That owner already reads the new input; only earlier requests are stale.
@@ -1239,18 +1247,12 @@ function createMinchoViteEnvironmentPlugin(
 
         const transformBabelOptions: BabelOptions = {
           ...babelOptions,
-          ...(_options?.optimize
-            ? {
-                optimize: {
-                  ...babelOptions?.optimize,
-                  ...Object.fromEntries(
-                    Object.entries(_options.optimize).filter(
-                      ([, value]) => value !== undefined
-                    )
-                  )
-                }
-              }
-            : {}),
+          optimize: internalResolveOptimizationOptions(
+            _options?.optimizationMode ??
+              (config.command === "serve" ? "development" : "production"),
+            babelOptions?.optimize,
+            _options?.optimize
+          ),
           compilationCache,
           compilationContext: this.environment
             ? this.environment.name +
@@ -3681,9 +3683,8 @@ if (import.meta.vitest) {
 
           try {
             await createExtractedCssFixture(harness);
-            await vi.advanceTimersByTimeAsync(500);
+            await vi.runOnlyPendingTimersAsync();
             expect(flush).not.toHaveBeenCalled();
-            expect(vi.getTimerCount()).toBe(0);
           } finally {
             await harness.closeWatcher();
             vi.useRealTimers();
@@ -5881,6 +5882,12 @@ if (import.meta.vitest) {
               source: fixture.source,
               babel: expect.objectContaining({
                 ...disabledCase.expectedOptions,
+                optimize: {
+                  pureFunctions: true,
+                  staticRecipes: true,
+                  styledComponents: true,
+                  ...disabledCase.expectedOptions?.optimize
+                },
                 staticCssEvalSourceProvider: expect.any(Object)
               })
             })

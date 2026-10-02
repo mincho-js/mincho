@@ -1,6 +1,9 @@
 import {
   types as t,
+  parseSync,
+  traverse,
   transformSync,
+  transformFromAstSync,
   type NodePath,
   type TransformOptions
 } from "@babel/core";
@@ -45,6 +48,54 @@ export interface StaticStyledElement extends StaticRecipeCall {
   readonly className: string;
 }
 
+export interface RuntimeCandidates {
+  readonly recipes: boolean;
+  readonly styled: boolean;
+}
+
+function isRecipeCandidate(path: NodePath<t.CallExpression>): boolean {
+  if (path.node.arguments.length > 1 || path.node.optional) return false;
+
+  const callee = path.get("callee");
+  if (
+    callee.isImport() ||
+    (callee.isIdentifier({ name: "require" }) &&
+      !callee.scope.getBinding("require"))
+  )
+    return false;
+
+  const reference = getModuleReference(callee);
+
+  return (
+    !reference ||
+    ![
+      "@mincho-js/css",
+      "@mincho-js/css/runtime",
+      "@mincho-js/react/runtime",
+      "@mincho-js/css/rules/createRuntimeFn"
+    ].includes(reference.source)
+  );
+}
+
+/** Capture this after extraction, while Babel already owns the lexical scope. */
+export function collectRuntimeCandidates(ast: t.File): RuntimeCandidates {
+  let recipes = false;
+  let styled = false;
+  traverse(ast, {
+    CallExpression(path) {
+      if (!recipes && isRecipeCandidate(path)) recipes = true;
+    },
+
+    JSXElement(path) {
+      const name = path.node.openingElement.name;
+
+      if (!t.isJSXIdentifier(name) || !/^[a-z]/.test(name.name)) styled = true;
+    }
+  });
+
+  return { recipes, styled };
+}
+
 /** Both bundlers understand call annotations on the known pure serialized factory. */
 export function annotateRecipeFactories(
   source: string,
@@ -52,30 +103,38 @@ export function annotateRecipeFactories(
 ): string {
   if (!source.includes("@mincho-js/css/rules/createRuntimeFn")) return source;
 
-  return (
-    transformSync(source, {
-      filename,
-      configFile: false,
-      babelrc: false,
-      sourceType: "unambiguous",
-      plugins: [
-        () => ({
-          visitor: {
-            CallExpression(path: NodePath<t.CallExpression>) {
-              const reference = getModuleReference(path.get("callee"));
+  const ast = parseSync(source, {
+    filename,
+    configFile: false,
+    babelrc: false,
+    sourceType: "unambiguous"
+  });
+  if (!ast) return source;
 
-              if (
-                !reference?.unsafe &&
-                reference?.source === "@mincho-js/css/rules/createRuntimeFn" &&
-                reference.members.join(".") === "createRuntimeFn"
-              )
-                t.addComment(path.node, "leading", "#__PURE__");
-            }
-          }
-        })
-      ]
-    })?.code ?? source
-  );
+  const positions: number[] = [];
+  traverse(ast, {
+    CallExpression(path) {
+      const reference = getModuleReference(path.get("callee"));
+
+      if (
+        !reference?.unsafe &&
+        reference?.source === "@mincho-js/css/rules/createRuntimeFn" &&
+        reference.members.join(".") === "createRuntimeFn" &&
+        path.node.start != null
+      )
+        positions.push(path.node.start);
+    }
+  });
+
+  // The serialized module only needs comments. Preserve its existing bytes
+  // instead of running another Babel transform and printing the entire file.
+  let result = source;
+
+  for (const position of positions.sort((a, b) => b - a))
+    result =
+      result.slice(0, position) + "/*#__PURE__*/" + result.slice(position);
+
+  return result;
 }
 
 /** Read only serialized factories emitted by the existing sidecar evaluator. */
@@ -90,6 +149,7 @@ export function* analyzeRuntimeExpressions(options: {
   calls: StaticRecipeCall[];
   elements: StaticStyledElement[];
   dependencies: string[];
+  ast: t.File;
 }> {
   const graph = createModuleGraph({
     isExternal: (id) =>
@@ -116,7 +176,8 @@ export function* analyzeRuntimeExpressions(options: {
   const jsx: NodePath<t.JSXElement>[] = [];
   owner.program.traverse({
     CallExpression(path) {
-      if (options.staticRecipes !== false) candidates.push(path);
+      if (options.staticRecipes !== false && isRecipeCandidate(path))
+        candidates.push(path);
     },
 
     JSXElement(path) {
@@ -125,24 +186,16 @@ export function* analyzeRuntimeExpressions(options: {
   });
 
   const calls: StaticRecipeCall[] = [];
+  const recipes = new WeakMap<t.CallExpression, SerializedRecipe>();
 
   for (const path of candidates) {
-    if (path.node.arguments.length > 1 || path.node.optional) continue;
-
-    const reference = getModuleReference(path.get("callee"));
-    if (
-      reference &&
-      [
-        "@mincho-js/css",
-        "@mincho-js/css/runtime",
-        "@mincho-js/react/runtime",
-        "@mincho-js/css/rules/createRuntimeFn"
-      ].includes(reference.source)
-    )
-      continue;
-
     try {
-      const recipe = yield* serializedRecipe(graph, owner, path.get("callee"));
+      const recipe = yield* serializedRecipe(
+        graph,
+        owner,
+        path.get("callee"),
+        recipes
+      );
       if (!recipe) continue;
 
       const argument = path.get("arguments")[0];
@@ -164,7 +217,11 @@ export function* analyzeRuntimeExpressions(options: {
     }
   }
 
-  const elements: StaticStyledElement[] = [];
+  const candidatesWithFactories: Array<{
+    element: StaticStyledElement;
+    component: NodePath<t.CallExpression>;
+    recipe: NodePath<t.CallExpression>;
+  }> = [];
 
   for (const element of jsx) {
     try {
@@ -203,7 +260,12 @@ export function* analyzeRuntimeExpressions(options: {
         continue;
       if (elementIdentityObserved(element)) continue;
 
-      const recipe = yield* serializedRecipe(graph, target.module, args[1]!);
+      const recipe = yield* serializedRecipe(
+        graph,
+        target.module,
+        args[1]!,
+        recipes
+      );
       if (
         !recipe ||
         !recipe.config ||
@@ -280,7 +342,6 @@ export function* analyzeRuntimeExpressions(options: {
       }
 
       if (options.pureFunctions === false && budget.calls) continue;
-      if (!(yield* componentUsesAreSafe(graph, target.path))) continue;
 
       const recipeTarget = yield* graph.valueTarget(
         target.module,
@@ -290,35 +351,89 @@ export function* analyzeRuntimeExpressions(options: {
       if (
         !recipeTarget ||
         "external" in recipeTarget ||
-        !recipeTarget.path.isCallExpression() ||
-        !(yield* componentUsesAreSafe(graph, recipeTarget.path, true))
+        !recipeTarget.path.isCallExpression()
       )
         continue;
 
-      elements.push({
-        key: expressionKey(element),
-        ...recipe,
-        options: selection,
-        tag: args[0]!.node.value,
-        variants,
-        className
+      candidatesWithFactories.push({
+        component: target.path,
+        recipe: recipeTarget.path,
+        element: {
+          key: expressionKey(element),
+          ...recipe,
+          options: selection,
+          tag: args[0]!.node.value,
+          variants,
+          className
+        }
       });
     } catch {
       /* Dynamic props or observable component identity keep the wrapper. */
     }
   }
 
-  return { calls, elements, dependencies: [...graph.dependencies] };
+  const safety = new WeakMap<
+    t.CallExpression,
+    { modules: number; safe: boolean }
+  >();
+
+  function* safeFactory(
+    factory: NodePath<t.CallExpression>,
+    recipe = false
+  ): ModuleGraphFlow<boolean> {
+    let checked = safety.get(factory.node);
+
+    if (!checked || (checked.safe && checked.modules !== graph.modules.size)) {
+      const safe = yield* componentUsesAreSafe(graph, factory, recipe);
+      checked = { safe, modules: graph.modules.size };
+      safety.set(factory.node, checked);
+    }
+
+    return checked.safe;
+  }
+
+  let elements: StaticStyledElement[];
+  let moduleCount: number;
+
+  do {
+    moduleCount = graph.modules.size;
+    elements = [];
+
+    for (const candidate of candidatesWithFactories) {
+      try {
+        if (
+          (yield* safeFactory(candidate.component)) &&
+          (yield* safeFactory(candidate.recipe, true))
+        )
+          elements.push(candidate.element);
+      } catch {
+        // Incomplete identity proofs preserve the original wrapper.
+      }
+    }
+  } while (moduleCount !== graph.modules.size);
+
+  return {
+    calls,
+    elements,
+    dependencies: [...graph.dependencies],
+    ast: owner.program.parent as t.File
+  };
 }
+
+type SerializedRecipe = Omit<StaticRecipeCall, "key" | "options">;
 
 function* serializedRecipe(
   graph: ModuleGraph,
   module: SourceModule,
-  path: NodePath<t.Node>
-): ModuleGraphFlow<Omit<StaticRecipeCall, "key" | "options"> | null> {
+  path: NodePath<t.Node>,
+  recipes: WeakMap<t.CallExpression, SerializedRecipe>
+): ModuleGraphFlow<SerializedRecipe | null> {
   const target = yield* graph.valueTarget(module, path, new Set());
   if (!target || "external" in target || !target.path.isCallExpression())
     return null;
+
+  const previous = recipes.get(target.path.node);
+  if (previous) return previous;
 
   const factory = getModuleReference(target.path.get("callee"));
   if (
@@ -341,10 +456,14 @@ function* serializedRecipe(
   );
   if (budget.calls) return null;
 
-  return {
+  const result = {
     identity: `${target.module.id}\0${expressionKey(target.path)}`,
     config: staticData(config)
   };
+
+  recipes.set(target.path.node, result);
+
+  return result;
 }
 
 /** Refuse aliases that escape, observe identity or modify the component in the loaded graph. */
@@ -485,6 +604,7 @@ function elementIdentityObserved(element: NodePath<t.JSXElement>): boolean {
 }
 
 export function applyRuntimeExpressions(options: {
+  ast?: t.File;
   filename: string;
   source: string;
   replacements: ReadonlyArray<{ key: string; value: string }>;
@@ -497,7 +617,7 @@ export function applyRuntimeExpressions(options: {
   sourceMaps?: boolean;
   inputSourceMap?: TransformOptions["inputSourceMap"];
 }) {
-  return transformSync(options.source, {
+  const transformOptions: TransformOptions = {
     filename: options.filename,
     configFile: false,
     babelrc: false,
@@ -561,7 +681,11 @@ export function applyRuntimeExpressions(options: {
         }
       })
     ]
-  });
+  };
+
+  return options.ast
+    ? transformFromAstSync(options.ast, options.source, transformOptions)
+    : transformSync(options.source, transformOptions);
 }
 
 function staticData(node: t.Expression): StaticData {

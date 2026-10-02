@@ -8,6 +8,8 @@ import {
   type MinchoExecutionOptions,
   type MinchoCacheOptions,
   InternalRuntimeOptimizations,
+  internalResolveOptimizationOptions,
+  type OptimizationMode,
   type BabelTransformResult,
   type InternalStaticCssEvalLoadedSource as StaticCssEvalLoadedSource,
   type InternalStaticCssEvalMetadataLike as StaticCssEvalMetadata,
@@ -60,6 +62,9 @@ export interface MinchoEsbuildPluginOptions {
   diagnostics?: MinchoDiagnosticsOptions;
   cache?: MinchoCacheOptions;
   execution?: MinchoExecutionOptions;
+
+  /** Defaults to production; set development explicitly for serve/watch contexts. */
+  optimizationMode?: OptimizationMode;
   optimize?: BabelOptions["optimize"];
   includeNodeModulesPattern?: RegExp;
   jsxCssProp?: boolean;
@@ -87,10 +92,16 @@ export function minchoEsbuildPlugin({
   diagnostics: diagnosticsOptions,
   cache: cacheOptions,
   execution: executionOptions,
-  optimize,
+  optimize: optimizationOverrides,
+  optimizationMode = "production",
   jsxCssProp,
   extractCalls
 }: MinchoEsbuildPluginOptions = {}): EsbuildPlugin {
+  const optimize = internalResolveOptimizationOptions(
+    optimizationMode,
+    optimizationOverrides
+  );
+
   return {
     name: "mincho-js-esbuild",
 

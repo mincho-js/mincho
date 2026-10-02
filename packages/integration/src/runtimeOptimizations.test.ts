@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { RuntimeOptimizations } from "./runtimeOptimizations.js";
+import { CompilationCache } from "./compilationCache.js";
 import type {
   BabelTransformResult,
   StaticCssEvalSourceProvider
@@ -32,6 +33,142 @@ const result = (code: string): BabelTransformResult => ({
 });
 
 describe("static recipe invocations", () => {
+  it("validates concurrent requests against their own provider and environment", async () => {
+    const code =
+      'import { button } from "/extracted_rules.css.ts"; export const cls = button();';
+
+    const cache = new CompilationCache();
+    const optimization = new RuntimeOptimizations();
+    const options = {
+      filename: "/app.ts",
+      source: code,
+      babel: { compilationCache: cache }
+    };
+
+    const firstProvider = provider({ "/extracted_rules.css.ts": factory });
+    const secondProvider = provider({
+      "/extracted_rules.css.ts": factory.replace('"base"', '"server"')
+    });
+
+    const [first, second] = await Promise.all([
+      optimization.transform(options, result(code), firstProvider),
+      optimization.transform(options, result(code), secondProvider)
+    ]);
+
+    expect(first.code).toContain('"base small"');
+    expect(second.code).toContain('"server small"');
+
+    const client = await optimization.transform(
+      options,
+      result(code),
+      firstProvider
+    );
+
+    expect(client.code).toBe(first.code);
+  });
+
+  it("reuses analysis while observing fresh sidecar outputs every generation", async () => {
+    const code =
+      'import { button } from "/extracted_rules.css.ts"; export const cls = button();';
+
+    const cache = new CompilationCache();
+    const parse = vi.spyOn(cache.parser, "parse");
+    const modules = { "/extracted_rules.css.ts": factory };
+    const sourceProvider = provider(modules);
+    const load = vi.spyOn(sourceProvider, "load");
+    const optimization = new RuntimeOptimizations();
+    const options = {
+      filename: "/app.ts",
+      source: code,
+      babel: { compilationCache: cache }
+    };
+
+    cache.begin();
+
+    const first = await optimization.transform(
+      options,
+      result(code),
+      sourceProvider
+    );
+
+    await cache.end();
+
+    const parsed = parse.mock.calls.length;
+
+    expect(parsed).toBeGreaterThan(0);
+
+    const loaded = load.mock.calls.length;
+
+    optimization.clear();
+    cache.begin();
+
+    const second = await optimization.transform(
+      options,
+      result(code),
+      sourceProvider
+    );
+
+    await cache.end();
+
+    expect(second.code).toBe(first.code);
+    expect(parse).toHaveBeenCalledTimes(parsed);
+    expect(load.mock.calls.length).toBeGreaterThan(loaded);
+
+    modules["/extracted_rules.css.ts"] = factory.replace('"base"', '"changed"');
+    optimization.clear();
+    cache.begin();
+
+    const third = await optimization.transform(
+      options,
+      result(code),
+      sourceProvider
+    );
+
+    await cache.end();
+
+    expect(third.code).toContain('"changed small"');
+    expect(parse.mock.calls.length).toBeGreaterThan(parsed);
+  });
+
+  it("does not remember provider failures and skips proven non-consumers", async () => {
+    const code =
+      'import { button } from "/extracted_rules.css.ts"; export const cls = button();';
+
+    const cache = new CompilationCache();
+    const options = {
+      filename: "/app.ts",
+      source: code,
+      babel: { compilationCache: cache }
+    };
+
+    const optimization = new RuntimeOptimizations();
+    const sourceProvider = provider({ "/extracted_rules.css.ts": factory });
+    const load = vi
+      .spyOn(sourceProvider, "load")
+      .mockRejectedValueOnce(new Error("temporary"));
+
+    const first = result(code);
+
+    expect(await optimization.transform(options, first, sourceProvider)).toBe(
+      first
+    );
+    expect(
+      (await optimization.transform(options, result(code), sourceProvider)).code
+    ).toContain('"base small"');
+
+    const original: BabelTransformResult = {
+      ...result("export const value = 1;"),
+      runtimeCandidates: { recipes: false, styled: false }
+    };
+
+    load.mockClear();
+
+    expect(
+      await optimization.transform(options, original, sourceProvider)
+    ).toBe(original);
+    expect(load).not.toHaveBeenCalled();
+  });
+
   it.each([
     [
       'import { button } from "barrel";',

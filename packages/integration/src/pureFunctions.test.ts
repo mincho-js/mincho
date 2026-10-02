@@ -6,6 +6,41 @@ import {
 import { CompilationCache } from "./compilationCache.js";
 
 describe("cross-module pure helpers", () => {
+  it.each([
+    {
+      plugins: ["jsx" as const],
+      source: 'import "./styles.css"; export const view = <div />;'
+    },
+    {
+      plugins: ["flow" as const],
+      source: 'import "./styles.css"; export type Props = {| title: string |};'
+    }
+  ])(
+    "defers optional parsing to configured Babel syntax: $plugins",
+    async ({ plugins, source }) => {
+      const options = {
+        filename: "/virtual-pure/configured.js",
+        source,
+        babel: { parserOpts: { plugins } }
+      };
+      const baseline = await babelTransformSource({
+        ...options,
+        babel: { ...options.babel, optimize: { pureFunctions: false } }
+      });
+
+      expect((await babelTransformSource(options)).code).toBe(baseline.code);
+    }
+  );
+
+  it("retains configured Babel syntax errors after optional parsing fails", async () => {
+    await expect(
+      babelTransformSource({
+        filename: "/virtual-pure/invalid.js",
+        source: 'import "./styles.css"; export const broken = ;'
+      })
+    ).rejects.toThrow("Unexpected token");
+  });
+
   it("uses asynchronous source providers and tracks changed helper modules", async () => {
     let scale = 4;
 

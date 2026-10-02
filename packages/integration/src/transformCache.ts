@@ -62,6 +62,22 @@ async function transformWithInputs(
   } = options.babel ?? {};
 
   if (
+    babel.optimize?.staticRecipes === false &&
+    babel.optimize.styledComponents === false &&
+    !babel.extractCalls &&
+    !babel.jsxCssProp &&
+    !/@(?:mincho-js|vanilla-extract)\//.test(options.source)
+  ) {
+    // Native dev-server transform caches already cover ordinary modules. Avoid
+    // repeating ancestor configuration checks for every module in the graph.
+    recordCompilationDiagnostic("cache-bypass", {
+      reason: "ordinary-development-module"
+    });
+
+    return transform(options);
+  }
+
+  if (
     babel.staticCssEvalProvider ||
     babel.plugins?.length ||
     babel.presets?.length ||

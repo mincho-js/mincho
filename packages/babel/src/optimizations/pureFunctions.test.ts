@@ -34,6 +34,23 @@ function analyze(source: string, modules: Record<string, string> = {}) {
 }
 
 describe("pure helper evaluation", () => {
+  it("keeps immediate helper calls eligible while leaving function-valued rules intact", () => {
+    const folded = analyze(
+      'const App = () => <div css={{ color: (() => "red")() }} />;'
+    );
+
+    expect(folded.replacements).toHaveLength(1);
+    expect(generate(folded.replacements[0]!.expression).code).toContain(
+      'color: "red"'
+    );
+
+    const callbacks = analyze(
+      'import { rules } from "@mincho-js/css"; const cls = rules({ base: { color: "red" }, compoundVariants: ({ size }) => [] });'
+    );
+
+    expect(callbacks.replacements).toHaveLength(0);
+  });
+
   it("evaluates defaults, closures, nested helpers, arrays and expressions", () => {
     const result = analyze(`
       const scale = 4;

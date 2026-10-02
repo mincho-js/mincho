@@ -98,3 +98,7 @@ export { canSkipMinchoTransform as internalCanSkipMinchoTransform } from "./tran
 
 export { InternalSourceAstCache } from "@mincho-js/babel";
 export { RuntimeOptimizations as InternalRuntimeOptimizations } from "./runtimeOptimizations.js";
+export {
+  resolveOptimizationOptions as internalResolveOptimizationOptions,
+  type OptimizationMode
+} from "./optimizationMode.js";

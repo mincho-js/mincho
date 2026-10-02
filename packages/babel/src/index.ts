@@ -161,6 +161,8 @@ export { analyzePureFunctions as internalAnalyzePureFunctions } from "./optimiza
 
 export {
   annotateRecipeFactories as internalAnnotateRecipeFactories,
+  collectRuntimeCandidates as internalCollectRuntimeCandidates,
   analyzeRuntimeExpressions as internalAnalyzeRuntimeExpressions,
-  applyRuntimeExpressions as internalApplyRuntimeExpressions
+  applyRuntimeExpressions as internalApplyRuntimeExpressions,
+  type RuntimeCandidates as InternalRuntimeCandidates
 } from "./optimizations/runtimeExpressions.js";

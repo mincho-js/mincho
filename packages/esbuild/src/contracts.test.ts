@@ -102,6 +102,59 @@ function observeBuilds() {
 }
 
 describe("esbuild build contracts", () => {
+  it(
+    "defaults to production optimizations and allows development overrides",
+    { timeout: 30_000 },
+    async () => {
+      const root = await fixture({
+        "entry.tsx":
+          'import { button } from "./styles"; export const className = button();',
+        "styles.ts":
+          'import { rules } from "@mincho-js/css"; export const button = rules({ base: { color: "red" }, variants: { size: { large: { padding: 8 }, small: { padding: 4 } } }, defaultVariants: { size: "large" } });'
+      });
+
+      const cases = [
+        { options: {}, folded: true },
+        { options: { optimizationMode: "development" }, folded: false },
+        {
+          options: {
+            optimizationMode: "development",
+            optimize: { staticRecipes: true }
+          },
+          folded: true
+        },
+        {
+          options: {
+            optimizationMode: "production",
+            optimize: { staticRecipes: false }
+          },
+          folded: false
+        }
+      ] as const;
+
+      let css: string | undefined;
+
+      for (const { options, folded } of cases) {
+        const result = await build(
+          buildOptions(root, {
+            minify: true,
+            plugins: minchoEsbuildPlugins(options)
+          })
+        );
+
+        expect(outputText(result, ".js").includes("defaultVariants")).toBe(
+          !folded
+        );
+
+        css ??= outputText(result, ".css");
+
+        expect(outputText(result, ".css")).toBe(css);
+      }
+
+      expect(css).toContain("padding:8px");
+    }
+  );
+
   it("respects native and configured script loaders", async () => {
     const root = await fixture({
       "entry.jsx": "export const App = () => <div />;",

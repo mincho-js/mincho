@@ -53,6 +53,34 @@ describe("Babel transform cache", () => {
     }
   });
 
+  it("retries helper analysis after a transient provider failure", async () => {
+    const load = vi
+      .fn(async () => ({
+        source: 'export function make() { return { color: "red" }; }'
+      }))
+      .mockRejectedValueOnce(new Error("temporary provider failure"));
+
+    const options = {
+      filename: "/virtual-cache/helpers.ts",
+      source:
+        'import { css } from "@mincho-js/css"; import { make } from "./helper"; export const cls = css(make());',
+      babel: {
+        compilationCache: new CompilationCache(),
+        staticCssEvalSourceProvider: {
+          resolve: () => ({ id: "/virtual-cache/helper.ts" }),
+
+          load
+        }
+      }
+    };
+
+    expect((await babelTransformSource(options)).result[1]).toContain("make()");
+    expect((await babelTransformSource(options)).result[1]).toContain(
+      'color: "red"'
+    );
+    expect(load).toHaveBeenCalledTimes(2);
+  });
+
   it("retries CSS extraction after a transient provider failure", async () => {
     const load = vi
       .fn(async () => ({

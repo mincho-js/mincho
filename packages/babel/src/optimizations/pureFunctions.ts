@@ -104,6 +104,9 @@ export function* analyzePureFunctions(options: {
   const diagnostics: Array<{ key: string; result: "folded" | "deopt" }> = [];
 
   for (const path of candidates) {
+    // Literal data cannot contain a helper invocation, including through imports.
+    if (isLiteralData(path.node) || containsFunctionData(path.node)) continue;
+
     const key = expressionKey(path);
     const budget = createStaticExpressionBudget();
 
@@ -131,6 +134,46 @@ export function* analyzePureFunctions(options: {
   }
 
   return { replacements, diagnostics, dependencies: [...graph.dependencies] };
+}
+
+function isLiteralData(node: t.Node): boolean {
+  if (
+    t.isStringLiteral(node) ||
+    t.isNumericLiteral(node) ||
+    t.isBooleanLiteral(node) ||
+    t.isNullLiteral(node) ||
+    t.isBigIntLiteral(node)
+  )
+    return true;
+  if (t.isObjectExpression(node))
+    return node.properties.every(
+      (property) =>
+        t.isObjectProperty(property) &&
+        !property.computed &&
+        isLiteralData(property.value)
+    );
+  if (t.isArrayExpression(node))
+    return node.elements.every((element) => !element || isLiteralData(element));
+
+  return false;
+}
+
+function containsFunctionData(node: t.Node): boolean {
+  // Function-valued data cannot be interpreted. Calls (including IIFEs) stay
+  // eligible; only recurse through containers the interpreter evaluates eagerly.
+  if (t.isFunction(node)) return true;
+  if (t.isObjectExpression(node))
+    return node.properties.some(
+      (property) =>
+        t.isObjectMethod(property) ||
+        (t.isObjectProperty(property) && containsFunctionData(property.value))
+    );
+  if (t.isArrayExpression(node))
+    return node.elements.some(
+      (element) => element && containsFunctionData(element)
+    );
+
+  return false;
 }
 
 export function applyPureFunctions(

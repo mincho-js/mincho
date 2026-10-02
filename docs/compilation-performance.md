@@ -49,6 +49,35 @@ sidecar reuse checks dependency contents, resolution directories and ancestor
 configuration files. Pending work is shared only within a build generation.
 Failures are never retained, and stale completions cannot replace newer entries.
 
+File reads, content hashes, configuration discovery and package metadata are
+shared within a build. Vite development requests and standalone integration
+calls get a fresh input session. Sessions recheck their observed inputs when
+they finish, including same-mtime edits and configuration creation or deletion.
+A changed source rejects the result and rolls back that session's cache writes.
+Directory changes invalidate reuse without rejecting native output-directory
+creation. These checks supplement `buildWithMincho`'s existing two-pass snapshot;
+they do not make ordinary native bundler writes transactional.
+
+Runtime analysis caches validate their resolve/load observations against the
+current provider, including freshly evaluated serialized sidecars. A hit skips
+analysis and rewriting; CSS execution and registry publication still take place.
+Factory configurations and component identity proofs are shared within one
+analysis graph, and identity proofs are rechecked if the graph grows. Modules
+with no recipe or styled consumers skip this analysis. Existing ASTs are reused
+only with the standard parser configuration. Custom Babel parsers keep their
+normal parsing path.
+
+CommonJS export descriptions are cached by filename and source contents, then
+cloned before graph-specific re-export discovery. Ordinary ESM skips that
+inspection. In development, ordinary modules also skip Mincho's transform-cache
+configuration checks; the native dev server retains its own transform cache.
+
+Invalidation follows dependency-to-owner links transitively, leaving unrelated
+results available. Cache entries and parsed source caches each retain at most
+512 entries and 64 MiB of accounted data. Parsed-source accounting measures
+source bytes, not the full heap occupied by ASTs. There is no disk cache and no
+additional compiler worker pool.
+
 Custom Babel configuration and unknown compilation plugins bypass reuse because
 their external inputs cannot be tracked. Cache hits restore dependency watches
 and native assets. Eligible CSS evaluation results can be replayed into an
@@ -109,6 +138,32 @@ fields over `babel.optimize`; `defineRulesCxConditions` retains its existing
 opt-in behavior. Babel supports same-file helpers directly, while integration
 prepares asynchronous cross-module results and retains their dependency watches.
 
+Both adapters also accept `optimizationMode: "development" | "production"`.
+Vite selects development for `serve` and production for `build`, independently
+of `NODE_ENV` and Vite's named `mode`. esbuild defaults to production; opt into
+development explicitly for watch sessions. Individual defined `optimize` fields
+override the selected profile. `undefined` does not erase an earlier setting.
+
+| Option                    | Development | Production |
+| ------------------------- | ----------- | ---------- |
+| `pureFunctions`           | `true`      | `true`     |
+| `staticRecipes`           | `false`     | `true`     |
+| `styledComponents`        | `false`     | `true`     |
+| `defineRulesCxConditions` | Opt-in      | Opt-in     |
+
+```ts
+minchoEsbuildPlugins({ optimizationMode: "development" });
+minchoVitePlugin({
+  optimizationMode: "development",
+  optimize: { staticRecipes: true },
+});
+```
+
+Development keeps CSS extraction and pure helper evaluation while avoiding the
+additional recipe folding and styled JSX analysis by default. It retains more
+runtime JavaScript. Production keeps the existing bundle and runtime
+optimizations. Standalone Babel behavior does not change.
+
 ## Runtime package boundaries
 
 The existing `@mincho-js/css/rules/createRuntimeFn` and
@@ -121,7 +176,7 @@ The CSS authoring entry and registry retain their existing effect declarations;
 registers definitions. The package contract checks unused and dynamic runtime
 bundles in both ESM and CommonJS output formats.
 
-`optimize.staticRecipes` defaults to `true` in build integrations. Calls to
+`optimize.staticRecipes` defaults to `true` in the production profile. Calls to
 Mincho `rules` with proved static arguments become class-name literals, including
 calls through local imports and reexports. The pass reads serialized configuration
 from the normal extracted sidecar and invokes only the known pure recipe runtime.
@@ -145,7 +200,7 @@ yarn benchmark:compilation --pack=/path/to/baseline --candidate=/tmp/mincho-base
 yarn benchmark:compilation --pack=/path/to/candidate --candidate=/tmp/mincho-candidate
 yarn benchmark:compilation \
   --baseline=/tmp/mincho-baseline --candidate=/tmp/mincho-candidate \
-  --baseline-label=baseline --candidate-label=candidate \
+  --baseline-label=f6a4844b --candidate-label=working-tree \
   --rounds=5 --output=.cache/compilation-benchmark
 ```
 
@@ -176,11 +231,11 @@ SSR markup at the end of each measured phase. Every unchanged rebuild is also
 checked against that process's first output. Sizes include raw/gzip/Brotli byte counts;
 concatenated chunks are not a network transfer-size estimate.
 
-Run `--diagnostics` separately into another output directory, using revisions
-that both support diagnostic output. Reports contain the phases exposed by each
-revision, such as Babel transforms, provider loads/resolutions, sidecar
-compilation and CSS evaluation. Instrumented wall times are not the timing
-baseline. The existing 512 KiB package-graph worker threshold is unchanged.
+Run `--diagnostics` separately into another output directory. Its counters
+include reads/hashes, input reuse and validation, parse/cache hits, provider
+loads/resolutions, optional-pass skips and CSS evaluation. Instrumented wall
+times are not the timing baseline. The existing 512 KiB package-graph worker
+threshold is unchanged.
 
 For Vite development, the worker reads the final report after closing the server
 and groups events by their completion time within each measured phase. This
@@ -231,3 +286,136 @@ separately so persistence and cleanup costs remain visible.
 
 The [default settings comparison](./compiler-defaults-performance.md) records
 measurements for this adoption separately from later compiler optimizations.
+
+## Historical compilation diagnostics
+
+For the 24-module ESM esbuild fixture, a separate diagnostic run comparing
+`f6a4844b` with this implementation recorded the following unchanged rebuild.
+Counts include failed configuration probes and the final input validation:
+
+| Operation                          | `f6a4844b` | Current |
+| ---------------------------------- | ---------: | ------: |
+| Node `fs.promises.readFile` calls  |      9,849 |     304 |
+| Node `crypto.createHash` calls     |        562 |     228 |
+| Runtime-analysis passes            |         25 |       0 |
+| Runtime-result cache hits          |          0 |       1 |
+| Producer modules skipping analysis |          0 |      24 |
+| CSS evaluations                    |         24 |      24 |
+
+The first build runs runtime analysis once instead of 25 times. Editing a
+producer invalidates the consumer's runtime result and analyzes it again.
+The unchanged rebuild still evaluates every sidecar, so these savings do not
+depend on retaining CSS execution or registry state across builds.
+
+## Build-time comparison
+
+The following measurements compare `f6a4844b` (the nine earlier optimizations)
+with this implementation on 2026-09-19. The machine used Linux x64, an Intel
+Core i5-8265U, Node 24.21.0, esbuild 0.27.7, Vite 7.3.3, Babel 7.29.7,
+React 19.2.6 and vanilla-extract CSS 1.21.2. No diagnostics, tests or package
+builds ran alongside the timed workers.
+
+The npm ESM matrix ran five rounds per revision and case. Values below are
+milliseconds, shown as baseline → current. Rebuild values are the median of
+each round's three-rebuild median.
+
+| Fixture                    |          esbuild first |      esbuild unchanged |         esbuild edited |        Vite production |
+| -------------------------- | ---------------------: | ---------------------: | ---------------------: | ---------------------: |
+| 24 style modules           |   1,302 → 925 (−28.9%) |     667 → 197 (−70.5%) |     641 → 258 (−59.8%) | 1,547 → 1,135 (−26.7%) |
+| 240 style modules          | 9,013 → 5,631 (−37.5%) | 6,284 → 1,666 (−73.5%) | 6,166 → 2,188 (−64.5%) | 9,422 → 6,119 (−35.1%) |
+| 24 modules sharing tokens  |          1,542 → 1,096 |              728 → 213 |              704 → 263 |          1,714 → 1,255 |
+| 240 modules without styles |          2,313 → 1,180 |            1,796 → 190 |            1,798 → 177 |          3,155 → 1,911 |
+
+Editing the shared token file rebuilt its consumers in 463 ms versus 1,159 ms
+(−60.1%). For the four smaller recipe/styled cases, esbuild's initial build
+improved by 3.4–12.2% and unchanged rebuilds by 46.9–52.3%. Vite's static styled
+case was effectively unchanged (536.5 → 535.9 ms); the other small cases
+improved by 4.5–18.0%. None of these ESM medians regressed by more than 5%.
+
+For the compilation phase, the 24-module esbuild initial-build goal of −30%
+was narrowly missed at −28.9%.
+The 240-module initial-build goal, both sizes' unchanged/edit goals of −40%/−30%,
+and Vite production's −20% goal were met. These fixture results are not timing
+guarantees for other machines or projects.
+
+Including worker startup and package loading, time to the first result was
+1,714 → 1,377 ms for esbuild's 24-module case (−19.7%) and
+9,429 → 6,086 ms for 240 modules (−35.5%). Vite's corresponding timings were
+2,129 → 1,681 ms (−21.0%) and 9,977 → 6,695 ms (−32.9%).
+
+All production CSS and runtime comparisons passed. CSS and esbuild JS sizes
+were unchanged from `f6a4844b` in raw, gzip and Brotli form. Vite's mixed recipe
+and dynamic styled JS each lost 62 raw bytes (9/11 gzip bytes and 6/8 Brotli
+bytes respectively); the other Vite outputs were unchanged. For 240 style modules,
+esbuild's post-GC heap was 44.4 → 43.4 MiB and peak Node RSS was
+696.4 → 424.5 MiB. Vite's corresponding values were 40.5 → 40.3 MiB and
+400.3 → 411.0 MiB. Bounded input/analysis retention adds memory, while skipping
+repeated AST work reduces allocation; peak RSS is workload-dependent and is
+not guaranteed to decrease.
+
+The complete five-round records, including dispersion and process startup
+timings, are written to `.cache/compilation-benchmark-optimized/report.json`.
+
+The npm CommonJS matrix ran three rounds with the same measurement procedure:
+
+| Fixture                    |          esbuild first |      esbuild unchanged |         esbuild edited |         Vite production |
+| -------------------------- | ---------------------: | ---------------------: | ---------------------: | ----------------------: |
+| 24 style modules           | 1,446 → 1,054 (−27.1%) |     679 → 212 (−68.7%) |     639 → 294 (−54.0%) |  5,536 → 2,148 (−61.2%) |
+| 240 style modules          | 9,722 → 6,271 (−35.5%) | 6,408 → 1,697 (−73.5%) | 6,398 → 2,202 (−65.6%) | 42,243 → 9,042 (−78.6%) |
+| Static styled              |              417 → 403 |                94 → 57 |                85 → 72 |   1,328 → 1,360 (+2.4%) |
+| 240 modules without styles |          2,286 → 1,144 |            1,751 → 196 |            1,805 → 166 |           3,895 → 2,627 |
+
+Raw, gzip and Brotli JS/CSS sizes were unchanged in all four CommonJS cases,
+and CSS/runtime comparisons passed. The small Vite styled case regressed 2.4%,
+below the 5% review threshold. The first 24-module esbuild candidate run was
+slower than baseline, so the three individual samples and dispersion remain
+available in `.cache/compilation-benchmark-cjs/report.json`.
+
+Vite development ran three rounds per format with each revision's default
+profile. These are application-graph requests, not browser HMR timings:
+
+| Format / fixture                      |   First graph | Edited graph | Unchanged graph |
+| ------------------------------------- | ------------: | -----------: | --------------: |
+| ESM / 24 style modules                | 1,284 → 1,179 |     119 → 58 |     3.40 → 4.97 |
+| ESM / static styled                   |     385 → 317 |      97 → 59 |     0.38 → 0.43 |
+| ESM / 240 modules without styles      | 2,588 → 1,165 |  60.7 → 62.5 |   14.15 → 15.16 |
+| CommonJS / 24 style modules           | 4,772 → 1,658 |     309 → 94 |     3.61 → 4.04 |
+| CommonJS / static styled              |     593 → 571 |    284 → 118 |     0.40 → 0.38 |
+| CommonJS / 240 modules without styles | 3,349 → 1,956 |    460 → 277 |   15.49 → 13.84 |
+
+Unchanged development requests mostly use Vite's own transform cache. A separate
+diagnostic run of the ESM style/styled cases recorded no compilation, filesystem
+read or hash work in those requests. The 24-module unchanged graph walk still
+increased by 1.57 ms (+46.2%), and the plain ESM dependency edit increased 2.9%.
+The development profile retains runtime calls and can retain a larger module
+graph; it does not promise that every cached request becomes faster. Full records
+are in `.cache/compilation-benchmark-development/report.json`.
+
+Strict PnP ran one additional ESM/CommonJS matrix for 24 style modules, static
+styled and mixed recipes through both production adapters. All CSS/runtime
+comparisons passed; its individual timings in
+`.cache/compilation-benchmark-pnp/report.json` are smoke measurements, not
+stable performance estimates. An initially slower ESM mixed-recipe sample was
+rechecked for five rounds: esbuild's first build improved 472 → 433 ms (−8.3%),
+unchanged rebuilds 81 → 39 ms (−52.6%) and edits 79 → 44 ms (−44.9%). Vite's
+first build improved 1,522 → 1,472 ms (−3.3%). These repeat records are in
+`.cache/compilation-benchmark-pnp-repeat/report.json`.
+
+### Reference before the nine optimizations
+
+A separate three-round npm ESM comparison against `fbc32c0d` shows the remaining
+cost of the earlier features. These are fresh measurements of both revisions;
+the current medians differ slightly from the five-round table above.
+
+| Fixture          |      esbuild first | esbuild unchanged |   esbuild edited |      Vite production | esbuild JS bytes |
+| ---------------- | -----------------: | ----------------: | ---------------: | -------------------: | ---------------: |
+| 24 style modules | 585 → 961 (+64.2%) |         239 → 195 |        252 → 254 | 960 → 1,103 (+14.9%) |      6,657 → 526 |
+| Static styled    | 295 → 330 (+11.7%) |           42 → 34 | 36 → 43 (+17.0%) |    480 → 497 (+3.5%) |      1,787 → 253 |
+| Recipe           | 253 → 319 (+26.1%) |           33 → 31 | 29 → 34 (+19.4%) |    468 → 457 (−2.4%) |      1,338 → 342 |
+
+The corresponding esbuild gzip JS sizes were 1,372 → 274, 887 → 207 and
+600 → 77 bytes; Brotli sizes were 1,135 → 238, 817 → 166 and 549 → 86 bytes.
+CSS and runtime comparisons passed. The build-time changes recover much of the
+overhead introduced by the nine optimizations, while retaining their bundle
+benefits; they do not restore the earlier first-build or small-edit timings in
+every case. Records are in `.cache/compilation-benchmark-before-nine/report.json`.
