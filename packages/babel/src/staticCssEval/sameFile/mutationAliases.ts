@@ -1,3 +1,4 @@
+import { referencesModuleExport } from "../../commonjs/bindings.js";
 import { types as t } from "@babel/core";
 import type { NodePath } from "@babel/core";
 import type { Binding } from "@babel/traverse";
@@ -441,10 +442,10 @@ function isKnownReadOnlyCall(
   const callee = child(path, "callee");
   if (
     isBuiltInExtractionCall(callee) ||
-    callee.referencesImport("@mincho-js/css", "cx")
+    referencesModuleExport(callee, "@mincho-js/css", "cx")
   )
     return true;
-  if (callee.referencesImport("@mincho-js/react", "styled")) return true;
+  if (referencesModuleExport(callee, "@mincho-js/react", "styled")) return true;
   if (!callee.isMemberExpression()) return false;
 
   const object = child(callee, "object");

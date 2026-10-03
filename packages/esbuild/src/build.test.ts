@@ -17,7 +17,7 @@ import {
 } from "@vanilla-extract/css/adapter";
 import { runInNewContext } from "node:vm";
 import { TraceMap, originalPositionFor } from "@jridgewell/trace-mapping";
-import { build as nativeBuild, type Plugin } from "esbuild";
+import { build as nativeBuild, transform, type Plugin } from "esbuild";
 import MagicString from "magic-string";
 
 function actualPackageGraph() {
@@ -348,6 +348,42 @@ describe("buildWithMincho transaction", () => {
     }
   );
 
+  it("keeps import and require package conditions distinct", async () => {
+    const directory = join(
+      process.cwd(),
+      "../integration/src/__fixtures__/commonjs-conditions"
+    );
+
+    const files = Object.fromEntries(
+      await Promise.all(
+        ["package.json", "entry.js", "import.cjs", "require.cjs"].map(
+          async (name) => [
+            name,
+            await fs.readFile(join(directory, name), "utf8")
+          ]
+        )
+      )
+    );
+
+    const root = await fixture(files);
+    const result = await buildWithMincho({
+      absWorkingDir: root,
+      entryPoints: ["entry.js"],
+      outdir: "out",
+      write: false,
+      mincho: {
+        extractCalls: { "./import.cjs": ["make"], "./require.cjs": ["make"] }
+      }
+    });
+
+    const css = result.outputFiles!.find((file) =>
+      file.path.endsWith(".css")
+    )!.text;
+
+    expect(css).toContain("color: red");
+    expect(css).toContain("color: blue");
+  }, 30_000);
+
   it("reports unserializable custom call results without falling back to runtime", async () => {
     const root = await fixture({
       "factory.ts": "export const make = () => () => 1;",
@@ -367,170 +403,186 @@ describe("buildWithMincho transaction", () => {
     ).rejects.toThrow(/Invalid exports/);
   }, 30_000);
 
-  it("extracts custom calls and protects local factory implementations across multiple entries", async () => {
-    const sourceRoot = join(
-      process.cwd(),
-      "../integration/src/__fixtures__/extract-calls/"
-    );
-
-    const files = Object.fromEntries(
-      await Promise.all(
-        ["entry.ts", "factory.ts", "implementation.ts", "helper.ts"].map(
-          async (name) => [
-            name,
-            await fs.readFile(join(sourceRoot, name), "utf8")
-          ]
-        )
-      )
-    );
-
-    const root = await fixture(files);
-    const result = await buildWithMincho({
-      absWorkingDir: root,
-      entryPoints: ["helper.ts", "entry.ts"],
-      outdir: "out",
-      write: false,
-      format: "cjs",
-      mincho: {
-        extractCalls: { "./factory.ts": ["defineStyle", "makeRecipe"] }
-      }
-    });
-
-    const css = result
-      .outputFiles!.filter((file) => file.path.endsWith(".css"))
-      .map((file) => file.text)
-      .join("\n");
-
-    const code = result.outputFiles!.find((file) =>
-      file.path.endsWith("/entry.js")
-    )!.text;
-
-    const module = {
-      exports: {} as {
-        className: string;
-        localClassName: string;
-        render: (tone: string) => string;
-      }
-    };
-
-    runInNewContext(code, {
-      module,
-      exports: module.exports,
-      process: { env: { NODE_ENV: "production" } }
-    });
-
-    const quiet = module.exports.render("quiet");
-    const loud = module.exports.render("loud");
-
-    expect(quiet).not.toBe(loud);
-    expect(css).toContain(`.${module.exports.className}`);
-    expect(css).toContain(`.${module.exports.localClassName}`);
-    expect(css).toContain("color: orchid");
-
-    for (const name of quiet
-      .split(" ")
-      .filter((name) => !loud.split(" ").includes(name)))
-      expect(css).toContain(`.${name}`);
-
-    for (const name of loud
-      .split(" ")
-      .filter((name) => !quiet.split(" ").includes(name)))
-      expect(css).toContain(`.${name}`);
-
-    expect(css).toContain("color: tomato");
-    expect(css).toContain("border-width: 3px");
-    expect(css).toContain("outline-style: dotted");
-  }, 30_000);
-
-  it("extracts vanilla-extract packages alongside Mincho and preserves their runtime APIs", async () => {
-    const source = await fs.readFile(
-      join(
+  it.each(["ts", "cjs"])(
+    "extracts custom calls across multiple entries (%s)",
+    async (extension) => {
+      const sourceRoot = join(
         process.cwd(),
-        "../integration/src/__fixtures__/vanilla-extract/entry.ts"
-      ),
-      "utf8"
-    );
+        `../integration/src/__fixtures__/extract-calls${extension === "cjs" ? "-commonjs" : ""}/`
+      );
 
-    const root = await fixture({ "entry.ts": source });
-    const result = await buildWithMincho({
-      entryPoints: [join(root, "entry.ts")],
-      outdir: join(root, "out"),
-      write: false,
-      format: "cjs"
-    });
+      const files = Object.fromEntries(
+        await Promise.all(
+          ["entry", "factory", "implementation", "helper"]
+            .map((name) => `${name}.${extension}`)
+            .map(async (name) => [
+              name,
+              await fs.readFile(join(sourceRoot, name), "utf8")
+            ])
+        )
+      );
 
-    const css = result.outputFiles!.find((file) =>
-      file.path.endsWith(".css")
-    )!.text;
-
-    const code = result.outputFiles!.find((file) =>
-      file.path.endsWith(".js")
-    )!.text;
-
-    const module = {
-      exports: {} as {
-        render: (
-          tone: string,
-          display: string,
-          color: string
-        ) => {
-          className: string;
-          inline: Record<string, string>;
-          normalized: Record<string, string>;
-          mapped: Record<string, number>;
-          assigned: Record<string, string>;
-          fallback: string;
-        };
-        update: (element: unknown, color: string) => void;
-      }
-    };
-
-    runInNewContext(code, { module, exports: module.exports });
-
-    const quiet = module.exports.render("quiet", "flex", "red");
-    const loud = module.exports.render("loud", "grid", "blue");
-
-    expect(quiet.className).not.toBe(loud.className);
-
-    for (const className of `${quiet.className} ${loud.className}`.split(" "))
-      expect(css).toContain(`.${className}`);
-
-    expect(quiet.inline).toEqual({ [Object.keys(quiet.inline)[0]!]: "red" });
-    expect(loud.inline).toEqual({ [Object.keys(quiet.inline)[0]!]: "blue" });
-    expect(quiet.normalized).toEqual({ mobile: "flex", desktop: "grid" });
-    expect(loud.normalized).toEqual({ mobile: "grid", desktop: "grid" });
-    expect(quiet.mapped).toEqual({ mobile: 4, desktop: 8 });
-    expect(Object.values(loud.assigned)).toEqual(["blue"]);
-    expect(loud.fallback).toMatch(/^var\(--.+, blue\)$/);
-
-    const assigned: Record<string, string> = {};
-    module.exports.update(
-      {
-        style: {
-          setProperty: (name: string, value: string) => {
-            assigned[name] = value;
+      const root = await fixture(files);
+      const result = await buildWithMincho({
+        absWorkingDir: root,
+        entryPoints: [`helper.${extension}`, `entry.${extension}`],
+        outdir: "out",
+        write: false,
+        format: "cjs",
+        mincho: {
+          extractCalls: {
+            [`./factory.${extension}`]: ["defineStyle", "makeRecipe"]
           }
         }
-      },
-      "green"
-    );
+      });
 
-    expect(assigned).toEqual({ [Object.keys(quiet.inline)[0]!]: "green" });
+      const css = result
+        .outputFiles!.filter((file) => file.path.endsWith(".css"))
+        .map((file) => file.text)
+        .join("\n");
 
-    expect(css).toContain("padding: 13px");
-    expect(css).toContain("padding: 7px");
-    expect(css).toContain("@layer reset");
-    expect(css).toContain("@keyframes");
-    expect(css).toContain("view-transition-name:");
+      const code = result.outputFiles!.find((file) =>
+        file.path.endsWith("/entry.js")
+      )!.text;
 
-    const bodyColors = [...css.matchAll(/body\s*\{\s*color:\s*([^;]+);/g)].map(
-      ([, value]) => value
-    );
+      const module = {
+        exports: {} as {
+          className: string;
+          localClassName: string;
+          render: (tone: string) => string;
+        }
+      };
 
-    expect(bodyColors).toHaveLength(2);
-    expect(bodyColors[0]).toBe(Object.keys(quiet.assigned)[0]);
-    expect(bodyColors[1]).not.toBe(bodyColors[0]);
-  }, 30_000);
+      runInNewContext(code, {
+        module,
+        exports: module.exports,
+        process: { env: { NODE_ENV: "production" } }
+      });
+
+      const quiet = module.exports.render("quiet");
+      const loud = module.exports.render("loud");
+
+      expect(quiet).not.toBe(loud);
+      expect(css).toContain(`.${module.exports.className}`);
+      expect(css).toContain(`.${module.exports.localClassName}`);
+      expect(css).toContain("color: orchid");
+
+      for (const name of quiet
+        .split(" ")
+        .filter((name) => !loud.split(" ").includes(name)))
+        expect(css).toContain(`.${name}`);
+
+      for (const name of loud
+        .split(" ")
+        .filter((name) => !quiet.split(" ").includes(name)))
+        expect(css).toContain(`.${name}`);
+
+      expect(css).toContain("color: tomato");
+      expect(css).toContain("border-width: 3px");
+      expect(css).toContain("outline-style: dotted");
+    },
+    30_000
+  );
+
+  it.each(["ts", "cjs"])(
+    "extracts vanilla-extract packages and preserves runtime APIs (%s)",
+    async (extension) => {
+      const source = await fs.readFile(
+        join(
+          process.cwd(),
+          "../integration/src/__fixtures__/vanilla-extract/entry.ts"
+        ),
+        "utf8"
+      );
+
+      const root = await fixture({
+        [`entry.${extension}`]:
+          extension === "cjs"
+            ? (await transform(source, { loader: "ts", format: "cjs" })).code
+            : source
+      });
+
+      const result = await buildWithMincho({
+        entryPoints: [join(root, `entry.${extension}`)],
+        outdir: join(root, "out"),
+        write: false,
+        format: "cjs"
+      });
+
+      const css = result.outputFiles!.find((file) =>
+        file.path.endsWith(".css")
+      )!.text;
+
+      const code = result.outputFiles!.find((file) =>
+        file.path.endsWith(".js")
+      )!.text;
+
+      const module = {
+        exports: {} as {
+          render: (
+            tone: string,
+            display: string,
+            color: string
+          ) => {
+            className: string;
+            inline: Record<string, string>;
+            normalized: Record<string, string>;
+            mapped: Record<string, number>;
+            assigned: Record<string, string>;
+            fallback: string;
+          };
+          update: (element: unknown, color: string) => void;
+        }
+      };
+
+      runInNewContext(code, { module, exports: module.exports });
+
+      const quiet = module.exports.render("quiet", "flex", "red");
+      const loud = module.exports.render("loud", "grid", "blue");
+
+      expect(quiet.className).not.toBe(loud.className);
+
+      for (const className of `${quiet.className} ${loud.className}`.split(" "))
+        expect(css).toContain(`.${className}`);
+
+      expect(quiet.inline).toEqual({ [Object.keys(quiet.inline)[0]!]: "red" });
+      expect(loud.inline).toEqual({ [Object.keys(quiet.inline)[0]!]: "blue" });
+      expect(quiet.normalized).toEqual({ mobile: "flex", desktop: "grid" });
+      expect(loud.normalized).toEqual({ mobile: "grid", desktop: "grid" });
+      expect(quiet.mapped).toEqual({ mobile: 4, desktop: 8 });
+      expect(Object.values(loud.assigned)).toEqual(["blue"]);
+      expect(loud.fallback).toMatch(/^var\(--.+, blue\)$/);
+
+      const assigned: Record<string, string> = {};
+      module.exports.update(
+        {
+          style: {
+            setProperty: (name: string, value: string) => {
+              assigned[name] = value;
+            }
+          }
+        },
+        "green"
+      );
+
+      expect(assigned).toEqual({ [Object.keys(quiet.inline)[0]!]: "green" });
+
+      expect(css).toContain("padding: 13px");
+      expect(css).toContain("padding: 7px");
+      expect(css).toContain("@layer reset");
+      expect(css).toContain("@keyframes");
+      expect(css).toContain("view-transition-name:");
+
+      const bodyColors = [
+        ...css.matchAll(/body\s*\{\s*color:\s*([^;]+);/g)
+      ].map(([, value]) => value);
+
+      expect(bodyColors).toHaveLength(2);
+      expect(bodyColors[0]).toBe(Object.keys(quiet.assigned)[0]);
+      expect(bodyColors[1]).not.toBe(bodyColors[0]);
+    },
+    30_000
+  );
 
   it.each(["", "?variant"])(
     "orders CSS for virtual entries with suffix %s",

@@ -1,5 +1,8 @@
 import { transformSync } from "@babel/core";
-import { minchoStyledComponentPlugin } from "@mincho-js/babel";
+import {
+  internalInspectCommonJs,
+  minchoStyledComponentPlugin
+} from "@mincho-js/babel";
 import { addFileScope, getPackageInfo } from "@vanilla-extract/integration";
 import defaultEsbuild, {
   type BuildOptions,
@@ -28,6 +31,26 @@ interface CompileOptions {
   originalPath: string;
 }
 
+function addScopedSource(
+  options: Parameters<typeof addFileScope>[0],
+  loader: "js" | "jsx" | "ts" | "tsx"
+): string {
+  const source = addFileScope(options);
+  if (!/\brequire\b/.test(options.source)) return source;
+
+  const { topLevelRequires } = internalInspectCommonJs(
+    options.source,
+    `${options.filePath}.${loader}`
+  );
+
+  // A late CommonJS dependency can reset vanilla-extract's identifier counter
+  // when its file scope ends. Initialize unconditional top-level dependencies
+  // before entering this scope, leaving guarded and deferred calls in place.
+  return topLevelRequires.length
+    ? `${topLevelRequires.map((specifier) => `require(${JSON.stringify(specifier)});`).join("\n")}\n${source}`
+    : source;
+}
+
 function getScopedSourceWithCache({
   contents,
   originalPath,
@@ -45,12 +68,15 @@ function getScopedSourceWithCache({
     return resolverCache.get(originalPath)!;
   }
 
-  const source = addFileScope({
-    source: contents,
-    filePath: originalPath,
-    rootPath,
-    packageName
-  });
+  const source = addScopedSource(
+    {
+      source: contents,
+      filePath: originalPath,
+      rootPath,
+      packageName
+    },
+    "tsx"
+  );
 
   resolverCache.set(originalPath, source);
 
@@ -70,12 +96,15 @@ function transformScopedDependencySource({
   packageName: string;
   rootPath: string;
 }) {
-  let source = addFileScope({
-    source: contents,
-    filePath,
-    rootPath,
-    packageName
-  });
+  let source = addScopedSource(
+    {
+      source: contents,
+      filePath,
+      rootPath,
+      packageName
+    },
+    loader
+  );
 
   source = transformSync(source, {
     filename: filePath,

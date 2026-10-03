@@ -44,6 +44,16 @@ export function collectStaticCssEvalCjsExportMapOperations(
   );
 
   for (const statementPath of options.programPath.get("body")) {
+    // esbuild emits this unreachable assignment for Node's named-export lexer.
+    if (
+      statementPath.isExpressionStatement() &&
+      t.isLogicalExpression(statementPath.node.expression, {
+        operator: "&&"
+      }) &&
+      t.isNumericLiteral(statementPath.node.expression.left, { value: 0 })
+    )
+      continue;
+
     const directOperations = collectTopLevelCjsExportOperations(
       statementPath,
       state

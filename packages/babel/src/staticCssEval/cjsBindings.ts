@@ -50,11 +50,18 @@ function collectStaticCssEvalCjsRequireStatementBindings(
   statementPath: NodePath<t.Statement>,
   cjsImports: Map<string, ImportedStaticCssEvalCjsBinding>
 ): void {
-  if (!statementPath.isVariableDeclaration({ kind: "const" })) {
+  if (!statementPath.isVariableDeclaration()) {
     return;
   }
 
   for (const declaration of statementPath.node.declarations) {
+    if (
+      Object.keys(t.getBindingIdentifiers(declaration.id)).some(
+        (name) => !statementPath.scope.getBinding(name)?.constant
+      )
+    )
+      continue;
+
     collectStaticCssEvalCjsRequireDeclarator(
       declaration,
       statementPath.scope,
@@ -81,6 +88,7 @@ function collectStaticCssEvalCjsRequireDeclarator(
       importPath: source.importPath,
       propertyPath: source.propertyPath
     });
+
     return;
   }
 

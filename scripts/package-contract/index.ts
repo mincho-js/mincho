@@ -86,7 +86,12 @@ async function main(): Promise<void> {
         recursive: true
       });
 
-      for (const name of ["vanilla-extract", "extract-calls"]) {
+      for (const name of [
+        "vanilla-extract",
+        "extract-calls",
+        "extract-calls-commonjs",
+        "commonjs-conditions"
+      ]) {
         await cp(
           join(repoRoot, "packages/integration/src/__fixtures__", name),
           join(consumerRoot, "fixture/extraction", name),

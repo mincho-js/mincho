@@ -23,21 +23,26 @@ export class StaticCssEvalPrepassDependencies {
     importerId: string,
     specifier: string,
     resolution: NormalizedStaticCssEvalSourceResolution,
-    loadedSource?: StaticCssEvalLoadedSource
+    loadedSource?: StaticCssEvalLoadedSource,
+    resolutionMode?: "import" | "require"
   ): void {
     const key = JSON.stringify([
       importerId,
       specifier,
-      resolution.resolvedFile
+      resolution.resolvedFile,
+      resolutionMode ?? "import"
     ]);
 
     this.records.set(key, {
-      importResolution: createStaticCssEvalPrepassImportResolution(
-        importerId,
-        specifier,
-        resolution,
-        loadedSource
-      ),
+      importResolution: {
+        ...createStaticCssEvalPrepassImportResolution(
+          importerId,
+          specifier,
+          resolution,
+          loadedSource
+        ),
+        ...(resolutionMode === "require" ? { resolutionMode } : {})
+      },
       dependency: createStaticCssEvalResolvedDependency(
         importerId,
         specifier,

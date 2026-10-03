@@ -1,3 +1,4 @@
+import { referencesModuleExport } from "./commonjs/bindings.js";
 import { type NodePath, types as t } from "@babel/core";
 import type { Binding } from "@babel/traverse";
 import type { PluginState } from "./types.js";
@@ -172,9 +173,11 @@ export function getConstantBindingInitPath(
 function isDefineRulesCall(path: NodePath<t.Expression>): boolean {
   return (
     path.isCallExpression() &&
-    path
-      .get("callee")
-      .referencesImport(DEFINE_RULES_IMPORT_PATH, DEFINE_RULES_IMPORT_NAME)
+    referencesModuleExport(
+      path.get("callee"),
+      DEFINE_RULES_IMPORT_PATH,
+      DEFINE_RULES_IMPORT_NAME
+    )
   );
 }
 
@@ -183,12 +186,11 @@ function isCreateDefineRulesCxRuntimeCall(
 ): boolean {
   return (
     path.isCallExpression() &&
-    path
-      .get("callee")
-      .referencesImport(
-        DEFINE_RULES_CX_RUNTIME_IMPORT_PATH,
-        DEFINE_RULES_CX_RUNTIME_IMPORT_NAME
-      )
+    referencesModuleExport(
+      path.get("callee"),
+      DEFINE_RULES_CX_RUNTIME_IMPORT_PATH,
+      DEFINE_RULES_CX_RUNTIME_IMPORT_NAME
+    )
   );
 }
 

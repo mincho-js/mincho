@@ -159,6 +159,7 @@ export function createResolutionRequestFromCjsParts(
   return {
     importer,
     specifier: parts.specifier,
+    resolutionMode: "require",
     exportName: parts.exportName,
     memberPath: parts.memberPath,
     dependencyKind: parts.dependencyKind,
@@ -212,6 +213,7 @@ export function getLocalBindingCjsRequireSource(
   const expression = binding
     ? getStaticCssEvalConstBindingInitExpression(binding)
     : null;
+
   const source = getStaticCssEvalCjsRequireSource(
     expression ? unwrapTransparentCssRuleExpression(expression) : null,
     record.programPath.scope
@@ -338,6 +340,7 @@ export function getStaticExportEntryExpression(
     const expression = unwrapTransparentCssRuleExpression(
       exportEntry.expression
     );
+
     const reference = getStaticCssEvalMemberReference(expression);
 
     if (reference?.kind === "supported") {
@@ -771,6 +774,9 @@ export function createExportStarRequest(
   return {
     importer: record.id,
     specifier: starEntry.source,
+    resolutionMode: t.isExportAllDeclaration(starEntry.declaration)
+      ? "import"
+      : "require",
     exportName: request.exportName,
     memberPath: [...request.memberPath],
     dependencyKind: "reexported",
@@ -901,7 +907,8 @@ export function formatStaticCssEvalQueryExpression(
 
 export function createImportResolutionKey(
   importerId: string,
-  importPath: string
+  importPath: string,
+  mode?: "import" | "require"
 ): string {
-  return `${importerId}${importResolutionKeySeparator}${importPath}`;
+  return `${importerId}${importResolutionKeySeparator}${importPath}${mode === "require" ? "\0require" : ""}`;
 }

@@ -1,4 +1,4 @@
-import { types as t } from "@babel/core";
+import { types as t, type NodePath } from "@babel/core";
 import { getObjectKeyName } from "./cjsExportDescriptors.js";
 import {
   createExpressionSetOperation,
@@ -13,6 +13,7 @@ export function collectModuleReplacementOperations(options: {
   readonly expression: t.AssignmentExpression;
   readonly declaration: t.Statement;
   readonly state: StaticCssEvalCjsExportState;
+  readonly scope: NodePath<t.Node>["scope"];
 }): StaticCssEvalCjsExportMapOperation[] {
   options.state.exportsAliasSafe = false;
 
@@ -34,7 +35,19 @@ export function collectModuleReplacementOperations(options: {
   }
 
   if (!t.isObjectExpression(options.expression.right)) {
-    options.state.moduleObjectLike = false;
+    const right = options.expression.right;
+    const binding = t.isIdentifier(right)
+      ? options.scope.getBinding(right.name)
+      : undefined;
+
+    options.state.moduleObjectLike =
+      t.isFunction(right) ||
+      Boolean(
+        binding?.constant &&
+        (binding.path.isFunctionDeclaration() ||
+          (binding.path.isVariableDeclarator() &&
+            t.isFunction(binding.path.node.init)))
+      );
 
     return [
       ...operations,

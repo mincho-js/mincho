@@ -69,7 +69,7 @@ function isCopyPropsWrapperExpression(options: {
   );
 }
 
-function isSupportedEsbuildCopyPropsHelper(
+export function isSupportedEsbuildCopyPropsHelper(
   helperName: string,
   scope: StaticCssEvalBabelScope
 ): boolean {

@@ -220,7 +220,10 @@ export function minchoEsbuildPlugin({
         if (!loader) return;
         if (args.path.endsWith(".css.ts")) return;
 
-        if (args.path.includes("node_modules")) {
+        if (
+          args.path.includes("node_modules") ||
+          /(^|[\\/])\.yarn[\\/]/.test(args.path)
+        ) {
           if (!includeNodeModulesPattern) return;
           if (!includeNodeModulesPattern.test(args.path)) return;
         }
@@ -3974,6 +3977,39 @@ if (import.meta.vitest) {
         firstPresetBuildSource.marker
       );
     });
+
+    it.each([
+      "/workspace/.yarn/cache/pkg/index.ts",
+      String.raw`C:\workspace\.yarn\cache\pkg\index.ts`,
+      String.raw`C:\workspace/.yarn\cache/pkg/index.ts`
+    ])(
+      "filters Yarn dependency scripts on either platform: %s",
+      async (path: string) => {
+        const transform = vi
+          .spyOn(integrationHelpers, "babelTransformSource")
+          .mockResolvedValue({
+            code: "export {};",
+            map: null,
+            result: ["", ""]
+          });
+
+        for (const includeNodeModulesPattern of [undefined, /other-package/]) {
+          const harness = createBuildHarness({
+            plugin: minchoEsbuildPlugin({ includeNodeModulesPattern })
+          });
+
+          expect(await harness.loadScript({ path })).toBeUndefined();
+        }
+
+        expect(transform).not.toHaveBeenCalled();
+
+        const included = createBuildHarness({
+          plugin: minchoEsbuildPlugin({ includeNodeModulesPattern: /pkg/ })
+        });
+        expect(await included.loadScript({ path })).toBeDefined();
+        expect(transform).toHaveBeenCalledTimes(1);
+      }
+    );
 
     it("counts V5 preset artifacts when schema and version property order differs", () => {
       expect(

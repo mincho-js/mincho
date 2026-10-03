@@ -1,4 +1,8 @@
 import type { NodePath, types as t } from "@babel/core";
+import {
+  getModuleReference,
+  referencesModuleExport
+} from "../commonjs/bindings.js";
 import type { PluginState, ProgramScope } from "../types.js";
 import { analyzeExtractCalls } from "./analysis.js";
 import { isBuiltInExtractionCall } from "./builtins.js";
@@ -31,8 +35,11 @@ export function prepareExtractCalls(
   );
 }
 
-export function isExtractionCall(callee: NodePath<t.Node>): boolean {
-  if (isBuiltInExtractionCall(callee)) return true;
+export function isExtractionCall(
+  callee: NodePath<t.Node>,
+  strict = true
+): boolean {
+  if (isBuiltInExtractionCall(callee, strict)) return true;
 
   const program = callee.scope.getProgramParent() as ProgramScope;
   const config = program.minchoData?.extractCalls;
@@ -49,8 +56,12 @@ export function isExtractionCall(callee: NodePath<t.Node>): boolean {
 
   return (
     config !== undefined &&
-    Object.entries(config.imports).some(([source, names]) =>
-      names.some((name) => callee.referencesImport(source, name))
+    Object.entries(
+      getModuleReference(callee)?.kind === "require"
+        ? (config.requires ?? config.imports)
+        : config.imports
+    ).some(([source, names]) =>
+      names.some((name) => referencesModuleExport(callee, source, name, strict))
     )
   );
 }

@@ -14,12 +14,16 @@ import preprocess from "./transforms/preprocess.js";
 import type { PluginState } from "./types.js";
 import { prepareExtractCalls } from "./extractionCalls/index.js";
 
+import { normalizeTypeScriptCommonJs } from "./commonjs/modules.js";
+
 export function minchoBabelPlugin(): PluginObj<PluginState> {
   return {
     name: "mincho-babel-plugin",
     visitor: {
       Program: {
         enter(path, state) {
+          normalizeTypeScriptCommonJs(path, state.file);
+
           if (isDefineRulesCxConditionsEnabled(state)) {
             state.file.metadata[
               defineRulesCxConditionsOptimizationMetadataKey
@@ -84,3 +88,16 @@ export {
 } from "./extractionCalls/filesystem.js";
 export { ExtractCallsError as InternalExtractCallsError } from "./extractionCalls/types.js";
 export type { PreparedExtractCalls as InternalPreparedExtractCalls } from "./extractionCalls/types.js";
+export {
+  inspectCommonJs as internalInspectCommonJs,
+  commonJsToEsmPlugin as internalCommonJsToEsmPlugin
+} from "./commonjs/esm.js";
+
+export {
+  createModuleGraph as internalCreateModuleGraph,
+  parseModuleProgram as internalParseModuleProgram,
+  type ModuleGraph as InternalModuleGraph,
+  type ModuleGraphFlow as InternalModuleGraphFlow,
+  type ModuleGraphRequest as InternalModuleGraphRequest,
+  type ModuleTarget as InternalModuleTarget
+} from "./moduleGraph.js";
