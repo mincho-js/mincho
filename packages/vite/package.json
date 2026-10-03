@@ -54,7 +54,7 @@
   },
   "prettier": "prettier-config-custom",
   "dependencies": {
-    "@babel/core": "^7.29.0",
+    "@babel/core": "^7.29.6",
     "@mincho-js/css": "workspace:^",
     "@mincho-js/integration": "workspace:^",
     "@mincho-js/transform-to-vanilla": "workspace:^",
