@@ -519,13 +519,13 @@ function createMinchoViteEnvironmentPlugin(
 
       visited.add(dependency);
 
-      forgetRuntimeModule(dependency);
-
       // A provider can discover a changed dependency while evaluating its owner.
       // That owner already reads the new input; only earlier requests are stale.
       if (!staticCssEvalOwnerStack.getStore()?.has(dependency))
         ownerVersions.set(dependency, (ownerVersions.get(dependency) ?? 0) + 1);
       if (removed) cssState.clearGeneratedCssForOwner(dependency);
+
+      forgetRuntimeModule(dependency);
 
       for (const ownerId of (
         staticCssEvalProjectEngine.markDependencyDirty?.bind(
@@ -1291,6 +1291,7 @@ function createMinchoViteEnvironmentPlugin(
 
           cssState.clearGeneratedCssForOwner(fileId);
           staticCssEvalProjectEngine.refreshFile({ fileId });
+          rememberRuntimeModule(id, code);
 
           return null;
         }
@@ -1335,7 +1336,11 @@ function createMinchoViteEnvironmentPlugin(
 
           const resolvedCssPath = normalizePath(join(fileId, "..", file));
 
-          if (server && cssState.hasSidecar(resolvedCssPath)) {
+          if (
+            server &&
+            cssState.hasSidecar(resolvedCssPath) &&
+            cssState.getSidecar(resolvedCssPath) !== cssExtract
+          ) {
             const { moduleGraph } = server;
 
             for (const moduleId of [
@@ -1380,7 +1385,9 @@ function createMinchoViteEnvironmentPlugin(
                           skipSelf: false,
                           ...(options?.kind === "require"
                             ? {
-                                custom: { "node-resolve": { isRequire: true } }
+                                custom: {
+                                  "node-resolve": { isRequire: true }
+                                }
                               }
                             : {})
                         }

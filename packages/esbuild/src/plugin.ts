@@ -444,8 +444,13 @@ export function minchoEsbuildPlugin({
 
         const result: BabelTransformResult =
           (await internalCanSkipMinchoTransform(options))
-            ? { code: source, result: ["", ""] }
+            ? {
+                code: source,
+                result: ["", ""],
+                runtimeCandidates: { recipes: false, styled: false }
+              }
             : await traced.babelTransformSource(options);
+
         const [file, cssExtract] = result.result;
 
         if (file && cssExtract && cssExtract !== result.code) {
