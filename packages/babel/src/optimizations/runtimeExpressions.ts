@@ -40,6 +40,7 @@ export interface StaticRecipeCall {
   readonly identity: string;
   readonly config: StaticData;
   readonly options?: StaticData;
+  readonly compiled?: boolean;
 }
 
 export interface StaticStyledElement extends StaticRecipeCall {
@@ -119,7 +120,9 @@ export function annotateRecipeFactories(
       if (
         !reference?.unsafe &&
         reference?.source === "@mincho-js/css/rules/createRuntimeFn" &&
-        reference.members.join(".") === "createRuntimeFn" &&
+        ["createRuntimeFn", "createCompiledRuntimeFn"].includes(
+          reference.members.join(".")
+        ) &&
         path.node.start != null
       )
         positions.push(path.node.start);
@@ -439,8 +442,11 @@ function* serializedRecipe(
   if (
     factory?.unsafe ||
     factory?.source !== "@mincho-js/css/rules/createRuntimeFn" ||
-    factory.members.join(".") !== "createRuntimeFn" ||
-    target.path.node.arguments.length !== 1
+    !["createRuntimeFn", "createCompiledRuntimeFn"].includes(
+      factory.members.join(".")
+    ) ||
+    target.path.node.arguments.length < 1 ||
+    target.path.node.arguments.length > 2
   )
     return null;
 
@@ -458,6 +464,7 @@ function* serializedRecipe(
 
   const result = {
     identity: `${target.module.id}\0${expressionKey(target.path)}`,
+    compiled: factory.members.join(".") === "createCompiledRuntimeFn",
     config: staticData(config)
   };
 
