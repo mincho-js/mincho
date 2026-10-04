@@ -47,11 +47,13 @@ export class RuntimeOptimizations {
     const optimize = options.babel?.optimize;
 
     if (
-      (optimize?.staticRecipes === false &&
+      (optimize?.runtimeCodegen !== true &&
+        optimize?.staticRecipes === false &&
         optimize.styledComponents === false) ||
       (result.runtimeCandidates &&
         (!result.runtimeCandidates.recipes ||
-          optimize?.staticRecipes === false) &&
+          (optimize?.staticRecipes === false &&
+            optimize.runtimeCodegen !== true)) &&
         (!result.runtimeCandidates.styled ||
           optimize?.styledComponents === false))
     ) {
@@ -202,7 +204,8 @@ export class RuntimeOptimizations {
           parserCache: options.babel?.compilationCache?.parser,
           pureFunctions: optimize?.pureFunctions,
           staticRecipes: optimize?.staticRecipes,
-          styledComponents: optimize?.styledComponents
+          styledComponents: optimize?.styledComponents,
+          runtimeCodegen: optimize?.runtimeCodegen
         }),
         provider,
         dependencies
@@ -215,6 +218,32 @@ export class RuntimeOptimizations {
     if (!analysis) return result;
 
     const replacements: Array<{ key: string; value: string }> = [];
+    const finiteCalls: NonNullable<
+      Parameters<typeof internalApplyRuntimeExpressions>[0]["finiteCalls"]
+    >[number][] = [];
+
+    for (const item of analysis.finiteCalls) {
+      try {
+        const values = item.calls.map((call) => {
+          const runtime = createRuntimeFn(
+            call.config as Parameters<typeof createRuntimeFn>[0]
+          );
+
+          return runtime(call.options as Parameters<typeof runtime>[0]);
+        });
+
+        if (
+          values.reduce(
+            (size, value) => size + Buffer.byteLength(JSON.stringify(value)),
+            0
+          ) <= 4096
+        )
+          finiteCalls.push({ key: item.key, tree: item.tree, values });
+      } catch {
+        /* An invalid leaf preserves the entire original expression. */
+      }
+    }
+
     const elements: Array<{
       key: string;
       tag: string;
@@ -269,13 +298,26 @@ export class RuntimeOptimizations {
       flattened: elements.length
     });
 
-    if (!replacements.length && !elements.length) return result;
+    if (
+      !replacements.length &&
+      !elements.length &&
+      !finiteCalls.length &&
+      !analysis.expressions.length &&
+      !analysis.dynamicElements.length &&
+      !analysis.chains.length
+    )
+      return result;
 
     const transformed = internalApplyRuntimeExpressions({
       ast: analysis.ast,
       filename: options.filename,
       source: result.code,
       replacements,
+      expressions: analysis.expressions,
+      finiteCalls,
+      dynamicElements: analysis.dynamicElements,
+      chains: analysis.chains,
+      runtimeCodegen: optimize?.runtimeCodegen,
       elements,
       sourceMaps: options.sourceMaps,
       inputSourceMap: result.map ?? undefined

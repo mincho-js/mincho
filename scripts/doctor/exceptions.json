@@ -1190,6 +1190,16 @@
     "expires": "2026-12-31"
   },
   {
+    "id": "integration-runtime-codegen-test-tsx-loader",
+    "file": "packages/integration/src/runtimeCodegen.test.ts",
+    "type": "warning",
+    "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
+    "source": "loader: \"tsx\",",
+    "count": 1,
+    "reason": "This differential runtime test uses esbuild's built-in TSX parser before executing original and optimized React components; it does not load a Webpack dependency.",
+    "expires": "2026-12-31"
+  },
+  {
     "id": "integration-compile-plugins-test-esbuild-loader-01",
     "file": "packages/integration/src/compilePlugins.test.ts",
     "type": "warning",

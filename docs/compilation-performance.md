@@ -269,15 +269,21 @@ bundles in both ESM and CommonJS output formats.
 Mincho `rules` with proved static arguments become class-name literals, including
 calls through local imports and reexports. The pass reads serialized configuration
 from the normal extracted sidecar and invokes only the known pure recipe runtime.
-It does not evaluate component modules or enumerate possible variant combinations.
-Repeated observed arguments share results within a build generation, and the
-native sidecar pipeline evaluates each sidecar once per build.
+It does not evaluate component modules. Repeated observed arguments share results
+within a build generation, and the native sidecar pipeline evaluates each sidecar
+once per build.
 
-Dynamic calls, public recipe methods and CSS imports remain intact. CommonJS
-exports can retain their recipe runtime even when a particular call is folded;
-replacing a call with a string does not always reduce bundle size. Vanilla Extract
-recipes and sprinkles keep their normal extraction support but are not folded by
-this pass. Standalone `.css.ts` authoring modules also keep their existing behavior.
+With `optimize.runtimeCodegen` enabled, recipe selections built from literal values
+and containers with up to four conditional expressions can expand into at most
+16 precomputed class strings. The conditions still run at runtime in their original
+order. Unproved selections and expansions over the budget retain the original call.
+
+The static-argument pass keeps other dynamic calls, public recipe methods and CSS
+imports intact. CommonJS exports can retain their recipe runtime even when a
+particular call is folded; replacing a call with a string does not always reduce
+bundle size. Vanilla Extract recipes and sprinkles keep their normal extraction
+support but are not folded by this pass. Standalone `.css.ts` authoring modules
+also keep their existing behavior.
 
 ## Reproducible compilation benchmark
 

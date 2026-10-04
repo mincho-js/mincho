@@ -535,6 +535,7 @@ export async function transformSourceUncached(
       ],
       sourceMaps,
       ast:
+        optimize?.runtimeCodegen === true ||
         optimize?.staticRecipes !== false ||
         optimize?.styledComponents !== false,
       ...(inputSourceMap !== undefined ? { inputSourceMap } : {})

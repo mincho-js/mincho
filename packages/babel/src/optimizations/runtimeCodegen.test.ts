@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 import { optimizeRuntimeCodegen } from "./runtimeCodegen.js";
 import { pruneRecipeMetadata } from "./recipeMetadata.js";
 import { babelTransform } from "../testUtils/plugin.js";
+import { analyzeRuntimeExpressions } from "./runtimeExpressions.js";
 import { vx } from "@mincho-js/transform-runtime";
 
 function optimize(code: string) {
@@ -27,6 +28,30 @@ function optimize(code: string) {
       })
     ]
   })!.code!;
+}
+
+function analyze(source: string, modules: Record<string, string> = {}) {
+  const flow = analyzeRuntimeExpressions({
+    filename: "/app.tsx",
+    source,
+    runtimeCodegen: true,
+    styledComponents: true
+  });
+
+  let step = flow.next();
+
+  while (!step.done) {
+    const request = step.value;
+    step = flow.next(
+      request.kind === "load"
+        ? (modules[request.id] ?? null)
+        : modules[request.source]
+          ? request.source
+          : null
+    );
+  }
+
+  return step.value;
 }
 
 describe("runtime code generation", () => {
@@ -166,6 +191,49 @@ describe("runtime code generation", () => {
       expect(code).not.toContain("props: false");
     }
   );
+
+  it("retains runtime calls when a local or imported module permits direct eval", () => {
+    const factory =
+      'const {createCompiledRuntimeFn: make} = require("@mincho-js/css/rules/createRuntimeFn"); const r = make({ defaultClassName: "base", variantClassNames: {}, defaultVariants: {}, compoundVariants: [], propVars: { width: "--width" } });';
+
+    const local = analyze(
+      `${factory} const cls = r(); const style = r.props({width: 1});`
+    );
+
+    expect(local.calls).toHaveLength(1);
+    expect(local.expressions).toHaveLength(1);
+
+    const owner = analyze(
+      `${factory} function inspect(eval) { eval("r.props = custom"); } const cls = r(); const style = r.props({width: 1});`
+    );
+
+    expect(owner.calls).toHaveLength(0);
+    expect(owner.expressions).toHaveLength(0);
+
+    const safeImport = analyze(
+      'import {r} from "/bridge.js"; export const cls = r();',
+      {
+        "/bridge.js":
+          'const {r} = require("/extracted_rules.css.ts"); exports.r = r;',
+        "/extracted_rules.css.ts": `${factory} exports.r = r;`
+      }
+    );
+
+    expect(safeImport.calls).toHaveLength(1);
+
+    const imported = analyze(
+      'import {r} from "/bridge.js"; export const cls = r();',
+      {
+        "/bridge.js":
+          'const {r} = require("/extracted_rules.css.ts"); function inspect(eval) { return eval("r"); } exports.r = r;',
+        "/extracted_rules.css.ts": `${factory} exports.r = r;`
+      }
+    );
+
+    expect(imported.dependencies).toContain("/bridge.js");
+    expect(imported.calls).toHaveLength(0);
+    expect(imported.finiteCalls).toHaveLength(0);
+  });
 
   it("removes only redundant copies of fresh data objects", () => {
     const code = optimize(

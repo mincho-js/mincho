@@ -8,6 +8,20 @@ import {
   type TransformOptions
 } from "@babel/core";
 import { getModuleReference } from "../commonjs/bindings.js";
+import { pruneRecipeMetadata } from "./recipeMetadata.js";
+import { hasDynamicScope } from "./dynamicScope.js";
+import {
+  analyzeStyledRuntime,
+  applyStyledRuntime,
+  type DynamicStyledElement,
+  type StyledChain
+} from "./styledRuntime.js";
+import {
+  finiteRecipeTree,
+  finiteArgument,
+  mapFiniteRecipeTree,
+  type FiniteRecipeTree
+} from "./finiteRecipes.js";
 import {
   createModuleGraph,
   parseModuleProgram,
@@ -148,9 +162,18 @@ export function* analyzeRuntimeExpressions(options: {
   pureFunctions?: boolean;
   staticRecipes?: boolean;
   styledComponents?: boolean;
+  runtimeCodegen?: boolean;
 }): ModuleGraphFlow<{
   calls: StaticRecipeCall[];
   elements: StaticStyledElement[];
+  finiteCalls: {
+    key: string;
+    tree: FiniteRecipeTree;
+    calls: StaticRecipeCall[];
+  }[];
+  expressions: { key: string; expression: t.Expression }[];
+  dynamicElements: DynamicStyledElement[];
+  chains: StyledChain[];
   dependencies: string[];
   ast: t.File;
 }> {
@@ -175,11 +198,27 @@ export function* analyzeRuntimeExpressions(options: {
 
   graph.modules.set(owner.id, owner);
 
+  const unproved = (ast = owner.program.parent as t.File) => ({
+    calls: [],
+    elements: [],
+    finiteCalls: [],
+    expressions: [],
+    dynamicElements: [],
+    chains: [],
+    dependencies: [...graph.dependencies],
+    ast
+  });
+
+  if (hasDynamicScope(owner.program)) return unproved();
+
   const candidates: NodePath<t.CallExpression>[] = [];
   const jsx: NodePath<t.JSXElement>[] = [];
   owner.program.traverse({
     CallExpression(path) {
-      if (options.staticRecipes !== false && isRecipeCandidate(path))
+      if (
+        (options.staticRecipes !== false || options.runtimeCodegen) &&
+        isRecipeCandidate(path)
+      )
         candidates.push(path);
     },
 
@@ -189,10 +228,58 @@ export function* analyzeRuntimeExpressions(options: {
   });
 
   const calls: StaticRecipeCall[] = [];
+  const finiteCalls: {
+    key: string;
+    tree: FiniteRecipeTree;
+    calls: StaticRecipeCall[];
+  }[] = [];
+
+  const expressions: { key: string; expression: t.Expression }[] = [];
   const recipes = new WeakMap<t.CallExpression, SerializedRecipe>();
 
   for (const path of candidates) {
     try {
+      const callee = path.get("callee");
+
+      if (
+        options.runtimeCodegen &&
+        callee.isMemberExpression() &&
+        !callee.node.computed &&
+        t.isIdentifier(callee.node.property, { name: "props" })
+      ) {
+        const recipe = yield* serializedRecipe(
+          graph,
+          owner,
+          callee.get("object"),
+          recipes
+        );
+
+        const argument = path.node.arguments[0];
+        const target = yield* graph.valueTarget(
+          owner,
+          callee.get("object"),
+          new Set()
+        );
+
+        if (
+          recipe?.compiled &&
+          target &&
+          !("external" in target) &&
+          target.path.isCallExpression() &&
+          (yield* componentUsesAreSafe(graph, target.path, true, true)) &&
+          t.isObjectExpression(argument)
+        ) {
+          const expression = inlineRecipeProps(recipe.config, argument, path);
+
+          if (expression)
+            expressions.push({ key: expressionKey(path), expression });
+        }
+
+        continue;
+      }
+
+      if (options.staticRecipes === false) continue;
+
       const recipe = yield* serializedRecipe(
         graph,
         owner,
@@ -203,6 +290,31 @@ export function* analyzeRuntimeExpressions(options: {
 
       const argument = path.get("arguments")[0];
       if (argument && !argument.isExpression()) continue;
+
+      if (options.runtimeCodegen && argument?.isExpression()) {
+        const tree = finiteRecipeTree(argument.node);
+
+        if (tree) {
+          const variants: StaticRecipeCall[] = [];
+
+          const visit = (branch: FiniteRecipeTree): void => {
+            if ("index" in branch)
+              variants[branch.index] = {
+                ...recipe,
+                key: `${expressionKey(path)}:${branch.index}`,
+                options: finiteArgument(branch.argument)
+              };
+            else {
+              visit(branch.consequent);
+              visit(branch.alternate);
+            }
+          };
+
+          visit(tree);
+          finiteCalls.push({ key: expressionKey(path), tree, calls: variants });
+          continue;
+        }
+      }
 
       const budget = createStaticExpressionBudget();
       const value = argument
@@ -415,9 +527,46 @@ export function* analyzeRuntimeExpressions(options: {
     }
   } while (moduleCount !== graph.modules.size);
 
+  const advancedStyled =
+    options.runtimeCodegen && options.styledComponents
+      ? yield* analyzeStyledRuntime(owner.program, function* (path) {
+          const recipe = yield* serializedRecipe(graph, owner, path, recipes);
+          if (!recipe?.compiled) return null;
+
+          const target = yield* graph.valueTarget(owner, path, new Set());
+          if (
+            !target ||
+            "external" in target ||
+            !target.path.isCallExpression() ||
+            !(yield* componentUsesAreSafe(graph, target.path, true, true))
+          )
+            return null;
+
+          return recipe;
+        })
+      : { dynamicElements: [], chains: [] };
+
+  // Imported aliases and configs can also be observed or replaced through eval.
+  if (
+    [...graph.modules.values()].some((module) =>
+      hasDynamicScope(module.program)
+    )
+  )
+    return unproved(
+      parseModuleProgram(
+        options.filename,
+        options.source,
+        true,
+        options.parserCache
+      ).parent as t.File
+    );
+
   return {
     calls,
     elements,
+    finiteCalls,
+    expressions,
+    ...advancedStyled,
     dependencies: [...graph.dependencies],
     ast: owner.program.parent as t.File
   };
@@ -473,23 +622,122 @@ function* serializedRecipe(
   return result;
 }
 
+function inlineRecipeProps(
+  config: StaticData,
+  argument: t.ObjectExpression,
+  path: NodePath<t.CallExpression>
+): t.Expression | null {
+  if (!config || typeof config !== "object" || Array.isArray(config))
+    return null;
+
+  const vars = config.propVars;
+  if (!vars || typeof vars !== "object" || Array.isArray(vars)) return null;
+
+  const properties: t.ObjectProperty[] = [];
+  const seen = new Set<string>();
+
+  for (const property of argument.properties) {
+    if (
+      !t.isObjectProperty(property) ||
+      property.computed ||
+      !t.isExpression(property.value)
+    )
+      return null;
+
+    const key = t.isIdentifier(property.key)
+      ? property.key.name
+      : t.isStringLiteral(property.key)
+        ? property.key.value
+        : null;
+    if (
+      key === null ||
+      key === "__proto__" ||
+      /^\d+$/.test(key) ||
+      seen.has(key) ||
+      typeof vars[key] !== "string"
+    )
+      return null;
+
+    seen.add(key);
+    properties.push(
+      t.objectProperty(
+        t.stringLiteral(vars[key] as string),
+        t.cloneNode(property.value)
+      )
+    );
+  }
+
+  const assignments: t.Expression[] = [];
+  const values = properties.map((property) => {
+    const id = path.scope.generateUidIdentifier("recipeProp");
+    path.scope.push({ id, kind: "let" });
+    assignments.push(
+      t.assignmentExpression(
+        "=",
+        t.cloneNode(id),
+        property.value as t.Expression
+      )
+    );
+
+    return id;
+  });
+
+  const result = path.scope.generateUidIdentifier("recipeStyle");
+  path.scope.push({ id: result, kind: "let" });
+  assignments.push(
+    t.assignmentExpression("=", t.cloneNode(result), t.objectExpression([]))
+  );
+
+  for (let index = 0; index < properties.length; index++)
+    assignments.push(
+      t.assignmentExpression(
+        "=",
+        t.memberExpression(
+          t.cloneNode(result),
+          t.cloneNode(properties[index]!.key) as t.Expression,
+          true
+        ),
+        t.cloneNode(values[index]!)
+      )
+    );
+
+  // Match the runtime's ordinary assignments, including inherited setters. All
+  // values are evaluated first, exactly as Object.entries snapshots the input.
+  return t.sequenceExpression([...assignments, t.cloneNode(result)]);
+}
+
 /** Refuse aliases that escape, observe identity or modify the component in the loaded graph. */
 function* componentUsesAreSafe(
   graph: ModuleGraph,
   factory: NodePath<t.CallExpression>,
-  recipe = false
+  recipe = false,
+  closed = false
 ): ModuleGraphFlow<boolean> {
   let visited = 0;
 
   for (const module of graph.modules.values()) {
+    const allowExports =
+      !closed || /(?:^|\/)extracted_[^/]+\.css\.ts$/.test(module.id);
+    if (
+      !allowExports &&
+      factory.findParent(
+        (path) =>
+          path.isExportNamedDeclaration() || path.isExportDefaultDeclaration()
+      ) &&
+      factory.scope.getProgramParent().path === module.program
+    )
+      return false;
+
     const observed: NodePath<t.Node>[] = [];
     module.program.traverse({
       ReferencedIdentifier(path) {
-        if (!safeComponentReference(path, recipe)) observed.push(path);
+        if (!safeComponentReference(path, recipe, allowExports))
+          observed.push(path);
       },
 
       MemberExpression(path) {
-        if (!safeComponentReference(path, recipe)) observed.push(path);
+        if (!safeComponentReference(path, recipe, allowExports))
+          observed.push(path);
       }
     });
 
@@ -522,7 +770,8 @@ function* componentUsesAreSafe(
 
 function safeComponentReference(
   path: NodePath<t.Node>,
-  recipe: boolean
+  recipe: boolean,
+  allowExports = true
 ): boolean {
   const parent = path.parentPath;
   if (!parent) return false;
@@ -561,15 +810,21 @@ function safeComponentReference(
   )
     return true;
   if (parent.isExportSpecifier() || parent.isExportDefaultDeclaration())
-    return true;
+    return allowExports;
   if (
     parent.isVariableDeclarator() &&
     parent.node.init === path.node &&
     t.isIdentifier(parent.node.id)
   )
-    return Boolean(parent.scope.getBinding(parent.node.id.name)?.constant);
+    return (
+      Boolean(parent.scope.getBinding(parent.node.id.name)?.constant) &&
+      (allowExports ||
+        !parent.parentPath.parentPath?.isExportNamedDeclaration())
+    );
 
   if (parent.isAssignmentExpression() && parent.node.right === path.node) {
+    if (!allowExports) return false;
+
     const left = parent.get("left");
 
     if (left.isMemberExpression()) {
@@ -615,6 +870,15 @@ export function applyRuntimeExpressions(options: {
   filename: string;
   source: string;
   replacements: ReadonlyArray<{ key: string; value: string }>;
+  expressions?: ReadonlyArray<{ key: string; expression: t.Expression }>;
+  finiteCalls?: ReadonlyArray<{
+    key: string;
+    tree: FiniteRecipeTree;
+    values: readonly string[];
+  }>;
+  dynamicElements?: readonly DynamicStyledElement[];
+  chains?: readonly StyledChain[];
+  runtimeCodegen?: boolean;
   elements?: ReadonlyArray<{
     key: string;
     tag: string;
@@ -654,10 +918,17 @@ export function applyRuntimeExpressions(options: {
             });
             preserveModuleEffects(program, () => {
               applyPureFunctions(program, {
-                replacements: options.replacements.map((item) => ({
-                  key: item.key,
-                  expression: t.stringLiteral(item.value)
-                })),
+                replacements: [
+                  ...options.replacements.map((item) => ({
+                    key: item.key,
+                    expression: t.stringLiteral(item.value)
+                  })),
+                  ...(options.expressions ?? []),
+                  ...(options.finiteCalls ?? []).map((item) => ({
+                    key: item.key,
+                    expression: mapFiniteRecipeTree(item.tree, item.values)
+                  }))
+                ],
                 dependencies: [],
                 diagnostics: []
               });
@@ -683,6 +954,14 @@ export function applyRuntimeExpressions(options: {
                   )
                 );
               }
+
+              applyStyledRuntime(
+                program,
+                options.dynamicElements ?? [],
+                options.chains ?? []
+              );
+
+              if (options.runtimeCodegen) pruneRecipeMetadata(program);
             });
           }
         }

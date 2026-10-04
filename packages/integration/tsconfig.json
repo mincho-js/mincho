@@ -11,6 +11,9 @@
       "path": "../debug-log"
     },
     {
+      "path": "../react"
+    },
+    {
       "path": "../../configs/vite-config-custom"
     },
     {
