@@ -237,6 +237,7 @@ override the selected profile. `undefined` does not erase an earlier setting.
 | `pureFunctions`           | `true`      | `true`     |
 | `staticRecipes`           | `false`     | `true`     |
 | `styledComponents`        | `false`     | `true`     |
+| `runtimeCodegen`          | `false`     | `true`     |
 | `defineRulesCxConditions` | Opt-in      | Opt-in     |
 
 ```ts

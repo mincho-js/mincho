@@ -6,12 +6,14 @@ describe("optimization mode", () => {
     expect(resolveOptimizationOptions("development")).toEqual({
       pureFunctions: true,
       staticRecipes: false,
-      styledComponents: false
+      styledComponents: false,
+      runtimeCodegen: false
     });
     expect(resolveOptimizationOptions("production")).toEqual({
       pureFunctions: true,
       staticRecipes: true,
-      styledComponents: true
+      styledComponents: true,
+      runtimeCodegen: true
     });
   });
 
@@ -30,6 +32,7 @@ describe("optimization mode", () => {
       pureFunctions: true,
       staticRecipes: true,
       styledComponents: false,
+      runtimeCodegen: false,
       defineRulesCxConditions: true
     });
   });

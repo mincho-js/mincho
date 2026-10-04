@@ -5893,6 +5893,7 @@ if (import.meta.vitest) {
                   pureFunctions: true,
                   staticRecipes: true,
                   styledComponents: true,
+                  runtimeCodegen: true,
                   ...disabledCase.expectedOptions?.optimize
                 },
                 staticCssEvalSourceProvider: expect.any(Object)

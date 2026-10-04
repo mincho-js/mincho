@@ -40,6 +40,7 @@ export interface PluginOptions {
     pureFunctions?: boolean;
     staticRecipes?: boolean;
     styledComponents?: boolean;
+    runtimeCodegen?: boolean;
   };
 
   /** @internal Prepared sync provider supplied by bundler prepasses only. */

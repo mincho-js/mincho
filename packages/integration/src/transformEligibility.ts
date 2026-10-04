@@ -54,6 +54,7 @@ async function inspectTransformEligibility(
       ) ||
       (jsxCssProp && facts.cssJsx) ||
       (optimize?.staticRecipes !== false && facts.calls) ||
+      (optimize?.runtimeCodegen === true && facts.calls) ||
       (optimize?.styledComponents !== false && facts.componentJsx)
     )
       return false;

@@ -9,9 +9,11 @@ source files and are extracted into CSS sidecars. See the
 Additional package and local style factories can be registered with
 [`extractCalls`](../../docs/extract-calls.md).
 
-The default `optimizationMode: "production"` enables recipe folding and styled
-JSX optimization. Use `optimizationMode: "development"` for faster watch
-transforms; individual `optimize` switches override the profile. See
+The default `optimizationMode: "production"` enables `pureFunctions`,
+`staticRecipes`, `styledComponents`, and `runtimeCodegen`. Use
+`optimizationMode: "development"` for faster watch transforms; it keeps
+`pureFunctions` enabled and disables the other three switches by default.
+Individual `optimize` switches override the profile. See
 [compilation performance](../../docs/compilation-performance.md) for defaults,
 cache behavior and the benchmark harness.
 

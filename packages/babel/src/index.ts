@@ -19,7 +19,11 @@ import type { PluginState } from "./types.js";
 import { prepareExtractCalls } from "./extractionCalls/index.js";
 
 import { normalizeTypeScriptCommonJs } from "./commonjs/modules.js";
-import { removeUnusedGeneratedImports } from "./optimizations/runtimeCodegen.js";
+import {
+  optimizeRuntimeCodegen,
+  removeUnusedGeneratedImports
+} from "./optimizations/runtimeCodegen.js";
+import { pruneRecipeMetadata } from "./optimizations/recipeMetadata.js";
 
 export function minchoBabelPlugin(): PluginObj<PluginState> {
   const started = new WeakMap<PluginState, number>();
@@ -67,6 +71,12 @@ export function minchoBabelPlugin(): PluginObj<PluginState> {
 
         exit(path, state) {
           postprocess(path, state);
+
+          if (state.opts.optimize?.runtimeCodegen === true) {
+            optimizeRuntimeCodegen(path);
+            pruneRecipeMetadata(path);
+          }
+
           removeUnusedJsxCssPropCssModuleImports(path);
           removeUnusedGeneratedImports(path);
 

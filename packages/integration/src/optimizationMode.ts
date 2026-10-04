@@ -10,7 +10,8 @@ export function resolveOptimizationOptions(
   const result: NonNullable<BabelOptions["optimize"]> = {
     pureFunctions: true,
     staticRecipes: mode === "production",
-    styledComponents: mode === "production"
+    styledComponents: mode === "production",
+    runtimeCodegen: mode === "production"
   };
 
   for (const options of overrides)
