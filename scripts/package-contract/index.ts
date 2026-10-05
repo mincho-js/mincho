@@ -39,6 +39,8 @@ async function writeConsumerManifest(
     "@vanilla-extract/sprinkles": "1.7.1",
     "@vanilla-extract/vite-plugin": "5.2.2",
     esbuild: "0.27.7",
+    react: "19.2.6",
+    "react-dom": "19.2.6",
     vite: "7.3.3"
   });
   await writeFile(
@@ -136,12 +138,17 @@ async function main(): Promise<void> {
 
       await assertInstalledPackageContract({ consumerRoot, packed, repoRoot });
 
-      const runNode = (args: readonly string[], artifactPath: string) =>
+      const runNode = (
+        args: readonly string[],
+        artifactPath: string,
+        reportOutput = false
+      ) =>
         runCommand({
           command: "node",
           args: linker === "pnp" ? [yarnPath, "node", ...args] : args,
           cwd: consumerRoot,
-          artifactPath
+          artifactPath,
+          reportOutput
         });
 
       await runNode(
@@ -178,7 +185,18 @@ async function main(): Promise<void> {
       );
       await runNode(
         ["fixture/modules/runtime-treeshaking.mjs"],
-        join(consumerRoot, "fixture", "modules")
+        join(consumerRoot, "fixture", "modules"),
+        true
+      );
+      await runNode(
+        ["fixture/modules/styled-flatten.mjs"],
+        join(consumerRoot, "fixture", "modules"),
+        true
+      );
+      await runNode(
+        ["fixture/modules/compilation-benchmark.mjs"],
+        join(consumerRoot, "fixture", "modules"),
+        true
       );
       await runNode(
         [

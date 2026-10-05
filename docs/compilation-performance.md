@@ -260,6 +260,8 @@ The existing `@mincho-js/css/rules/createRuntimeFn` and
 separate runtime directory whose package boundary declares `sideEffects: false`.
 Their shared chunks contain only recipe and class-name helpers. Unused serialized
 runtime factories can therefore disappear together with their configuration.
+Known serialized recipe factory calls also carry explicit pure annotations so
+both esbuild and Rollup can remove unused initialization after JSX flattening.
 The CSS authoring entry and registry retain their existing effect declarations;
 `createDefineRulesCssRuntime` also stays outside the pure boundary because it
 registers definitions. The package contract checks unused and dynamic runtime
@@ -284,6 +286,56 @@ particular call is folded; replacing a call with a string does not always reduce
 bundle size. Vanilla Extract recipes and sprinkles keep their normal extraction
 support but are not folded by this pass. Standalone `.css.ts` authoring modules
 also keep their existing behavior.
+
+`optimize.styledComponents` also defaults to `true`. For example, a static
+`<Button size="large" className="extra">` can become an intrinsic `<button>`
+with the exact serialized recipe classes. Analysis follows the same lexical
+imports and reexports, including CommonJS and namespace JSX. Other attributes
+and children retain their evaluation order. Defaults, compound variants and
+the runtime's class-name ordering (including its trailing space) are preserved.
+
+Spreads, `as`, refs, custom component targets, dynamic variants/class names,
+component escapes, mutations and observed element types prevent flattening.
+The pass checks component uses in the loaded source graph; it does not perform
+whole-program analysis of consumers outside that graph. Disable
+`styledComponents` for code that changes exported component objects indirectly
+at runtime. Public component exports and remaining dynamic JSX retain wrappers.
+Both runtime optimizations are independent and require a build integration;
+the Babel-only transform still emits the existing runtime calls.
+
+The package contract compares SSR markup, attribute/child evaluation order and
+module effects before and after flattening in ESM and CommonJS bundles. It also
+reports raw/gzip/Brotli sizes and three-round median compilation times for fresh
+contexts, unchanged rebuilds and dependency edits. These context measurements
+share a process; they are not fresh-process startup benchmarks or timing gates.
+
+Measurements from the package contract on 2026-09-19, with Node 24.21.0 and
+esbuild 0.27.7, use the same minifier and identifier settings in each comparison.
+The static styled fixture retained identical CSS and SSR output:
+
+| Format   | JS bytes before → after |  gzip bytes | Brotli bytes |
+| -------- | ----------------------: | ----------: | -----------: |
+| ESM      |             1,776 → 262 |   891 → 218 |    809 → 186 |
+| CommonJS |             2,282 → 749 | 1,121 → 471 |  1,011 → 401 |
+
+The separate small recipe fixture reduced JS from 1,218 to 246 bytes, but did
+**not** demonstrate a build-time speedup. Its median timings in milliseconds
+were:
+
+| Linker / mode                             | New context | Unchanged rebuild | Dependency edit |
+| ----------------------------------------- | ----------: | ----------------: | --------------: |
+| npm / optimizations off, cache off        |        26.8 |              21.8 |            21.4 |
+| npm / optimizations on, cache off         |        44.1 |              50.0 |            43.3 |
+| npm / optimizations on, cache on          |        59.7 |              49.4 |            60.2 |
+| strict PnP / optimizations off, cache off |        72.2 |              27.5 |            30.9 |
+| strict PnP / optimizations on, cache off  |       101.7 |              48.0 |            52.2 |
+| strict PnP / optimizations on, cache on   |       123.0 |              70.1 |            75.1 |
+
+Analysis and cache validation add overhead that can exceed recompilation costs
+for small inputs. These results support bundle reduction, not a general claim
+of faster builds. Measure the actual project with diagnostics; `cache: false`
+and individual `optimize` switches remain available when that tradeoff is
+unfavorable.
 
 ## Reproducible compilation benchmark
 

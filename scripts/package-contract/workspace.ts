@@ -12,6 +12,7 @@ import { PackageContractError } from "./types.js";
 const seeds = [
   "@examples/shared-component",
   "@mincho-js/vite",
+  "@mincho-js/react",
   "@mincho-js/esbuild"
 ] as const;
 

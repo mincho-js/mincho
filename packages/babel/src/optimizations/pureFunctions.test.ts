@@ -113,6 +113,8 @@ describe("pure helper evaluation", () => {
     "const helper = n => ({ padding: this.value });",
     "const object = { padding: 4 }; object.padding++; const helper = n => object;",
     "export const object = { padding: 4 }; const helper = n => object;",
+    "const object = { padding: 4 }; export const shared = () => object; const helper = n => object;",
+    "const object = { padding: 4 }; export { object }; const helper = n => object;",
     "const helper = n => ({ padding: runtime });"
   ])("deopts unsupported or effectful code: %s", (helper) => {
     expect(
@@ -137,6 +139,17 @@ describe("pure helper evaluation", () => {
       analyze(`${large} const App = () => <div css={helper(2)} />;`)
         .replacements
     ).toHaveLength(0);
+  });
+
+  it("does not fold shared aggregate state accessed through a namespace", () => {
+    const result = analyze(
+      'import * as tokens from "tokens"; const helper = () => ({ padding: tokens.object.padding }); const App = () => <div css={helper()} />;',
+      {
+        tokens: "export const object = { padding: 4 };"
+      }
+    );
+
+    expect(result.replacements).toHaveLength(0);
   });
 
   it("enables local Babel evaluation by default and allows an opt out", () => {

@@ -286,3 +286,176 @@ describe("static recipe invocations", () => {
     ).toContain('"changed small"');
   });
 });
+
+const component = `import { $$styled } from "@mincho-js/react/runtime";
+import { button } from "/extracted_rules.css.ts";
+export const Button = /*#__PURE__*/ $$styled("button", button);`;
+
+const componentModules = {
+  components: component,
+  barrel: 'export { Button } from "components";',
+  "/extracted_rules.css.ts": factory
+};
+
+async function styledResult(
+  code: string,
+  modules = componentModules,
+  optimize?: {
+    styledComponents?: boolean;
+    staticRecipes?: boolean;
+    pureFunctions?: boolean;
+  }
+) {
+  return new RuntimeOptimizations().transform(
+    {
+      filename: "/app.tsx",
+      source: code,
+      sourceMaps: true,
+      babel: { optimize }
+    },
+    result(code),
+    provider(modules)
+  );
+}
+
+describe("static styled JSX", () => {
+  it.each([
+    ['import { Button } from "barrel";', "Button"],
+    ['import * as ui from "barrel";', "ui.Button"],
+    ['const { Button } = require("barrel");', "Button"],
+    ['const ui = require("barrel");', "ui.Button"]
+  ])("flattens lexical JSX references: %s", async (imports, tag) => {
+    const code = `${imports} export const App = () => <${tag} id={track("id")} size="large" active title={track("title")} className="explicit">{track("child")}</${tag}>;`;
+    const transformed = await styledResult(code);
+
+    expect(transformed.code).toContain(
+      '<button id={track("id")} title={track("title")} className={"base large active compound explicit"}>'
+    );
+    expect(transformed.code).toContain('{track("child")}</button>');
+    expect(transformed.map?.sources).toContain("app.tsx");
+    expect(transformed.staticCssEval?.dependencyFiles).toEqual(
+      expect.arrayContaining(["components", "/extracted_rules.css.ts"])
+    );
+  });
+
+  it("preserves dynamic uses and public component exports while flattening defaults and nested JSX", async () => {
+    const code =
+      'import { Button } from "components"; export { Button }; export const Dynamic = size => <Button size={size} />; export const App = () => <Button><Button active={false} /></Button>;';
+
+    const transformed = await styledResult(code);
+
+    expect(transformed.code).toContain("export { Button }");
+    expect(transformed.code).toContain("<Button size={size}");
+    expect(
+      transformed.code.match(/<button className={"base small "}/g)
+    ).toHaveLength(2);
+  });
+
+  it.each([
+    "<Button {...props} />",
+    '<Button as="a" />',
+    "<Button ref={undefined} />",
+    "<Button className={unknown} />",
+    "<Button size={unknown()} />",
+    '<Button size="large" size="small" />',
+    '<Button size={{ toString: () => "large" }} />'
+  ])("retains unsupported props: %s", async (jsx) => {
+    const code = `import { Button } from "components"; export const App = () => ${jsx};`;
+
+    expect((await styledResult(code)).code).toBe(code);
+  });
+
+  it.each([
+    "observe(Button);",
+    'Button.defaultProps = { size: "large" };',
+    "const identity = Button;",
+    "const Alias = Button; observe(Alias);",
+    'const Alias = Button; Alias.displayName = "changed";',
+    "const componentBag = { Button };"
+  ])(
+    "retains observed or escaped component identity: %s",
+    async (observation) => {
+      const code = `import { Button } from "components"; ${observation} export const App = () => <Button />;`;
+
+      // An unused const alias is harmless. Exporting or passing it is observable.
+      const observed =
+        observation === "const identity = Button;"
+          ? code + " export { identity }; identity.defaultProps = {};"
+          : code;
+
+      expect((await styledResult(observed)).code).toBe(observed);
+    }
+  );
+
+  it("detects observations in producers and reexport aliases", async () => {
+    for (const modules of [
+      {
+        ...componentModules,
+        components: component + ' Button.defaultProps = { size: "large" };'
+      },
+      {
+        ...componentModules,
+        components: component + " button.variants = () => [];"
+      },
+      {
+        ...componentModules,
+        barrel:
+          'import { Button as Original } from "components"; const Button = Original; Button.defaultProps = {}; export { Button };'
+      }
+    ]) {
+      const code =
+        'import { Button } from "barrel"; export const App = () => <Button />;';
+
+      expect((await styledResult(code, modules)).code).toBe(code);
+    }
+  });
+
+  it("retains custom components, initialization errors and element type observations", async () => {
+    const imported =
+      'import { Button } from "components"; export const App = () => <Button />;';
+
+    expect(
+      (
+        await styledResult(imported, {
+          ...componentModules,
+          components: component.replace('"button", button', "Custom, button")
+        })
+      ).code
+    ).toBe(imported);
+
+    const observed =
+      'import { Button } from "components"; const element = <Button />; export const type = element.type;';
+
+    expect((await styledResult(observed)).code).toBe(observed);
+
+    const early = component.replace(
+      "export const Button",
+      "const element = <Button />; export const Button"
+    );
+
+    expect((await styledResult(early)).code).toBe(early);
+  });
+
+  it("controls recipe and styled optimizations independently", async () => {
+    const code =
+      'import { Button } from "components"; export const App = () => <Button />;';
+
+    expect(
+      (await styledResult(code, componentModules, { styledComponents: false }))
+        .code
+    ).toBe(code);
+    expect(
+      (await styledResult(code, componentModules, { staticRecipes: false }))
+        .code
+    ).toContain('<button className={"base small "}');
+  });
+
+  it("uses JavaScript string escapes for static class names containing quotes", async () => {
+    const code = `import { Button } from "components"; export const App = () => <Button className={'a"b'} />;`;
+    const transformed = await styledResult(code);
+
+    expect(transformed.code).toContain(
+      `className={${JSON.stringify('base small a"b')}}`
+    );
+  });
+});

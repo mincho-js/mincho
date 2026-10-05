@@ -7,6 +7,7 @@ type CommandOptions = {
   readonly command: string;
   readonly cwd: string;
   readonly env?: Readonly<Record<string, string>>;
+  readonly reportOutput?: boolean;
 };
 
 export async function runCommand({
@@ -14,7 +15,8 @@ export async function runCommand({
   artifactPath,
   command,
   cwd,
-  env: overrides
+  env: overrides,
+  reportOutput = false
 }: CommandOptions): Promise<void> {
   const rendered = [command, ...args].join(" ");
   console.log(`[package-contract] $ ${rendered}`);
@@ -61,4 +63,6 @@ export async function runCommand({
 
     throw new PackageContractError(failure);
   }
+
+  if (reportOutput && result.stdout) process.stdout.write(result.stdout);
 }
