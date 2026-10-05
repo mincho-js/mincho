@@ -3,6 +3,8 @@ import {
   createRuntimeFn,
   createCompiledRuntimeFn
 } from "@mincho-js/css/rules/createRuntimeFn";
+import { mapVarProps } from "@mincho-js/css/rules/mapVarProps";
+import { createCompiledClassRuntimeFn } from "@mincho-js/css/rules/createClassRuntimeFn";
 import { $$styled, $$styledChain } from "@mincho-js/react/runtime";
 import { createElement, type ReactElement } from "react";
 import * as jsxRuntime from "react/jsx-runtime";
@@ -23,10 +25,11 @@ const config = {
       string
     ]
   ],
-  propVars: { width: "--width" }
+  propVars: { width: "--width" as const }
 };
 
-const factory = `import {createCompiledRuntimeFn as make} from "@mincho-js/css/rules/createRuntimeFn"; export const recipe = make(${JSON.stringify(config)});`;
+const { propVars, ...classConfig } = config;
+const factory = `import {createCompiledRuntimeFn as make} from "@mincho-js/css/rules/createRuntimeFn"; export const recipe = make(${JSON.stringify(classConfig)}, ${JSON.stringify(propVars)});`;
 
 async function optimize(code: string, compilationCache?: CompilationCache) {
   const result = await new RuntimeOptimizations().transform(
@@ -72,10 +75,15 @@ function styledModule(source: string) {
   const modules: Record<string, unknown> = {
     "/extracted_rules.css.ts": {
       recipe: createCompiledRuntimeFn(
-        config as unknown as Parameters<typeof createCompiledRuntimeFn>[0]
+        config as unknown as Parameters<typeof createCompiledRuntimeFn>[0],
+        config.propVars
       )
     },
     "@mincho-js/css/rules/createRuntimeFn": { createCompiledRuntimeFn },
+    "@mincho-js/css/rules/mapVarProps": { mapVarProps },
+    "@mincho-js/css/rules/createClassRuntimeFn": {
+      createCompiledClassRuntimeFn
+    },
     "@mincho-js/react/runtime": { $$styled, $$styledChain },
     "react/jsx-runtime": jsxRuntime,
     react: { createElement }
@@ -154,12 +162,23 @@ describe("runtime compiler optimizations", () => {
     }
   });
 
-  it("retains unbounded or nonliteral selections", async () => {
+  it("uses the class-only runtime for unbounded or nonliteral selections", async () => {
     const code = await optimize(
       recipeImport + "export const run = (value) => recipe({size: value});"
     );
 
-    expect(code).toContain("recipe({");
+    expect(code).toContain("_recipeClasses({");
+    expect(code).not.toContain("mapVarProps");
+    expect(code).not.toContain("--width");
+
+    const before = styledModule(
+      recipeImport + "export const run=value=>recipe({size:value});"
+    ).run;
+
+    const after = styledModule(code).run;
+
+    for (const value of ["small", "large", "missing", true, null, undefined])
+      expect(after(value)).toEqual(before(value));
 
     const properties = Array.from(
       { length: 5 },
@@ -171,7 +190,23 @@ describe("runtime compiler optimizations", () => {
         recipeImport +
           `export function run(flags){return recipe({${properties}});}`
       )
-    ).toContain("recipe({");
+    ).toContain("_recipeClasses({");
+  });
+
+  it("retains observed recipe metadata and escaped recipe identities", async () => {
+    for (const use of [
+      "export const names=recipe.classNames;",
+      "export const variantKeys=recipe.variants();",
+      "observe(recipe);",
+      "export {recipe};"
+    ]) {
+      const code = await optimize(
+        recipeImport + use + "export const run=input=>recipe(input);"
+      );
+
+      expect(code).toContain("recipe(input)");
+      expect(code).not.toContain("_recipeClasses");
+    }
   });
 
   it("inlines known recipe props while preserving value evaluation", async () => {
@@ -186,12 +221,179 @@ describe("runtime compiler optimizations", () => {
       await optimize(
         recipeImport + "export const style = recipe.props({...source});"
       )
-    ).toContain("recipe.props");
+    ).toContain("mapVarProps");
     expect(
       await optimize(
         recipeImport + "export const style = recipe.props({unknown: read()});"
       )
-    ).toContain("recipe.props");
+    ).toContain("mapVarProps");
+  });
+
+  it.each([
+    [
+      "function",
+      "export function run(w, style = recipe.props({width: w})) { return style; }",
+      4
+    ],
+    [
+      "destructuring",
+      "export function run({w, style = recipe.props({width: w})}) { return style; }",
+      { w: 4 }
+    ],
+    [
+      "array pattern",
+      "export function run([w, style = recipe.props({width: w})]) { return style; }",
+      [4]
+    ],
+    [
+      "arrow",
+      "export const run = (w, style = recipe.props({width: w})) => style;",
+      4
+    ],
+    [
+      "method",
+      "const object = { method(w, style = recipe.props({width: w})) { return style; } }; export const run = w => object.method(w);",
+      4
+    ],
+    [
+      "constructor",
+      "class Box { constructor(w, style = recipe.props({width: w})) { this.style = style; } } export const run = w => new Box(w).style;",
+      4
+    ],
+    [
+      "nested default",
+      "export function run(w, getStyle = (style = recipe.props({width: w})) => style) { return getStyle(); }",
+      4
+    ]
+  ])(
+    "keeps recipe props defaults valid in a %s parameter scope",
+    async (_kind, declaration, input) => {
+      const source = '"use strict"; ' + recipeImport + declaration;
+      const code = await optimize(source);
+      const expected = styledModule(source).run!(input);
+
+      expect(styledModule(code).run!(input)).toEqual(expected);
+      expect(expected).toEqual({ "--width": 4 });
+      expect(code).toContain('from "@mincho-js/css/rules/mapVarProps"');
+      expect(code).not.toMatch(/\b_recipeProp\d*\b/);
+    }
+  );
+
+  it("still inlines props inside a function body nested in a parameter default", async () => {
+    const source =
+      '"use strict"; ' +
+      recipeImport +
+      "export function run(w, getStyle = () => recipe.props({width: w})) { return getStyle(); }";
+    const code = await optimize(source);
+
+    expect(styledModule(code).run!(4)).toEqual(styledModule(source).run!(4));
+    expect(code).toContain("_recipeProp");
+    expect(code).not.toContain("mapVarProps");
+  });
+
+  it("keeps parameter default values isolated during reentrant calls", async () => {
+    const source = `
+      "use strict";
+      import { createCompiledRuntimeFn as make } from "@mincho-js/css/rules/createRuntimeFn";
+      const recipe = make({ defaultClassName: "base", variantClassNames: {}, defaultVariants: {}, compoundVariants: [] }, { width: "--width", height: "--height" });
+      export function run(width, next, style = recipe.props({ width, height: next() })) { return style; }
+    `;
+    const code = await optimize(source);
+    const before = styledModule(source).run!;
+    const after = styledModule(code).run!;
+    const expected = before(4, () => {
+      before(8, () => 16);
+      return 32;
+    });
+
+    expect(expected).toEqual({ "--width": 4, "--height": 32 });
+    expect(
+      after(4, () => {
+        after(8, () => 16);
+        return 32;
+      })
+    ).toEqual(expected);
+  });
+
+  it("maps aliased dynamic inputs with identical Proxy traps and exceptions", async () => {
+    const source =
+      recipeImport +
+      "const alias=recipe; export const run=input=>alias.props(input);";
+
+    const code = await optimize(source);
+
+    expect(code).toContain('from "@mincho-js/css/rules/mapVarProps"');
+    expect(code).not.toContain("alias.props(");
+
+    const before = styledModule(source).run;
+    const after = styledModule(code).run;
+    const events: string[] = [];
+    const input = new Proxy(
+      { width: 0, unknown: false, [Symbol("ignored")]: 1 },
+      {
+        ownKeys(target) {
+          events.push("keys");
+
+          return Reflect.ownKeys(target);
+        },
+
+        getOwnPropertyDescriptor(target, key) {
+          events.push(`descriptor:${String(key)}`);
+
+          return Reflect.getOwnPropertyDescriptor(target, key);
+        },
+
+        get(target, key, receiver) {
+          events.push(`get:${String(key)}`);
+
+          return Reflect.get(target, key, receiver);
+        }
+      }
+    );
+
+    const expected = before(input);
+    const expectedEvents = events.splice(0);
+
+    expect(after(input)).toEqual(expected);
+    expect(events).toEqual(expectedEvents);
+    expect(after(input)).not.toBe(after(input));
+    expect(() => after(null)).toThrow(TypeError);
+    expect(() =>
+      after({
+        get unknown() {
+          throw new Error("unknown getter");
+        }
+      })
+    ).toThrow("unknown getter");
+  });
+
+  it("keeps unknown-key expressions ahead of mapped result assignments", async () => {
+    const source =
+      recipeImport +
+      'export const run=read=>recipe.props({width:read("width"),unknown:read("unknown")});';
+
+    const after = styledModule(await optimize(source)).run;
+    const events: string[] = [];
+    Object.defineProperty(Object.prototype, "--width", {
+      configurable: true,
+
+      set() {
+        events.push("write");
+      }
+    });
+
+    try {
+      expect(
+        after((key: string) => {
+          events.push(key);
+
+          return 4;
+        })
+      ).toEqual({});
+      expect(events).toEqual(["width", "unknown", "write"]);
+    } finally {
+      Reflect.deleteProperty(Object.prototype, "--width");
+    }
   });
 
   it("preserves inherited setters when inlining recipe props", async () => {
@@ -342,7 +544,7 @@ describe("runtime compiler optimizations", () => {
       styledImport +
       'import {createCompiledRuntimeFn as make} from "@mincho-js/css/rules/createRuntimeFn";' +
       'const Parent=$$styled("div",recipe); export function App(flag){' +
-      `const recipe=make(${JSON.stringify({ ...config, defaultClassName: "inner" })});` +
+      `const recipe=make(${JSON.stringify({ ...config, defaultClassName: "inner" })}, ${JSON.stringify(config.propVars)});` +
       'const Child=$$styled(Parent,recipe); return <Child size={flag ? "large" : "small"}/>;}';
 
     const nestedCode = await optimize(nested);

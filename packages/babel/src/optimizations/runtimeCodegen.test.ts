@@ -11,6 +11,7 @@ import { pruneRecipeMetadata } from "./recipeMetadata.js";
 import { babelTransform } from "../testUtils/plugin.js";
 import { analyzeRuntimeExpressions } from "./runtimeExpressions.js";
 import { vx } from "@mincho-js/transform-runtime";
+import { minchoBabelPlugin } from "../index.js";
 
 function optimize(code: string) {
   return transformSync(code, {
@@ -114,6 +115,42 @@ describe("runtime code generation", () => {
     }
   );
 
+  it("removes extracted authoring imports while preserving runtime references and explicit effects", () => {
+    // No TypeScript preset: unused import elision must not hide this regression.
+    const extract = (source: string) => {
+      const options = { result: ["", ""], optimize: { runtimeCodegen: true } };
+      const result = transformSync(source, {
+        configFile: false,
+        babelrc: false,
+        plugins: [[minchoBabelPlugin, options]]
+      })!;
+
+      return { code: result.code!, result: options.result };
+    };
+
+    const source =
+      'import {rules, cx} from "@mincho-js/css"; const recipe = rules({props:["width"]}); export function map(input) {return recipe.props(input);} export const cls = cx(input);';
+
+    const result = extract(source);
+
+    expect(result.code).not.toMatch(/import\s*\{[^}]*\brules\b/);
+    expect(result.code).toContain('import { cx } from "@mincho-js/css"');
+    expect(result.result[1]).toContain("rules({");
+    expect(extract('import "@mincho-js/css";' + source).code).toContain(
+      'import "@mincho-js/css"'
+    );
+    expect(extract(source + "export {rules};").code).toMatch(
+      /import\s*\{[^}]*\brules\b/
+    );
+    expect(extract(source + 'eval("rules");').code).toMatch(
+      /import\s*\{[^}]*\brules\b/
+    );
+    expect(
+      extract('import {rules} from "@mincho-js/css"; export const value=1;')
+        .code
+    ).toContain("rules");
+  });
+
   it("folds literal class runs without crossing dynamic evaluations or deduplicating", () => {
     const code = optimize(
       'import {cx} from "@mincho-js/css/classname"; export const value=cx("a", [false, ["b", "a"]], next(), "", "c");'
@@ -181,20 +218,20 @@ describe("runtime code generation", () => {
       const code = optimize(`
       const {createCompiledRuntimeFn: make} = require("@mincho-js/css/rules/createRuntimeFn");
       let cx = require("@mincho-js/css/classname").cx;
-      const r = make({ propVars: { width: "--width" }, defaultClassName: "base" });
+      const r = make({ defaultClassName: "base" }, { width: "--width" });
       ${use}
       const result = cx("a", "b");
     `);
 
       expect(code).toContain('cx("a", "b")');
-      expect(code).toContain("propVars");
+      expect(code).toContain("--width");
       expect(code).not.toContain("props: false");
     }
   );
 
   it("retains runtime calls when a local or imported module permits direct eval", () => {
     const factory =
-      'const {createCompiledRuntimeFn: make} = require("@mincho-js/css/rules/createRuntimeFn"); const r = make({ defaultClassName: "base", variantClassNames: {}, defaultVariants: {}, compoundVariants: [], propVars: { width: "--width" } });';
+      'const {createCompiledRuntimeFn: make} = require("@mincho-js/css/rules/createRuntimeFn"); const r = make({ defaultClassName: "base", variantClassNames: {}, defaultVariants: {}, compoundVariants: [] }, { width: "--width" });';
 
     const local = analyze(
       `${factory} const cls = r(); const style = r.props({width: 1});`
@@ -252,11 +289,11 @@ describe("runtime code generation", () => {
 
     const code = optimize(
       factory +
-        'const r=make({propVars:{width:"--width"},defaultClassName:"base"}); function render(value){return r(value)}'
+        'const r=make({defaultClassName:"base"},{width:"--width"}); function render(value){return r(value)}'
     );
 
-    expect(code).not.toContain("propVars");
-    expect(code).toContain("props: false");
+    expect(code).not.toContain("--width");
+    expect(code).toContain("createCompiledClassRuntimeFn");
     expect(code).toContain("variants: false");
     expect(code).toContain("classNames: false");
 
@@ -267,11 +304,11 @@ describe("runtime code generation", () => {
       "r[name];"
     ]) {
       const open = optimize(
-        factory + 'const r=make({propVars:{width:"--width"}});' + use
+        factory + 'const r=make({}, {width:"--width"});' + use
       );
 
       expect(open).not.toContain("props: false");
-      expect(open).toContain("propVars");
+      expect(open).toContain("--width");
     }
   });
 
@@ -280,7 +317,7 @@ describe("runtime code generation", () => {
       'import {createCompiledRuntimeFn as make} from "@mincho-js/css/rules/createRuntimeFn";';
 
     const recipe =
-      'const r=make({propVars:{width:"--width"},defaultClassName:"base"}); r();';
+      'const r=make({defaultClassName:"base"},{width:"--width"}); r();';
 
     for (const mutation of [
       'Object.defineProperty(Function.prototype, "props", {set(value) { observe(value); }});',
@@ -291,7 +328,7 @@ describe("runtime code generation", () => {
     ]) {
       const code = optimize(factory + mutation + recipe);
 
-      expect(code).toContain("propVars");
+      expect(code).toContain("--width");
       expect(code).not.toContain("props: false");
       expect(code).not.toContain("variants: false");
       expect(code).not.toContain("classNames: false");
@@ -301,6 +338,6 @@ describe("runtime code generation", () => {
       factory + 'Object.prototype.hasOwnProperty.call(input, "id");' + recipe
     );
 
-    expect(readOnly).toContain("props: false");
+    expect(readOnly).toContain("createCompiledClassRuntimeFn");
   });
 });

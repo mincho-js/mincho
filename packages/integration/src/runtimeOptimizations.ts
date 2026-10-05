@@ -2,7 +2,7 @@ import {
   internalAnalyzeRuntimeExpressions,
   internalApplyRuntimeExpressions
 } from "@mincho-js/babel";
-import { createRuntimeFn } from "@mincho-js/css/rules/createRuntimeFn";
+import { createClassRuntimeFn } from "@mincho-js/css/rules/createClassRuntimeFn";
 import type {
   BabelTransformResult,
   BabelTransformSourceOptions,
@@ -225,8 +225,8 @@ export class RuntimeOptimizations {
     for (const item of analysis.finiteCalls) {
       try {
         const values = item.calls.map((call) => {
-          const runtime = createRuntimeFn(
-            call.config as Parameters<typeof createRuntimeFn>[0]
+          const runtime = createClassRuntimeFn(
+            call.config as Parameters<typeof createClassRuntimeFn>[0]
           );
 
           return runtime(call.options as Parameters<typeof runtime>[0]);
@@ -267,8 +267,8 @@ export class RuntimeOptimizations {
 
       if (value === undefined) {
         try {
-          const runtime = createRuntimeFn(
-            call.config as Parameters<typeof createRuntimeFn>[0]
+          const runtime = createClassRuntimeFn(
+            call.config as Parameters<typeof createClassRuntimeFn>[0]
           );
 
           value = runtime(call.options as Parameters<typeof runtime>[0]);

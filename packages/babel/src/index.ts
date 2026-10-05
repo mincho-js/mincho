@@ -21,6 +21,7 @@ import { prepareExtractCalls } from "./extractionCalls/index.js";
 import { normalizeTypeScriptCommonJs } from "./commonjs/modules.js";
 import {
   optimizeRuntimeCodegen,
+  removeUnusedExtractedImports,
   removeUnusedGeneratedImports
 } from "./optimizations/runtimeCodegen.js";
 import { pruneRecipeMetadata } from "./optimizations/recipeMetadata.js";
@@ -75,6 +76,7 @@ export function minchoBabelPlugin(): PluginObj<PluginState> {
           if (state.opts.optimize?.runtimeCodegen === true) {
             optimizeRuntimeCodegen(path);
             pruneRecipeMetadata(path);
+            removeUnusedExtractedImports(path);
           }
 
           removeUnusedJsxCssPropCssModuleImports(path);

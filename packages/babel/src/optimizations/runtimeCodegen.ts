@@ -2,6 +2,46 @@ import { types as t, type NodePath } from "@babel/core";
 import { getModuleReference } from "../commonjs/bindings.js";
 import type { ProgramScope } from "../types.js";
 import { hasDynamicScope } from "./dynamicScope.js";
+import { builtInExtractionCalls } from "../extractionCalls/builtins.js";
+
+/** Authoring imports already evaluated in the sidecar need no client runtime. */
+export function removeUnusedExtractedImports(
+  program: NodePath<t.Program>
+): void {
+  const data = (program.scope as ProgramScope).minchoData;
+  if (!data || hasDynamicScope(program)) return;
+
+  const extracted = new Set(
+    data.nodes.filter((node) => t.isImportDeclaration(node))
+  );
+  if (!extracted.size) return;
+
+  program.scope.crawl();
+
+  for (const path of program.get("body")) {
+    if (!path.isImportDeclaration() || !extracted.has(path.node)) continue;
+
+    const names = builtInExtractionCalls[path.node.source.value];
+    if (!names) continue;
+
+    for (const specifier of path.get("specifiers")) {
+      if (!specifier.isImportSpecifier()) continue;
+
+      const imported = specifier.node.imported;
+      const name = t.isIdentifier(imported) ? imported.name : imported.value;
+      const binding = program.scope.getBinding(specifier.node.local.name);
+
+      if (names.includes(name) && binding?.constant && !binding.referenced)
+        specifier.remove();
+    }
+
+    if (
+      !path.node.specifiers.length &&
+      !data.effectImports?.has(path.node.source.value)
+    )
+      path.remove();
+  }
+}
 
 /** Generated bindings have no user-requested module effects. Never infer ownership by name. */
 export function removeUnusedGeneratedImports(

@@ -7,6 +7,7 @@ import {
   type NodePath,
   type TransformOptions
 } from "@babel/core";
+import { addNamed } from "@babel/helper-module-imports";
 import { getModuleReference } from "../commonjs/bindings.js";
 import { pruneRecipeMetadata } from "./recipeMetadata.js";
 import { hasDynamicScope } from "./dynamicScope.js";
@@ -53,6 +54,7 @@ export interface StaticRecipeCall {
   readonly key: string;
   readonly identity: string;
   readonly config: StaticData;
+  readonly propVars?: StaticData;
   readonly options?: StaticData;
   readonly compiled?: boolean;
 }
@@ -87,7 +89,8 @@ function isRecipeCandidate(path: NodePath<t.CallExpression>): boolean {
       "@mincho-js/css",
       "@mincho-js/css/runtime",
       "@mincho-js/react/runtime",
-      "@mincho-js/css/rules/createRuntimeFn"
+      "@mincho-js/css/rules/createRuntimeFn",
+      "@mincho-js/css/rules/createClassRuntimeFn"
     ].includes(reference.source)
   );
 }
@@ -236,6 +239,46 @@ export function* analyzeRuntimeExpressions(options: {
 
   const expressions: { key: string; expression: t.Expression }[] = [];
   const recipes = new WeakMap<t.CallExpression, SerializedRecipe>();
+  const propTables = new Map<string, t.Identifier>();
+  const classRuntimes = new Map<string, t.Identifier>();
+  let mapProps: t.Identifier | undefined;
+  let classFactory: t.Identifier | undefined;
+
+  const safety = new WeakMap<
+    t.CallExpression,
+    Map<string, { modules: number; safe: boolean }>
+  >();
+
+  function* safeFactory(
+    factory: NodePath<t.CallExpression>,
+    recipe = false,
+    closed = false,
+    callsAndPropsOnly = false
+  ): ModuleGraphFlow<boolean> {
+    let proofs = safety.get(factory.node);
+
+    if (!proofs) {
+      proofs = new Map();
+      safety.set(factory.node, proofs);
+    }
+
+    const key = `${recipe}:${closed}:${callsAndPropsOnly}`;
+    let checked = proofs.get(key);
+
+    if (!checked || checked.modules !== graph.modules.size) {
+      const safe = yield* componentUsesAreSafe(
+        graph,
+        factory,
+        recipe,
+        closed,
+        callsAndPropsOnly
+      );
+      checked = { safe, modules: graph.modules.size };
+      proofs.set(key, checked);
+    }
+
+    return checked.safe;
+  }
 
   for (const path of candidates) {
     try {
@@ -266,13 +309,50 @@ export function* analyzeRuntimeExpressions(options: {
           target &&
           !("external" in target) &&
           target.path.isCallExpression() &&
-          (yield* componentUsesAreSafe(graph, target.path, true, true)) &&
-          t.isObjectExpression(argument)
+          (yield* safeFactory(target.path, true, true)) &&
+          t.isExpression(argument)
         ) {
-          const expression = inlineRecipeProps(recipe.config, argument, path);
+          const inline = t.isObjectExpression(argument)
+            ? inlineRecipeProps(recipe.propVars, argument, path)
+            : null;
 
-          if (expression)
-            expressions.push({ key: expressionKey(path), expression });
+          if (inline) {
+            expressions.push({ key: expressionKey(path), expression: inline });
+          } else if (isPropVarTable(recipe.propVars)) {
+            let table = propTables.get(recipe.identity);
+
+            if (!table) {
+              table =
+                owner.program.scope.generateUidIdentifier("recipePropVars");
+              owner.program.scope.push({
+                id: t.cloneNode(table),
+                kind: "const",
+                init: t.objectExpression(
+                  Object.entries(recipe.propVars).map(([key, value]) =>
+                    t.objectProperty(
+                      t.stringLiteral(key),
+                      t.stringLiteral(value),
+                      key === "__proto__"
+                    )
+                  )
+                )
+              });
+              propTables.set(recipe.identity, table);
+            }
+
+            mapProps ??= addNamed(
+              owner.program,
+              "mapVarProps",
+              "@mincho-js/css/rules/mapVarProps"
+            );
+            expressions.push({
+              key: expressionKey(path),
+              expression: t.callExpression(t.cloneNode(mapProps), [
+                t.cloneNode(table),
+                t.cloneNode(argument)
+              ])
+            });
+          }
         }
 
         continue;
@@ -317,9 +397,68 @@ export function* analyzeRuntimeExpressions(options: {
       }
 
       const budget = createStaticExpressionBudget();
-      const value = argument
-        ? yield* evaluateStaticExpression(graph, owner, argument, budget)
-        : undefined;
+      let value;
+
+      try {
+        value = argument
+          ? yield* evaluateStaticExpression(graph, owner, argument, budget)
+          : undefined;
+      } catch {
+        const target = yield* graph.valueTarget(
+          owner,
+          path.get("callee"),
+          new Set()
+        );
+
+        if (
+          options.runtimeCodegen &&
+          recipe.compiled &&
+          target &&
+          !("external" in target) &&
+          target.path.isCallExpression() &&
+          (yield* safeFactory(target.path, true, true, true))
+        ) {
+          let runtime = classRuntimes.get(recipe.identity);
+
+          if (!runtime) {
+            classFactory ??= addNamed(
+              owner.program,
+              "createCompiledClassRuntimeFn",
+              "@mincho-js/css/rules/createClassRuntimeFn"
+            );
+            runtime =
+              owner.program.scope.generateUidIdentifier("recipeClasses");
+
+            const init = t.callExpression(t.cloneNode(classFactory), [
+              staticDataExpression(recipe.config),
+              t.objectExpression(
+                ["variants", "classNames"].map((name) =>
+                  t.objectProperty(t.identifier(name), t.booleanLiteral(false))
+                )
+              )
+            ]);
+
+            t.addComment(init, "leading", "#__PURE__");
+            owner.program.scope.push({
+              id: t.cloneNode(runtime),
+              kind: "const",
+              init
+            });
+            classRuntimes.set(recipe.identity, runtime);
+          }
+
+          expressions.push({
+            key: expressionKey(path),
+            expression: t.callExpression(
+              t.cloneNode(runtime),
+              path.node.arguments.map((argument) => t.cloneNode(argument))
+            )
+          });
+        }
+
+        continue;
+      }
+
       if (options.pureFunctions === false && budget.calls) continue;
 
       calls.push({
@@ -487,26 +626,6 @@ export function* analyzeRuntimeExpressions(options: {
     }
   }
 
-  const safety = new WeakMap<
-    t.CallExpression,
-    { modules: number; safe: boolean }
-  >();
-
-  function* safeFactory(
-    factory: NodePath<t.CallExpression>,
-    recipe = false
-  ): ModuleGraphFlow<boolean> {
-    let checked = safety.get(factory.node);
-
-    if (!checked || (checked.safe && checked.modules !== graph.modules.size)) {
-      const safe = yield* componentUsesAreSafe(graph, factory, recipe);
-      checked = { safe, modules: graph.modules.size };
-      safety.set(factory.node, checked);
-    }
-
-    return checked.safe;
-  }
-
   let elements: StaticStyledElement[];
   let moduleCount: number;
 
@@ -538,7 +657,7 @@ export function* analyzeRuntimeExpressions(options: {
             !target ||
             "external" in target ||
             !target.path.isCallExpression() ||
-            !(yield* componentUsesAreSafe(graph, target.path, true, true))
+            !(yield* safeFactory(target.path, true, true))
           )
             return null;
 
@@ -590,12 +709,16 @@ function* serializedRecipe(
   const factory = getModuleReference(target.path.get("callee"));
   if (
     factory?.unsafe ||
-    factory?.source !== "@mincho-js/css/rules/createRuntimeFn" ||
-    !["createRuntimeFn", "createCompiledRuntimeFn"].includes(
-      factory.members.join(".")
+    !(
+      (factory?.source === "@mincho-js/css/rules/createRuntimeFn" &&
+        ["createRuntimeFn", "createCompiledRuntimeFn"].includes(
+          factory.members.join(".")
+        )) ||
+      (factory?.source === "@mincho-js/css/rules/createClassRuntimeFn" &&
+        factory.members.join(".") === "createCompiledClassRuntimeFn")
     ) ||
     target.path.node.arguments.length < 1 ||
-    target.path.node.arguments.length > 2
+    target.path.node.arguments.length > 3
   )
     return null;
 
@@ -609,12 +732,31 @@ function* serializedRecipe(
     configPath,
     budget
   );
+
+  const fullCompiled = factory.members.join(".") === "createCompiledRuntimeFn";
+  const compiled =
+    fullCompiled ||
+    factory.members.join(".") === "createCompiledClassRuntimeFn";
+
+  const varsPath = target.path.get("arguments")[1];
+  const propVars =
+    fullCompiled && varsPath?.isExpression()
+      ? staticData(
+          yield* evaluateStaticExpression(
+            graph,
+            target.module,
+            varsPath,
+            budget
+          )
+        )
+      : undefined;
   if (budget.calls) return null;
 
   const result = {
     identity: `${target.module.id}\0${expressionKey(target.path)}`,
-    compiled: factory.members.join(".") === "createCompiledRuntimeFn",
-    config: staticData(config)
+    compiled,
+    config: staticData(config),
+    propVars
   };
 
   recipes.set(target.path.node, result);
@@ -622,16 +764,48 @@ function* serializedRecipe(
   return result;
 }
 
+function staticDataExpression(value: StaticData): t.Expression {
+  if (Array.isArray(value))
+    return t.arrayExpression(value.map(staticDataExpression));
+  if (value && typeof value === "object")
+    return t.objectExpression(
+      Object.entries(value).map(([key, value]) =>
+        t.objectProperty(
+          t.stringLiteral(key),
+          staticDataExpression(value),
+          key === "__proto__"
+        )
+      )
+    );
+
+  return t.valueToNode(value);
+}
+
+function isPropVarTable(value: StaticData): value is Record<string, string> {
+  return (
+    !!value &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    Object.values(value).every((entry) => typeof entry === "string")
+  );
+}
+
 function inlineRecipeProps(
-  config: StaticData,
+  vars: StaticData,
   argument: t.ObjectExpression,
   path: NodePath<t.CallExpression>
 ): t.Expression | null {
-  if (!config || typeof config !== "object" || Array.isArray(config))
-    return null;
+  if (!isPropVarTable(vars)) return null;
 
-  const vars = config.propVars;
-  if (!vars || typeof vars !== "object" || Array.isArray(vars)) return null;
+  // Parameter initializers would share outer temporaries across reentrant calls.
+  const fn = path.getFunctionParent();
+  if (
+    fn &&
+    path.findParent(
+      (parent) => parent.listKey === "params" && parent.parentPath === fn
+    )
+  )
+    return null;
 
   const properties: t.ObjectProperty[] = [];
   const seen = new Set<string>();
@@ -711,7 +885,8 @@ function* componentUsesAreSafe(
   graph: ModuleGraph,
   factory: NodePath<t.CallExpression>,
   recipe = false,
-  closed = false
+  closed = false,
+  callsAndPropsOnly = false
 ): ModuleGraphFlow<boolean> {
   let visited = 0;
 
@@ -731,12 +906,16 @@ function* componentUsesAreSafe(
     const observed: NodePath<t.Node>[] = [];
     module.program.traverse({
       ReferencedIdentifier(path) {
-        if (!safeComponentReference(path, recipe, allowExports))
+        if (
+          !safeComponentReference(path, recipe, allowExports, callsAndPropsOnly)
+        )
           observed.push(path);
       },
 
       MemberExpression(path) {
-        if (!safeComponentReference(path, recipe, allowExports))
+        if (
+          !safeComponentReference(path, recipe, allowExports, callsAndPropsOnly)
+        )
           observed.push(path);
       }
     });
@@ -747,7 +926,8 @@ function* componentUsesAreSafe(
       const source = getModuleReference(path)?.source;
       if (
         source === "@mincho-js/react/runtime" ||
-        source === "@mincho-js/css/rules/createRuntimeFn"
+        source === "@mincho-js/css/rules/createRuntimeFn" ||
+        source === "@mincho-js/css/rules/createClassRuntimeFn"
       )
         continue;
 
@@ -771,13 +951,15 @@ function* componentUsesAreSafe(
 function safeComponentReference(
   path: NodePath<t.Node>,
   recipe: boolean,
-  allowExports = true
+  allowExports = true,
+  callsAndPropsOnly = false
 ): boolean {
   const parent = path.parentPath;
   if (!parent) return false;
 
   if (recipe && parent.isCallExpression()) {
     if (parent.node.callee === path.node) return true;
+    if (callsAndPropsOnly) return false;
 
     const callee = getModuleReference(parent.get("callee"));
     if (
@@ -795,6 +977,16 @@ function safeComponentReference(
     parent.node.object === path.node
   ) {
     const use = parent.parentPath;
+    if (callsAndPropsOnly)
+      return (
+        !parent.node.computed &&
+        t.isIdentifier(parent.node.property, { name: "props" }) &&
+        use.isCallExpression() &&
+        use.node.callee === parent.node &&
+        !use.node.optional &&
+        use.node.arguments.length === 1 &&
+        t.isExpression(use.node.arguments[0])
+      );
     if (
       !use.isAssignmentExpression() &&
       !use.isUpdateExpression() &&

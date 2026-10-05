@@ -1,4 +1,5 @@
 import { types as t, type NodePath } from "@babel/core";
+import { addNamed } from "@babel/helper-module-imports";
 import { getModuleReference, staticMemberName } from "../commonjs/bindings.js";
 import { hasDynamicScope } from "./dynamicScope.js";
 
@@ -80,12 +81,13 @@ export function pruneRecipeMetadata(program: NodePath<t.Program>): boolean {
   program.scope.crawl();
 
   let changed = false;
+  let classFactory: t.Identifier | undefined;
   program.traverse({
     VariableDeclarator(path) {
       if (!t.isIdentifier(path.node.id)) return;
 
       const init = path.get("init");
-      if (!init.isCallExpression() || init.node.arguments.length !== 1) return;
+      if (!init.isCallExpression() || init.node.arguments.length !== 2) return;
 
       const factory = getModuleReference(init.get("callee"));
       if (
@@ -133,38 +135,44 @@ export function pruneRecipeMetadata(program: NodePath<t.Program>): boolean {
       const disabled = Object.entries(features).filter(([, used]) => !used);
       if (!disabled.length) return;
 
-      if (!features.props) {
-        // Preserve config expression effects unless the removed metadata is literal.
-        config.properties = config.properties.filter((property) => {
-          if (
-            !t.isObjectProperty(property) ||
-            property.computed ||
-            !(
-              t.isIdentifier(property.key, { name: "propVars" }) ||
-              t.isStringLiteral(property.key, { value: "propVars" })
+      const propVars = init.node.arguments[1];
+
+      if (
+        !features.props &&
+        t.isObjectExpression(propVars) &&
+        propVars.properties.every(
+          (item) =>
+            t.isObjectProperty(item) &&
+            !item.computed &&
+            t.isStringLiteral(item.value)
+        )
+      ) {
+        classFactory ??= addNamed(
+          program,
+          "createCompiledClassRuntimeFn",
+          "@mincho-js/css/rules/createClassRuntimeFn"
+        );
+        init.node.callee = t.cloneNode(classFactory);
+        init.node.arguments = [config];
+        init.node.arguments.push(
+          t.objectExpression(
+            disabled
+              .filter(([name]) => name !== "props")
+              .map(([name]) =>
+                t.objectProperty(t.identifier(name), t.booleanLiteral(false))
+              )
+          )
+        );
+      } else {
+        init.node.arguments.push(
+          t.objectExpression(
+            disabled.map(([name]) =>
+              t.objectProperty(t.identifier(name), t.booleanLiteral(false))
             )
           )
-            return true;
-
-          return (
-            !t.isObjectExpression(property.value) ||
-            !property.value.properties.every(
-              (item) =>
-                t.isObjectProperty(item) &&
-                !item.computed &&
-                t.isStringLiteral(item.value)
-            )
-          );
-        });
+        );
       }
 
-      init.node.arguments.push(
-        t.objectExpression(
-          disabled.map(([name]) =>
-            t.objectProperty(t.identifier(name), t.booleanLiteral(false))
-          )
-        )
-      );
       changed = true;
     }
   });
