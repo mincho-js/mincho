@@ -13,6 +13,58 @@ afterEach(async () => {
 });
 
 describe("static recipe bundles", () => {
+  it("uses the serve profile independently of Vite mode and honors overrides", async () => {
+    const cache = join(process.cwd(), ".cache");
+    await mkdir(cache, { recursive: true });
+
+    const root = await mkdtemp(join(cache, "optimization-mode-"));
+    roots.push(root);
+    await writeFile(
+      join(root, "entry.ts"),
+      'import { button } from "./styles"; export const className = button();'
+    );
+    await writeFile(
+      join(root, "styles.ts"),
+      'import { rules } from "@mincho-js/css"; export const button = rules({ base: { color: "red" } });'
+    );
+
+    const cases = [
+      { options: {}, folded: false },
+      { options: { optimizationMode: "production" }, folded: true },
+      {
+        options: { babel: { optimize: { staticRecipes: true } } },
+        folded: true
+      },
+      {
+        options: {
+          babel: { optimize: { staticRecipes: true } },
+          optimize: { staticRecipes: false }
+        },
+        folded: false
+      }
+    ] as const;
+
+    for (const { options, folded } of cases) {
+      const server = await createServer({
+        root,
+        configFile: false,
+        mode: "production",
+        logLevel: "silent",
+        plugins: [minchoVitePlugin(options)],
+        server: { middlewareMode: true, watch: null },
+        optimizeDeps: { noDiscovery: true }
+      });
+
+      try {
+        const result = await server.transformRequest("/entry.ts");
+
+        expect(result?.code.includes("button()")).toBe(!folded);
+      } finally {
+        await server.close();
+      }
+    }
+  });
+
   it("uses current serialized classes in dev after a dependency edit", async () => {
     const cache = join(process.cwd(), ".cache");
     await mkdir(cache, { recursive: true });
@@ -35,7 +87,7 @@ describe("static recipe bundles", () => {
       root,
       configFile: false,
       logLevel: "silent",
-      plugins: [minchoVitePlugin()],
+      plugins: [minchoVitePlugin({ optimizationMode: "production" })],
       server: { middlewareMode: true, watch: null },
       optimizeDeps: { noDiscovery: true }
     });
@@ -158,6 +210,7 @@ describe("static recipe bundles", () => {
         const result = await build({
           root,
           configFile: false,
+          mode: "development",
           logLevel: "silent",
           plugins: [
             minchoVitePlugin({
