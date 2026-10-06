@@ -50,6 +50,35 @@ await writeFile(
   export const Polymorphic = () => <Button as="a" href="/link">link</Button>;
 `
 );
+await writeFile(
+  join(root, "dynamic.tsx"),
+  `
+  import { styled } from "@mincho-js/react";
+  const Button = styled.button({
+    base: { color: "red" },
+    variants: { size: { large: { padding: 8 }, small: { padding: 4 } } },
+    defaultVariants: { size: "small" }
+  });
+  export const App = ({ active }) => <Button size={active ? "large" : "small"} title="label" className="extra">child</Button>;
+`
+);
+await writeFile(
+  join(root, "chain.tsx"),
+  `
+  import { styled } from "@mincho-js/react";
+  const Parent = styled.div({
+    base: { color: "red" },
+    variants: { size: { large: { padding: 8 }, small: { padding: 4 } }, tone: { muted: { opacity: 0.5 } } },
+    defaultVariants: { size: "small" }
+  });
+  const Child = styled(Parent, {
+    base: { display: "block" },
+    variants: { size: { large: { margin: 8 }, small: { margin: 4 } } },
+    defaultVariants: { size: "large" }
+  });
+  export const App = ({ active }) => <Child size={active ? "large" : "small"} tone="muted" className="extra">child</Child>;
+`
+);
 
 const text = (result, extension) =>
   result.outputFiles
@@ -86,6 +115,19 @@ const evaluate = async (code, format, name) => {
   const imported = await import(pathToFileURL(file).href);
 
   return format === "esm" ? imported : imported.default;
+};
+
+const countStyledWrappers = (element) => {
+  let count = 0;
+
+  while (typeof element.type !== "string") {
+    assert.equal(typeof element.type.render, "function");
+
+    element = element.type.render(element.props, null);
+    count++;
+  }
+
+  return count;
 };
 
 globalThis.__minchoComponentEvaluations = 0;
@@ -158,6 +200,43 @@ for (const format of ["esm", "cjs"]) {
   console.log(
     `[styled-flatten] ${format}: ${JSON.stringify({ baseline: sizes(baselineCode), optimized: sizes(optimizedCode), css: sizes(text(optimized, ".css")) })}`
   );
+
+  for (const [fixture, wrappersBefore, wrappersAfter] of [
+    ["dynamic", 1, 0],
+    ["chain", 2, 1]
+  ]) {
+    const baseline = await bundle(format, `${fixture}.tsx`, false);
+    const optimized = await bundle(format, `${fixture}.tsx`, true);
+    const baselineCode = text(baseline, ".js");
+    const optimizedCode = text(optimized, ".js");
+
+    assert.equal(text(optimized, ".css"), text(baseline, ".css"));
+
+    const original = await evaluate(
+      baselineCode,
+      format,
+      `${fixture}-before-${format}`
+    );
+
+    const transformed = await evaluate(
+      optimizedCode,
+      format,
+      `${fixture}-after-${format}`
+    );
+
+    for (const active of [true, false]) {
+      const before = original.App({ active });
+      const after = transformed.App({ active });
+
+      assert.equal(countStyledWrappers(before), wrappersBefore);
+      assert.equal(countStyledWrappers(after), wrappersAfter);
+      assert.equal(renderToStaticMarkup(after), renderToStaticMarkup(before));
+    }
+
+    console.log(
+      `[styled-${fixture}] ${format}: ${JSON.stringify({ baseline: sizes(baselineCode), optimized: sizes(optimizedCode), wrappersBefore, wrappersAfter })}`
+    );
+  }
 }
 
 delete globalThis.__minchoComponentEvaluations;

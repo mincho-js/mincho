@@ -287,7 +287,7 @@ bundle size. Vanilla Extract recipes and sprinkles keep their normal extraction
 support but are not folded by this pass. Standalone `.css.ts` authoring modules
 also keep their existing behavior.
 
-`optimize.styledComponents` also defaults to `true`. For example, a static
+`optimize.styledComponents` also defaults to `true` in production. For example, a static
 `<Button size="large" className="extra">` can become an intrinsic `<button>`
 with the exact serialized recipe classes. Analysis follows the same lexical
 imports and reexports, including CommonJS and namespace JSX. Other attributes
@@ -309,8 +309,9 @@ reports raw/gzip/Brotli sizes and three-round median compilation times for fresh
 contexts, unchanged rebuilds and dependency edits. These context measurements
 share a process; they are not fresh-process startup benchmarks or timing gates.
 
-Measurements from the package contract on 2026-09-19, with Node 24.21.0 and
-esbuild 0.27.7, use the same minifier and identifier settings in each comparison.
+The following historical package-contract measurements are from `f6a4844b`,
+before the build-time changes below. They used Node 24.21.0 and esbuild 0.27.7
+on 2026-09-19, with the same minifier and identifier settings in each comparison.
 The static styled fixture retained identical CSS and SSR output:
 
 | Format   | JS bytes before → after |  gzip bytes | Brotli bytes |

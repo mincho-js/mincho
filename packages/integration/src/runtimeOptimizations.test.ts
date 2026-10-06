@@ -319,6 +319,18 @@ async function styledResult(
 }
 
 describe("static styled JSX", () => {
+  it("rechecks repeated components when later JSX loads an identity observer", async () => {
+    const code =
+      'import { Button } from "components"; import { Button as Later } from "late"; export const App = () => <><Button /><Button /><Later /></>;';
+
+    const modules = {
+      ...componentModules,
+      late: 'import { Button } from "components"; Button.defaultProps = { size: "large" }; export { Button };'
+    };
+
+    expect((await styledResult(code, modules)).code).toBe(code);
+  });
+
   it.each([
     ['import { Button } from "barrel";', "Button"],
     ['import * as ui from "barrel";', "ui.Button"],

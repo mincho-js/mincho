@@ -1325,7 +1325,10 @@ function createMinchoViteEnvironmentPlugin(
         }
 
         if (!current())
-          return { code: transformResult.code, map: transformResult.map ?? null };
+          return {
+            code: transformResult.code,
+            map: transformResult.map ?? null
+          };
 
         const [file, cssExtract] = transformResult.result;
 
