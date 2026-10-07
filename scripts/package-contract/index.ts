@@ -61,7 +61,11 @@ async function writeConsumerManifest(
         overrides: {
           "@vanilla-extract/integration": "$@vanilla-extract/integration"
         },
-        devDependencies: { typescript: "5.9.3", "@types/node": "25.6.2" }
+        devDependencies: {
+          typescript: "5.9.3",
+          "@types/node": "25.6.2",
+          "@types/react": "19.2.14"
+        }
       },
       null,
       2

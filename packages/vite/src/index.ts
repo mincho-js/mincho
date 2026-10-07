@@ -47,6 +47,7 @@ import { createLibraryCssLinker } from "./libraryCssLinker.js";
 import { createPackageGraphAnalysis } from "./packageGraphAnalysis.js";
 import { createViteStaticCssEvalSourceProvider } from "./staticCssEvalSourceProvider.js";
 import { commonJsRuntimePrefix, commonJsRuntimeRequest } from "./commonJs.js";
+import { createJsxRuntimeGuardPlugins } from "./jsxRuntimeGuards.js";
 
 type PluginContext = Rollup.PluginContext;
 
@@ -110,6 +111,15 @@ export type {
   MinchoExecutionOptions,
   MinchoCacheOptions
 } from "@mincho-js/integration";
+
+/** Include automatic JSX guard specialization after Vite's JSX transform. */
+export function minchoVitePlugins(
+  options: MinchoVitePluginOptions = {}
+): Plugin[] {
+  const { evidence, guard } = createJsxRuntimeGuardPlugins(options);
+
+  return [evidence, minchoVitePlugin(options), guard];
+}
 
 export function minchoVitePlugin(_options?: MinchoVitePluginOptions) {
   const parser =
@@ -5897,6 +5907,7 @@ if (import.meta.vitest) {
                   staticRecipes: true,
                   styledComponents: true,
                   runtimeCodegen: true,
+                  jsxRuntimeGuards: true,
                   ...disabledCase.expectedOptions?.optimize
                 },
                 staticCssEvalSourceProvider: expect.any(Object)

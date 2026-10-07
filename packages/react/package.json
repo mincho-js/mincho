@@ -65,6 +65,26 @@
         "types": "./dist/cjs/jsx-dev-runtime.d.cts",
         "default": "./dist/cjs/jsx-dev-runtime.cjs"
       }
+    },
+    "./compiled-jsx-runtime": {
+      "import": {
+        "types": "./dist/esm/compiled-jsx-runtime.d.ts",
+        "default": "./dist/esm/compiled-jsx-runtime.mjs"
+      },
+      "require": {
+        "types": "./dist/cjs/compiled-jsx-runtime.d.cts",
+        "default": "./dist/cjs/compiled-jsx-runtime.cjs"
+      }
+    },
+    "./compiled-jsx-dev-runtime": {
+      "import": {
+        "types": "./dist/esm/compiled-jsx-dev-runtime.d.ts",
+        "default": "./dist/esm/compiled-jsx-dev-runtime.mjs"
+      },
+      "require": {
+        "types": "./dist/cjs/compiled-jsx-dev-runtime.d.cts",
+        "default": "./dist/cjs/compiled-jsx-dev-runtime.cjs"
+      }
     }
   },
   "files": [

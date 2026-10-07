@@ -41,6 +41,7 @@ export interface PluginOptions {
     staticRecipes?: boolean;
     styledComponents?: boolean;
     runtimeCodegen?: boolean;
+    jsxRuntimeGuards?: boolean;
   };
 
   /** @internal Prepared sync provider supplied by bundler prepasses only. */

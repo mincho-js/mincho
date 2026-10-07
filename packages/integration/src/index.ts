@@ -1,4 +1,10 @@
 export {
+  internalCanBypassJsxRuntimeGuards,
+  internalHasExplicitJsxRuntimeImport,
+  internalTransformJsxRuntimeGuards
+} from "@mincho-js/babel";
+
+export {
   CompilationDiagnostics,
   measureCompilationPhase as internalMeasureCompilationPhase,
   recordCompilationDiagnostic as internalRecordCompilationDiagnostic,

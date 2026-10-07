@@ -7,6 +7,8 @@ import type { preset as packedPreset } from "@mincho-js-proof/real-d/preset" wit
 };
 import { defineRules } from "@mincho-js/css";
 import { cx, type ClassValue } from "@mincho-js/css/classname";
+import type { JSX as CompiledJSX } from "@mincho-js/react/compiled-jsx-runtime";
+import type { JSX as CompiledDevJSX } from "@mincho-js/react/compiled-jsx-dev-runtime";
 import type { DefineRulesRegistrySession } from "@mincho-js/css/defineRules/registry";
 import {
   minchoBabelPlugin,
@@ -113,6 +115,13 @@ export {
 export const transform = () => babelTransformSource(options);
 
 export const runtimeClasses = (value: ClassValue): string => cx("base", value);
+
+export const compiledJsxProps: CompiledJSX.IntrinsicElements["div"] = {
+  css: { color: "red" }
+};
+
+export const compiledDevJsxProps: CompiledDevJSX.IntrinsicElements["div"] =
+  compiledJsxProps;
 
 // Direct API artifacts must cross either conditional declaration format.
 export function collectDirectPreset() {

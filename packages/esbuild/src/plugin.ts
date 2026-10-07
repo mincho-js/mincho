@@ -4,6 +4,7 @@ import {
   CompilationDiagnostics,
   InternalCompilationCache,
   internalCanSkipMinchoTransform,
+  internalCanBypassJsxRuntimeGuards,
   InternalCompilationExecution,
   type MinchoExecutionOptions,
   type MinchoCacheOptions,
@@ -137,6 +138,8 @@ export function minchoEsbuildPlugin({
       >();
 
       const sidecarLoads = new Map<string, Promise<OnLoadResult>>();
+      const unguardedJsxImporters = new Map<string, object>();
+      let jsxGuardGeneration = {};
       build.onDispose?.(async () => {
         await execution.close();
         compilationCache?.clear();
@@ -191,6 +194,8 @@ export function minchoEsbuildPlugin({
       const assets = new EsbuildAssets(build);
 
       build.onStart(() => {
+        jsxGuardGeneration = {};
+        unguardedJsxImporters.clear();
         execution.begin();
         diagnostics.begin();
         compilationCache?.begin();
@@ -202,6 +207,27 @@ export function minchoEsbuildPlugin({
       });
       build.onResolve({ filter: /.*/ }, (args) =>
         args.kind === "url-token" ? assets.resolveCssUrl(args.path) : undefined
+      );
+
+      build.onResolve(
+        { filter: /^@mincho-js\/react\/jsx(?:-dev)?-runtime$/ },
+        async (args) => {
+          if (
+            (args.kind !== "import-statement" &&
+              args.kind !== "require-call") ||
+            args.pluginData?.jsxGuardGeneration !== jsxGuardGeneration ||
+            unguardedJsxImporters.get(args.importer) !== jsxGuardGeneration
+          )
+            return;
+
+          return build.resolve(args.path.replace("/jsx", "/compiled-jsx"), {
+            importer: args.importer,
+            namespace: args.namespace,
+            resolveDir: args.resolveDir,
+            kind: args.kind,
+            pluginData: args.pluginData
+          });
+        }
       );
 
       const rootRealpath = getRealpathOrResolvedPath(
@@ -471,6 +497,7 @@ export function minchoEsbuildPlugin({
       build.onLoad({ filter: /.*/, namespace: "file" }, async (args) => {
         if (args.with?.type === "json" || args.with?.type === "bytes") return;
 
+        const loadGeneration = jsxGuardGeneration;
         const prepared = await prepareScript(args.path);
         if (!prepared) return;
 
@@ -508,6 +535,17 @@ export function minchoEsbuildPlugin({
         );
 
         const { code, map, staticCssEval } = result;
+        const bypassJsxGuards =
+          loadGeneration === jsxGuardGeneration &&
+          optimize.jsxRuntimeGuards === true &&
+          code.includes("<") &&
+          internalCanBypassJsxRuntimeGuards(code, args.path);
+
+        if (bypassJsxGuards)
+          unguardedJsxImporters.set(args.path, loadGeneration);
+        else if (loadGeneration === jsxGuardGeneration)
+          unguardedJsxImporters.delete(args.path);
+
         const existingDependencies =
           staticCssEvalProjectEngine.getFileResult(args.path)
             ?.dependencyFiles ?? [];
@@ -517,7 +555,10 @@ export function minchoEsbuildPlugin({
             ? `${code}\n//# sourceMappingURL=data:application/json;base64,${Buffer.from(JSON.stringify(map)).toString("base64")}`
             : code,
           loader,
-          pluginData: { mainFilePath: args.path },
+          pluginData: {
+            mainFilePath: args.path,
+            ...(bypassJsxGuards ? { jsxGuardGeneration: loadGeneration } : {})
+          },
           watchFiles: getWatchableStaticCssEvalDependencyFiles(
             await rootRealpath,
             {

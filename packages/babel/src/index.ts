@@ -134,6 +134,11 @@ export type {
 } from "./staticCssEval/importedModules.js";
 export { STATIC_CSS_EVAL_LIMITS as internalStaticCssEvalLimits } from "./staticCssEval/types.js";
 export { styledComponentPlugin as minchoStyledComponentPlugin } from "./styled.js";
+export {
+  canBypassJsxRuntimeGuards as internalCanBypassJsxRuntimeGuards,
+  hasExplicitJsxRuntimeImport as internalHasExplicitJsxRuntimeImport,
+  transformJsxRuntimeGuards as internalTransformJsxRuntimeGuards
+} from "./optimizations/jsxRuntimeGuards.js";
 export type {
   ExtractCalls,
   MinchoBabelFileMetadata,

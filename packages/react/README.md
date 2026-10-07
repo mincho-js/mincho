@@ -537,6 +537,8 @@ These spread rules are not Emotion runtime parity. Mincho compiles explicit `css
 
 `@mincho-js/react/jsx-runtime` and `@mincho-js/react/jsx-dev-runtime` are thin wrappers around React's automatic JSX runtimes. They only guard missed transforms for own `css` props.
 
+The compiler can select `@mincho-js/react/compiled-jsx-runtime` or `@mincho-js/react/compiled-jsx-dev-runtime` after proving that a call cannot contain an own `css` prop. These entries reexport React's functions and `Fragment` directly while retaining Mincho's JSX types. Keep `jsxImportSource` set to `@mincho-js/react`; the compiled entries are generated-code interfaces, and unverified calls continue to use the guarded runtimes.
+
 Supported static rule branches are converted to generated class names before JSX reaches the runtime. Static imported values are resolved before runtime through the provider-backed AST evaluator described above. Mincho does not provide StyleX `stylex.props` fallback behavior, inject a StyleX helper namespace, execute imported files, or fall back to runtime CSS generation.
 
 If an own `css` prop reaches either runtime, Mincho throws:

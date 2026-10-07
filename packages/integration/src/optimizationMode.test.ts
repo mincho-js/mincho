@@ -7,13 +7,15 @@ describe("optimization mode", () => {
       pureFunctions: true,
       staticRecipes: false,
       styledComponents: false,
-      runtimeCodegen: false
+      runtimeCodegen: false,
+      jsxRuntimeGuards: false
     });
     expect(resolveOptimizationOptions("production")).toEqual({
       pureFunctions: true,
       staticRecipes: true,
       styledComponents: true,
-      runtimeCodegen: true
+      runtimeCodegen: true,
+      jsxRuntimeGuards: true
     });
   });
 
@@ -33,6 +35,7 @@ describe("optimization mode", () => {
       staticRecipes: true,
       styledComponents: false,
       runtimeCodegen: false,
+      jsxRuntimeGuards: false,
       defineRulesCxConditions: true
     });
   });

@@ -11,7 +11,8 @@ export function resolveOptimizationOptions(
     pureFunctions: true,
     staticRecipes: mode === "production",
     styledComponents: mode === "production",
-    runtimeCodegen: mode === "production"
+    runtimeCodegen: mode === "production",
+    jsxRuntimeGuards: mode === "production"
   };
 
   for (const options of overrides)
