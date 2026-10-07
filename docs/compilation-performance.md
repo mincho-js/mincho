@@ -104,7 +104,8 @@ Pure-helper results share the existing parser/analysis LRU. Serialized evaluatio
 share the existing compilation-cache limits and disk cleanup. These paths trade
 bounded memory and first-use analysis/serialization for less repeated work; they
 do not reduce application JavaScript/CSS by themselves. Filesystem cache format
-`mincho-compilation-v2` prevents older manifests from being reused.
+`mincho-compilation-v3-runtime-canonical` prevents older manifests from being reused
+after the canonical recipe-order change.
 
 Evaluation keys include source, file scope, identifier mode, environment,
 compiler/library implementations and observed configuration. Entry shims and
@@ -239,6 +240,7 @@ override the selected profile. `undefined` does not erase an earlier setting.
 | `styledComponents`        | `false`     | `true`     |
 | `runtimeCodegen`          | `false`     | `true`     |
 | `defineRulesCxConditions` | Opt-in      | Opt-in     |
+| `jsxRuntimeGuards`        | `false`     | `true`     |
 
 ```ts
 minchoEsbuildPlugins({ optimizationMode: "development" });
@@ -251,7 +253,10 @@ minchoVitePlugin({
 Development keeps CSS extraction and pure helper evaluation while avoiding the
 additional recipe folding and styled JSX analysis by default. It retains more
 runtime JavaScript. Production keeps the existing bundle and runtime
-optimizations. Standalone Babel behavior does not change.
+optimizations. Standalone Babel enables the new code-generation reductions only
+with `optimize.runtimeCodegen: true`; JSX guard specialization requires the
+bundler integration. See [runtime optimization](runtime-optimizations.md) for
+eligibility, the canonical recipe-order change, and experimental options.
 
 ## Runtime package boundaries
 
@@ -299,9 +304,10 @@ component escapes, mutations and observed element types prevent flattening.
 The pass checks component uses in the loaded source graph; it does not perform
 whole-program analysis of consumers outside that graph. Disable
 `styledComponents` for code that changes exported component objects indirectly
-at runtime. Public component exports and remaining dynamic JSX retain wrappers.
-Both runtime optimizations are independent and require a build integration;
-the Babel-only transform still emits the existing runtime calls.
+at runtime. Public component exports and remaining dynamic JSX retain wrappers. The new
+`runtimeCodegen` pass additionally supports a conservative subset of closed,
+dynamic intrinsic JSX and local styled chains. Recipe/styled graph analysis
+requires a build integration; Babel-only operation retains those runtime calls.
 
 The package contract compares SSR markup, attribute/child evaluation order and
 module effects before and after flattening in ESM and CommonJS bundles. It also

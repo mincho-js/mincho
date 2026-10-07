@@ -159,6 +159,24 @@ export function MyButton({ state }: ButtonProps) {
 
 The `rules()` function is used to define both static and dynamic styles for reusable blocks.
 
+Recipe class strings have a canonical order: base classes, selected variants in
+`recipe.variants()` order, then matching compound classes in declaration order.
+The variant order is `Object.keys()` of the merged variant and toggle definition;
+argument key order and array selection order do not reorder the output. Array
+inputs still use the last selection for each variant, nullish selections fall
+back to defaults, and compounds compare values strictly (`true` differs from
+`"true"`). The compatibility `recipe()` API follows the same ordering.
+
+This replaces the earlier argument-dependent string order. CSS declaration order
+does not change, but snapshots, exact class-string comparisons, and subsequent
+`defineRules.cx` conflict resolution can change. `defineRules.cx` continues to
+resolve registered conflicting writes in input order, with the last write
+winning. Compiled recipes and scoped class merging use bounded per-instance
+caches; input getters and callbacks still run on repeated calls.
+Small recipes avoid result caching, and complex recipes release caches when
+reuse stays low. See the [runtime measurements and cache policy](../../docs/performance-runtime.md)
+for startup, memory, and bundle-size costs.
+
 ```typescript
 // button.css.ts
 import { rules } from '@mincho-js/css';

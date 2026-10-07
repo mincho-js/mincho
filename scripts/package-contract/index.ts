@@ -198,6 +198,11 @@ async function main(): Promise<void> {
         true
       );
       await runNode(
+        ["fixture/modules/runtime-codegen.mjs"],
+        join(consumerRoot, "fixture", "modules"),
+        true
+      );
+      await runNode(
         ["fixture/modules/compilation-benchmark.mjs"],
         join(consumerRoot, "fixture", "modules"),
         true

@@ -303,3 +303,18 @@ assert.equal(classnameEsm.cx, authoringEsm.cx);
 assert.equal(classnameCjs.cx, authoringCjs.cx);
 assert.equal(typeof classnameEsm.cx.multiple, "function");
 assert.equal(typeof classnameCjs.cx.with, "function");
+
+for (const [entry, names] of [
+  ["jsx-runtime", ["jsx", "jsxs", "Fragment"]],
+  ["jsx-dev-runtime", ["jsxDEV", "Fragment"]]
+]) {
+  const native = await import(`react/${entry}`);
+  const compiled = await import(`@mincho-js/react/compiled-${entry}`);
+  const nativeCjs = require(`react/${entry}`);
+  const compiledCjs = require(`@mincho-js/react/compiled-${entry}`);
+
+  for (const name of names) {
+    assert.equal(compiled[name], native[name]);
+    assert.equal(compiledCjs[name], nativeCjs[name]);
+  }
+}
