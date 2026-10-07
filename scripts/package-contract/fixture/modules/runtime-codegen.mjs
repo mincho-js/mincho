@@ -11,6 +11,10 @@ await mkdir(root, { recursive: true });
 await writeFile(
   join(root, "entry.tsx"),
   `
+  import {rules} from "@mincho-js/css";
+  const recipe = rules({variants:{tone:{red:{color:"red"},blue:{color:"blue"}}},props:["width","color"]});
+  export function propsDynamic(input) {return recipe.props(input);}
+  export function propsStatic(read) {return recipe.props({width:read("width"),color:read("color")});}
   export function merge(classes) { return <div className="base" css={classes}/>; }
   export function rule(flag) { return <div css={{color: flag ? "red" : "blue"}}/>; }
   export function width(size) { return <div css={{width: +size}}/>; }
@@ -46,7 +50,7 @@ for (const format of ["esm", "cjs"])
     );
     assert.doesNotMatch(
       code,
-      /setFileScope|registerDefineRulesRegistryInstance|appendCss|createRuntimeFn|assertNoCssProp/
+      /setFileScope|registerDefineRulesRegistryInstance|appendCss|createRuntimeFn|assertNoCssProp|variantClassNames|compoundVariants/
     );
 
     const inputs = Object.keys(result.metafile.inputs).join("\n");
@@ -72,6 +76,52 @@ for (const format of ["esm", "cjs"])
       output.rule(false).props.className
     );
     assert.deepEqual(Object.values(output.width(0).props.style), [0]);
+
+    const events = [];
+    const mapped = output.propsDynamic({
+      get width() {
+        events.push("width");
+
+        return 0;
+      },
+
+      get unknown() {
+        events.push("unknown");
+
+        return true;
+      },
+
+      get color() {
+        events.push("color");
+
+        return null;
+      }
+    });
+
+    assert.deepEqual(Object.values(mapped), [0, null]);
+    assert.deepEqual(events, ["width", "unknown", "color"]);
+    assert.notEqual(output.propsDynamic({}), output.propsDynamic({}));
+
+    events.length = 0;
+
+    assert.deepEqual(
+      Object.values(
+        output.propsStatic((name) => {
+          events.push(name);
+
+          return name;
+        })
+      ),
+      ["width", "color"]
+    );
+    assert.deepEqual(events, ["width", "color"]);
+
+    const css = result.outputFiles.find((file) =>
+      file.path.endsWith(".css")
+    ).text;
+
+    assert.match(css, /color:red/);
+    assert.match(css, /color:#00f|color:blue/);
 
     console.log(
       `[runtime-codegen] ${format}, verbatim=${verbatimModuleSyntax}: ${Buffer.byteLength(code)} raw / ${gzipSync(code).length} gzip bytes`

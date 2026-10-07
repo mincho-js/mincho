@@ -423,7 +423,10 @@ try {
     },
     {
       label: "compiled-current",
-      recipe: recipe.createCompiledRuntimeFn,
+
+      recipe: (config) =>
+        recipe.createCompiledRuntimeFn(config, config.propVars),
+
       cx: cx.createCompiledDefineRulesCxRuntime,
       note: "Private immutable factory with lazy preparation and adaptive bounded caches for complex recipes. Differences from direct-current include preparation and metadata handling, not just caching."
     }
