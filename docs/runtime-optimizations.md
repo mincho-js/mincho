@@ -41,6 +41,7 @@ recipe result to it therefore uses the new canonical recipe class order.
 | 14  | Specialize JSX runtime guards               | esbuild proves the final file; Vite proves individual lowered calls and original import provenance. Explicit public runtime uses and uncertain transforms retain the guard.               |
 | 15  | Non-inheriting generated variables          | Experimental: only generated variables proven to be consumed on the same supported intrinsic element.                                                                                     |
 | 16  | Share CSS prefixes across chunks            | Experimental Vite/esbuild finalization with ordered shared CSS, asset and loading checks, and conservative fallback.                                                                      |
+| 17  | Reduce scoped `cx` lookup and merge work    | Normalized tuple caching with adaptive prediction, second-chance eviction and direct token scanning; mutable inputs retain normalization and getter evaluation.                           |
 
 ## Options
 
@@ -122,12 +123,50 @@ Both experimental options default to `false`:
 
 ## Cost and verification
 
-The cache stores at most 256 results and 65,536 UTF-16 units of keys and results
+Each compiled recipe cache stores at most 256 results and 65,536 UTF-16 units of keys and results
 per compiled instance. Recipe caching starts after 8 calls only when the
 variant/compound cost is at least 32. A 64-lookup window with fewer than 16 hits
 disables the cache for that instance. Scoped `cx` bypasses caching for inputs
-over 4,096 UTF-16 units. Cache misses and unsupported values use the original
-calculation, including strict compound comparisons.
+over 4,096 UTF-16 units. Tuples, prepared token/write-ID fragments and results
+share a separate 1,024-entry / 131,072-unit allowance. A first fragment sighting retains
+only its key; a repeat can retain tokens and write IDs. Tuples can borrow unused
+string space and return it when result caching needs it. Tuples reserve 512
+entries and initially 16,384 units, with 512 warmup lookups before the first
+64-lookup reuse check. The limits grow retention as entries arrive, without
+preallocating the full allowance. Mutable inputs are evaluated
+on every call before their per-argument strings can hit the tuple cache, avoiding
+the full-string join on a hit. The result cache handles other normalized inputs.
+A single array can use its normalized elements as tuple slots while preserving
+clsx's array getter order, repeated reads and captured length.
+Cache misses and unsupported values preserve the original contracts,
+including strict compound comparisons. The direct token scanner preserves
+whitespace and conflict handling; already normalized, unchanged merges return
+their input. Two/three-argument predictions compare slots directly; short tuples
+add an array only when a wider prediction needs it. Predictions for up to eight arguments return
+before the general merge wrapper; four-to-eight-argument probes pass fixed slots
+without another rest array. Hot predictions update one window counter;
+counting misses preserves the existing reuse thresholds. A failed outer probe
+is not repeated for scalar arguments; resolved values retry with their strings.
+Tuple caching and
+prediction stop when their reuse rate is too low; a
+disabled tuple cache gets one retry after 32 identical result-cache hits.
+Unique first strings index tuples directly without bucket arrays, with full equality checks. A shared
+first string switches that cache generation to sampled tuple hashes, avoiding
+long prefix buckets. The conversion is bounded by the 512 retained entries.
+Segments crossing cached fragment boundaries are revalidated from write IDs.
+Compiled conflict resolution reuses bounded write-generation marks from its
+second merge; public mutable factories retain independent `Set` tracking.
+The optional numeric buffer costs at most another 16 KiB, outside the UTF-16
+string allowance.
+After 16 actual merges, eligible compiled factories can prepare an exact
+class-name lookup and numeric token spans, avoiding per-token substring
+allocation. Hash collisions are checked against complete names. The path waits
+while scalar tuple reuse is effective, accepts at most 1,024 registered
+class/marker entries, and preserves segment validation and nested-call behavior.
+It retains at most another 24 KiB of typed storage plus registered-name
+references; larger token buffers are temporary. These allocations are separate
+from the write marks and string budget. The mutable direct factory and unusual
+IDs keep the ordinary path.
 
 These are workload-dependent optimizations. Compiled cache helpers add JavaScript
 bytes; initialization and low-reuse calls can be slower. The reproducible

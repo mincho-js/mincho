@@ -60,6 +60,8 @@ async function fingerprints() {
     "rules/utils.ts",
     "defineRules/createDefineRulesCxRuntime.ts",
     "classname/cx.ts",
+    "runtime/cxCache.ts",
+    "runtime/cxArguments.ts",
     "runtime/cache.ts"
   ];
 
