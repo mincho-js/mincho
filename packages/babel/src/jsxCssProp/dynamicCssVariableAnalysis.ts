@@ -811,7 +811,7 @@ function getLeafDeclarationName(options: {
   );
 }
 
-function collectDynamicCssVariableValueFragment(options: {
+export function collectDynamicCssVariableValueFragment(options: {
   readonly expression: t.Expression;
   readonly scope: NodePath<t.JSXOpeningElement>["scope"];
 }): DynamicCssVariableValueFragment | null {

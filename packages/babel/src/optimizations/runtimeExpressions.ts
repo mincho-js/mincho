@@ -10,6 +10,11 @@ import {
 import { addNamed } from "@babel/helper-module-imports";
 import { getModuleReference } from "../commonjs/bindings.js";
 import { pruneRecipeMetadata } from "./recipeMetadata.js";
+import { createClassNameTables, isClassNameJoin } from "./classNameTables.js";
+import {
+  inlineCssVariableKeys,
+  isSidecarCssVariableKey
+} from "./sidecarStrings.js";
 import { hasDynamicScope } from "./dynamicScope.js";
 import {
   analyzeStyledRuntime,
@@ -102,6 +107,14 @@ export function collectRuntimeCandidates(ast: t.File): RuntimeCandidates {
   traverse(ast, {
     CallExpression(path) {
       if (!recipes && isRecipeCandidate(path)) recipes = true;
+    },
+
+    BinaryExpression(path) {
+      if (!recipes && isClassNameJoin(path)) recipes = true;
+    },
+
+    ObjectProperty(path) {
+      if (!recipes && isSidecarCssVariableKey(path)) recipes = true;
     },
 
     JSXElement(path) {
@@ -238,6 +251,12 @@ export function* analyzeRuntimeExpressions(options: {
   }[] = [];
 
   const expressions: { key: string; expression: t.Expression }[] = [];
+
+  if (options.runtimeCodegen) {
+    expressions.push(...(yield* createClassNameTables(graph, owner)));
+    expressions.push(...(yield* inlineCssVariableKeys(graph, owner)));
+  }
+
   const recipes = new WeakMap<t.CallExpression, SerializedRecipe>();
   const propTables = new Map<string, t.Identifier>();
   const classRuntimes = new Map<string, t.Identifier>();

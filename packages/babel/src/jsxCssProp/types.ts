@@ -62,6 +62,7 @@ export type CssClassNameBaseLoweringRequest = {
 };
 
 export type AggregatePropsBinding = {
+  readonly propsIdentifier: t.Identifier;
   readonly declarations: t.VariableDeclaration[];
   readonly classNameIdentifier: t.Identifier;
   readonly restIdentifier: t.Identifier;
@@ -77,6 +78,7 @@ export type DynamicCssVariableLowering = {
 export type NormalizedJsxCssPropElement = {
   readonly cssAttribute: t.JSXAttribute;
   readonly cssExpression: t.Expression;
+  readonly cssShapeExpression: t.Expression;
   readonly cssValueClassification: CssPropValueClassification;
   readonly cssLoweringMode: CssPropLoweringMode;
   readonly dynamicCssVariableRule: DynamicCssVariableRule | null;

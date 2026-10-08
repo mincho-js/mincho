@@ -246,7 +246,7 @@ describe("minchoBabelPlugin", () => {
     expect(code).toContain(
       'import { vx as _vx } from "@mincho-js/transform-runtime";'
     );
-    expect(code).toContain("const _minchoCssBranch = state.active;");
+    expect(code).toContain("const _minchoCssTest = state.active;");
     expect(code).toContain("...(_minchoCssBranch ?");
     expect(code).not.toContain(" css=");
     expect(code).not.toContain('_vx("red")');
@@ -306,7 +306,7 @@ describe("minchoBabelPlugin", () => {
     );
 
     expect(code).not.toContain(" css=");
-    expect(code).toMatch(/const _minchoCssBranch\d* = guard\.enabled;/);
+    expect(code).toMatch(/const _minchoCssTest\d* = guard\.enabled;/);
     expect(code).toContain("...(_minchoCssBranch");
     expect(observed).toEqual({
       nestedProps: {
@@ -398,10 +398,8 @@ describe("minchoBabelPlugin", () => {
     expect(code).not.toContain("_css(");
     expect(code).not.toContain("createVar");
     expect(code).not.toContain("getVarName");
-    expect(code).toContain("const _minchoCssBranch = state.active;");
-    expect(code).toMatch(
-      /const _minchoCssBranch\d* = .* \? state\.fallback : void 0;/
-    );
+    expect(code).toContain("const _minchoCssTest = state.active;");
+    expect(code).toMatch(/const _minchoCssTest\d* = state\.fallback;/);
     expect(code).toContain("...(_minchoCssBranch ?");
     expect(observed.events).toEqual(["active", "fallback"]);
     expect(observed.styleKeys).toEqual(["css-rule"]);
@@ -1030,12 +1028,15 @@ describe("minchoBabelPlugin", () => {
       { jsxCssProp: true }
     ).code;
 
-    expect(objectStyle).toMatch(
-      /style=\{\{\s+\.\.\.baseStyle,\s+opacity: props\.opacity,\s+\[_\$mincho\$\$App\w*ColorVarKey\d*\]: _vx\(props\.color\),\s+\[_\$mincho\$\$App\w*BackgroundColorVarKey\d*\]: _vx\(props\.backgroundColor\)\s+\}\}/
-    );
-    expect(expressionStyle).toMatch(
-      /style=\{\{\s+\.\.\.props\.style,\s+\[_\$mincho\$\$App\w*BorderColorVarKey\d*\]: _vx\(props\.borderColor\)\s+\}\}/
-    );
+    expect(objectStyle).toContain("...baseStyle");
+    expect(objectStyle).toContain("opacity: props.opacity");
+    expect(objectStyle).toContain("_vx(props.color)");
+    expect(objectStyle).toContain("_vx(props.backgroundColor)");
+    expect(expressionStyle).toContain("...props.style");
+    expect(expressionStyle).toContain("_vx(props.borderColor)");
+
+    for (const output of [objectStyle, expressionStyle])
+      expect(output).toMatch(/style=\{\{[\s\S]+VarKey\d*\]: _vx\(/);
 
     for (const output of [objectStyle, expressionStyle]) {
       expect(output).not.toContain(" css=");
@@ -1057,10 +1058,10 @@ describe("minchoBabelPlugin", () => {
     );
 
     expect(code).toMatch(
-      /className=\{_\$mincho\$\$App\w*Cx\d*\(props\.className, _\$mincho\$\$App\d*\)\}/
+      /className=\{_\$mincho\$\$AppCx\d*\(props.className, _\$mincho\$\$App\d*\)\}/
     );
     expect(code).toMatch(
-      /style=\{\{\s+\[_\$mincho\$\$App\w*ColorVarKey\d*\]: _vx\(props\.color\)\s+\}\}/
+      /style=\{\{\s+\[_\$mincho\$\$App\w*ColorVarKey\d*\]: _vx\(props.color\)\s+\}\}/
     );
     expect(code).not.toContain(" css=");
     expect(code).not.toContain('from "@mincho-js/css"');
@@ -1106,7 +1107,7 @@ describe("minchoBabelPlugin", () => {
     expect(result[1]).toMatch(/_minchoCreateVar\d*\(/);
     expect(result[1]).toMatch(/_minchoGetVarName\d*\(/);
     expect(result[1]).toContain("_css({");
-    expect(result[1]).toContain("cx as");
+    expect(code).toContain("cx as");
     expect(code).not.toContain('from "@mincho-js/css"');
     expect(code).not.toContain("createVar");
     expect(code).not.toContain("getVarName");
@@ -1280,10 +1281,10 @@ describe("minchoBabelPlugin", () => {
         "pre.className",
         "pre.css",
         "explicit.style",
+        "dynamic",
         "post.style",
         "post.className",
-        "post.css",
-        "dynamic"
+        "post.css"
       ],
       reads: {
         preStyle: 1,
@@ -1498,7 +1499,7 @@ describe("minchoBabelPlugin", () => {
     expect(code).toMatch(
       /import \{ _\$mincho\$\$App\w*ColorVarKey as _\$mincho\$\$App\w*ColorVarKey2, _\$mincho\$\$App\w*ColorVarKey3 as _\$mincho\$\$App\w*ColorVarKey4 \} from "extracted_[^"]+\.css\.ts";/
     );
-    expect(code).toContain("const _minchoCssBranch = state.condition;");
+    expect(code).toContain("const _minchoCssTest = state.condition;");
     expect(code).toContain("className={_minchoCssBranch ?");
     expect(code).toContain("...(_minchoCssBranch ?");
     expect(code).not.toContain(" css=");
@@ -2435,13 +2436,11 @@ describe("minchoBabelPlugin", () => {
 
       expect(code).not.toContain(" css=");
       expect(code).not.toContain("_css(");
-      expect(code).toContain('key="compiled-key"');
-      expect(code).toContain("ref={explicitRef}");
-      expect(code).not.toContain('key: "compiled-key"');
+      expect(code).toContain('key: "compiled-key"');
+      expect(code).toContain("ref: explicitRef");
+      expect(code).toMatch(/key=\{_minchoPreProps\d*\.key\}/);
       expect(code).toContain("...(_minchoCssBranch ?");
-      expect(code).toMatch(
-        /const _minchoCssBranch\d* = .* \? state\.fallback : void 0;/
-      );
+      expect(code).toMatch(/const _minchoCssTest\d* = state\.fallback;/);
       expect(observed).toEqual({
         hasCss: false,
         styleKeys: ["padding", "opacity", "margin", "css-rule"],

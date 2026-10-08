@@ -642,11 +642,10 @@ describe("minchoBabelPlugin", () => {
     };
 
     expect(code).not.toContain(" css=");
-    expect(code).toContain('key="before-key"');
-    expect(code).toContain("ref={explicitRef}");
-    expect(code).toContain('key="after-key"');
-    expect(code).not.toContain('key: "before-key"');
-    expect(code).not.toContain('key: "after-key"');
+    expect(code).toContain('key: "before-key"');
+    expect(code).toContain("ref: explicitRef");
+    expect(code).toContain('key: "after-key"');
+    expect(code).toMatch(/key=\{_mincho\w*Props\d*\.key\}/);
     expect(observed.before).toMatchObject({
       key: "before-key",
       ref: "explicit-ref",

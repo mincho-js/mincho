@@ -688,9 +688,14 @@ export function createUnsupportedReexportStaticCssEvalProvider(): StaticCssEvalP
 
 export function runJsxCssPropRuntime(
   source: string,
-  returnStatement: string
+  returnStatement: string,
+  runtimeCodegen = false
 ): unknown {
-  const { code } = babelTransform(source, { jsxCssProp: true });
+  const { code } = babelTransform(source, {
+    jsxCssProp: true,
+    optimize: { runtimeCodegen }
+  });
+
   const result = transformSync(code, {
     plugins: [jsxRuntimeTransformPlugin()],
     presets: [typescriptPresetPath],

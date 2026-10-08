@@ -29,7 +29,7 @@ const config = {
 };
 
 const { propVars, ...classConfig } = config;
-const factory = `import {createCompiledRuntimeFn as make} from "@mincho-js/css/rules/createRuntimeFn"; export const recipe = make(${JSON.stringify(classConfig)}, ${JSON.stringify(propVars)});`;
+const factory = `import {createCompiledRuntimeFn as make} from "@mincho-js/css/rules/createRuntimeFn"; export const recipe = make(${JSON.stringify(classConfig)}, ${JSON.stringify(propVars)}); export var red="red", blue="blue", on="on", off="off", widthVar="--width";`;
 
 async function optimize(code: string, compilationCache?: CompilationCache) {
   const result = await new RuntimeOptimizations().transform(
@@ -74,6 +74,11 @@ function styledModule(source: string) {
   const module = { exports };
   const modules: Record<string, unknown> = {
     "/extracted_rules.css.ts": {
+      red: "red",
+      blue: "blue",
+      on: "on",
+      off: "off",
+      widthVar: "--width",
       recipe: createCompiledRuntimeFn(
         config as unknown as Parameters<typeof createCompiledRuntimeFn>[0],
         config.propVars
@@ -120,6 +125,91 @@ function renderStyled(
 }
 
 describe("runtime compiler optimizations", () => {
+  it("inlines literal sidecar variable keys without changing value evaluation", async () => {
+    const source =
+      'import {widthVar} from "/extracted_rules.css.ts"; export const run=read=><div style={{[widthVar]:read()}}/>;';
+
+    const code = await optimize(source);
+
+    expect(code).toContain('"--width"');
+    expect(code).not.toContain("[widthVar]");
+
+    const value = {
+      toString() {
+        throw new Error("coerced");
+      }
+    };
+
+    let reads = 0;
+
+    expect(
+      styledModule(code).run(() => {
+        reads++;
+
+        return value;
+      }).props
+    ).toEqual({ style: { "--width": value } });
+    expect(reads).toBe(1);
+  });
+
+  it("precomputes static class joins while preserving nested guard order", async () => {
+    const source =
+      'import {red,blue,on,off} from "/extracted_rules.css.ts"; export const run=(a,b,c)=><div className={(a()?red:b()?blue:on)+" "+(c()?on:off)}/>;';
+
+    const code = await optimize(source);
+
+    expect(code).toContain("_minchoClassNames");
+
+    const before = styledModule(source).run;
+    const after = styledModule(code).run;
+
+    for (let mask = 0; mask < 8; mask++) {
+      const events: number[] = [];
+      const args = [0, 1, 2].map((bit) => () => {
+        events.push(bit);
+
+        return !!(mask & (1 << bit));
+      });
+
+      const expected = before(...args).props;
+      const order = events.splice(0);
+
+      expect(after(...args).props).toEqual(expected);
+      expect(events).toEqual(order);
+    }
+  });
+
+  it("retains unknown class coercions and oversized combination tables", async () => {
+    const dynamic =
+      'import {red,blue} from "/extracted_rules.css.ts"; export const run=(flag,input)=><div className={(flag?red:blue)+input}/>;';
+
+    expect(await optimize(dynamic)).not.toContain("_minchoClassNames");
+
+    const suffix = "x".repeat(4096);
+
+    expect(
+      await optimize(
+        'import {red,blue} from "/extracted_rules.css.ts"; export const run=flag=><div className={(flag?red:blue)+' +
+          JSON.stringify(suffix) +
+          "}/>;"
+      )
+    ).not.toContain("_minchoClassNames");
+
+    const events: string[] = [];
+    const input = {
+      toString() {
+        events.push("coerce");
+
+        return " tail";
+      }
+    };
+
+    expect(
+      styledModule(await optimize(dynamic)).run(true, input).props
+    ).toEqual({ className: "red tail" });
+    expect(events).toEqual(["coerce"]);
+  });
+
   it("folds finite recipe selections with canonical output and exact short circuit evaluation", async () => {
     const source =
       recipeImport +

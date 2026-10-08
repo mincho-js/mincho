@@ -42,6 +42,8 @@ export function createDynamicCssVariableLowering(options: {
   readonly path: NodePath<t.JSXOpeningElement>;
   readonly rule: DynamicCssVariableRule;
   readonly needsClassNameMerge: boolean;
+  readonly nonInheritingCssVars?: boolean;
+  readonly preparedValues?: ReadonlySet<string>;
 }): DynamicCssVariableLowering {
   const programParent = options.path.scope.getProgramParent() as ProgramScope;
   const nearestIdentifier = getNearestIdentifier(options.path);
@@ -127,7 +129,8 @@ export function createDynamicCssVariableLowering(options: {
         t.cloneNode(importedVariableKeyIdentifier),
         createDynamicCssVariableValueExpression(
           leaf.valueFragment,
-          vxIdentifier
+          vxIdentifier,
+          options.preparedValues
         ),
         true
       )
@@ -237,12 +240,19 @@ export function createDynamicCssVariableLowering(options: {
   };
 }
 
-function createDynamicCssVariableValueExpression(
+export function createDynamicCssVariableValueExpression(
   fragment: DynamicCssVariableValueFragment,
-  vxIdentifier: t.Identifier
+  vxIdentifier: t.Identifier,
+  preparedValues?: ReadonlySet<string>
 ): t.Expression {
   switch (fragment.kind) {
     case "direct-value":
+      if (
+        t.isIdentifier(fragment.expression) &&
+        preparedValues?.has(fragment.expression.name)
+      )
+        return t.cloneNode(fragment.expression);
+
       return t.callExpression(t.cloneNode(vxIdentifier), [
         t.cloneNode(fragment.expression)
       ]);
@@ -256,11 +266,13 @@ function createDynamicCssVariableValueExpression(
         t.cloneNode(fragment.test),
         createDynamicCssVariableValueExpression(
           fragment.consequent,
-          vxIdentifier
+          vxIdentifier,
+          preparedValues
         ),
         createDynamicCssVariableValueExpression(
           fragment.alternate,
-          vxIdentifier
+          vxIdentifier,
+          preparedValues
         )
       );
     default: {

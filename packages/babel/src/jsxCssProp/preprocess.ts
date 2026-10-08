@@ -25,6 +25,7 @@ import {
   evaluateCssPropPartialEvalPolicy,
   getCssPropDynamicCssVariableRule,
   getCssPropShapeBranchExpression,
+  getCssPropShapeExpression,
   getCssPropSidecarHoistabilityRoute,
   getStaticCssEvalOwnerFile,
   routeCssPropLowering,
@@ -36,6 +37,10 @@ import {
   createDynamicCssVariableLowering,
   createDynamicCssVariableStyleAttributeValue
 } from "./dynamicCssVariableCodegen.js";
+import {
+  canSplitStaticConditions,
+  createOrderedCssLowering
+} from "./orderedCss.js";
 import {
   assertSupportedSpreadAggregationContext,
   transformSpreadAggregatedCssProp
@@ -79,18 +84,22 @@ export function preprocessJsxCssProp(
 
       const normalizedElement: NormalizedJsxCssPropElement = {
         ...analyzedElement,
-        dynamicCssVariableLowering: rule
-          ? createDynamicCssVariableLowering({
-              path: openingElementPath,
-              rule,
-              needsClassNameMerge:
-                analyzedElement.classNameAttribute !== null ||
-                hasSpread ||
-                (rule.kind === "branch" &&
-                  (analyzedElement.attributesBeforeCss.length > 0 ||
-                    analyzedElement.attributesAfterCss.length > 0))
-            })
-          : null
+        dynamicCssVariableLowering:
+          createOrderedCssLowering(openingElementPath, analyzedElement, {
+            splitConditions: state.opts.optimize?.runtimeCodegen === true
+          }) ??
+          (rule
+            ? createDynamicCssVariableLowering({
+                path: openingElementPath,
+                rule,
+                needsClassNameMerge:
+                  analyzedElement.classNameAttribute !== null ||
+                  hasSpread ||
+                  (rule.kind === "branch" &&
+                    (analyzedElement.attributesBeforeCss.length > 0 ||
+                      analyzedElement.attributesAfterCss.length > 0))
+              })
+            : null)
       };
 
       const { cssAttribute, classNameAttribute, styleAttribute } =
@@ -149,7 +158,11 @@ export function preprocessJsxCssProp(
 
       attributes.splice(attributes.indexOf(cssAttribute), 1);
 
-      if (dynamicCssVariableLowering) {
+      if (
+        dynamicCssVariableLowering &&
+        (dynamicCssVariableLowering.styleProperties.length > 0 ||
+          (dynamicCssVariableRuntimeLowering?.styleProperties.length ?? 0) > 0)
+      ) {
         const runtimeLowering = getDynamicCssVariableRuntimeLowering(
           dynamicCssVariableLowering
         );
@@ -313,6 +326,31 @@ function analyzeOpeningElement(
     partialEvalResult
   );
 
+  const cssShapeExpression = getCssPropShapeExpression(partialEvalResult);
+  if (
+    state.opts.optimize?.runtimeCodegen === true &&
+    canSplitStaticConditions(cssShapeExpression)
+  ) {
+    // Avoid constructing the Cartesian product only to split it in codegen.
+    return {
+      cssAttribute,
+      cssExpression: cssShapeExpression,
+      cssShapeExpression,
+      cssValueClassification: "branch-css-rule",
+      cssLoweringMode: {
+        kind: "ast-static-rule",
+        cssValueClassification: "branch-css-rule"
+      },
+      dynamicCssVariableRule: null,
+      classNameAttribute: classNameAttributes[0] ?? null,
+      styleAttribute: styleAttributes[0] ?? null,
+      attributesBeforeCss,
+      attributesAfterCss,
+      hasSpreadBeforeCss,
+      hasSpreadAfterCss
+    };
+  }
+
   const cssShapeBranchExpression = getCssPropShapeBranchExpression({
     partialEvalResult,
     scope: openingElementPath.scope
@@ -362,6 +400,7 @@ function analyzeOpeningElement(
   return {
     cssAttribute,
     cssExpression: route.cssExpression,
+    cssShapeExpression,
     cssValueClassification: route.cssValueClassification,
     cssLoweringMode: route.cssLoweringMode,
     dynamicCssVariableRule,

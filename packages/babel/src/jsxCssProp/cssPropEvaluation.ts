@@ -240,7 +240,7 @@ function shouldPreferPartialEvalDeoptDiagnostic(
   }
 }
 
-function getCssPropShapeExpression(
+export function getCssPropShapeExpression(
   result: CssPropPartialEvalPolicyResult
 ): t.Expression {
   return result.deoptReasons.some(isFailClosedShapeDeoptReason)
