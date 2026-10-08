@@ -26,7 +26,7 @@ recipe result to it therefore uses the new canonical recipe class order.
 | #   | Reduction                                   | Eligibility and fallback                                                                                                                                                                  |
 | --- | ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 1   | Pure `@mincho-js/css/classname` entry       | Generated `cx` imports use a runtime-only ESM/CJS entry; public root `cx` retains the same function identity.                                                                             |
-| 2   | Inline `recipe.props`                       | A known compiled recipe and literal, known prop keys; evaluates inputs first and preserves ordinary assignment behavior. Unknown keys, escapes and spreads keep the method call.          |
+| 2   | Separate `recipe.props`                     | Closed compiled recipes use direct assignments for known literal keys and a small mapping helper for dynamic inputs. Escaped or mutable recipes retain the method.                        |
 | 3   | Simplify `vx`                               | Syntax-proven primitive values only; unknown values retain the scalar guard. TypeScript annotations are not proof.                                                                        |
 | 4   | Elide redundant object copies               | Fresh data-only object literals or conditional fresh literals; getters, spreads, computed keys and `__proto__` remain untouched.                                                          |
 | 5   | Adaptive compiled recipe cache              | Immutable compiler-produced configurations, with precomputed key order and bounded result caching for sufficiently complex, reused recipes. Direct factory use retains the uncached path. |
@@ -42,6 +42,46 @@ recipe result to it therefore uses the new canonical recipe class order.
 | 15  | Non-inheriting generated variables          | Experimental: only generated variables proven to be consumed on the same supported intrinsic element.                                                                                     |
 | 16  | Share CSS prefixes across chunks            | Experimental Vite/esbuild finalization with ordered shared CSS, asset and loading checks, and conservative fallback.                                                                      |
 | 17  | Reduce scoped `cx` lookup and merge work    | Normalized tuple caching with adaptive prediction, second-chance eviction and direct token scanning; mutable inputs retain normalization and getter evaluation.                           |
+
+## Compiler helpers and conditional CSS
+
+Compiled recipes serialize class configuration and the prop-to-variable table
+separately. With `runtimeCodegen` enabled, a closed `.props()`-only use retains
+only its table and `@mincho-js/css/rules/mapVarProps`. Known mapping keys can be
+lowered to direct assignments instead. Class-only uses retain the class factory
+without the mapping helper. Escaped or mutated recipes keep their full runtime.
+CSS authoring effects and their order survive removal of unused JavaScript data.
+Unused built-in authoring imports already evaluated in the sidecar are removed
+even with `verbatimModuleSyntax`. Explicit side-effect imports and remaining
+runtime references are preserved.
+
+`mapVarProps(table, input)` returns a fresh ordinary object and forwards values
+unchanged. It uses `Object.entries`: all enumerable string-keyed input values,
+including unknown keys, are read before mapping begins. Symbols are ignored.
+It does not perform `vx` normalization. The mutable direct factory additionally
+preserves per-entry reads of `config.propVars`, after input getter evaluation.
+
+Independent top-level static JSX declarations can use separate plain CSS branch
+classes without generating every combined CSS rule. Shorthands, logical/physical
+overlap, vendor aliases and nested rules remain grouped. Dynamic CSS values and
+branch tests are evaluated in source order, including their position between
+JSX spreads and explicit `key`/`ref` attributes. This does not add a CSS-variable
+encoding of boolean conditions; ordinary dynamic scalar variables still use `vx`.
+Staged JSX also captures the element type before attribute evaluation, preserving
+namespace getters and component temporal-dead-zone errors. Simple CSS-only JSX
+stays inline.
+
+Small, proven class combinations are joined once at build time and selected by
+index at runtime. A module may retain at most 256 table entries and 4,096 UTF-16
+units of class string payload; this is not a heap-byte limit. Unproved or larger
+joins keep ordinary concatenation. Immutable generated CSS variable names are
+inlined into style object keys, while their value expressions retain their order.
+
+`finishCssProps` and fixed-arity variable writers remain experiments in the
+benchmark scripts: neither met the bundle/runtime/allocation acceptance criteria.
+No generic array-based writer or runtime function generator is shipped. See the
+[compiler helper measurements](./performance-runtime.md#compiler-helpers-and-conditional-css-2026-09-21)
+for their costs and the added build analysis cost.
 
 ## Options
 

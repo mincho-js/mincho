@@ -951,3 +951,152 @@ Regression tests cover normalized-value reuse and reentry, array accessors and
 captured length, falsy slots and overflow past eight arguments, prefix-index
 conversion and sampled-hash collisions. The native benchmark now also exposes
 `array-single` as a repeatable scenario.
+
+## Compiler helpers and conditional CSS, 2026-09-21
+
+This comparison uses the working implementation immediately before the helper
+changes, saved with its build artifacts, rather than assuming that `HEAD` includes
+all local work. The starting commit was `8f3c9211`; the unrelated untracked cx
+reports were preserved. The local baseline and raw report are
+`/var/tmp/mincho-compiler-helpers-before-yahiv6n1` and
+`/var/tmp/mincho-helpers-measure/final-3/report.json`. They are measurement artifacts,
+not repository dependencies.
+
+Node 24.21.0, Yarn 4.18.0, Intel i5-8265U. Actual Mincho/esbuild consumers were built
+serially in both module formats. Each runtime case used three fresh processes,
+five warmup blocks, then nine samples of 20,000 calls. Tables below report the
+median of process medians and their min–max range. Allocation sampling ran
+separately for 10,000 calls; retained-result samples kept 10,000 results alive
+across GC and released them between samples. These are sampled allocation and
+retained heap measurements, not peak heap or UTF-16 string budgets. JSX fixtures
+use a small element factory returning props: they measure generated assembly,
+not React rendering or application performance.
+
+### Adopted changes
+
+`mapVarProps` has a pure CSS runtime subpath. Serialized class data and mapping
+tables are separate, so dynamic `.props()`-only consumers drop the class runtime,
+variant/compound data and caches. Known literal keys still inline. Closed class
+calls can use the class-only factory; observed metadata or escaped/mutable
+recipes retain their runtime. The mutable direct factory preserves the original
+per-entry `config.propVars` access, including changes made by input getters.
+
+Independent static JSX conditions become ordinary CSS branch classes. Five
+binary declarations produce 10 rules instead of 32 combined rules. Small class
+joins are precomputed under a module budget of 256 entries / 4,096 UTF-16 units,
+avoiding per-call string allocation. Larger joins retain concatenation and the
+table adds persistent module data. Overlapping properties and nested rules remain
+grouped. Dynamic CSS variables keep scalar normalization; inlining their proven
+names removes computed property construction without adding writer calls.
+
+| Actual consumer | ESM raw / gzip, before → after (B) | CommonJS raw / gzip, before → after (B) |
+| --- | ---: | ---: |
+| Literal `.props()` | 110 / 118 → 110 / 118 | 527 / 342 → 527 / 342 |
+| Dynamic `.props()` only | 4,157 / 1,759 → 215 / 179 | 4,574 / 1,933 → 632 / 393 |
+| Classes only | 4,159 / 1,764 → 3,990 / 1,687 | 4,576 / 1,939 → 4,407 / 1,865 |
+| Classes and dynamic props | 4,195 / 1,779 → 4,181 / 1,769 | 4,612 / 1,956 → 4,598 / 1,945 |
+| Five independent conditions | 1,568 / 701 → 1,853 / 276 | 1,999 / 917 → 2,270 / 514 |
+| Four variables × 10 sites | 2,053 / 565 → 1,791 / 393 | 2,492 / 816 → 2,208 / 635 |
+| Eight variables × 10 sites | 3,333 / 856 → 2,751 / 521 | 3,772 / 1,104 → 3,168 / 767 |
+| Sixteen variables × 10 sites | 6,653 / 1,487 → 5,431 / 845 | 7,092 / 1,749 → 5,848 / 1,104 |
+
+Five-condition CSS shrinks from 2,881 / 281 to 269 / 151 raw/gzip bytes.
+Its combined ESM JS+CSS is 4,449 → 2,122 raw and 982 → 427 gzip bytes (the
+compressed sizes are summed across the two assets). The precomputed class table
+increases raw JavaScript but reduces combined bytes. Other fixtures' CSS is
+unchanged. The literal `.props()` artifacts are byte-identical.
+
+| ESM call | Before, ns [range] | After, ns [range] | Sampled allocated B/call, before → after |
+| --- | ---: | ---: | ---: |
+| Literal `.props()` | 45.1 [45.1–48.4] | 49.3 [45.3–49.5] | 57.3 → 60.7 |
+| Dynamic `.props()` | 3,707.4 [3,684.0–3,792.8] | 3,826.6 [3,605.9–3,854.3] | 2,003.5 → 2,014.4 |
+| Classes only | 333.8 [331.4–357.7] | 330.2 [322.9–331.4] | 201.3 → 194.2 |
+| Classes and props | 4,152.1 [4,132.7–4,314.0] | 4,259.2 [4,071.4–4,301.3] | 2,246.8 → 2,245.1 |
+| Five conditions | 71.5 [66.5–81.3] | 45.8 [42.6–45.8] | 57.6 → 36.2 |
+| Four variables | 606.5 [592.5–691.9] | 91.1 [85.4–107.2] | 96.1 → 98.7 |
+| Eight variables | 1,478.4 [1,416.2–1,489.5] | 58.0 [56.4–122.0] | 204.3 → 138.1 |
+| Sixteen variables | 3,335.4 [3,243.3–3,352.0] | 101.0 [98.9–103.5] | 410.2 → 199.7 |
+
+Dynamic mapping deliberately receives many unknown keys, whose values must still
+be read. It has no demonstrated runtime speedup: its median is about 3% higher
+with overlapping ranges. Literal-mapping timing differences are noise on
+identical code. Retained results are unchanged for props (~64 B), classes
+(~120 B), both (~232 B) and conditions (~40 B). Eight-variable results decrease
+from ~169 to ~136 B; sixteen-variable results from ~217 to ~200 B.
+
+Closed class-only factory creation changes from 650.7 to 55.4 ns, retaining
+832 → 136 B per factory because unused metadata setup disappears. Full factories
+measure 649.5 → 624.5 ns but retain **832 → 872 B**; the extra wrapper environment
+is a cost when all features remain observable. Mapping-only bundles create no
+class factory. First-call medians for dynamic mapping are 248 → 245 µs
+(ranges 187–270 / 204–245); eight-variable calls are 215 → 211 µs
+(175–289 / 197–216). Five-condition first calls measure 326 → 166 µs
+(274–330 / 155–167). Import/loader heap deltas are noisy and do not isolate
+helper memory; they must not be interpreted as a fixed module-memory saving.
+
+### Optional helpers not adopted
+
+The experiment transforms actual generated output, keeping input evaluation at
+its original position. There is no fixed usage-count heuristic in production.
+
+| Candidate | ESM inline → candidate raw / gzip (B) | CommonJS inline → candidate raw / gzip (B) |
+| --- | ---: | ---: |
+| `finishCssProps`, 1 site | 1,209 / 608 → 1,247 / 624 | 1,626 / 820 → 1,664 / 836 |
+| `finishCssProps`, 10 sites | 3,976 / 812 → 3,897 / 827 | 4,393 / 1,022 → 4,314 / 1,035 |
+| `finishCssProps`, 50 sites | 16,362 / 1,578 → 15,765 / 1,591 | 16,795 / 1,808 → 16,198 / 1,821 |
+| Mutating owned-props finish, 50 sites | 16,362 / 1,578 → 15,458 / 1,659 | 16,795 / 1,808 → 15,891 / 1,862 |
+| Fixed-arity writer, 8 variables × 10 sites | 2,751 / 521 → 3,281 / 605 | 3,168 / 767 → 3,698 / 852 |
+
+At 50 sites, copying finish reduces ESM call time from 2,419 to 1,692 ns but
+adds one object and raises sampled allocation from 664 to 728 B/call. The owned
+version removes two rest copies but adds two descriptor objects to preserve
+ordinary own-property semantics and ordering; it measures 2,902 ns, 1,166 B
+allocated and 684 B retained per result, versus 268 B retained inline. Both fail
+the gzip/allocation criteria.
+
+Each of the ten variable sites has a distinct exact schema. Fixed-arity writers
+therefore share no schemas, increase both bundle sizes and provide no reliable
+speed benefit (eight variables: 93 ns [89–121], versus inline 58 [56–122]).
+An isolated key-inlining experiment explained the apparent initial writer gain:
+literal keys alone were smaller and faster. A generic array/schema writer was
+not introduced. Neither experiment uses runtime code generation in shipped code.
+
+The original complex before/after-spread fixture failed actual builds with
+"Invalid exports" because a generated class-merging function reached the sidecar.
+The corrected pure-runtime import builds successfully. Optional finish candidates
+are compared with that corrected inline output; no before-change speedup is
+claimed for a fixture that could not build.
+
+### Build cost and reproduction
+
+Additional graph analysis is a build-time tradeoff. Three warm, uncached ESM
+build samples measured median 225 → 175 ms for five independent conditions,
+but 224 → 270, 259 → 339 and 316 → 444 ms for 4/8/16 variables across ten sites.
+Those variable cases add about 21–40% build time; they are not build-time wins.
+These are small fixture builds, not whole-application or disk-cache timings.
+
+Build both the saved baseline and the current checkout before running:
+
+```sh
+mise exec -- node scripts/benchmark-compiler-helpers.mjs BEFORE_ROOT OUTPUT_DIRECTORY
+mise exec -- node scripts/benchmark-compiler-helpers/validate.mjs OUTPUT_DIRECTORY
+MINCHO_BROWSER_BINARY=/usr/bin/chromium mise exec -- node scripts/benchmark-compiler-helpers/browser.mjs OUTPUT_DIRECTORY
+```
+
+The driver records source/artifact hashes, build failures, all process samples,
+both module formats and candidate schema counts. It rejects source/artifact
+changes during measurement. Keep builds and tests out of the timed run.
+Regression coverage checks getter/Proxy/enumeration behavior, unknown keys,
+inherited setters, fresh results, exceptions, lazy guards, spread/style order,
+symbols, `__proto__`, key/ref, component type evaluation and temporal dead zones.
+Chromium also checks 128 before/after computed-style cases, including shorthand,
+logical/physical overlap, selectors and media rules.
+
+Validation passed: 773 Babel, 505 CSS (one existing skip), 330 integration,
+78 esbuild, 64 Vite and 3 transform-runtime tests, plus type checking, lint and
+doctor with zero new diagnostics. The CSS timeout cases passed on a serial retry.
+The differential script passed 1,576 comparisons across ESM/CommonJS, including
+the optional candidates. Packed npm and strict-PnP consumers passed import/type,
+tree-shaking, Vite/esbuild and browser checks. After the final import cleanup and
+JSX tag fixes, a fresh release build reproduced all 45 measured ESM/CommonJS/CSS
+artifacts byte for byte; those artifact checks are not additional timing samples.
