@@ -107,3 +107,13 @@ export {
   resolveOptimizationOptions as internalResolveOptimizationOptions,
   type OptimizationMode
 } from "./optimizationMode.js";
+
+export {
+  planCssChunkSharing as internalPlanCssChunkSharing,
+  resolveCssChunkSharingOptions as internalResolveCssChunkSharingOptions,
+  isShareableCss as internalIsShareableCss,
+  type MinchoCssChunkSharingOptions,
+  type CssSharingBoundary as InternalCssSharingBoundary,
+  type CssSharingModule as InternalCssSharingModule,
+  type CssSharingGroup as InternalCssSharingGroup
+} from "./cssChunkSharing.js";

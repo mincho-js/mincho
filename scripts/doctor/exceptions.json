@@ -1190,13 +1190,13 @@
     "expires": "2026-12-31"
   },
   {
-    "id": "integration-runtime-codegen-test-tsx-loader",
-    "file": "packages/integration/src/runtimeCodegen.test.ts",
+    "id": "esbuild-css-sharing-test-file-loader",
+    "file": "packages/esbuild/src/cssSharing.test.ts",
     "type": "warning",
     "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
-    "source": "loader: \"tsx\",",
+    "source": "loader: { \".png\": \"file\" },",
     "count": 1,
-    "reason": "This differential runtime test uses esbuild's built-in TSX parser before executing original and optimized React components; it does not load a Webpack dependency.",
+    "reason": "The native esbuild fixture maps PNG assets to its built-in file loader; no Webpack loader package is resolved.",
     "expires": "2026-12-31"
   },
   {
@@ -1207,6 +1207,56 @@
     "source": "loader: \"tsx\",",
     "count": 1,
     "reason": "This key/ref regression uses esbuild's built-in TSX parser before executing compiled JSX with React's development runtime; it does not load a Webpack dependency.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "esbuild-css-sharing-test-css-loader",
+    "file": "packages/esbuild/src/cssSharing.test.ts",
+    "type": "warning",
+    "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
+    "source": "loader: \"css\"",
+    "count": 1,
+    "reason": "The custom esbuild onLoad fixture returns CSS syntax using a built-in loader name, not a dependency specifier.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "esbuild-css-sharing-replay-css-loader",
+    "file": "packages/esbuild/src/cssSharing.ts",
+    "type": "warning",
+    "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
+    "source": "loader: \"css\"",
+    "count": 1,
+    "reason": "The CSS-only replay entry uses the native esbuild CSS parser; this is not a Webpack loader package.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "esbuild-css-sharing-replay-input-loader",
+    "file": "packages/esbuild/src/cssSharing.ts",
+    "type": "warning",
+    "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
+    "source": "loader: input.result.loader,",
+    "count": 1,
+    "reason": "Replay preserves an already captured native esbuild OnLoadResult loader enum; it performs no package lookup.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "vite-css-sharing-module-classification",
+    "file": "packages/vite/src/cssSharing.ts",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": "(!id.includes(\"node_modules\") &&",
+    "count": 1,
+    "reason": "This is a conservative module-ownership classification that excludes dependency CSS; it does not resolve or open a package through node_modules.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "integration-runtime-codegen-test-tsx-loader",
+    "file": "packages/integration/src/runtimeCodegen.test.ts",
+    "type": "warning",
+    "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
+    "source": "loader: \"tsx\",",
+    "count": 1,
+    "reason": "This differential runtime test uses esbuild's built-in TSX parser before executing original and optimized React components; it does not load a Webpack dependency.",
     "expires": "2026-12-31"
   },
   {

@@ -4,7 +4,12 @@ import {
   mergeDefineRulesPackageGraphs,
   type DefineRulesPackageGraph
 } from "@mincho-js/integration";
-import type { BuildOptions, OnLoadArgs, OnLoadResult } from "esbuild";
+import type {
+  BuildOptions,
+  OnLoadArgs,
+  OnLoadResult,
+  OnResolveResult
+} from "esbuild";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -141,6 +146,27 @@ export interface BuildTransaction {
   graphs: Map<string, DefineRulesPackageGraph>;
   styles: Map<string, Set<string>>;
   graphParts?: Map<string, Map<string, DefineRulesPackageGraph>>;
+
+  /** Inputs already evaluated by the two native passes, never fresh plugin calls. */
+  cssReplay?: {
+    inputs: Map<string, CssReplayInput>;
+    resolutions: Map<string, OnResolveResult>;
+  };
+}
+
+export interface CssReplayInput {
+  args: OnLoadArgs;
+  result: OnLoadResult & { contents: string | Uint8Array };
+  replayable: boolean;
+}
+
+export function cssReplayResolutionKey(
+  namespace: string,
+  importer: string,
+  request: string,
+  kind: string
+): string {
+  return JSON.stringify([namespace, importer, request, kind]);
 }
 
 export function recordPackageGraph(

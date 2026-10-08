@@ -9,6 +9,7 @@ import {
   InternalCompilationExecution,
   type MinchoExecutionOptions,
   type MinchoCacheOptions,
+  type MinchoCssChunkSharingOptions,
   InternalRuntimeOptimizations,
   internalResolveOptimizationOptions,
   type OptimizationMode,
@@ -47,6 +48,7 @@ import { createLibraryCssLinker } from "./libraryCssLinker.js";
 import { createPackageGraphAnalysis } from "./packageGraphAnalysis.js";
 import { createViteStaticCssEvalSourceProvider } from "./staticCssEvalSourceProvider.js";
 import { commonJsRuntimePrefix, commonJsRuntimeRequest } from "./commonJs.js";
+import { createCssSharing } from "./cssSharing.js";
 import { createJsxRuntimeGuardPlugins } from "./jsxRuntimeGuards.js";
 
 type PluginContext = Rollup.PluginContext;
@@ -96,6 +98,9 @@ export interface MinchoVitePluginOptions {
 
   /** Additional build-time calls; local files are relative to root. Overrides babel.extractCalls. */
   extractCalls?: BabelOptions["extractCalls"];
+  experimental?: {
+    cssChunkSharing?: MinchoCssChunkSharingOptions;
+  };
   libraryCss?: {
     /** Exact output-relative CSS filename when build.cssCodeSplit is false. */
     fileName?: string;
@@ -109,7 +114,8 @@ export type {
   ExtractCalls,
   OptimizationMode,
   MinchoExecutionOptions,
-  MinchoCacheOptions
+  MinchoCacheOptions,
+  MinchoCssChunkSharingOptions
 } from "@mincho-js/integration";
 
 /** Include automatic JSX guard specialization after Vite's JSX transform. */
@@ -224,6 +230,7 @@ function createMinchoViteEnvironmentPlugin(
   execution.compilationCache = compilationCache;
 
   const runtimeOptimizations = new InternalRuntimeOptimizations();
+  const cssSharing = createCssSharing(_options?.experimental?.cssChunkSharing);
   const runtimeOwners = new Set<string>();
 
   // Keep our serialized imports before Vite rewrites them for the dev server.
@@ -718,6 +725,7 @@ function createMinchoViteEnvironmentPlugin(
         }
 
         diagnosticsClosed = false;
+        cssSharing.begin();
         execution.begin();
         diagnostics.begin();
 
@@ -802,6 +810,7 @@ function createMinchoViteEnvironmentPlugin(
       cancelDiagnosticsFlush();
       diagnosticsClosed = false;
       config = resolvedConfig;
+      cssSharing.configure(config);
       rootRealpath = await getRealpathOrResolvedPath(config.root);
       compilationCache?.configure(
         _options?.cache,
@@ -1031,6 +1040,8 @@ function createMinchoViteEnvironmentPlugin(
       code: string,
       id: string
     ) {
+      cssSharing.record(id, code, cssState.hasCss(id));
+
       const sidecarPath = ownedExtractedSidecarPath(id);
       if (id.startsWith("\0") && sidecarPath === undefined) return;
 
@@ -1489,10 +1500,16 @@ function createMinchoViteEnvironmentPlugin(
       }
     },
 
+    outputOptions(options) {
+      return cssSharing.outputOptions(options);
+    },
+
     renderChunk: {
       order: "post",
 
       async handler(code, chunk, outputOptions, meta) {
+        await cssSharing.renderChunk(chunk, meta.chunks);
+
         if (
           config.command !== "build" ||
           !config.build.lib ||
@@ -1596,9 +1613,11 @@ function createMinchoViteEnvironmentPlugin(
 
     buildEnd(error) {
       if (error) compilationCache?.clear();
+      else cssSharing.plan(this);
     },
 
     renderError(error) {
+      cssSharing.abort();
       abortOutputLinkers(error ?? new Error("Vite rendering failed"));
     },
 

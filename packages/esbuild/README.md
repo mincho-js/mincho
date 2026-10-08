@@ -16,6 +16,15 @@ The default `optimizationMode: "production"` enables `pureFunctions`,
 Individual `optimize` switches override the profile. See
 [compilation performance](../../docs/compilation-performance.md) for defaults,
 cache behavior and the benchmark harness.
+The [runtime optimization guide](../../docs/runtime-optimizations.md) covers
+canonical recipe order, generated helpers and the experimental runtime options.
+
+With `jsx: "automatic"` and `jsxImportSource: "@mincho-js/react"`, production
+builds use React's native JSX runtime for modules whose final JSX props are
+proven to contain no `css` property. Explicit imports or `require()` calls of
+Mincho's public JSX runtimes retain their guards. Unknown spreads and remaining
+`css` props also retain the guards. Set `optimize.jsxRuntimeGuards: false` to
+disable this optimization, or `true` to enable it in the development profile.
 
 ```ts
 import { build } from "esbuild";
@@ -120,3 +129,44 @@ through JavaScript; CSS `@import` between managed packages, including through
 intermediate CSS files, fails before publication because native CSS import
 ordering can override the JavaScript prelude. Imports of a package's own CSS
 fragments remain supported.
+
+## Experimental CSS sharing
+
+`buildWithMincho` can emit a shared stylesheet for an identical prefix of whole
+CSS modules used by multiple entries. It is disabled by default. Enabling it
+requires at least two boundaries and 4,096 source bytes by default:
+
+```ts
+const result = await buildWithMincho({
+  entryPoints: ["src/account.ts", "src/settings.ts"],
+  outdir: "dist",
+  metafile: true,
+  mincho: {
+    experimental: {
+      cssChunkSharing: { minBoundaries: 2, minBytes: 4096 },
+    },
+  },
+});
+
+// Use this ordered list when generating HTML or rendering on the server.
+const stylesheets = result.minchoCssManifest?.entries["account.js"]?.css;
+```
+
+The same data is written to `mincho-css-manifest.json`. Paths are relative to
+the output directory. Load the entry's `css` array in order: shared CSS first,
+then private CSS. The original native `cssBundle` is retained as
+`fallbackCssBundle` for integrations that do not consume this manifest. Use
+either the ordered array or the fallback stylesheet; loading both duplicates
+rules and can change the cascade.
+
+This option adds a native CSS-only build from captured inputs after the two
+existing passes. User plugins still run only for `analyze` and `emit`; URLs,
+source maps and content hashes are produced by esbuild. Additional outputs and
+the manifest participate in the same input validation and publication rollback.
+Dynamic descendants retain esbuild's existing entry CSS loading boundary.
+
+Sharing trades additional build work and published fallback files for smaller
+combined CSS transfers across entries. A first entry may need an extra CSS
+request. Global rules, CSS `@import`, unknown plugin provenance, CSS banners and
+footers, and conflicting module order keep the native output. Standalone
+`minchoEsbuildPlugins` and context/watch builds cannot enable this option.

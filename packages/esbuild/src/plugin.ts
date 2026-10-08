@@ -8,6 +8,7 @@ import {
   InternalCompilationExecution,
   type MinchoExecutionOptions,
   type MinchoCacheOptions,
+  type MinchoCssChunkSharingOptions,
   InternalRuntimeOptimizations,
   internalResolveOptimizationOptions,
   type OptimizationMode,
@@ -72,6 +73,10 @@ export interface MinchoEsbuildPluginOptions {
 
   /** Additional build-time calls; local files are relative to absWorkingDir. */
   extractCalls?: BabelOptions["extractCalls"];
+  experimental?: {
+    /** Available through the one-shot buildWithMincho API. */
+    cssChunkSharing?: MinchoCssChunkSharingOptions;
+  };
 }
 
 /**
@@ -107,6 +112,14 @@ export function minchoEsbuildPlugin({
     name: "mincho-js-esbuild",
 
     setup(build) {
+      if (
+        experimental?.cssChunkSharing &&
+        !getBuildTransaction(build.initialOptions)
+      )
+        throw new Error(
+          "cssChunkSharing requires buildWithMincho(); plugin-only and context/watch builds are unsupported."
+        );
+
       const execution = new InternalCompilationExecution(
         executionOptions,
         cacheOptions !== false

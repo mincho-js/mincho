@@ -11,6 +11,7 @@ import { dirname, isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   BuildInputSnapshot,
+  cssReplayResolutionKey,
   effectiveLoader,
   observeLoad,
   setBuildTransaction,
@@ -22,6 +23,7 @@ import {
   type MinchoEsbuildPluginOptions
 } from "./plugin.js";
 import { publishOutputs } from "./publish.js";
+import { emitSharedCss, type MinchoCssManifest } from "./cssSharing.js";
 
 type Remapper = (
   maps: SourceMapInput[],
@@ -64,10 +66,15 @@ interface Pass {
   cwd: string;
 }
 
+export interface BuildWithMinchoResult extends esbuild.BuildResult {
+  /** Load each entry's CSS list in order instead of its fallback cssBundle. */
+  minchoCssManifest?: MinchoCssManifest;
+}
+
 /** Native two-pass, one-shot build. Neither pass publishes unvalidated outputs. */
 export async function buildWithMincho(
   options: BuildWithMinchoOptions
-): Promise<esbuild.BuildResult> {
+): Promise<BuildWithMinchoResult> {
   const { mincho, plugins, ...nativeOptions } = options;
 
   if (
@@ -95,7 +102,10 @@ export async function buildWithMincho(
       phase,
       snapshot,
       graphs: new Map(),
-      styles: new Map()
+      styles: new Map(),
+      ...(phase === "emit" && mincho?.experimental?.cssChunkSharing
+        ? { cssReplay: { inputs: new Map(), resolutions: new Map() } }
+        : {})
     };
 
     const observer = createObserver(transaction, preludes, nativeOptions);
@@ -112,8 +122,11 @@ export async function buildWithMincho(
             setBuildTransaction(build.initialOptions, transaction);
           }
         },
-        ...[...(plugins?.(phase) ?? []), ...minchoEsbuildPlugins(mincho)].map(
-          observer.wrap
+        ...(plugins?.(phase) ?? []).map((plugin) =>
+          observer.wrap(plugin, false)
+        ),
+        ...minchoEsbuildPlugins(mincho).map((plugin) =>
+          observer.wrap(plugin, true)
         ),
         observer.fallback
       ]
@@ -135,6 +148,14 @@ export async function buildWithMincho(
     if (JSON.stringify(emittedPlan.get(id)) !== JSON.stringify(ordered))
       throw new Error(`Mincho CSS graph changed between passes: ${id}`);
   }
+
+  const sharing = await emitSharedCss(
+    emitted.result,
+    emitted.transaction,
+    nativeOptions,
+    emitted.cwd,
+    mincho?.experimental?.cssChunkSharing
+  );
 
   await snapshot.validate();
 
@@ -159,6 +180,7 @@ export async function buildWithMincho(
 
   return {
     ...emitted.result,
+    ...(sharing ? { minchoCssManifest: sharing } : {}),
     ...(nativeOptions.metafile ? {} : { metafile: undefined }),
     ...(nativeOptions.write === false ? {} : { outputFiles: undefined })
   };
@@ -315,7 +337,8 @@ function createObserver(
 
   const load = async (
     args: esbuild.OnLoadArgs,
-    result: esbuild.OnLoadResult | null | undefined
+    result: esbuild.OnLoadResult | null | undefined,
+    replayable: boolean
   ): Promise<esbuild.OnLoadResult | null | undefined> => {
     if (!result || result.contents === undefined) return result;
 
@@ -329,6 +352,46 @@ function createObserver(
 
     observeLoad(transaction, args, result);
 
+    const loader = result.loader ?? "js";
+
+    if (
+      transaction.cssReplay &&
+      [
+        "css",
+        "file",
+        "copy",
+        "dataurl",
+        "binary",
+        "base64",
+        "text",
+        "empty"
+      ].includes(loader)
+    ) {
+      const identity = fileIdentity(
+        `${args.namespace !== "file" ? `${args.namespace}:` : ""}${args.path}${args.suffix}`,
+        resolvedOptions.absWorkingDir ?? process.cwd()
+      );
+
+      const previous = transaction.cssReplay.inputs.get(identity);
+      transaction.cssReplay.inputs.set(identity, {
+        args,
+        result: {
+          ...result,
+          contents:
+            typeof result.contents === "string"
+              ? result.contents
+              : new Uint8Array(result.contents)
+        },
+
+        // Import attributes can create multiple native modules for one path.
+        // The CSS metafile alone cannot distinguish those load identities.
+        replayable:
+          replayable &&
+          previous?.replayable !== false &&
+          Object.keys(args.with).length === 0
+      });
+    }
+
     const prelude = preludes.get(
       fileIdentity(
         `${args.namespace !== "file" ? `${args.namespace}:` : ""}${args.path}${args.suffix}`,
@@ -340,8 +403,6 @@ function createObserver(
       injectedImports.add(
         JSON.stringify([args.namespace, args.path, specifier])
       );
-
-    const loader = result.loader ?? "js";
 
     if (!["js", "jsx", "ts", "tsx"].includes(loader)) {
       if (!prelude?.length) return result;
@@ -478,6 +539,16 @@ function createObserver(
     result: esbuild.OnResolveResult | null | undefined
   ): void => {
     if (!result?.path && !result?.external) return;
+    if (args.kind === "import-rule" || args.kind === "url-token")
+      transaction.cssReplay?.resolutions.set(
+        cssReplayResolutionKey(
+          args.namespace,
+          args.importer,
+          args.path,
+          args.kind
+        ),
+        result
+      );
 
     if (args.path.endsWith("/style.css") && result.path && !result.external) {
       const identities = transaction.styles.get(args.path) ?? new Set<string>();
@@ -520,7 +591,10 @@ function createObserver(
     );
   };
 
-  const wrap = (plugin: esbuild.Plugin): esbuild.Plugin => ({
+  const wrap = (
+    plugin: esbuild.Plugin,
+    replayable: boolean
+  ): esbuild.Plugin => ({
     name: plugin.name,
 
     setup(build) {
@@ -529,7 +603,7 @@ function createObserver(
 
         onLoad(filter, callback) {
           build.onLoad(filter, async (args) =>
-            load(args, await callback(args))
+            load(args, await callback(args), replayable)
           );
         },
 
@@ -607,11 +681,15 @@ function createObserver(
             `Mincho cannot snapshot the native loader for ${args.path}. Configure a loader or a plugin.`
           );
 
-        return load(args, {
-          contents: await transaction.snapshot.readFile(args.path),
-          loader,
-          resolveDir: dirname(args.path)
-        });
+        return load(
+          args,
+          {
+            contents: await transaction.snapshot.readFile(args.path),
+            loader,
+            resolveDir: dirname(args.path)
+          },
+          true
+        );
       });
     }
   };
