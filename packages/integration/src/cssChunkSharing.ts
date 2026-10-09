@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-/** Experimental whole-module CSS sharing. Disabled unless explicitly enabled. */
+/** Whole-module CSS sharing; default activation depends on the build adapter. */
 export type MinchoCssChunkSharingOptions =
   | boolean
   | { minBoundaries?: number; minBytes?: number };
@@ -47,6 +47,7 @@ export function planCssChunkSharing(
   boundaries: readonly CssSharingBoundary[],
   modules: ReadonlyMap<string, CssSharingModule>,
   options: { minBoundaries: number; minBytes: number },
+  acceptGroup?: (modules: readonly string[]) => boolean,
   nameKey: (id: string) => string = (id) => id
 ): CssSharingGroup[] {
   interface Prefix {
@@ -116,11 +117,12 @@ export function planCssChunkSharing(
       prefix.boundaries.length < options.minBoundaries ||
       prefix.bytes < options.minBytes ||
       largestConsumerCount.get(prefix) !== prefix.boundaries.length ||
-      [...prefix.children.values()].some(
-        (child) =>
-          child.boundaries.length === prefix.boundaries.length &&
-          largestConsumerCount.get(child) === child.boundaries.length
-      )
+      (!acceptGroup &&
+        [...prefix.children.values()].some(
+          (child) =>
+            child.boundaries.length === prefix.boundaries.length &&
+            largestConsumerCount.get(child) === child.boundaries.length
+        ))
     )
       continue;
 
@@ -133,6 +135,7 @@ export function planCssChunkSharing(
     ids.reverse();
 
     if (
+      (acceptGroup && !acceptGroup(ids)) ||
       ids.some((id) =>
         [...consumers.get(id)!].some((consumer) => !members.has(consumer))
       )

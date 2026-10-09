@@ -49,6 +49,11 @@ import { createPackageGraphAnalysis } from "./packageGraphAnalysis.js";
 import { createViteStaticCssEvalSourceProvider } from "./staticCssEvalSourceProvider.js";
 import { commonJsRuntimePrefix, commonJsRuntimeRequest } from "./commonJs.js";
 import { createCssSharing } from "./cssSharing.js";
+import {
+  appCssConfig,
+  validateAppCssOptions,
+  type MinchoAppCssOptions
+} from "./appCss.js";
 import { createJsxRuntimeGuardPlugins } from "./jsxRuntimeGuards.js";
 
 type PluginContext = Rollup.PluginContext;
@@ -98,10 +103,16 @@ export interface MinchoVitePluginOptions {
 
   /** Additional build-time calls; local files are relative to root. Overrides babel.extractCalls. */
   extractCalls?: BabelOptions["extractCalls"];
+
+  /** Client application CSS distribution and optional route-aware sharing. */
+  appCss?: MinchoAppCssOptions;
   experimental?: {
     cssChunkSharing?: MinchoCssChunkSharingOptions;
   };
   libraryCss?: {
+    /** Split CSS ownership. Production defaults to chunk, development to entry. */
+    mode?: "chunk" | "entry";
+
     /** Exact output-relative CSS filename when build.cssCodeSplit is false. */
     fileName?: string;
 
@@ -109,6 +120,8 @@ export interface MinchoVitePluginOptions {
     analysis?: "auto" | "worker" | "inline";
   };
 }
+
+export type { MinchoAppCssOptions, MinchoCssRoute } from "./appCss.js";
 
 export type {
   ExtractCalls,
@@ -128,6 +141,8 @@ export function minchoVitePlugins(
 }
 
 export function minchoVitePlugin(_options?: MinchoVitePluginOptions) {
+  validateAppCssOptions(_options?.appCss);
+
   const parser =
     _options?.cache === false
       ? undefined
@@ -160,6 +175,39 @@ export function minchoVitePlugin(_options?: MinchoVitePluginOptions) {
 
   return {
     ...plugin,
+
+    config(userConfig, env) {
+      const appConfig = appCssConfig(_options?.appCss, userConfig, env);
+      if (appConfig) return appConfig;
+
+      const lib = userConfig.build?.lib;
+      if (
+        env.command !== "build" ||
+        userConfig.build?.ssr ||
+        !lib ||
+        (_options?.optimizationMode ?? "production") !== "production" ||
+        _options?.libraryCss?.mode === "entry" ||
+        _options?.libraryCss?.fileName !== undefined ||
+        userConfig.build?.cssCodeSplit !== undefined
+      )
+        return;
+
+      const entries =
+        typeof lib.entry === "string" ? [lib.entry] : Object.values(lib.entry);
+
+      const outputs = [userConfig.build?.rollupOptions?.output].flat();
+      if (
+        entries.length > 1 &&
+        (lib.formats ?? ["es", "cjs"]).every(
+          (format) => format === "es" || format === "cjs"
+        ) &&
+        outputs.every(
+          (output) =>
+            !output?.format || output.format === "es" || output.format === "cjs"
+        )
+      )
+        return { build: { cssCodeSplit: true } };
+    },
 
     async configResolved(this: void, resolvedConfig: ResolvedConfig) {
       config = resolvedConfig;
@@ -230,7 +278,12 @@ function createMinchoViteEnvironmentPlugin(
   execution.compilationCache = compilationCache;
 
   const runtimeOptimizations = new InternalRuntimeOptimizations();
-  const cssSharing = createCssSharing(_options?.experimental?.cssChunkSharing);
+  const cssSharing = createCssSharing(
+    _options?.appCss?.sharing ?? _options?.experimental?.cssChunkSharing,
+    (detail) => diagnostics.record(config.root, "css-sharing", detail),
+    _options?.appCss?.routes
+  );
+
   const runtimeOwners = new Set<string>();
 
   // Keep our serialized imports before Vite rewrites them for the dev server.
@@ -395,12 +448,24 @@ function createMinchoViteEnvironmentPlugin(
     if (!linker) {
       linker = createLibraryCssLinker({
         cssCodeSplit: config.build.cssCodeSplit === true,
+        mode: libraryCssMode(),
         fileName: _options?.libraryCss?.fileName
       });
       outputLinkers.set(outputOptions, linker);
     }
 
     return linker;
+  }
+
+  function libraryCssMode(): "chunk" | "entry" {
+    return (
+      _options?.libraryCss?.mode ??
+      ((_options?.optimizationMode ??
+        (config.command === "build" ? "production" : "development")) ===
+      "production"
+        ? "chunk"
+        : "entry")
+    );
   }
 
   const virtualExt = ".vanilla.css";
@@ -567,7 +632,8 @@ function createMinchoViteEnvironmentPlugin(
   function collectLibraryCssSidecarContract(
     entryChunk: Rollup.RenderedChunk,
     chunks: Record<string, Rollup.RenderedChunk>,
-    getModuleInfo: OutputPluginContext["getModuleInfo"]
+    getModuleInfo: OutputPluginContext["getModuleInfo"],
+    local = false
   ): {
     ancestorStyleSpecifiers: string[];
     graphModuleIds: string[];
@@ -579,10 +645,13 @@ function createMinchoViteEnvironmentPlugin(
     const seenChunkFileNames = new Set<string>();
     const seenStyleSpecifiers = new Set<string>();
     const virtualCssOwnerIds = new Set<string>();
+    const moduleChunks = new Map<string, string>();
     let hasOwnCss = false;
 
     for (const output of Object.values(chunks)) {
       for (const moduleId of output.moduleIds) {
+        moduleChunks.set(moduleId, output.fileName);
+
         if (moduleId.endsWith(virtualExt)) {
           virtualCssOwnerIds.add(moduleId.slice(0, -virtualExt.length));
         }
@@ -610,6 +679,17 @@ function createMinchoViteEnvironmentPlugin(
           seenModuleIds.add(current.moduleId);
 
           const moduleInfo = getModuleInfo(current.moduleId);
+          const owner = moduleChunks.get(current.moduleId);
+
+          if (
+            local &&
+            ((owner && owner !== entryChunk.fileName) ||
+              (moduleInfo?.isIncluded === false &&
+                !virtualCssOwnerIds.has(current.moduleId)))
+          ) {
+            worklist.pop();
+            continue;
+          }
 
           if (!moduleInfo?.isExternal) {
             hasOwnCss ||=
@@ -682,7 +762,7 @@ function createMinchoViteEnvironmentPlugin(
         if (importedFileName !== undefined) {
           const importedChunk = chunks[importedFileName];
 
-          if (importedChunk) {
+          if (importedChunk && !local) {
             worklist.push({ chunk: importedChunk, index: -1 });
           }
 
@@ -1523,11 +1603,15 @@ function createMinchoViteEnvironmentPlugin(
           let ancestorStyleSpecifiers: string[] = [];
           let hasOwnCss = false;
 
-          if (chunk.isEntry || chunk.isDynamicEntry) {
+          const chunkMode =
+            config.build.cssCodeSplit && libraryCssMode() === "chunk";
+
+          if (chunkMode || chunk.isEntry || chunk.isDynamicEntry) {
             const contract = collectLibraryCssSidecarContract(
               chunk,
               meta.chunks,
-              this.getModuleInfo
+              this.getModuleInfo,
+              chunkMode
             );
 
             hasOwnCss = contract.hasOwnCss;
@@ -1569,7 +1653,8 @@ function createMinchoViteEnvironmentPlugin(
             chunks: meta.chunks,
             format: outputOptions.format,
             ancestorStyleSpecifiers,
-            hasOwnCss
+            hasOwnCss,
+            parse: this.parse?.bind(this)
           });
         } catch (error) {
           linker.abort(
@@ -1613,7 +1698,7 @@ function createMinchoViteEnvironmentPlugin(
 
     buildEnd(error) {
       if (error) compilationCache?.clear();
-      else cssSharing.plan(this);
+      else return cssSharing.plan(this);
     },
 
     renderError(error) {
@@ -2610,6 +2695,10 @@ if (import.meta.vitest) {
       libraryCss: {
         fileName: "style.css",
         analysis: "inline",
+
+        // These synthetic fixtures exercise the legacy entry contract. Native
+        // consumer builds cover the production chunk ownership contract.
+        mode: "entry",
         ...pluginOptions?.libraryCss
       }
     }) as unknown as Plugin;

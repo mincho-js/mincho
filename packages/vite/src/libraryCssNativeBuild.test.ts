@@ -658,7 +658,26 @@ describe("native library CSS in one Vite application build", () => {
         String(asset.source).includes(selector!)
       )!;
 
-      const ordered = cssReferences(entry);
+      // Production links dependency CSS from its owning chunk. Follow the
+      // static JS graph instead of requiring the root to import every sheet.
+      const visited = new Set<string>();
+
+      const collect = (chunk: Rollup.OutputChunk): string[] => {
+        if (visited.has(chunk.fileName)) return [];
+
+        visited.add(chunk.fileName);
+
+        return [
+          ...chunk.imports.flatMap((id) => {
+            const child = allChunks.find((item) => item.fileName === id);
+
+            return child ? collect(child) : [];
+          }),
+          ...cssReferences(chunk)
+        ];
+      };
+
+      const ordered = [...new Set(collect(entry))];
 
       expect(ordered).toContain(sharedCss.fileName);
       expect(ordered.indexOf(sharedCss.fileName)).toBeLessThan(

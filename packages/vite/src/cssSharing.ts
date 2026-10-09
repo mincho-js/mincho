@@ -8,6 +8,11 @@ import {
 } from "@mincho-js/integration";
 import { relative } from "node:path";
 import { normalizePath, type ResolvedConfig, type Rollup } from "vite";
+import {
+  collectCssRouteReach,
+  routesForCssModules,
+  type MinchoCssRoute
+} from "./appCss.js";
 
 interface CssChunk {
   fileName: string;
@@ -20,12 +25,17 @@ const cssRequest =
   /\.(?:css|scss|sass|less|styl|stylus|pcss|postcss)(?:[?#]|$)/;
 
 /** Vite still performs CSS transformation, extraction, hashing and HTML linking. */
-export function createCssSharing(option?: MinchoCssChunkSharingOptions) {
+export function createCssSharing(
+  option?: MinchoCssChunkSharingOptions,
+  report: (detail: unknown) => void = () => {},
+  routes?: readonly MinchoCssRoute[]
+) {
   const options = internalResolveCssChunkSharingOptions(option);
   const sources = new Map<string, { source: string; owned: boolean }>();
   let config: ResolvedConfig;
   let enabled = false;
   let groups: InternalCssSharingGroup[] = [];
+  let routeReach: Map<string, Set<string>> | undefined;
   let assignment = new Map<string, string>();
   let barriers = new WeakMap<
     object,
@@ -57,6 +67,7 @@ export function createCssSharing(option?: MinchoCssChunkSharingOptions) {
     begin() {
       abort();
       groups = [];
+      routeReach = undefined;
       assignment = new Map();
       // Keep unchanged module sources: Rollup can reuse transforms in watch mode.
     },
@@ -65,28 +76,34 @@ export function createCssSharing(option?: MinchoCssChunkSharingOptions) {
       if (enabled && cssRequest.test(id)) sources.set(id, { source, owned });
     },
 
-    plan(
+    async plan(
       context: Pick<
         Rollup.PluginContext,
-        "getModuleIds" | "getModuleInfo" | "getWatchFiles" | "warn"
+        "getModuleIds" | "getModuleInfo" | "getWatchFiles" | "warn" | "resolve"
       > & { environment?: { config: { consumer: string } } }
     ) {
       if (
         !enabled ||
         !options ||
         context.environment?.config.consumer === "server"
-      )
-        return;
+      ) {
+        if (options) report({ applied: false, reason: "unsupported-build" });
 
+        return;
+      }
+
+      const ids = [...context.getModuleIds()];
+      const cssIds = ids.filter((id) => cssRequest.test(id));
       const opaqueTransforms =
         Boolean(config.css.postcss || config.css.lightningcss) ||
         config.plugins.some(
           (plugin) =>
             plugin.transform &&
-            !plugin.name.startsWith("vite:") &&
-            !plugin.name.startsWith("mincho-") &&
+            !nativeTransforms.has(plugin.name) &&
+            plugin.name !== "mincho-css-vite" &&
             plugin.name !== "mincho:jsx-runtime-provenance" &&
-            plugin.name !== "mincho:jsx-runtime-guards"
+            plugin.name !== "mincho:jsx-runtime-guards" &&
+            !excludesCss(plugin.transform, cssIds)
         ) ||
         context
           .getWatchFiles()
@@ -97,6 +114,7 @@ export function createCssSharing(option?: MinchoCssChunkSharingOptions) {
           );
 
       if (opaqueTransforms) {
+        report({ applied: false, reason: "opaque-css-transform" });
         context.warn(
           "[mincho] CSS sharing skipped: custom CSS transforms have no module ownership proof."
         );
@@ -104,7 +122,25 @@ export function createCssSharing(option?: MinchoCssChunkSharingOptions) {
         return;
       }
 
-      const ids = [...context.getModuleIds()];
+      if (routes) {
+        const result = await collectCssRouteReach(routes, config.root, context);
+
+        if (!result.reach) {
+          report({
+            applied: false,
+            reason: "unresolved-route-modules",
+            missing: result.missing
+          });
+          context.warn(
+            "[mincho] CSS sharing skipped: appCss.routes references modules outside the built graph."
+          );
+
+          return;
+        }
+
+        routeReach = result.reach;
+      }
+
       const live = new Set(ids);
       const modules = new Map<string, { bytes: number; shareable: boolean }>();
 
@@ -155,9 +191,24 @@ export function createCssSharing(option?: MinchoCssChunkSharingOptions) {
       groups = internalPlanCssChunkSharing(
         boundaries,
         modules,
-        options,
+        routeReach ? { ...options, minBoundaries: 2 } : options,
+        routeReach
+          ? (ids) =>
+              routesForCssModules(ids, routeReach!).length >=
+              options.minBoundaries
+          : undefined,
         (id) => normalizePath(relative(config.root, id))
       );
+
+      if (!groups.length)
+        report({
+          applied: false,
+          reason: routeReach
+            ? "no-eligible-route-prefix"
+            : "no-eligible-prefix",
+          thresholds: options
+        });
+
       assignment = new Map(
         groups.flatMap((group) => group.modules.map((id) => [id, group.name]))
       );
@@ -174,10 +225,26 @@ export function createCssSharing(option?: MinchoCssChunkSharingOptions) {
         output.inlineDynamicImports ||
         (output.format !== "es" && output.format !== "cjs")
       ) {
+        if (groups.length)
+          report({ applied: false, reason: "custom-output-layout" });
+
         assignment = new Map();
 
         return null;
       }
+
+      report({
+        applied: true,
+        reason: routeReach ? "ordered-route-prefix" : "ordered-prefix",
+        groups: groups.map((group) =>
+          routeReach
+            ? {
+                ...group,
+                routes: routesForCssModules(group.modules, routeReach)
+              }
+            : group
+        )
+      });
 
       return {
         ...output,
@@ -244,4 +311,51 @@ export function createCssSharing(option?: MinchoCssChunkSharingOptions) {
 
     abort
   };
+}
+
+// Vite 7 native CSS processing is covered by native build tests. A third-party
+// plugin does not become trusted merely by choosing a `vite:` name.
+const nativeTransforms = new Set([
+  "vite:css",
+  "vite:css-post",
+  "vite:esbuild",
+  "vite:json",
+  "vite:worker",
+  "vite:define",
+  "vite:build-html",
+  "vite:worker-import-meta-url",
+  "vite:asset-import-meta-url",
+  "vite:dynamic-import-vars",
+  "vite:import-glob",
+  "vite:build-import-analysis",
+  "vite:reporter"
+]);
+
+/** Only a declared regular-expression filter proves CSS cannot be transformed. */
+function excludesCss(hook: unknown, ids: string[]): boolean {
+  if (!hook || typeof hook !== "object") return false;
+
+  const filter = (hook as { filter?: { id?: unknown } }).filter?.id;
+  if (!filter) return false;
+
+  const matches = (patterns: unknown, id: string): boolean | undefined => {
+    const values = Array.isArray(patterns) ? patterns : [patterns];
+    if (!values.length || !values.every((value) => value instanceof RegExp))
+      return;
+
+    return values.some((value: RegExp) =>
+      new RegExp(value.source, value.flags.replace(/[gy]/g, "")).test(id)
+    );
+  };
+
+  const selection =
+    filter instanceof RegExp || Array.isArray(filter)
+      ? { include: filter, exclude: undefined }
+      : (filter as { include?: unknown; exclude?: unknown });
+
+  return ids.every(
+    (id) =>
+      matches(selection.include, id) === false ||
+      matches(selection.exclude, id) === true
+  );
 }

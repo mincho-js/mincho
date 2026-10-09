@@ -67,6 +67,7 @@ describe("CSS chunk sharing", () => {
         boundaries,
         inputs,
         options,
+        undefined,
         (id) => id.slice(root.length + 1)
       );
 
@@ -83,6 +84,24 @@ describe("CSS chunk sharing", () => {
     });
 
     expect(groups[0]!.name).toBe(groups[1]!.name);
+  });
+
+  it("keeps an eligible shorter prefix when route policy excludes its child", () => {
+    const boundaries = [
+      { id: "a", modules: ["base", "extra", "a"] },
+      { id: "b", modules: ["base", "extra", "b"] }
+    ];
+
+    expect(
+      planCssChunkSharing(
+        boundaries,
+        modules,
+        { minBoundaries: 2, minBytes: 0 },
+        (ids) => !ids.includes("extra")
+      )
+    ).toMatchObject([
+      { modules: ["base"], boundaries: ["a", "b"], savedBytes: 100 }
+    ]);
   });
 
   it("keeps unowned modules as ordering barriers and applies thresholds", () => {

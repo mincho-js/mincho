@@ -1,5 +1,6 @@
 import { posix } from "node:path";
 import MagicString from "magic-string";
+import type { Rollup } from "vite";
 import { findChunkDirectivePrologueEnd } from "./chunkPrologue.js";
 
 /** Structural projection shared by Rollup's render metadata and test fixtures. */
@@ -8,11 +9,14 @@ export interface LibraryCssChunk {
   imports: string[];
   isEntry: boolean;
   isDynamicEntry: boolean;
+  moduleIds?: readonly string[];
+  exports?: readonly string[];
   viteMetadata?: { importedCss?: Set<string> };
 }
 
 export interface LibraryCssLinkerOptions {
   cssCodeSplit: boolean;
+  mode?: "chunk" | "entry";
 
   /** Exact output-relative native CSS asset name, required for unsplit CSS. */
   fileName?: string;
@@ -25,12 +29,14 @@ export interface LibraryCssRenderInput {
   format: string;
   ancestorStyleSpecifiers: readonly string[];
   hasOwnCss: boolean;
+  parse?: Rollup.PluginContext["parse"];
 }
 
 export function createLibraryCssLinker(options: LibraryCssLinkerOptions) {
   if (options.fileName !== undefined) validateFileName(options.fileName);
 
   const expectedCss = new Set<string>();
+  const cssOnlyChunks = new Set<string>();
   let aborted: Error | undefined;
   const pendingBarriers = new Set<{ reject: (error: Error) => void }>();
   const barriers = new WeakMap<
@@ -57,6 +63,8 @@ export function createLibraryCssLinker(options: LibraryCssLinkerOptions) {
         ancestorStyleSpecifiers,
         hasOwnCss
       } = input;
+
+      if (isCssOnlyChunk(chunk, code)) cssOnlyChunks.add(chunk.fileName);
 
       if (options.cssCodeSplit) {
         let barrier = barriers.get(chunks);
@@ -92,11 +100,12 @@ export function createLibraryCssLinker(options: LibraryCssLinkerOptions) {
         await barrier.promise;
       }
 
-      if (!chunk.isEntry && !chunk.isDynamicEntry) return null;
+      const chunkMode = options.cssCodeSplit && options.mode === "chunk";
+      if (!chunkMode && !chunk.isEntry && !chunk.isDynamicEntry) return null;
       if (format !== "es" && format !== "cjs") return null;
 
       const ownCss = options.cssCodeSplit
-        ? collectStaticCss(chunk, chunks)
+        ? collectStaticCss(chunk, chunks, chunkMode ? cssOnlyChunks : undefined)
         : hasOwnCss
           ? [requireUnsplitFileName(options.fileName)]
           : [];
@@ -137,7 +146,11 @@ export function createLibraryCssLinker(options: LibraryCssLinkerOptions) {
       );
 
       const edit = new MagicString(code);
-      const insertion = findChunkDirectivePrologueEnd(code);
+      const insertion =
+        chunkMode && input.parse
+          ? findStyleInsertion(code, chunk, format, input.parse)
+          : findChunkDirectivePrologueEnd(code);
+
       const prefix = code.slice(0, insertion);
       const separator =
         insertion === 0 ||
@@ -244,7 +257,8 @@ function validateFileName(fileName: string): void {
 
 function collectStaticCss(
   root: LibraryCssChunk,
-  chunks: Record<string, LibraryCssChunk>
+  chunks: Record<string, LibraryCssChunk>,
+  cssOnlyChunks?: ReadonlySet<string>
 ): string[] {
   const css = new Set<string>();
   const visited = new Set<string>();
@@ -270,9 +284,84 @@ function collectStaticCss(
     for (const imported of [...frame.chunk.imports].reverse()) {
       const child = chunks[imported];
 
-      if (child) pending.push({ chunk: child, exit: false });
+      if (child && (!cssOnlyChunks || cssOnlyChunks.has(child.fileName)))
+        pending.push({ chunk: child, exit: false });
     }
   }
 
   return [...css];
+}
+
+/** Match Vite's removable CSS-only chunks before it removes their JS edges. */
+function isCssOnlyChunk(chunk: LibraryCssChunk, code: string): boolean {
+  if (!chunk.moduleIds?.length || chunk.exports?.length) return false;
+
+  const css = /\.(?:css|scss|sass|less|styl|stylus|pcss|postcss)(?:[?#]|$)/;
+  if (chunk.moduleIds.some((id) => /\.module\./.test(id))) return false;
+
+  return (
+    chunk.moduleIds.every((id) => css.test(id)) ||
+    (!chunk.isEntry && code === "")
+  );
+}
+
+type SyntaxNode = {
+  type: string;
+  end: number;
+  [key: string]: unknown;
+};
+
+/** Dependencies must evaluate before this chunk's own stylesheet. */
+function findStyleInsertion(
+  code: string,
+  chunk: LibraryCssChunk,
+  format: string,
+  parse: Rollup.PluginContext["parse"]
+): number {
+  let insertion = findChunkDirectivePrologueEnd(code);
+
+  const requiresDependency = (value: unknown): boolean => {
+    if (!value || typeof value !== "object") return false;
+    if (Array.isArray(value)) return value.some(requiresDependency);
+
+    const node = value as SyntaxNode;
+    if (/Function|Class/.test(node.type)) return false;
+
+    if (node.type === "CallExpression") {
+      const callee = node.callee as { type?: string; name?: string };
+      const args = node.arguments as { value?: unknown }[];
+      if (
+        callee.type === "Identifier" &&
+        callee.name === "require" &&
+        args.length === 1 &&
+        typeof args[0]?.value === "string" &&
+        (chunk.imports.includes(args[0].value) ||
+          chunk.imports.includes(
+            posix.normalize(
+              posix.join(posix.dirname(chunk.fileName), args[0].value)
+            )
+          ))
+      )
+        return true;
+    }
+
+    return Object.values(node).some(requiresDependency);
+  };
+
+  for (const statement of parse(code).body as unknown as SyntaxNode[]) {
+    if (
+      (format === "es" &&
+        (statement.type === "ImportDeclaration" ||
+          ((statement.type === "ExportNamedDeclaration" ||
+            statement.type === "ExportAllDeclaration") &&
+            statement.source))) ||
+      (format === "cjs" &&
+        (statement.type === "VariableDeclaration" ||
+          statement.type === "ExpressionStatement") &&
+        requiresDependency(statement))
+    )
+      insertion = Math.max(insertion, statement.end);
+  }
+
+  return insertion;
 }

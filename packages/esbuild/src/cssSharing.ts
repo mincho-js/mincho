@@ -185,6 +185,7 @@ export async function emitSharedCss(
     boundaries,
     modules,
     options,
+    undefined,
     (id) => slash(relative(cwd, id))
   ).filter(
     (group) =>
