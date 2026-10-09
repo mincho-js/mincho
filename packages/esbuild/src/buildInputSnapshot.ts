@@ -141,6 +141,11 @@ export class BuildInputSnapshot {
 }
 
 export interface BuildTransaction {
+  cssSharingDiagnostics?: {
+    record(detail: unknown): void;
+
+    flush(): Promise<void>;
+  };
   phase: BuildPhase;
   snapshot: BuildInputSnapshot;
   graphs: Map<string, DefineRulesPackageGraph>;

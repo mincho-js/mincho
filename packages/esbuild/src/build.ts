@@ -76,6 +76,11 @@ export async function buildWithMincho(
   options: BuildWithMinchoOptions
 ): Promise<BuildWithMinchoResult> {
   const { mincho, plugins, ...nativeOptions } = options;
+  const explicitSharing = mincho?.experimental?.cssChunkSharing;
+  const sharingOptions =
+    explicitSharing ??
+    ((mincho?.optimizationMode ?? "production") === "production" &&
+      Boolean(nativeOptions.outdir || nativeOptions.outfile));
 
   if (
     nativeOptions.write !== false &&
@@ -103,7 +108,7 @@ export async function buildWithMincho(
       snapshot,
       graphs: new Map(),
       styles: new Map(),
-      ...(phase === "emit" && mincho?.experimental?.cssChunkSharing
+      ...(phase === "emit" && sharingOptions
         ? { cssReplay: { inputs: new Map(), resolutions: new Map() } }
         : {})
     };
@@ -154,10 +159,12 @@ export async function buildWithMincho(
     emitted.transaction,
     nativeOptions,
     emitted.cwd,
-    mincho?.experimental?.cssChunkSharing
+    sharingOptions,
+    explicitSharing !== undefined
   );
 
   await snapshot.validate();
+  await emitted.transaction.cssSharingDiagnostics?.flush();
 
   if (nativeOptions.write !== false) {
     if (!nativeOptions.allowOverwrite) {

@@ -167,6 +167,17 @@ export function minchoEsbuildPlugin({
         "esbuild"
       );
 
+      const transaction = getBuildTransaction(build.initialOptions);
+
+      if (transaction) {
+        const root = build.initialOptions.absWorkingDir ?? process.cwd();
+        transaction.cssSharingDiagnostics = {
+          record: (detail) => diagnostics.record(root, "css-sharing", detail),
+
+          flush: () => diagnostics.flush(root)
+        };
+      }
+
       const traced = {
         compile: (options: Parameters<typeof compile>[0]) =>
           diagnostics.run(options.originalPath, "sidecar-compile", () =>
@@ -192,7 +203,6 @@ export function minchoEsbuildPlugin({
           )
       };
 
-      const transaction = getBuildTransaction(build.initialOptions);
       const resolvers = new Map<string, string>();
       const resolverCache = new Map<string, string>();
 

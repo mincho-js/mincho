@@ -48,11 +48,21 @@ export async function emitSharedCss(
   transaction: BuildTransaction,
   nativeOptions: esbuild.BuildOptions,
   cwd: string,
-  option?: MinchoCssChunkSharingOptions
+  option?: MinchoCssChunkSharingOptions,
+  emitFallbackManifest = true
 ): Promise<MinchoCssManifest | undefined> {
   const options = internalResolveCssChunkSharingOptions(option);
   const replay = transaction.cssReplay;
-  if (!options || !replay) return;
+
+  if (!options || !replay) {
+    transaction.cssSharingDiagnostics?.record({
+      applied: false,
+      reason: "disabled"
+    });
+
+    return;
+  }
+
   if (!nativeOptions.outdir && !nativeOptions.outfile)
     throw new Error(
       "cssChunkSharing requires an output directory or output file."
@@ -119,6 +129,7 @@ export async function emitSharedCss(
 
   const boundaries: { id: string; modules: string[] }[] = [];
   const eligible = new Set<string>();
+  const skippedBoundaries: string[] = [];
 
   for (const [outputPath, output] of Object.entries(result.metafile.outputs)) {
     if (!output.entryPoint || !output.cssBundle) continue;
@@ -155,15 +166,19 @@ export async function emitSharedCss(
       })
     )
       eligible.add(id);
-    else
-      result.warnings.push({
-        id: "mincho-css-sharing",
-        pluginName: "mincho",
-        text: `CSS sharing skipped for ${id}: CSS imports or custom/unknown plugin provenance cannot be replayed as ordered whole modules.`,
-        location: null,
-        notes: [],
-        detail: undefined
-      });
+    else {
+      skippedBoundaries.push(id);
+
+      if (emitFallbackManifest)
+        result.warnings.push({
+          id: "mincho-css-sharing",
+          pluginName: "mincho",
+          text: `CSS sharing skipped for ${id}: CSS imports or custom/unknown plugin provenance cannot be replayed as ordered whole modules.`,
+          location: null,
+          notes: [],
+          detail: undefined
+        });
+    }
   }
 
   const groups = internalPlanCssChunkSharing(
@@ -177,6 +192,27 @@ export async function emitSharedCss(
       !nativeOptions.footer?.css &&
       group.boundaries.every((id) => eligible.has(id))
   );
+
+  transaction.cssSharingDiagnostics?.record({
+    applied: groups.length > 0,
+    reason: groups.length ? "ordered-prefix" : "no-eligible-prefix",
+    thresholds: options,
+    boundaries: boundaries.length,
+    replayableBoundaries: eligible.size,
+    skippedBoundaries,
+    cssBannerOrFooter: Boolean(
+      nativeOptions.banner?.css || nativeOptions.footer?.css
+    ),
+    groups: groups.map(({ name, boundaries, savedBytes }) => ({
+      name,
+      boundaries,
+      estimatedSourceBytesSaved: savedBytes
+    }))
+  });
+
+  // Automatic production sharing must not add unused files for native layouts.
+  // Explicit callers retain the v1 fallback manifest even without a candidate.
+  if (!groups.length && !emitFallbackManifest) return;
 
   if (groups.length) {
     const entries = new Map<string, readonly string[]>();
