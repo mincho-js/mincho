@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { build, type Rollup } from "vite";
+import { build, type Plugin, type Rollup } from "vite";
 import { minchoVitePlugins } from "./index.js";
 
 const roots: string[] = [];
@@ -33,12 +33,17 @@ afterEach(async () => {
   );
 });
 
-async function compile(root: string, customChunks = false) {
+async function compile(
+  root: string,
+  customChunks = false,
+  plugins: Plugin[] = []
+) {
   const result = await build({
     root,
     configFile: false,
     logLevel: "silent",
     plugins: [
+      ...plugins,
       ...minchoVitePlugins({
         cache: false,
         experimental: { cssChunkSharing: { minBytes: 0 } }
@@ -81,6 +86,25 @@ describe("Vite native CSS sharing", () => {
     }
 
     expect(sharedFiles[0]).toBe(sharedFiles[1]);
+  });
+
+  it("accepts proven script-only filters but rejects opaque vite-prefixed transforms", async () => {
+    const root = await fixture();
+
+    for (const filtered of [false, true]) {
+      const result = await compile(root, false, [
+        {
+          name: "vite:custom-transform",
+          transform: filtered
+            ? { filter: { id: /\.[jt]sx?$/ }, handler: () => null }
+            : () => null
+        }
+      ]);
+
+      expect(
+        result.output.some((item) => item.fileName.includes("mincho-shared-"))
+      ).toBe(filtered);
+    }
   });
 
   it("keeps native HTML and manifest CSS order shared then private", async () => {
