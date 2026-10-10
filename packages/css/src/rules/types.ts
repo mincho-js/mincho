@@ -10,7 +10,9 @@ import type { CSSRuleWith } from "../css/types.js";
 
 export type ResolveComplex<T> =
   T extends Array<infer U> ? Array<Resolve<U>> : Resolve<T>;
+
 type RemoveUndefined<T> = T extends undefined ? never : T;
+
 export type RemoveUndefinedFromIntersection<T> = {
   [K in keyof T]: RemoveUndefined<T[K]>;
 }[keyof T];
@@ -22,6 +24,7 @@ type UnionToIntersection<U> = (
   : never;
 
 type Primitive = string | number | boolean | null | undefined;
+
 export type Serializable =
   | {
       [Key in string | number]: Primitive | Serializable;
@@ -43,6 +46,7 @@ export type VariantStyle<
 export type VariantDefinitions = Record<string, RecipeStyleRule>;
 
 type BooleanMap<T> = T extends "true" | "false" ? boolean : T;
+
 export type ToggleVariantMap<ToggleVariants extends VariantDefinitions> = {
   [VariantGroup in keyof ToggleVariants]: {
     true: ToggleVariants[VariantGroup];
@@ -50,11 +54,13 @@ export type ToggleVariantMap<ToggleVariants extends VariantDefinitions> = {
 };
 
 export type VariantGroups = Record<string, VariantDefinitions>;
+
 export type VariantObjectSelection<Variants extends VariantGroups> = {
   [VariantGroup in keyof Variants]?:
     | BooleanMap<keyof Variants[VariantGroup]>
     | undefined;
 };
+
 export type VariantToggleSelection<Variants extends VariantGroups> = {
   [VariantGroup in keyof Variants]: keyof Variants[VariantGroup] extends
     | "true"
@@ -62,6 +68,7 @@ export type VariantToggleSelection<Variants extends VariantGroups> = {
     ? VariantGroup
     : never;
 }[keyof Variants];
+
 export type VariantSelection<Variants extends VariantGroups> =
   | VariantObjectSelection<Variants>
   | Array<VariantToggleSelection<Variants> | VariantObjectSelection<Variants>>;
@@ -77,6 +84,7 @@ export type PropTarget = keyof ResolvedProperties;
 export type ComplexPropDefinitions<PropKeys extends PropTarget | undefined> =
   | PropDefinition<PropKeys>
   | Array<PropKeys | PropDefinition<PropKeys>>;
+
 export type PropDefinition<PropKeys extends PropTarget | undefined> = {
   [Key in NonNullableString | PropTarget]?: {
     base?: ResolvedProperties[Exclude<PropKeys, undefined>];
@@ -91,6 +99,7 @@ export type PropDefinitionOutput<
     ? PropDefinitionOutputElement<T[number]>
     : PropDefinitionOutputElement<T>
 >;
+
 type PropDefinitionOutputElement<DefinitionElement> =
   DefinitionElement extends string
     ? HandlePropTarget<DefinitionElement>
@@ -101,6 +110,7 @@ type PropDefinitionOutputElement<DefinitionElement> =
 type HandlePropTarget<PropKeys extends string> = PropKeys extends PropTarget
   ? { [Key in PropKeys]?: ResolvedProperties[Key] }
   : never;
+
 type HandlePropDefinition<PropObject extends { [key: string]: unknown }> =
   UnionToIntersection<
     {
@@ -110,6 +120,7 @@ type HandlePropDefinition<PropObject extends { [key: string]: unknown }> =
       >;
     }[keyof PropObject & string]
   >;
+
 type HandlePropDefinitionEntry<
   Key extends string,
   PropValue
@@ -125,18 +136,20 @@ export type PropVars<
   Props extends ComplexPropDefinitions<PropTarget | undefined>
 > = Record<keyof PropDefinitionOutput<Props>, PureCSSVarKey>;
 
-export type PatternResult<
-  Variants extends VariantGroups,
-  Props extends ComplexPropDefinitions<PropTarget | undefined>
-> = {
+export type ClassRuntimeConfig<Variants extends VariantGroups> = {
   defaultClassName: string;
   variantClassNames: VariantsClassNames<Variants>;
   defaultVariants: VariantObjectSelection<Variants>;
   compoundVariants: Array<[VariantObjectSelection<Variants>, string]>;
-  propVars: PropVars<Props>;
 };
 
+export type PatternResult<
+  Variants extends VariantGroups,
+  Props extends ComplexPropDefinitions<PropTarget | undefined>
+> = ClassRuntimeConfig<Variants> & { propVars: PropVars<Props> };
+
 export type Brand<K, T> = K & { __brand: T };
+
 export type VariantStringMap<Variants extends VariantGroups> = {
   [VariantKey in keyof Variants]: {
     [VariantTarget in keyof Variants[VariantKey]]: Brand<
@@ -145,6 +158,7 @@ export type VariantStringMap<Variants extends VariantGroups> = {
     >;
   };
 };
+
 export type BrandValue<Variants extends VariantGroups> = {
   [VariantKey in keyof Variants]: VariantStringMap<Variants>[VariantKey][keyof Variants[VariantKey]];
 }[keyof Variants];
@@ -189,14 +203,17 @@ export interface RecipeClassNames<Variants extends VariantGroups> {
   variants: VariantsClassNames<Variants>;
 }
 
+export interface ClassRuntimeFn<Variants extends VariantGroups> {
+  (options?: ResolveComplex<VariantSelection<Variants>>): string;
+  variants: () => (keyof Variants)[];
+  classNames: RecipeClassNames<Variants>;
+}
+
 export interface RuntimeFn<
   Variants extends VariantGroups,
   Props extends ComplexPropDefinitions<PropTarget | undefined>
-> {
-  (options?: ResolveComplex<VariantSelection<Variants>>): string;
+> extends ClassRuntimeFn<Variants> {
   props: (options: Resolve<PropDefinitionOutput<Props>>) => CSSRule;
-  variants: () => (keyof Variants)[];
-  classNames: RecipeClassNames<Variants>;
 }
 
 export type RulesVariants<
@@ -248,10 +265,12 @@ if (import.meta.vitest) {
         blue: string;
       };
     };
+
     function assertSelectedVariant(
       variants: VariantSelection<ExampleVariants>
     ) {
       assertType<VariantSelection<ExampleVariants>>(variants);
+
       return variants;
     }
 
@@ -276,6 +295,7 @@ if (import.meta.vitest) {
       classNames: RecipeClassNames<Variants>
     ) {
       assertType(classNames);
+
       return classNames;
     }
 
@@ -313,6 +333,7 @@ if (import.meta.vitest) {
         false: { border: string };
       };
     };
+
     type TestPropsType = [
       "background",
       { corner: { targets: ["borderColor", "outlineColor"] } }
@@ -320,6 +341,7 @@ if (import.meta.vitest) {
 
     it("RuntimeFn Type Check", () => {
       type ExpectedResultType = RuntimeFn<TestVariantsType, TestPropsType>;
+
       expectTypeOf<ExpectedResultType>().toBeFunction();
       expectTypeOf<ExpectedResultType["variants"]>().toBeFunction();
       expectTypeOf<ExpectedResultType["classNames"]>().toBeObject();
@@ -332,8 +354,10 @@ if (import.meta.vitest) {
             background?: CSSRule["background"];
             corner?: CSSRule["borderColor"] & CSSRule["outlineColor"];
           }) => ({}) as CSSRule,
+
           variants: () =>
             ["color", "size", "outlined"] satisfies (keyof TestVariantsType)[],
+
           classNames: {
             base: "basic-class",
             variants: {
@@ -354,6 +378,7 @@ if (import.meta.vitest) {
           } satisfies RecipeClassNames<TestVariantsType>
         }
       );
+
       assertType<ExpectedResultType>(expectedResult);
     });
   });
@@ -365,6 +390,7 @@ if (import.meta.vitest) {
       Props extends ComplexPropDefinitions<PropTarget> | undefined = undefined
     >(options: PatternOptions<Variants, ToggleVariants, Props>) {
       assertType<PatternOptions<Variants, ToggleVariants, Props>>(options);
+
       return options;
     }
 
@@ -448,6 +474,7 @@ if (import.meta.vitest) {
       disabled: { textDecoration: "line-through" },
       rounded: { borderRadius: 999 }
     } as const;
+
     const variants = {
       color: {
         brand: { color: "#FFFFA0" },
@@ -521,6 +548,7 @@ if (import.meta.vitest) {
             }
           }
         ],
+
         toggles: toggleVariants
       });
 
@@ -534,6 +562,7 @@ if (import.meta.vitest) {
             }
           }
         ],
+
         variants
       });
       assertValidOptions({
@@ -545,6 +574,7 @@ if (import.meta.vitest) {
             }
           }
         ],
+
         variants
       });
 
@@ -558,6 +588,7 @@ if (import.meta.vitest) {
             }
           }
         ],
+
         toggles: toggleVariants,
         variants
       });
@@ -602,6 +633,7 @@ if (import.meta.vitest) {
         defaultVariants: {
           size: "small"
         },
+
         compoundVariants: ({ color, size }) => [
           {
             condition: [color.brand, size.small],

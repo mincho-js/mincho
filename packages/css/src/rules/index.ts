@@ -62,11 +62,14 @@ function rulesWith<
   ) => PatternOptions<Variants, ToggleVariants, Props>
 ) {
   type RestrictedCSSRule = CSSRuleWith<T>;
+
   type RulePattern = PatternOptions<Variants, ToggleVariants, Props>;
+
   type RuntimeFnType = RuntimeFn<
     ConditionalVariants<Variants, ToggleVariants>,
     Exclude<Props, undefined>
   >;
+
   type TransformRuleMap<T extends Record<string | number, RestrictedCSSRule>> =
     {
       [K in keyof T]: RuntimeFnType;
@@ -75,6 +78,7 @@ function rulesWith<
   function rulesWithImpl(style: RestrictedCSSRule, debugId?: string) {
     return rulesImpl(callback(style), debugId) as RuntimeFnType;
   }
+
   function rulesWithRaw(style: RestrictedCSSRule) {
     return rulesRaw(callback(style)) as RulePattern;
   }
@@ -122,8 +126,10 @@ export function rulesImpl<
   } = options;
 
   type PureProps = Exclude<Props, undefined>;
+
   const propVars = {} as PropVars<PureProps>;
   const propStyles: CSSRule = {};
+
   if (Array.isArray(props)) {
     for (const prop of props) {
       if (typeof prop === "string") {
@@ -141,6 +147,7 @@ export function rulesImpl<
   }
 
   let defaultClassName: string;
+
   if (!base || typeof base === "string") {
     const baseClassName = css([baseStyles, propStyles], debugId);
     defaultClassName = base ? `${baseClassName} ${base}` : baseClassName;
@@ -154,18 +161,23 @@ export function rulesImpl<
   }
 
   type PureVariants = Exclude<Variants, undefined>;
+
   type PureToggleVariants = Exclude<ToggleVariants, undefined>;
+
   type CombinedVariants = ConditionalVariants<PureVariants, PureToggleVariants>;
+
   const mergedVariants = mergeObject(
     variants,
     transformToggleVariants(toggles)
   ) as CombinedVariants;
+
   // @ts-expect-error - Temporarily ignoring the error as the PatternResult type is not fully defined
   const variantClassNames: PatternResult<CombinedVariants>["variantClassNames"] =
     mapValues(mergedVariants, (variantGroup, variantGroupName) => {
       // TODO: Use css.with supported data mapping when available
       // Transform variant values before passing to css.multiple
       const transformedVariants: Record<string | number, ComplexCSSRule> = {};
+
       for (const key in variantGroup) {
         const styleRule = variantGroup[key];
         transformedVariants[key] =
@@ -214,25 +226,24 @@ export function rulesImpl<
     });
   }
 
-  const config: PatternResult<CombinedVariants, PureProps> = {
+  const config: Omit<PatternResult<CombinedVariants, PureProps>, "propVars"> = {
     defaultClassName,
     variantClassNames,
     defaultVariants: transformVariantSelection(defaultVariants),
-    compoundVariants: compounds,
-    propVars
+    compoundVariants: compounds
   };
 
   return addFunctionSerializer<
     RuntimeFn<ConditionalVariants<Variants, ToggleVariants>, PureProps>
   >(
-    createRuntimeFn(config) as RuntimeFn<
+    createRuntimeFn({ ...config, propVars }) as RuntimeFn<
       ConditionalVariants<Variants, ToggleVariants>,
       PureProps
     >,
     {
       importPath: "@mincho-js/css/rules/createRuntimeFn",
-      importName: "createRuntimeFn",
-      args: [config as Serializable]
+      importName: "createCompiledRuntimeFn",
+      args: [config as Serializable, propVars]
     }
   );
 }
@@ -416,6 +427,7 @@ if (import.meta.vitest) {
           } satisfies VariantStyle<"true" | "false">
         }
       } as const;
+
       const result = rules(variants, debugId);
 
       // Base check
@@ -490,15 +502,15 @@ if (import.meta.vitest) {
       expect(result({ size: "small", color: "brand" })).toMatch(
         identifierName(
           debugId,
-          `${debugId}_size_small`,
-          `${debugId}_color_brand`
+          `${debugId}_color_brand`,
+          `${debugId}_size_small`
         )
       );
       expect(result(["outlined", { color: "brand" }])).toMatch(
         identifierName(
           debugId,
-          `${debugId}_outlined_true`,
-          `${debugId}_color_brand`
+          `${debugId}_color_brand`,
+          `${debugId}_outlined_true`
         )
       );
       expect(result([{ color: "brand" }, "outlined"])).toMatch(
@@ -521,6 +533,7 @@ if (import.meta.vitest) {
 
       // Without debugId
       const resultWithoutDebugId = rules(variants);
+
       expect(resultWithoutDebugId({ color: "brand" })).toMatch(
         identifierName(undefined, `color_brand`)
       );
@@ -593,8 +606,8 @@ if (import.meta.vitest) {
       expect(result(["rounded", "disabled"])).toMatch(
         identifierName(
           debugId,
-          `${debugId}_rounded_true`,
-          `${debugId}_disabled_true`
+          `${debugId}_disabled_true`,
+          `${debugId}_rounded_true`
         )
       );
     });
@@ -694,6 +707,7 @@ if (import.meta.vitest) {
               }
             }
           ],
+
           variants: {
             color: {
               brand: { color: "#FFFFA0" },
@@ -785,15 +799,15 @@ if (import.meta.vitest) {
       expect(result({ size: "small", color: "brand" })).toMatch(
         identifierName(
           debugId,
-          `${debugId}_size_small`,
-          `${debugId}_color_brand`
+          `${debugId}_color_brand`,
+          `${debugId}_size_small`
         )
       );
       expect(result(["outlined", { color: "brand" }])).toMatch(
         identifierName(
           debugId,
-          `${debugId}_outlined_true`,
           `${debugId}_color_brand`,
+          `${debugId}_outlined_true`,
           // Compound
           `${debugId}_compound_0`
         )
@@ -810,9 +824,9 @@ if (import.meta.vitest) {
       expect(result(["outlined", { color: "brand", size: "medium" }])).toMatch(
         identifierName(
           debugId,
-          `${debugId}_outlined_true`,
           `${debugId}_color_brand`,
           `${debugId}_size_medium`,
+          `${debugId}_outlined_true`,
           // Compound
           `${debugId}_compound_0`,
           `${debugId}_compound_1`
@@ -851,6 +865,7 @@ if (import.meta.vitest) {
       const result = rules(
         {
           variants,
+
           compoundVariants: ({ color, size }) => {
             return [
               {
@@ -877,6 +892,7 @@ if (import.meta.vitest) {
       const resultMultiple = rules(
         {
           variants,
+
           compoundVariants: ({ color, size, outlined }) => [
             {
               condition: [color.brand, size.small],
@@ -908,6 +924,7 @@ if (import.meta.vitest) {
       const resultBoolean = rules(
         {
           variants,
+
           compoundVariants: ({ outlined }) => [
             {
               condition: [outlined.true],
@@ -917,6 +934,7 @@ if (import.meta.vitest) {
         },
         debugId
       );
+
       expect(resultBoolean({ outlined: true })).toMatch(
         identifierName(
           debugId,
@@ -929,10 +947,12 @@ if (import.meta.vitest) {
       const resultEmpty = rules(
         {
           variants,
+
           compoundVariants: () => []
         },
         debugId
       );
+
       expect(resultEmpty({ color: "brand" })).toMatch(
         identifierName(debugId, `${debugId}_color_brand`)
       );
@@ -972,6 +992,7 @@ if (import.meta.vitest) {
         if (propValue === "red") {
           expect(varName).toMatch(identifierName(`--${debugId}_color`));
         }
+
         if (propValue === "blue") {
           expect(varName).toMatch(identifierName(`--${debugId}_background`));
         }
@@ -995,6 +1016,7 @@ if (import.meta.vitest) {
         },
         debugId
       );
+
       Object.entries(
         result2.props({
           rounded: "999px",
@@ -1007,6 +1029,7 @@ if (import.meta.vitest) {
         if (propValue === "999px") {
           expect(varName).toMatch(identifierName(`--${debugId}_rounded`));
         }
+
         if (propValue === "2rem") {
           expect(varName).toMatch(identifierName(`--${debugId}_size`));
         }
@@ -1025,6 +1048,7 @@ if (import.meta.vitest) {
         },
         debugId
       );
+
       Object.entries(
         result3.props({
           color: "red",
@@ -1039,12 +1063,15 @@ if (import.meta.vitest) {
         if (propValue === "red") {
           expect(varName).toMatch(identifierName(`--${debugId}_color`));
         }
+
         if (propValue === "blue") {
           expect(varName).toMatch(identifierName(`--${debugId}_background`));
         }
+
         if (propValue === "999px") {
           expect(varName).toMatch(identifierName(`--${debugId}_rounded`));
         }
+
         if (propValue === "2rem") {
           expect(varName).toMatch(identifierName(`--${debugId}_size`));
         }
@@ -1057,10 +1084,13 @@ if (import.meta.vitest) {
       const ruleObj1 = rules.raw({
         base: { color: "red" }
       });
+
       assertType<PatternOptions<undefined, undefined, undefined>>(ruleObj1);
+
       expect(ruleObj1).toStrictEqual({
         base: { color: "red" }
       });
+
       rules(ruleObj1); // Ensure it can be used with rules()
 
       const ruleObj2 = rules.raw({
@@ -1080,6 +1110,7 @@ if (import.meta.vitest) {
           }
         }
       });
+
       assertType<
         PatternOptions<
           {
@@ -1101,6 +1132,7 @@ if (import.meta.vitest) {
           undefined
         >
       >(ruleObj2);
+
       expect(ruleObj2).toStrictEqual({
         variants: {
           color: {
@@ -1118,6 +1150,7 @@ if (import.meta.vitest) {
           }
         }
       });
+
       rules(ruleObj2); // Ensure it can be used with rules()
 
       const ruleObj3 = rules.raw({
@@ -1126,6 +1159,7 @@ if (import.meta.vitest) {
           rounded: { borderRadius: 999 }
         }
       });
+
       assertType<
         PatternOptions<
           undefined,
@@ -1136,12 +1170,14 @@ if (import.meta.vitest) {
           undefined
         >
       >(ruleObj3);
+
       expect(ruleObj3).toStrictEqual({
         toggles: {
           disabled: { textDecoration: "line-through" },
           rounded: { borderRadius: 999 }
         }
       });
+
       rules(ruleObj3); // Ensure it can be used with rules()
 
       const ruleObj4 = rules.raw({
@@ -1154,6 +1190,7 @@ if (import.meta.vitest) {
           }
         ]
       });
+
       assertType<
         PatternOptions<
           undefined,
@@ -1168,6 +1205,7 @@ if (import.meta.vitest) {
           >
         >
       >(ruleObj4);
+
       expect(ruleObj4).toStrictEqual({
         props: [
           "color",
@@ -1178,6 +1216,7 @@ if (import.meta.vitest) {
           }
         ]
       });
+
       rules(ruleObj4); // Ensure it can be used with rules()
     });
   });
@@ -1263,6 +1302,7 @@ if (import.meta.vitest) {
             backgroundColor: bg,
             color: text
           },
+
           // TODO: Fix `rules.with` type inference
           // @ts-expect-error Broken inference for variants
           variants: {
@@ -1273,6 +1313,7 @@ if (import.meta.vitest) {
           }
         })
       );
+
       const result = myRules.multiple(
         {
           light: { bg: "#ffffff", text: "#000000" },
@@ -1291,6 +1332,7 @@ if (import.meta.vitest) {
       assert.hasAllKeys(result.light, ["props", "variants", "classNames"]);
       expect(result.light()).toMatch(identifierName(`${debugId}_light`));
       assert.hasAllKeys(result.light.classNames.variants, ["emphasis"]);
+
       // TODO: Fix `rules.with` type inference
       // @ts-expect-error Broken inference for variants
       assert.hasAllKeys(result.light.classNames.variants.emphasis, [
@@ -1302,6 +1344,7 @@ if (import.meta.vitest) {
       assert.hasAllKeys(result.dark, ["props", "variants", "classNames"]);
       expect(result.dark()).toMatch(identifierName(`${debugId}_dark`));
       assert.hasAllKeys(result.dark.classNames.variants, ["emphasis"]);
+
       // TODO: Fix `rules.with` type inference
       // @ts-expect-error Broken inference for variants
       assert.hasAllKeys(result.dark.classNames.variants.emphasis, [
@@ -1315,6 +1358,7 @@ if (import.meta.vitest) {
       expect(result.light({ emphasis: "strong" })).toMatch(
         identifierName(`${debugId}_light`, `${debugId}_light_emphasis_strong`)
       );
+
       // TODO: Fix `rules.with` type inference
       // @ts-expect-error Broken inference for variants
       expect(result.dark({ emphasis: "subtle" })).toMatch(
@@ -1333,6 +1377,7 @@ if (import.meta.vitest) {
           }
         }
       }));
+
       const result = myRules.multiple(
         { xs: { spacing: 4 }, sm: { spacing: 8 }, md: { spacing: 16 } },
         debugId
