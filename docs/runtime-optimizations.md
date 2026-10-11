@@ -139,16 +139,18 @@ the build integration. Direct `eval` (including a shadowed binding that can hold
 the intrinsic function) and `with` disable optimizations that require a closed
 lexical reference graph.
 
-Both experimental options default to `false`:
+Experimental options have adapter-specific defaults:
 
-- `nonInheritingCssVars` emits an `@property` registration with `syntax: "*"`
+- `nonInheritingCssVars` defaults to `false` and emits an `@property` registration with `syntax: "*"`
   and `inherits: false` for eligible generated variables. Selector-dependent
   consumption, custom components/elements, customized built-ins (`is`) and JSX
   spreads keep ordinary variables. It intentionally changes inheritance for these
   private variables;
   it does not register user-defined properties.
 - `cssChunkSharing` accepts `true` or `{ minBoundaries, minBytes }`, defaulting to
-  2 boundaries and 4,096 source bytes when enabled. It shares compatible whole
+  2 boundaries and 4,096 source bytes when enabled. It is automatic in production
+  `buildWithMincho` builds with an output path, and disabled by default in Vite
+  and development. Explicit `false` disables sharing. It shares compatible whole
   leading CSS module sequences, preserving shared-before-private order and native
   asset handling. Vite retains lazy CSS loading. Missing ownership, unsupported
   CSS or import attributes keep the native layout; arbitrary equal rules are not

@@ -24,6 +24,63 @@ See [compilation performance](../../docs/compilation-performance.md),
 [vanilla-extract support](../../docs/vanilla-extract.md), and
 [additional extraction calls](../../docs/extract-calls.md) for other options.
 
+## Application CSS
+
+Choose CSS distribution and optional route-aware sharing independently:
+
+```ts
+export default defineConfig({
+  plugins: minchoVitePlugins({
+    appCss: {
+      mode: "dist-chunk",
+      sharing: { minBoundaries: 2, minBytes: 4096 },
+      routes: [
+        { id: "home", entry: "src/home.tsx", layouts: ["src/layout.tsx"] },
+        { id: "admin", entry: "src/admin.tsx", layouts: ["src/layout.tsx"] },
+      ],
+    },
+  }),
+});
+```
+
+`mode: "native"` (default) preserves Vite configuration. `"single"` requests
+one sheet; `"dist-chunk"` requests native CSS code splitting and lazy loading.
+Conflicting explicit `build.cssCodeSplit` settings are errors. Mincho's
+`dist-chunk` is a distribution option, not UnoCSS-style token regeneration or
+unused-selector removal. These options do not change development serving,
+library builds or SSR.
+
+The generic route list includes each route's entry and ancestor layouts. Paths
+are relative to the Vite root or exact ids in the built graph. With this list,
+sharing thresholds count distinct routes that statically use the candidate CSS;
+nested dynamic imports retain their own boundaries. Without it, thresholds count
+native entries and dynamic import targets. Routes do not create lazy JS imports
+or load missing layouts; the router owns those dependencies. Missing route
+modules skip sharing with a diagnostic.
+
+Sharing is opt-in. `appCss.sharing` takes precedence over
+`experimental.cssChunkSharing`, including `false`. All native consumers must
+still agree on the shared prefix's order. This shares whole CSS modules rather
+than deduplicating atoms or promoting lazy-only CSS into the initial page. See
+[CSS bundling](../../docs/css-bundling.md) for the full contract and measurements.
+
+## Library CSS ownership
+
+Production split libraries link each chunk to its own CSS. Component subpaths
+and ESM named imports from a pure barrel in Vite consumers can therefore retain
+only the selected components' styles. Native esbuild consumers should use
+subpaths: esbuild 0.27.7 retains CSS from unused barrel exports. JavaScript
+dependencies provide their own styles first;
+shared CSS-only chunks removed by Vite still have their CSS linked.
+
+For multiple ESM/CJS library entries, Mincho defaults `build.cssCodeSplit` to
+`true` unless you configure it, select `libraryCss.mode: "entry"`, or declare
+`libraryCss.fileName`. Development and explicit entry mode retain entry-wide
+aggregation. Use `"chunk"` to request chunk ownership explicitly. Mark published
+CSS as side effects (`"sideEffects": ["**/*.css"]`) and expose component subpaths.
+Single CSS builds still require a fixed `libraryCss.fileName` matching Vite's
+output. See [CSS bundling](../../docs/css-bundling.md) for examples and measurements.
+
 ## Experimental CSS sharing
 
 Application builds can share an identical prefix of whole CSS modules across
@@ -49,6 +106,9 @@ Sharing can reduce combined CSS transfers when several boundaries are visited,
 at the cost of an additional stylesheet request and build analysis. Only
 class-owned CSS with an agreed module order is eligible. Global rules, custom
 `manualChunks`, library/SSR builds, disabled CSS splitting and opaque CSS
-transforms keep the native layout. A custom transform plugin, including a React
-plugin whose CSS behavior cannot be proven, also disables sharing. This first
-version favors preserving native CSS semantics over speculative sharing.
+transforms keep the native layout. A custom transform is allowed only when its
+declared regular-expression hook filter excludes the build's CSS modules.
+Plugin names alone do not establish that proof. React's production plugin
+without a transform hook does not disable sharing. Native Vite splitting remains
+the default: an extra shared chunk can increase compressed JavaScript without
+reducing CSS.

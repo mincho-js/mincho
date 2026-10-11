@@ -8,13 +8,23 @@ second application build, filesystem emulator or private hook patch is needed.
 
 ## Supported output contracts
 
-With `build.cssCodeSplit: true`, Mincho reads the CSS assets recorded by Vite for
-the entry and its static chunk dependencies. Hashed CSS filenames remain owned
-by Vite. All chunk CSS render hooks finish before Mincho collects this metadata.
+With `build.cssCodeSplit: true`, production defaults to `libraryCss.mode: "chunk"`.
+Each emitted JavaScript chunk links its own CSS and package styles in its local
+module scope. Static JavaScript dependencies load before those styles. Removed
+CSS-only chunks contribute their styles to their importers; executable shared
+chunks retain their own links. A pure barrel does not collect all component CSS.
+Hashed CSS filenames remain owned by Vite. All chunk CSS render hooks finish
+before Mincho collects this metadata.
 Dynamic entry CSS is linked by that entry, not hoisted into an unrelated root.
 Vite's `viteMetadata.importedCss` is version-sensitive; the actual build tests
 and release gate cover the installed Vite version. A styled chunk without the
 required metadata fails instead of silently losing its CSS.
+
+Multiple ESM/CJS library entries default to CSS splitting unless the user
+configures `build.cssCodeSplit`, declares a fixed `libraryCss.fileName`, or selects
+`libraryCss.mode: "entry"`. Explicit entry mode and the development profile keep
+the previous entry-wide static dependency aggregation. CSS splitting preserves
+whole modules; it does not remove unused selectors. See [CSS bundling](css-bundling.md).
 
 With `build.cssCodeSplit: false`, Vite determines the combined CSS asset after
 JavaScript hashing. Mincho therefore requires an explicit, fixed output-relative

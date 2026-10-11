@@ -47,6 +47,15 @@ order while excluding the unused component. A separate pure ESM barrel records
 native esbuild's unused-CSS retention. Both npm and strict PnP run these checks;
 component subpaths are the supported selective-loading contract at this stage.
 
+`modules/css-bundling.mjs` builds a component library with the installed Vite
+adapter, then consumes it with ordinary Vite and esbuild. Vite ESM named imports
+and both bundlers' ESM/CJS subpath imports must include exactly the selected
+component's CSS and shared dependencies. Native esbuild's retained CSS for unused
+barrel exports is recorded separately. The same checks run in npm and strict PnP.
+The installed Vite adapter also builds single, dist-chunk and generic route/layout
+application fixtures, checking native lazy CSS ownership and route sharing. Both
+conditional declaration formats expose `MinchoAppCssOptions` and `MinchoCssRoute`.
+
 The original unminified diamond fixtures remain static decoder and package
 contract regressions. Production minification runs separately; a passing
 unminified assertion does not establish a compression result.

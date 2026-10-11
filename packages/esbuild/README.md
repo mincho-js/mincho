@@ -133,8 +133,10 @@ fragments remain supported.
 ## Experimental CSS sharing
 
 `buildWithMincho` can emit a shared stylesheet for an identical prefix of whole
-CSS modules used by multiple entries. It is disabled by default. Enabling it
-requires at least two boundaries and 4,096 source bytes by default:
+CSS modules used by multiple entries. Production builds with an output path
+enable sharing by default, requiring at least two boundaries and 4,096 source
+bytes. Development builds disable it. Set `experimental.cssChunkSharing: false`
+to retain native output, or override the thresholds explicitly:
 
 ```ts
 const result = await buildWithMincho({
@@ -159,6 +161,11 @@ then private CSS. The original native `cssBundle` is retained as
 either the ordered array or the fallback stylesheet; loading both duplicates
 rules and can change the cascade.
 
+Automatic sharing produces no extra CSS or manifest when no eligible prefix
+exists. Explicit `true` or threshold options retain the fallback manifest even
+without a shared group. Existing integrations loading the native `cssBundle`
+continue to work; transfer savings require consuming the ordered manifest.
+
 This option adds a native CSS-only build from captured inputs after the two
 existing passes. User plugins still run only for `analyze` and `emit`; URLs,
 source maps and content hashes are produced by esbuild. Additional outputs and
@@ -170,3 +177,6 @@ combined CSS transfers across entries. A first entry may need an extra CSS
 request. Global rules, CSS `@import`, unknown plugin provenance, CSS banners and
 footers, and conflicting module order keep the native output. Standalone
 `minchoEsbuildPlugins` and context/watch builds cannot enable this option.
+There is no browser CSS loader or additional lazy CSS boundary. See
+[CSS bundling](../../docs/css-bundling.md) for the application/library distinction
+and the reproducible benchmark.
