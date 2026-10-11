@@ -40,6 +40,8 @@ import {
 } from "@mincho-js/esbuild";
 import { minchoVitePlugin } from "@mincho-js/vite";
 import type {
+  MinchoAppCssOptions,
+  MinchoCssRoute,
   MinchoVitePluginOptions,
   ExtractCalls as ViteExtractCalls,
   MinchoExecutionOptions as ViteExecutionOptions,
@@ -93,11 +95,22 @@ const esbuildPlugins: EsbuildPlugin[] = minchoEsbuildPlugins({
   jsxCssProp: true
 });
 
+const routes: readonly MinchoCssRoute[] = [
+  { id: "home", entry: "src/home.tsx", layouts: ["src/layout.tsx"] }
+];
+
+const appCss: MinchoAppCssOptions = {
+  mode: "dist-chunk",
+  sharing: { minBoundaries: 2, minBytes: 4096 },
+  routes
+};
+
 const viteOptions: MinchoVitePluginOptions = {
   cache,
   execution,
   extractCalls,
   jsxCssProp: true,
+  appCss,
   libraryCss: { fileName: "style.css", analysis: "worker" }
 };
 

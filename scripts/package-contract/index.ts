@@ -98,6 +98,13 @@ async function main(): Promise<void> {
       await cp(join(scriptRoot, "fixture"), join(consumerRoot, "fixture"), {
         recursive: true
       });
+      await cp(
+        join(repoRoot, "scripts", "benchmark-css"),
+        join(consumerRoot, "fixture", "css-bundling"),
+        {
+          recursive: true
+        }
+      );
 
       for (const name of [
         "vanilla-extract",
@@ -205,6 +212,11 @@ async function main(): Promise<void> {
       await runNode(
         ["fixture/modules/compilation-benchmark.mjs"],
         join(consumerRoot, "fixture", "modules"),
+        true
+      );
+      await runNode(
+        ["fixture/modules/css-bundling.mjs"],
+        join(consumerRoot, "fixture", "modules", "css-bundling-output"),
         true
       );
       await runNode(
