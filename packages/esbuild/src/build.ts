@@ -77,10 +77,7 @@ export async function buildWithMincho(
 ): Promise<BuildWithMinchoResult> {
   const { mincho, plugins, ...nativeOptions } = options;
   const explicitSharing = mincho?.experimental?.cssChunkSharing;
-  const sharingOptions =
-    explicitSharing ??
-    ((mincho?.optimizationMode ?? "production") === "production" &&
-      Boolean(nativeOptions.outdir || nativeOptions.outfile));
+  const sharingOptions = explicitSharing ?? false;
 
   if (
     nativeOptions.write !== false &&

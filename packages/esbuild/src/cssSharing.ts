@@ -211,10 +211,6 @@ export async function emitSharedCss(
     }))
   });
 
-  // Automatic production sharing must not add unused files for native layouts.
-  // Explicit callers retain the v1 fallback manifest even without a candidate.
-  if (!groups.length && !emitFallbackManifest) return;
-
   if (groups.length) {
     const entries = new Map<string, readonly string[]>();
     const entryNames = new Map<string, string>();

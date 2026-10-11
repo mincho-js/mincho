@@ -143,15 +143,16 @@ describe("native esbuild CSS sharing", () => {
     expect(result.minchoCssManifest).toBeUndefined();
   });
 
-  it("shares production entries by default and respects development and explicit opt-out", async () => {
-    const root = await fixture({
-      "shared.css": Array.from(
-        { length: 180 },
-        (_, i) => `.shared${i} { padding: ${i}px; color: red; }`
-      ).join("\n")
-    });
+  it.each(["production", "development", "disabled"] as const)(
+    "keeps CSS sharing opt-in in %s mode",
+    async (mode) => {
+      const root = await fixture({
+        "shared.css": Array.from(
+          { length: 180 },
+          (_, i) => `.shared${i} { padding: ${i}px; color: red; }`
+        ).join("\n")
+      });
 
-    for (const mode of ["production", "development", "disabled"] as const) {
       const result = await buildWithMincho({
         absWorkingDir: root,
         entryPoints: ["a.js", "b.js"],
@@ -167,19 +168,13 @@ describe("native esbuild CSS sharing", () => {
         }
       });
 
-      if (mode === "production") {
-        expect(result.minchoCssManifest!.entries["a.js"]!.css).toHaveLength(2);
-        expect(result.minchoCssManifest!.entries["a.js"]!.css[0]).toBe(
-          result.minchoCssManifest!.entries["b.js"]!.css[0]
-        );
-      } else {
-        expect(result.minchoCssManifest).toBeUndefined();
-        expect(
-          result.outputFiles!.some((file) => file.path.includes("mincho-css"))
-        ).toBe(false);
-      }
-    }
-  });
+      expect(result.minchoCssManifest).toBeUndefined();
+      expect(
+        result.outputFiles!.some((file) => file.path.includes("mincho-css"))
+      ).toBe(false);
+    },
+    20_000
+  );
 
   it("adds no automatic manifest or replay files when sharing is ineligible", async () => {
     const root = await fixture();

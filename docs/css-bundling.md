@@ -91,13 +91,12 @@ are Vite-only; esbuild's native loading boundary is described below.
 
 ### esbuild entry CSS
 
-One-shot esbuild `buildWithMincho` production builds with an output path enable
-whole-module prefix sharing at two boundaries and 4,096 source bytes. Explicit
-`false` disables it; development and standalone plugin/context/watch APIs keep
-native behavior. Automatic sharing emits nothing extra without an eligible
-candidate. Explicit `true` or threshold options preserve the existing fallback
-manifest contract. Diagnostics report thresholds, selected groups and fallback
-reasons through the adapter's existing diagnostics option.
+One-shot esbuild `buildWithMincho` supports opt-in whole-module prefix sharing.
+Use `experimental.cssChunkSharing: true` for thresholds of two boundaries and
+4,096 source bytes, or provide explicit thresholds. Both development and production
+retain native output when omitted. The standalone plugin/context/watch APIs keep
+native behavior. Explicit sharing preserves the fallback manifest contract.
+Diagnostics report thresholds, selected groups and fallback reasons.
 
 For esbuild shared output, generate HTML/SSR links from the ordered
 `minchoCssManifest.entries[outputFile].css` array. Load that list **or** the native

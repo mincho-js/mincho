@@ -101,7 +101,8 @@ export function minchoEsbuildPlugin({
   optimize: optimizationOverrides,
   optimizationMode = "production",
   jsxCssProp,
-  extractCalls
+  extractCalls,
+  experimental
 }: MinchoEsbuildPluginOptions = {}): EsbuildPlugin {
   const optimize = internalResolveOptimizationOptions(
     optimizationMode,
