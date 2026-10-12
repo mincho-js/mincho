@@ -15,7 +15,7 @@ export interface MinchoCssRoute {
 }
 
 export interface MinchoAppCssOptions {
-  /** Native config by default; single or native CSS assets per output chunk. */
+  /** Native config by default; single sheet or Mincho rule generation per output chunk. */
   mode?: "native" | "single" | "dist-chunk";
 
   /** Opt-in whole-module prefix sharing. With routes, count distinct routes. */

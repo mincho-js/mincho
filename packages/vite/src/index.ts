@@ -49,6 +49,7 @@ import { createPackageGraphAnalysis } from "./packageGraphAnalysis.js";
 import { createViteStaticCssEvalSourceProvider } from "./staticCssEvalSourceProvider.js";
 import { commonJsRuntimePrefix, commonJsRuntimeRequest } from "./commonJs.js";
 import { createCssSharing } from "./cssSharing.js";
+import { createDistChunkCss } from "./distChunkCss.js";
 import {
   appCssConfig,
   validateAppCssOptions,
@@ -234,10 +235,14 @@ export function minchoVitePlugin(_options?: MinchoVitePluginOptions) {
         _options,
         diagnostics.fork(environment.name),
         environment.name,
-        sharedAnalysis
+        sharedAnalysis,
+        environment.config.consumer
       );
 
-      await environmentPlugin.configResolved(config);
+      await environmentPlugin.configResolved({
+        ...config,
+        build: environment.config.build ?? config.build
+      });
 
       if (server) environmentPlugin.configureServer(server);
       else pendingServerPlugins.add(environmentPlugin);
@@ -251,7 +256,8 @@ function createMinchoViteEnvironmentPlugin(
   _options: MinchoVitePluginOptions | undefined,
   diagnostics: CompilationDiagnostics,
   environment = "client",
-  sharedAnalysis?: { parser: InternalSourceAstCache; owners: Set<symbol> }
+  sharedAnalysis?: { parser: InternalSourceAstCache; owners: Set<symbol> },
+  consumer = "client"
 ) {
   const execution = new InternalCompilationExecution(
     _options?.execution,
@@ -285,6 +291,9 @@ function createMinchoViteEnvironmentPlugin(
   );
 
   const runtimeOwners = new Set<string>();
+  const distChunkCss = createDistChunkCss((phase, detail) =>
+    diagnostics.record(config.root, phase, detail)
+  );
 
   // Keep our serialized imports before Vite rewrites them for the dev server.
   const runtimeModules = new Map<string, string>();
@@ -369,6 +378,11 @@ function createMinchoViteEnvironmentPlugin(
   });
 
   const { resolverCache } = cssState;
+
+  const clearGeneratedCssForOwner = (owner: string) => {
+    distChunkCss.clearOwner(owner);
+    cssState.clearGeneratedCssForOwner(owner);
+  };
 
   const staticCssEvalProjectEngine = new internalMinchoProjectEngine();
   const libraryCssSidecarContracts = new Map<
@@ -605,7 +619,7 @@ function createMinchoViteEnvironmentPlugin(
       // That owner already reads the new input; only earlier requests are stale.
       if (!staticCssEvalOwnerStack.getStore()?.has(dependency))
         ownerVersions.set(dependency, (ownerVersions.get(dependency) ?? 0) + 1);
-      if (removed) cssState.clearGeneratedCssForOwner(dependency);
+      if (removed) clearGeneratedCssForOwner(dependency);
 
       forgetRuntimeModule(dependency);
 
@@ -617,7 +631,7 @@ function createMinchoViteEnvironmentPlugin(
           staticCssEvalProjectEngine
         )
       )(dependency)) {
-        if (removed) cssState.clearGeneratedCssForOwner(ownerId);
+        if (removed) clearGeneratedCssForOwner(ownerId);
 
         invalidateViteModule(ownerId);
         pending.push(ownerId);
@@ -806,6 +820,7 @@ function createMinchoViteEnvironmentPlugin(
 
         diagnosticsClosed = false;
         cssSharing.begin();
+        distChunkCss.begin();
         execution.begin();
         diagnostics.begin();
 
@@ -891,6 +906,11 @@ function createMinchoViteEnvironmentPlugin(
       diagnosticsClosed = false;
       config = resolvedConfig;
       cssSharing.configure(config);
+      distChunkCss.configure(
+        config,
+        _options?.appCss?.mode === "dist-chunk" && consumer === "client"
+      );
+      plugin.renderChunk.order = distChunkCss.enabled ? "pre" : "post";
       rootRealpath = await getRealpathOrResolvedPath(config.root);
       compilationCache?.configure(
         _options?.cache,
@@ -904,6 +924,9 @@ function createMinchoViteEnvironmentPlugin(
     },
 
     resolveId(id: string, importer?: string) {
+      const marker = distChunkCss.resolve(id);
+      if (marker) return marker;
+
       if (id.startsWith(commonJsRuntimePrefix)) {
         const [file, specifier, external] = commonJsRuntimeRequest(id);
         if (
@@ -1028,6 +1051,9 @@ function createMinchoViteEnvironmentPlugin(
     },
 
     async load(id: string) {
+      const marker = distChunkCss.load(id);
+      if (marker) return marker;
+
       if (id.startsWith(commonJsRuntimePrefix)) {
         const [file, specifier] = commonJsRuntimeRequest(id);
         const source = await fs.promises.readFile(file, "utf8");
@@ -1204,6 +1230,7 @@ function createMinchoViteEnvironmentPlugin(
           resolverCache.delete(moduleInfo.originalPath);
 
           const nextCss = new Map<string, string>();
+          const nextArtifacts = distChunkCss.transaction();
 
           const { source, watchFiles } = await tracedCompile({
             filePath: moduleInfo.filePath,
@@ -1233,6 +1260,19 @@ function createMinchoViteEnvironmentPlugin(
             source,
             filePath: moduleInfo.filePath,
             identOption: config.mode === "production" ? "short" : "debug",
+            ...(distChunkCss.enabled
+              ? {
+                  cssSourceFile: moduleInfo.originalPath,
+                  cssSourceRoot: config.root,
+
+                  serializeCssArtifact: (
+                    artifact: Parameters<typeof distChunkCss.collect>[0]
+                  ) =>
+                    current()
+                      ? distChunkCss.collect(artifact, nextArtifacts)
+                      : ""
+                }
+              : {}),
 
             serializeVirtualCssPath: async ({
               fileScope,
@@ -1242,6 +1282,10 @@ function createMinchoViteEnvironmentPlugin(
               source: string;
             }) => {
               if (!current()) return "";
+              if (distChunkCss.enabled)
+                throw new Error(
+                  "[mincho] dist-chunk requires an integration build with CSS IR support; CSS was serialized during module evaluation."
+                );
 
               hasGeneratedVirtualCss = true;
 
@@ -1259,6 +1303,8 @@ function createMinchoViteEnvironmentPlugin(
 
           const publish = () => {
             if (!current()) return;
+            if (distChunkCss.enabled)
+              distChunkCss.commit(moduleInfo.originalPath, nextArtifacts);
 
             diagnostics.record(
               moduleInfo.originalPath,
@@ -1302,8 +1348,7 @@ function createMinchoViteEnvironmentPlugin(
 
           return registryResult.source;
         } catch (error) {
-          if (current())
-            cssState.clearGeneratedCssForOwner(moduleInfo.originalPath);
+          if (current()) clearGeneratedCssForOwner(moduleInfo.originalPath);
 
           if (config.command === "build") {
             throw error;
@@ -1390,7 +1435,7 @@ function createMinchoViteEnvironmentPlugin(
         ) {
           if (!current()) return null;
 
-          cssState.clearGeneratedCssForOwner(fileId);
+          clearGeneratedCssForOwner(fileId);
           staticCssEvalProjectEngine.refreshFile({ fileId });
           rememberRuntimeModule(id, code);
 
@@ -1544,7 +1589,7 @@ function createMinchoViteEnvironmentPlugin(
         addStaticCssEvalWatchFilesForOwner(this, fileId);
 
         if (!cssExtract || !file) {
-          cssState.clearGeneratedCssForOwner(fileId);
+          clearGeneratedCssForOwner(fileId);
 
           if (
             commonJsTransformed ||
@@ -1585,9 +1630,15 @@ function createMinchoViteEnvironmentPlugin(
     },
 
     renderChunk: {
-      order: "post",
+      order: "post" as "pre" | "post",
 
       async handler(code, chunk, outputOptions, meta) {
+        if (distChunkCss.enabled) {
+          await distChunkCss.render(this, chunk, outputOptions, meta.chunks);
+
+          return null;
+        }
+
         await cssSharing.renderChunk(chunk, meta.chunks);
 
         if (
@@ -1665,6 +1716,16 @@ function createMinchoViteEnvironmentPlugin(
         }
       }
     },
+    augmentChunkHash: {
+      order: "pre",
+
+      handler() {
+        if (distChunkCss.enabled && distChunkCss.chunks)
+          cssSharing.reorder(distChunkCss.chunks);
+
+        return undefined;
+      }
+    },
     generateBundle: {
       order: "post",
 
@@ -1697,8 +1758,16 @@ function createMinchoViteEnvironmentPlugin(
     },
 
     buildEnd(error) {
-      if (error) compilationCache?.clear();
-      else return cssSharing.plan(this);
+      if (error) {
+        compilationCache?.clear();
+      } else {
+        distChunkCss.plan(
+          this,
+          cssSharing.needsPreview ? cssSharing.recordArtifact : undefined
+        );
+
+        return cssSharing.plan(this);
+      }
     },
 
     renderError(error) {
@@ -1729,6 +1798,7 @@ function createMinchoViteEnvironmentPlugin(
         abortOutputLinkers(new Error("Vite bundle closed"));
 
         if (!config.build.watch) {
+          distChunkCss.clear();
           await execution.close();
           compilationCache?.clear();
           releaseAnalysis();
@@ -1748,6 +1818,7 @@ function createMinchoViteEnvironmentPlugin(
       cancelDiagnosticsFlush();
       diagnosticsClosed = true;
       transformEpoch = Symbol("closed");
+      distChunkCss.clear();
       await execution.close();
       compilationCache?.clear();
       releaseAnalysis();
@@ -1812,7 +1883,7 @@ function createMinchoViteEnvironmentPlugin(
         return result;
       })
       .catch((error) => {
-        if (publication.current?.()) cssState.clearGeneratedCssForOwner(owner);
+        if (publication.current?.()) clearGeneratedCssForOwner(owner);
 
         throw error;
       });

@@ -50,7 +50,43 @@ export function createCssSharing(
     barriers = new WeakMap();
   };
 
+  const reorder = (chunks: Record<string, CssChunk>) => {
+    if (!assignment.size) return;
+
+    const names = new Set(groups.map((group) => group.name));
+
+    for (const current of Object.values(chunks)) {
+      const shared: string[] = [];
+
+      for (const imported of current.imports) {
+        const dependency = chunks[imported];
+
+        if (dependency && names.has(dependency.name))
+          shared.push(...(dependency.viteMetadata?.importedCss ?? []));
+      }
+
+      const css = current.viteMetadata?.importedCss;
+
+      if (css && shared.length) {
+        const own = [...css];
+        css.clear();
+
+        for (const id of [...shared, ...own]) css.add(id);
+      }
+    }
+  };
+
   return {
+    get needsPreview() {
+      return enabled;
+    },
+
+    recordArtifact(id: string, source: string) {
+      if (enabled) sources.set(id, { source, owned: true });
+    },
+
+    reorder,
+
     configure(resolved: ResolvedConfig) {
       config = resolved;
       enabled = Boolean(
@@ -145,7 +181,7 @@ export function createCssSharing(
       const modules = new Map<string, { bytes: number; shareable: boolean }>();
 
       for (const id of ids) {
-        if (!cssRequest.test(id)) continue;
+        if (!cssRequest.test(id) && !sources.get(id)?.owned) continue;
 
         const input = sources.get(id);
         modules.set(id, {
@@ -276,31 +312,10 @@ export function createCssSharing(
       barrier.arrived++;
 
       if (barrier.arrived === Object.keys(chunks).length) {
-        const names = new Set(groups.map((group) => group.name));
-
         // Vite's pure-CSS cleanup later appends imported CSS. Seed shared CSS
         // first now so Set insertion order remains shared -> private in HTML,
         // manifests, and dynamic-import preload dependency lists.
-        for (const current of Object.values(chunks)) {
-          const shared: string[] = [];
-
-          for (const imported of current.imports) {
-            const dependency = chunks[imported];
-
-            if (dependency && names.has(dependency.name))
-              shared.push(...(dependency.viteMetadata?.importedCss ?? []));
-          }
-
-          const css = current.viteMetadata?.importedCss;
-
-          if (css && shared.length) {
-            const own = [...css];
-            css.clear();
-
-            for (const id of [...shared, ...own]) css.add(id);
-          }
-        }
-
+        reorder(chunks);
         pending.delete(barrier.done);
         barrier.done();
       }
@@ -315,7 +330,7 @@ export function createCssSharing(
 
 // Vite 7 native CSS processing is covered by native build tests. A third-party
 // plugin does not become trusted merely by choosing a `vite:` name.
-const nativeTransforms = new Set([
+export const nativeTransforms = new Set([
   "vite:css",
   "vite:css-post",
   "vite:esbuild",
@@ -332,7 +347,7 @@ const nativeTransforms = new Set([
 ]);
 
 /** Only a declared regular-expression filter proves CSS cannot be transformed. */
-function excludesCss(hook: unknown, ids: string[]): boolean {
+export function excludesCss(hook: unknown, ids: string[]): boolean {
   if (!hook || typeof hook !== "object") return false;
 
   const filter = (hook as { filter?: { id?: unknown } }).filter?.id;
