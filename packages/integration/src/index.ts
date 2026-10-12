@@ -117,3 +117,7 @@ export {
   type CssSharingModule as InternalCssSharingModule,
   type CssSharingGroup as InternalCssSharingGroup
 } from "./cssChunkSharing.js";
+export {
+  generateVanillaCss as internalGenerateVanillaCss,
+  type VanillaCssArtifact as InternalVanillaCssArtifact
+} from "./vanillaCssIr.js";

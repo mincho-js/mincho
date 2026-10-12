@@ -8,6 +8,7 @@ import {
   type DefineRulesRegistrySession
 } from "@mincho-js/css/defineRules/registry";
 import { defineRules } from "@mincho-js/css";
+import type { VanillaOptions } from "./vanillaEvaluation.js";
 import { processVanillaFile } from "@vanilla-extract/integration";
 import { processCachedEvaluation } from "./evaluationResultCache.js";
 import {
@@ -24,9 +25,7 @@ import { runDefineRulesPresetRegistryStep } from "./defineRulesRegistryQueue.js"
 
 export { runDefineRulesPresetRegistryStep } from "./defineRulesRegistryQueue.js";
 
-export type DefineRulesPresetRegistryFileOptions = Parameters<
-  typeof processVanillaFile
->[0];
+export type DefineRulesPresetRegistryFileOptions = VanillaOptions;
 
 export interface DefineRulesPresetRegistryResult {
   source: string;

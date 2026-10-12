@@ -8,6 +8,7 @@ import { CompilationExecution } from "./compilationExecution.js";
 import { CompilationDiagnostics } from "./diagnostics.js";
 import * as diskCache from "./diskCache.js";
 import { getActiveDefineRulesRegistrySession } from "@mincho-js/css/defineRules/registry";
+import { generateVanillaCss, type VanillaCssArtifact } from "./vanillaCssIr.js";
 import {
   processDefineRulesPresetRegistryFile,
   runDefineRulesPresetRegistryStep
@@ -57,6 +58,56 @@ function runtime(evaluation: "auto" | "fresh" = "auto", enabled = true) {
 }
 
 describe("serialized evaluation results", () => {
+  it("replays raw CSS artifacts and separates IR from CSS-text cache entries", async () => {
+    const source = await compiled(
+      'import {style} from "@vanilla-extract/css"; export const box=style({color:"red"});'
+    );
+
+    const execution = runtime();
+    const diagnostics = new CompilationDiagnostics({ console: true });
+    const artifacts: VanillaCssArtifact[] = [];
+
+    const run = (deferred: boolean) =>
+      runDefineRulesPresetRegistryStep(() =>
+        diagnostics.run(filePath, "test", () =>
+          execution.run(() =>
+            processDefineRulesPresetRegistryFile({
+              source,
+              filePath,
+              ...(deferred
+                ? {
+                    serializeCssArtifact: (artifact: VanillaCssArtifact) => {
+                      artifacts.push(artifact);
+
+                      return 'import "marker";';
+                    }
+                  }
+                : {}),
+
+              serializeVirtualCssPath: ({ source }) =>
+                `import ${JSON.stringify(source)};`
+            })
+          )
+        )
+      );
+
+    const text = await run(false);
+    const first = await run(true);
+
+    expect((await run(true)).source).toBe(first.source);
+    expect(artifacts).toHaveLength(2);
+    expect(artifacts[1]).toEqual(artifacts[0]);
+    expect(text.source).toContain(
+      JSON.stringify(generateVanillaCss(artifacts[0]!))
+    );
+    expect(
+      diagnostics
+        .snapshot()
+        .builds.flatMap((b) => b.events)
+        .filter((e) => e.phase === "evaluation-result-hit")
+    ).toHaveLength(1);
+  });
+
   it.each([
     'import {style} from "@vanilla-extract/css"; export const box = style({color:"red"});',
     'import {rules} from "@mincho-js/css"; export const box = rules({color:"red"});'

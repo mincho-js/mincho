@@ -2,7 +2,6 @@ import { createRequire } from "node:module";
 import { readdir } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import type { DefineRulesRegistrySession } from "@mincho-js/css/defineRules/registry";
-import type { processVanillaFile } from "@vanilla-extract/integration";
 import { currentCompilationExecution } from "./compilationExecution.js";
 import { cacheDigest } from "./compilationInputs.js";
 import { getCompilerIdentity } from "./diskCache.js";
@@ -15,10 +14,11 @@ import {
   evaluationEnvironment,
   processVanillaWithExecution,
   replayVanillaEvaluation,
-  type SerializedVanillaEvaluation
+  type SerializedVanillaEvaluation,
+  type VanillaOptions
 } from "./vanillaEvaluation.js";
 
-type Options = Parameters<typeof processVanillaFile>[0];
+type Options = VanillaOptions;
 
 function snapshotRegistry(session: DefineRulesRegistrySession) {
   return structuredClone({
@@ -130,8 +130,11 @@ export async function processCachedEvaluation<T>(
       return fresh();
     }
 
-    const key = `evaluation-result:${cacheDigest(
+    const key = `evaluation-result-v2:${cacheDigest(
       JSON.stringify([
+        options.serializeCssArtifact ? "css-ir-v1" : "css-text",
+        options.cssSourceFile,
+        options.cssSourceRoot,
         identity,
         options.source,
         options.filePath,

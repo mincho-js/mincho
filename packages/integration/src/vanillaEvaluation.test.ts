@@ -6,6 +6,7 @@ import { CompilationDiagnostics } from "./diagnostics.js";
 import { compile } from "./compile.js";
 import { proveReusableEvaluation } from "./evaluationProof.js";
 import { processVanillaWithExecution } from "./vanillaEvaluation.js";
+import { generateVanillaCss, type VanillaCssArtifact } from "./vanillaCssIr.js";
 
 const executions: CompilationExecution[] = [];
 
@@ -27,6 +28,63 @@ async function compiled(contents: string) {
 }
 
 describe("compatible vanilla-extract evaluation", () => {
+  it.each(["auto", "fresh"] as const)(
+    "defers CSS with %s evaluation, preserving compositions and ordered rules",
+    async (evaluation) => {
+      const source = await compiled(`
+      import {style, globalStyle, keyframes, layer} from '@vanilla-extract/css';
+      const base = style({color:'red'});
+      export const composed = style([base]);
+      export const unused = style([base]);
+      const animation = keyframes({from:{opacity:0},to:{opacity:1}});
+      export const box = style({animationName:animation, selectors:{[composed + ' &']:{color:'blue'}}, '@media':{'(min-width: 20px)':{padding:2}}});
+      globalStyle('body', {margin:0});
+      export const styles = layer('styles');
+    `);
+
+      const css: string[] = [];
+      const expected = await processVanillaFile({
+        source,
+        filePath,
+
+        serializeVirtualCssPath: ({ source }) => {
+          css.push(source);
+
+          return 'import "marker";';
+        }
+      });
+
+      const execution = new CompilationExecution({ workers: 0, evaluation });
+      executions.push(execution);
+
+      const artifacts: VanillaCssArtifact[] = [];
+      const actual = await execution.run(() =>
+        processVanillaWithExecution({
+          source,
+          filePath,
+
+          serializeVirtualCssPath: () => {
+            throw new Error("CSS serialized during evaluation");
+          },
+
+          serializeCssArtifact: (artifact) => {
+            artifacts.push(artifact);
+
+            return 'import "marker";';
+          }
+        })
+      );
+
+      expect(actual).toBe(expected);
+
+      const snapshot = structuredClone(artifacts);
+
+      expect(artifacts.map(generateVanillaCss)).toEqual(css);
+      expect(artifacts.map(generateVanillaCss)).toEqual(css);
+      expect(artifacts).toEqual(snapshot);
+    }
+  );
+
   it.each<"auto" | "fresh" | undefined>([undefined, "auto", "fresh"])(
     "preserves CSS and exports with evaluation %s",
     async (evaluation) => {

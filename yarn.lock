@@ -2590,6 +2590,7 @@ __metadata:
     "@vanilla-extract/integration": "npm:^8.0.10"
     esbuild: "npm:^0.27.7"
     eslint-config-custom: "workspace:^"
+    eval: "npm:0.1.8"
     prettier-config-custom: "workspace:^"
     react: "npm:^19.2.6"
     react-dom: "npm:^19.2.6"

@@ -4,7 +4,7 @@
  */
 import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { Script, createContext, type Context } from "node:vm";
 import { cachedDataVersionTag } from "node:v8";
 import type { Adapter, FileScope } from "@vanilla-extract/css";
@@ -13,6 +13,7 @@ import * as fileScopeApi from "@vanilla-extract/css/fileScope";
 import { transformCss } from "@vanilla-extract/css/transformCss";
 import {
   parseFileScope,
+  getPackageInfo,
   processVanillaFile,
   serializeCss,
   serializeVanillaModule,
@@ -28,6 +29,11 @@ import {
   recordCompilationDiagnostic,
   measureCompilationPhase
 } from "./diagnostics.js";
+import {
+  collectSelectorCompositions,
+  isolateVanillaCssArtifact,
+  type VanillaCssArtifact
+} from "./vanillaCssIr.js";
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Rollup rewrites import.meta.url in CommonJS output.
@@ -190,9 +196,17 @@ class EvaluationPool {
 
 const pools = new WeakMap<CompilationExecution, EvaluationPool>();
 
-type VanillaOptions = Parameters<typeof processVanillaFile>[0];
+export type VanillaOptions = Parameters<typeof processVanillaFile>[0] & {
+  /** Internal build adapter: return a JS marker import, without serializing CSS. */
+  serializeCssArtifact?: (
+    artifact: VanillaCssArtifact
+  ) => string | Promise<string>;
+  cssSourceFile?: string;
+  cssSourceRoot?: string;
+};
 
 export interface SerializedVanillaEvaluation {
+  readonly artifacts?: readonly VanillaCssArtifact[];
   readonly css: readonly {
     fileName: string;
     fileScope: FileScope;
@@ -221,6 +235,16 @@ export async function replayVanillaEvaluation(
 ): Promise<string> {
   const imports: string[] = [];
 
+  if (value.artifacts) {
+    if (!options.serializeCssArtifact)
+      throw new Error("Mincho CSS IR cache requires a chunk CSS collector");
+
+    for (const artifact of value.artifacts)
+      imports.push(
+        await options.serializeCssArtifact(structuredClone(artifact))
+      );
+  }
+
   for (const css of value.css)
     imports.push(
       options.serializeVirtualCssPath
@@ -246,7 +270,23 @@ export async function processVanillaWithExecution(
   consume: (source: string) => unknown = (source) => source,
   capture?: EvaluationCapture
 ): Promise<unknown> {
-  const fresh = async () => consume(await processVanillaFile(options));
+  if (options.serializeCssArtifact && !compatibleIntegration())
+    throw new Error(
+      "Mincho dist-chunk requires @vanilla-extract/integration 8.0.10 and @vanilla-extract/css 1.20.1"
+    );
+
+  const fresh = async () =>
+    consume(
+      options.serializeCssArtifact
+        ? await evaluateVanilla(
+            options,
+            undefined,
+            undefined,
+            createRequire(resolve(options.filePath)),
+            capture
+          )
+        : await processVanillaFile(options)
+    );
 
   const execution = currentCompilationExecution();
   if (
@@ -314,13 +354,17 @@ export async function processVanillaWithExecution(
 
 async function evaluateVanilla(
   {
+    source: program,
     filePath,
     outputCss = true,
     identOption = process.env.NODE_ENV === "production" ? "short" : "debug",
-    serializeVirtualCssPath
-  }: Parameters<typeof processVanillaFile>[0],
-  script: Script,
-  context: Context,
+    serializeVirtualCssPath,
+    serializeCssArtifact,
+    cssSourceFile = filePath,
+    cssSourceRoot = process.cwd()
+  }: VanillaOptions,
+  script: Script | undefined,
+  context: Context | undefined,
   require: NodeRequire,
   capture?: EvaluationCapture
 ): Promise<string> {
@@ -356,29 +400,40 @@ async function evaluateVanilla(
   };
 
   const nodeEnv = process.env.NODE_ENV;
+  const evaluationAdapter =
+    require("@vanilla-extract/css/adapter") as typeof adapter;
+
+  const evaluationScope =
+    require("@vanilla-extract/css/fileScope") as typeof fileScopeApi;
+
   let scopeDepth = 0;
+  const scopedRequire = Object.assign(
+    (name: string) =>
+      name === "@vanilla-extract/css/fileScope"
+        ? {
+            ...evaluationScope,
 
-  const scopedRequire = (name: string) =>
-    name === "@vanilla-extract/css/fileScope"
-      ? {
-          ...fileScopeApi,
-          setFileScope(...args: Parameters<typeof fileScopeApi.setFileScope>) {
-            fileScopeApi.setFileScope(...args);
-            scopeDepth++;
-          },
+            setFileScope(
+              ...args: Parameters<typeof fileScopeApi.setFileScope>
+            ) {
+              evaluationScope.setFileScope(...args);
+              scopeDepth++;
+            },
 
-          endFileScope() {
-            if (scopeDepth <= 0)
-              throw new Error("Unbalanced Mincho file scope");
+            endFileScope() {
+              if (scopeDepth <= 0)
+                throw new Error("Unbalanced Mincho file scope");
 
-            try {
-              fileScopeApi.endFileScope();
-            } finally {
-              scopeDepth--;
+              try {
+                evaluationScope.endFileScope();
+              } finally {
+                scopeDepth--;
+              }
             }
           }
-        }
-      : require(name);
+        : require(name),
+    require
+  );
 
   const exports = {};
   const module = {
@@ -393,24 +448,42 @@ async function evaluateVanilla(
       if (originalNodeEnv === undefined) delete process.env.NODE_ENV;
       else process.env.NODE_ENV = originalNodeEnv;
 
-      adapter.setAdapter(cssAdapter);
+      evaluationAdapter.setAdapter(cssAdapter);
 
       try {
-        const evaluate = script.runInContext(context) as (
-          exports: object,
-          require: typeof scopedRequire,
-          module: object
-        ) => void;
+        if (!script || !context) {
+          // Match upstream's fresh eval sandbox, including Node globals and
+          // CommonJS exports, while retaining balanced adapter/scope cleanup.
+          const evalCode = ownRequire("eval") as (
+            source: string,
+            filename: string,
+            scope: object,
+            globals: boolean
+          ) => object;
 
-        evaluate(exports, scopedRequire, module);
+          module.exports = evalCode(
+            program,
+            filePath,
+            { console, process, require: scopedRequire },
+            true
+          );
+        } else {
+          const evaluate = script.runInContext(context) as (
+            exports: object,
+            require: typeof scopedRequire,
+            module: object
+          ) => void;
+
+          evaluate(exports, scopedRequire, module);
+        }
       } finally {
         try {
           while (scopeDepth > 0) {
             scopeDepth--;
-            fileScopeApi.endFileScope();
+            evaluationScope.endFileScope();
           }
         } finally {
-          adapter.removeAdapter();
+          evaluationAdapter.removeAdapter();
         }
       }
     } finally {
@@ -423,8 +496,45 @@ async function evaluateVanilla(
 
   const cssImports: string[] = [];
   const serializedCss: SerializedVanillaEvaluation["css"][number][] = [];
+  const sourcePackage = serializeCssArtifact
+    ? getPackageInfo(dirname(cssSourceFile))
+    : undefined;
+
+  const origin = (scope: FileScope) =>
+    sourcePackage &&
+    scope.packageName === sourcePackage.name &&
+    scope.filePath ===
+      relative(sourcePackage.dirname, cssSourceFile).replace(/\\/g, "/")
+      ? cssSourceFile
+      : resolve(cssSourceRoot, scope.filePath);
+
+  let artifacts: VanillaCssArtifact[] | undefined = serializeCssArtifact
+    ? [...cssByScope].map(([key, cssObjs]) =>
+        structuredClone({
+          origin: origin(parseFileScope(key)),
+          fileScope: parseFileScope(key),
+          cssObjs,
+          localClassNames: [...classNames],
+          composedClassLists: compositions,
+          usedCompositions: [...used]
+        })
+      )
+    : undefined;
+
+  if (artifacts) {
+    collectSelectorCompositions(artifacts, used);
+    artifacts = artifacts.map((artifact) =>
+      isolateVanillaCssArtifact({ ...artifact, usedCompositions: [...used] })
+    );
+
+    for (const artifact of artifacts) {
+      cssImports.push(await serializeCssArtifact!(structuredClone(artifact)));
+    }
+  }
 
   for (const [key, cssObjs] of cssByScope) {
+    if (serializeCssArtifact) break;
+
     const fileScope: FileScope = parseFileScope(key);
     let source: string;
     adapter.setAdapter(cssAdapter);
@@ -465,7 +575,7 @@ async function evaluateVanilla(
     unused.length ? new RegExp(`(${unused.join("|")})\\s`, "g") : null
   );
 
-  capture?.complete({ css: serializedCss, exports: exportsSource });
+  capture?.complete({ css: serializedCss, artifacts, exports: exportsSource });
 
   return joinEvaluation(cssImports, exportsSource);
 }
