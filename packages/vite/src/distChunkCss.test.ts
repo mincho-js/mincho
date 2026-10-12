@@ -364,4 +364,289 @@ describe("chunk-stage Mincho CSS generation", () => {
       )
     ).toBe(false);
   });
+
+  it("preserves pure style imports and ordinary CSS ordering, resolving URLs and PostCSS from the origin", async () => {
+    const root = await fixture({
+      "main.js":
+        'import "./before.css"; import "./only-style.js"; import "./after.css";',
+      "before.css": ".order {color: red}",
+      "only-style.js":
+        'import {globalCss} from "@mincho-js/css"; globalCss(".order", {color:"blue",backgroundImage:"url(./icon.svg)","@media":{"(min-width:1px)":{padding:2}}});',
+      "after.css": ".order {color: green}",
+      "icon.svg":
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><circle cx="5" cy="5" r="3"/></svg>'
+    });
+
+    const config: UserConfig = {
+      css: {
+        postcss: {
+          plugins: [
+            {
+              postcssPlugin: "recolor",
+
+              Declaration(declaration) {
+                if (declaration.value === "blue") declaration.value = "purple";
+              }
+            }
+          ]
+        }
+      },
+      build: { assetsInlineLimit: 0 }
+    };
+
+    const native = await compile(root, { appCss: { mode: "native" } }, config);
+    const chunk = await compile(root, {}, config);
+    const svg = chunk.output.find((i) => i.fileName.endsWith(".svg"))!;
+
+    expect(chunk.text.replace(`/${svg.fileName}`, "./icon.svg")).toBe(
+      native.text
+    );
+    expect(chunk.text.indexOf("color: red")).toBeLessThan(
+      chunk.text.indexOf("color: purple")
+    );
+    expect(chunk.text.indexOf("color: purple")).toBeLessThan(
+      chunk.text.indexOf("color: green")
+    );
+    expect(chunk.text).toContain("min-width:1px");
+    expect(chunk.text).toContain(svg.fileName);
+  });
+
+  it.each([
+    { cache: false, execution: { workers: 0, evaluation: "fresh" } },
+    { cache: false, execution: { workers: 2 } },
+    {
+      cache: { type: "filesystem", evaluationResults: true },
+      execution: { workers: 0 }
+    }
+  ] satisfies MinchoVitePluginOptions[])(
+    "preserves CSS across cold/warm builds with %j",
+    async (options) => {
+      const root = await fixture();
+      const cold = await compile(root, options);
+      const warm = await compile(root, options);
+
+      expect(warm.css).toEqual(cold.css);
+      expect(
+        warm.events.filter((e) => e.phase === "css-ir-generate")
+      ).toHaveLength(3);
+
+      if (options.cache)
+        expect(warm.events.some((e) => e.phase.includes("hit"))).toBe(true);
+    }
+  );
+
+  it("rejects opaque CSS transforms while accepting explicit JS-only filters", async () => {
+    const root = await fixture();
+
+    await expect(
+      compile(
+        root,
+        {},
+        {
+          plugins: [
+            {
+              name: "opaque-styles",
+
+              transform(code) {
+                return code;
+              }
+            }
+          ]
+        }
+      )
+    ).rejects.toThrow('cannot replay CSS transform "opaque-styles"');
+
+    const result = await compile(
+      root,
+      {},
+      {
+        plugins: [
+          {
+            name: "js-only",
+            transform: {
+              filter: { id: /\.[jt]sx?$/ },
+
+              handler(code) {
+                return code;
+              }
+            }
+          }
+        ]
+      }
+    );
+
+    expect(result.text).toContain("color: blue");
+  });
+
+  it("changes CSS, JS and manifest hashes after a CSS-only edit", async () => {
+    const root = await fixture();
+    const before = await compile(root);
+    await writeFile(
+      join(root, "a-style.js"),
+      'import {css} from "@mincho-js/css"; export const style=css({color:"orange"});'
+    );
+
+    const after = await compile(root);
+
+    const jsName = (result: typeof before) =>
+      result.output.find(
+        (i) => i.type === "chunk" && i.facadeModuleId === join(root, "a.js")
+      )!.fileName;
+
+    expect(jsName(after)).not.toBe(jsName(before));
+    expect(after.text).toContain("orange");
+    expect(after.text).not.toContain("blue");
+    expect(
+      after.output.find((i) => i.fileName === ".vite/manifest.json")
+    ).not.toEqual(
+      before.output.find((i) => i.fileName === ".vite/manifest.json")
+    );
+  });
+
+  it("keeps composition, layer, keyframe and conditional output equal to native CSS", async () => {
+    const root = await fixture({
+      "main.js":
+        'import "./home.css"; import {style} from "./complex.js"; import "./after.css"; globalThis.style=style;',
+      "after.css": "@media (min-width:1px) {body {color:green}}",
+      "complex.js": `import {css, globalCss, layer, keyframes} from '@mincho-js/css';
+        const scope=layer('example');
+        const animation=keyframes({from:{opacity:0},to:{opacity:1}});
+        const base=css({color:'red'});
+        export const group=css([base]);
+        globalCss('body', {'@media':{'(min-width:1px)':{color:'orange'}}});
+        export const style=css({animationName:animation, selectors:{[group+' &']:{padding:3}}, '@layer':{[scope]:{color:'blue'}}, '@media':{'(min-width:1px)':{margin:2}}});`
+    });
+
+    const native = await compile(root, { appCss: { mode: "native" } });
+    const chunk = await compile(root);
+
+    expect(chunk.text).toBe(native.text);
+    expect(chunk.text).toContain("@keyframes");
+    expect(chunk.text).toContain("@layer");
+  });
+
+  it("retains unchanged IR and removes edited/deleted owners in watch builds", async () => {
+    const root = await fixture();
+    let latest = "";
+    const watcher = (await build({
+      root,
+      configFile: false,
+      logLevel: "silent",
+      plugins: [
+        minchoVitePlugin({
+          cache: { type: "memory" },
+          appCss: { mode: "dist-chunk" }
+        }),
+        {
+          name: "watch-css-output",
+
+          generateBundle(_options, bundle) {
+            latest = Object.values(bundle)
+              .filter(
+                (i): i is Rollup.OutputAsset =>
+                  i.type === "asset" && i.fileName.endsWith(".css")
+              )
+              .map((i) => String(i.source))
+              .join("\n");
+          }
+        }
+      ],
+
+      // Allow the watcher's file-event throttle to settle between rapid edits,
+      // including the deliberately fast syntax-error/recovery cycle.
+      build: {
+        write: false,
+        watch: { buildDelay: 150 },
+        minify: false,
+        cssMinify: false
+      }
+    })) as Rollup.RollupWatcher;
+
+    const next = () =>
+      new Promise<string>((resolve, reject) => {
+        let started = false;
+
+        const handler = (event: Rollup.RollupWatcherEvent) => {
+          if (event.code === "BUNDLE_START") started = true;
+          if (!started) return;
+
+          if (event.code === "ERROR") {
+            watcher.off("event", handler);
+            reject(event.error);
+          }
+
+          if (event.code === "BUNDLE_END") void event.result.close();
+
+          if (event.code === "END") {
+            watcher.off("event", handler);
+            resolve(latest);
+          }
+        };
+
+        watcher.on("event", handler);
+      });
+
+    try {
+      expect(await next()).toContain("color: blue");
+
+      let changed = next();
+      await writeFile(
+        join(root, "a-style.js"),
+        'import {css} from "@mincho-js/css"; export const style=css({color:"orange"});'
+      );
+
+      const edited = await changed;
+
+      expect(edited).toContain("color: orange");
+      expect(edited).toContain("color: green");
+      expect(edited).not.toContain("color: blue");
+
+      changed = next();
+
+      const failed = expect(changed).rejects.toThrow();
+      await writeFile(join(root, "a-style.js"), "export const style = ;");
+      await failed;
+      changed = next();
+      await writeFile(
+        join(root, "a-style.js"),
+        'import {css} from "@mincho-js/css"; export const style=css({color:"purple"});'
+      );
+
+      const recovered = await changed;
+
+      expect(recovered).toContain("color: purple");
+      expect(recovered).not.toContain("color: orange");
+
+      changed = next();
+      await writeFile(
+        join(root, "main.js"),
+        'import "./home.css"; globalThis.load=()=>import("./b.js");'
+      );
+
+      const removed = await changed;
+
+      expect(removed).not.toContain("color: orange");
+      expect(removed).not.toContain("color: purple");
+      expect(removed).toContain("color: green");
+
+      changed = next();
+      await writeFile(
+        join(root, "main.js"),
+        'import "./home.css"; globalThis.routes={a:()=>import("./a.js"),b:()=>import("./b.js")};'
+      );
+
+      expect(await changed).toContain("color: purple");
+
+      changed = next();
+      await writeFile(
+        join(root, "main.js"),
+        'import "./home.css"; globalThis.load=()=>import("./b.js");'
+      );
+      await rm(join(root, "a-style.js"));
+
+      expect(await changed).not.toContain("color: purple");
+    } finally {
+      await watcher.close();
+    }
+  });
 });
