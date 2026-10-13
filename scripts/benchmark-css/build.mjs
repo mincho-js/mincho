@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { join, relative } from "node:path";
+import { readFile } from "node:fs/promises";
 import {
   appFiles,
   libraryFiles,
@@ -23,6 +24,7 @@ export async function buildApp(tools, root, kind, bundler, mode) {
   const outdir = join(root, "dist");
   let artifacts;
   let buildMs;
+  let generatedArtifacts = 0;
 
   if (bundler === "vite") {
     const start = performance.now();
@@ -33,6 +35,7 @@ export async function buildApp(tools, root, kind, bundler, mode) {
       plugins: [
         tools.minchoVitePlugin({
           cache: false,
+          diagnostics: { json: "mincho-events.json" },
           appCss: {
             mode:
               mode === "single"
@@ -68,6 +71,20 @@ export async function buildApp(tools, root, kind, bundler, mode) {
 
     buildMs = performance.now() - start;
     artifacts = viteArtifacts(result);
+
+    const diagnostics = JSON.parse(
+      await readFile(join(root, "mincho-events.json"), "utf8")
+    );
+
+    generatedArtifacts = diagnostics.builds
+      .flatMap((build) => build.events)
+      .filter((event) => event.phase === "css-ir-generate").length;
+
+    assert.equal(
+      generatedArtifacts > 0,
+      !["single", "native"].includes(mode),
+      "dist-chunk must generate Mincho CSS at output time"
+    );
   } else {
     const start = performance.now();
     const result = await tools.buildWithMincho({
@@ -151,7 +168,14 @@ export async function buildApp(tools, root, kind, bundler, mode) {
     assert(!initialCss.includes("--bench-module-b:"));
   }
 
-  return { artifacts, outdir, navigation, reverse, buildMs };
+  return {
+    artifacts,
+    outdir,
+    navigation,
+    reverse,
+    buildMs,
+    generatedArtifacts
+  };
 }
 
 export async function buildLibrary(

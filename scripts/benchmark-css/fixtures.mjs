@@ -28,15 +28,19 @@ export function appFiles(kind) {
       type: "module",
       sideEffects: true
     }),
-    "shared.css": sharedCss,
-    "layout.js": 'import "./shared.css"; export const layout = "shared";',
-    "home.css": ".home{--bench-module-home:1;color:black;}",
-
-    // Route modifiers must win independently of the order in which the native
-    // bundler loads a shared CSS-only chunk and route assets.
-    "a.css": ".shared.route-a{--bench-module-a:1;color:blue;}",
-    "b.css": ".shared.route-b{--bench-module-b:1;color:green;}"
+    "layout.js": `import {css, defineRules} from '@mincho-js/css';
+      export const layout = css((() => {
+        const {css: tokenCss} = defineRules({properties:{padding:true,color:true}});
+        return [{color:'red', vars:{'--bench-module-shared':'1'}},
+          ${Array.from({ length: 160 }, (_, i) => `tokenCss({padding:${i},color:'rgb(${i},${255 - i},${i % 97})'})`).join(",")}];
+      })());`,
+    "home.css": ".home{--bench-module-home:1;color:black;}"
+    // The initial ordinary stylesheet also exercises native/generated CSS coexistence.
   };
+
+  for (const name of ["a", "b"])
+    files[`${name}-style.js`] = `import {css} from '@mincho-js/css';
+    export const page=css({vars:{'--bench-module-${name}':'1'},selectors:{'&&':{color:'${name === "a" ? "blue" : "green"}'}}});`;
 
   if (kind === "spa") {
     Object.assign(files, {
@@ -55,15 +59,15 @@ export function appFiles(kind) {
 
     for (const name of ["a", "b"])
       files[`${name}.js`] =
-        `import { layout } from './layout.js'; import './${name}.css';
-      export const className=layout+' route-${name}';
+        `import { layout } from './layout.js'; import {page} from './${name}-style.js';
+      export const className=layout+' '+page;
       export const evaluatedColor=(()=>{const el=document.createElement('div');el.className=className;document.body.append(el);const color=getComputedStyle(el).color;el.remove();return color;})();`;
   } else {
     for (const name of ["a", "b"]) {
       files[`${name}.html`] = html(name);
       files[`${name}.js`] =
-        `import { layout } from './layout.js'; import './${name}.css'; ${phase}
-        document.querySelector('#sample').className=layout+' route-${name}';
+        `import { layout } from './layout.js'; import {page} from './${name}-style.js'; ${phase}
+        document.querySelector('#sample').className=layout+' '+page;
         window.addEventListener('load',()=>{record('${name}');${finish}});`;
     }
   }

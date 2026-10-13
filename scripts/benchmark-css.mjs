@@ -104,6 +104,7 @@ if (selected.includes("apps")) {
           bundler,
           mode,
           buildMs: result.buildMs,
+          generatedArtifacts: result.generatedArtifacts,
           files: fileReport(result.artifacts),
           navigation: result.navigation,
           reverse: result.reverse,

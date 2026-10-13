@@ -29,6 +29,12 @@ for (const mode of ["single", "dist-chunk", "routes"]) {
   );
 
   if (mode === "single") assert.equal(sheets.length, 1);
+  else
+    assert(
+      result.generatedArtifacts > 0,
+      "Expected chunk-stage generation from the installed integration"
+    );
+
   if (mode === "routes")
     assert(sheets.some((id) => id.includes("mincho-shared-")));
 }
