@@ -20,6 +20,23 @@ afterEach(async () => {
 const babel = { babelrc: false, configFile: false } as const;
 
 describe("adapter transform eligibility", () => {
+  it("keeps the ordinary-module fast path with experimental CSS defaults", async () => {
+    expect(
+      await canSkipMinchoTransform({
+        filename: "/plain.ts",
+        source: "export const x = 1;",
+        babel: { ...babel, experimental: {} }
+      })
+    ).toBe(true);
+    expect(
+      await canSkipMinchoTransform({
+        filename: "/plain.ts",
+        source: "export const x = 1;",
+        babel: { ...babel, experimental: { nonInheritingCssVars: true } }
+      })
+    ).toBe(true);
+  });
+
   it("skips ordinary TS without changing the direct Babel API", async () => {
     const options = {
       filename: "/plain.ts",

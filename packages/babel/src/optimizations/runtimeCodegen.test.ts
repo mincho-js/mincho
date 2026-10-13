@@ -340,4 +340,29 @@ describe("runtime code generation", () => {
 
     expect(readOnly).toContain("createCompiledClassRuntimeFn");
   });
+
+  it("registers private self-consumed vars only for supported intrinsic elements", () => {
+    const transform = (tag: string, style: string) =>
+      babelTransform(`function App(size) {return <${tag} css={${style}}/>;}`, {
+        jsxCssProp: true,
+        experimental: { nonInheritingCssVars: true }
+      });
+
+    expect(transform("div", "{width: +size}").result[1]).toContain(
+      "inherits: false"
+    );
+    expect(
+      transform("div", '{"@media": {"(min-width: 1px)": {width: +size}}}')
+        .result[1]
+    ).toContain("inherits: false");
+
+    for (const tag of ["Component", "custom-element"])
+      expect(transform(tag, "{width: +size}").result[1]).not.toContain(
+        "inherits: false"
+      );
+
+    expect(
+      transform("div", '{selectors: {"& > span": {width: +size}}}').result[1]
+    ).not.toContain("inherits: false");
+  });
 });

@@ -1,5 +1,6 @@
 import type { NodePath } from "@babel/core";
 import { types as t } from "@babel/core";
+import { isIntrinsicElement } from "../optimizations/intrinsicElements.js";
 import type { ProgramScope } from "../types.js";
 import {
   getNearestIdentifier,
@@ -46,6 +47,16 @@ export function createDynamicCssVariableLowering(options: {
   readonly preparedValues?: ReadonlySet<string>;
 }): DynamicCssVariableLowering {
   const programParent = options.path.scope.getProgramParent() as ProgramScope;
+  const nonInheriting =
+    options.nonInheritingCssVars === true &&
+    t.isJSXIdentifier(options.path.node.name) &&
+    isIntrinsicElement(options.path.node.name.name) &&
+    options.path.node.attributes.every(
+      (attribute) =>
+        t.isJSXAttribute(attribute) &&
+        !t.isJSXIdentifier(attribute.name, { name: "is" })
+    );
+
   const nearestIdentifier = getNearestIdentifier(options.path);
   const identifierBase = nearestIdentifier
     ? `$mincho$$${nearestIdentifier.node.name}`
@@ -157,7 +168,23 @@ export function createDynamicCssVariableLowering(options: {
             t.cloneNode(leaf.variableIdentifier),
             t.callExpression(
               t.cloneNode(helperImportBindings.createVarIdentifier),
-              [t.stringLiteral(leaf.propertyName)]
+              [
+                ...(nonInheriting && leaf.selfConsumed
+                  ? [
+                      t.objectExpression([
+                        t.objectProperty(
+                          t.identifier("syntax"),
+                          t.stringLiteral("*")
+                        ),
+                        t.objectProperty(
+                          t.identifier("inherits"),
+                          t.booleanLiteral(false)
+                        )
+                      ])
+                    ]
+                  : []),
+                t.stringLiteral(leaf.propertyName)
+              ]
             )
           )
         ])

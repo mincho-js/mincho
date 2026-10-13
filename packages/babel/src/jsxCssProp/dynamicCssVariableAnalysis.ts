@@ -187,6 +187,7 @@ type DynamicCssVariableArrayWalkResult = {
 function collectDynamicCssVariableObjectExpression(options: {
   readonly expression: t.ObjectExpression;
   readonly declarationName: string | null;
+  readonly consumption?: "self" | "condition" | "blocked";
   readonly scope: NodePath<t.JSXOpeningElement>["scope"];
 }): DynamicCssVariableObjectWalkResult | null {
   const properties: t.ObjectExpression["properties"] = [];
@@ -215,6 +216,14 @@ function collectDynamicCssVariableObjectExpression(options: {
     if (t.isObjectExpression(value)) {
       const nestedResult = collectDynamicCssVariableObjectExpression({
         expression: value,
+        consumption:
+          options.consumption === "blocked"
+            ? "blocked"
+            : options.consumption === "condition"
+              ? "self"
+              : /^@(media|supports|container)$/.test(propertyName)
+                ? "condition"
+                : "blocked",
         declarationName: getNestedDeclarationName({
           propertyName,
           declarationName: options.declarationName
@@ -263,6 +272,8 @@ function collectDynamicCssVariableObjectExpression(options: {
     }
 
     const leaf: DynamicCssVariableLeaf = {
+      selfConsumed:
+        options.consumption === undefined || options.consumption === "self",
       propertyName: leafPropertyName,
       valueFragment,
       variableIdentifier: t.identifier("minchoDynamicCssVariable")

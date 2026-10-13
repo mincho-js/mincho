@@ -228,6 +228,7 @@ export type BabelOptions = Omit<
   extractCalls?: PluginOptions["extractCalls"];
   jsxCssProp?: boolean;
   optimize?: PluginOptions["optimize"];
+  experimental?: PluginOptions["experimental"];
   staticCssEvalProvider?: PluginOptions["staticCssEvalProvider"];
 
   /** @internal Async source provider used to prepare imported css eval data. */
@@ -325,6 +326,7 @@ export async function transformSourceUncached(
     extractCalls,
     jsxCssProp = false,
     optimize,
+    experimental,
     staticCssEvalProvider,
     staticCssEvalSourceProvider,
     staticCssEvalProjectEngine,
@@ -399,6 +401,7 @@ export async function transformSourceUncached(
     result: ["", ""],
     diagnostics,
     jsxCssProp,
+    experimental,
     ...(extractCalls !== undefined ? { extractCalls } : {}),
     ...(optimize ? { optimize } : {})
   };

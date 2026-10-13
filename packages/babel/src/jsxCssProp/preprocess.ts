@@ -86,12 +86,15 @@ export function preprocessJsxCssProp(
         ...analyzedElement,
         dynamicCssVariableLowering:
           createOrderedCssLowering(openingElementPath, analyzedElement, {
-            splitConditions: state.opts.optimize?.runtimeCodegen === true
+            splitConditions: state.opts.optimize?.runtimeCodegen === true,
+            nonInheritingCssVars: state.opts.experimental?.nonInheritingCssVars
           }) ??
           (rule
             ? createDynamicCssVariableLowering({
                 path: openingElementPath,
                 rule,
+                nonInheritingCssVars:
+                  state.opts.experimental?.nonInheritingCssVars,
                 needsClassNameMerge:
                   analyzedElement.classNameAttribute !== null ||
                   hasSpread ||

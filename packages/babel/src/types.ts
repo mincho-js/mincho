@@ -43,6 +43,7 @@ export interface PluginOptions {
     runtimeCodegen?: boolean;
     jsxRuntimeGuards?: boolean;
   };
+  experimental?: { nonInheritingCssVars?: boolean };
 
   /** @internal Prepared sync provider supplied by bundler prepasses only. */
   staticCssEvalProvider?: StaticCssEvalProvider;

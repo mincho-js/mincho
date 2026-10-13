@@ -74,6 +74,8 @@ export interface MinchoEsbuildPluginOptions {
   /** Additional build-time calls; local files are relative to absWorkingDir. */
   extractCalls?: BabelOptions["extractCalls"];
   experimental?: {
+    nonInheritingCssVars?: boolean;
+
     /** Available through the one-shot buildWithMincho API. */
     cssChunkSharing?: MinchoCssChunkSharingOptions;
   };
@@ -484,6 +486,11 @@ export function minchoEsbuildPlugin({
             jsxCssProp,
             extractCalls,
             optimize,
+            experimental: {
+              ...(experimental?.nonInheritingCssVars !== undefined
+                ? { nonInheritingCssVars: experimental.nonInheritingCssVars }
+                : {})
+            },
             compilationCache,
             staticCssEvalSourceProvider: provider,
             staticCssEvalProjectEngine,

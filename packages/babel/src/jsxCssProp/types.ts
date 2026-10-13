@@ -115,6 +115,7 @@ export type DynamicCssVariableValueFragment =
     };
 
 export type DynamicCssVariableLeaf = {
+  readonly selfConsumed?: boolean;
   readonly propertyName: string;
   readonly valueFragment: DynamicCssVariableValueFragment;
   readonly variableIdentifier: t.Identifier;

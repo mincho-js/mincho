@@ -108,6 +108,7 @@ export interface MinchoVitePluginOptions {
   /** Client application CSS distribution and optional route-aware sharing. */
   appCss?: MinchoAppCssOptions;
   experimental?: {
+    nonInheritingCssVars?: boolean;
     cssChunkSharing?: MinchoCssChunkSharingOptions;
   };
   libraryCss?: {
@@ -1393,6 +1394,15 @@ function createMinchoViteEnvironmentPlugin(
 
         const transformBabelOptions: BabelOptions = {
           ...babelOptions,
+          experimental: {
+            ...babelOptions?.experimental,
+            ...(_options?.experimental?.nonInheritingCssVars !== undefined
+              ? {
+                  nonInheritingCssVars:
+                    _options.experimental.nonInheritingCssVars
+                }
+              : {})
+          },
           optimize: internalResolveOptimizationOptions(
             _options?.optimizationMode ??
               (config.command === "serve" ? "development" : "production"),

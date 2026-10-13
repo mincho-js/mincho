@@ -24,6 +24,7 @@ async function inspectTransformEligibility(
     compilationContext: _context,
     optimize,
     jsxCssProp,
+    experimental: _experimental,
     diagnostics: _diagnostics,
     staticCssEvalSourceProvider: _provider,
     staticCssEvalProjectEngine: _engine,

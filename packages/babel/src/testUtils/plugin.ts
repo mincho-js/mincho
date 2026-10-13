@@ -23,7 +23,11 @@ export function babelTransform(
   pluginOptions: Partial<
     Pick<
       PluginOptions,
-      "jsxCssProp" | "staticCssEvalProvider" | "optimize" | "extractCalls"
+      | "jsxCssProp"
+      | "staticCssEvalProvider"
+      | "optimize"
+      | "extractCalls"
+      | "experimental"
     >
   > = {},
   transformOptions: {
