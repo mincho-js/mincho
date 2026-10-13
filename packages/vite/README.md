@@ -44,11 +44,18 @@ export default defineConfig({
 ```
 
 `mode: "native"` (default) preserves Vite configuration. `"single"` requests
-one sheet; `"dist-chunk"` requests native CSS code splitting and lazy loading.
-Conflicting explicit `build.cssCodeSplit` settings are errors. Mincho's
-`dist-chunk` is a distribution option, not UnoCSS-style token regeneration or
-unused-selector removal. These options do not change development serving,
-library builds or SSR.
+one sheet. `"dist-chunk"` collects raw Mincho rules during evaluation and generates
+CSS from style markers in each final output chunk, following UnoCSS's chunk-stage
+model. It preserves file/cascade order and uses native Vite processing for
+PostCSS, URL assets, lazy preloads, hashes, HTML and manifests. It does not purge
+selectors or merge unrelated rules. Conflicting explicit `build.cssCodeSplit`
+settings are errors. Development serving, library builds and SSR are unchanged.
+
+The private adapter currently requires Vite **7.3.3**, vanilla-extract integration
+**8.0.10** and CSS **1.20.1**. Unsupported versions, Lightning CSS transformation,
+or opaque third-party CSS transforms fail explicitly; use `native` for those
+toolchains. Native PostCSS is supported, and JS-only plugins can declare a
+CSS-excluding `transform.filter.id`.
 
 The generic route list includes each route's entry and ancestor layouts. Paths
 are relative to the Vite root or exact ids in the built graph. With this list,
@@ -58,7 +65,9 @@ native entries and dynamic import targets. Routes do not create lazy JS imports
 or load missing layouts; the router owns those dependencies. Missing route
 modules skip sharing with a diagnostic.
 
-Sharing is opt-in. `appCss.sharing` takes precedence over
+Sharing is opt-in. Only with sharing enabled, a temporary build-end IR preview
+measures eligibility; final CSS is always generated from output chunks. User
+`manualChunks` still controls placement. `appCss.sharing` takes precedence over
 `experimental.cssChunkSharing`, including `false`. All native consumers must
 still agree on the shared prefix's order. This shares whole CSS modules rather
 than deduplicating atoms or promoting lazy-only CSS into the initial page. See

@@ -17,19 +17,46 @@ already share CSS with less JavaScript metadata.
 
 `appCss.mode` explicitly selects the client application's CSS distribution:
 
-| Mode | Behavior |
-| --- | --- |
-| `"native"` (default) | Preserve Vite's `build.cssCodeSplit` configuration. |
-| `"single"` | Request `cssCodeSplit: false`, including lazy styles in one sheet. |
-| `"dist-chunk"` | Request `cssCodeSplit: true`, using native output chunk CSS and lazy preloading. |
+| Mode                 | Behavior                                                                                                                            |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `"native"` (default) | Preserve Vite's `build.cssCodeSplit` configuration.                                                                                 |
+| `"single"`           | Request `cssCodeSplit: false`, including lazy styles in one sheet.                                                                  |
+| `"dist-chunk"`       | Collect raw Mincho rules, then generate CSS from each final output chunk's style markers. Vite owns CSS assets and lazy preloading. |
 
 Contradictory explicit `build.cssCodeSplit` settings fail with a configuration
 error. These modes apply to client application builds; development serving,
-libraries and SSR retain their existing behavior. `dist-chunk` describes the
-**distribution** contract. Mincho still extracts module CSS before Vite assembles
-chunks. It does not regenerate atomic rules from final chunk tokens as UnoCSS's
-`dist-chunk` mode does, nor does it promise one CSS file for every JS chunk.
-Native shared CSS chunks and CSS-free JS chunks remain possible.
+libraries and SSR retain their existing behavior. `dist-chunk` follows UnoCSS's
+chunk-stage generation model using evaluated rule data instead of utility tokens.
+Module evaluation collects ordered vanilla-extract rules, scope, classes and
+compositions; its JS output imports empty, side-effectful style markers. No CSS
+text is generated during transformation, and no additional flag is required.
+
+Before Vite's CSS output hook, Mincho generates the artifacts selected by actual
+`chunk.modules`. Each authoring file remains an ordering barrier among ordinary
+CSS imports. URLs and PostCSS resolve from its physical location. Vite then
+handles minification, assets, hashes, HTML links, manifests and lazy preloads.
+Repeated references to the same artifact are emitted once per chunk; unrelated
+equal declarations are not merged. This does not purge selectors or rename
+classes, nor promise a CSS file for every JS chunk.
+
+The private adapter is validated against **Vite 7.3.3**, **vanilla-extract
+integration 8.0.10** and **vanilla-extract CSS 1.20.1**. Other versions, missing
+hooks, Lightning CSS transformation, and opaque third-party CSS transforms fail
+explicitly for `dist-chunk`. Vite's PostCSS configuration is supported. JS-only
+plugins can declare CSS-excluding regular expressions in `transform.filter.id`.
+Use `native` with unsupported toolchains until their adapter contracts are tested.
+External CSS output supports ES/CJS formats.
+
+Sharing remains optional. Only with sharing enabled, a temporary `buildEnd` IR
+preview measures bytes and runs the existing safety classifier; it is never
+emitted. Final CSS is always generated from actual chunk membership. Unsupported
+sharing layouts, including user `manualChunks`, skip additional sharing while
+retaining chunk-stage generation. Diagnostics expose `css-ir-preview` and
+`css-ir-generate`; default `dist-chunk` has no preview.
+
+Evaluation caches store raw IR under a separate key/schema from CSS-text results.
+Environment and output state are isolated. Watch builds retain IR for unchanged
+cached transforms and replace it when an owner changes.
 
 The distribution mode and sharing policy are independent:
 
@@ -140,8 +167,14 @@ Mark CSS as side effects and expose the matching package subpaths:
   "sideEffects": ["**/*.css"],
   "exports": {
     ".": { "import": "./dist/index.mjs", "require": "./dist/index.cjs" },
-    "./button": { "import": "./dist/button.mjs", "require": "./dist/button.cjs" },
-    "./dialog": { "import": "./dist/dialog.mjs", "require": "./dist/dialog.cjs" }
+    "./button": {
+      "import": "./dist/button.mjs",
+      "require": "./dist/button.cjs"
+    },
+    "./dialog": {
+      "import": "./dist/dialog.mjs",
+      "require": "./dist/dialog.cjs"
+    }
   }
 }
 ```
@@ -211,7 +244,9 @@ it, the report explicitly marks browser checks skipped. Served bytes are raw;
 compression columns are offline estimates. Browser timings are not performance
 thresholds.
 
-Application fixtures include a shared layout module, and SPA fixtures use a map
+Application fixtures now generate real Mincho `css()` and `defineRules()` styles
+in shared layouts and route style modules, alongside ordinary initial CSS. They
+assert output-time generation via diagnostics. SPA fixtures use a map
 of route loader functions. During validation with Vite
 7.3.3, a ternary containing two dynamic imports was minified into a preload call
 with only the second route's CSS dependencies. This reproduced without Mincho;
@@ -223,37 +258,38 @@ sidecars has separate regression tests.
 
 ### Measured fixture results
 
-September 22, 2026; Node 24.21.0, Vite 7.3.3 and esbuild 0.27.7. All 54 size
-scenarios and the 14 application browser scenarios completed. Sizes below are
-per-file Brotli quality 11 sums, in bytes. A session visits both routes/pages
-and revisits the first; library rows use one of twelve components.
+September 23, 2026; Node 24.21.0, Vite 7.3.3 and esbuild 0.27.7. All 14
+application comparisons passed both size checks and Chromium style/cache checks
+using actual Mincho rules. These replace the earlier ordinary-CSS measurements
+of the distribution alias. Sizes are per-file Brotli quality 11 sums in bytes;
+a session visits both routes/pages and revisits the first.
 
-| Scenario | Initial CSS | Session CSS | Initial CSS requests |
-| --- | ---: | ---: | ---: |
-| Vite SPA, single CSS | 889 | 889 | 1 |
-| Vite SPA, native / dist-chunk | 44 | 987 | 1 |
-| Vite SPA, route/layout sharing | 44 | 987 | 1 |
-| Vite MPA, native / dist-chunk / route sharing | 891 | 943 | 2 |
-| esbuild MPA, native | 861 | 1,729 | 1 |
-| esbuild MPA, shared manifest | 891 | 943 | 2 |
-| Library, single CSS | 937 | 937 | 1 |
-| Library, component subpath | 869 | 869 | 1 |
-| Library, group subpath | 899 | 899 | 1 |
+| Scenario                      | Initial CSS | Session CSS | CSS / JS files | Chunk-stage generations | Build ms |
+| ----------------------------- | ----------: | ----------: | -------------: | ----------------------: | -------: |
+| Vite SPA, native              |          44 |       1,255 |          4 / 4 |                       0 |    1,811 |
+| Vite SPA, dist-chunk          |          44 |       1,255 |          4 / 4 |                       3 |    1,810 |
+| Vite SPA, dist-chunk + routes |          44 |       1,255 |          4 / 4 |                       3 |    1,801 |
+| Vite MPA, native              |       1,148 |       1,211 |          3 / 3 |                       0 |    1,911 |
+| Vite MPA, dist-chunk          |       1,148 |       1,211 |          3 / 3 |                       3 |    1,875 |
+| Vite MPA, dist-chunk + routes |       1,148 |       1,211 |          3 / 3 |                       3 |    1,816 |
 
-Vite's native and explicit `dist-chunk` output matched in these fixtures. Both
-opt-in sharing policies saved no CSS and increased JavaScript preload metadata,
-so native splitting remains the default. The route policy controls which
-otherwise-safe prefixes qualify; it is not a promise of smaller output.
-esbuild sharing reduced cumulative MPA CSS by 45.5%, with 30 more bytes and one
-additional CSS request on the first page. All repeated page/route visits reused
-CSS; the browser reported no repeat CSS network requests.
+These rows have no repeated CSS module markers. Session CSS raw/gzip/Brotli
+totals are 7,723/2,075/1,255 B for SPA and 7,683/2,017/1,211 B for MPA.
+SPA initially requests one CSS file; MPA requests two. Build times are one run
+with Mincho caching disabled in a shared Node process, not evidence of a speedup.
+The report also records initial/session JS, route transitions and browser cache
+hits. Reproduce with `yarn benchmark:css --cases=apps --browser=/usr/bin/chromium`.
 
-The library's common CSS dominates this small fixture. Component subpaths saved
-7.3% compressed CSS in both consumers, while native esbuild named imports retained
-all twelve components' styles. These measurements demonstrate the tradeoffs;
-they are not expected savings for every application. Use the report's raw/gzip
-columns, complete usage matrix, file counts and browser resources for your own
-decision.
+Native Vite already shares this fixture's common styles, so actual chunk-stage
+generation and optional route sharing do not reduce CSS bytes here. Native
+splitting remains the default. In the same run, esbuild MPA sharing reduced
+session CSS from 2,207 to 1,211 B, increasing initial CSS from 1,101 to 1,148 B
+and adding one initial CSS request. Repeated visits reused CSS in every case.
+
+The unchanged library baseline (September 22, one of twelve components) is
+937 B for a single sheet, 869 B for a component subpath and 899 B for a group
+subpath. Native esbuild named imports retained all twelve components' styles.
+These fixture results are not expected savings for every application or library.
 
 The design uses the render-time metadata approach from
 [vite-plugin-lib-inject-css](https://github.com/emosheeep/vite-plugin-lib-inject-css)

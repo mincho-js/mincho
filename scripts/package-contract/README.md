@@ -53,7 +53,10 @@ and both bundlers' ESM/CJS subpath imports must include exactly the selected
 component's CSS and shared dependencies. Native esbuild's retained CSS for unused
 barrel exports is recorded separately. The same checks run in npm and strict PnP.
 The installed Vite adapter also builds single, dist-chunk and generic route/layout
-application fixtures, checking native lazy CSS ownership and route sharing. Both
+application fixtures with actual `css()`/`defineRules()` calls. Diagnostics must
+prove chunk-stage generation for dist-chunk/routes; checks also cover lazy CSS
+ownership and route sharing. Fresh evaluation uses the declared `eval` dependency
+under strict PnP. Both
 conditional declaration formats expose `MinchoAppCssOptions` and `MinchoCssRoute`.
 
 The original unminified diamond fixtures remain static decoder and package
