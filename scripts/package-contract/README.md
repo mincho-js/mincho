@@ -16,6 +16,21 @@ The browser binary is optional; an unset `MINCHO_BROWSER_BINARY` produces an
 explicit skipped-browser message. When supplied, Chromium checks computed
 styles from the actual native entry CSS output in both build modes.
 
+## CI responsibilities
+
+The `production-contract` job uses the same `pre_job` duplicate-run decision as
+the other CI jobs. `yarn verify:production-contract` cleans generated output and
+build caches, builds fresh release payloads, and runs the isolated consumers.
+The release build remains necessary to check the exact packed production output
+without depending on another job's workspace or build cache.
+
+Workspace tests run in the `build` job, while workspace type checks and lint run
+in `typecheck`. The production contract does not repeat `test:all --force`;
+its installed-consumer runtime, declaration, bundling and package metadata checks
+exercise the release artifacts rather than the workspace source.
+
+## Installed consumers
+
 The same tarballs are installed into separate npm and Yarn 4.18.0 strict PnP
 consumers. PnP has no fallback, and a negative undeclared-dependency check runs
 alongside ESM/CJS imports and strict declaration checks. The verifier resolves

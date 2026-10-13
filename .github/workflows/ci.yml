@@ -112,6 +112,8 @@ jobs:
         run: yarn test
 
   production-contract:
+    needs: pre_job
+    if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -125,7 +127,7 @@ jobs:
       - name: Setup Yarn download cache
         uses: ./.github/actions/node-setup
 
-      - name: Verify production contract without build or test caches
+      - name: Verify clean release payloads in isolated consumers
         run: yarn verify:production-contract
 
       - name: Preserve packed package artifacts

@@ -40,7 +40,7 @@
     "test": "yarn task test",
     "test:all": "yarn task test:all",
     "test:doctor": "node --test scripts/doctor/*.test.mjs",
-    "verify:production-contract": "yarn g:clean && yarn task clean && yarn task test:all --force && yarn build:release && yarn check:package-contract",
+    "verify:production-contract": "yarn g:clean && yarn task clean && yarn build:release && yarn check:package-contract",
     "coverage": "yarn task coverage",
     "coverage:all": "yarn task coverage:all",
     "forallpackages": "yarn workspaces foreach -Aptv --no-private --verbose",
