@@ -210,6 +210,11 @@ async function main(): Promise<void> {
         true
       );
       await runNode(
+        ["fixture/modules/compiler-classes.mjs"],
+        join(consumerRoot, "fixture", "modules", "compiler-classes"),
+        true
+      );
+      await runNode(
         ["fixture/modules/compilation-benchmark.mjs"],
         join(consumerRoot, "fixture", "modules"),
         true

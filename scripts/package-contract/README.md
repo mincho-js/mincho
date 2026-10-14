@@ -55,12 +55,15 @@ checks that disabling evaluation result caching still allows context reuse.
 The consumer pins vanilla-extract integration 8.0.10, matching the workspace
 lockfile and respecting the strict PnP dependency age gate.
 
-`modules/library-css.mjs` produces a split component library using the installed
-Vite adapter. Plain Vite and native esbuild consumers load its ESM/CJS component
-entries, retaining shared, CSS-only, and extracted Mincho styles in dependency
-order while excluding the unused component. A separate pure ESM barrel records
-native esbuild's unused-CSS retention. Both npm and strict PnP run these checks;
-component subpaths are the supported selective-loading contract at this stage.
+`modules/compiler-classes.mjs` verifies the optional private class strategies
+through installed esbuild packages. Default and explicitly disabled output must
+match. Enabled strategies must retain matching SSR/client classes, markup and
+native CSS across fresh evaluation, memory-cache rebuilds and observed compiler
+worker execution. It checks same-file atomic reuse, compound classes, independent
+file cascade domains, source import order, and scoped fallback for public or
+externally composed classes. Build-only helpers must disappear from application
+JavaScript. `compiler-classes/sizes.json` records this fixture's raw JS/CSS bytes;
+these optional strategies do not guarantee smaller output for every input.
 
 `modules/css-bundling.mjs` builds a component library with the installed Vite
 adapter, then consumes it with ordinary Vite and esbuild. Vite ESM named imports
@@ -73,6 +76,13 @@ prove chunk-stage generation for dist-chunk/routes; checks also cover lazy CSS
 ownership and route sharing. Fresh evaluation uses the declared `eval` dependency
 under strict PnP. Both
 conditional declaration formats expose `MinchoAppCssOptions` and `MinchoCssRoute`.
+
+`modules/library-css.mjs` produces a split component library using the installed
+Vite adapter. Plain Vite and native esbuild consumers load its ESM/CJS component
+entries, retaining shared, CSS-only, and extracted Mincho styles in dependency
+order while excluding the unused component. A separate pure ESM barrel records
+native esbuild's unused-CSS retention. Both npm and strict PnP run these checks;
+component subpaths are the supported selective-loading contract at this stage.
 
 The original unminified diamond fixtures remain static decoder and package
 contract regressions. Production minification runs separately; a passing
