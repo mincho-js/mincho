@@ -25,6 +25,10 @@ import {
   removeUnusedGeneratedImports
 } from "./optimizations/runtimeCodegen.js";
 import { pruneRecipeMetadata } from "./optimizations/recipeMetadata.js";
+import {
+  prepareCompilerClassStrategies,
+  finishCompilerClassStrategies
+} from "./optimizations/compilerClassStrategies.js";
 
 export function minchoBabelPlugin(): PluginObj<PluginState> {
   const started = new WeakMap<PluginState, number>();
@@ -67,11 +71,13 @@ export function minchoBabelPlugin(): PluginObj<PluginState> {
           }
 
           preprocess(path, prepareExtractCalls(path, state));
+          prepareCompilerClassStrategies(path, state);
           state.opts.jsxCssPropTransformed = preprocessJsxCssProp(path, state);
         },
 
         exit(path, state) {
           postprocess(path, state);
+          finishCompilerClassStrategies(path, state);
 
           if (state.opts.optimize?.runtimeCodegen === true) {
             optimizeRuntimeCodegen(path);

@@ -41,6 +41,10 @@ export const builtInExtractionCalls: Readonly<
     "recipe"
   ],
   "@mincho-js/css/compat": [...vanillaExtractAPIs, "recipe"],
+
+  // Internal helper emitted only after the private class/owner proof. Keep it
+  // in the shared extraction matcher so every adapter uses the same sidecar.
+  "@mincho-js/css/defineRules/registry": ["compilePrivateDefineRulesClass"],
   "@vanilla-extract/css": vanillaExtractAPIs,
   "@vanilla-extract/recipes": ["recipe"],
   "@vanilla-extract/sprinkles": [
