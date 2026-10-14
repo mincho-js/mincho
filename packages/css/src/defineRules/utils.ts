@@ -3,6 +3,7 @@ import { setFileScope } from "@vanilla-extract/css/fileScope";
 import hash from "@emotion/hash";
 import { css } from "../css/index.js";
 import { identifierName, isUnSafeObjectKey } from "../utils.js";
+import { emitCompilerClass } from "./compilerClasses.js";
 
 type CanonicalNode =
   | ["null"]
@@ -19,6 +20,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   }
 
   const proto = Object.getPrototypeOf(value);
+
   return proto === Object.prototype || proto === null;
 }
 
@@ -44,6 +46,7 @@ function canonicalize(
       if (Object.is(value, -0)) {
         return ["number", "-0"];
       }
+
       return ["number", String(value)];
 
     case "undefined":
@@ -91,6 +94,7 @@ function pairCacheKey(key: unknown, value: unknown): string {
 
 function hashedCacheKey(parts: readonly CanonicalNode[]): string {
   const input = JSON.stringify(parts);
+
   return hash(input);
 }
 
@@ -119,14 +123,23 @@ export function createCanonicalStyleCache(debugId?: string) {
     return classNameCache[cacheKey];
   }
 
-  function cacheClassName(cacheKey: string, style: CSSRule): string {
+  function cacheClassName(
+    cacheKey: string,
+    style: CSSRule,
+    compilerName?: string
+  ): string {
     const classNameOrUndefined = classNameCache[cacheKey];
     if (classNameOrUndefined != null) {
       return classNameOrUndefined;
     }
 
-    const className = css(style, debugId);
+    const className =
+      compilerName === undefined
+        ? css(style, debugId)
+        : emitCompilerClass(compilerName, style);
+
     classNameCache[cacheKey] = className;
+
     return className;
   }
 
@@ -163,11 +176,18 @@ export function createCanonicalStyleCache(debugId?: string) {
   function addFragment(
     key: unknown,
     value: unknown,
-    fragment: CSSRule
+    fragment: CSSRule,
+    compilerName?: string
   ): { readonly cacheKey: string; readonly className: string } {
+    // Keep the public preset lookup identity: deserialized css() must find the
+    // final class without emitting a new scoped rule for the same fragment.
     const cacheKey = fragmentCacheKey(key, value, fragment);
     fragmentCacheKeys.add(cacheKey);
-    return { cacheKey, className: cacheClassName(cacheKey, fragment) };
+
+    return {
+      cacheKey,
+      className: cacheClassName(cacheKey, fragment, compilerName)
+    };
   }
 
   function hydrateFragment(cacheKey: string, className: string): void {
@@ -184,6 +204,7 @@ export function createCanonicalStyleCache(debugId?: string) {
 
     for (const cacheKey of fragmentCacheKeys) {
       const className = classNameCache[cacheKey];
+
       if (className != null) {
         snapshot[cacheKey] = className;
       }
@@ -207,6 +228,7 @@ export function createCanonicalStyleCache(debugId?: string) {
     hydrateFragment,
     exportSnapshot,
     clear,
+
     get size() {
       return Object.keys(classNameCache).length;
     }
@@ -233,9 +255,13 @@ if (import.meta.vitest) {
       const cache = createCanonicalStyleCache(debugId);
 
       expect(cache.has("user", { b: 2, a: 1 })).toBe(false);
+
       expectClassName(cache.add("user", { b: 2, a: 1 }));
+
       expect(cache.has("user", { a: 1, b: 2 })).toBe(true);
+
       expectClassName(cache.add("user", { a: 1, b: 2 }));
+
       expect(cache.size).toBe(1);
     });
 
@@ -243,7 +269,9 @@ if (import.meta.vitest) {
       const cache = createCanonicalStyleCache(debugId);
 
       expect(cache.has({ b: 2, a: 1 }, "value")).toBe(false);
+
       expectClassName(cache.add({ b: 2, a: 1 }, "value"));
+
       expect(cache.has({ a: 1, b: 2 }, "value")).toBe(true);
       expect(cache.size).toBe(1);
     });
@@ -252,9 +280,13 @@ if (import.meta.vitest) {
       const cache = createCanonicalStyleCache(debugId);
 
       expect(cache.has("list", ["a", "b"])).toBe(false);
+
       expectClassName(cache.add("list", ["a", "b"]));
+
       expect(cache.has("list", ["b", "a"])).toBe(false);
+
       expectClassName(cache.add("list", ["a", "b"]));
+
       expect(cache.size).toBe(1);
     });
 
@@ -262,7 +294,9 @@ if (import.meta.vitest) {
       const cache = createCanonicalStyleCache(debugId);
 
       expect(cache.has("list", ["x", { b: 2, a: 1 }])).toBe(false);
+
       expectClassName(cache.add("list", ["x", { b: 2, a: 1 }]));
+
       expect(cache.has("list", ["x", { a: 1, b: 2 }])).toBe(true);
       expect(cache.has("list", [{ a: 1, b: 2 }, "x"])).toBe(false);
     });
@@ -271,9 +305,13 @@ if (import.meta.vitest) {
       const cache = createCanonicalStyleCache(debugId);
 
       expect(cache.has(["a", "b"], "value")).toBe(false);
+
       expectClassName(cache.add(["a", "b"], "value"));
+
       expect(cache.has(["b", "a"], "value")).toBe(false);
+
       expectClassName(cache.add(["a", "b"], "value"));
+
       expect(cache.size).toBe(1);
     });
 
@@ -282,6 +320,7 @@ if (import.meta.vitest) {
 
       expectClassName(cache.add("user", { a: 1 }));
       expectClassName(cache.add("admin", { a: 1 }));
+
       expect(cache.size).toBe(2);
     });
 
@@ -290,6 +329,7 @@ if (import.meta.vitest) {
 
       expectClassName(cache.add("user", { a: 1 }));
       expectClassName(cache.add("user", { a: 2 }));
+
       expect(cache.size).toBe(2);
     });
 
@@ -314,7 +354,9 @@ if (import.meta.vitest) {
       expectClassName(cache.add("n", NaN));
 
       expectClassName(cache.add("zero", -0));
+
       expect(cache.has("zero", 0)).toBe(false);
+
       expectClassName(cache.add("zero", 0));
 
       expect(cache.size).toBe(3);
@@ -330,12 +372,16 @@ if (import.meta.vitest) {
 
       const className = cache.add("x", { a: 1 });
       expectClassName(className);
+
       expect(cache.has("x", { a: 1 })).toBe(true);
       expect(cache.get("x", { a: 1 })).toBe(className);
+
       cache.add("x", { a: 1 });
+
       expect(cache.size).toBe(1);
 
       cache.clear();
+
       expect(cache.size).toBe(0);
       expect(cache.has("x", { a: 1 })).toBe(false);
     });
@@ -353,6 +399,7 @@ if (import.meta.vitest) {
       );
 
       expectClassName(className);
+
       expect(
         cache.hasFragment(
           "background",
@@ -393,6 +440,7 @@ if (import.meta.vitest) {
       });
 
       expectClassName(className);
+
       expect(cache.exportSnapshot()).toEqual({ [cacheKey]: className });
     });
 
@@ -404,6 +452,7 @@ if (import.meta.vitest) {
         "red",
         fragment
       );
+
       const cache = createCanonicalStyleCache(debugId);
 
       cache.hydrateFragment(cacheKey, className);
@@ -431,12 +480,14 @@ if (import.meta.vitest) {
         vars: { "--alpha": "1" },
         background: "rgba(255, 0, 0, var(--alpha))"
       });
+
       const pruned = cache.addFragment("background", "red", {
         vars: { "--alpha": "1" }
       });
 
       expectClassName(full.className);
       expectClassName(pruned.className);
+
       expect(pruned.className).not.toBe(full.className);
       expect(
         cache.getFragment("background", "red", {
@@ -453,6 +504,7 @@ if (import.meta.vitest) {
         vars: { "--alpha": "1" },
         background: "rgba(255, 0, 0, var(--alpha))"
       } as const;
+
       const secondFragment = {
         background: "rgba(255, 0, 0, var(--alpha))",
         vars: { "--alpha": "1" }
@@ -467,7 +519,9 @@ if (import.meta.vitest) {
         "red",
         firstFragment
       );
+
       expectClassName(className);
+
       expect(cache.getFragment("background", "red", secondFragment)).toBe(
         className
       );
@@ -498,6 +552,7 @@ if (import.meta.vitest) {
 
       expectClassName(cache.add("obj", a));
       expectClassName(cache.add("obj", b));
+
       expect(cache.size).toBe(1);
     });
 

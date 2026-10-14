@@ -10,6 +10,14 @@ import { createCx } from "../classname/cx.js";
 import { registerDefineRulesRegistryInstance } from "./registry.js";
 import { normalizeDefineRulesConditions } from "./conditions.js";
 import { createCanonicalStyleCache } from "./utils.js";
+import { css as rootCss } from "../css/index.js";
+import {
+  compilerAtomIdentities,
+  registerCompilerClassMethod,
+  compilerClassName,
+  emitCompilerClass,
+  type CompilerClassStrategy
+} from "./compilerClasses.js";
 import { createCanonicalWriteKey, createEngineMetadata } from "./metadata.js";
 import type { CompiledSegment, EngineMetadata } from "./metadata.js";
 import { createRuntimePresetState } from "./runtimePreset.js";
@@ -74,11 +82,15 @@ export function createDefineRulesRuntime<
   readonly getCxRuntimeArtifact: () => DefineRulesCxRuntimeArtifact;
 } {
   type CssInput = DefineRulesComplexCssInput<Properties, Shortcuts, Conditions>;
+
   type ContextualCssInput = CssInput | ((context: Context) => CssInput);
+
   const normalizedConditions = normalizeDefineRulesConditions(
     config.conditions
   );
+
   const styleCache = createCanonicalStyleCache(config.debugId);
+  let compiledClasses: Map<string, string> | undefined;
   const metadata = createEngineMetadata();
   const presetState = createRuntimePresetState(
     config.presets,
@@ -106,6 +118,7 @@ export function createDefineRulesRuntime<
   function resolveToFragments(args: CssInput): ResolvedStyleFragment[] {
     const fragments: ResolvedStyleFragment[] = [];
     applyInput(config, fragments, args, []);
+
     return fragments;
   }
 
@@ -128,25 +141,56 @@ export function createDefineRulesRuntime<
     );
   }
 
-  function cssImpl(args: ContextualCssInput): string {
+  function emitCss(
+    args: ContextualCssInput,
+    strategy?: CompilerClassStrategy
+  ): string {
     const atomicWrites = collectEmittedAtomicWrites(
       collectAtomicWrites(
         resolveToFragments(resolveContextualInput(args)),
         normalizedConditions
       )
     );
+
+    const identities = strategy
+      ? compilerAtomIdentities(atomicWrites, strategy)
+      : undefined;
+
+    if (identities && strategy?.compileClass && atomicWrites.length > 1) {
+      // This class is intentionally opaque: it cannot represent independently
+      // removable atomic writes. The compiler rejects every cx/preset escape.
+      const identity = JSON.stringify(identities);
+      const cached = compiledClasses?.get(identity);
+      if (cached) return cached;
+
+      const style = flattenAtomicWrites(atomicWrites);
+      const className = strategy.globalAtomicClasses
+        ? emitCompilerClass(compilerClassName("combination", identity), style)
+        : rootCss(style, config.debugId);
+
+      (compiledClasses ??= new Map()).set(identity, className);
+
+      return className;
+    }
+
     const entries = [] as Array<{
       kind: "known";
       className: string;
       writeKeyId: number;
     }>;
 
+    let index = 0;
+
     for (const atomicWrite of atomicWrites) {
       const { cacheKey, className } = styleCache.addFragment(
         atomicWrite.property,
         atomicWrite.value,
-        atomicWrite.style
+        atomicWrite.style,
+        identities && strategy?.globalAtomicClasses
+          ? compilerClassName("atom", identities[index])
+          : undefined
       );
+
       const inheritedWriteKeyId = metadata.getWriteKeyIdForClassName(className);
       const writeKeyId = internAtomicWriteKey(metadata, atomicWrite);
 
@@ -160,6 +204,7 @@ export function createDefineRulesRuntime<
       }
 
       entries.push({ kind: "known", className, writeKeyId });
+      index += 1;
     }
 
     const className = entries.map((entry) => entry.className).join(" ");
@@ -167,25 +212,38 @@ export function createDefineRulesRuntime<
       entries,
       hasKnownAtomicClass: entries.length > 0
     });
+
     const markedClassName =
       marker === undefined ? className : `${marker} ${className}`;
 
     return markedClassName;
   }
 
+  function cssImpl(args: ContextualCssInput): string {
+    // Public calls keep ignoring extra arguments. Only the compiler helper's
+    // private WeakMap dispatch can select a generation strategy.
+    return emitCss(args);
+  }
+
   const css = Object.assign(cssImpl, {
     raw: cssRaw
   }) as DefineRulesCss<CssInput, Context>;
+
+  registerCompilerClassMethod(css, emitCss);
+
   const cx = createDefineRulesCx(metadata);
+
   return {
     css,
     cx,
+
     getCxRuntimeArtifact() {
       return createDefineRulesCxRuntimeArtifact(
         presetState.getSnapshot(),
         metadata.getRegisteredSegmentsByMarker()
       );
     },
+
     get preset() {
       return presetState.getSnapshot();
     }
@@ -222,6 +280,7 @@ function pushClassValueSegments(
 ): void {
   if (typeof input === "string") {
     pushClassStringSegments(metadata, segments, input);
+
     return;
   }
 
@@ -229,6 +288,7 @@ function pushClassValueSegments(
     if (input) {
       segments.push(metadata.getCompiledSegment(String(input)));
     }
+
     return;
   }
 
@@ -236,6 +296,7 @@ function pushClassValueSegments(
     if (input !== 0n) {
       segments.push(metadata.getCompiledSegment(String(input)));
     }
+
     return;
   }
 
@@ -252,6 +313,7 @@ function pushClassValueSegments(
     for (const item of input) {
       pushClassValueSegments(metadata, segments, item);
     }
+
     return;
   }
 
@@ -275,6 +337,7 @@ function pushClassStringSegments(
 
   if (registeredSegment !== undefined) {
     segments.push(registeredSegment);
+
     return;
   }
 
@@ -512,16 +575,19 @@ function applyInput<
 
   if (typeof input === "string") {
     applyInlineShortcut(ctx, fragmentsOut, input, shortcutStack);
+
     return;
   }
 
   if (Array.isArray(input)) {
     applyArray(ctx, fragmentsOut, input, shortcutStack);
+
     return;
   }
 
   if (isPlainObject(input)) {
     applyObject(ctx, fragmentsOut, input, shortcutStack);
+
     return;
   }
 
@@ -541,8 +607,10 @@ function applyInlineShortcut<
 ) {
   if (hasOwn(ctx.shortcuts, shortcutName)) {
     applyShortcut(ctx, fragmentsOut, shortcutName, undefined, shortcutStack);
+
     return;
   }
+
   throw new Error(`Unknown fixed style: "${shortcutName}"`);
 }
 
@@ -593,8 +661,10 @@ function applyEntry<
   if (value == null) {
     return;
   }
+
   if (hasOwn(ctx.shortcuts, key)) {
     applyShortcut(ctx, fragmentsOut, key, value, shortcutStack);
+
     return;
   }
 
@@ -629,6 +699,7 @@ function applyProperty<
         shortcutStack,
         result as CSSRule
       );
+
       return;
     } else {
       pushResolvedFragment(
@@ -639,6 +710,7 @@ function applyProperty<
           [prop]: result
         } as CSSRule
       );
+
       return;
     }
   }
@@ -653,6 +725,7 @@ function applyProperty<
         [prop]: value
       } as CSSRule
     );
+
     return;
   }
 
@@ -666,6 +739,7 @@ function applyProperty<
       shortcutStack,
       mappedValue as CSSRule
     );
+
     return;
   }
 
@@ -689,6 +763,7 @@ function applyShortcutReference<
 ) {
   if (hasOwn(ctx.shortcuts, targetName)) {
     applyShortcut(ctx, fragmentsOut, targetName, value, shortcutStack);
+
     return;
   }
 
@@ -727,6 +802,7 @@ function applyShortcut<
       value,
       nextShortcutStack
     );
+
     return;
   }
 
@@ -741,6 +817,7 @@ function applyShortcut<
         nextShortcutStack
       );
     }
+
     return;
   }
 
@@ -748,6 +825,7 @@ function applyShortcut<
     // fn shortcut
     const produced = shortcutDefinition(value);
     applyInput(ctx, fragmentsOut, produced, nextShortcutStack);
+
     return;
   }
 
@@ -758,10 +836,14 @@ function applyShortcut<
     // - { inline: false } => do not apply
     if (value === undefined || value === true) {
       applyInput(ctx, fragmentsOut, shortcutDefinition, nextShortcutStack);
+
       return;
     }
+
     if (!value) return;
+
     applyInput(ctx, fragmentsOut, shortcutDefinition, nextShortcutStack);
+
     return;
   }
 
@@ -774,6 +856,7 @@ function internAtomicWriteKey(
 ): number {
   const conditionId = metadata.internCondition(atomicWrite.condition);
   const propertyId = metadata.internProperty(atomicWrite.property);
+
   return metadata.internWriteKey(conditionId, propertyId);
 }
 

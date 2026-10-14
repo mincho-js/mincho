@@ -21,6 +21,7 @@ import {
 export { presetArtifactDiagnostics } from "./presetArtifactReaders.js";
 export { parseDefineRulesPresetArtifactV5 } from "./presetArtifact.js";
 export { resolveDefineRulesPresetGraphV5 } from "./presetGraph.js";
+export { compilePrivateDefineRulesClass } from "./compilerClasses.js";
 
 interface NormalizedDefineRulesRegistryFileScope {
   packageName: string;
@@ -33,6 +34,7 @@ export interface DefineRulesRegistryInstance {
   registrationIndex: number;
   config: unknown;
   presetArtifact: DefineRulesPresetArtifactV5;
+
   getPresetSnapshot(): DefineRulesPresetArtifactV5;
 }
 
@@ -60,6 +62,7 @@ function getRegistryStack(): DefineRulesRegistrySession[] {
 
   const nextStack: DefineRulesRegistrySession[] = [];
   registryGlobal[DEFINE_RULES_REGISTRY_STACK] = nextStack;
+
   return nextStack;
 }
 
@@ -80,6 +83,7 @@ export function beginDefineRulesRegistrySession(): DefineRulesRegistrySession {
   };
 
   getRegistryStack().push(session);
+
   return session;
 }
 
@@ -91,6 +95,7 @@ export function endDefineRulesRegistrySession():
   const session = stack?.pop();
 
   clearRegistryStackIfEmpty();
+
   return session;
 }
 
@@ -126,6 +131,7 @@ export function registerDefineRulesRegistryInstance<
   const Conditions extends DefineRulesConditions = DefineRulesEmptyConditions
 >(metadata: {
   config: DefineRulesCtx<Properties, Shortcuts, Conditions>;
+
   getPresetSnapshot(): DefineRulesPresetArtifactV5;
 }): DefineRulesRegistryInstance | undefined {
   const session = getActiveDefineRulesRegistrySession();
@@ -144,21 +150,25 @@ export function registerDefineRulesRegistryInstance<
   const fileScopeId = `${fileScope.packageName}:${fileScope.filePath}`;
   const registrationIndex =
     session.nextRegistrationIndexByFileScope[fileScopeId] ?? 0;
+
   const registrationId = `${fileScopeId}#defineRules:${registrationIndex}`;
   const instance: DefineRulesRegistryInstance = {
     registrationId,
     fileScope,
     registrationIndex,
     config: metadata.config,
+
     get presetArtifact() {
       return metadata.getPresetSnapshot();
     },
+
     getPresetSnapshot: metadata.getPresetSnapshot
   };
 
   session.nextRegistrationIndex += 1;
   session.nextRegistrationIndexByFileScope[fileScopeId] = registrationIndex + 1;
   session.instances.push(instance);
+
   return instance;
 }
 
@@ -199,6 +209,7 @@ if (import.meta.vitest) {
         }
       } as const,
       presetArtifact,
+
       getPresetSnapshot: () => createDefineRulesPresetArtifactV5(presetArtifact)
     };
   };
@@ -228,6 +239,7 @@ if (import.meta.vitest) {
       const firstInstance = registerDefineRulesRegistryInstance(
         createRegistryMetadata()
       );
+
       const secondInstance = registerDefineRulesRegistryInstance(
         createRegistryMetadata()
       );
@@ -251,18 +263,21 @@ if (import.meta.vitest) {
     it("keeps registration indexes stable per fileScope", () => {
       const session = beginDefineRulesRegistrySession();
       setFileScope("src/a.css.ts", "pkg");
+
       const firstAInstance = registerDefineRulesRegistryInstance(
         createRegistryMetadata()
       );
 
       endFileScope();
       setFileScope("src/b.css.ts", "pkg");
+
       const firstBInstance = registerDefineRulesRegistryInstance(
         createRegistryMetadata()
       );
 
       endFileScope();
       setFileScope("src/a.css.ts", "pkg");
+
       const secondAInstance = registerDefineRulesRegistryInstance(
         createRegistryMetadata()
       );
@@ -315,12 +330,14 @@ if (import.meta.vitest) {
     it("keeps nested sessions isolated and restores the previous active session", () => {
       const outerSession = beginDefineRulesRegistrySession();
       setFileScope("outer.css.ts", "pkg");
+
       const outerFirstInstance = registerDefineRulesRegistryInstance(
         createRegistryMetadata()
       );
 
       const innerSession = beginDefineRulesRegistrySession();
       setFileScope("inner.css.ts", "pkg");
+
       const innerInstance = registerDefineRulesRegistryInstance(
         createRegistryMetadata()
       );
@@ -330,7 +347,9 @@ if (import.meta.vitest) {
         "pkg:inner.css.ts#defineRules:0"
       );
       expect(endDefineRulesRegistrySession()).toBe(innerSession);
+
       endFileScope();
+
       expect(getActiveDefineRulesRegistrySession()).toBe(outerSession);
 
       const outerSecondInstance = registerDefineRulesRegistryInstance(
@@ -391,11 +410,14 @@ if (import.meta.vitest) {
     it("stores V5 preset artifact references and defers snapshot reads", () => {
       const session = beginDefineRulesRegistrySession();
       setFileScope("live.css.ts", "pkg");
+
       const preset = createRegistryPresetArtifact();
       let snapshotReadCount = 0;
       const metadata = createRegistryMetadata(preset);
+
       const getPresetSnapshot = () => {
         snapshotReadCount += 1;
+
         return createDefineRulesPresetArtifactV5(preset);
       };
 

@@ -36,6 +36,8 @@ export interface PluginOptions {
   jsxCssProp?: boolean;
   jsxCssPropTransformed?: boolean;
   optimize?: {
+    dependencyGraph?: boolean;
+    staticStyles?: boolean;
     defineRulesCxConditions?: boolean;
     pureFunctions?: boolean;
     staticRecipes?: boolean;
@@ -43,7 +45,15 @@ export interface PluginOptions {
     runtimeCodegen?: boolean;
     jsxRuntimeGuards?: boolean;
   };
-  experimental?: { nonInheritingCssVars?: boolean };
+  experimental?: {
+    nonInheritingCssVars?: boolean;
+
+    /** Opt-in content identities inside proven private CSS cascade domains. */
+    globalAtomicClasses?: boolean;
+
+    /** Opt-in collapse of proven private static class combinations. */
+    compileClass?: boolean;
+  };
 
   /** @internal Prepared sync provider supplied by bundler prepasses only. */
   staticCssEvalProvider?: StaticCssEvalProvider;
