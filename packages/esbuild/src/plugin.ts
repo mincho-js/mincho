@@ -75,6 +75,8 @@ export interface MinchoEsbuildPluginOptions {
   extractCalls?: BabelOptions["extractCalls"];
   experimental?: {
     nonInheritingCssVars?: boolean;
+    globalAtomicClasses?: boolean;
+    compileClass?: boolean;
 
     /** Available through the one-shot buildWithMincho API. */
     cssChunkSharing?: MinchoCssChunkSharingOptions;
@@ -489,6 +491,12 @@ export function minchoEsbuildPlugin({
             experimental: {
               ...(experimental?.nonInheritingCssVars !== undefined
                 ? { nonInheritingCssVars: experimental.nonInheritingCssVars }
+                : {}),
+              ...(experimental?.globalAtomicClasses !== undefined
+                ? { globalAtomicClasses: experimental.globalAtomicClasses }
+                : {}),
+              ...(experimental?.compileClass !== undefined
+                ? { compileClass: experimental.compileClass }
                 : {})
             },
             compilationCache,

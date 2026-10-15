@@ -109,6 +109,8 @@ export interface MinchoVitePluginOptions {
   appCss?: MinchoAppCssOptions;
   experimental?: {
     nonInheritingCssVars?: boolean;
+    globalAtomicClasses?: boolean;
+    compileClass?: boolean;
     cssChunkSharing?: MinchoCssChunkSharingOptions;
   };
   libraryCss?: {
@@ -1401,6 +1403,14 @@ function createMinchoViteEnvironmentPlugin(
                   nonInheritingCssVars:
                     _options.experimental.nonInheritingCssVars
                 }
+              : {}),
+            ...(_options?.experimental?.globalAtomicClasses !== undefined
+              ? {
+                  globalAtomicClasses: _options.experimental.globalAtomicClasses
+                }
+              : {}),
+            ...(_options?.experimental?.compileClass !== undefined
+              ? { compileClass: _options.experimental.compileClass }
               : {})
           },
           optimize: internalResolveOptimizationOptions(
