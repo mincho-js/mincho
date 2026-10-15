@@ -1,5 +1,12 @@
 # @mincho-js/css-additional-types
 
+## 0.1.1
+
+### Patch Changes
+
+- [#249](https://github.com/mincho-js/mincho/pull/249) [`9699f0d`](https://github.com/mincho-js/mincho/commit/9699f0d9628ec431f49dda9ef329d58516794189) Thanks [@black7375](https://github.com/black7375)! - **package**
+  - Achieve all [Are the types wrong](https://github.com/arethetypeswrong/arethetypeswrong.github.io) using [vite-plugin-dts-build's dual mode](https://github.com/black7375/vite-plugin-dts-build#dual-module-support).
+
 ## 0.1.0
 
 ### Minor Changes
