@@ -30,6 +30,7 @@ import {
   measureCompilationPhase
 } from "./diagnostics.js";
 import {
+  annotateVanillaCssArtifacts,
   collectSelectorCompositions,
   isolateVanillaCssArtifact,
   type VanillaCssArtifact
@@ -289,6 +290,7 @@ export async function processVanillaWithExecution(
     );
 
   const execution = currentCompilationExecution();
+
   if (
     !execution ||
     !execution.cacheEnabled ||
@@ -435,6 +437,16 @@ async function evaluateVanilla(
     require
   );
 
+  const resourceRegistry = (
+    serializeCssArtifact
+      ? ownRequire("@mincho-js/css/defineRules/registry")
+      : {}
+  ) as {
+    beginCompilerResourceCapture?: () => Set<string>;
+    endCompilerResourceCapture?: () => void;
+  };
+
+  let generatedVariables: Set<string> | undefined;
   const exports = {};
   const module = {
     exports,
@@ -451,6 +463,12 @@ async function evaluateVanilla(
       evaluationAdapter.setAdapter(cssAdapter);
 
       try {
+        if (
+          resourceRegistry.beginCompilerResourceCapture &&
+          resourceRegistry.endCompilerResourceCapture
+        )
+          generatedVariables = resourceRegistry.beginCompilerResourceCapture();
+
         if (!script || !context) {
           // Match upstream's fresh eval sandbox, including Node globals and
           // CommonJS exports, while retaining balanced adapter/scope cleanup.
@@ -483,7 +501,12 @@ async function evaluateVanilla(
             evaluationScope.endFileScope();
           }
         } finally {
-          evaluationAdapter.removeAdapter();
+          try {
+            if (generatedVariables)
+              resourceRegistry.endCompilerResourceCapture!();
+          } finally {
+            evaluationAdapter.removeAdapter();
+          }
         }
       }
     } finally {
@@ -526,6 +549,28 @@ async function evaluateVanilla(
     artifacts = artifacts.map((artifact) =>
       isolateVanillaCssArtifact({ ...artifact, usedCompositions: [...used] })
     );
+  }
+
+  const serializeExports = () => {
+    const unused = compositions
+      .filter(({ identifier }) => !used.has(identifier))
+      .map(({ identifier }) => identifier);
+
+    return serializeVanillaModule(
+      [],
+      module.exports,
+      unused.length ? new RegExp(`(${unused.join("|")})\\s`, "g") : null
+    );
+  };
+
+  let exportsSource = artifacts ? serializeExports() : undefined;
+
+  if (artifacts) {
+    annotateVanillaCssArtifacts(
+      artifacts,
+      [exportsSource!],
+      [...(generatedVariables ?? [])]
+    );
 
     for (const artifact of artifacts) {
       cssImports.push(await serializeCssArtifact!(structuredClone(artifact)));
@@ -565,16 +610,7 @@ async function evaluateVanilla(
     );
   }
 
-  const unused = compositions
-    .filter(({ identifier }) => !used.has(identifier))
-    .map(({ identifier }) => identifier);
-
-  const exportsSource = serializeVanillaModule(
-    [],
-    module.exports,
-    unused.length ? new RegExp(`(${unused.join("|")})\\s`, "g") : null
-  );
-
+  exportsSource ??= serializeExports();
   capture?.complete({ css: serializedCss, artifacts, exports: exportsSource });
 
   return joinEvaluation(cssImports, exportsSource);
