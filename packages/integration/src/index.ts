@@ -119,5 +119,10 @@ export {
 } from "./cssChunkSharing.js";
 export {
   generateVanillaCss as internalGenerateVanillaCss,
+  hashVanillaCssArtifact as internalHashVanillaCssArtifact,
   type VanillaCssArtifact as InternalVanillaCssArtifact
 } from "./vanillaCssIr.js";
+export {
+  optimizeVanillaCssArtifacts as internalOptimizeVanillaCssArtifacts,
+  type CssIrOptimizationOptions as InternalCssIrOptimizationOptions
+} from "./cssIrOptimization.js";
