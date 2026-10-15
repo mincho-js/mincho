@@ -74,7 +74,7 @@
     "vitest": "^4.1.5"
   },
   "dependencies": {
-    "@fastify/deepmerge": "^3.2.1",
+    "@fastify/deepmerge": "^3.2.2",
     "@mincho-js/css-additional-types": "workspace:^",
     "@mincho-js/csstype": "^3.1.4"
   },

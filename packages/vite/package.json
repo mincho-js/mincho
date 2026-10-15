@@ -58,7 +58,7 @@
     "@mincho-js/css": "workspace:^",
     "@mincho-js/integration": "workspace:^",
     "@mincho-js/transform-to-vanilla": "workspace:^",
-    "@rollup/pluginutils": "^5.3.0",
+    "@rollup/pluginutils": "^5.4.0",
     "@vanilla-extract/integration": "^8.0.10",
     "magic-string": "^0.30.21"
   },
@@ -71,7 +71,7 @@
     "@vanilla-extract/dynamic": "^2.1.5",
     "@vanilla-extract/recipes": "^0.5.7",
     "@vanilla-extract/sprinkles": "^1.7.1",
-    "@vanilla-extract/vite-plugin": "^5.2.2",
+    "@vanilla-extract/vite-plugin": "^5.2.6",
     "eslint-config-custom": "workspace:^",
     "prettier-config-custom": "workspace:^",
     "tsconfig-custom": "workspace:^",
