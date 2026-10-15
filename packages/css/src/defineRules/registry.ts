@@ -19,6 +19,10 @@ import {
   createPresetOriginId
 } from "./presetCanonical.js";
 export { presetArtifactDiagnostics } from "./presetArtifactReaders.js";
+export {
+  beginCompilerResourceCapture,
+  endCompilerResourceCapture
+} from "../compilerResources.js";
 export { parseDefineRulesPresetArtifactV5 } from "./presetArtifact.js";
 export { resolveDefineRulesPresetGraphV5 } from "./presetGraph.js";
 export { compilePrivateDefineRulesClass } from "./compilerClasses.js";

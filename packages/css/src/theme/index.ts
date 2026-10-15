@@ -1,8 +1,5 @@
-import {
-  createVar,
-  generateIdentifier,
-  fallbackVar
-} from "@vanilla-extract/css";
+import { generateIdentifier, fallbackVar } from "@vanilla-extract/css";
+import { createVar } from "../compilerResources.js";
 import { registerClassName } from "@vanilla-extract/css/adapter";
 import { getFileScope, setFileScope } from "@vanilla-extract/css/fileScope";
 import type {
@@ -35,12 +32,16 @@ type WithOptionalLayer<T extends Theme> = T & {
 
 interface ThemeSubFunctions {
   fallbackVar: typeof fallbackVar;
+
   raw(varReference: PureCSSVarFunction): CSSVarValue;
+
   raw<const T>(value: T): T;
+
   alias(varReference: unknown): string;
 }
 
 type ResolveThemeOutput<T extends Theme> = Resolve<ResolveTheme<T>>;
+
 type ThemeTokensInput<ThemeTokens extends Theme> =
   WithOptionalLayer<ThemeTokens> &
     ThisType<ResolveThemeOutput<ThemeTokens> & ThemeSubFunctions>;
@@ -68,8 +69,10 @@ type ThemeCreationTokensInput<ThemeTokens extends Theme> =
 
 const THEME_CONTRACT_EXPECTED_ERROR =
   "theme.extends() expected ThemeContract as first argument.";
+
 const THEME_CONTRACT_DIRECT_CALL_ERROR =
   "theme() does not accept ThemeContract; use theme.extends().";
+
 const THEME_REPLACEMENT_TOKENS_EXPECTED_ERROR =
   "theme.extends() expected replacement tokens.";
 
@@ -117,6 +120,7 @@ export function globalTheme<const ThemeTokens extends Theme>(
         };
 
   globalCss(selector, rule);
+
   return resolvedTokens;
 }
 
@@ -196,6 +200,7 @@ function createThemeResult<const ThemeTokens extends Theme>(
   );
 
   globalCss(themeClassName, rule);
+
   return [themeClassName, resolvedThemeTokens, contract];
 }
 
@@ -235,13 +240,16 @@ function extractLayerFromTokens<ThemeTokens extends Theme>(
 interface AssignedVars {
   [cssVarName: string]: CSSVarValue;
 }
+
 interface CSSVarMap {
   [varPath: string]: PureCSSVarKey;
 }
+
 interface ThemeAssignmentMetadata {
   cssVarMap: Readonly<CSSVarMap>;
   assignedVars: Readonly<Record<string, CSSVarValue>>;
 }
+
 /**
  * Context object for token processing functions
  */
@@ -261,6 +269,7 @@ function createThemeContract<const ThemeTokens extends Theme>(
   const contractValues = Object.freeze({ ...values }) as Readonly<
     Record<string, CSSVarValue>
   >;
+
   const contractCSSVarByPath = Object.freeze({
     ...cssVarByPath
   }) as Readonly<CSSVarMap>;
@@ -386,6 +395,7 @@ function assignTokenVariables(
     const varPath = context.parentPath
       ? `${context.parentPath}-${camelToKebab(key)}`
       : camelToKebab(key);
+
     const cssVar = getCSSVarByPath(varPath, context);
     const varRef = getVarReference(varPath, context);
     const currentPath = [...context.path, key];
@@ -431,6 +441,7 @@ function assignTokenVariables(
         vars[cssVar] = cssValue;
         setByPath(resolvedTokens, currentPath, varRef);
       }
+
       continue;
     }
 
@@ -457,6 +468,7 @@ function assignTokenVariables(
         get() {
           return varRef;
         },
+
         enumerable: true,
         configurable: true
       });
@@ -469,6 +481,7 @@ function assignTokenVariables(
 
         const propPath = `${varPath}-${camelToKebab(propKey)}`;
         const propCssVar = getCSSVarByPath(propPath, context);
+
         if (typeof propDescriptor.get === "function") {
           // Store placeholder reference; value will be resolved in pass 2
           resolvedComposite[propKey] = getVarReference(propPath, context);
@@ -526,9 +539,11 @@ function resolveSemanticTokens(
     if (typeof descriptor.get === "function") {
       // Set the current path for alias() to access
       currentProcessingPath = currentPath;
+
       // Call getter with resolvedTokens as this context
       // This allows semantic tokens to reference other tokens
       const computedValue = descriptor.get.call(resolvedTokens);
+
       // Clear the current path after getter execution
       currentProcessingPath = [];
 
@@ -545,6 +560,7 @@ function resolveSemanticTokens(
         vars[cssVar] = computedValue;
         setByPath(resolvedTokens, currentPath, computedValue);
       }
+
       continue;
     }
 
@@ -563,10 +579,12 @@ function resolveSemanticTokens(
           compositeDescriptors
         )) {
           if (propKey === "resolved") continue;
+
           Object.defineProperty(evaluationContext, propKey, propDescriptor);
         }
 
         currentProcessingPath = resolvedPath;
+
         const computedValue = resolvedDescriptor.get.call(evaluationContext);
         currentProcessingPath = [];
 
@@ -639,6 +657,7 @@ function assignReplacementTokensFromContract<ThemeTokens extends Theme>(
       assignedVars: contract.values
     }
   };
+
   const resolvedTokens = createReplacementResolvedTokens(
     vars,
     assignedVars,
@@ -786,6 +805,7 @@ function assignReplacementTokenValue(
     const cssVar = getReplacementCSSVar(varsNode, path, context);
     assignedVars[cssVar] = extractCSSValue(replacementNode);
     setByPath(resolvedTokens, path, varsNode);
+
     return;
   }
 
@@ -798,6 +818,7 @@ function assignReplacementTokenValue(
       path,
       context
     );
+
     return;
   }
 
@@ -810,6 +831,7 @@ function assignReplacementTokenValue(
       path,
       context
     );
+
     return;
   }
 
@@ -822,6 +844,7 @@ function assignReplacementTokenValue(
       path,
       context
     );
+
     return;
   }
 
@@ -833,6 +856,7 @@ function assignReplacementTokenValue(
       resolvedTokens,
       createReplacementChildContext(context, path)
     );
+
     return;
   }
 
@@ -881,6 +905,7 @@ function assignReplacementTokenDefinition(
     const cssVar = getReplacementCSSVar(varsNode, path, context);
     assignedVars[cssVar] = extractTokenDefinitionValue(definition);
     setByPath(resolvedTokens, path, varsNode);
+
     return;
   }
 
@@ -892,6 +917,7 @@ function assignReplacementTokenDefinition(
       resolvedTokens,
       createReplacementChildContext(context, path)
     );
+
     return;
   }
 
@@ -960,6 +986,7 @@ function resolveReplacementSemanticTokens(
         context
       );
     }
+
     return;
   }
 
@@ -972,6 +999,7 @@ function resolveReplacementSemanticTokens(
       context.path,
       context
     );
+
     return;
   }
 
@@ -998,6 +1026,7 @@ function resolveReplacementSemanticTokens(
         resolvedTokens,
         currentPath
       );
+
       const currentPathKey = currentPath.join(".");
 
       if (context.aliasMap.has(currentPathKey)) {
@@ -1008,6 +1037,7 @@ function resolveReplacementSemanticTokens(
           currentPath,
           context
         );
+
         assignedVars[cssVar] = computedValue as CSSVarValue;
         setByPath(resolvedTokens, currentPath, computedValue);
       }
@@ -1028,6 +1058,7 @@ function resolveReplacementSemanticTokens(
           childContext
         );
       }
+
       continue;
     }
 
@@ -1075,6 +1106,7 @@ function resolveReplacementCompositeValue(
 
   for (const [key, descriptor] of Object.entries(descriptors)) {
     if (key === "resolved") continue;
+
     Object.defineProperty(evaluationContext, key, descriptor);
   }
 
@@ -1084,16 +1116,19 @@ function resolveReplacementCompositeValue(
     evaluationContext,
     resolvedPath
   );
+
   const resolvedPathKey = resolvedPath.join(".");
 
   if (context.aliasMap.has(resolvedPathKey)) {
     setByPath(resolvedTokens, resolvedPath, computedValue);
+
     return;
   }
 
   const fallbackVarReference = isPlainObject(varsNode)
     ? (varsNode as Record<string, unknown>).resolved
     : varsNode;
+
   const cssVar = getReplacementCSSVar(fallbackVarReference, path, context);
   assignedVars[cssVar] = extractCSSValue(computedValue as TokenValue);
   setByPath(resolvedTokens, resolvedPath, `var(${cssVar})`);
@@ -1105,6 +1140,7 @@ function callReplacementGetter(
   path: string[]
 ): unknown {
   currentProcessingPath = path;
+
   try {
     return getter.call(thisArg);
   } finally {
@@ -1202,6 +1238,7 @@ function createThemeExtensionArrayLengthMismatchError(path: string[]): Error {
 
 function isPrimitive(value: unknown): value is TokenPrimitiveValue {
   const type = typeof value;
+
   return (
     type === "string" ||
     type === "number" ||
@@ -1220,6 +1257,7 @@ function isNestedTheme(value: unknown): value is Theme {
   if (isTokenUnitValue(value)) return false;
   if (isTokenCompositeValue(value)) return false;
   if (isTokenDefinition(value)) return false;
+
   return true;
 }
 
@@ -1263,7 +1301,9 @@ function isTokenUnitValue(value: unknown): value is TokenDimensionValue {
 
 function isTokenCompositeValue(value: unknown): value is TokenCompositeValue {
   if (typeof value !== "object" || value === null) return false;
+
   const descriptor = Object.getOwnPropertyDescriptor(value, "resolved");
+
   return descriptor !== undefined && descriptor.get !== undefined;
 }
 
@@ -1288,6 +1328,7 @@ function getCSSVarByPath(
     const varValue = createVar(varPath);
     context.cssVarMap[varPath] = getVarName(varValue);
   }
+
   return context.cssVarMap[varPath];
 }
 
@@ -1300,6 +1341,7 @@ function getVarReference(
   context: TokenProcessingContext
 ): PureCSSVarFunction {
   const cssVar = getCSSVarByPath(varPath, context);
+
   return `var(${cssVar})` as PureCSSVarFunction;
 }
 
@@ -1309,13 +1351,17 @@ function setByPath(
   value: unknown
 ): void {
   let target: Record<string, unknown> = obj;
+
   for (let i = 0; i < path.length - 1; i++) {
     const key = path[i];
+
     if (!isPlainObject(target[key])) {
       target[key] = {};
     }
+
     target = target[key] as Record<string, unknown>;
   }
+
   if (path.length > 0) {
     target[path[path.length - 1]] = value;
   }
@@ -1330,11 +1376,13 @@ function createRawExtractor(vars: AssignedVars) {
     if (typeof varReference === "string") {
       // Use getVarName utility to extract the CSS variable name
       const varName = getVarName(varReference);
+
       // If it was a var() reference and we have the value, return it
       if (varName !== varReference && varName in vars) {
         return vars[varName];
       }
     }
+
     // If not a var reference or lookup failed, return as-is
     return varReference;
   };
@@ -1353,6 +1401,7 @@ function createAliasFunction(context: TokenProcessingContext) {
     const currentPathStr = currentProcessingPath.join(".");
 
     context.aliasMap.add(currentPathStr);
+
     // Return the var reference unchanged
     return String(varReference);
   };
@@ -1362,6 +1411,7 @@ function extractFontFamilyValue(value: TokenFontFamilyValue): CSSVarValue {
   if (Array.isArray(value)) {
     return value.join(", ") as CSSVarValue;
   }
+
   return value as CSSVarValue;
 }
 
@@ -1391,6 +1441,7 @@ function extractColorValue(value: string | TokenColorValue): CSSVarValue {
   if (value.components && Array.isArray(value.components)) {
     const components = value.components.join(", ");
     const alpha = value.alpha !== undefined ? ` / ${value.alpha}` : "";
+
     return `${value.colorSpace}(${components}${alpha})` as CSSVarValue;
   }
 
@@ -1514,11 +1565,14 @@ if (import.meta.vitest) {
     // Remove hash suffix from CSS variable names and var() references
     return str.replace(/__[a-zA-Z0-9]+/g, "");
   }
+
   function normalizeVars(vars: AssignedVars): AssignedVars {
     const normalized: AssignedVars = {};
+
     for (const [key, value] of Object.entries(vars)) {
       normalized[stripHash(key)] = value;
     }
+
     return normalized;
   }
 
@@ -1529,15 +1583,19 @@ if (import.meta.vitest) {
     if (Array.isArray(tokens)) {
       return tokens.map(normalizeResolvedTokens) as T;
     }
+
     if (tokens && typeof tokens === "object") {
       const normalized: T = {} as T;
       const source = tokens as Record<string, unknown>;
       const target = normalized as Record<string, unknown>;
+
       for (const [key, value] of Object.entries(source)) {
         const descriptor = Object.getOwnPropertyDescriptor(source, key);
+
         if (descriptor?.get) {
           Object.defineProperty(target, key, {
             get: () => normalizeResolvedTokens(source[key]),
+
             enumerable: true,
             configurable: true
           });
@@ -1545,8 +1603,10 @@ if (import.meta.vitest) {
           target[key] = normalizeResolvedTokens(value);
         }
       }
+
       return normalized;
     }
+
     return tokens;
   }
 
@@ -1577,6 +1637,7 @@ if (import.meta.vitest) {
     expect(Object.isFrozen(contract)).toBe(true);
     expect(Object.isFrozen(contract.values)).toBe(true);
     expect(Object.isFrozen(contract.cssVarByPath)).toBe(true);
+
     assertType<ThemeContract<ThemeTokens>>(contract);
 
     return contract;
@@ -1617,6 +1678,7 @@ if (import.meta.vitest) {
 
   // Validate that CSS variables have proper hash format
   const VAR_HASH_REGEX = /^--[a-zA-Z0-9-]+__[a-zA-Z0-9]+$/;
+
   function validateHashFormatForVar(vars: AssignedVars): void {
     for (const key of Object.keys(vars)) {
       expect(key).toMatch(VAR_HASH_REGEX);
@@ -1625,8 +1687,10 @@ if (import.meta.vitest) {
 
   function validateHashFormatForResolved(resolved: object): void {
     const flattedTokens = flattenAndFilterResolvedTokens(resolved);
+
     for (const key of Object.keys(flattedTokens)) {
       const varName = getVarName(flattedTokens[key]);
+
       expect(varName).toMatch(VAR_HASH_REGEX);
     }
   }
@@ -1756,6 +1820,7 @@ if (import.meta.vitest) {
 
       const normalizedTokens = normalizeResolvedTokens(result.resolvedTokens);
       assertType<PureCSSVarFunction>(result.resolvedTokens.color.base.red);
+
       expect(normalizedTokens.color.base.red).toBe("var(--color-base-red)");
       expect(normalizedTokens.color.base.green).toBe("var(--color-base-green)");
       expect(normalizedTokens.color.base.blue).toBe("var(--color-base-blue)");
@@ -1779,6 +1844,7 @@ if (import.meta.vitest) {
               get primary(): string {
                 return this.color.base.blue;
               },
+
               get danger(): string {
                 return this.color.base.red;
               }
@@ -1793,8 +1859,10 @@ if (import.meta.vitest) {
       // CSS variables should be created for both base and semantic tokens
       // Note: Semantic tokens reference other tokens, so their values are var() references
       const normalizedVars = normalizeVars(result.vars);
+
       expect(normalizedVars["--color-base-red"]).toBe("#ff0000");
       expect(normalizedVars["--color-base-blue"]).toBe("#0000ff");
+
       // Semantic tokens contain var() references WITH hashes that need to be normalized
       expect(stripHash(normalizedVars["--color-semantic-primary"])).toBe(
         "var(--color-base-blue)"
@@ -1805,6 +1873,7 @@ if (import.meta.vitest) {
 
       // Resolved tokens should all use var() references
       const normalizedTokens = normalizeResolvedTokens(result.resolvedTokens);
+
       expect(normalizedTokens.color.base.red).toBe("var(--color-base-red)");
       expect(normalizedTokens.color.base.blue).toBe("var(--color-base-blue)");
       expect(normalizedTokens.color.semantic.primary).toBe(
@@ -1827,6 +1896,7 @@ if (import.meta.vitest) {
               get primary(): string {
                 return this.fallbackVar(this.color.base.blue, "#007bff");
               },
+
               get secondary(): string {
                 // Test fallback with an existing token
                 return this.fallbackVar(this.color.base.green, "#6c757d");
@@ -1840,6 +1910,7 @@ if (import.meta.vitest) {
       validateHashFormatForResolved(result.resolvedTokens);
 
       const normalizedVars = normalizeVars(result.vars);
+
       // The semantic tokens should contain var() with fallback
       expect(stripHash(normalizedVars["--color-semantic-primary"])).toBe(
         "var(--color-base-blue, #007bff)"
@@ -1862,10 +1933,12 @@ if (import.meta.vitest) {
                 // Use alias to reference without creating CSS var
                 return this.alias(this.color.base.blue);
               },
+
               get danger(): string {
                 // Another alias
                 return this.alias(this.color.base.red);
               },
+
               get secondary(): string {
                 // Normal reference (creates CSS var)
                 return this.color.base.blue;
@@ -1879,6 +1952,7 @@ if (import.meta.vitest) {
       validateHashFormatForResolved(result.resolvedTokens);
 
       const normalizedVars = normalizeVars(result.vars);
+
       // Base tokens should have CSS variables
       expect(normalizedVars["--color-base-blue"]).toBe("#0000ff");
       expect(normalizedVars["--color-base-red"]).toBe("#ff0000");
@@ -1895,6 +1969,7 @@ if (import.meta.vitest) {
 
       // Resolved tokens should all use var() references
       const normalizedTokens = normalizeResolvedTokens(result.resolvedTokens);
+
       expect(normalizedTokens.color.semantic.primary).toBe(
         "var(--color-base-blue)"
       );
@@ -1919,14 +1994,17 @@ if (import.meta.vitest) {
                 // Use raw to get the actual value instead of var() reference
                 return this.raw(this.color.base.blue);
               },
+
               get danger(): string {
                 // Test raw with another token
                 return this.raw(this.color.base.red);
               },
+
               get numeric(): number {
                 // Test raw with a literal number
                 return this.raw(1);
               },
+
               get custom(): string {
                 // Test raw with a non-var value
                 return this.raw("#00ff00");
@@ -1939,9 +2017,11 @@ if (import.meta.vitest) {
               get small(): number {
                 return this.raw(this.space.base[1]);
               },
+
               get medium(): number {
                 return this.raw(this.space.base[3]);
               },
+
               get large(): number {
                 return this.raw(this.space.base[5]);
               }
@@ -1954,6 +2034,7 @@ if (import.meta.vitest) {
       validateHashFormatForResolved(result.resolvedTokens);
 
       const normalizedVars = normalizeVars(result.vars);
+
       // The semantic tokens should contain the raw values, not var() references
       expect(normalizedVars["--color-semantic-primary"]).toBe("#0000ff");
       expect(normalizedVars["--color-semantic-danger"]).toBe("#ff0000");
@@ -2213,6 +2294,7 @@ if (import.meta.vitest) {
       });
 
       const normalized = normalizeResolvedTokens(result.resolvedTokens);
+
       expect(normalized.typography.fontFamily).toBe(
         "var(--typography-font-family)"
       );
@@ -2233,6 +2315,7 @@ if (import.meta.vitest) {
             get resolved(): string {
               return `${this.shadow.light.color} ${this.shadow.light.offsetX} ${this.shadow.light.offsetY} ${this.shadow.light.blur}`;
             },
+
             color: "#00000080",
             offsetX: { value: 0.5, unit: "rem" },
             offsetY: { value: 0.5, unit: "rem" },
@@ -2245,6 +2328,7 @@ if (import.meta.vitest) {
       validateHashFormatForResolved(result.resolvedTokens);
 
       const normalized = normalizeVars(result.vars);
+
       expect(stripHash(normalized["--shadow-light"])).toBe(
         "var(--shadow-light-color) var(--shadow-light-offset-x) var(--shadow-light-offset-y) var(--shadow-light-blur)"
       );
@@ -2255,6 +2339,7 @@ if (import.meta.vitest) {
 
       const resolvedShadow = normalizeResolvedTokens(result.resolvedTokens)
         .shadow.light;
+
       expect(resolvedShadow.resolved).toBe("var(--shadow-light)");
       expect(resolvedShadow.color).toBe("var(--shadow-light-color)");
       expect(resolvedShadow.offsetX).toBe("var(--shadow-light-offset-x)");
@@ -2288,6 +2373,7 @@ if (import.meta.vitest) {
       validateHashFormatForResolved(result.resolvedTokens);
 
       const normalized = normalizeVars(result.vars);
+
       expect(normalized["--typography-heading-sizes-0"]).toBe(48);
       expect(normalized["--typography-heading-sizes-4"]).toBe(16);
       expect(normalized["--typography-heading-weight"]).toBe("700");
@@ -2308,15 +2394,19 @@ if (import.meta.vitest) {
         values: { brand: "red" },
         cssVarByPath: { brand: "green" }
       };
+
       const typedTheme = theme.with<typeof tokens>();
+
       const assertReservedInputTypes = () => {
         // @ts-expect-error: three object-valued contract fields are reserved.
         theme(tokens);
+
         // @ts-expect-error: typed handles reserve the same contract shape.
         typedTheme(tokens);
       };
 
       assertType<() => void>(assertReservedInputTypes);
+
       expect(() => callThemeForRuntimeError(tokens)).toThrow(
         THEME_CONTRACT_DIRECT_CALL_ERROR
       );
@@ -2423,9 +2513,11 @@ if (import.meta.vitest) {
       type ContractTheme = {
         color: { brand: string; accent: string };
       };
+
       const tokens = {
         color: { brand: "blue", accent: "cyan" }
       } satisfies ThemeTokensInput<ContractTheme>;
+
       const result = theme(tokens, "theme-contract-class");
       const [, vars, contract] = result;
       expectThemeContractResult(result);
@@ -2437,6 +2529,7 @@ if (import.meta.vitest) {
         Readonly<Record<string, CSSVarValue>>
       >();
       expectTypeOf(contract.cssVarByPath).toEqualTypeOf<Readonly<CSSVarMap>>();
+
       // @ts-expect-error: resolved vars are not full ThemeContract values.
       assertType<ThemeContract<ContractTheme>>(contract.vars);
       assertType<ThemeContract<ContractTheme>>({
@@ -2466,9 +2559,11 @@ if (import.meta.vitest) {
 
     it("rejects invalid ThemeContract replacement inputs", () => {
       type ContractTheme = { color: { brand: string } };
+
       const tokens = {
         color: { brand: "blue" }
       } satisfies ThemeTokensInput<ContractTheme>;
+
       const result = theme(tokens, "theme-invalid-contract-base");
       const [, vars, contract] = result;
       const replacementTokens = {
@@ -2476,6 +2571,7 @@ if (import.meta.vitest) {
       } satisfies ThemeTokensInput<ContractTheme>;
 
       expectThemeContractResult(result);
+
       expect(isThemeContract(contract)).toBe(true);
       expect(isThemeContract({})).toBe(false);
       expect(() => assertThemeContract({})).toThrow(
@@ -2539,6 +2635,7 @@ if (import.meta.vitest) {
       ).toThrow(THEME_CONTRACT_DIRECT_CALL_ERROR);
 
       const typedTheme = theme.with<ContractTheme>();
+
       expect(() =>
         Reflect.apply(typedTheme, undefined, [contract, replacementTokens])
       ).toThrow(THEME_CONTRACT_DIRECT_CALL_ERROR);
@@ -2564,8 +2661,11 @@ if (import.meta.vitest) {
       const result = themeTokens({ color: "red" }, "theme-with");
 
       expect(Array.isArray(result)).toBe(true);
+
       expectThemeContractResult(result);
+
       expect(result[0]).toMatch(identifierName("theme-with"));
+
       validateHashFormatForResolved(result[1]);
     });
 
@@ -2574,6 +2674,7 @@ if (import.meta.vitest) {
         color: string;
         nested: { size: number };
       }>();
+
       const tokens = {
         color: "red",
         nested: { size: 12 }
@@ -2583,8 +2684,10 @@ if (import.meta.vitest) {
       const direct = theme(tokens, "theme1");
 
       expect(Array.isArray(wrapped)).toBe(true);
+
       expectThemeContractResult(wrapped);
       expectThemeContractResult(direct);
+
       expect(wrapped[0]).toMatch(identifierName("theme1"));
       expect(direct[0]).toMatch(identifierName("theme1"));
       expect(normalizeResolvedTokens(wrapped[1])).toEqual(
@@ -2592,6 +2695,7 @@ if (import.meta.vitest) {
       );
       expect(wrapped[2].vars).toBe(wrapped[1]);
       expect(direct[2].vars).toBe(direct[1]);
+
       validateHashFormatForResolved(wrapped[1]);
       validateHashFormatForResolved(direct[1]);
     });
@@ -2601,11 +2705,13 @@ if (import.meta.vitest) {
         color: { brand: string };
         font: { body: string };
       };
+
       const fixedTheme = theme.with<FixedTheme>();
       const baseResult = fixedTheme({
         color: { brand: "blue" },
         font: { body: "arial" }
       });
+
       const [, baseVars, contract] = baseResult;
       const derivedResult = fixedTheme.extends(
         contract,
@@ -2615,11 +2721,13 @@ if (import.meta.vitest) {
         },
         "theme-with-derived"
       );
+
       const [derivedClassName, derivedVars] = derivedResult;
 
       assertType<ThemeResult<FixedTheme>>(derivedResult);
       expectTypeOf(derivedResult).toEqualTypeOf<ThemeResult<FixedTheme>>();
       expectThemeContractResult(derivedResult);
+
       expect(derivedClassName).toMatch(identifierName("theme-with-derived"));
       expect(derivedVars.color.brand).toBe(baseVars.color.brand);
       expect(derivedVars.font.body).toBe(baseVars.font.body);
@@ -2642,8 +2750,10 @@ if (import.meta.vitest) {
       assertType<
         ThemeContract<{ color: { brand: string }; font: { body: string } }>
       >(contract);
+
       expect(isThemeContract(contract)).toBe(true);
       expect(contract.vars).toBe(vars);
+
       expectTypeOf<typeof vars.color.brand>().not.toBeAny();
       expectTypeOf<
         typeof vars.color.brand
@@ -2673,12 +2783,14 @@ if (import.meta.vitest) {
       myTheme({
         color: { brand: "blue" },
         font: { body: "arial" },
+
         // @ts-expect-error: top-level keys outside the contract are not accepted.
         space: "4px"
       });
       myTheme({
         color: {
           brand: "blue",
+
           // @ts-expect-error: nested keys outside the contract are not accepted.
           accent: "red"
         },
@@ -2720,10 +2832,13 @@ if (import.meta.vitest) {
           font: { body: string };
         }>
       >(contract);
+
       expect(isThemeContract(contract)).toBe(true);
       expect(contract.vars).toBe(vars);
       expect(className).toMatch(identifierName("theme-with-layer"));
+
       validateHashFormatForResolved(vars);
+
       expect(normalizeResolvedTokens(vars)).toEqual({
         color: {
           brand: "var(--color-brand)",
@@ -2742,21 +2857,27 @@ if (import.meta.vitest) {
         colors: { brand: string };
         font: { body: string };
       };
+
       type ExpectedVars = {
         colors: { brand: PureCSSVarFunction };
         font: { body: PureCSSVarFunction };
       };
+
       type SingleTokenTheme = { color: string };
+
       type SingleTokenVars = { color: PureCSSVarFunction };
+
       const tokens: ThemeTokensInput<ExpectedTheme> = {
         colors: { brand: "blue" },
         font: { body: "arial" }
       };
+
       const direct = theme(tokens);
 
       assertType<ThemeResult<ExpectedTheme>>(direct);
       assertType<ExpectedVars>(direct[1]);
       expectTypeOf(direct).toEqualTypeOf<ThemeResult<ExpectedTheme>>();
+
       const directContract = expectThemeContractResult(direct);
 
       const directWithDebug = theme(tokens, "theme-overload-direct-debug");
@@ -2771,6 +2892,7 @@ if (import.meta.vitest) {
         colors: { brand: "red" },
         font: { body: "helvetica" }
       };
+
       const derived = theme.extends(directContract, replacementTokens);
 
       assertType<ThemeResult<ExpectedTheme>>(derived);
@@ -2790,6 +2912,7 @@ if (import.meta.vitest) {
         ThemeResult<ExpectedTheme>
       >();
       expectThemeContractResult(derivedWithDebug);
+
       expect(derivedWithDebug[0]).toMatch(
         identifierName("theme-overload-derived-debug")
       );
@@ -2817,18 +2940,22 @@ if (import.meta.vitest) {
         color: { brand: string; accent: string };
         font: { body: string };
       };
+
       const strictTheme = theme.with<StrictTheme>();
       const strictTokens: ThemeTokensInput<StrictTheme> = {
         color: { brand: "blue", accent: "cyan" },
         font: { body: "arial" }
       };
+
       const strictResult = strictTheme(strictTokens);
       const [, , strictContract] = strictResult;
       expectThemeContractResult(strictResult);
+
       const strictReplacementTokens: ThemeTokensInput<StrictTheme> = {
         color: { brand: "red", accent: "orange" },
         font: { body: "helvetica" }
       };
+
       const strictDerived = strictTheme.extends(
         strictContract,
         strictReplacementTokens,
@@ -2838,6 +2965,7 @@ if (import.meta.vitest) {
       assertType<ThemeResult<StrictTheme>>(strictDerived);
       expectTypeOf(strictDerived).toEqualTypeOf<ThemeResult<StrictTheme>>();
       expectThemeContractResult(strictDerived);
+
       expect(strictDerived[0]).toMatch(
         identifierName("theme-with-strict-derived")
       );
@@ -2850,17 +2978,21 @@ if (import.meta.vitest) {
               get literal() {
                 const literal = this.raw("literal");
                 assertType<"literal">(literal);
+
                 return literal;
               },
+
               get numeric() {
                 const numeric = this.raw(1);
                 assertType<1>(numeric);
+
                 return numeric;
               }
             }
           }
         })
       );
+
       assertType<
         ThemeResult<{
           color: {
@@ -2873,8 +3005,10 @@ if (import.meta.vitest) {
       const assertStrictReplacementTypeErrors = () => {
         // @ts-expect-error: legacy top-level replacement calls are not accepted.
         theme<StrictTheme>(strictContract, strictReplacementTokens);
+
         // @ts-expect-error: typed handles accept contracts only through handle.extends().
         strictTheme(strictContract, strictReplacementTokens);
+
         // @ts-expect-error: font branch is required by the replacement contract.
         theme.extends<StrictTheme>(strictContract, {
           color: { brand: "red", accent: "orange" }
@@ -2887,6 +3021,7 @@ if (import.meta.vitest) {
         theme.extends<StrictTheme>(strictContract, {
           color: { brand: "red", accent: "orange" },
           font: { body: "helvetica" },
+
           // @ts-expect-error: top-level replacement keys outside the contract are not accepted.
           space: "4px"
         });
@@ -2894,6 +3029,7 @@ if (import.meta.vitest) {
           color: {
             brand: "red",
             accent: "orange",
+
             // @ts-expect-error: nested replacement keys outside the contract are not accepted.
             neutral: "gray"
           },
@@ -2923,13 +3059,16 @@ if (import.meta.vitest) {
         colors: { brand: string };
         font: { body: string };
       };
+
       const baseTokens: ThemeTokensInput<UserTheme> = {
         colors: { brand: "blue" },
         font: { body: "arial" }
       };
+
       const baseResult = theme(baseTokens, "theme-user-example");
       const [baseClassName, vars, contract] = baseResult;
       expectThemeContractResult(baseResult);
+
       const transformSpy = vi.spyOn(
         await import("@mincho-js/transform-to-vanilla"),
         "transform"
@@ -2944,6 +3083,7 @@ if (import.meta.vitest) {
           },
           "theme-user-example-derived"
         );
+
         const [derivedClassName, nextVars, nextContract] = derivedResult;
         const thirdResult = theme.extends(
           nextContract,
@@ -2953,12 +3093,14 @@ if (import.meta.vitest) {
           },
           "theme-user-example-third"
         );
+
         const [thirdClassName, thirdVars, thirdContract] = thirdResult;
         const colorsBrandVar = getVarName(vars.colors.brand);
         const fontBodyVar = getVarName(vars.font.body);
 
         expectThemeContractResult(derivedResult);
         expectThemeContractResult(thirdResult);
+
         expect(typeof derivedClassName).toBe("string");
         expect(derivedClassName).toMatch(
           identifierName("theme-user-example-derived")
@@ -2983,6 +3125,7 @@ if (import.meta.vitest) {
               input as { selectors?: Record<string, { vars?: AssignedVars }> }
           )
           .find((input) => input.selectors?.[derivedClassName] !== undefined);
+
         const emittedVars =
           derivedTransformInput?.selectors?.[derivedClassName]?.vars;
 
@@ -3002,6 +3145,7 @@ if (import.meta.vitest) {
         font: { body: string };
         space: number[];
       };
+
       const runtimeErrorTokens: ThemeTokensInput<RuntimeErrorTheme> =
         compositeValue({
           color: {
@@ -3015,21 +3159,25 @@ if (import.meta.vitest) {
           font: { body: "arial" },
           space: [1, 2]
         });
+
       const runtimeErrorResult = theme(runtimeErrorTokens, "theme-errors-base");
       const [, runtimeErrorVars, contract] = runtimeErrorResult;
       expectThemeContractResult(runtimeErrorResult);
       expectThemeVarsContract(runtimeErrorVars, contract);
+
       const missingNestedBranch = {
         color: { brand: "red" },
         font: { body: "helvetica" },
         space: [3, 4]
       };
+
       const extraTopLevelKey = {
         color: { brand: "red", semantic: { primary: "crimson" } },
         font: { body: "helvetica" },
         space: [3, 4],
         elevation: "high"
       };
+
       const extraNestedKey = {
         color: {
           brand: "red",
@@ -3039,6 +3187,7 @@ if (import.meta.vitest) {
         font: { body: "helvetica" },
         space: [3, 4]
       };
+
       const arrayLengthMismatch = {
         color: { brand: "red", semantic: { primary: "crimson" } },
         font: { body: "helvetica" },
@@ -3085,6 +3234,7 @@ if (import.meta.vitest) {
         enumerable: true,
         configurable: true
       });
+
       expect(() =>
         callThemeExtensionForRuntimeError<RuntimeErrorTheme>(
           contract,
@@ -3113,12 +3263,15 @@ if (import.meta.vitest) {
             get primary(): string {
               return this.color.brand;
             },
+
             get fallback(): string {
               return this.fallbackVar(this.color.brand, "#123456");
             },
+
             get rawBrand(): string {
               return this.raw(this.color.brand);
             },
+
             get aliasBrand(): string {
               return this.alias(this.color.brand);
             }
@@ -3134,8 +3287,10 @@ if (import.meta.vitest) {
               const offsetX = `${this.offsetX.value}${this.offsetX.unit}`;
               const offsetY = `${this.offsetY.value}${this.offsetY.unit}`;
               const blur = `${this.blur.value}${this.blur.unit}`;
+
               return `${this.color} ${offsetX} ${offsetY} ${blur}`;
             },
+
             color: "#00000080",
             offsetX: { value: 1, unit: "px" },
             offsetY: { value: 2, unit: "px" },
@@ -3143,9 +3298,11 @@ if (import.meta.vitest) {
           })
         }
       });
+
       const baseResult = theme(baseTokens, "theme-token-forms-base");
       const [, vars, contract] = baseResult;
       expectThemeContractResult(baseResult);
+
       const varsSnapshot = normalizeResolvedTokens(vars);
       const replacementTokens = compositeValue({
         scalar: "replacement-scalar",
@@ -3159,12 +3316,15 @@ if (import.meta.vitest) {
             get primary(): string {
               return this.color.brand;
             },
+
             get fallback(): string {
               return this.fallbackVar(this.color.brand, "#654321");
             },
+
             get rawBrand(): string {
               return this.raw(this.color.brand);
             },
+
             get aliasBrand(): string {
               return this.alias(this.color.brand);
             }
@@ -3180,8 +3340,10 @@ if (import.meta.vitest) {
               const offsetX = `${this.offsetX.value}${this.offsetX.unit}`;
               const offsetY = `${this.offsetY.value}${this.offsetY.unit}`;
               const blur = `${this.blur.value}${this.blur.unit}`;
+
               return `${this.color} ${offsetX} ${offsetY} ${blur}`;
             },
+
             color: "#11111180",
             offsetX: { value: 2, unit: "px" },
             offsetY: { value: 4, unit: "px" },
@@ -3189,16 +3351,20 @@ if (import.meta.vitest) {
           })
         }
       });
+
       const layeredReplacementTokens = {
         "@layer": "theme-replacements",
         ...replacementTokens
       } as ThemeTokensInput<typeof baseTokens>;
+
       const replacementPrimaryGetter = Object.getOwnPropertyDescriptor(
         replacementTokens.color.semantic,
         "primary"
       )?.get;
+
       deepFreezeObject(vars);
       deepFreezeObject(layeredReplacementTokens);
+
       const transformSpy = vi.spyOn(
         await import("@mincho-js/transform-to-vanilla"),
         "transform"
@@ -3210,17 +3376,22 @@ if (import.meta.vitest) {
           layeredReplacementTokens,
           "theme-token-forms-derived"
         );
+
         const [derivedClassName, nextVars, nextContract] = derivedResult;
         expectThemeContractResult(derivedResult);
+
         expect(nextContract).not.toBe(contract);
         expect(nextVars.scalar).toBe(vars.scalar);
         expect(nextVars.color.brand).toBe(vars.color.brand);
         expect(nextVars.space.scale[0]).toBe(vars.space.scale[0]);
         expect(nextVars.shadow.card.color).toBe(vars.shadow.card.color);
+
         const normalizedNextVars = normalizeResolvedTokens(nextVars);
+
         expect(normalizedNextVars.shadow.card.resolved).toBe(
           "var(--shadow-card)"
         );
+
         type ThemeTransformInput = {
           selectors?: Record<
             string,
@@ -3230,15 +3401,18 @@ if (import.meta.vitest) {
             }
           >;
         };
+
         const derivedTransformInput = transformSpy.mock.calls
           .map(([input]) => input as ThemeTransformInput)
           .find((input) => input.selectors?.[derivedClassName] !== undefined);
+
         const emittedLayerVars =
           derivedTransformInput?.selectors?.[derivedClassName]?.["@layer"]?.[
             "theme-replacements"
           ]?.vars;
 
         expect(emittedLayerVars).toBeDefined();
+
         const normalizedEmittedVars = normalizeVars(
           emittedLayerVars as AssignedVars
         );
@@ -3318,9 +3492,11 @@ if (import.meta.vitest) {
           }
         })
       );
+
       const [, vars, contract] = result;
       expectThemeContractResult(result);
       expectThemeVarsContract(vars, contract);
+
       const rawBrandVar = contract.cssVarByPath["color-semantic-raw-brand"];
 
       expect(Object.keys(contract)).toEqual(["vars", "values", "cssVarByPath"]);
@@ -3335,7 +3511,9 @@ if (import.meta.vitest) {
 
       expectThemeContractResult(result);
       assertType<ThemeContract<{ color: string }>>(contract);
+
       expect(className).toMatch(identifierName("theme2"));
+
       validateHashFormatForResolved(themeVars);
     });
 
@@ -3349,6 +3527,7 @@ if (import.meta.vitest) {
       expectThemeContractResult(result2);
       expectThemeVarsContract(themeVars1, contract1);
       expectThemeVarsContract(themeVars2, contract2);
+
       expect(className1).toMatch(identifierName("theme1"));
       expect(className2).toMatch(identifierName("theme2"));
       expect(className1).not.toBe(className2);
@@ -3363,6 +3542,7 @@ if (import.meta.vitest) {
 
       expectThemeContractResult(result);
       expectThemeVarsContract(themeVars, contract);
+
       expect(className).toMatch(/^[a-zA-Z_][a-zA-Z0-9_]*$/);
     });
 
@@ -3377,13 +3557,16 @@ if (import.meta.vitest) {
         },
         debugId
       );
+
       const [className, themeVars, contract] = result;
 
       expectThemeContractResult(result);
       expectThemeVarsContract(themeVars, contract);
+
       expect(className).toMatch(identifierName(`${debugId}`));
 
       validateHashFormatForResolved(themeVars);
+
       expect(normalizeResolvedTokens(themeVars)).toEqual({
         color: {
           primary: "var(--color-primary)",
@@ -3401,9 +3584,11 @@ if (import.meta.vitest) {
       });
 
       expect(className).toBeDefined();
+
       expectThemeVarsContract(themeVars, contract);
 
       validateHashFormatForResolved(themeVars);
+
       expect(normalizeResolvedTokens(themeVars)).toEqual({
         color: "var(--color)",
         size: "var(--size)",
@@ -3419,7 +3604,9 @@ if (import.meta.vitest) {
       });
 
       expect(className).toBeDefined();
+
       expectThemeVarsContract(themeVars, contract);
+
       expect(normalizeResolvedTokens(themeVars)).toEqual({
         space: [
           "var(--space-0)",
@@ -3447,10 +3634,13 @@ if (import.meta.vitest) {
       });
 
       expect(className).toBeDefined();
+
       expectThemeVarsContract(themeVars, contract);
 
       validateHashFormatForResolved(themeVars);
+
       const normalized = normalizeResolvedTokens(themeVars);
+
       expect(normalized.typography.heading.fontSize).toBe(
         "var(--typography-heading-font-size)"
       );
@@ -3486,9 +3676,11 @@ if (import.meta.vitest) {
       });
 
       expect(className).toBeDefined();
+
       expectThemeVarsContract(themeVars, contract);
 
       validateHashFormatForResolved(themeVars);
+
       expect(normalizeResolvedTokens(themeVars)).toEqual({
         color: "var(--color)",
         font: "var(--font)",
@@ -3515,9 +3707,11 @@ if (import.meta.vitest) {
       );
 
       expect(className).toMatch(identifierName(`${debugId}`));
+
       expectThemeVarsContract(themeVars, contract);
 
       validateHashFormatForResolved(themeVars);
+
       expect(normalizeResolvedTokens(themeVars)).toEqual({
         color: {
           base: {
@@ -3542,6 +3736,7 @@ if (import.meta.vitest) {
               get primary(): string {
                 return this.alias(this.color.base.blue);
               },
+
               get danger(): string {
                 return this.alias(this.color.base.red);
               }
@@ -3552,10 +3747,13 @@ if (import.meta.vitest) {
       );
 
       expect(className).toMatch(identifierName(`${debugId}`));
+
       expectThemeVarsContract(themeVars, contract);
 
       validateHashFormatForResolved(themeVars);
+
       const normalized = normalizeResolvedTokens(themeVars);
+
       expect(normalized.color.semantic.primary).toBe("var(--color-base-blue)");
       expect(normalized.color.semantic.danger).toBe("var(--color-base-red)");
     });
@@ -3572,6 +3770,7 @@ if (import.meta.vitest) {
               get primary(): string {
                 return this.raw(this.color.base.blue);
               },
+
               get danger(): string {
                 return this.raw(this.color.base.red);
               }
@@ -3582,9 +3781,11 @@ if (import.meta.vitest) {
       );
 
       expect(className).toMatch(identifierName(`${debugId}`));
+
       expectThemeVarsContract(themeVars, contract);
 
       validateHashFormatForResolved(themeVars);
+
       expect(normalizeResolvedTokens(themeVars)).toEqual({
         color: {
           base: {
@@ -3604,6 +3805,7 @@ if (import.meta.vitest) {
         get resolved() {
           return `${this.color} ${this.offsetX.value}${this.offsetX.unit} ${this.offsetY.value}${this.offsetY.unit}`;
         },
+
         color: "#00000080",
         offsetX: { value: 0.5, unit: "rem" },
         offsetY: { value: 0.5, unit: "rem" }
@@ -3614,10 +3816,13 @@ if (import.meta.vitest) {
       });
 
       expect(className).toBeDefined();
+
       expectThemeVarsContract(themeVars, contract);
 
       validateHashFormatForResolved(themeVars);
+
       const normalized = normalizeResolvedTokens(themeVars);
+
       expect(normalized.shadow.resolved).toBe("var(--shadow)");
       expect(normalized.shadow.color).toBe("var(--shadow-color)");
       expect(normalized.shadow.offsetX).toBe("var(--shadow-offset-x)");
@@ -3631,9 +3836,11 @@ if (import.meta.vitest) {
       });
 
       expect(className).toBeDefined();
+
       expectThemeVarsContract(themeVars, contract);
 
       validateHashFormatForResolved(themeVars);
+
       expect(normalizeResolvedTokens(themeVars)).toEqual({
         spacing: "var(--spacing)",
         borderWidth: "var(--border-width)"
@@ -3648,9 +3855,11 @@ if (import.meta.vitest) {
       });
 
       expect(className).toBeDefined();
+
       expectThemeVarsContract(themeVars, contract);
 
       validateHashFormatForResolved(themeVars);
+
       expect(normalizeResolvedTokens(themeVars)).toEqual({
         backgroundColor: "var(--background-color)",
         fontSize: "var(--font-size)",
@@ -3673,10 +3882,13 @@ if (import.meta.vitest) {
       });
 
       expect(className).toBeDefined();
+
       expectThemeVarsContract(themeVars, contract);
 
       validateHashFormatForResolved(themeVars);
+
       const normalized = normalizeResolvedTokens(themeVars);
+
       expect(normalized.design.system.color.brand.primary).toBe(
         "var(--design-system-color-brand-primary)"
       );
@@ -3706,10 +3918,13 @@ if (import.meta.vitest) {
       });
 
       expect(className).toBeDefined();
+
       expectThemeVarsContract(themeVars, contract);
 
       validateHashFormatForResolved(themeVars);
+
       const normalized = normalizeResolvedTokens(themeVars);
+
       expect(normalized.primitives.color).toBe("var(--primitives-color)");
       expect(normalized.primitives.size).toBe("var(--primitives-size)");
       expect(normalized.arrays.space).toEqual([
@@ -3734,12 +3949,15 @@ if (import.meta.vitest) {
               get primary(): string {
                 return this.color.base.blue;
               },
+
               get danger(): string {
                 return this.color.base.red;
               },
+
               get success(): string {
                 return this.color.base.green;
               },
+
               get info(): string {
                 return this.fallbackVar(this.color.semantic.primary, "#17a2b8");
               }
@@ -3750,10 +3968,13 @@ if (import.meta.vitest) {
       );
 
       expect(className).toMatch(identifierName(`${debugId}`));
+
       expectThemeVarsContract(themeVars, contract);
 
       validateHashFormatForResolved(themeVars);
+
       const normalized = normalizeResolvedTokens(themeVars);
+
       expect(normalized.color.semantic.primary).toBe("var(--color-base-blue)");
       expect(normalized.color.semantic.danger).toBe("var(--color-base-red)");
       expect(normalized.color.semantic.success).toBe("var(--color-base-green)");
@@ -3785,10 +4006,13 @@ if (import.meta.vitest) {
       });
 
       expect(className).toBeDefined();
+
       expectThemeVarsContract(themeVars, contract);
 
       validateHashFormatForResolved(themeVars);
+
       const normalized = normalizeResolvedTokens(themeVars);
+
       expect(normalized.weight.normal).toBe("var(--weight-normal)");
       expect(normalized.weight.bold).toBe("var(--weight-bold)");
       expect(normalized.weight.semiBold).toBe("var(--weight-semi-bold)");
@@ -3808,9 +4032,11 @@ if (import.meta.vitest) {
       });
 
       expect(className).toBeDefined();
+
       expectThemeVarsContract(themeVars, contract);
 
       validateHashFormatForResolved(themeVars);
+
       expect(normalizeResolvedTokens(themeVars)).toEqual({
         lineHeight: "var(--line-height)",
         zIndex: "var(--z-index)"
@@ -3836,10 +4062,13 @@ if (import.meta.vitest) {
       });
 
       expect(className).toBeDefined();
+
       expectThemeVarsContract(themeVars, contract);
 
       validateHashFormatForResolved(themeVars);
+
       const normalized = normalizeResolvedTokens(themeVars);
+
       expect(normalized.color.simple).toBe("var(--color-simple)");
       expect(normalized.color.complex).toBe("var(--color-complex)");
     });
@@ -3863,6 +4092,7 @@ if (import.meta.vitest) {
               get primary(): string {
                 return this.color.base.blue;
               },
+
               get error(): string {
                 return this.color.base.red;
               }
@@ -3874,9 +4104,11 @@ if (import.meta.vitest) {
               get small(): string {
                 return this.space.base[1];
               },
+
               get medium(): string {
                 return this.space.base[3];
               },
+
               get large(): string {
                 return this.space.base[5];
               }
@@ -3887,6 +4119,7 @@ if (import.meta.vitest) {
               get resolved(): string {
                 return `${this.shadow.light.color} ${this.shadow.light.offsetX} ${this.shadow.light.offsetY} ${this.shadow.light.blur}`;
               },
+
               color: "#00000080",
               offsetX: { value: 0.5, unit: "rem" },
               offsetY: { value: 0.5, unit: "rem" },
@@ -3898,9 +4131,11 @@ if (import.meta.vitest) {
       );
 
       expect(className).toMatch(identifierName(`${debugId}`));
+
       expectThemeVarsContract(themeVars, contract);
 
       validateHashFormatForResolved(themeVars);
+
       expect(normalizeResolvedTokens(themeVars)).toEqual({
         color: {
           base: {
@@ -3949,6 +4184,7 @@ if (import.meta.vitest) {
         },
         "testTheme"
       );
+
       const [className, themeVars, contract] = result;
       const globalThemeVars = globalTheme(".test-global-theme", {
         color: {
@@ -3958,9 +4194,11 @@ if (import.meta.vitest) {
 
       expectThemeContractResult(result);
       expectThemeVarsContract(themeVars, contract);
+
       expect(className).toMatch(identifierName("testTheme"));
 
       validateHashFormatForResolved(themeVars);
+
       expect(normalizeResolvedTokens(themeVars)).toEqual({
         color: {
           primary: "var(--color-primary)"
@@ -3980,6 +4218,7 @@ if (import.meta.vitest) {
 
       expectThemeContractResult(result);
       expectThemeVarsContract(themeVars, contract);
+
       expect(className).toBeDefined();
       expect(themeVars).toEqual({});
     });

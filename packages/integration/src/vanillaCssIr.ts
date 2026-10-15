@@ -1,5 +1,6 @@
 /** Vanilla-extract 1.20.1 adapter data, before CSS serialization. */
 import type { Adapter, FileScope } from "@vanilla-extract/css";
+import { createHash } from "node:crypto";
 import { setAdapter, removeAdapter } from "@vanilla-extract/css/adapter";
 import { transformCss } from "@vanilla-extract/css/transformCss";
 
@@ -11,9 +12,84 @@ export interface VanillaCssArtifact {
   localClassNames: string[];
   composedClassLists: Parameters<Adapter["registerComposition"]>[0][];
   usedCompositions: string[];
+
+  /** References visible to runtime consumers; absent metadata is opaque. */
+  provenance?: {
+    version: 1;
+    publicReferences: readonly string[];
+    generatedVariables: readonly string[];
+    opaque: boolean;
+  };
 }
 
+/** JSON's default NaN/Infinity/null and omitted-undefined collisions are unsafe
+ * for CSS custom-property token streams. Escape every string before using
+ * distinct scalar tags, so author strings cannot collide with internal tags.
+ */
+export function hashVanillaCssArtifact(artifact: VanillaCssArtifact): string {
+  // Consumer export metadata is merged by owner separately. It must not give
+  // identical provider CSS multiple module identities or change its load order.
+  const { provenance: _provenance, ...css } = artifact;
+  const value = JSON.stringify(css, (_key, item: unknown) => {
+    if (typeof item === "string") return `\0s${item}`;
+    if (item === undefined) return "\0u";
+    if (
+      typeof item === "number" &&
+      (!Number.isFinite(item) || Object.is(item, -0))
+    )
+      return `\0n${Object.is(item, -0) ? "-0" : String(item)}`;
+    if (typeof item === "bigint") return `\0i${item}`;
+
+    return item;
+  });
+
+  return createHash("sha256")
+    .update("css-ir-identity-v2\0")
+    .update(value)
+    .digest("hex");
+}
+
+/** Record references before CSS imports are appended to serialized exports.
+ * All scopes share the export surface: a consumer can expose a provider's var.
+ * Escaped identifiers are deliberately opaque rather than incompletely parsed.
+ */
+export function annotateVanillaCssArtifacts(
+  artifacts: readonly VanillaCssArtifact[],
+  serializedExports: readonly string[],
+  generatedVariables: readonly string[] = []
+): void {
+  const references = new Set<string>();
+  let opaque = false;
+
+  for (const source of serializedExports) {
+    if (/\\(?:u|x)/.test(source)) opaque = true;
+
+    for (const match of source.matchAll(/--[A-Za-z_][A-Za-z0-9_-]*/g))
+      references.add(match[0]);
+  }
+
+  const provenance = {
+    version: 1 as const,
+    publicReferences: [...references].sort(),
+    generatedVariables: [...generatedVariables].sort(),
+    opaque
+  };
+
+  for (const artifact of artifacts) artifact.provenance = provenance;
+}
+
+// Evaluation finishes these arrays before either composition pass reads them.
+// Weak ownership lets both passes share facts without retaining removed owners.
+const selectorFacts = new WeakMap<VanillaCssArtifact["cssObjs"], string[]>();
+const compositionFacts = new WeakMap<
+  VanillaCssArtifact["composedClassLists"],
+  { identifier: string; pattern: RegExp }[]
+>();
+
 function selectors(artifact: VanillaCssArtifact): string[] {
+  const cached = selectorFacts.get(artifact.cssObjs);
+  if (cached) return cached;
+
   const result: string[] = [];
 
   const visit = (value: unknown) => {
@@ -34,7 +110,25 @@ function selectors(artifact: VanillaCssArtifact): string[] {
     visit(root.rule);
   }
 
+  selectorFacts.set(artifact.cssObjs, result);
+
   return result;
+}
+
+function compositions(artifact: VanillaCssArtifact) {
+  let cached = compositionFacts.get(artifact.composedClassLists);
+
+  if (!cached) {
+    cached = [...artifact.composedClassLists]
+      .reverse()
+      .map(({ identifier, classList }) => ({
+        identifier,
+        pattern: new RegExp(`(${classList})`, "g")
+      }));
+    compositionFacts.set(artifact.composedClassLists, cached);
+  }
+
+  return cached;
 }
 
 /** Exclude other scopes' registration context from this artifact's identity.
@@ -47,10 +141,8 @@ export function isolateVanillaCssArtifact(
   const values = selectors(artifact);
   const required = new Set<string>();
   const rewritten = values.map((value) => {
-    for (const { identifier, classList } of [
-      ...artifact.composedClassLists
-    ].reverse())
-      value = value.replace(new RegExp(`(${classList})`, "g"), () => {
+    for (const { identifier, pattern } of compositions(artifact))
+      value = value.replace(pattern, () => {
         required.add(identifier);
 
         return identifier;
@@ -79,11 +171,11 @@ export function collectSelectorCompositions(
   used: Set<string>
 ): void {
   for (const artifact of artifacts) {
-    const compositions = [...artifact.composedClassLists].reverse();
+    const matches = compositions(artifact);
 
     const selector = (value: string) => {
-      for (const { identifier, classList } of compositions)
-        value = value.replace(new RegExp(`(${classList})`, "g"), () => {
+      for (const { identifier, pattern } of matches)
+        value = value.replace(pattern, () => {
           used.add(identifier);
 
           return identifier;

@@ -15,7 +15,6 @@ export {
   assignVars,
   composeStyles,
   createContainer,
-  createVar,
   fallbackVar,
   fontFace,
   generateIdentifier,
@@ -25,6 +24,7 @@ export {
   keyframes,
   layer
 } from "@vanilla-extract/css";
+export { createVar } from "./compilerResources.js";
 
 export { globalCss, css, selector } from "./css/index.js";
 export type { CSSRuleWith } from "./css/types.js";
@@ -112,6 +112,7 @@ if (import.meta.vitest) {
       expect(typeof getVarName).toBe("function");
       expect(getVarName("var(--my-var-name, 1px)")).toBe("--my-var-name");
       expect(getVarName("--my-var-name")).toBe("--my-var-name");
+
       expectTypeOf(getVarName).returns.toEqualTypeOf<
         import("@mincho-js/transform-to-vanilla").PureCSSVarKey
       >();
