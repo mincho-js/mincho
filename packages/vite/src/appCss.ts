@@ -23,9 +23,69 @@ export interface MinchoAppCssOptions {
 
   /** Router manifest entries; their static dependencies determine CSS reach. */
   routes?: readonly MinchoCssRoute[];
+
+  /** Safe IR passes, enabled for production dist-chunk builds. */
+  optimize?:
+    | boolean
+    | {
+        mergeRules?: boolean;
+        pruneGenerated?: boolean;
+        compactThemes?: boolean;
+
+        /** Native graph sharing keeps existing thresholds and route boundaries. */
+        shareAtoms?: boolean;
+      };
+}
+
+export function resolveAppCssOptimization(
+  options: MinchoAppCssOptions | undefined,
+  production: boolean
+) {
+  const value = options?.optimize;
+  if (
+    options?.mode !== "dist-chunk" ||
+    value === false ||
+    (!production && value === undefined)
+  )
+    return undefined;
+
+  const explicit = typeof value === "object" ? value : {};
+
+  return {
+    mergeRules: explicit.mergeRules ?? true,
+    pruneGenerated: explicit.pruneGenerated ?? true,
+    compactThemes: explicit.compactThemes ?? true,
+    shareAtoms:
+      options.sharing === false ? false : (explicit.shareAtoms ?? true)
+  };
 }
 
 export function validateAppCssOptions(options?: MinchoAppCssOptions): void {
+  const optimization = options?.optimize;
+
+  if (optimization !== undefined && typeof optimization !== "boolean") {
+    if (
+      !optimization ||
+      typeof optimization !== "object" ||
+      Array.isArray(optimization)
+    )
+      throw new Error(
+        "appCss.optimize must be a boolean or an optimization options object."
+      );
+
+    for (const [name, value] of Object.entries(optimization))
+      if (
+        ![
+          "mergeRules",
+          "pruneGenerated",
+          "compactThemes",
+          "shareAtoms"
+        ].includes(name) ||
+        (value !== undefined && typeof value !== "boolean")
+      )
+        throw new Error(`Invalid appCss.optimize option: ${name}.`);
+  }
+
   if (
     options?.mode !== undefined &&
     !["native", "single", "dist-chunk"].includes(options.mode)

@@ -7,7 +7,49 @@ import {
   type MinchoAppCssOptions,
   type MinchoVitePluginOptions
 } from "./index.js";
-import { appCssConfig } from "./appCss.js";
+import {
+  appCssConfig,
+  resolveAppCssOptimization,
+  validateAppCssOptions
+} from "./appCss.js";
+
+it("enables production IR defaults and honors explicit opt-outs", () => {
+  expect(resolveAppCssOptimization({ mode: "dist-chunk" }, true)).toEqual({
+    mergeRules: true,
+    pruneGenerated: true,
+    compactThemes: true,
+    shareAtoms: true
+  });
+  expect(
+    resolveAppCssOptimization({ mode: "dist-chunk" }, false)
+  ).toBeUndefined();
+  expect(
+    resolveAppCssOptimization({ mode: "native", optimize: true }, true)
+  ).toBeUndefined();
+  expect(
+    resolveAppCssOptimization({ mode: "dist-chunk", optimize: false }, true)
+  ).toBeUndefined();
+  expect(
+    resolveAppCssOptimization(
+      { mode: "dist-chunk", sharing: false, optimize: { mergeRules: false } },
+      true
+    )
+  ).toEqual({
+    mergeRules: false,
+    pruneGenerated: true,
+    compactThemes: true,
+    shareAtoms: false
+  });
+  expect(
+    resolveAppCssOptimization(
+      { mode: "dist-chunk", optimize: { shareAtoms: false } },
+      true
+    )?.shareAtoms
+  ).toBe(false);
+  expect(() =>
+    validateAppCssOptions({ optimize: { mergeRules: "yes" } as never })
+  ).toThrow("appCss.optimize");
+});
 
 const roots: string[] = [];
 

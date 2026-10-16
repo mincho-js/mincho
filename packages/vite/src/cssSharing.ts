@@ -30,7 +30,7 @@ export function createCssSharing(
   report: (detail: unknown) => void = () => {},
   routes?: readonly MinchoCssRoute[]
 ) {
-  const options = internalResolveCssChunkSharingOptions(option);
+  let options = internalResolveCssChunkSharingOptions(option);
   const sources = new Map<string, { source: string; owned: boolean }>();
   let config: ResolvedConfig;
   let enabled = false;
@@ -87,8 +87,12 @@ export function createCssSharing(
 
     reorder,
 
-    configure(resolved: ResolvedConfig) {
+    configure(
+      resolved: ResolvedConfig,
+      automatic?: MinchoCssChunkSharingOptions
+    ) {
       config = resolved;
+      options = internalResolveCssChunkSharingOptions(option ?? automatic);
       enabled = Boolean(
         options &&
         config.command === "build" &&
@@ -129,6 +133,7 @@ export function createCssSharing(
       }
 
       const ids = [...context.getModuleIds()];
+      const thresholds = options;
       const cssIds = ids.filter((id) => cssRequest.test(id));
       const opaqueTransforms =
         Boolean(config.css.postcss || config.css.lightningcss) ||
@@ -227,11 +232,11 @@ export function createCssSharing(
       groups = internalPlanCssChunkSharing(
         boundaries,
         modules,
-        routeReach ? { ...options, minBoundaries: 2 } : options,
+        routeReach ? { ...thresholds, minBoundaries: 2 } : thresholds,
         routeReach
           ? (ids) =>
               routesForCssModules(ids, routeReach!).length >=
-              options.minBoundaries
+              thresholds.minBoundaries
           : undefined,
         (id) => normalizePath(relative(config.root, id))
       );
