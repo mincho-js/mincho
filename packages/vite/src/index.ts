@@ -52,6 +52,7 @@ import { createCssSharing } from "./cssSharing.js";
 import { createDistChunkCss } from "./distChunkCss.js";
 import {
   appCssConfig,
+  resolveAppCssOptimization,
   validateAppCssOptions,
   type MinchoAppCssOptions
 } from "./appCss.js";
@@ -294,8 +295,9 @@ function createMinchoViteEnvironmentPlugin(
   );
 
   const runtimeOwners = new Set<string>();
-  const distChunkCss = createDistChunkCss((phase, detail) =>
-    diagnostics.record(config.root, phase, detail)
+  const distChunkCss = createDistChunkCss(
+    (phase, detail) => diagnostics.record(config.root, phase, detail),
+    () => (_options?.cache === false ? undefined : compilationCache)
   );
 
   // Keep our serialized imports before Vite rewrites them for the dev server.
@@ -908,10 +910,17 @@ function createMinchoViteEnvironmentPlugin(
       cancelDiagnosticsFlush();
       diagnosticsClosed = false;
       config = resolvedConfig;
-      cssSharing.configure(config);
+
+      const cssOptimization = resolveAppCssOptimization(
+        _options?.appCss,
+        _options?.optimizationMode !== "development"
+      );
+
+      cssSharing.configure(config, cssOptimization?.shareAtoms);
       distChunkCss.configure(
         config,
-        _options?.appCss?.mode === "dist-chunk" && consumer === "client"
+        _options?.appCss?.mode === "dist-chunk" && consumer === "client",
+        cssOptimization
       );
       plugin.renderChunk.order = distChunkCss.enabled ? "pre" : "post";
       rootRealpath = await getRealpathOrResolvedPath(config.root);
@@ -1777,11 +1786,11 @@ function createMinchoViteEnvironmentPlugin(
       }
     },
 
-    buildEnd(error) {
+    async buildEnd(error) {
       if (error) {
         compilationCache?.clear();
       } else {
-        distChunkCss.plan(
+        await distChunkCss.plan(
           this,
           cssSharing.needsPreview ? cssSharing.recordArtifact : undefined
         );
