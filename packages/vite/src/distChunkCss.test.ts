@@ -1,5 +1,6 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import type { InternalVanillaCssArtifact } from "@mincho-js/integration";
 import {
   build,
   createBuilder,
@@ -90,7 +91,7 @@ async function compile(
       minchoVitePlugin({
         cache: false,
         ...options,
-        appCss: { mode: "dist-chunk", ...options.appCss },
+        appCss: { mode: "dist-chunk", optimize: true, ...options.appCss },
         diagnostics: { json: "events.json" }
       }),
       observer,
@@ -116,8 +117,17 @@ async function compile(
   );
 
   const report = JSON.parse(await readFile(join(root, "events.json"), "utf8"));
-  const events: { phase: string; detail?: { chunk?: string } }[] =
-    report.builds.flatMap((b: { events: unknown[] }) => b.events);
+  const events: {
+    phase: string;
+    detail?: {
+      chunk?: string;
+      mergedRules?: number;
+      enabled?: boolean;
+      reason?: string;
+      removedVariables?: number;
+      liveness?: string;
+    };
+  }[] = report.builds.flatMap((b: { events: unknown[] }) => b.events);
 
   return {
     output: output.output,
@@ -128,7 +138,311 @@ async function compile(
   };
 }
 
+describe("shared artifact provenance", () => {
+  function fixture() {
+    const adapter = createDistChunkCss(() => {});
+    adapter.configure(
+      {
+        command: "build",
+        root: process.cwd(),
+        css: {},
+        build: { cssCodeSplit: true },
+        plugins: [
+          { name: "vite:css", transform: async (code: string) => code },
+          { name: "vite:css-post", transform: async () => "export default '';" }
+        ]
+      } as unknown as ResolvedConfig,
+      true,
+      { mergeRules: false, compactThemes: false, pruneGenerated: true }
+    );
+
+    const data = (
+      publicReferences: string[],
+      opaque = false
+    ): InternalVanillaCssArtifact => ({
+      origin: "/project/shared.css.ts",
+      fileScope: { filePath: "shared.css.ts", packageName: "test" },
+      cssObjs: [
+        {
+          type: "local",
+          selector: "shared",
+          rule: {
+            vars: { "--one": "red", "--two": "blue", "--dead": "green" },
+            color: "black"
+          }
+        }
+      ],
+      localClassNames: ["shared"],
+      composedClassLists: [],
+      usedCompositions: [],
+      provenance: {
+        version: 1,
+        publicReferences,
+        generatedVariables: ["--one", "--two", "--dead"],
+        opaque
+      }
+    });
+
+    const publish = (owner: string, values: InternalVanillaCssArtifact[]) => {
+      const transaction = adapter.transaction();
+
+      for (const value of values) adapter.collect(value, transaction);
+
+      adapter.commit(owner, transaction);
+
+      expect(transaction.size).toBe(1);
+
+      return [...transaction.keys()][0]!;
+    };
+
+    const preview = async (ids: string[], code?: string) => {
+      const sources: string[] = [];
+      await adapter.plan(
+        {
+          getModuleIds: () => ids.values(),
+
+          ...(code === undefined
+            ? {}
+            : { getModuleInfo: () => ({ code }) as Rollup.ModuleInfo })
+        },
+        (_id, css) => sources.push(css)
+      );
+
+      return sources.join("\n");
+    };
+
+    return { adapter, data, publish, preview };
+  }
+
+  it("unions per-owner visibility while retaining one CSS identity", async () => {
+    const { data, publish, preview } = fixture();
+    const id = publish("/project/a.js", [data(["--one"]), data(["--two"])]);
+    const second = publish("/project/b.js", [data([])]);
+
+    expect(second).toBe(id);
+
+    const css = await preview(["/project/a.js", "/project/b.js", id]);
+
+    expect(css).toContain("--one");
+    expect(css).toContain("--two");
+    expect(css).not.toContain("--dead");
+    expect(css.match(/color: black/g)).toHaveLength(1);
+  });
+
+  it("recomputes union and opaque state after owner replacement or deletion", async () => {
+    const { adapter, data, publish, preview } = fixture();
+    const id = publish("/project/a.js", [data(["--one"])]);
+    publish("/project/b.js", [data(["--two"], true)]);
+
+    const ids = ["/project/a.js", "/project/b.js", id];
+
+    expect(await preview(ids)).toContain("--dead");
+
+    publish("/project/b.js", [data(["--two"])]);
+
+    expect(await preview(ids)).not.toContain("--dead");
+
+    publish("/project/a.js", [data([])]);
+
+    expect(await preview(ids)).not.toContain("--one");
+    expect(await preview(ids)).toContain("--two");
+
+    adapter.clearOwner("/project/b.js");
+
+    expect(await preview(ids)).not.toContain("--two");
+
+    const unknown = data([]);
+    delete unknown.provenance;
+    publish("/project/b.js", [unknown]);
+
+    expect(await preview(ids)).toContain("--dead");
+
+    adapter.clearOwner("/project/b.js");
+
+    expect(await preview(ids)).not.toContain("--dead");
+  });
+
+  it("discards removed consumer visibility even when a live owner keeps the shared marker", async () => {
+    const { adapter, data, publish, preview } = fixture();
+    const id = publish("/project/a.js", [data(["--one"])]);
+    publish("/project/b.js", [data([])]);
+
+    expect(await preview(["/project/a.js", "/project/b.js", id])).toContain(
+      "--one"
+    );
+    expect(await preview(["/project/b.js?query", id])).not.toContain("--one");
+    expect(adapter.load(id)).toBeDefined();
+    expect(await preview(["/project/b.js"])).toBe("");
+    expect(() => adapter.load(id)).toThrow("Missing dist-chunk style artifact");
+    expect(publish("/project/a.js", [data(["--two"])])).toBe(id);
+    expect(await preview(["/project/a.js", id])).toContain("--two");
+
+    adapter.clear();
+
+    expect(() => adapter.load(id)).toThrow("Missing dist-chunk style artifact");
+  });
+
+  it.each([
+    "getComputedStyle",
+    "computedStyleMap",
+    "cssRules",
+    "styleSheets",
+    "getPropertyValue",
+    "setProperty",
+    "registerProperty"
+  ])("keeps private resources when loaded JS can use %s", async (method) => {
+    const { data, publish, preview } = fixture();
+    const id = publish("/project/a.js", [data([])]);
+    const ids = ["/project/a.js", id];
+
+    expect(await preview(ids)).not.toContain("--dead");
+    expect(
+      await preview(ids, `globalThis.observe = value => value["${method}"];`)
+    ).toContain("--dead");
+  });
+});
+
 describe("chunk-stage Mincho CSS generation", () => {
+  it("merges adjacent equal rules without changing exported class names", async () => {
+    const root = await fixture({
+      "main.js": 'import {a,b} from "./styles.js"; globalThis.classes=[a,b];',
+      "styles.js":
+        'import {css} from "@mincho-js/css"; export const a=css({color:"red"}); export const b=css({color:"red"});'
+    });
+
+    const baseline = await compile(root, { appCss: { optimize: false } });
+    const optimized = await compile(root);
+
+    expect(baseline.text.match(/color: red/g)).toHaveLength(2);
+    expect(optimized.text.match(/color: red/g)).toHaveLength(1);
+
+    const classes = (css: string) =>
+      [...css.matchAll(/\.([A-Za-z_][\w-]*)/g)].map((match) => match[1]).sort();
+
+    expect(classes(optimized.text)).toEqual(classes(baseline.text));
+    expect(
+      optimized.events.some(
+        (event) =>
+          event.phase === "css-ir-optimize" &&
+          (event.detail?.mergedRules ?? 0) > 0
+      )
+    ).toBe(true);
+  });
+
+  it("prunes captured private vars while retaining exported and author-owned vars", async () => {
+    const root = await fixture({
+      "main.js":
+        'import {style,publicToken} from "./styles.js"; globalThis.classes=[style,publicToken];',
+      "styles.js": `import {css,createVar} from "@mincho-js/css";
+        import {createGlobalVar} from "@vanilla-extract/css";
+        export const publicToken=createVar({syntax:"<color>",inherits:false,initialValue:"green"},"publicToken");
+        const author=createGlobalVar("author-token",{syntax:"<color>",inherits:false,initialValue:"blue"});
+        export const style=css((()=>{const privateToken=createVar({syntax:"<color>",inherits:false,initialValue:"red"},"privateToken");return {vars:{[privateToken]:"red",[publicToken]:"green",[author]:"blue"},color:"black"};})());`
+    });
+
+    const baseline = await compile(root, { appCss: { optimize: false } });
+    const optimized = await compile(root);
+
+    expect(baseline.text.match(/@property /g)).toHaveLength(3);
+    expect(optimized.text.match(/@property /g)).toHaveLength(2);
+    expect(optimized.text).toContain("initial-value: green");
+    expect(optimized.text).toContain("author-token");
+    expect(optimized.text).toContain("color: black");
+    expect(
+      optimized.events.some(
+        (event) =>
+          event.phase === "css-ir-optimize" &&
+          (event.detail?.removedVariables ?? 0) > 0
+      )
+    ).toBe(true);
+  });
+
+  it("preserves private properties observed through runtime CSSOM access", async () => {
+    const root = await fixture({
+      "main.js":
+        'import {style} from "./styles.js"; globalThis.classes=style; globalThis.observe=element=>getComputedStyle(element);',
+      "styles.js": `import {css,createVar} from "@mincho-js/css";
+        export const style=css((()=>{const token=createVar({syntax:"<color>",inherits:false,initialValue:"red"});return {vars:{[token]:"red"},color:"black"};})());`
+    });
+
+    const observed = await compile(root);
+
+    expect(observed.text.match(/@property /g)).toHaveLength(1);
+    expect(
+      observed.events.some(
+        (event) =>
+          event.phase === "css-ir-optimize" &&
+          event.detail?.liveness === "opaque-runtime-css"
+      )
+    ).toBe(true);
+
+    await writeFile(
+      join(root, "main.js"),
+      'import {style} from "./styles.js"; globalThis.classes=style;'
+    );
+
+    const unobserved = await compile(root);
+
+    expect(unobserved.text).not.toContain("@property");
+    expect(unobserved.text).toContain("color: black");
+  });
+
+  it("memoizes pure serialization across sharing previews and outputs, with a cache opt-out", async () => {
+    const root = await fixture();
+    const cached = await compile(root, {
+      cache: { type: "memory" },
+      appCss: { sharing: { minBytes: 0 } }
+    });
+
+    const uncached = await compile(root, {
+      cache: false,
+      appCss: { sharing: { minBytes: 0 } }
+    });
+
+    expect(uncached.text).toBe(cached.text);
+
+    const count = (result: typeof cached) =>
+      result.events.filter((event) => event.phase === "css-ir-serialize")
+        .length;
+
+    expect(count(uncached)).toBeGreaterThan(count(cached));
+    expect(
+      uncached.events
+        .filter((event) => event.phase === "css-ir-serialize-cache")
+        .every((event) => event.detail?.enabled === false)
+    ).toBe(true);
+  });
+
+  it("skips structural passes for inline or automatically discovered PostCSS configuration", async () => {
+    const root = await fixture({
+      "main.js": 'import {a,b} from "./styles.js"; globalThis.classes=[a,b];',
+      "styles.js":
+        'import {css} from "@mincho-js/css"; export const a=css({color:"red"}); export const b=css({color:"red"});',
+      ".postcssrc.json": '{"plugins":{}}'
+    });
+
+    const result = await compile(root, {
+      appCss: { optimize: { shareAtoms: false } }
+    });
+
+    expect(result.text.match(/color: red/g)).toHaveLength(2);
+    expect(
+      result.events.some(
+        (event) =>
+          event.phase === "css-ir-optimize" &&
+          event.detail?.reason === "opaque-postcss"
+      )
+    ).toBe(true);
+
+    const inline = await compile(
+      root,
+      {},
+      { css: { postcss: { plugins: [] } } }
+    );
+
+    expect(inline.text).toBe(result.text);
+  });
+
   it("fails explicitly when native adapter hooks are missing, leaving inactive modes alone", () => {
     const adapter = createDistChunkCss(() => {});
     const config = {
@@ -162,7 +476,7 @@ describe("chunk-stage Mincho CSS generation", () => {
       expect(source).not.toContain("color:");
     }
 
-    expect(result.events.some((e) => e.phase === "css-ir-preview")).toBe(false);
+    expect(result.events.some((e) => e.phase === "css-ir-preview")).toBe(true);
 
     const generated = result.events.filter(
       (e) => e.phase === "css-ir-generate"
@@ -321,9 +635,9 @@ describe("chunk-stage Mincho CSS generation", () => {
   it("matches native ownership for a style provider evaluated from multiple consumers", async () => {
     const root = await fixture({
       "a-style.js":
-        'import {css} from "@mincho-js/css"; import {layout} from "./layout.js"; export const style=css([layout,{color:"blue"}]);',
+        'import {css,createVar} from "@mincho-js/css"; import {layout} from "./layout.js"; const token=createVar(); export const style=css([layout,{color:"blue",vars:{[token]:"a"}}]);',
       "b-style.js":
-        'import {css} from "@mincho-js/css"; import {layout} from "./layout.js"; export const style=css([layout,{color:"green"}]);'
+        'import {css,createVar} from "@mincho-js/css"; import {layout} from "./layout.js"; const token=createVar(); export const style=css([layout,{color:"green",vars:{[token]:"b"}}]);'
     });
 
     const native = await compile(root, { appCss: { mode: "native" } });

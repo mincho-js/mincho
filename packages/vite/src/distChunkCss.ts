@@ -2,10 +2,15 @@ import { createHash } from "node:crypto";
 import { normalizePath } from "@rollup/pluginutils";
 import {
   internalGenerateVanillaCss,
+  internalHashVanillaCssArtifact,
+  internalOptimizeVanillaCssArtifacts,
+  type InternalCompilationCache,
+  type InternalCssIrOptimizationOptions,
   type InternalVanillaCssArtifact
 } from "@mincho-js/integration";
 import { version, type Plugin, type ResolvedConfig, type Rollup } from "vite";
 import { excludesCss, nativeTransforms } from "./cssSharing.js";
+import { hasOpaquePostcss } from "./cssOptimizationGuard.js";
 
 const prefix = "\0mincho-style-marker:";
 
@@ -26,14 +31,53 @@ function transform(plugin: Plugin | undefined): Transform | undefined {
 interface Artifact {
   origin: string;
   data: InternalVanillaCssArtifact;
+  serializationKey?: string;
 }
+
+type Provenance = InternalVanillaCssArtifact["provenance"];
+
+/** Export visibility belongs to evaluations, not the shared CSS identity. */
+function mergeProvenance(values: Iterable<Provenance>): Provenance {
+  const publicReferences = new Set<string>();
+  const generatedVariables = new Set<string>();
+  let opaque = false;
+
+  for (const value of values) {
+    if (!value || value.version !== 1) {
+      opaque = true;
+      continue;
+    }
+
+    opaque ||= value.opaque;
+
+    for (const name of value.publicReferences) publicReferences.add(name);
+
+    for (const name of value.generatedVariables) generatedVariables.add(name);
+  }
+
+  return {
+    version: 1,
+    publicReferences: [...publicReferences].sort(),
+    generatedVariables: [...generatedVariables].sort(),
+    opaque
+  };
+}
+
+const ownerModuleId = (id: string) => normalizePath(id.replace(/[?#].*$/, ""));
+
+const runtimeCssAccess =
+  /\b(?:getComputedStyle|computedStyleMap|cssRules|styleSheets|getPropertyValue|setProperty|registerProperty)\b/;
 
 /** One instance per Vite environment. Only output hooks serialize final CSS. */
 export function createDistChunkCss(
-  report: (phase: string, detail: unknown) => void
+  report: (phase: string, detail: unknown) => void,
+  getCache: () => InternalCompilationCache | undefined = () => undefined
 ) {
   const artifacts = new Map<string, Artifact>();
   const owners = new Map<string, Set<string>>();
+  const provenanceByOwner = new Map<string, Map<string, Provenance>>();
+  const optimized = new Map<string, Artifact>();
+  let optimization: InternalCssIrOptimizationOptions | undefined;
   let config: ResolvedConfig;
   let enabled = false;
   let cssTransform: Transform | undefined;
@@ -42,13 +86,77 @@ export function createDistChunkCss(
   let outputs = new WeakMap<object, number>();
   let chunks: Record<string, Rollup.RenderedChunk> | undefined;
 
+  async function serialize(id: string, artifact: Artifact) {
+    let created = false;
+
+    const create = async () => {
+      created = true;
+
+      const start = performance.now();
+      const value = internalGenerateVanillaCss(artifact.data);
+      const bytes = Buffer.byteLength(value);
+      report("css-ir-serialize", {
+        id,
+        bytes,
+        milliseconds: performance.now() - start
+      });
+
+      return {
+        value,
+        bytes,
+        owner: artifact.data.origin,
+        dependencies: [artifact.data.origin],
+
+        valid: async () => true
+      };
+    };
+
+    const cache = getCache();
+
+    // IDs include origin, rules, file scope and composition context. Native
+    // CSS transforms, URL resolution and asset emission still run every time.
+    const value = cache
+      ? await cache.run(
+          `css-ir-text-ve1.20.1-v2:${artifact.serializationKey ?? id}`,
+          create
+        )
+      : (await create()).value;
+
+    report("css-ir-serialize-cache", { id, hit: !created, enabled: !!cache });
+
+    return value;
+  }
+
+  const recomputeProvenance = (id: string) => {
+    optimized.delete(id);
+
+    const contributions = provenanceByOwner.get(id);
+
+    if (!contributions?.size) {
+      provenanceByOwner.delete(id);
+      artifacts.delete(id);
+
+      return;
+    }
+
+    const artifact = artifacts.get(id)!;
+    artifacts.set(id, {
+      ...artifact,
+      data: {
+        ...artifact.data,
+        provenance: mergeProvenance(contributions.values())
+      }
+    });
+  };
+
   const clearOwner = (owner: string) => {
     const previous = owners.get(owner);
     owners.delete(owner);
 
-    for (const id of previous ?? [])
-      if (![...owners.values()].some((ids) => ids.has(id)))
-        artifacts.delete(id);
+    for (const id of previous ?? []) {
+      provenanceByOwner.get(id)?.delete(owner);
+      recomputeProvenance(id);
+    }
   };
 
   return {
@@ -60,8 +168,13 @@ export function createDistChunkCss(
       return chunks;
     },
 
-    configure(resolved: ResolvedConfig, active: boolean) {
+    configure(
+      resolved: ResolvedConfig,
+      active: boolean,
+      options?: InternalCssIrOptimizationOptions
+    ) {
       config = resolved;
+      optimization = options;
       enabled =
         active &&
         config.command === "build" &&
@@ -93,6 +206,7 @@ export function createDistChunkCss(
     begin() {
       outputs = new WeakMap();
       chunks = undefined;
+      optimized.clear();
       // Keep IR for Rollup's unchanged transform cache in watch mode.
     },
 
@@ -101,8 +215,17 @@ export function createDistChunkCss(
       next: Map<string, Artifact>
     ): string {
       const origin = normalizePath(`${data.origin}.vanilla.css`);
-      const id = `${prefix}${digest(JSON.stringify([origin, data]))}`;
-      next.set(id, { origin, data: structuredClone(data) });
+      const snapshot = structuredClone(data);
+      const id = `${prefix}${internalHashVanillaCssArtifact(snapshot)}`;
+      const previous = next.get(id);
+
+      if (previous)
+        snapshot.provenance = mergeProvenance([
+          previous.data.provenance,
+          snapshot.provenance
+        ]);
+
+      next.set(id, { origin, data: snapshot });
 
       return `import ${JSON.stringify(id)};`;
     },
@@ -115,14 +238,25 @@ export function createDistChunkCss(
       clearOwner(owner);
       owners.set(owner, new Set(next.keys()));
 
-      for (const [id, artifact] of next) artifacts.set(id, artifact);
+      for (const [id, artifact] of next) {
+        if (!artifacts.has(id)) artifacts.set(id, artifact);
+
+        const contributions =
+          provenanceByOwner.get(id) ?? new Map<string, Provenance>();
+
+        contributions.set(owner, artifact.data.provenance);
+        provenanceByOwner.set(id, contributions);
+        recomputeProvenance(id);
+      }
     },
 
     clearOwner,
 
     clear() {
       artifacts.clear();
+      optimized.clear();
       owners.clear();
+      provenanceByOwner.clear();
       chunks = undefined;
     },
 
@@ -139,13 +273,37 @@ export function createDistChunkCss(
       return { code: "export {};", moduleSideEffects: "no-treeshake" as const };
     },
 
-    plan(
-      context: Pick<Rollup.PluginContext, "getModuleIds">,
+    async plan(
+      context: Pick<Rollup.PluginContext, "getModuleIds"> &
+        Partial<Pick<Rollup.PluginContext, "getModuleInfo">>,
       preview?: (id: string, source: string) => void
     ) {
       if (!enabled) return;
 
+      optimized.clear();
+
       const live = new Set(context.getModuleIds());
+      const liveOwners = new Set([...live].map(ownerModuleId));
+
+      // Watch builds retain unchanged owners. A removed consumer must no longer
+      // keep shared resources public just because another owner keeps the CSS.
+      for (const [owner, ids] of owners) {
+        if (!liveOwners.has(ownerModuleId(owner))) {
+          clearOwner(owner);
+          continue;
+        }
+
+        for (const id of ids) {
+          if (live.has(id)) continue;
+
+          ids.delete(id);
+          provenanceByOwner.get(id)?.delete(owner);
+          recomputeProvenance(id);
+        }
+
+        if (!ids.size) owners.delete(owner);
+      }
+
       const selected = [...artifacts].filter(([id]) => live.has(id));
       const cssIds = selected.map(([, artifact]) => artifact.origin);
       const opaque = config.plugins.find(
@@ -163,20 +321,53 @@ export function createDistChunkCss(
         throw new Error(
           `[mincho] dist-chunk cannot replay CSS transform ${JSON.stringify(opaque.name)}. Declare a transform.filter.id excluding generated CSS, or use appCss.mode: "native".`
         );
+
+      if (optimization && selected.length) {
+        if (hasOpaquePostcss(config)) {
+          report("css-ir-optimize", {
+            applied: false,
+            reason: "opaque-postcss"
+          });
+        } else {
+          // Runtime CSSOM reads/writes can observe otherwise private resources.
+          // A string/key match is intentionally conservative, including aliases.
+          const opaqueRuntime = [...live].some((id) =>
+            runtimeCssAccess.test(context.getModuleInfo?.(id)?.code ?? "")
+          );
+
+          const result = internalOptimizeVanillaCssArtifacts(
+            new Map(selected.map(([id, artifact]) => [id, artifact.data])),
+            optimization,
+            opaqueRuntime ||
+              [...live].some((id) =>
+                /\.(?:css|scss|sass|less|styl|stylus|pcss|postcss)(?:[?#]|$)/.test(
+                  id
+                )
+              )
+          );
+
+          for (const [id, data] of result.artifacts) {
+            const original = artifacts.get(id)!;
+            optimized.set(id, {
+              ...original,
+              data,
+              serializationKey: `${id}:ir-opt-v2:${internalHashVanillaCssArtifact(data)}`
+            });
+          }
+
+          report("css-ir-optimize", {
+            applied: true,
+            ...result.diagnostics,
+            ...(opaqueRuntime ? { liveness: "opaque-runtime-css" } : {})
+          });
+        }
+      }
+
       if (preview)
         for (const [id, artifact] of selected) {
           report("css-ir-preview", { id });
-          preview(id, internalGenerateVanillaCss(artifact.data));
+          preview(id, await serialize(id, optimized.get(id) ?? artifact));
         }
-
-      for (const id of artifacts.keys())
-        if (!live.has(id)) artifacts.delete(id);
-
-      for (const [owner, ids] of owners) {
-        for (const id of ids) if (!live.has(id)) ids.delete(id);
-
-        if (!ids.size) owners.delete(owner);
-      }
     },
 
     async render(
@@ -207,7 +398,7 @@ export function createDistChunkCss(
 
         if (!id.startsWith(prefix)) continue;
 
-        const artifact = artifacts.get(id);
+        const artifact = optimized.get(id) ?? artifacts.get(id);
         if (!artifact)
           throw new Error(`[mincho] Missing dist-chunk style artifact: ${id}`);
 
@@ -215,7 +406,7 @@ export function createDistChunkCss(
 
         // Keep physical file boundaries for URL resolution, PostCSS, cascade and
         // conditional ordering; ordinary CSS remains in its native position.
-        const source = internalGenerateVanillaCss(artifact.data);
+        const source = await serialize(id, artifact);
         const compiled = await cssTransform!.call(
           context as ThisParameterType<Transform>,
           source,
