@@ -24,7 +24,7 @@ export interface MinchoAppCssOptions {
   /** Router manifest entries; their static dependencies determine CSS reach. */
   routes?: readonly MinchoCssRoute[];
 
-  /** Safe IR passes, enabled for production dist-chunk builds. */
+  /** Explicit opt-in passes for dist-chunk CSS resources. */
   optimize?:
     | boolean
     | {
@@ -39,14 +39,10 @@ export interface MinchoAppCssOptions {
 
 export function resolveAppCssOptimization(
   options: MinchoAppCssOptions | undefined,
-  production: boolean
+  _production: boolean
 ) {
   const value = options?.optimize;
-  if (
-    options?.mode !== "dist-chunk" ||
-    value === false ||
-    (!production && value === undefined)
-  )
+  if (options?.mode !== "dist-chunk" || value === false || value === undefined)
     return undefined;
 
   const explicit = typeof value === "object" ? value : {};

@@ -91,7 +91,7 @@ async function compile(
       minchoVitePlugin({
         cache: false,
         ...options,
-        appCss: { mode: "dist-chunk", ...options.appCss },
+        appCss: { mode: "dist-chunk", optimize: true, ...options.appCss },
         diagnostics: { json: "events.json" }
       }),
       observer,

@@ -13,8 +13,10 @@ import {
   validateAppCssOptions
 } from "./appCss.js";
 
-it("enables production IR defaults and honors explicit opt-outs", () => {
-  expect(resolveAppCssOptimization({ mode: "dist-chunk" }, true)).toEqual({
+it("keeps IR optimization opt-in and honors explicit opt-outs", () => {
+  expect(
+    resolveAppCssOptimization({ mode: "dist-chunk", optimize: true }, true)
+  ).toEqual({
     mergeRules: true,
     pruneGenerated: true,
     compactThemes: true,
