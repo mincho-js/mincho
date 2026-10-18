@@ -854,14 +854,20 @@ if (import.meta.vitest) {
     const path = await import("node:path");
     fixtureIndex += 1;
 
+    // Keep dependency resolution inside the PnP workspace without changing cwd entries.
     const fixtureRoot = path.join(
-      process.env.TMPDIR ?? `${process.cwd()}/temps`,
+      process.cwd(),
+      ".cache",
       `defineRulesPreset-cross-package-${fixtureIndex}-${label}`
     );
 
     const providerPath = path.join(fixtureRoot, "provider.css.ts");
 
     await fs.mkdir(fixtureRoot, { recursive: true });
+    await fs.writeFile(
+      path.join(fixtureRoot, "package.json"),
+      JSON.stringify({ name: "mincho-conditional-registry-fixture" })
+    );
     await fs.writeFile(
       providerPath,
       createCrossPackageConditionalProviderSource(),

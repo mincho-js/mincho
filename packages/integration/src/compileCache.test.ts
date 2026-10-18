@@ -1,13 +1,17 @@
 import { mkdir, mkdtemp, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { describe, expect, it, vi } from "vitest";
 import esbuild from "esbuild";
 import { compile } from "./compile.js";
 import { CompilationCache } from "./compilationCache.js";
+import { CompilationDiagnostics } from "./diagnostics.js";
 
 describe("sidecar compilation cache", () => {
   it("observes Babel root config creation, edits and removal outside the owner ancestry", async () => {
-    const root = await mkdtemp(join(process.cwd(), "cache-test-"));
+    // Keep sibling fixture creation out of observed workspace directory entries.
+    await mkdir(join(process.cwd(), ".cache"), { recursive: true });
+    const root = await mkdtemp(join(process.cwd(), ".cache", "cache-test-"));
     const babelRoot = join(root, "app");
     const sourceRoot = join(root, "source");
     let cwd: ReturnType<typeof vi.spyOn> | undefined;
@@ -69,8 +73,182 @@ describe("sidecar compilation cache", () => {
     }
   });
 
+  it("reuses sliced compilation while retaining absent Babel configuration watches and invalidation", async () => {
+    // This fixture uses only relative data modules, so it can live outside the
+    // workspace whose directory fingerprint other test files legitimately change.
+    const root = await mkdtemp(join(tmpdir(), "cache-graph-test-"));
+
+    try {
+      await writeFile(
+        join(root, "package.json"),
+        '{"name":"cache-graph-test"}'
+      );
+      await writeFile(
+        join(root, "dep.ts"),
+        'export const palette={red:"red",unused:"UNUSED_GRAPH_MEMBER"};'
+      );
+
+      const build = vi.fn(esbuild.build);
+      const cache = new CompilationCache();
+      const diagnostics = new CompilationDiagnostics({ json: "unused.json" });
+      const options = {
+        cache,
+        dependencyGraph: true,
+        esbuild: { ...esbuild, build },
+        originalPath: join(root, "owner.ts"),
+        filePath: join(root, "owner.css.ts"),
+        cwd: root,
+        contents:
+          'import {palette} from "./dep"; export const color=palette.red;',
+        resolverCache: new Map<string, string>()
+      };
+
+      const run = () =>
+        diagnostics.run(options.filePath, "compile-test", () =>
+          compile(options)
+        );
+
+      const configFile = join(root, ".babelrc.json");
+      const first = await run();
+
+      expect(first.source).not.toContain("UNUSED_GRAPH_MEMBER");
+      expect(first.watchFiles).toContain(configFile);
+      expect((await run()).source).toBe(first.source);
+      expect(build).toHaveBeenCalledTimes(1);
+
+      cache.invalidate(configFile);
+      await run();
+
+      expect(build).toHaveBeenCalledTimes(2);
+
+      await writeFile(configFile, '{"comments":false}');
+
+      expect((await run()).source).toContain("UNUSED_GRAPH_MEMBER");
+      expect(build).toHaveBeenCalledTimes(3);
+
+      await rm(configFile);
+
+      // The absent configuration restores the complete earlier fingerprint, so
+      // its previously sliced result is valid again without compiling anew.
+      const restored = await run();
+
+      expect(restored.source).toBe(first.source);
+      expect(restored.source).not.toContain("UNUSED_GRAPH_MEMBER");
+      expect(build).toHaveBeenCalledTimes(3);
+
+      await run();
+
+      expect(build).toHaveBeenCalledTimes(3);
+
+      const events = diagnostics
+        .snapshot()
+        .builds.flatMap((entry) => entry.events);
+
+      expect(events.some((entry) => entry.phase === "cache-hit")).toBe(true);
+      expect(
+        events.some(
+          (entry) =>
+            entry.phase === "cache-bypass" &&
+            (entry.detail as { reason?: string })?.reason ===
+              "unobserved-watch-file"
+        )
+      ).toBe(false);
+      expect(
+        events.some(
+          (entry) =>
+            entry.phase === "cache-bypass" &&
+            (entry.detail as { reason?: string })?.reason ===
+              "external-babel-configuration"
+        )
+      ).toBe(true);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("invalidates a loaded sibling's Babel configuration before graph slicing", async () => {
+    const root = await mkdtemp(join(tmpdir(), "cache-sibling-test-"));
+
+    try {
+      await mkdir(join(root, "app"));
+      await mkdir(join(root, "shared"));
+      await writeFile(
+        join(root, "package.json"),
+        '{"name":"cache-sibling-test"}'
+      );
+      await writeFile(
+        join(root, "shared", "dep.ts"),
+        'export const palette={red:"red",unused:"SIBLING_MEMBER"};'
+      );
+
+      const build = vi.fn(esbuild.build);
+      const diagnostics = new CompilationDiagnostics({ json: "unused.json" });
+      const options = {
+        cache: new CompilationCache(),
+        dependencyGraph: true,
+        esbuild: { ...esbuild, build },
+        originalPath: join(root, "app", "owner.ts"),
+        filePath: join(root, "app", "owner.css.ts"),
+        cwd: root,
+        contents:
+          'import {palette} from "../shared/dep"; export const color=palette.red;',
+        resolverCache: new Map<string, string>()
+      };
+
+      const run = () =>
+        diagnostics.run(options.filePath, "compile-test", () =>
+          compile(options)
+        );
+
+      const configFile = join(root, "shared", ".babelrc.json");
+      const first = await run();
+
+      expect(first.source).not.toContain("SIBLING_MEMBER");
+      expect(first.watchFiles).toContain(configFile);
+
+      await run();
+
+      expect(build).toHaveBeenCalledTimes(1);
+
+      await writeFile(configFile, '{"comments":false}');
+
+      expect((await run()).source).toContain("SIBLING_MEMBER");
+      expect(build).toHaveBeenCalledTimes(2);
+
+      await writeFile(configFile, '{"comments":false,"compact":true}');
+
+      expect((await run()).source).toContain("SIBLING_MEMBER");
+      expect(build).toHaveBeenCalledTimes(3);
+
+      const events = diagnostics
+        .snapshot()
+        .builds.flatMap((entry) => entry.events);
+
+      expect(
+        events.some(
+          (entry) =>
+            entry.phase === "dependency-graph-bypass" &&
+            (entry.detail as { reason?: string })?.reason ===
+              "external-babel-configuration"
+        )
+      ).toBe(true);
+
+      await rm(configFile);
+
+      expect((await run()).source).not.toContain("SIBLING_MEMBER");
+
+      await run();
+
+      expect(build).toHaveBeenCalledTimes(4);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("skips unchanged compilation and invalidates source, dependencies and configuration", async () => {
-    const root = await mkdtemp(join(process.cwd(), "cache-test-"));
+    // Keep sibling fixture creation out of observed workspace directory entries.
+    await mkdir(join(process.cwd(), ".cache"), { recursive: true });
+    const root = await mkdtemp(join(process.cwd(), ".cache", "cache-test-"));
 
     try {
       await writeFile(join(root, "package.json"), '{"name":"cache-test"}');
