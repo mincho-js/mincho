@@ -24,12 +24,19 @@ import {
   type CompilationExecution
 } from "./compilationExecution.js";
 import { proveReusableEvaluation } from "./evaluationProof.js";
+import {
+  executeStaticStyleProgram,
+  readStaticStyleProgram,
+  staticStyleModules,
+  type StaticStyleProgram
+} from "./staticStyles.js";
 import { cacheDigest } from "./compilationInputs.js";
 import {
   recordCompilationDiagnostic,
   measureCompilationPhase
 } from "./diagnostics.js";
 import {
+  annotateVanillaCssArtifacts,
   collectSelectorCompositions,
   isolateVanillaCssArtifact,
   type VanillaCssArtifact
@@ -203,6 +210,7 @@ export type VanillaOptions = Parameters<typeof processVanillaFile>[0] & {
   ) => string | Promise<string>;
   cssSourceFile?: string;
   cssSourceRoot?: string;
+  staticStyles?: boolean;
 };
 
 export interface SerializedVanillaEvaluation {
@@ -289,6 +297,30 @@ export async function processVanillaWithExecution(
     );
 
   const execution = currentCompilationExecution();
+
+  if (
+    options.staticStyles &&
+    execution?.evaluation !== "fresh" &&
+    compatibleIntegration()
+  ) {
+    const program = readStaticStyleProgram(options.source);
+
+    if (program && staticStyleModules(program, options.filePath)) {
+      recordCompilationDiagnostic("static-styles-evaluate", { avoided: "vm" });
+
+      return consume(
+        await evaluateVanilla(
+          options,
+          undefined,
+          undefined,
+          createRequire(resolve(options.filePath)),
+          capture,
+          program
+        )
+      );
+    }
+  }
+
   if (
     !execution ||
     !execution.cacheEnabled ||
@@ -366,7 +398,8 @@ async function evaluateVanilla(
   script: Script | undefined,
   context: Context | undefined,
   require: NodeRequire,
-  capture?: EvaluationCapture
+  capture?: EvaluationCapture,
+  staticProgram?: StaticStyleProgram
 ): Promise<string> {
   const cssByScope = new Map<string, Parameters<Adapter["appendCss"]>[0][]>();
   const classNames = new Set<string>();
@@ -435,6 +468,16 @@ async function evaluateVanilla(
     require
   );
 
+  const resourceRegistry = (
+    serializeCssArtifact
+      ? ownRequire("@mincho-js/css/defineRules/registry")
+      : {}
+  ) as {
+    beginCompilerResourceCapture?: () => Set<string>;
+    endCompilerResourceCapture?: () => void;
+  };
+
+  let generatedVariables: Set<string> | undefined;
   const exports = {};
   const module = {
     exports,
@@ -443,54 +486,74 @@ async function evaluateVanilla(
     require: scopedRequire
   };
 
-  await measureCompilationPhase("vm-evaluate", async () => {
-    try {
-      if (originalNodeEnv === undefined) delete process.env.NODE_ENV;
-      else process.env.NODE_ENV = originalNodeEnv;
-
-      evaluationAdapter.setAdapter(cssAdapter);
-
+  await measureCompilationPhase(
+    staticProgram ? "static-styles-execute" : "vm-evaluate",
+    async () => {
       try {
-        if (!script || !context) {
-          // Match upstream's fresh eval sandbox, including Node globals and
-          // CommonJS exports, while retaining balanced adapter/scope cleanup.
-          const evalCode = ownRequire("eval") as (
-            source: string,
-            filename: string,
-            scope: object,
-            globals: boolean
-          ) => object;
+        if (originalNodeEnv === undefined) delete process.env.NODE_ENV;
+        else process.env.NODE_ENV = originalNodeEnv;
 
-          module.exports = evalCode(
-            program,
-            filePath,
-            { console, process, require: scopedRequire },
-            true
-          );
-        } else {
-          const evaluate = script.runInContext(context) as (
-            exports: object,
-            require: typeof scopedRequire,
-            module: object
-          ) => void;
+        evaluationAdapter.setAdapter(cssAdapter);
 
-          evaluate(exports, scopedRequire, module);
-        }
-      } finally {
         try {
-          while (scopeDepth > 0) {
-            scopeDepth--;
-            evaluationScope.endFileScope();
+          if (
+            resourceRegistry.beginCompilerResourceCapture &&
+            resourceRegistry.endCompilerResourceCapture
+          )
+            generatedVariables =
+              resourceRegistry.beginCompilerResourceCapture();
+
+          if (staticProgram) {
+            module.exports = executeStaticStyleProgram(
+              staticProgram,
+              scopedRequire
+            );
+          } else if (!script || !context) {
+            // Match upstream's fresh eval sandbox, including Node globals and
+            // CommonJS exports, while retaining balanced adapter/scope cleanup.
+            const evalCode = ownRequire("eval") as (
+              source: string,
+              filename: string,
+              scope: object,
+              globals: boolean
+            ) => object;
+
+            module.exports = evalCode(
+              program,
+              filePath,
+              { console, process, require: scopedRequire },
+              true
+            );
+          } else {
+            const evaluate = script.runInContext(context) as (
+              exports: object,
+              require: typeof scopedRequire,
+              module: object
+            ) => void;
+
+            evaluate(exports, scopedRequire, module);
           }
         } finally {
-          evaluationAdapter.removeAdapter();
+          try {
+            while (scopeDepth > 0) {
+              scopeDepth--;
+              evaluationScope.endFileScope();
+            }
+          } finally {
+            try {
+              if (generatedVariables)
+                resourceRegistry.endCompilerResourceCapture!();
+            } finally {
+              evaluationAdapter.removeAdapter();
+            }
+          }
         }
+      } finally {
+        if (nodeEnv === undefined) delete process.env.NODE_ENV;
+        else process.env.NODE_ENV = nodeEnv;
       }
-    } finally {
-      if (nodeEnv === undefined) delete process.env.NODE_ENV;
-      else process.env.NODE_ENV = nodeEnv;
     }
-  });
+  );
 
   capture?.beforeSerialize();
 
@@ -525,6 +588,28 @@ async function evaluateVanilla(
     collectSelectorCompositions(artifacts, used);
     artifacts = artifacts.map((artifact) =>
       isolateVanillaCssArtifact({ ...artifact, usedCompositions: [...used] })
+    );
+  }
+
+  const serializeExports = () => {
+    const unused = compositions
+      .filter(({ identifier }) => !used.has(identifier))
+      .map(({ identifier }) => identifier);
+
+    return serializeVanillaModule(
+      [],
+      module.exports,
+      unused.length ? new RegExp(`(${unused.join("|")})\\s`, "g") : null
+    );
+  };
+
+  let exportsSource = artifacts ? serializeExports() : undefined;
+
+  if (artifacts) {
+    annotateVanillaCssArtifacts(
+      artifacts,
+      [exportsSource!],
+      [...(generatedVariables ?? [])]
     );
 
     for (const artifact of artifacts) {
@@ -565,16 +650,7 @@ async function evaluateVanilla(
     );
   }
 
-  const unused = compositions
-    .filter(({ identifier }) => !used.has(identifier))
-    .map(({ identifier }) => identifier);
-
-  const exportsSource = serializeVanillaModule(
-    [],
-    module.exports,
-    unused.length ? new RegExp(`(${unused.join("|")})\\s`, "g") : null
-  );
-
+  exportsSource ??= serializeExports();
   capture?.complete({ css: serializedCss, artifacts, exports: exportsSource });
 
   return joinEvaluation(cssImports, exportsSource);

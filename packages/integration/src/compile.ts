@@ -1,6 +1,17 @@
 import { scopedFileScopeRuntime } from "./fileScopeRuntime.js";
-import { measureCompilationPhase } from "./diagnostics.js";
-import { executeScopedTransform } from "./compilationExecution.js";
+import {
+  measureCompilationPhase,
+  recordCompilationDiagnostic
+} from "./diagnostics.js";
+import {
+  currentCompilationExecution,
+  executeScopedTransform
+} from "./compilationExecution.js";
+import { createStaticStyleSource } from "./staticStyles.js";
+import {
+  prepareEvaluationDependencyGraph,
+  type EvaluationDependencyGraph
+} from "./evaluationDependencyGraph.js";
 import { cacheDigest } from "./compilationCache.js";
 import type { CompilationCache } from "./compilationCache.js";
 import { cachedCompile, type CompileCacheBridge } from "./compileCache.js";
@@ -23,6 +34,8 @@ export interface CompileOptions {
   /** @internal Environment-owned compilation cache and native asset replay. */
   cache?: CompilationCache;
   cacheBridge?: CompileCacheBridge;
+  dependencyGraph?: boolean;
+  staticStyles?: boolean;
   esbuild?: PluginBuild["esbuild"];
   filePath: string;
   contents: string;
@@ -153,7 +166,8 @@ function createScopedOnLoadPlugin(
   loaders: BuildOptions["loader"] = {},
   readFile: (path: string) => Promise<string> = (path) =>
     fs.promises.readFile(path, "utf-8"),
-  readFileBytes?: (path: string) => Promise<Uint8Array>
+  readFileBytes?: (path: string) => Promise<Uint8Array>,
+  graph?: () => EvaluationDependencyGraph | undefined
 ) {
   return {
     name: "mincho:custom-extract-scope",
@@ -174,6 +188,20 @@ function createScopedOnLoadPlugin(
               };
 
             return undefined;
+          }
+
+          const prepared = graph?.()?.sources.get(args.path);
+
+          if (prepared !== undefined) {
+            recordCompilationDiagnostic("dependency-graph-scope-skip", {
+              file: args.path
+            });
+
+            return {
+              contents: prepared,
+              loader,
+              resolveDir: dirname(args.path)
+            };
           }
 
           const contents = await readFile(args.path);
@@ -287,6 +315,10 @@ async function compileUncached({
   externals = [],
   loader,
   plugins = [],
+  cache,
+  cacheBridge,
+  dependencyGraph = false,
+  staticStyles = false,
   readFile,
   readFileBytes,
   resolverCache = new Map(),
@@ -294,6 +326,37 @@ async function compileUncached({
 }: CompileOptions) {
   const packageInfo = getPackageInfo(cwd);
   const sourcePackageInfo = getPackageInfo(dirname(originalPath));
+  const trustedPlugins =
+    !plugins.length ||
+    (plugins.length === 1 && plugins[0] === cacheBridge?.plugin);
+
+  if (
+    staticStyles &&
+    currentCompilationExecution()?.evaluation !== "fresh" &&
+    trustedPlugins
+  ) {
+    const direct = createStaticStyleSource({
+      contents,
+      originalPath,
+      filePath,
+      packageName: sourcePackageInfo.name,
+      rootPath: sourcePackageInfo.dirname
+    });
+
+    if (direct) {
+      recordCompilationDiagnostic("static-styles-compile", {
+        avoided: "esbuild"
+      });
+
+      return { source: direct, watchFiles: [] as string[] };
+    }
+
+    recordCompilationDiagnostic("static-styles-bypass", {
+      reason: "unproved-literal-program"
+    });
+  }
+
+  let graph: EvaluationDependencyGraph | undefined;
   const source = getScopedSourceWithCache({
     contents,
     originalPath,
@@ -321,11 +384,46 @@ async function compileUncached({
         ...plugins.map((plugin) =>
           scopeLoadedDependencies(plugin, packageInfo.name)
         ),
+        ...(dependencyGraph && trustedPlugins
+          ? [
+              {
+                name: "mincho:evaluation-dependency-graph",
+
+                setup(build: PluginBuild) {
+                  build.onStart(
+                    AsyncResource.bind(async () => {
+                      graph = await prepareEvaluationDependencyGraph({
+                        // The runtime counter wrapper adds a compiler-owned
+                        // require. Prove user dependencies against the standard
+                        // scope scaffold while compiling the full wrapper above.
+                        source: addFileScope({
+                          source: contents,
+                          filePath: originalPath,
+                          rootPath: sourcePackageInfo.dirname,
+                          packageName: sourcePackageInfo.name
+                        }),
+                        filePath,
+                        cwd,
+                        build,
+                        readFile:
+                          readFile ??
+                          ((path) => fs.promises.readFile(path, "utf8")),
+                        parser: cache?.parser,
+
+                        loaderForFile: (file) => effectiveLoader(file, loader)
+                      });
+                    })
+                  );
+                }
+              }
+            ]
+          : []),
         createScopedOnLoadPlugin(
           packageInfo.name,
           loader,
           readFile,
-          readFileBytes
+          readFileBytes,
+          () => graph
         )
       ]
     })
@@ -335,7 +433,12 @@ async function compileUncached({
 
   return {
     source: compiledSource,
-    watchFiles: getWatchFiles(cwd, result.metafile)
+    watchFiles: [
+      ...new Set([
+        ...getWatchFiles(cwd, result.metafile),
+        ...(graph?.watchFiles ?? [])
+      ])
+    ]
   };
 }
 

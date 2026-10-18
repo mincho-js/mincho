@@ -6,6 +6,7 @@ import { currentCompilationExecution } from "./compilationExecution.js";
 import { cacheDigest } from "./compilationInputs.js";
 import { getCompilerIdentity } from "./diskCache.js";
 import { proveReusableEvaluation } from "./evaluationProof.js";
+import { readStaticStyleProgram, staticStyleModules } from "./staticStyles.js";
 import {
   recordCompilationDiagnostic,
   measureCompilationPhase
@@ -62,7 +63,16 @@ export async function processCachedEvaluation<T>(
     return fresh();
 
   return cache.withInputs(async () => {
-    const proof = proveReusableEvaluation(options.source, cache.parser);
+    const staticProgram = options.staticStyles
+      ? readStaticStyleProgram(options.source)
+      : undefined;
+
+    const staticModules =
+      staticProgram && staticStyleModules(staticProgram, options.filePath);
+
+    const proof = staticModules
+      ? { reusable: true, modules: staticModules }
+      : proveReusableEvaluation(options.source, cache.parser);
 
     if (!proof) {
       recordCompilationDiagnostic("evaluation-result-bypass", {
@@ -130,7 +140,7 @@ export async function processCachedEvaluation<T>(
       return fresh();
     }
 
-    const key = `evaluation-result-v2:${cacheDigest(
+    const key = `evaluation-result-v3:${cacheDigest(
       JSON.stringify([
         options.serializeCssArtifact ? "css-ir-v1" : "css-text",
         options.cssSourceFile,
@@ -140,6 +150,7 @@ export async function processCachedEvaluation<T>(
         options.filePath,
         options.outputCss ?? true,
         options.identOption,
+        options.staticStyles,
         evaluationEnvironment(),
         [...inputs]
       ])

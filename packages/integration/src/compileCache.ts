@@ -1,6 +1,7 @@
 import { basename, join, resolve } from "node:path";
 import type { Plugin } from "esbuild";
 import type { CompileOptions } from "./compile.js";
+import { currentCompilationExecution } from "./compilationExecution.js";
 import { cacheDigest } from "./compilationCache.js";
 import { recordCompilationDiagnostic } from "./diagnostics.js";
 
@@ -64,11 +65,16 @@ async function compileWithInputs(
     return compile(options);
   }
 
-  if (await cache.hasExternalBabelConfiguration(configurations))
+  if (await cache.hasExternalBabelConfiguration(configurations)) {
+    recordCompilationDiagnostic("cache-bypass", {
+      reason: "external-babel-configuration"
+    });
+
     return compile(options);
+  }
 
   const cwd = options.cwd ?? process.cwd();
-  const key = `compile:${cacheDigest(
+  const key = `compile-v2:${cacheDigest(
     JSON.stringify([
       options.originalPath,
       options.filePath,
@@ -76,6 +82,9 @@ async function compileWithInputs(
       cwd,
       options.externals,
       options.loader,
+      options.dependencyGraph,
+      options.staticStyles,
+      currentCompilationExecution()?.evaluation,
       cacheBridge?.key,
       process.env.NODE_ENV,
       process.env.BABEL_ENV
@@ -143,8 +152,17 @@ async function compileWithInputs(
     ]);
 
     for (const dependency of compiled.watchFiles)
-      if (!synthetic.has(dependency) && !observed.has(dependency))
+      if (
+        !synthetic.has(dependency) &&
+        !observed.has(dependency) &&
+        !configurations.has(dependency)
+      ) {
         cacheable = false;
+        recordCompilationDiagnostic("cache-bypass", {
+          reason: "unobserved-watch-file",
+          file: dependency
+        });
+      }
 
     const fingerprints = new Map([...configurations, ...observed]);
 
@@ -156,8 +174,12 @@ async function compileWithInputs(
 
     // A source transform supplied by an external Babel configuration can read
     // arbitrary inputs. Its execution is deliberately not memoized.
-    if (await cache.hasExternalBabelConfiguration(configurations))
+    if (await cache.hasExternalBabelConfiguration(configurations)) {
       cacheable = false;
+      recordCompilationDiagnostic("cache-bypass", {
+        reason: "external-babel-configuration"
+      });
+    }
 
     const watches = [...configurations]
       .filter(
