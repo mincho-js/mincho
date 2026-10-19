@@ -16,10 +16,12 @@ export const cases = [
   "helpers-24",
   "tokens-used-24",
   "tokens-unused-24",
+  "tokens-members-24",
   "environments-24"
 ];
 
-const incremental = /^(logic|helpers|tokens-used|tokens-unused|environments)-/;
+const incremental =
+  /^(logic|helpers|tokens-used|tokens-unused|tokens-members|environments)-/;
 
 async function incrementalDependency(directory, name, format, iteration = 0) {
   const extension = format === "cjs" ? "cts" : "ts";
@@ -28,6 +30,20 @@ async function incrementalDependency(directory, name, format, iteration = 0) {
     format === "cjs"
       ? `exports.${name}=${value};`
       : `export const ${name}=${value};`;
+
+  if (name.startsWith("tokens-members-")) {
+    const unused = Array.from(
+      { length: 256 },
+      (_, index) => `unused${index}:${index + iteration}`
+    ).join(",");
+
+    await writeFile(
+      join(directory, `tokens.${extension}`),
+      expose("palette", `{brand:{color:'red',${unused}},unused:${iteration}}`)
+    );
+
+    return;
+  }
 
   const color =
     name.startsWith("tokens-used-") && iteration % 2 ? "blue" : "red";
@@ -64,10 +80,17 @@ async function incrementalOwner(directory, name, format, index, iteration = 0) {
   await writeFile(
     join(directory, `styles${index}.${extension}`),
     importValue("css", "@mincho-js/css") +
-      importValue("base,make", `./tokens.${extension}`) +
+      importValue(
+        name.startsWith("tokens-members-") ? "palette" : "base,make",
+        `./tokens.${extension}`
+      ) +
       expose(
         `button${index}`,
-        name.startsWith("helpers-") ? "css(make(4))" : "css(base)"
+        name.startsWith("tokens-members-")
+          ? "css({color:palette.brand.color})"
+          : name.startsWith("helpers-")
+            ? "css(make(4))"
+            : "css(base)"
       ) +
       expose(`version${index}`, iteration)
   );

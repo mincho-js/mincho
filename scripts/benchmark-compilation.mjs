@@ -145,8 +145,8 @@ if (values.pack) {
     vite: "7.3.3",
     react: "19.2.6",
     "react-dom": "19.2.6",
-    "@babel/core": "7.29.7",
-    "@vanilla-extract/css": "1.21.2"
+    "@babel/core": "7.29.0",
+    "@vanilla-extract/css": "1.20.1"
   };
 
   for (const directory of (await readdir(join(repo, "packages"))).sort()) {
