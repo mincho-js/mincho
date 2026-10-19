@@ -186,7 +186,13 @@ export function minchoEsbuildPlugin({
       const traced = {
         compile: (options: Parameters<typeof compile>[0]) =>
           diagnostics.run(options.originalPath, "sidecar-compile", () =>
-            execution.run(() => integrationHelpers.compile(options))
+            execution.run(() =>
+              integrationHelpers.compile({
+                ...options,
+                dependencyGraph: optimize.dependencyGraph,
+                staticStyles: optimize.staticStyles
+              })
+            )
           ),
 
         babelTransformSource: (
@@ -203,7 +209,10 @@ export function minchoEsbuildPlugin({
         ) =>
           diagnostics.run(options.filePath, "css-evaluation", () =>
             execution.run(() =>
-              integrationHelpers.processDefineRulesPresetRegistryFile(options)
+              integrationHelpers.processDefineRulesPresetRegistryFile({
+                ...options,
+                staticStyles: optimize.staticStyles
+              })
             )
           )
       };
@@ -3726,7 +3735,8 @@ if (import.meta.vitest) {
         source: expect.any(String),
         filePath: resolveResult.path,
         outputCss: undefined,
-        identOption: "debug"
+        identOption: "debug",
+        staticStyles: false
       });
       expect(registrySpy).toHaveBeenCalledTimes(1);
       expect(loadResult.loader).toBe("js");
@@ -3805,59 +3815,79 @@ if (import.meta.vitest) {
       expect(loadResult.contents).toContain("blue");
     });
 
-    it("routes extracted css through the shared preset registry wrapper without breaking the namespace flow", async () => {
-      vi.spyOn(integrationHelpers, "babelTransformSource").mockResolvedValue({
-        code: "export const app = {};",
-        result: ["extracted_rules.css.ts", "resolver contents"]
-      });
-      vi.spyOn(integrationHelpers, "compile").mockResolvedValue({
-        source: "compiled source"
-      } as Awaited<ReturnType<typeof compile>>);
-
-      const registryStepSpy = vi.spyOn(
-        integrationHelpers,
-        "runDefineRulesPresetRegistryStep"
-      );
-
-      const presetBuildSource = await createV5PresetBuildSource();
-      const registrySpy = vi
-        .spyOn(integrationHelpers, "processDefineRulesPresetRegistryFile")
-        .mockResolvedValue({
-          ...createRegistryResult(presetBuildSource.source),
-          ancestorStyleSpecifiers: ["@scope/ancestor/style.css"]
+    it.each([false, true])(
+      "routes extracted css through the registry wrapper with evaluation shortcuts opted in: %s",
+      async (optIn: boolean) => {
+        vi.spyOn(integrationHelpers, "babelTransformSource").mockResolvedValue({
+          code: "export const app = {};",
+          result: ["extracted_rules.css.ts", "resolver contents"]
         });
 
-      const harness = createBuildHarness();
-      const { loadResult, resolveResult } =
-        await loadExtractedCssFromEntry(harness);
+        const compileSpy = vi
+          .spyOn(integrationHelpers, "compile")
+          .mockResolvedValue({
+            source: "compiled source"
+          } as Awaited<ReturnType<typeof compile>>);
 
-      expect(resolveResult).toEqual({
-        namespace: "extracted-css",
-        path: "/workspace/src/extracted_rules.css.ts",
-        pluginData: {
-          path: "extracted_rules.css.ts",
-          mainFilePath: "/workspace/src/app.ts"
-        }
-      });
-      expect(registryStepSpy).toHaveBeenCalledWith(expect.any(Function));
-      expect(registryStepSpy).toHaveBeenCalledTimes(1);
-      expect(registrySpy).toHaveBeenCalledWith({
-        source: "compiled source",
-        filePath: "/workspace/src/extracted_rules.css.ts",
-        outputCss: undefined,
-        identOption: "debug"
-      });
-      expect(loadResult.loader).toBe("js");
-      expect(loadResult.resolveDir).toBe("/workspace/src");
-      expect(loadResult.contents).toContain(
-        'import "@scope/ancestor/style.css";'
-      );
+        const registryStepSpy = vi.spyOn(
+          integrationHelpers,
+          "runDefineRulesPresetRegistryStep"
+        );
 
-      expectSourceToContainPresetAtomClassName(
-        loadResult.contents,
-        presetBuildSource.className
-      );
-    });
+        const presetBuildSource = await createV5PresetBuildSource();
+        const registrySpy = vi
+          .spyOn(integrationHelpers, "processDefineRulesPresetRegistryFile")
+          .mockResolvedValue({
+            ...createRegistryResult(presetBuildSource.source),
+            ancestorStyleSpecifiers: ["@scope/ancestor/style.css"]
+          });
+
+        const harness = createBuildHarness({
+          plugin: minchoEsbuildPlugin({
+            optimize: optIn
+              ? { dependencyGraph: true, staticStyles: true }
+              : undefined
+          })
+        });
+
+        const { loadResult, resolveResult } =
+          await loadExtractedCssFromEntry(harness);
+
+        expect(resolveResult).toEqual({
+          namespace: "extracted-css",
+          path: "/workspace/src/extracted_rules.css.ts",
+          pluginData: {
+            path: "extracted_rules.css.ts",
+            mainFilePath: "/workspace/src/app.ts"
+          }
+        });
+        expect(compileSpy).toHaveBeenCalledWith(
+          expect.objectContaining({
+            dependencyGraph: optIn,
+            staticStyles: optIn
+          })
+        );
+        expect(registryStepSpy).toHaveBeenCalledWith(expect.any(Function));
+        expect(registryStepSpy).toHaveBeenCalledTimes(1);
+        expect(registrySpy).toHaveBeenCalledWith({
+          source: "compiled source",
+          filePath: "/workspace/src/extracted_rules.css.ts",
+          outputCss: undefined,
+          identOption: "debug",
+          staticStyles: optIn
+        });
+        expect(loadResult.loader).toBe("js");
+        expect(loadResult.resolveDir).toBe("/workspace/src");
+        expect(loadResult.contents).toContain(
+          'import "@scope/ancestor/style.css";'
+        );
+
+        expectSourceToContainPresetAtomClassName(
+          loadResult.contents,
+          presetBuildSource.className
+        );
+      }
+    );
 
     it("passes short identifiers to the registry wrapper when esbuild minifies", async () => {
       vi.spyOn(integrationHelpers, "babelTransformSource").mockResolvedValue({
@@ -3880,7 +3910,8 @@ if (import.meta.vitest) {
         source: "compiled source",
         filePath: "/workspace/src/extracted_rules.css.ts",
         outputCss: undefined,
-        identOption: "short"
+        identOption: "short",
+        staticStyles: false
       });
     });
 
@@ -3932,7 +3963,8 @@ if (import.meta.vitest) {
           source: expect.any(String),
           filePath: resolveResult.path,
           outputCss: undefined,
-          identOption: "debug"
+          identOption: "debug",
+          staticStyles: false
         });
         expect(registrySpy).toHaveBeenCalledTimes(1);
         expect(loadResult.loader).toBe("js");
@@ -4095,7 +4127,8 @@ if (import.meta.vitest) {
         source: "compiled source",
         filePath: "/workspace/src/extracted_rules.css.ts",
         outputCss: undefined,
-        identOption: "debug"
+        identOption: "debug",
+        staticStyles: false
       });
       expect(loadResult).toEqual({
         errors: [
@@ -4258,13 +4291,15 @@ if (import.meta.vitest) {
         source: "compiled source:/workspace/src/extracted_a.css.ts",
         filePath: "/workspace/src/extracted_a.css.ts",
         outputCss: undefined,
-        identOption: "debug"
+        identOption: "debug",
+        staticStyles: false
       });
       expect(registrySpy).toHaveBeenNthCalledWith(2, {
         source: "compiled source:/workspace/src/extracted_b.css.ts",
         filePath: "/workspace/src/extracted_b.css.ts",
         outputCss: undefined,
-        identOption: "debug"
+        identOption: "debug",
+        staticStyles: false
       });
 
       expectSourceToContainPresetAtomClassName(

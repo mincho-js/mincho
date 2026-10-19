@@ -12,7 +12,11 @@ export function resolveOptimizationOptions(
     staticRecipes: mode === "production",
     styledComponents: mode === "production",
     runtimeCodegen: mode === "production",
-    jsxRuntimeGuards: mode === "production"
+    jsxRuntimeGuards: mode === "production",
+
+    // These evaluation shortcuts need an explicit opt-in: cost varies by workload.
+    dependencyGraph: false,
+    staticStyles: false
   };
 
   for (const options of overrides)

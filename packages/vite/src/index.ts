@@ -333,7 +333,14 @@ function createMinchoViteEnvironmentPlugin(
 
   const tracedCompile = (options: Parameters<typeof compile>[0]) =>
     diagnostics.run(options.originalPath, "sidecar-compile", () =>
-      execution.run(() => compile({ ...options, cache: compilationCache }))
+      execution.run(() =>
+        compile({
+          ...options,
+          dependencyGraph: compilerOptimizations().dependencyGraph,
+          staticStyles: compilerOptimizations().staticStyles,
+          cache: compilationCache
+        })
+      )
     );
 
   const tracedTransform = (
@@ -347,10 +354,25 @@ function createMinchoViteEnvironmentPlugin(
     options: Parameters<typeof processDefineRulesPresetViteFile>[0]
   ) =>
     diagnostics.run(options.filePath, "css-evaluation", () =>
-      execution.run(() => processDefineRulesPresetViteFile(options))
+      execution.run(() =>
+        processDefineRulesPresetViteFile({
+          ...options,
+          staticStyles: compilerOptimizations().staticStyles
+        })
+      )
     );
 
   let config: ResolvedConfig;
+
+  function compilerOptimizations() {
+    return internalResolveOptimizationOptions(
+      _options?.optimizationMode ??
+        (config.command === "serve" ? "development" : "production"),
+      _options?.babel?.optimize,
+      _options?.optimize
+    );
+  }
+
   let server: ViteDevServer;
   let diagnosticsFlushTimer: ReturnType<typeof setTimeout> | undefined;
   let diagnosticsFlushPromise: Promise<void> | undefined;
@@ -6042,6 +6064,15 @@ if (import.meta.vitest) {
           expectedOptions: { optimize: { defineRulesCxConditions: false } }
         },
         {
+          label: "explicit evaluation shortcut opt-ins",
+          pluginOptions: {
+            optimize: { dependencyGraph: true, staticStyles: true }
+          },
+          expectedOptions: {
+            optimize: { dependencyGraph: true, staticStyles: true }
+          }
+        },
+        {
           label: "only defined top-level optimization fields override Babel",
           pluginOptions: {
             babel: {
@@ -6116,6 +6147,8 @@ if (import.meta.vitest) {
                   styledComponents: true,
                   runtimeCodegen: true,
                   jsxRuntimeGuards: true,
+                  dependencyGraph: false,
+                  staticStyles: false,
                   ...disabledCase.expectedOptions?.optimize
                 },
                 staticCssEvalSourceProvider: expect.any(Object)
