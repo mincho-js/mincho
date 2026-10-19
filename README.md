@@ -86,6 +86,10 @@ Currently, most of the features are related to the CSS preprocessor.
 - [CSS Nesting](https://github.com/mincho-js/working-group/blob/main/text/001-css-nesting.md): Expressing better nesting and referencing.
 - [CSS Rules](https://github.com/mincho-js/working-group/blob/main/text/002-css-rules.md): Expressing static and dynamic styles for reusable blocks.
 
+See [compiler optimizations](./docs/compiler-optimizations.md) for production
+profiles, application CSS passes, experimental class strategies, and their
+fallback conditions.
+
 ## Contributing
 
 Interested in contributing?  
