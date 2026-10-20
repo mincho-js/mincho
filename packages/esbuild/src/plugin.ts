@@ -10,6 +10,7 @@ import {
   type MinchoCacheOptions,
   type MinchoCssChunkSharingOptions,
   InternalRuntimeOptimizations,
+  internalRebindSymbolicTokenArtifact,
   internalResolveOptimizationOptions,
   type OptimizationMode,
   type BabelTransformResult,
@@ -211,7 +212,9 @@ export function minchoEsbuildPlugin({
             execution.run(() =>
               integrationHelpers.processDefineRulesPresetRegistryFile({
                 ...options,
-                staticStyles: optimize.staticStyles
+                staticStyles: optimize.staticStyles,
+                ...(optimize.symbolicTokens ? { symbolicTokens: true } : {}),
+                ...(optimize.staticScopedCx ? { staticScopedCx: true } : {})
               })
             )
           )
@@ -347,6 +350,7 @@ export function minchoEsbuildPlugin({
           const {
             ancestorStyleSpecifiers,
             source: registrySource,
+            symbolicTokens,
             packageGraph
           } = await integrationHelpers.runDefineRulesPresetRegistryStep(() =>
             traced.processDefineRulesPresetRegistryFile({
@@ -381,6 +385,16 @@ export function minchoEsbuildPlugin({
 
           return {
             contents,
+            ...(symbolicTokens
+              ? {
+                  pluginData: {
+                    symbolicTokens: internalRebindSymbolicTokenArtifact(
+                      symbolicTokens,
+                      contents
+                    )
+                  }
+                }
+              : {}),
             loader: "js",
             resolveDir: dirname(path),
             watchFiles: [...new Set([...watchFiles, ...assetWatchFiles])]
@@ -570,7 +584,10 @@ export function minchoEsbuildPlugin({
                   return loaded.errors?.length ||
                     typeof loaded.contents !== "string"
                     ? null
-                    : { source: loaded.contents };
+                    : {
+                        source: loaded.contents,
+                        symbolicTokens: loaded.pluginData?.symbolicTokens
+                      };
                 }
 
                 if (id === args.path) return null;

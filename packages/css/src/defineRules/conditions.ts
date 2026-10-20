@@ -17,7 +17,9 @@ export interface NormalizedCondition {
 export type DefineRulesCondition = string | DefineRulesConditionObject;
 
 export type DefineRulesConditions = Record<string, DefineRulesCondition>;
+
 export type ConditionAliasValue = string | DefineRulesConditionObject;
+
 export type ConditionAliasMap = Record<`_${string}`, ConditionAliasValue>;
 
 export type DefineRulesConditionAliasKey<
@@ -33,6 +35,7 @@ const ALLOWED_CONDITION_KEYS = new Set([
   "@container",
   "selector"
 ]);
+
 const RESERVED_CONDITION_ALIASES = new Set([
   "_hover",
   "__before",
@@ -119,7 +122,22 @@ function isPlainRecordObject(value: unknown): value is Record<string, unknown> {
   }
 
   const proto = Object.getPrototypeOf(value);
-  return proto === Object.prototype || proto === null;
+  if (proto === Object.prototype || proto === null) return true;
+
+  // Compiler evaluation can supply a plain object from another VM realm.
+  // Inspect the constructor descriptor without invoking user accessors.
+  if (Object.getPrototypeOf(proto) !== null) return false;
+
+  const constructor = Object.getOwnPropertyDescriptor(proto, "constructor");
+
+  return (
+    constructor !== undefined &&
+    "value" in constructor &&
+    typeof constructor.value === "function" &&
+    constructor.value.prototype === proto &&
+    Function.prototype.toString.call(constructor.value) ===
+      Function.prototype.toString.call(Object)
+  );
 }
 
 // == Tests ====================================================================

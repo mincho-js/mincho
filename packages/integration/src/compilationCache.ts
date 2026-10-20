@@ -36,6 +36,9 @@ export interface CacheEntry<T> {
   readonly dependencies: readonly string[];
   readonly valid: () => Promise<boolean>;
 
+  /** Memory-only dependencies revalidated by the caller before every reuse. */
+  readonly semanticDependencies?: readonly string[];
+
   /** Only explicitly serializable producers may opt into persistence. */
   readonly manifest?: PersistentManifest;
 }
@@ -307,7 +310,11 @@ export class CompilationCache {
         const entry = this.entries.get(key);
 
         // Retain semantic entries until their provider has supplied the changed export.
-        if (entry?.manifest?.semanticFiles?.includes(dependency)) continue;
+        if (
+          entry?.semanticDependencies?.includes(dependency) ||
+          entry?.manifest?.semanticFiles?.includes(dependency)
+        )
+          continue;
         if (entry?.owner) pending.push(entry.owner);
 
         this.remove(key);
@@ -383,7 +390,11 @@ export class CompilationCache {
         }
 
         if (this.entries.get(key) === previous) this.remove(key);
-        if (previous.manifest?.semanticFiles?.length && previous.owner)
+        if (
+          (previous.semanticDependencies?.length ||
+            previous.manifest?.semanticFiles?.length) &&
+          previous.owner
+        )
           this.invalidateEntries(previous.owner);
 
         recordCompilationDiagnostic("cache-invalidated", { key });
@@ -391,6 +402,14 @@ export class CompilationCache {
 
       const started = this.disk ? performance.now() : 0;
       const entry = await create();
+      recordCompilationDiagnostic("cache-created", () => ({
+        key,
+        bytes: entry.bytes,
+        retained:
+          generation === this.generation &&
+          entry.bytes <= this.maxBytes &&
+          this.maxEntries > 0
+      }));
 
       if (this.disk) this.costs.set(entry, performance.now() - started);
 

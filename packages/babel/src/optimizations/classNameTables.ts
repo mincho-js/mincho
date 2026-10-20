@@ -17,6 +17,16 @@ interface Choices {
 const maxUnits = 4096;
 const maxEntries = 256;
 
+export interface ClassStringBudget {
+  units: number;
+  entries: number;
+}
+
+export const createClassStringBudget = (): ClassStringBudget => ({
+  units: maxUnits,
+  entries: maxEntries
+});
+
 export function isClassNameJoin(path: NodePath<t.BinaryExpression>): boolean {
   return (
     path.node.operator === "+" &&
@@ -31,7 +41,8 @@ export function isClassNameJoin(path: NodePath<t.BinaryExpression>): boolean {
 
 export function* createClassNameTables(
   graph: ModuleGraph,
-  owner: SourceModule
+  owner: SourceModule,
+  budget = createClassStringBudget()
 ): ModuleGraphFlow<{ key: string; expression: t.Expression }[]> {
   const candidates: NodePath<t.BinaryExpression>[] = [];
   owner.program.traverse({
@@ -41,8 +52,6 @@ export function* createClassNameTables(
   });
 
   const replacements: { key: string; expression: t.Expression }[] = [];
-  let remainingUnits = maxUnits;
-  let remainingEntries = maxEntries;
 
   for (const path of candidates) {
     try {
@@ -51,8 +60,8 @@ export function* createClassNameTables(
       if (
         !result.fromSidecar ||
         result.values.length < 2 ||
-        units > remainingUnits ||
-        result.values.length > remainingEntries
+        units > budget.units ||
+        result.values.length > budget.entries
       )
         continue;
 
@@ -70,8 +79,8 @@ export function* createClassNameTables(
         key: expressionKey(path),
         expression: t.memberExpression(t.cloneNode(table), result.index, true)
       });
-      remainingUnits -= units;
-      remainingEntries -= result.values.length;
+      budget.units -= units;
+      budget.entries -= result.values.length;
     } catch {
       // Unknown values, cyclic bindings and oversized products keep concatenation.
     }

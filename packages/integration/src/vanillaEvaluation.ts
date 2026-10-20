@@ -32,6 +32,10 @@ import {
 } from "./staticStyles.js";
 import { cacheDigest } from "./compilationInputs.js";
 import {
+  compilerTokenReferences,
+  replayCompilerTokenReferences
+} from "@mincho-js/css/defineRules/registry";
+import {
   recordCompilationDiagnostic,
   measureCompilationPhase
 } from "./diagnostics.js";
@@ -211,9 +215,12 @@ export type VanillaOptions = Parameters<typeof processVanillaFile>[0] & {
   cssSourceFile?: string;
   cssSourceRoot?: string;
   staticStyles?: boolean;
+  symbolicTokens?: boolean;
+  staticScopedCx?: boolean;
 };
 
 export interface SerializedVanillaEvaluation {
+  readonly tokenReferences?: readonly string[];
   readonly artifacts?: readonly VanillaCssArtifact[];
   readonly css: readonly {
     fileName: string;
@@ -241,6 +248,9 @@ export async function replayVanillaEvaluation(
   options: VanillaOptions,
   value: SerializedVanillaEvaluation
 ): Promise<string> {
+  if (options.symbolicTokens && value.tokenReferences)
+    replayCompilerTokenReferences(value.tokenReferences);
+
   const imports: string[] = [];
 
   if (value.artifacts) {
@@ -319,6 +329,11 @@ export async function processVanillaWithExecution(
         )
       );
     }
+
+    recordCompilationDiagnostic("evaluation-fallback", {
+      reason: program ? "incompatible-static-modules" : "nonliteral-program",
+      target: "vm"
+    });
   }
 
   if (
@@ -393,7 +408,8 @@ async function evaluateVanilla(
     serializeVirtualCssPath,
     serializeCssArtifact,
     cssSourceFile = filePath,
-    cssSourceRoot = process.cwd()
+    cssSourceRoot = process.cwd(),
+    symbolicTokens = false
   }: VanillaOptions,
   script: Script | undefined,
   context: Context | undefined,
@@ -651,7 +667,12 @@ async function evaluateVanilla(
   }
 
   exportsSource ??= serializeExports();
-  capture?.complete({ css: serializedCss, artifacts, exports: exportsSource });
+  capture?.complete({
+    css: serializedCss,
+    artifacts,
+    exports: exportsSource,
+    ...(symbolicTokens ? { tokenReferences: compilerTokenReferences() } : {})
+  });
 
   return joinEvaluation(cssImports, exportsSource);
 }

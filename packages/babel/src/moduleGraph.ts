@@ -19,7 +19,8 @@ export type ModuleGraphRequest =
       source: string;
       mode?: "import" | "require";
     }
-  | { kind: "load"; id: string };
+  | { kind: "load"; id: string }
+  | { kind: "token-reference"; id: string; name?: string; value?: string };
 
 export type ModuleGraphFlow<T> = Generator<
   ModuleGraphRequest,

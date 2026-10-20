@@ -214,6 +214,19 @@ async function main(): Promise<void> {
         join(consumerRoot, "fixture", "modules", "compiler-classes"),
         true
       );
+      for (const args of [
+        ["--profile", "cx"],
+        ["--profile", "tokens", "--format", "cjs"],
+        ["--profile", "all", "--bundler", "vite", "--workers", "1", "--cache"],
+        ["--profile", "all", "--bundler", "vite", "--format", "cjs", "--cache"]
+      ]) {
+        await runNode(
+          ["fixture/modules/atomic-runtime.mjs", ...args],
+          join(consumerRoot, "fixture", "modules", "atomic-runtime"),
+          true
+        );
+      }
+
       await runNode(
         ["fixture/modules/compilation-benchmark.mjs"],
         join(consumerRoot, "fixture", "modules"),

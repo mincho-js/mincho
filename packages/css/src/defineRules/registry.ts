@@ -21,7 +21,11 @@ import {
 export { presetArtifactDiagnostics } from "./presetArtifactReaders.js";
 export {
   beginCompilerResourceCapture,
-  endCompilerResourceCapture
+  endCompilerResourceCapture,
+  beginCompilerTokenCapture,
+  endCompilerTokenCapture,
+  compilerTokenReferences,
+  replayCompilerTokenReferences
 } from "../compilerResources.js";
 export { parseDefineRulesPresetArtifactV5 } from "./presetArtifact.js";
 export { resolveDefineRulesPresetGraphV5 } from "./presetGraph.js";

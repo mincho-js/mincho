@@ -3,7 +3,9 @@ import { addNamed } from "@babel/helper-module-imports";
 import { getModuleReference, staticMemberName } from "../commonjs/bindings.js";
 import { hasDynamicScope } from "./dynamicScope.js";
 
-function hasObservablePrototypeMutation(program: NodePath<t.Program>): boolean {
+export function hasObservablePrototypeMutation(
+  program: NodePath<t.Program>
+): boolean {
   let observed = false;
   program.traverse({
     MemberExpression(path) {

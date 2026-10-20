@@ -8,6 +8,17 @@ import type {
 import { expressionKey } from "./pureFunctions.js";
 
 const generatedSidecar = /(?:^|\/)extracted_[^/]+\.css\.ts$/;
+const viteSidecarPrefix = "\0mincho-extracted-css:";
+
+function isGeneratedSidecar(id: string): boolean {
+  // Vite wraps owned sidecars in a virtual JavaScript module after extraction.
+  // Accept that exact wrapper, without treating arbitrary .css.ts.js files as
+  // compiler-generated immutable exports.
+  if (id.startsWith(viteSidecarPrefix) && id.endsWith(".js"))
+    id = id.slice(viteSidecarPrefix.length, -3);
+
+  return generatedSidecar.test(id);
+}
 
 export function isSidecarCssVariableKey(
   path: NodePath<t.ObjectProperty>
@@ -19,7 +30,7 @@ export function isSidecarCssVariableKey(
   return (
     !!reference &&
     !reference.unsafe &&
-    generatedSidecar.test(reference.source) &&
+    isGeneratedSidecar(reference.source) &&
     !!path.findParent(
       (parent) =>
         parent.isJSXAttribute() &&
@@ -35,18 +46,14 @@ export function* readSidecarString(
   path: NodePath<t.Node>
 ): ModuleGraphFlow<string> {
   const reference = getModuleReference(path);
-  if (
-    !reference ||
-    reference.unsafe ||
-    !generatedSidecar.test(reference.source)
-  )
+  if (!reference || reference.unsafe || !isGeneratedSidecar(reference.source))
     throw new Error("Unproved sidecar reference");
 
   const target = yield* graph.valueTarget(owner, path, new Set());
   if (
     !target ||
     "external" in target ||
-    !generatedSidecar.test(target.module.id) ||
+    !isGeneratedSidecar(target.module.id) ||
     !target.path.isStringLiteral()
   )
     throw new Error("Nonliteral sidecar string");

@@ -20,6 +20,7 @@ function fixture(files: Record<string, string>) {
       let value: string | null;
 
       if (request.kind === "load") value = files[request.id] ?? null;
+      else if (request.kind === "token-reference") value = null;
       else {
         requests.push({
           source: request.source,

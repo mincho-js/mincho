@@ -136,6 +136,9 @@ export interface StaticCssEvalSourceResolution {
 }
 
 export interface StaticCssEvalLoadedSource {
+  /** @internal Produced by the current compiler's CSS evaluation, never source annotations. */
+  symbolicTokens?: import("./symbolicTokens.js").SymbolicTokenArtifact;
+
   /** Preferred loaded module text. */
   sourceText?: string;
 
@@ -164,6 +167,13 @@ export interface StaticCssEvalSourceProvider {
   ): MaybePromise<StaticCssEvalSourceResolution | null>;
 
   load(id: string): MaybePromise<StaticCssEvalLoadedSource | null>;
+
+  /** @internal Observed separately so CSS value edits can preserve reference analysis. */
+  tokenReference?(
+    id: string,
+    name?: string,
+    value?: string
+  ): MaybePromise<{ value: string; identity: string } | null>;
 }
 
 export interface StaticCssEvalPrepassResult {
@@ -237,6 +247,9 @@ export type BabelOptions = Omit<
 };
 
 export type BabelTransformResult = {
+  /** @internal Shared bound across synchronous cx baking and async class tables. */
+  classStringBudget?: { units: number; entries: number };
+
   /** @internal Statically inspected helper exports; runtime imports retain file dependencies. */
   readonly semanticDemands?: readonly {
     file: string;
@@ -627,6 +640,24 @@ export async function transformSourceUncached(
   )?.minchoCompilation;
 
   if (compilation) recordCompilationDiagnostic("extraction", compilation);
+
+  const classStringBudget = (
+    result.metadata as
+      | { minchoClassStringBudget?: { units: number; entries: number } }
+      | undefined
+  )?.minchoClassStringBudget;
+
+  for (const [key, phase] of [
+    ["minchoCssBooleanGates", "css-boolean-gates-result"],
+    ["minchoClassStrategies", "compiler-class-strategies-result"]
+  ] as const) {
+    const detail = (result.metadata as Record<string, unknown> | undefined)?.[
+      key
+    ];
+
+    if (detail) recordCompilationDiagnostic(phase, detail);
+  }
+
   if (staticCssEval)
     recordCompilationDiagnostic("static-evaluation", {
       dependencies: staticCssEval.dependencies,
@@ -638,6 +669,7 @@ export async function transformSourceUncached(
       ? { runtimeCandidates: internalCollectRuntimeCandidates(result.ast) }
       : {}),
     ...(compilation ? { diagnostics: compilation } : {}),
+    ...(classStringBudget ? { classStringBudget } : {}),
     result: options.result,
     semanticDemands: options.preparedPureFunctions?.exportDemands,
     code: result.code!,

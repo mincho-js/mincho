@@ -58,6 +58,15 @@ export async function driveModuleGraph<T>(
             request.source
           );
         }
+      } else if (request.kind === "token-reference") {
+        const result = await provider?.tokenReference?.(
+          loadKeys.get(request.id) ?? request.id,
+          request.name,
+          request.value
+        );
+
+        watchFiles.add(request.id);
+        value = result?.value ?? null;
       } else {
         const loaded = provider
           ? await provider.load(loadKeys.get(request.id) ?? request.id)

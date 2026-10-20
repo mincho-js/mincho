@@ -3,6 +3,7 @@ import {
   internalApplyRuntimeExpressions
 } from "@mincho-js/babel";
 import { createClassRuntimeFn } from "@mincho-js/css/rules/createClassRuntimeFn";
+import { createCompiledDefineRulesCxRuntime } from "@mincho-js/css/defineRules/createDefineRulesCxRuntime";
 import type {
   BabelTransformResult,
   BabelTransformSourceOptions,
@@ -10,12 +11,21 @@ import type {
 } from "./babel.js";
 import { driveModuleGraph } from "./moduleGraph.js";
 import { cacheDigest, type CompilationCache } from "./compilationCache.js";
+import { tokenReferenceProvider } from "./symbolicTokens.js";
 import {
   measureCompilationPhase,
+  compilationDiagnosticsEnabled,
   recordCompilationDiagnostic
 } from "./diagnostics.js";
 
 type Observation =
+  | {
+      kind: "token";
+      args: Parameters<
+        NonNullable<StaticCssEvalSourceProvider["tokenReference"]>
+      >;
+      digest: string;
+    }
   | {
       kind: "resolve";
       args: Parameters<StaticCssEvalSourceProvider["resolve"]>;
@@ -46,11 +56,20 @@ export class RuntimeOptimizations {
   ): Promise<BabelTransformResult> {
     const optimize = options.babel?.optimize;
 
+    if (optimize?.symbolicTokens) provider = tokenReferenceProvider(provider);
+
     if (
-      (optimize?.runtimeCodegen !== true &&
+      (optimize?.symbolicTokens !== true &&
+        optimize?.staticScopedCx !== true &&
+        optimize?.runtimeCodegen !== true &&
         optimize?.staticRecipes === false &&
         optimize.styledComponents === false) ||
       (result.runtimeCandidates &&
+        !optimize?.symbolicTokens &&
+        !(
+          optimize?.staticScopedCx &&
+          result.runtimeCandidates.scopedCx !== false
+        ) &&
         (!result.runtimeCandidates.recipes ||
           (optimize?.staticRecipes === false &&
             optimize.runtimeCodegen !== true)) &&
@@ -85,6 +104,7 @@ export class RuntimeOptimizations {
         options.filename,
         result.code,
         result.map,
+        result.classStringBudget,
         options.sourceMaps,
         options.babel?.optimize,
         options.babel?.compilationContext,
@@ -95,8 +115,24 @@ export class RuntimeOptimizations {
       key,
       async () => {
         const observations: Observation[] = [];
+        const tokenDependencies = new Set<string>();
         let cacheable = true;
         const observing: StaticCssEvalSourceProvider = {
+          async tokenReference(...args) {
+            try {
+              const value = (await provider.tokenReference?.(...args)) ?? null;
+              observations.push({ kind: "token", args, digest: digest(value) });
+
+              if (value) tokenDependencies.add(args[0]);
+
+              return value;
+            } catch (error) {
+              cacheable = false;
+
+              throw error;
+            }
+          },
+
           async resolve(...args) {
             try {
               const value = await provider.resolve(...args);
@@ -152,8 +188,15 @@ export class RuntimeOptimizations {
         ]);
 
         for (const observation of observations)
-          if (observation.kind === "load")
+          if (observation.kind === "load" || observation.kind === "token") {
             dependencies.add(observation.args[0]);
+
+            // A full source observation still requires ordinary invalidation.
+            if (observation.kind === "load")
+              tokenDependencies.delete(observation.args[0]);
+          }
+
+        tokenDependencies.delete(options.filename);
 
         const value = { output, observations };
 
@@ -161,6 +204,7 @@ export class RuntimeOptimizations {
           owner: options.filename,
           value,
           dependencies: [...dependencies],
+          semanticDependencies: [...tokenDependencies],
           bytes: cacheable
             ? Buffer.byteLength(JSON.stringify(value))
             : Infinity,
@@ -175,7 +219,10 @@ export class RuntimeOptimizations {
           const current =
             observation.kind === "load"
               ? await provider.load(...observation.args)
-              : await provider.resolve(...observation.args);
+              : observation.kind === "token"
+                ? ((await provider.tokenReference?.(...observation.args)) ??
+                  null)
+                : await provider.resolve(...observation.args);
           if (digest(current) !== observation.digest) return false;
         }
 
@@ -205,7 +252,11 @@ export class RuntimeOptimizations {
           pureFunctions: optimize?.pureFunctions,
           staticRecipes: optimize?.staticRecipes,
           styledComponents: optimize?.styledComponents,
-          runtimeCodegen: optimize?.runtimeCodegen
+          runtimeCodegen: optimize?.runtimeCodegen,
+          staticScopedCx: optimize?.staticScopedCx,
+          symbolicTokens: optimize?.symbolicTokens,
+          classStringBudget: result.classStringBudget,
+          diagnostics: compilationDiagnosticsEnabled()
         }),
         provider,
         dependencies
@@ -218,6 +269,39 @@ export class RuntimeOptimizations {
     if (!analysis) return result;
 
     const replacements: Array<{ key: string; value: string }> = [];
+    let scopedApplied = 0;
+    let scopedBudget = 0;
+
+    for (const call of analysis.scopedCx) {
+      try {
+        const runtime = createCompiledDefineRulesCxRuntime(call.artifact);
+        const value = runtime(...(call.args as Parameters<typeof runtime>));
+
+        if (
+          value.length > analysis.stringBudget.units ||
+          analysis.stringBudget.entries === 0
+        ) {
+          scopedBudget++;
+          continue;
+        }
+
+        replacements.push({ key: call.key, value });
+        analysis.stringBudget.units -= value.length;
+        analysis.stringBudget.entries--;
+        scopedApplied++;
+      } catch {
+        /* Keep the original call and artifact. */
+      }
+    }
+
+    if (optimize?.staticScopedCx)
+      recordCompilationDiagnostic("static-scoped-cx-result", () => ({
+        ...analysis.scopedCxDiagnostics,
+        applied: scopedApplied,
+        budget: scopedBudget,
+        units: 4096 - analysis.stringBudget.units
+      }));
+
     const finiteCalls: NonNullable<
       Parameters<typeof internalApplyRuntimeExpressions>[0]["finiteCalls"]
     >[number][] = [];
@@ -318,6 +402,7 @@ export class RuntimeOptimizations {
       dynamicElements: analysis.dynamicElements,
       chains: analysis.chains,
       runtimeCodegen: optimize?.runtimeCodegen,
+      staticScopedCx: optimize?.staticScopedCx,
       elements,
       sourceMaps: options.sourceMaps,
       inputSourceMap: result.map ?? undefined

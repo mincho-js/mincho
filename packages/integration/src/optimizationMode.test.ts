@@ -10,7 +10,9 @@ describe("optimization mode", () => {
       runtimeCodegen: false,
       jsxRuntimeGuards: false,
       dependencyGraph: false,
-      staticStyles: false
+      staticStyles: false,
+      staticScopedCx: false,
+      symbolicTokens: false
     });
     expect(resolveOptimizationOptions("production")).toEqual({
       pureFunctions: true,
@@ -19,7 +21,9 @@ describe("optimization mode", () => {
       runtimeCodegen: true,
       jsxRuntimeGuards: true,
       dependencyGraph: false,
-      staticStyles: false
+      staticStyles: false,
+      staticScopedCx: false,
+      symbolicTokens: false
     });
   });
 
@@ -62,6 +66,8 @@ describe("optimization mode", () => {
       jsxRuntimeGuards: false,
       dependencyGraph: false,
       staticStyles: false,
+      staticScopedCx: false,
+      symbolicTokens: false,
       defineRulesCxConditions: true
     });
   });

@@ -1,7 +1,15 @@
 import { internalAnnotateRecipeFactories } from "@mincho-js/babel";
 import { measureCompilationPhase } from "./diagnostics.js";
 import {
+  compatibleTokenProducer,
+  createSymbolicTokenArtifact,
+  type SymbolicTokenArtifact
+} from "./symbolicTokens.js";
+import { getCompilerIdentity } from "./diskCache.js";
+import {
   beginDefineRulesRegistrySession,
+  beginCompilerTokenCapture,
+  endCompilerTokenCapture,
   endDefineRulesRegistrySession,
   getActiveDefineRulesRegistrySession,
   parseDefineRulesPresetArtifactV5,
@@ -32,6 +40,7 @@ export interface DefineRulesPresetRegistryResult {
   registrySession: DefineRulesRegistrySession;
   ancestorStyleSpecifiers: readonly string[];
   packageGraph?: DefineRulesPackageGraph;
+  symbolicTokens?: SymbolicTokenArtifact;
 }
 
 export function getDefineRulesAncestorStyleSpecifiers(registrySession: {
@@ -50,8 +59,22 @@ export async function processDefineRulesPresetRegistryFile(
   options: DefineRulesPresetRegistryFileOptions
 ): Promise<DefineRulesPresetRegistryResult> {
   const registrySession = beginDefineRulesRegistrySession();
+  const tokens =
+    options.symbolicTokens && compatibleTokenProducer(options.filePath)
+      ? beginCompilerTokenCapture()
+      : undefined;
 
   try {
+    let compiler: string | undefined;
+
+    if (tokens) {
+      try {
+        compiler = await getCompilerIdentity();
+      } catch {
+        // Token metadata is optional; ordinary CSS evaluation must still run.
+      }
+    }
+
     return await measureCompilationPhase("vanilla-extract", () =>
       processCachedEvaluation(options, registrySession, (source) => {
         const presetArtifacts =
@@ -61,8 +84,25 @@ export async function processDefineRulesPresetRegistryFile(
           owner: options.filePath
         });
 
+        const annotated = internalAnnotateRecipeFactories(
+          source,
+          options.filePath,
+          options.staticScopedCx
+        );
+
+        const symbolicTokens =
+          tokens && compiler
+            ? createSymbolicTokenArtifact(
+                annotated,
+                options.filePath,
+                compiler,
+                tokens
+              )
+            : undefined;
+
         return {
-          source: internalAnnotateRecipeFactories(source, options.filePath),
+          source: annotated,
+          ...(symbolicTokens ? { symbolicTokens } : {}),
           registrySession,
           packageGraph,
           ancestorStyleSpecifiers:
@@ -71,6 +111,8 @@ export async function processDefineRulesPresetRegistryFile(
       })
     );
   } finally {
+    if (tokens) endCompilerTokenCapture();
+
     endDefineRulesRegistrySession();
   }
 }
@@ -1022,6 +1064,70 @@ if (import.meta.vitest) {
   });
 
   describe("defineRules preset registry wrapper", () => {
+    it("preserves CSS and exports when optional token identity is unavailable", async () => {
+      const compiled = await compileRegistryFixture(
+        `
+          import { createVar, defineRules } from "@mincho-js/css";
+
+          export const brand = createVar();
+          const button = defineRules({ properties: { color: true } });
+          export const buttonClass = button.css({ color: brand });
+        `,
+        "token-identity-fallback"
+      );
+
+      const run = async (symbolicTokens: boolean) => {
+        const css: string[] = [];
+        const result = await processDefineRulesPresetRegistryFile({
+          source: compiled.source,
+          filePath: compiled.filePath,
+          identOption: "debug",
+          symbolicTokens,
+
+          serializeVirtualCssPath: ({ fileName, source }) => {
+            css.push(source);
+
+            return `import "${fileName}";`;
+          }
+        });
+
+        return { result, css };
+      };
+
+      const expected = await run(false);
+      expect(expected.css.join("\n")).toMatch(/color:\s*var\(--/);
+
+      const identity = vi
+        .spyOn(await import("./diskCache.js"), "getCompilerIdentity")
+        .mockRejectedValue(new Error("Compiler identity read failed"));
+
+      try {
+        await run(false);
+        expect(identity).not.toHaveBeenCalled();
+
+        for (let attempt = 0; attempt < 2; attempt++) {
+          const actual = await run(true);
+          expect(actual.result.source).toBe(expected.result.source);
+          expect(actual.css).toEqual(expected.css);
+          expect(actual.result.packageGraph).toEqual(
+            expected.result.packageGraph
+          );
+          expect(actual.result.registrySession.instances).toHaveLength(1);
+          expect(actual.result.symbolicTokens).toBeUndefined();
+          expect(getActiveDefineRulesRegistrySession()).toBeUndefined();
+        }
+      } finally {
+        identity.mockRestore();
+      }
+
+      const recovered = await run(true);
+      expect(recovered.result.symbolicTokens?.references).toEqual({
+        brand: expect.stringMatching(/^var\(--/)
+      });
+      expect(recovered.css).toEqual(expected.css);
+      expect(getActiveDefineRulesRegistrySession()).toBeUndefined();
+    });
+
     it("registry serializes live V5 preset artifacts from processed css calls", async () => {
       const {
         source,

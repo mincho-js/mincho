@@ -10,6 +10,51 @@ const entry = (value: number, bytes = 1): CacheEntry<number> => ({
 });
 
 describe("compilation cache", () => {
+  it("revalidates memory semantic dependencies before invalidating their consumers", async () => {
+    const cache = new CompilationCache();
+    let reference = 1;
+    const create = vi.fn(async () => ({
+      ...entry(reference),
+      owner: "/app.ts",
+      dependencies: ["/app.ts", "/tokens.ts"],
+      semanticDependencies: ["/tokens.ts"]
+    }));
+
+    const validate = vi.fn(async (value: number) => value === reference);
+    const consumer = vi.fn(async () => ({
+      ...entry(reference),
+      dependencies: ["/app.ts"]
+    }));
+
+    const run = () => cache.run("runtime", create, validate);
+
+    await run();
+    await cache.run("consumer", consumer);
+
+    cache.invalidate("/tokens.ts");
+
+    expect(await run()).toBe(1);
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(validate).toHaveBeenCalledTimes(1);
+
+    await cache.run("consumer", consumer);
+
+    expect(consumer).toHaveBeenCalledTimes(1);
+
+    reference = 2;
+    cache.invalidate("/tokens.ts");
+
+    expect(await run()).toBe(2);
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(await cache.run("consumer", consumer)).toBe(2);
+    expect(consumer).toHaveBeenCalledTimes(2);
+
+    cache.invalidate("/app.ts");
+    await run();
+
+    expect(create).toHaveBeenCalledTimes(3);
+  });
+
   it("deduplicates pending work, isolates generations and does not retain failures", async () => {
     const cache = new CompilationCache();
     let finish!: (value: CacheEntry<number>) => void;

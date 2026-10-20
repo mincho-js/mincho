@@ -46,7 +46,7 @@ function analyze(source: string, modules: Record<string, string> = {}) {
     step = flow.next(
       request.kind === "load"
         ? (modules[request.id] ?? null)
-        : modules[request.source]
+        : request.kind === "resolve" && modules[request.source]
           ? request.source
           : null
     );

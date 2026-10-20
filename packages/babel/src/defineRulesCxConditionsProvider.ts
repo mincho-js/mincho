@@ -55,7 +55,8 @@ export function isDefineRulesCxRuntimeRecipe(
 
   return (
     value.importPath === DEFINE_RULES_CX_RUNTIME_IMPORT_PATH &&
-    value.importName === DEFINE_RULES_CX_RUNTIME_IMPORT_NAME &&
+    (value.importName === DEFINE_RULES_CX_RUNTIME_IMPORT_NAME ||
+      value.importName === "createCompiledDefineRulesCxRuntime") &&
     Array.isArray(value.args)
   );
 }

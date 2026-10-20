@@ -564,12 +564,31 @@ export async function prepareEvaluationDependencyGraph(input: {
             t.isImport(path.node.callee) ||
             (t.isIdentifier(path.node.callee) &&
               ["require", "eval"].includes(path.node.callee.name))
-          )
+          ) {
             opaque = true;
+            recordCompilationDiagnostic(
+              "dependency-reachability-widened",
+              () => ({
+                file: module.path,
+                reason: t.isIdentifier(path.node.callee)
+                  ? path.node.callee.name === "require"
+                    ? "commonjs"
+                    : "dynamic-eval"
+                  : "dynamic-import"
+              })
+            );
+          }
         },
 
         ImportExpression() {
           opaque = true;
+          recordCompilationDiagnostic(
+            "dependency-reachability-widened",
+            () => ({
+              file: module.path,
+              reason: "dynamic-import"
+            })
+          );
         }
       });
 
@@ -688,6 +707,14 @@ export async function prepareEvaluationDependencyGraph(input: {
             )?.target;
 
             if (target?.closed) {
+              recordCompilationDiagnostic(
+                "dependency-reachability-widened",
+                () => ({
+                  file: module.path,
+                  reason: "export-star",
+                  target: target.path
+                })
+              );
               target.closed = false;
               widened = true;
             }

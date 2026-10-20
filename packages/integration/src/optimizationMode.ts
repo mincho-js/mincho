@@ -16,7 +16,9 @@ export function resolveOptimizationOptions(
 
     // These evaluation shortcuts need an explicit opt-in: cost varies by workload.
     dependencyGraph: false,
-    staticStyles: false
+    staticStyles: false,
+    staticScopedCx: false,
+    symbolicTokens: false
   };
 
   for (const options of overrides)

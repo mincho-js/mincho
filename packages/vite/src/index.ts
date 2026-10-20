@@ -11,6 +11,7 @@ import {
   type MinchoCacheOptions,
   type MinchoCssChunkSharingOptions,
   InternalRuntimeOptimizations,
+  type InternalSymbolicTokenArtifact,
   internalResolveOptimizationOptions,
   type OptimizationMode,
   type BabelTransformResult,
@@ -302,6 +303,7 @@ function createMinchoViteEnvironmentPlugin(
 
   // Keep our serialized imports before Vite rewrites them for the dev server.
   const runtimeModules = new Map<string, string>();
+  const runtimeTokens = new Map<string, InternalSymbolicTokenArtifact>();
   let runtimeModuleBytes = 0;
 
   function forgetRuntimeModule(id: string) {
@@ -311,15 +313,23 @@ function createMinchoViteEnvironmentPlugin(
       runtimeModuleBytes -= Buffer.byteLength(previous);
 
     runtimeModules.delete(id);
+    runtimeTokens.delete(id);
   }
 
-  function rememberRuntimeModule(id: string, source: string) {
+  function rememberRuntimeModule(
+    id: string,
+    source: string,
+    tokens?: InternalSymbolicTokenArtifact
+  ) {
     forgetRuntimeModule(id);
 
     const bytes = Buffer.byteLength(source);
     if (bytes > 64 * 1024 * 1024) return;
 
     runtimeModules.set(id, source);
+
+    if (tokens) runtimeTokens.set(id, tokens);
+
     runtimeModuleBytes += bytes;
 
     while (runtimeModules.size > 512 || runtimeModuleBytes > 64 * 1024 * 1024)
@@ -328,6 +338,7 @@ function createMinchoViteEnvironmentPlugin(
 
   function clearRuntimeModules() {
     runtimeModules.clear();
+    runtimeTokens.clear();
     runtimeModuleBytes = 0;
   }
 
@@ -357,7 +368,13 @@ function createMinchoViteEnvironmentPlugin(
       execution.run(() =>
         processDefineRulesPresetViteFile({
           ...options,
-          staticStyles: compilerOptimizations().staticStyles
+          staticStyles: compilerOptimizations().staticStyles,
+          ...(compilerOptimizations().symbolicTokens
+            ? { symbolicTokens: true }
+            : {}),
+          ...(compilerOptimizations().staticScopedCx
+            ? { staticScopedCx: true }
+            : {})
         })
       )
     );
@@ -1378,7 +1395,11 @@ function createMinchoViteEnvironmentPlugin(
           if (publication) publication.publish = publish;
           else publish();
 
-          rememberRuntimeModule(id, registryResult.source);
+          rememberRuntimeModule(
+            id,
+            registryResult.source,
+            registryResult.symbolicTokens
+          );
 
           return registryResult.source;
         } catch (error) {
@@ -1601,7 +1622,12 @@ function createMinchoViteEnvironmentPlugin(
                       if (runtimeOwners.has(moduleId)) {
                         const source = runtimeModules.get(moduleId);
 
-                        return source ? { source } : null;
+                        return source
+                          ? {
+                              source,
+                              symbolicTokens: runtimeTokens.get(moduleId)
+                            }
+                          : null;
                       }
 
                       const loaded =
@@ -1612,7 +1638,12 @@ function createMinchoViteEnvironmentPlugin(
                       const source =
                         runtimeModules.get(moduleId) ?? loaded?.code;
 
-                      return source ? { source } : null;
+                      return source
+                        ? {
+                            source,
+                            symbolicTokens: runtimeTokens.get(moduleId)
+                          }
+                        : null;
                     }
                   }
                 )
@@ -6149,6 +6180,8 @@ if (import.meta.vitest) {
                   jsxRuntimeGuards: true,
                   dependencyGraph: false,
                   staticStyles: false,
+                  staticScopedCx: false,
+                  symbolicTokens: false,
                   ...disabledCase.expectedOptions?.optimize
                 },
                 staticCssEvalSourceProvider: expect.any(Object)

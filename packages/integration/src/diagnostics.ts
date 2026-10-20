@@ -223,6 +223,33 @@ export async function measureCompilationPhase<T>(
   }
 }
 
+export function measureCompilationPhaseSync<T>(
+  phase: string,
+  operation: () => T
+): T {
+  const context = active.getStore();
+  if (!context) return operation();
+
+  const start = performance.now();
+  let status: CompilationEvent["status"] = "ok";
+
+  try {
+    return operation();
+  } catch (error) {
+    status = "error";
+
+    throw error;
+  } finally {
+    context.diagnostics.append(context.report, {
+      file: context.file,
+      phase,
+      start,
+      duration: performance.now() - start,
+      status
+    });
+  }
+}
+
 export function recordCompilationDiagnostic(
   phase: string,
   detail?: unknown
@@ -236,8 +263,14 @@ export function recordCompilationDiagnostic(
     start: performance.now(),
     duration: 0,
     status: "info",
-    ...(detail === undefined ? {} : { detail })
+    ...(detail === undefined
+      ? {}
+      : { detail: typeof detail === "function" ? detail() : detail })
   });
+}
+
+export function compilationDiagnosticsEnabled(): boolean {
+  return active.getStore() !== undefined;
 }
 
 /** Preserve the caller's report when native services reuse older async contexts. */

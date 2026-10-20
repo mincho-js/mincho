@@ -9,7 +9,9 @@ import { proveReusableEvaluation } from "./evaluationProof.js";
 import { readStaticStyleProgram, staticStyleModules } from "./staticStyles.js";
 import {
   recordCompilationDiagnostic,
-  measureCompilationPhase
+  measureCompilationPhase,
+  measureCompilationPhaseSync,
+  compilationDiagnosticsEnabled
 } from "./diagnostics.js";
 import {
   evaluationEnvironment,
@@ -21,8 +23,16 @@ import {
 
 type Options = VanillaOptions;
 
+function copyRegistry<T>(value: T): T {
+  return compilationDiagnosticsEnabled()
+    ? measureCompilationPhaseSync("cache-registry-copy", () =>
+        structuredClone(value)
+      )
+    : structuredClone(value);
+}
+
 function snapshotRegistry(session: DefineRulesRegistrySession) {
-  return structuredClone({
+  return copyRegistry({
     nextRegistrationIndex: session.nextRegistrationIndex,
     nextRegistrationIndexByFileScope: session.nextRegistrationIndexByFileScope,
     instances: session.instances.map((instance) => ({
@@ -151,6 +161,7 @@ export async function processCachedEvaluation<T>(
         options.outputCss ?? true,
         options.identOption,
         options.staticStyles,
+        options.symbolicTokens,
         evaluationEnvironment(),
         [...inputs]
       ])
@@ -199,14 +210,14 @@ export async function processCachedEvaluation<T>(
     recordCompilationDiagnostic("evaluation-result-hit");
 
     return measureCompilationPhase("evaluation-replay", async () => {
-      const registry = structuredClone(value.registry);
+      const registry = copyRegistry(value.registry);
       session.nextRegistrationIndex = registry.nextRegistrationIndex;
       session.nextRegistrationIndexByFileScope =
         registry.nextRegistrationIndexByFileScope;
       session.instances = registry.instances.map((instance) => ({
         ...instance,
 
-        getPresetSnapshot: () => structuredClone(instance.presetArtifact)
+        getPresetSnapshot: () => copyRegistry(instance.presetArtifact)
       }));
 
       return consume(await replayVanillaEvaluation(options, value.vanilla));

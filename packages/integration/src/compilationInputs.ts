@@ -1,7 +1,11 @@
 import { createHash } from "node:crypto";
 import { readFile, readdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { recordCompilationDiagnostic } from "./diagnostics.js";
+import {
+  recordCompilationDiagnostic,
+  compilationDiagnosticsEnabled,
+  measureCompilationPhaseSync
+} from "./diagnostics.js";
 import { getCompilationIoPool, type CompilationIoPool } from "./ioPool.js";
 
 type Input = { digest: string | null; bytes?: Uint8Array };
@@ -169,6 +173,11 @@ export class CompilationInputs {
 }
 
 export function cacheDigest(value: string | Uint8Array): string {
+  if (compilationDiagnosticsEnabled())
+    return measureCompilationPhaseSync("cache-hash", () =>
+      createHash("sha256").update(value).digest("hex")
+    );
+
   return createHash("sha256").update(value).digest("hex");
 }
 

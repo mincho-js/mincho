@@ -5,10 +5,64 @@ import { describe, expect, it, vi } from "vitest";
 import {
   CompilationDiagnostics,
   measureCompilationPhase,
+  measureCompilationPhaseSync,
   recordCompilationDiagnostic
 } from "./diagnostics.js";
 
 describe("compilation diagnostics", () => {
+  it("measures synchronous cache work without a clock read when disabled", async () => {
+    const clock = vi.spyOn(performance, "now");
+
+    try {
+      expect(measureCompilationPhaseSync("cache-copy", () => 42)).toBe(42);
+      expect(clock).not.toHaveBeenCalled();
+
+      const diagnostics = new CompilationDiagnostics({ json: "report.json" });
+      await diagnostics.run("app.ts", "outer", async () => {
+        expect(() =>
+          measureCompilationPhaseSync("cache-copy", () => {
+            throw new Error("copy failed");
+          })
+        ).toThrow("copy failed");
+      });
+
+      expect(diagnostics.snapshot().builds[0]!.events[0]).toMatchObject({
+        phase: "cache-copy",
+        status: "error"
+      });
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it("does not construct disabled diagnostic payloads or sum nested durations", async () => {
+    const detail = vi.fn(() => ({ reason: "commonjs" }));
+    recordCompilationDiagnostic("reason", detail);
+
+    expect(detail).not.toHaveBeenCalled();
+
+    const diagnostics = new CompilationDiagnostics({ json: "report.json" });
+    await diagnostics.run("app.ts", "outer", async () => {
+      await measureCompilationPhase("inner", async () =>
+        recordCompilationDiagnostic("reason", detail)
+      );
+    });
+
+    expect(detail).toHaveBeenCalledTimes(1);
+
+    const events = diagnostics.snapshot().builds[0]!.events;
+
+    expect(events.find((event) => event.phase === "reason")).toMatchObject({
+      duration: 0,
+      detail: { reason: "commonjs" }
+    });
+    expect(
+      events
+        .filter((event) => event.status !== "info")
+        .map((event) => event.phase)
+    ).toEqual(["inner", "outer"]);
+  });
+
   it("publishes the latest generation to each output and preserves identical files", async () => {
     const root = await mkdtemp(join(tmpdir(), "mincho-diagnostics-writes-"));
 

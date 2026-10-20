@@ -25,6 +25,7 @@ import {
   removeUnusedGeneratedImports
 } from "./optimizations/runtimeCodegen.js";
 import { pruneRecipeMetadata } from "./optimizations/recipeMetadata.js";
+import { optimizeLocalScopedCx } from "./optimizations/localScopedCx.js";
 import {
   prepareCompilerClassStrategies,
   finishCompilerClassStrategies
@@ -78,6 +79,12 @@ export function minchoBabelPlugin(): PluginObj<PluginState> {
         exit(path, state) {
           postprocess(path, state);
           finishCompilerClassStrategies(path, state);
+
+          if (state.opts.optimize?.staticScopedCx)
+            state.file.metadata.minchoClassStringBudget = optimizeLocalScopedCx(
+              path,
+              state.file.opts.filename ?? "/__mincho__.tsx"
+            );
 
           if (state.opts.optimize?.runtimeCodegen === true) {
             optimizeRuntimeCodegen(path);

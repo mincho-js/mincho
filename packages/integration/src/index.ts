@@ -126,3 +126,7 @@ export {
   optimizeVanillaCssArtifacts as internalOptimizeVanillaCssArtifacts,
   type CssIrOptimizationOptions as InternalCssIrOptimizationOptions
 } from "./cssIrOptimization.js";
+export {
+  rebindSymbolicTokenArtifact as internalRebindSymbolicTokenArtifact,
+  type SymbolicTokenArtifact as InternalSymbolicTokenArtifact
+} from "./symbolicTokens.js";

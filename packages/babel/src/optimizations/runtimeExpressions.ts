@@ -9,8 +9,22 @@ import {
 } from "@babel/core";
 import { addNamed } from "@babel/helper-module-imports";
 import { getModuleReference } from "../commonjs/bindings.js";
-import { pruneRecipeMetadata } from "./recipeMetadata.js";
-import { createClassNameTables, isClassNameJoin } from "./classNameTables.js";
+import {
+  hasObservablePrototypeMutation,
+  pruneRecipeMetadata
+} from "./recipeMetadata.js";
+import {
+  createClassNameTables,
+  createClassStringBudget,
+  isClassNameJoin
+} from "./classNameTables.js";
+import {
+  analyzeScopedCx,
+  isCompiledScopedCx,
+  pruneScopedCxFactories,
+  type ScopedCxCall
+} from "./scopedCx.js";
+import { symbolicTokenReferences } from "./symbolicTokens.js";
 import {
   inlineCssVariableKeys,
   isSidecarCssVariableKey
@@ -73,6 +87,7 @@ export interface StaticStyledElement extends StaticRecipeCall {
 export interface RuntimeCandidates {
   readonly recipes: boolean;
   readonly styled: boolean;
+  readonly scopedCx?: boolean;
 }
 
 function isRecipeCandidate(path: NodePath<t.CallExpression>): boolean {
@@ -104,9 +119,17 @@ function isRecipeCandidate(path: NodePath<t.CallExpression>): boolean {
 export function collectRuntimeCandidates(ast: t.File): RuntimeCandidates {
   let recipes = false;
   let styled = false;
+  let scopedCx = false;
   traverse(ast, {
     CallExpression(path) {
       if (!recipes && isRecipeCandidate(path)) recipes = true;
+      if (
+        !scopedCx &&
+        !path.node.optional &&
+        (path.get("callee").isIdentifier() ||
+          path.get("callee").isMemberExpression())
+      )
+        scopedCx = true;
     },
 
     BinaryExpression(path) {
@@ -124,15 +147,23 @@ export function collectRuntimeCandidates(ast: t.File): RuntimeCandidates {
     }
   });
 
-  return { recipes, styled };
+  return { recipes, styled, scopedCx };
 }
 
 /** Both bundlers understand call annotations on the known pure serialized factory. */
 export function annotateRecipeFactories(
   source: string,
-  filename: string
+  filename: string,
+  scopedCx = false
 ): string {
-  if (!source.includes("@mincho-js/css/rules/createRuntimeFn")) return source;
+  if (
+    !source.includes("@mincho-js/css/rules/createRuntimeFn") &&
+    !(
+      scopedCx &&
+      source.includes("@mincho-js/css/defineRules/createDefineRulesCxRuntime")
+    )
+  )
+    return source;
 
   const ast = parseSync(source, {
     filename,
@@ -149,10 +180,11 @@ export function annotateRecipeFactories(
 
       if (
         !reference?.unsafe &&
-        reference?.source === "@mincho-js/css/rules/createRuntimeFn" &&
-        ["createRuntimeFn", "createCompiledRuntimeFn"].includes(
-          reference.members.join(".")
-        ) &&
+        ((reference?.source === "@mincho-js/css/rules/createRuntimeFn" &&
+          ["createRuntimeFn", "createCompiledRuntimeFn"].includes(
+            reference.members.join(".")
+          )) ||
+          (scopedCx && isCompiledScopedCx(path))) &&
         path.node.start != null
       )
         positions.push(path.node.start);
@@ -179,8 +211,15 @@ export function* analyzeRuntimeExpressions(options: {
   staticRecipes?: boolean;
   styledComponents?: boolean;
   runtimeCodegen?: boolean;
+  staticScopedCx?: boolean;
+  symbolicTokens?: boolean;
+  classStringBudget?: ReturnType<typeof createClassStringBudget>;
+  diagnostics?: boolean;
 }): ModuleGraphFlow<{
   calls: StaticRecipeCall[];
+  scopedCx: ScopedCxCall[];
+  scopedCxDiagnostics?: Record<string, number>;
+  stringBudget: ReturnType<typeof createClassStringBudget>;
   elements: StaticStyledElement[];
   finiteCalls: {
     key: string;
@@ -216,6 +255,8 @@ export function* analyzeRuntimeExpressions(options: {
 
   const unproved = (ast = owner.program.parent as t.File) => ({
     calls: [],
+    scopedCx: [],
+    stringBudget: createClassStringBudget(),
     elements: [],
     finiteCalls: [],
     expressions: [],
@@ -252,8 +293,22 @@ export function* analyzeRuntimeExpressions(options: {
 
   const expressions: { key: string; expression: t.Expression }[] = [];
 
+  if (options.symbolicTokens)
+    expressions.push(...(yield* symbolicTokenReferences(graph, owner)));
+
+  const stringBudget = options.classStringBudget
+    ? { ...options.classStringBudget }
+    : createClassStringBudget();
+
+  const scopedCxDiagnostics = options.diagnostics ? {} : undefined;
+  const scopedCx = options.staticScopedCx
+    ? yield* analyzeScopedCx(graph, owner, scopedCxDiagnostics)
+    : [];
+
   if (options.runtimeCodegen) {
-    expressions.push(...(yield* createClassNameTables(graph, owner)));
+    expressions.push(
+      ...(yield* createClassNameTables(graph, owner, stringBudget))
+    );
     expressions.push(...(yield* inlineCssVariableKeys(graph, owner)));
   }
 
@@ -686,8 +741,11 @@ export function* analyzeRuntimeExpressions(options: {
 
   // Imported aliases and configs can also be observed or replaced through eval.
   if (
-    [...graph.modules.values()].some((module) =>
-      hasDynamicScope(module.program)
+    [...graph.modules.values()].some(
+      (module) =>
+        hasDynamicScope(module.program) ||
+        (options.staticScopedCx &&
+          hasObservablePrototypeMutation(module.program))
     )
   )
     return unproved(
@@ -701,6 +759,9 @@ export function* analyzeRuntimeExpressions(options: {
 
   return {
     calls,
+    scopedCx,
+    scopedCxDiagnostics,
+    stringBudget,
     elements,
     finiteCalls,
     expressions,
@@ -1090,6 +1151,7 @@ export function applyRuntimeExpressions(options: {
   dynamicElements?: readonly DynamicStyledElement[];
   chains?: readonly StyledChain[];
   runtimeCodegen?: boolean;
+  staticScopedCx?: boolean;
   elements?: ReadonlyArray<{
     key: string;
     tag: string;
@@ -1173,6 +1235,7 @@ export function applyRuntimeExpressions(options: {
               );
 
               if (options.runtimeCodegen) pruneRecipeMetadata(program);
+              if (options.staticScopedCx) pruneScopedCxFactories(program);
             });
           }
         }

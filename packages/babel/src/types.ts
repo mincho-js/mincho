@@ -38,6 +38,12 @@ export interface PluginOptions {
   optimize?: {
     dependencyGraph?: boolean;
     staticStyles?: boolean;
+
+    /** Bake proven immutable scoped cx calls using the serialized runtime. */
+    staticScopedCx?: boolean;
+
+    /** Reuse compiler-produced token references without reinterpreting their producer. */
+    symbolicTokens?: boolean;
     defineRulesCxConditions?: boolean;
     pureFunctions?: boolean;
     staticRecipes?: boolean;
