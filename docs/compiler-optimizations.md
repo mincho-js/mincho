@@ -61,10 +61,11 @@ results use the same bounded cache and invalidate when source/options change.
 
 ## Application CSS
 
-The CSS passes default on for production `appCss.mode: "dist-chunk"` builds using
-the validated Vite/vanilla-extract adapter. Native mode, development serving,
-libraries, and SSR keep their existing CSS path. Generated class names are
-preserved by all default passes.
+The CSS passes require explicit `appCss.optimize: true` or an options object in
+`appCss.mode: "dist-chunk"` builds using the validated Vite/vanilla-extract adapter.
+Omitting `appCss.optimize` keeps them disabled in both profiles. Native mode,
+development serving, libraries, and SSR keep their existing CSS path. Generated
+class names are preserved by all four passes.
 
 | Option           | Applied scope                                                       | Preservation boundaries                                                                                                                           |
 | ---------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
