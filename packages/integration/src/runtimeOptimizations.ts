@@ -59,22 +59,23 @@ export class RuntimeOptimizations {
     if (optimize?.symbolicTokens) provider = tokenReferenceProvider(provider);
 
     if (
-      (optimize?.symbolicTokens !== true &&
+      !options.babel?.privateRecipes &&
+      ((optimize?.symbolicTokens !== true &&
         optimize?.staticScopedCx !== true &&
         optimize?.runtimeCodegen !== true &&
         optimize?.staticRecipes === false &&
         optimize.styledComponents === false) ||
-      (result.runtimeCandidates &&
-        !optimize?.symbolicTokens &&
-        !(
-          optimize?.staticScopedCx &&
-          result.runtimeCandidates.scopedCx !== false
-        ) &&
-        (!result.runtimeCandidates.recipes ||
-          (optimize?.staticRecipes === false &&
-            optimize.runtimeCodegen !== true)) &&
-        (!result.runtimeCandidates.styled ||
-          optimize?.styledComponents === false))
+        (result.runtimeCandidates &&
+          !optimize?.symbolicTokens &&
+          !(
+            optimize?.staticScopedCx &&
+            result.runtimeCandidates.scopedCx !== false
+          ) &&
+          (!result.runtimeCandidates.recipes ||
+            (optimize?.staticRecipes === false &&
+              optimize.runtimeCodegen !== true)) &&
+          (!result.runtimeCandidates.styled ||
+            optimize?.styledComponents === false)))
     ) {
       recordCompilationDiagnostic("runtime-analysis-skipped", {
         file: options.filename
@@ -101,12 +102,15 @@ export class RuntimeOptimizations {
     const key =
       "runtime:" +
       digest([
+        options.babel?.privateRecipes ? "private-resource-proofs-v2" : null,
         options.filename,
         result.code,
         result.map,
         result.classStringBudget,
         options.sourceMaps,
         options.babel?.optimize,
+        options.babel?.privateRecipes,
+        options.babel?.privateRecipes ? result.result[0] : undefined,
         options.babel?.compilationContext,
         result.staticCssEval?.dependencyFiles
       ]);
@@ -179,6 +183,9 @@ export class RuntimeOptimizations {
             : {
                 code: transformed.code,
                 map: transformed.map,
+                privateRecipeUses: transformed.privateRecipeUses,
+                privateResourceReferences:
+                  transformed.privateResourceReferences,
                 dependencies: transformed.staticCssEval?.dependencyFiles ?? []
               };
 
@@ -256,7 +263,10 @@ export class RuntimeOptimizations {
           staticScopedCx: optimize?.staticScopedCx,
           symbolicTokens: optimize?.symbolicTokens,
           classStringBudget: result.classStringBudget,
-          diagnostics: compilationDiagnosticsEnabled()
+          diagnostics: compilationDiagnosticsEnabled(),
+          privateRecipeImport: options.babel?.privateRecipes
+            ? result.result[0]
+            : undefined
         }),
         provider,
         dependencies
@@ -267,6 +277,43 @@ export class RuntimeOptimizations {
       return null;
     });
     if (!analysis) return result;
+    if (options.babel?.privateRecipes)
+      result = {
+        ...result,
+        privateResourceReferences: analysis.privateResourceReferences,
+        privateRecipeUses: analysis.privateRecipes.map(
+          ({ recipe, selections }) => {
+            const config = recipe.config as Parameters<
+              typeof createClassRuntimeFn
+            >[0];
+
+            let used: string[] | null = null;
+
+            if (selections)
+              try {
+                const runtime = createClassRuntimeFn(config);
+                used = [
+                  ...new Set([
+                    ...analysis.privateClassReferences.flatMap((value) =>
+                      value.split(/\s+/)
+                    ),
+                    ...selections
+                      .flatMap((selection) =>
+                        runtime(
+                          selection as Parameters<typeof runtime>[0]
+                        ).split(/\s+/)
+                      )
+                      .filter(Boolean)
+                  ])
+                ].sort();
+              } catch {
+                /* Invalid serialized config remains fully live. */
+              }
+
+            return { id: config.defaultClassName, used };
+          }
+        )
+      };
 
     const replacements: Array<{ key: string; value: string }> = [];
     let scopedApplied = 0;
@@ -424,12 +471,20 @@ export class RuntimeOptimizations {
       code: string;
       map?: BabelTransformResult["map"];
       dependencies: readonly string[];
+      privateRecipeUses?: BabelTransformResult["privateRecipeUses"];
+      privateResourceReferences?: readonly string[];
     }
   ): BabelTransformResult {
     const previous = result.staticCssEval;
 
     return {
       ...result,
+      ...(output.privateRecipeUses
+        ? { privateRecipeUses: output.privateRecipeUses }
+        : {}),
+      ...(output.privateResourceReferences
+        ? { privateResourceReferences: output.privateResourceReferences }
+        : {}),
       code: output.code,
       ...(output.map !== undefined ? { map: output.map } : {}),
       runtimeOptimized: true,

@@ -32,6 +32,116 @@ const result = (code: string): BabelTransformResult => ({
   result: ["", ""]
 });
 
+describe("private recipe resource proofs", () => {
+  const serialized = `import {createCompiledRuntimeFn} from "@mincho-js/css/rules/createRuntimeFn"; export const button = createCompiledRuntimeFn(${JSON.stringify(config)}, {});`;
+
+  async function proof(body: string, cache?: CompilationCache) {
+    const code = `import {button} from "/extracted_rules.css.ts"; ${body}`;
+    const input = {
+      ...result(code),
+      result: ["/extracted_rules.css.ts", ""] as [string, string]
+    };
+
+    return new RuntimeOptimizations().transform(
+      {
+        filename: "/app.ts",
+        source: code,
+        babel: {
+          privateRecipes: true,
+          compilationCache: cache,
+          optimize: { staticRecipes: false, styledComponents: false }
+        }
+      },
+      input,
+      provider({ "/extracted_rules.css.ts": serialized })
+    );
+  }
+
+  it("retains all literal branches, defaults, toggles and compound results before JS folding", async () => {
+    const output = await proof(
+      'const alias=button; export function render(flag){return alias({size:flag?"small":"large",active:true})}; const first=button();'
+    );
+
+    expect(output.privateRecipeUses).toEqual([
+      { id: "base", used: ["active", "base", "compound", "large", "small"] }
+    ]);
+    expect(output.code).toContain("alias(");
+  });
+
+  it.each([
+    "export {button};",
+    "export const alias=button;",
+    "globalThis.button=button;",
+    "button.classNames.variants;",
+    "button.variants();",
+    "button.props({});",
+    "button(value);",
+    'button({get size(){return "small"}});',
+    'button.size="large";',
+    'const selection={size:"small"}; mutate(selection);button(selection);',
+    "const before=alias;const alias=button;before();",
+    "button(...values);",
+    'eval("button(value)");'
+  ])(
+    "does not prove escaping, dynamic, metadata, mutation or early use: %s",
+    async (body) => {
+      expect(
+        (await proof(body)).privateRecipeUses?.[0]?.used ?? null
+      ).toBeNull();
+    }
+  );
+
+  it("replays build-only use metadata from the bounded analysis cache", async () => {
+    const cache = new CompilationCache();
+    const first = await proof('const cls=button({size:"small"});', cache);
+    const second = await proof('const cls=button({size:"small"});', cache);
+
+    expect(second.privateRecipeUses).toEqual(first.privateRecipeUses);
+    expect(second.privateRecipeUses?.[0]?.used).toEqual(["base", "small"]);
+    expect(JSON.stringify(second.code)).not.toContain("privateRecipeUses");
+  });
+
+  it("keeps classes exposed outside serialized recipe metadata", async () => {
+    const source = `import {button, leaked} from '/extracted_rules.css.ts'; export const outside=leaked; export const selected=button({size:'small'});`;
+    const output = await new RuntimeOptimizations().transform(
+      { filename: "/app.ts", source, babel: { privateRecipes: true } },
+      { ...result(source), result: ["/extracted_rules.css.ts", ""] },
+      provider({
+        "/extracted_rules.css.ts": serialized + 'export const leaked="large";'
+      })
+    );
+
+    expect(output.privateRecipeUses?.[0]?.used).toEqual([
+      "base",
+      "large",
+      "small"
+    ]);
+  });
+
+  it.each([
+    [
+      'export const first="frame"; export const second="frame";',
+      "const unused=first; export const publicValue=second;"
+    ],
+    [
+      'export const first="frame"; export const second={name:"frame"};',
+      "const unused=first; export const publicValue=second;"
+    ]
+  ])(
+    "keeps keyframes exposed through another auto export",
+    async (serialized, use) => {
+      const source = `import {first,second} from '/extracted_values.css.ts'; ${use}`;
+      const output = await new RuntimeOptimizations().transform(
+        { filename: "/app.ts", source, babel: { privateRecipes: true } },
+        { ...result(source), result: ["/extracted_values.css.ts", ""] },
+        provider({ "/extracted_values.css.ts": serialized })
+      );
+
+      expect(output.privateResourceReferences).toEqual([]);
+    }
+  );
+});
+
 describe("static recipe invocations", () => {
   it("validates concurrent requests against their own provider and environment", async () => {
     const code =

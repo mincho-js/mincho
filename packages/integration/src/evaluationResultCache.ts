@@ -152,7 +152,7 @@ export async function processCachedEvaluation<T>(
 
     const key = `evaluation-result-v3:${cacheDigest(
       JSON.stringify([
-        options.serializeCssArtifact ? "css-ir-v1" : "css-text",
+        options.serializeCssArtifact ? "css-ir-resources-v4" : "css-text",
         options.cssSourceFile,
         options.cssSourceRoot,
         identity,

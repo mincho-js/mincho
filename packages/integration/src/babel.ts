@@ -235,6 +235,9 @@ export type BabelOptions = Omit<
   /** @internal Resolver environment identity, separate from module source. */
   compilationContext?: string;
   diagnostics?: boolean;
+
+  /** @internal Vite dist-chunk private-resource proof, independent of JS folding. */
+  privateRecipes?: boolean;
   extractCalls?: PluginOptions["extractCalls"];
   jsxCssProp?: boolean;
   optimize?: PluginOptions["optimize"];
@@ -247,6 +250,10 @@ export type BabelOptions = Omit<
 };
 
 export type BabelTransformResult = {
+  /** @internal Original use graph; never emitted to the application. */
+  privateRecipeUses?: readonly import("./vanillaCssIr.js").PrivateRecipeUse[];
+  privateResourceReferences?: readonly string[];
+
   /** @internal Shared bound across synchronous cx baking and async class tables. */
   classStringBudget?: { units: number; entries: number };
 
@@ -335,6 +342,7 @@ export async function transformSourceUncached(
   const {
     compilationCache,
     compilationContext: _compilationContext,
+    privateRecipes: _privateRecipes,
     diagnostics,
     extractCalls,
     jsxCssProp = false,

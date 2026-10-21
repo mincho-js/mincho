@@ -35,6 +35,7 @@ import {
   compilerTokenReferences,
   replayCompilerTokenReferences
 } from "@mincho-js/css/defineRules/registry";
+import type { CompilerStyleResources } from "@mincho-js/css/defineRules/registry";
 import {
   recordCompilationDiagnostic,
   measureCompilationPhase
@@ -424,6 +425,8 @@ async function evaluateVanilla(
   const cssAdapter: Adapter = {
     appendCss(css, scope) {
       if (!outputCss) return;
+      if (css.type === "keyframes")
+        resourceRegistry.recordCompilerKeyframeRule?.(css.name);
 
       const key = stringifyFileScope(scope);
       const rules = cssByScope.get(key) ?? [];
@@ -432,6 +435,7 @@ async function evaluateVanilla(
     },
 
     registerClassName(name) {
+      resourceRegistry.recordCompilerClass?.(name);
       classNames.add(name);
     },
 
@@ -491,9 +495,14 @@ async function evaluateVanilla(
   ) as {
     beginCompilerResourceCapture?: () => Set<string>;
     endCompilerResourceCapture?: () => void;
+    beginCompilerStyleCapture?: () => CompilerStyleResources;
+    endCompilerStyleCapture?: () => void;
+    recordCompilerClass?: (name: string) => void;
+    recordCompilerKeyframeRule?: (name: string) => void;
   };
 
   let generatedVariables: Set<string> | undefined;
+  let generatedResources: CompilerStyleResources | undefined;
   const exports = {};
   const module = {
     exports,
@@ -512,6 +521,13 @@ async function evaluateVanilla(
         evaluationAdapter.setAdapter(cssAdapter);
 
         try {
+          if (
+            serializeCssArtifact &&
+            resourceRegistry.beginCompilerStyleCapture &&
+            resourceRegistry.endCompilerStyleCapture
+          )
+            generatedResources = resourceRegistry.beginCompilerStyleCapture();
+
           if (
             resourceRegistry.beginCompilerResourceCapture &&
             resourceRegistry.endCompilerResourceCapture
@@ -560,7 +576,12 @@ async function evaluateVanilla(
               if (generatedVariables)
                 resourceRegistry.endCompilerResourceCapture!();
             } finally {
-              evaluationAdapter.removeAdapter();
+              try {
+                if (generatedResources)
+                  resourceRegistry.endCompilerStyleCapture!();
+              } finally {
+                evaluationAdapter.removeAdapter();
+              }
             }
           }
         }
@@ -625,7 +646,8 @@ async function evaluateVanilla(
     annotateVanillaCssArtifacts(
       artifacts,
       [exportsSource!],
-      [...(generatedVariables ?? [])]
+      [...(generatedVariables ?? [])],
+      generatedResources
     );
 
     for (const artifact of artifacts) {

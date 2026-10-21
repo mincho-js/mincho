@@ -124,8 +124,10 @@ export {
 } from "./vanillaCssIr.js";
 export {
   optimizeVanillaCssArtifacts as internalOptimizeVanillaCssArtifacts,
+  cssVariableLivenessOpaque as internalCssVariableLivenessOpaque,
   type CssIrOptimizationOptions as InternalCssIrOptimizationOptions
 } from "./cssIrOptimization.js";
+export { cssResourcesNeedWholeGraph as internalCssResourcesNeedWholeGraph } from "./cssIrResources.js";
 export {
   rebindSymbolicTokenArtifact as internalRebindSymbolicTokenArtifact,
   type SymbolicTokenArtifact as InternalSymbolicTokenArtifact

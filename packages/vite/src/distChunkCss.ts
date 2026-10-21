@@ -4,6 +4,8 @@ import {
   internalGenerateVanillaCss,
   internalHashVanillaCssArtifact,
   internalOptimizeVanillaCssArtifacts,
+  internalCssVariableLivenessOpaque,
+  internalCssResourcesNeedWholeGraph,
   type InternalCompilationCache,
   type InternalCssIrOptimizationOptions,
   type InternalVanillaCssArtifact
@@ -11,6 +13,7 @@ import {
 import { version, type Plugin, type ResolvedConfig, type Rollup } from "vite";
 import { excludesCss, nativeTransforms } from "./cssSharing.js";
 import { hasOpaquePostcss } from "./cssOptimizationGuard.js";
+import { CssIrAggregation } from "./cssIrAggregation.js";
 
 const prefix = "\0mincho-style-marker:";
 
@@ -36,13 +39,19 @@ interface Artifact {
 
 type Provenance = InternalVanillaCssArtifact["provenance"];
 
+type ResourceProof = {
+  uses?: readonly { id: string; used: readonly string[] | null }[];
+  references?: readonly string[];
+};
+
 /** Export visibility belongs to evaluations, not the shared CSS identity. */
 function mergeProvenance(values: Iterable<Provenance>): Provenance {
+  const contributions = [...values];
   const publicReferences = new Set<string>();
   const generatedVariables = new Set<string>();
   let opaque = false;
 
-  for (const value of values) {
+  for (const value of contributions) {
     if (!value || value.version !== 1) {
       opaque = true;
       continue;
@@ -59,7 +68,95 @@ function mergeProvenance(values: Iterable<Provenance>): Provenance {
     version: 1,
     publicReferences: [...publicReferences].sort(),
     generatedVariables: [...generatedVariables].sort(),
-    opaque
+    opaque,
+    ...(contributions.every((value) => value?.resources?.version === 2)
+      ? {
+          resources: {
+            version: 2 as const,
+            keyframes: [
+              ...new Set(
+                contributions.flatMap((value) => value!.resources!.keyframes)
+              )
+            ].sort(),
+            foreignKeyframes: [
+              ...new Set(
+                contributions.flatMap(
+                  (value) => value!.resources!.foreignKeyframes ?? []
+                )
+              )
+            ].sort(),
+            publicKeyframes: [
+              ...new Set(
+                contributions.flatMap((value) => [
+                  ...value!.resources!.publicKeyframes
+                ])
+              )
+            ].sort(),
+            themes: [...new Set(contributions[0]!.resources!.themes)]
+              .filter((name) =>
+                contributions.every((value) =>
+                  value!.resources!.themes.includes(name)
+                )
+              )
+              .sort(),
+            recipes: [
+              ...new Set(
+                contributions.flatMap((value) =>
+                  value!.resources!.recipes.map((recipe) => recipe.id)
+                )
+              )
+            ]
+              .sort()
+              .map((id) => {
+                const entries = contributions.map((value) =>
+                  value!.resources!.recipes.find((recipe) => recipe.id === id)
+                );
+
+                return {
+                  id,
+
+                  // Every contributor must agree that this rule belongs to the recipe.
+                  classes: (entries[0]?.classes ?? [])
+                    .filter((name) =>
+                      entries.every((entry) => entry?.classes.includes(name))
+                    )
+                    .sort(),
+                  references: [
+                    ...new Set(
+                      entries.flatMap((entry) => entry?.references ?? [])
+                    )
+                  ].sort()
+                };
+              }),
+            recipeUses: [
+              ...new Set(
+                contributions.flatMap((value) =>
+                  value!.resources!.recipes.map((recipe) => recipe.id)
+                )
+              )
+            ]
+              .sort()
+              .map((id) => {
+                const uses = contributions
+                  .filter((value) =>
+                    value!.resources!.recipes.some((recipe) => recipe.id === id)
+                  )
+                  .map(
+                    (value) =>
+                      value!.resources!.recipeUses?.find((use) => use.id === id)
+                        ?.used
+                  );
+
+                return {
+                  id,
+                  used: uses.every((use) => use != null)
+                    ? [...new Set(uses.flatMap((use) => [...use!]))].sort()
+                    : null
+                };
+              })
+          }
+        }
+      : {})
   };
 }
 
@@ -77,6 +174,24 @@ export function createDistChunkCss(
   const owners = new Map<string, Set<string>>();
   const provenanceByOwner = new Map<string, Map<string, Provenance>>();
   const optimized = new Map<string, Artifact>();
+  const recipeUses = new Map<
+    string,
+    readonly { id: string; used: readonly string[] | null }[]
+  >();
+
+  const privateResourceReferences = new Map<string, readonly string[]>();
+
+  // Original consumer code is inspected only after CSS capture and graph guards.
+  // Keep unchanged owners across watch builds; clearOwner releases both inputs.
+  const resourceProofs = new Map<
+    string,
+    (source: string) => Promise<ResourceProof>
+  >();
+
+  const resourceSources = new Map<string, string>();
+  const fingerprints = new Map<string, string>();
+  const dirty = new Set<string>();
+  const aggregation = new CssIrAggregation();
   let optimization: InternalCssIrOptimizationOptions | undefined;
   let config: ResolvedConfig;
   let enabled = false;
@@ -128,23 +243,48 @@ export function createDistChunkCss(
   }
 
   const recomputeProvenance = (id: string) => {
-    optimized.delete(id);
-
     const contributions = provenanceByOwner.get(id);
 
     if (!contributions?.size) {
       provenanceByOwner.delete(id);
       artifacts.delete(id);
+      fingerprints.delete(id);
+      optimized.delete(id);
+      dirty.add(id);
 
       return;
     }
 
     const artifact = artifacts.get(id)!;
+    const provenance = mergeProvenance(
+      [...contributions].map(([owner, value]) =>
+        value?.resources
+          ? {
+              ...value,
+              resources: {
+                ...value.resources,
+                recipeUses: recipeUses.get(owner),
+                publicKeyframes: value.resources.publicKeyframes.filter(
+                  (name) =>
+                    !privateResourceReferences.get(owner)?.includes(name)
+                )
+              }
+            }
+          : value
+      )
+    );
+
+    const fingerprint = digest(JSON.stringify(provenance));
+    if (fingerprints.get(id) === fingerprint) return;
+
+    fingerprints.set(id, fingerprint);
+    dirty.add(id);
+    optimized.delete(id);
     artifacts.set(id, {
       ...artifact,
       data: {
         ...artifact.data,
-        provenance: mergeProvenance(contributions.values())
+        provenance
       }
     });
   };
@@ -152,6 +292,10 @@ export function createDistChunkCss(
   const clearOwner = (owner: string) => {
     const previous = owners.get(owner);
     owners.delete(owner);
+    recipeUses.delete(owner);
+    privateResourceReferences.delete(owner);
+    resourceProofs.delete(owner);
+    resourceSources.delete(owner);
 
     for (const id of previous ?? []) {
       provenanceByOwner.get(id)?.delete(owner);
@@ -159,9 +303,51 @@ export function createDistChunkCss(
     }
   };
 
+  const recordRecipeUses = (
+    owner: string,
+    uses: NonNullable<ResourceProof["uses"]> = [],
+    references: readonly string[] = []
+  ) => {
+    if (
+      !enabled ||
+      (!optimization?.pruneRecipes && !optimization?.pruneKeyframes)
+    )
+      return;
+    if (
+      JSON.stringify([
+        recipeUses.get(owner),
+        privateResourceReferences.get(owner)
+      ]) === JSON.stringify([uses, references])
+    )
+      return;
+
+    recipeUses.set(owner, uses);
+    privateResourceReferences.set(owner, references);
+
+    for (const id of owners.get(owner) ?? []) recomputeProvenance(id);
+  };
+
   return {
     get enabled() {
       return enabled;
+    },
+
+    get needsResourceProofs() {
+      return (
+        enabled &&
+        (optimization?.pruneRecipes === true ||
+          optimization?.pruneKeyframes === true)
+      );
+    },
+
+    recordRecipeUses,
+
+    recordResourceProof(
+      owner: string,
+      analyze: (source: string) => Promise<ResourceProof>
+    ) {
+      resourceProofs.set(owner, analyze);
+      recordRecipeUses(owner);
     },
 
     get chunks() {
@@ -234,8 +420,24 @@ export function createDistChunkCss(
       return new Map<string, Artifact>();
     },
 
-    commit(owner: string, next: ReadonlyMap<string, Artifact>) {
-      clearOwner(owner);
+    commit(
+      owner: string,
+      next: ReadonlyMap<string, Artifact>,
+      source?: string
+    ) {
+      if (
+        source !== undefined &&
+        (optimization?.pruneRecipes || optimization?.pruneKeyframes)
+      )
+        resourceSources.set(owner, source);
+
+      // Retain immutable IR/facts for unchanged contributions instead of delete/re-add.
+      for (const id of owners.get(owner) ?? [])
+        if (!next.has(id)) {
+          provenanceByOwner.get(id)?.delete(owner);
+          recomputeProvenance(id);
+        }
+
       owners.set(owner, new Set(next.keys()));
 
       for (const [id, artifact] of next) {
@@ -257,6 +459,13 @@ export function createDistChunkCss(
       optimized.clear();
       owners.clear();
       provenanceByOwner.clear();
+      recipeUses.clear();
+      privateResourceReferences.clear();
+      resourceProofs.clear();
+      resourceSources.clear();
+      fingerprints.clear();
+      dirty.clear();
+      aggregation.clear();
       chunks = undefined;
     },
 
@@ -285,6 +494,15 @@ export function createDistChunkCss(
       const live = new Set(context.getModuleIds());
       const liveOwners = new Set([...live].map(ownerModuleId));
 
+      for (const owner of resourceProofs.keys())
+        if (!liveOwners.has(ownerModuleId(owner))) clearOwner(owner);
+
+      for (const owner of recipeUses.keys())
+        if (!liveOwners.has(ownerModuleId(owner))) {
+          recipeUses.delete(owner);
+          privateResourceReferences.delete(owner);
+        }
+
       // Watch builds retain unchanged owners. A removed consumer must no longer
       // keep shared resources public just because another owner keeps the CSS.
       for (const [owner, ids] of owners) {
@@ -304,7 +522,7 @@ export function createDistChunkCss(
         if (!ids.size) owners.delete(owner);
       }
 
-      const selected = [...artifacts].filter(([id]) => live.has(id));
+      let selected = [...artifacts].filter(([id]) => live.has(id));
       const cssIds = selected.map(([, artifact]) => artifact.origin);
       const opaque = config.plugins.find(
         (plugin) =>
@@ -335,33 +553,206 @@ export function createDistChunkCss(
             runtimeCssAccess.test(context.getModuleInfo?.(id)?.code ?? "")
           );
 
-          const result = internalOptimizeVanillaCssArtifacts(
-            new Map(selected.map(([id, artifact]) => [id, artifact.data])),
-            optimization,
+          const external =
             opaqueRuntime ||
-              [...live].some((id) =>
-                /\.(?:css|scss|sass|less|styl|stylus|pcss|postcss)(?:[?#]|$)/.test(
-                  id
-                )
+            [...live].some((id) =>
+              /\.(?:css|scss|sass|less|styl|stylus|pcss|postcss)(?:[?#]|$)/.test(
+                id
               )
+            );
+
+          const resourceBarrier = selected.some(
+            ([, { data }]) =>
+              !data.provenance ||
+              data.provenance.opaque ||
+              data.provenance.resources?.version !== 2
           );
 
-          for (const [id, data] of result.artifacts) {
-            const original = artifacts.get(id)!;
-            optimized.set(id, {
-              ...original,
+          const candidates = { recipes: 0, keyframes: 0 };
+
+          for (const [, { data }] of selected) {
+            candidates.recipes +=
+              data.provenance?.resources?.recipes.length ?? 0;
+            candidates.keyframes +=
+              data.provenance?.resources?.keyframes.length ?? 0;
+          }
+
+          const resourceSettings = {
+            pruneRecipes:
+              !!optimization.pruneRecipes &&
+              !external &&
+              !resourceBarrier &&
+              candidates.recipes > 0,
+            pruneKeyframes:
+              !!optimization.pruneKeyframes &&
+              !external &&
+              !resourceBarrier &&
+              candidates.keyframes > 0
+          };
+
+          let analyzedOwners = 0;
+
+          if (
+            resourceSettings.pruneRecipes ||
+            resourceSettings.pruneKeyframes
+          ) {
+            for (const [owner, analyze] of resourceProofs) {
+              const relevant = [...(owners.get(owner) ?? [])].some((id) => {
+                const resources = provenanceByOwner
+                  .get(id)
+                  ?.get(owner)?.resources;
+
+                return (
+                  (resourceSettings.pruneRecipes &&
+                    !!resources?.recipes.length) ||
+                  (resourceSettings.pruneKeyframes &&
+                    !!resources?.keyframes.length)
+                );
+              });
+
+              const source = resourceSources.get(owner);
+              if (!relevant || source === undefined) continue;
+
+              const proof = await analyze(source);
+              recordRecipeUses(owner, proof.uses, proof.references);
+              analyzedOwners++;
+            }
+
+            // Proof changes visibility, never CSS identity or module membership.
+            selected = selected.map(([id]) => [id, artifacts.get(id)!]);
+          }
+
+          if (optimization.pruneRecipes || optimization.pruneKeyframes)
+            report("css-resource-proofs", {
+              candidates,
+              analyzedOwners,
+              reason: external
+                ? "external-css"
+                : resourceBarrier
+                  ? "missing-or-opaque-provenance"
+                  : resourceSettings.pruneRecipes ||
+                      resourceSettings.pruneKeyframes
+                    ? "eligible"
+                    : "no-candidates"
+            });
+
+          const input = new Map(
+            selected.map(([id, artifact]) => [id, artifact.data])
+          );
+
+          const componentPasses =
+            resourceSettings.pruneRecipes ||
+            resourceSettings.pruneKeyframes ||
+            optimization.mergeConditionalRules ||
+            optimization.internThemeValues;
+
+          const topology = aggregation.update(input);
+          const groups =
+            optimization.internThemeValues ||
+            [...input.values()].some(internalCssResourcesNeedWholeGraph)
+              ? [[...input.keys()].sort()]
+              : topology;
+
+          // Legacy opaque-variable semantics remain global, even for independent groups.
+          const variableBarrier = [...input.values()].some((data) =>
+            internalCssVariableLivenessOpaque(
               data,
-              serializationKey: `${id}:ir-opt-v2:${internalHashVanillaCssArtifact(data)}`
+              resourceSettings.pruneKeyframes
+            )
+          );
+
+          const settings = {
+            ...optimization,
+            ...resourceSettings,
+            ...(componentPasses && variableBarrier
+              ? { pruneGenerated: false }
+              : {})
+          };
+
+          let reanalyzedOwners = 0;
+          let cacheHits = 0;
+
+          for (const ids of componentPasses
+            ? groups
+            : [[...input.keys()].sort()]) {
+            const key = `css-ir-opt-resources-v6-ve1.20.1:${digest(
+              JSON.stringify([
+                ids.map((id) => [id, fingerprints.get(id)]),
+                settings,
+                external,
+                variableBarrier,
+                resourceBarrier
+              ])
+            )}`;
+
+            let created = false;
+
+            const create = async () => {
+              created = true;
+
+              const result = internalOptimizeVanillaCssArtifacts(
+                new Map(ids.map((id) => [id, input.get(id)!])),
+                settings,
+                external
+              );
+
+              const value = {
+                artifacts: [...result.artifacts].map(([id, data]) => ({
+                  id,
+                  data,
+                  serializationKey: `${id}:ir-opt-v3:${internalHashVanillaCssArtifact(data)}`
+                })),
+                diagnostics: result.diagnostics
+              };
+
+              return {
+                value,
+                bytes: Buffer.byteLength(JSON.stringify(value)),
+                dependencies: [],
+
+                valid: async () => true
+              };
+            };
+
+            const cache = getCache();
+            const result = cache
+              ? await cache.run(key, create)
+              : (await create()).value;
+
+            if (created) reanalyzedOwners += ids.length;
+            else cacheHits += ids.length;
+
+            for (const { id, data, serializationKey } of result.artifacts)
+              optimized.set(id, {
+                ...artifacts.get(id)!,
+                data,
+                serializationKey
+              });
+
+            report("css-ir-optimize", {
+              applied: true,
+              ...result.diagnostics,
+              ...(componentPasses && variableBarrier
+                ? { liveness: "opaque-resource-references" }
+                : {}),
+              ...(resourceBarrier
+                ? { resourceBailout: "missing-or-opaque-provenance" }
+                : {}),
+              ...(opaqueRuntime ? { liveness: "opaque-runtime-css" } : {})
             });
           }
 
-          report("css-ir-optimize", {
-            applied: true,
-            ...result.diagnostics,
-            ...(opaqueRuntime ? { liveness: "opaque-runtime-css" } : {})
+          report("css-ir-aggregation", {
+            dirtyOwners: dirty.size,
+            reanalyzedOwners,
+            cacheHits,
+            components: groups.length,
+            cacheEnabled: !!getCache()
           });
         }
       }
+
+      dirty.clear();
 
       if (preview)
         for (const [id, artifact] of selected) {

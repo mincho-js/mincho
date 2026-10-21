@@ -1,4 +1,6 @@
 import type { VanillaCssArtifact } from "./vanillaCssIr.js";
+import { internThemeValues } from "./cssIrThemeValues.js";
+import { prunePrivateCssResources } from "./cssIrResources.js";
 
 type CssObject = VanillaCssArtifact["cssObjs"][number];
 
@@ -8,6 +10,10 @@ export interface CssIrOptimizationOptions {
   mergeRules: boolean;
   pruneGenerated: boolean;
   compactThemes: boolean;
+  mergeConditionalRules?: boolean;
+  pruneKeyframes?: boolean;
+  pruneRecipes?: boolean;
+  internThemeValues?: boolean;
 }
 
 interface Facts {
@@ -18,6 +24,7 @@ interface Facts {
 }
 
 const factsCache = new WeakMap<VanillaCssArtifact["cssObjs"], Facts>();
+const animationFactsCache = new WeakMap<VanillaCssArtifact["cssObjs"], Facts>();
 
 const variable = (value: string) =>
   /^(--[A-Za-z_][A-Za-z0-9_-]*)$/.exec(value)?.[1] ??
@@ -26,8 +33,9 @@ const variable = (value: string) =>
 const object = (value: unknown): value is RecordValue =>
   value !== null && typeof value === "object" && !Array.isArray(value);
 
-function facts(artifact: VanillaCssArtifact): Facts {
-  const cached = factsCache.get(artifact.cssObjs);
+function facts(artifact: VanillaCssArtifact, allowAnimation = false): Facts {
+  const cache = allowAnimation ? animationFactsCache : factsCache;
+  const cached = cache.get(artifact.cssObjs);
   if (cached) return cached;
 
   const result: Facts = {
@@ -53,7 +61,11 @@ function facts(artifact: VanillaCssArtifact): Facts {
     } else if (object(value)) {
       for (const [key, child] of Object.entries(value)) {
         // Removing a registered property's transitions can change event delivery.
-        if (/^(?:animation|transition)/i.test(key)) result.opaque = true;
+        if (
+          /^transition/i.test(key) ||
+          (!allowAnimation && /^animation/i.test(key))
+        )
+          result.opaque = true;
 
         if (key === "vars" && object(child)) {
           for (const [name, assigned] of Object.entries(child)) {
@@ -94,20 +106,23 @@ function facts(artifact: VanillaCssArtifact): Facts {
       );
   }
 
-  factsCache.set(artifact.cssObjs, result);
+  cache.set(artifact.cssObjs, result);
 
   return result;
 }
 
 /** Closed resource graph. Missing export provenance or opaque CSS is a barrier. */
-function deadVariables(artifacts: readonly VanillaCssArtifact[]) {
+function deadVariables(
+  artifacts: readonly VanillaCssArtifact[],
+  allowAnimation = false
+) {
   const candidates = new Set<string>();
   const live = new Set<string>();
   const edges = new Map<string, Set<string>>();
 
   for (const artifact of artifacts) {
     const provenance = artifact.provenance;
-    const info = facts(artifact);
+    const info = facts(artifact, allowAnimation);
     if (!provenance || provenance.opaque || info.opaque)
       return { dead: new Set<string>(), reason: "opaque-resource-references" };
 
@@ -144,6 +159,18 @@ function deadVariables(artifacts: readonly VanillaCssArtifact[]) {
     dead: new Set([...candidates].filter((name) => !live.has(name))),
     reason: "closed-resource-graph"
   };
+}
+
+/** Keep the existing whole-application variable barrier when aggregating components. */
+export function cssVariableLivenessOpaque(
+  artifact: VanillaCssArtifact,
+  allowAnimation = false
+): boolean {
+  return (
+    !artifact.provenance ||
+    artifact.provenance.opaque ||
+    facts(artifact, allowAnimation).opaque
+  );
 }
 
 function prune(value: unknown, dead: ReadonlySet<string>): unknown {
@@ -196,23 +223,86 @@ function localSelector(
   return name;
 }
 
+/** A single ordered condition path; layer, selector and sibling paths are barriers. */
+function conditionalRule(value: unknown): boolean {
+  if (!object(value) || Object.keys(value).length !== 1) return false;
+
+  const [kind, children] = Object.entries(value)[0]!;
+  if (
+    !["@media", "@supports"].includes(kind) ||
+    !object(children) ||
+    Object.keys(children).length !== 1
+  )
+    return false;
+
+  const child = Object.values(children)[0];
+
+  return flatRule(child) || conditionalRule(child);
+}
+
 /** Preserve file order, declaration/fallback order, conditions and class names. */
 export function optimizeVanillaCssArtifacts(
   input: ReadonlyMap<string, VanillaCssArtifact>,
   options: CssIrOptimizationOptions,
   externalCss = false
 ) {
+  const resources =
+    options.pruneRecipes || options.pruneKeyframes
+      ? prunePrivateCssResources(input, options, externalCss)
+      : undefined;
+
+  input = resources?.artifacts ?? input;
+
   const liveness =
     options.pruneGenerated && !externalCss
-      ? deadVariables([...input.values()])
+      ? deadVariables(
+          [...input.values()],
+          resources?.diagnostics.resourceBailout === "closed-resource-graph"
+        )
       : {
           dead: new Set<string>(),
           reason: externalCss ? "external-css" : "disabled"
         };
 
   const artifacts = new Map<string, VanillaCssArtifact>();
+  const reserved = new Set<string>();
+  const registered = new Set<string>();
+  const generatedHelpers = new Map<string, string>();
+  let escapedCss = false;
+
+  const findEscapes = (value: unknown): void => {
+    if (typeof value === "string") escapedCss ||= value.includes("\\");
+    else if (value && typeof value === "object")
+      for (const [key, child] of Object.entries(value)) {
+        findEscapes(key);
+        findEscapes(child);
+      }
+  };
+
+  if (options.internThemeValues)
+    for (const artifact of input.values()) {
+      findEscapes(artifact.cssObjs);
+
+      for (const match of JSON.stringify(artifact).matchAll(
+        /--[A-Za-z_][A-Za-z0-9_-]*/g
+      ))
+        reserved.add(match[0]);
+
+      for (const root of artifact.cssObjs)
+        if (root.type === "property") registered.add(root.name);
+    }
+
+  const themeValues = {
+    candidates: 0,
+    applied: 0,
+    bailout: 0,
+    savedBytes: 0,
+    addedBytes: 0
+  };
+
   let removedRules = 0;
   let mergedRules = 0;
+  const conditionalMerges = { candidates: 0, applied: 0, bailout: 0 };
 
   for (const [id, artifact] of input) {
     let roots: CssObject[] = [];
@@ -245,7 +335,27 @@ export function optimizeVanillaCssArtifacts(
       roots.push(next);
     }
 
-    if (options.mergeRules || options.compactThemes) {
+    if (options.internThemeValues && !externalCss && !escapedCss) {
+      const result = internThemeValues(
+        { ...artifact, cssObjs: roots },
+        reserved,
+        registered,
+        generatedHelpers
+      );
+
+      roots = result.artifact.cssObjs;
+
+      for (const key of Object.keys(
+        themeValues
+      ) as (keyof typeof themeValues)[])
+        themeValues[key] += result.diagnostics[key];
+    }
+
+    if (
+      options.mergeRules ||
+      options.compactThemes ||
+      options.mergeConditionalRules
+    ) {
       const merged: CssObject[] = [];
       const names = new Set(artifact.localClassNames);
       let previous: { signature: string; selectors: string[] } | undefined;
@@ -256,10 +366,17 @@ export function optimizeVanillaCssArtifacts(
         const theme =
           object(rule) && Object.keys(rule).every((key) => key === "vars");
 
+        const conditional =
+          object(rule) && ("@media" in rule || "@supports" in rule);
+
+        if (options.mergeConditionalRules && conditional)
+          conditionalMerges.candidates++;
+
         const signature =
           selector &&
-          flatRule(rule) &&
-          (theme ? options.compactThemes : options.mergeRules)
+          ((flatRule(rule) &&
+            (theme ? options.compactThemes : options.mergeRules)) ||
+            (options.mergeConditionalRules && conditionalRule(rule)))
             ? JSON.stringify(rule)
             : undefined;
 
@@ -273,6 +390,8 @@ export function optimizeVanillaCssArtifacts(
             rule: rule as Extract<CssObject, { type: "global" }>["rule"]
           };
           mergedRules++;
+
+          if (conditional) conditionalMerges.applied++;
         } else {
           merged.push(root);
           previous = signature
@@ -293,6 +412,15 @@ export function optimizeVanillaCssArtifacts(
       removedVariables: liveness.dead.size,
       removedRules,
       mergedRules,
+      conditionalMerges: {
+        ...conditionalMerges,
+        bailout: conditionalMerges.candidates - conditionalMerges.applied
+      },
+      themeValues: {
+        ...themeValues,
+        ...(escapedCss ? { reason: "escaped-css" } : {})
+      },
+      ...(resources ? { resources: resources.diagnostics } : {}),
       liveness: liveness.reason
     }
   };

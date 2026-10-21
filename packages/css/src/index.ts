@@ -21,10 +21,9 @@ export {
   globalFontFace,
   globalKeyframes,
   globalLayer,
-  keyframes,
   layer
 } from "@vanilla-extract/css";
-export { createVar } from "./compilerResources.js";
+export { createVar, keyframes } from "./compilerResources.js";
 
 export { globalCss, css, selector } from "./css/index.js";
 export type { CSSRuleWith } from "./css/types.js";

@@ -235,6 +235,26 @@ async function main(): Promise<void> {
         join(consumerRoot, "fixture", "modules"),
         true
       );
+      for (const args of [
+        ["--scenario", "variants", "--workers", "1"],
+        ["--scenario", "variants", "--format", "cjs"],
+        ["--scenario", "tokens"],
+        ["--scenario", "keyframes"],
+        ["--scenario", "conditional"],
+        ["--browser"]
+      ]) {
+        await runNode(
+          [
+            "fixture/modules/component-systems.mjs",
+            "--profile",
+            "all",
+            ...args
+          ],
+          join(consumerRoot, "fixture", "modules", "component-systems"),
+          true
+        );
+      }
+
       await runNode(
         ["fixture/modules/css-bundling.mjs"],
         join(consumerRoot, "fixture", "modules", "css-bundling-output"),

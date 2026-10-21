@@ -1,4 +1,119 @@
-import { createVar as vanillaCreateVar } from "@vanilla-extract/css";
+import {
+  createVar as vanillaCreateVar,
+  keyframes as vanillaKeyframes
+} from "@vanilla-extract/css";
+
+export interface CompilerStyleResources {
+  version: 2;
+  keyframes: string[];
+  foreignKeyframes?: string[];
+  recipes: { id: string; classes: string[]; references: string[] }[];
+  themes: string[];
+}
+
+const styleKey = Symbol.for("@mincho-js/compiler-style-resources/v2");
+const styleState = globalThis as typeof globalThis & {
+  [styleKey]?: (CompilerStyleResources & {
+    classNames: string[];
+    localKeyframe: number;
+  })[];
+};
+
+export function beginCompilerStyleCapture(): CompilerStyleResources {
+  const capture: CompilerStyleResources & {
+    classNames: string[];
+    localKeyframe: number;
+  } = {
+    version: 2,
+    keyframes: [],
+    foreignKeyframes: [],
+    recipes: [],
+    themes: [],
+    classNames: [],
+    localKeyframe: 0
+  };
+
+  (styleState[styleKey] ??= []).push(capture);
+
+  return capture;
+}
+
+export function endCompilerStyleCapture(): void {
+  styleState[styleKey]?.pop();
+
+  if (!styleState[styleKey]?.length) delete styleState[styleKey];
+}
+
+export function recordCompilerTheme(selector: string): void {
+  const captures = styleState[styleKey];
+  captures?.[captures.length - 1]?.themes.push(selector);
+}
+
+export function recordCompilerClass(name: string): void {
+  const captures = styleState[styleKey];
+  captures?.[captures.length - 1]?.classNames.push(name);
+}
+
+export function recordCompilerKeyframeRule(name: string): void {
+  const captures = styleState[styleKey];
+  const capture = captures?.[captures.length - 1];
+
+  if (capture && !capture.localKeyframe) capture.foreignKeyframes!.push(name);
+}
+
+export function compilerRecipeStart(): number | undefined {
+  const captures = styleState[styleKey];
+  return captures?.[captures.length - 1]?.classNames.length;
+}
+
+export function recordCompilerRecipe(
+  config: {
+    defaultClassName: string;
+    variantClassNames: Record<string, Record<string, string>>;
+    compoundVariants: readonly (readonly [unknown, string])[];
+  },
+  start: number | undefined
+): void {
+  const captures = styleState[styleKey];
+  const capture = captures?.[captures.length - 1];
+  if (!capture || start === undefined) return;
+
+  const generated = new Set(capture.classNames.slice(start));
+  const references = [
+    ...new Set(
+      [
+        config.defaultClassName,
+        ...Object.values(config.variantClassNames).flatMap(Object.values),
+        ...config.compoundVariants.map(([, name]) => name)
+      ]
+        .flatMap((name) => name.split(/\s+/))
+        .filter(Boolean)
+    )
+  ].sort();
+
+  capture.recipes.push({
+    id: config.defaultClassName,
+    classes: references.filter((name) => generated.has(name)),
+    references
+  });
+}
+
+/** Capture only the local API; globalKeyframes always remains author-owned. */
+export const keyframes: typeof vanillaKeyframes = (...args) => {
+  const captures = styleState[styleKey];
+  const capture = captures?.[captures.length - 1];
+
+  if (capture) capture.localKeyframe++;
+
+  try {
+    const name = Reflect.apply(vanillaKeyframes, undefined, args) as string;
+    capture?.keyframes.push(name);
+
+    return name;
+  } finally {
+    if (capture) capture.localKeyframe--;
+  }
+};
 
 // A symbol shares the active capture across bundled copies of the CSS package.
 // Captures live only as long as an evaluation; ordinary API calls retain nothing.

@@ -20,6 +20,11 @@ import {
 } from "./presetCanonical.js";
 export { presetArtifactDiagnostics } from "./presetArtifactReaders.js";
 export {
+  beginCompilerStyleCapture,
+  endCompilerStyleCapture,
+  recordCompilerClass,
+  recordCompilerKeyframeRule,
+  type CompilerStyleResources,
   beginCompilerResourceCapture,
   endCompilerResourceCapture,
   beginCompilerTokenCapture,

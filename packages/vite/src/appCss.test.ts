@@ -20,7 +20,11 @@ it("keeps IR optimization opt-in and honors explicit opt-outs", () => {
     mergeRules: true,
     pruneGenerated: true,
     compactThemes: true,
-    shareAtoms: true
+    shareAtoms: true,
+    mergeConditionalRules: false,
+    pruneKeyframes: false,
+    pruneRecipes: false,
+    internThemeValues: false
   });
   expect(
     resolveAppCssOptimization({ mode: "dist-chunk" }, false)
@@ -40,7 +44,11 @@ it("keeps IR optimization opt-in and honors explicit opt-outs", () => {
     mergeRules: false,
     pruneGenerated: true,
     compactThemes: true,
-    shareAtoms: false
+    shareAtoms: false,
+    mergeConditionalRules: false,
+    pruneKeyframes: false,
+    pruneRecipes: false,
+    internThemeValues: false
   });
   expect(
     resolveAppCssOptimization(
@@ -52,6 +60,44 @@ it("keeps IR optimization opt-in and honors explicit opt-outs", () => {
     validateAppCssOptions({ optimize: { mergeRules: "yes" } as never })
   ).toThrow("appCss.optimize");
 });
+
+it.each([undefined, true, {}])(
+  "keeps private pruning opt-in: %s",
+  (optimize) => {
+    for (const production of [false, true]) {
+      const result = resolveAppCssOptimization(
+        { mode: "dist-chunk", optimize },
+        production
+      );
+
+      if (optimize === undefined) expect(result).toBeUndefined();
+      else
+        expect(result).toMatchObject({
+          pruneRecipes: false,
+          pruneKeyframes: false
+        });
+    }
+  }
+);
+
+it.each([false, true])(
+  "honors explicit pruning flags in production=%s",
+  (production) => {
+    for (const enabled of [false, true])
+      expect(
+        resolveAppCssOptimization(
+          {
+            mode: "dist-chunk",
+            optimize: {
+              pruneRecipes: enabled,
+              pruneKeyframes: enabled
+            }
+          },
+          production
+        )
+      ).toMatchObject({ pruneRecipes: enabled, pruneKeyframes: enabled });
+  }
+);
 
 const roots: string[] = [];
 

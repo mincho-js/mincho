@@ -12,6 +12,10 @@ import { css } from "../css/index.js";
 import type { CSSRuleWith } from "../css/types.js";
 import { identifierName, getDebugName, getVarName } from "../utils.js";
 import { createRuntimeFn } from "./createRuntimeFn.js";
+import {
+  compilerRecipeStart,
+  recordCompilerRecipe
+} from "../compilerResources.js";
 import type {
   ComplexPropDefinitions,
   ConditionalVariants,
@@ -115,6 +119,7 @@ export function rulesImpl<
   ConditionalVariants<Variants, ToggleVariants>,
   Exclude<Props, undefined>
 > {
+  const resourceStart = compilerRecipeStart();
   const {
     toggles = {},
     variants = {},
@@ -232,6 +237,8 @@ export function rulesImpl<
     defaultVariants: transformVariantSelection(defaultVariants),
     compoundVariants: compounds
   };
+
+  recordCompilerRecipe(config, resourceStart);
 
   return addFunctionSerializer<
     RuntimeFn<ConditionalVariants<Variants, ToggleVariants>, PureProps>

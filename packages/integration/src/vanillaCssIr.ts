@@ -3,6 +3,13 @@ import type { Adapter, FileScope } from "@vanilla-extract/css";
 import { createHash } from "node:crypto";
 import { setAdapter, removeAdapter } from "@vanilla-extract/css/adapter";
 import { transformCss } from "@vanilla-extract/css/transformCss";
+import type { CompilerStyleResources } from "@mincho-js/css/defineRules/registry";
+
+/** Compiler use proof, kept separate from CSS content identity. Null pins all selections. */
+export interface PrivateRecipeUse {
+  id: string;
+  used: readonly string[] | null;
+}
 
 export interface VanillaCssArtifact {
   /** Absolute authoring file, used for URL/PostCSS resolution at output time. */
@@ -19,6 +26,10 @@ export interface VanillaCssArtifact {
     publicReferences: readonly string[];
     generatedVariables: readonly string[];
     opaque: boolean;
+    resources?: CompilerStyleResources & {
+      publicKeyframes: readonly string[];
+      recipeUses?: readonly PrivateRecipeUse[];
+    };
   };
 }
 
@@ -56,23 +67,44 @@ export function hashVanillaCssArtifact(artifact: VanillaCssArtifact): string {
 export function annotateVanillaCssArtifacts(
   artifacts: readonly VanillaCssArtifact[],
   serializedExports: readonly string[],
-  generatedVariables: readonly string[] = []
+  generatedVariables: readonly string[] = [],
+  resources?: CompilerStyleResources
 ): void {
   const references = new Set<string>();
+  const resourceReferences = new Set<string>();
   let opaque = false;
+  let resourcesOpaque = false;
 
   for (const source of serializedExports) {
     if (/\\(?:u|x)/.test(source)) opaque = true;
+    else if (source.includes("\\")) resourcesOpaque = true;
 
     for (const match of source.matchAll(/--[A-Za-z_][A-Za-z0-9_-]*/g))
       references.add(match[0]);
+
+    for (const match of source.matchAll(/[A-Za-z_][A-Za-z0-9_-]*/g))
+      resourceReferences.add(match[0]);
   }
 
   const provenance = {
     version: 1 as const,
     publicReferences: [...references].sort(),
     generatedVariables: [...generatedVariables].sort(),
-    opaque
+    opaque,
+    ...(resources?.version === 2 && !resourcesOpaque
+      ? {
+          resources: {
+            version: 2 as const,
+            keyframes: [...resources.keyframes].sort(),
+            foreignKeyframes: [...(resources.foreignKeyframes ?? [])].sort(),
+            recipes: structuredClone(resources.recipes),
+            themes: [...resources.themes].sort(),
+            publicKeyframes: resources.keyframes.filter((name) =>
+              resourceReferences.has(name)
+            )
+          }
+        }
+      : {})
   };
 
   for (const artifact of artifacts) artifact.provenance = provenance;

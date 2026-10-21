@@ -1,5 +1,5 @@
 import { generateIdentifier, fallbackVar } from "@vanilla-extract/css";
-import { createVar } from "../compilerResources.js";
+import { createVar, recordCompilerTheme } from "../compilerResources.js";
 import { registerClassName } from "@vanilla-extract/css/adapter";
 import { getFileScope, setFileScope } from "@vanilla-extract/css/fileScope";
 import type {
@@ -200,6 +200,7 @@ function createThemeResult<const ThemeTokens extends Theme>(
   );
 
   globalCss(themeClassName, rule);
+  recordCompilerTheme(themeClassName);
 
   return [themeClassName, resolvedThemeTokens, contract];
 }

@@ -1,6 +1,9 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { InternalVanillaCssArtifact } from "@mincho-js/integration";
+import {
+  InternalCompilationCache,
+  type InternalVanillaCssArtifact
+} from "@mincho-js/integration";
 import {
   build,
   createBuilder,
@@ -126,6 +129,12 @@ async function compile(
       reason?: string;
       removedVariables?: number;
       liveness?: string;
+      resources?: { removedRecipeRules: number; removedKeyframes: number };
+      themeValues?: { applied: number; savedBytes: number };
+      reanalyzedOwners?: number;
+      cacheHits?: number;
+      analyzedOwners?: number;
+      candidates?: { recipes: number; keyframes: number };
     };
   }[] = report.builds.flatMap((b: { events: unknown[] }) => b.events);
 
@@ -138,8 +147,429 @@ async function compile(
   };
 }
 
+describe("component-system production passes", () => {
+  it.each([
+    { pruneRecipes: true, pruneKeyframes: true },
+    { pruneRecipes: true, pruneKeyframes: false },
+    { pruneRecipes: false, pruneKeyframes: true }
+  ])(
+    "skips proof analysis and preserves output with no captured resources: %j",
+    async (optimize) => {
+      const root = await fixture({
+        "main.js": `import {css,createVar} from '@mincho-js/css';
+        const token=createVar(); export const a=css({vars:{[token]:'red'},color:'black'});
+        export const b=css({color:'black'});`
+      });
+
+      const baseline = await compile(root, {
+        appCss: { optimize: { pruneRecipes: false, pruneKeyframes: false } }
+      });
+
+      const result = await compile(root, { appCss: { optimize } });
+
+      expect(result.text).toBe(baseline.text);
+      expect(
+        result.events.some(
+          (event) => event.phase === "private-resource-analysis"
+        )
+      ).toBe(false);
+      expect(
+        result.events.find((event) => event.phase === "css-resource-proofs")
+          ?.detail
+      ).toMatchObject({
+        analyzedOwners: 0,
+        reason: "no-candidates",
+        candidates: { recipes: 0, keyframes: 0 }
+      });
+    }
+  );
+
+  it.each(["cssom", "external", "postcss"])(
+    "skips private proofs behind the %s guard",
+    async (guard) => {
+      const root = await fixture({
+        "main.js": `${guard === "external" ? "import './home.css';" : ""}
+      import {rules} from '@mincho-js/css'; const button=rules({variants:{size:{small:{fontSize:12},large:{fontSize:90}}}});
+      globalThis.cls=button({size:'small'}); ${guard === "cssom" ? "globalThis.observe=element=>getComputedStyle(element);" : ""}`
+      });
+
+      const config =
+        guard === "postcss" ? { css: { postcss: { plugins: [] } } } : {};
+
+      const baseline = await compile(
+        root,
+        {
+          appCss: { optimize: { pruneRecipes: false, pruneKeyframes: false } }
+        },
+        config
+      );
+
+      const result = await compile(
+        root,
+        { appCss: { optimize: { pruneRecipes: true, pruneKeyframes: true } } },
+        config
+      );
+
+      expect(result.text).toBe(baseline.text);
+      expect(result.text).toContain("font-size: 90px");
+      expect(
+        result.events.some(
+          (event) => event.phase === "private-resource-analysis"
+        )
+      ).toBe(false);
+
+      if (guard !== "postcss")
+        expect(
+          result.events.find((event) => event.phase === "css-resource-proofs")
+            ?.detail
+        ).toMatchObject({
+          analyzedOwners: 0,
+          reason: "external-css",
+          candidates: { recipes: 1 }
+        });
+    }
+  );
+
+  it("proves scalar-only keyframes and preserves escaping names when pruning is enabled", async () => {
+    const root = await fixture({
+      "main.js": `import {keyframes,css} from '@mincho-js/css';
+      const unused=keyframes({from:{opacity:0},to:{opacity:0.75}});
+      const alias=unused;
+      export const live=keyframes({from:{opacity:0},to:{opacity:1}});
+      export const style=css({color:'black'});`
+    });
+
+    const result = await compile(root, {
+      appCss: { optimize: { pruneKeyframes: true } }
+    });
+
+    expect(result.text.match(/@keyframes/g)).toHaveLength(1);
+    expect(result.text).not.toContain("opacity: 0.75");
+    expect(
+      result.events.some((event) => event.phase === "private-resource-analysis")
+    ).toBe(true);
+  });
+
+  it("updates use-only watch edits, restores removed owners and recovers from errors with workers", async () => {
+    const author = (size: string) =>
+      `import './guard.js'; import {rules} from '@mincho-js/css'; const button=rules({variants:{size:{small:{fontSize:12},large:{fontSize:90}}}}); globalThis.cls=button({size:'${size}'});`;
+
+    const root = await fixture({
+      "main.js": author("small"),
+      "guard.js": "globalThis.guard=0;"
+    });
+
+    let latest = "";
+    const watcher = (await build({
+      root,
+      configFile: false,
+      logLevel: "silent",
+      plugins: [
+        minchoVitePlugin({
+          cache: { type: "memory" },
+          execution: { workers: 1 },
+          appCss: {
+            mode: "dist-chunk",
+            optimize: { pruneRecipes: true, pruneKeyframes: true }
+          }
+        }),
+        {
+          name: "observe-resource-watch",
+
+          generateBundle(_options, bundle) {
+            latest = Object.values(bundle)
+              .filter(
+                (item) =>
+                  item.type === "asset" && item.fileName.endsWith(".css")
+              )
+              .map((item) => (item as Rollup.OutputAsset).source)
+              .join("\n");
+          }
+        }
+      ],
+      build: {
+        watch: { buildDelay: 150 },
+        write: false,
+        minify: false,
+        cssMinify: false
+      }
+    })) as Rollup.RollupWatcher;
+
+    const next = (error = false) =>
+      new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          watcher.off("event", event);
+          reject(new Error("watch timeout"));
+        }, 30000);
+
+        const event = (result: Rollup.RollupWatcherEvent) => {
+          if (result.code !== "BUNDLE_END" && result.code !== "ERROR") return;
+
+          clearTimeout(timeout);
+          watcher.off("event", event);
+
+          if ((result.code === "ERROR") !== error)
+            reject(new Error(`Unexpected watch ${result.code}`));
+          else resolve();
+        };
+
+        watcher.on("event", event);
+      });
+
+    const edit = async (source: string, error = false, file = "main.js") => {
+      const done = next(error);
+      await writeFile(join(root, file), source);
+      await done;
+    };
+
+    try {
+      await next();
+
+      expect(latest).toContain("font-size: 12px");
+      expect(latest).not.toContain("font-size: 90px");
+
+      // The recipe owner stays in Rollup's transform cache while the graph
+      // guard appears and disappears. Re-enable proofs from the original use.
+      await edit(
+        "globalThis.observe=element=>getComputedStyle(element);",
+        false,
+        "guard.js"
+      );
+
+      expect(latest).toContain("font-size: 12px");
+      expect(latest).toContain("font-size: 90px");
+
+      await edit("globalThis.guard=1;", false, "guard.js");
+
+      expect(latest).toContain("font-size: 12px");
+      expect(latest).not.toContain("font-size: 90px");
+
+      await edit(author("large"));
+
+      expect(latest).toContain("font-size: 90px");
+      expect(latest).not.toContain("font-size: 12px");
+
+      await edit("const broken = ;", true);
+      await edit(author("small"));
+
+      expect(latest).toContain("font-size: 12px");
+      expect(latest).not.toContain("font-size: 90px");
+
+      await edit("globalThis.cls='removed';");
+
+      expect(latest).toBe("");
+
+      await edit(author("large"));
+
+      expect(latest).toContain("font-size: 90px");
+      expect(latest).not.toContain("font-size: 12px");
+    } finally {
+      await watcher.close();
+    }
+  });
+
+  it("reuses independent immutable groups, invalidates use-only edits and drops removed owners", async () => {
+    const events: { phase: string; detail?: Record<string, unknown> }[] = [];
+    const cache = new InternalCompilationCache();
+    const adapter = createDistChunkCss(
+      (phase, detail) =>
+        events.push({
+          phase,
+          detail: detail as Record<string, unknown> | undefined
+        }),
+      () => cache
+    );
+
+    adapter.configure(
+      {
+        command: "build",
+        root: process.cwd(),
+        css: {},
+        build: { cssCodeSplit: true },
+        plugins: [
+          { name: "vite:css", transform: async (code: string) => code },
+          { name: "vite:css-post", transform: async () => "export default '';" }
+        ]
+      } as unknown as ResolvedConfig,
+      true,
+      {
+        mergeRules: false,
+        compactThemes: false,
+        pruneGenerated: false,
+        pruneRecipes: true
+      }
+    );
+
+    const publish = (owner: string, name: string) => {
+      const tx = adapter.transaction();
+      adapter.collect(
+        {
+          origin: owner,
+          fileScope: { filePath: owner, packageName: "test" },
+          cssObjs: [{ type: "local", selector: name, rule: { color: "red" } }],
+          localClassNames: [name],
+          composedClassLists: [],
+          usedCompositions: [],
+          provenance: {
+            version: 1,
+            opaque: false,
+            publicReferences: [],
+            generatedVariables: [],
+            resources: {
+              version: 2,
+              themes: [],
+              keyframes: [],
+              publicKeyframes: [],
+              recipes: [{ id: name, classes: [name], references: [name] }]
+            }
+          }
+        },
+        tx
+      );
+      adapter.commit(owner, tx);
+      adapter.recordRecipeUses(owner, [{ id: name, used: [name] }]);
+
+      return [...tx.keys()][0]!;
+    };
+
+    const a = publish("/a.js", "a");
+    const b = publish("/b.js", "b");
+    let live = ["/a.js", "/b.js", a, b];
+
+    const preview = async () => {
+      const css: string[] = [];
+      await adapter.plan({ getModuleIds: () => live.values() }, (_id, source) =>
+        css.push(source)
+      );
+
+      return css.join("\n");
+    };
+
+    expect(await preview()).toContain(".a");
+    expect(
+      events.findLast((event) => event.phase === "css-ir-aggregation")?.detail
+        ?.reanalyzedOwners
+    ).toBe(2);
+
+    adapter.begin();
+    await preview();
+
+    expect(
+      events.findLast((event) => event.phase === "css-ir-aggregation")?.detail
+    ).toMatchObject({ reanalyzedOwners: 0, cacheHits: 2 });
+
+    adapter.recordRecipeUses("/a.js", [{ id: "a", used: [] }]);
+
+    expect(await preview()).not.toContain(".a");
+    expect(
+      events.findLast((event) => event.phase === "css-ir-aggregation")?.detail
+    ).toMatchObject({ reanalyzedOwners: 1, cacheHits: 1 });
+
+    live = ["/b.js", b];
+
+    expect(await preview()).toContain(".b");
+    expect(() => adapter.load(a)).toThrow("Missing dist-chunk");
+    expect(publish("/a.js", "a")).toBe(a);
+
+    live = ["/a.js", "/b.js", a, b];
+
+    expect(await preview()).toContain(".a");
+  });
+
+  it.each([0, 1])(
+    "prunes actual private recipe selections and their keyframes (workers=%i)",
+    async (workers) => {
+      const root = await fixture({
+        "main.js": `import {rules, keyframes} from '@mincho-js/css';
+        const selected = keyframes({from:{opacity:0},to:{opacity:1}});
+        const unused = keyframes({from:{opacity:0.25},to:{opacity:0.75}});
+        const button = rules({variants:{size:{small:{fontSize:12,animationName:selected},large:{fontSize:90,animationName:unused}}},defaultVariants:{size:'small'}});
+        globalThis.classes = [button(), button({size: globalThis.flag ? 'small' : 'small'})];`
+      });
+
+      const baseline = await compile(root, {
+        appCss: { optimize: false },
+        execution: { workers }
+      });
+
+      const result = await compile(root, {
+        execution: { workers },
+        appCss: { optimize: { pruneRecipes: true, pruneKeyframes: true } }
+      });
+
+      expect(baseline.text).toContain("font-size: 90px");
+      expect(result.text).not.toContain("font-size: 90px");
+      expect(result.text).toContain("font-size: 12px");
+      expect(result.text.match(/@keyframes/g)).toHaveLength(1);
+      expect(
+        result.events.some(
+          (event) => (event.detail?.resources?.removedRecipeRules ?? 0) > 0
+        )
+      ).toBe(true);
+      expect(
+        result.events.some(
+          (event) => (event.detail?.resources?.removedKeyframes ?? 0) > 0
+        )
+      ).toBe(true);
+    }
+  );
+
+  it.each([
+    "globalThis.recipe=button;",
+    "globalThis.classes=button(globalThis.options);",
+    "globalThis.meta=button.classNames;",
+    "export {button};"
+  ])("retains opaque/public recipes: %s", async (use) => {
+    const root = await fixture({
+      "main.js": `import {recipe} from '@mincho-js/css/compat'; const button=recipe({variants:{size:{small:{fontSize:12},large:{fontSize:90}}}}); ${use}`
+    });
+
+    expect(
+      (await compile(root, { appCss: { optimize: { pruneRecipes: true } } }))
+        .text
+    ).toContain("font-size: 90px");
+  });
+
+  it("merges supported condition paths and interns captured theme blocks in real output", async () => {
+    const root = await fixture({
+      "main.js": `import {css} from '@mincho-js/css'; import {tokens} from './tokens.js';
+      export const a=css({'@media':{print:{color:'red'}}});
+      export const b=css({'@media':{print:{color:'red'}}});
+      globalThis.classes=[a,b,tokens];`,
+      "tokens.js": `import {theme} from '@mincho-js/css'; import {staticValue} from './build.js';
+      const value='linear-gradient(90deg, rgb(1, 20, 30) 0%, rgba(100, 200, 220, 0.75) 55%, rgb(240, 245, 250) 100%)';
+      export const tokens=staticValue(()=>theme({one:value,two:value,three:value}));`,
+      "build.js": "export const staticValue=fn=>fn();"
+    });
+
+    const extractCalls = { "./build.js": ["staticValue"] };
+    const baseline = await compile(root, {
+      extractCalls,
+      appCss: { optimize: false }
+    });
+
+    const result = await compile(root, {
+      extractCalls,
+      appCss: {
+        optimize: { mergeConditionalRules: true, internThemeValues: true }
+      }
+    });
+
+    expect(result.text.match(/color: red/g)).toHaveLength(1);
+    expect(result.text).toContain("var(--mi-");
+    expect(Buffer.byteLength(result.text)).toBeLessThan(
+      Buffer.byteLength(baseline.text)
+    );
+    expect(
+      result.events.some(
+        (event) => (event.detail?.themeValues?.applied ?? 0) > 0
+      )
+    ).toBe(true);
+  });
+});
+
 describe("shared artifact provenance", () => {
-  function fixture() {
+  function fixture(optimize: { mergeConditionalRules?: boolean } = {}) {
     const adapter = createDistChunkCss(() => {});
     adapter.configure(
       {
@@ -153,7 +583,12 @@ describe("shared artifact provenance", () => {
         ]
       } as unknown as ResolvedConfig,
       true,
-      { mergeRules: false, compactThemes: false, pruneGenerated: true }
+      {
+        mergeRules: false,
+        compactThemes: false,
+        pruneGenerated: true,
+        ...optimize
+      }
     );
 
     const data = (
@@ -213,6 +648,62 @@ describe("shared artifact provenance", () => {
 
     return { adapter, data, publish, preview };
   }
+
+  it("keeps public variables across groups and updates use-only visibility", async () => {
+    const { adapter, data, publish, preview } = fixture({
+      mergeConditionalRules: true
+    });
+    const provider = publish("/project/provider.js", [data([])]);
+    const exported: InternalVanillaCssArtifact = {
+      ...data(["--one"]),
+      origin: "/project/consumer.css.ts",
+      fileScope: { filePath: "consumer.css.ts", packageName: "test" },
+      cssObjs: [{ type: "local", selector: "consumer", rule: { padding: 2 } }],
+      localClassNames: ["consumer"],
+      provenance: {
+        version: 1,
+        publicReferences: ["--one"],
+        generatedVariables: [],
+        opaque: false
+      }
+    };
+    const consumer = publish("/project/consumer.js", [exported]);
+    const ids = [
+      "/project/provider.js",
+      "/project/consumer.js",
+      provider,
+      consumer
+    ];
+
+    const initial = await preview(ids);
+
+    expect(initial).toContain("--one: red");
+    expect(initial).not.toContain("--two");
+    expect(initial).not.toContain("--dead");
+
+    publish("/project/consumer.js", [
+      {
+        ...exported,
+        provenance: { ...exported.provenance!, publicReferences: ["--two"] }
+      }
+    ]);
+
+    const updated = await preview(ids);
+
+    expect(updated).toContain("--two: blue");
+    expect(updated).not.toContain("--one");
+
+    adapter.clearOwner("/project/consumer.js");
+
+    const removed = await preview(["/project/provider.js", provider]);
+
+    expect(removed).not.toContain("--one");
+    expect(removed).not.toContain("--two");
+
+    publish("/project/consumer.js", [exported]);
+
+    expect(await preview(ids)).toContain("--one: red");
+  });
 
   it("unions per-owner visibility while retaining one CSS identity", async () => {
     const { data, publish, preview } = fixture();

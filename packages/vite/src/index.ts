@@ -1356,7 +1356,11 @@ function createMinchoViteEnvironmentPlugin(
           const publish = () => {
             if (!current()) return;
             if (distChunkCss.enabled)
-              distChunkCss.commit(moduleInfo.originalPath, nextArtifacts);
+              distChunkCss.commit(
+                moduleInfo.originalPath,
+                nextArtifacts,
+                registryResult.source
+              );
 
             diagnostics.record(
               moduleInfo.originalPath,
@@ -1584,6 +1588,49 @@ function createMinchoViteEnvironmentPlugin(
         }
 
         rememberRuntimeModule(id, transformResult.code);
+
+        if (distChunkCss.needsResourceProofs && file && cssExtract) {
+          // Save the use graph before recipe folding. CSS evaluation supplies
+          // this owner's serialized exports later, without loading new modules
+          // from buildEnd or retaining a transform-hook context across watches.
+          const proofInput: BabelTransformResult = {
+            code: transformResult.code,
+            result: [file, ""]
+          };
+
+          const sidecar = normalizePath(join(fileId, "..", file));
+          const compilationContext = transformBabelOptions.compilationContext;
+          distChunkCss.recordResourceProof(fileId, (source) =>
+            diagnostics.run(fileId, "private-resource-analysis", async () => {
+              const proof = await runtimeOptimizations.transform(
+                {
+                  filename: fileId,
+                  source: proofInput.code,
+                  babel: {
+                    compilationCache,
+                    compilationContext,
+                    privateRecipes: true,
+                    optimize: { staticRecipes: false, styledComponents: false }
+                  }
+                },
+                proofInput,
+                {
+                  resolve: (owner, specifier) =>
+                    owner === fileId && [file, `./${file}`].includes(specifier)
+                      ? { id: sidecar }
+                      : null,
+
+                  load: (moduleId) => (moduleId === sidecar ? { source } : null)
+                }
+              );
+
+              return {
+                uses: proof.privateRecipeUses,
+                references: proof.privateResourceReferences
+              };
+            })
+          );
+        }
 
         if (typeof this.load === "function" && !runtimeOwners.has(id)) {
           runtimeOwners.add(id);

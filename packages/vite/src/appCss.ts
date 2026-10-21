@@ -34,6 +34,18 @@ export interface MinchoAppCssOptions {
 
         /** Native graph sharing keeps existing thresholds and route boundaries. */
         shareAtoms?: boolean;
+
+        /** Opt-in adjacent rules with identical ordered media/supports paths. */
+        mergeConditionalRules?: boolean;
+
+        /** Remove private compiler-owned animations; enabled explicitly. */
+        pruneKeyframes?: boolean;
+
+        /** Remove proven unused private selections; enabled explicitly. */
+        pruneRecipes?: boolean;
+
+        /** Experimental block-local sharing of repeated static theme literals. */
+        internThemeValues?: boolean;
       };
 }
 
@@ -51,6 +63,10 @@ export function resolveAppCssOptimization(
     mergeRules: explicit.mergeRules ?? true,
     pruneGenerated: explicit.pruneGenerated ?? true,
     compactThemes: explicit.compactThemes ?? true,
+    mergeConditionalRules: explicit.mergeConditionalRules ?? false,
+    pruneKeyframes: explicit.pruneKeyframes ?? false,
+    pruneRecipes: explicit.pruneRecipes ?? false,
+    internThemeValues: explicit.internThemeValues ?? false,
     shareAtoms:
       options.sharing === false ? false : (explicit.shareAtoms ?? true)
   };
@@ -75,7 +91,11 @@ export function validateAppCssOptions(options?: MinchoAppCssOptions): void {
           "mergeRules",
           "pruneGenerated",
           "compactThemes",
-          "shareAtoms"
+          "shareAtoms",
+          "mergeConditionalRules",
+          "pruneKeyframes",
+          "pruneRecipes",
+          "internThemeValues"
         ].includes(name) ||
         (value !== undefined && typeof value !== "boolean")
       )

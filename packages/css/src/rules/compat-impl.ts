@@ -11,6 +11,10 @@ import type {
 import { css } from "../css/index.js";
 import { identifierName, getDebugName, getVarName } from "../utils.js";
 import { createRuntimeFn } from "./createRuntimeFn.js";
+import {
+  compilerRecipeStart,
+  recordCompilerRecipe
+} from "../compilerResources.js";
 import type {
   ComplexPropDefinitions,
   ConditionalVariants,
@@ -92,6 +96,7 @@ export function recipe<
   type PureProps = Exclude<Props, undefined>;
 
   const propVars = {} as PropVars<PureProps>;
+  const resourceStart = compilerRecipeStart();
   const propStyles: CSSRule = {};
 
   if (Array.isArray(props)) {
@@ -174,6 +179,8 @@ export function recipe<
     defaultVariants: transformVariantSelection(defaultVariants),
     compoundVariants: compounds
   };
+
+  recordCompilerRecipe(config, resourceStart);
 
   return addFunctionSerializer<
     RuntimeFn<ConditionalVariants<Variants, ToggleVariants>, PureProps>

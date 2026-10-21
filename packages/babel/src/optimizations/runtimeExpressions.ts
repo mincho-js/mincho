@@ -30,6 +30,8 @@ import {
   isSidecarCssVariableKey
 } from "./sidecarStrings.js";
 import { hasDynamicScope } from "./dynamicScope.js";
+import { hasInitializedReferences } from "./initializedReferences.js";
+import type { Binding } from "@babel/traverse";
 import {
   analyzeStyledRuntime,
   applyStyledRuntime,
@@ -215,7 +217,16 @@ export function* analyzeRuntimeExpressions(options: {
   symbolicTokens?: boolean;
   classStringBudget?: ReturnType<typeof createClassStringBudget>;
   diagnostics?: boolean;
+
+  /** Exact generated import belonging to this owner, never an author-chosen export. */
+  privateRecipeImport?: string;
 }): ModuleGraphFlow<{
+  privateResourceReferences: string[];
+  privateClassReferences: string[];
+  privateRecipes: {
+    recipe: StaticRecipeCall;
+    selections: StaticData[] | null;
+  }[];
   calls: StaticRecipeCall[];
   scopedCx: ScopedCxCall[];
   scopedCxDiagnostics?: Record<string, number>;
@@ -254,6 +265,9 @@ export function* analyzeRuntimeExpressions(options: {
   graph.modules.set(owner.id, owner);
 
   const unproved = (ast = owner.program.parent as t.File) => ({
+    privateResourceReferences: [],
+    privateClassReferences: [],
+    privateRecipes: [],
     calls: [],
     scopedCx: [],
     stringBudget: createClassStringBudget(),
@@ -267,6 +281,18 @@ export function* analyzeRuntimeExpressions(options: {
   });
 
   if (hasDynamicScope(owner.program)) return unproved();
+
+  const privateResourceReferences: string[] = [];
+  const privateClassReferences: string[] = [];
+  const privateRecipes = options.privateRecipeImport
+    ? yield* analyzePrivateRecipeImports(
+        graph,
+        owner,
+        options.privateRecipeImport,
+        privateResourceReferences,
+        privateClassReferences
+      )
+    : [];
 
   const candidates: NodePath<t.CallExpression>[] = [];
   const jsx: NodePath<t.JSXElement>[] = [];
@@ -744,7 +770,7 @@ export function* analyzeRuntimeExpressions(options: {
     [...graph.modules.values()].some(
       (module) =>
         hasDynamicScope(module.program) ||
-        (options.staticScopedCx &&
+        ((options.staticScopedCx || options.privateRecipeImport) &&
           hasObservablePrototypeMutation(module.program))
     )
   )
@@ -758,6 +784,9 @@ export function* analyzeRuntimeExpressions(options: {
     );
 
   return {
+    privateResourceReferences,
+    privateClassReferences,
+    privateRecipes,
     calls,
     scopedCx,
     scopedCxDiagnostics,
@@ -772,6 +801,261 @@ export function* analyzeRuntimeExpressions(options: {
 }
 
 type SerializedRecipe = Omit<StaticRecipeCall, "key" | "options">;
+
+/** Inspect every original reference before JS folding/tree shaking, including lazy callbacks. */
+function* analyzePrivateRecipeImports(
+  graph: ModuleGraph,
+  owner: SourceModule,
+  source: string,
+  privateResourceReferences: string[],
+  privateClassReferences: string[]
+): ModuleGraphFlow<
+  {
+    recipe: StaticRecipeCall;
+    selections: StaticData[] | null;
+  }[]
+> {
+  if (hasObservablePrototypeMutation(owner.program)) return [];
+
+  const result: {
+    recipe: StaticRecipeCall;
+    selections: StaticData[] | null;
+  }[] = [];
+
+  const factories = new WeakMap<t.CallExpression, SerializedRecipe>();
+  const scalarPrivacy = new Map<string, boolean>();
+  const publicValues = new Set<string>();
+  const publicClasses = new Set<string>();
+  let opaqueExports = false;
+
+  const pinValues = (value: unknown, into = publicValues): void => {
+    if (typeof value === "string") into.add(value);
+    else if (value && typeof value === "object")
+      for (const child of Object.values(value)) pinValues(child, into);
+  };
+
+  for (const statement of owner.program.get("body")) {
+    if (
+      !statement.isImportDeclaration() ||
+      ![source, `./${source}`].includes(statement.node.source.value)
+    )
+      continue;
+
+    for (const specifier of statement.get("specifiers")) {
+      if (!specifier.isImportSpecifier()) continue;
+
+      const binding = owner.program.scope.getBinding(specifier.node.local.name);
+      if (!binding) continue;
+
+      try {
+        const target = yield* graph.valueTarget(
+          owner,
+          specifier.get("local"),
+          new Set()
+        );
+
+        if (
+          target &&
+          !("external" in target) &&
+          target.path.isStringLiteral()
+        ) {
+          const active = new Set<Binding>();
+
+          const unused = (binding: Binding): boolean => {
+            if (active.size > 100 || active.has(binding) || !binding.constant)
+              return false;
+
+            active.add(binding);
+
+            for (const ref of binding.referencePaths) {
+              const declaration = ref.parentPath;
+              if (
+                !declaration?.isVariableDeclarator() ||
+                declaration.node.init !== ref.node ||
+                !t.isIdentifier(declaration.node.id) ||
+                !declaration.parentPath.isVariableDeclaration({
+                  kind: "const"
+                }) ||
+                declaration.parentPath.parentPath?.isExportNamedDeclaration() ||
+                !hasInitializedReferences(ref)
+              )
+                return false;
+
+              const alias = declaration.scope.getBinding(
+                declaration.node.id.name
+              );
+              if (!alias || !unused(alias)) return false;
+            }
+
+            active.delete(binding);
+
+            return true;
+          };
+
+          const name = target.path.node.value;
+          scalarPrivacy.set(
+            name,
+            (scalarPrivacy.get(name) ?? true) && unused(binding)
+          );
+        }
+
+        const recipe = yield* serializedRecipe(
+          graph,
+          owner,
+          specifier.get("local"),
+          factories
+        );
+
+        if (!recipe?.compiled) {
+          if (
+            target &&
+            !("external" in target) &&
+            !target.path.isStringLiteral()
+          ) {
+            try {
+              if (!target.path.isExpression())
+                throw new Error("Non-value export");
+
+              pinValues(finiteArgument(target.path.node));
+              pinValues(finiteArgument(target.path.node), publicClasses);
+            } catch {
+              opaqueExports = true;
+            }
+          }
+
+          continue;
+        }
+
+        pinValues(recipe.config);
+        pinValues(recipe.propVars);
+
+        const selections: StaticData[] = [];
+        const active = new Set<Binding>();
+        let budget = 1000;
+
+        const literal = (path: NodePath<t.Node>): t.Expression | null => {
+          if (--budget < 0 || !path.isExpression()) return null;
+
+          if (path.isIdentifier()) {
+            if (!hasInitializedReferences(path)) return null;
+
+            const alias = path.scope.getBinding(path.node.name);
+            if (!alias?.constant || !alias.path.isVariableDeclarator())
+              return null;
+
+            // A literal selection object passed elsewhere may be mutated before use.
+            if (alias.referencePaths.some((ref) => ref !== path)) return null;
+
+            const init = alias.path.get("init");
+
+            return init.isExpression() ? literal(init) : null;
+          }
+
+          return path.node;
+        };
+
+        const inspect = (current: Binding): boolean => {
+          if (--budget < 0 || !current.constant || active.has(current))
+            return false;
+
+          active.add(current);
+
+          for (const ref of current.referencePaths) {
+            const use = ref.parentPath;
+
+            if (
+              use?.isVariableDeclarator() &&
+              use.node.init === ref.node &&
+              t.isIdentifier(use.node.id)
+            ) {
+              if (
+                !use.parentPath.isVariableDeclaration({ kind: "const" }) ||
+                !hasInitializedReferences(ref) ||
+                use.parentPath.parentPath?.isExportNamedDeclaration()
+              )
+                return false;
+
+              const alias = use.scope.getBinding(use.node.id.name);
+              if (!alias || !inspect(alias)) return false;
+
+              continue;
+            }
+
+            if (
+              !use?.isCallExpression() ||
+              use.node.callee !== ref.node ||
+              use.node.optional ||
+              use.node.arguments.length > 1
+            )
+              return false;
+
+            // Direct early reads remain opaque. Deferred calls do not execute here;
+            // all their literal branches are retained and the original TDZ remains.
+            if (!ref.getFunctionParent() && !hasInitializedReferences(ref))
+              return false;
+
+            const argument = use.get("arguments")[0];
+
+            if (!argument) {
+              selections.push(undefined);
+              continue;
+            }
+
+            const value = literal(argument);
+            if (!value) return false;
+
+            const tree = finiteRecipeTree(value);
+
+            if (tree) {
+              const visit = (branch: FiniteRecipeTree): void => {
+                if ("index" in branch)
+                  selections.push(finiteArgument(branch.argument));
+                else {
+                  visit(branch.consequent);
+                  visit(branch.alternate);
+                }
+              };
+
+              visit(tree);
+            } else selections.push(finiteArgument(value));
+          }
+
+          active.delete(current);
+
+          return true;
+        };
+
+        let safe = false;
+
+        try {
+          safe = inspect(binding);
+        } catch {
+          /* Non-literal/getter/mutation/escape retains the entire recipe. */
+        }
+
+        result.push({
+          recipe: { ...recipe, key: recipe.identity },
+          selections: safe ? selections : null
+        });
+      } catch {
+        opaqueExports = true; /* Missing/version-incompatible serialized factories never prove ownership. */
+      }
+    }
+  }
+
+  for (const [name, privateValue] of scalarPrivacy)
+    if (!privateValue) publicClasses.add(name);
+
+  privateClassReferences.push(...publicClasses);
+
+  if (opaqueExports) for (const entry of result) entry.selections = null;
+  if (!opaqueExports)
+    for (const [name, privateValue] of scalarPrivacy)
+      if (privateValue && !publicValues.has(name))
+        privateResourceReferences.push(name);
+
+  return result;
+}
 
 function* serializedRecipe(
   graph: ModuleGraph,
