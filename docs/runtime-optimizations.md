@@ -220,3 +220,10 @@ consumers, ESM/CommonJS declaration and bundle contracts, and JSX settings with
 both values of `verbatimModuleSyntax`. Browser checks on Chromium, Firefox and
 WebKit cover shared/private cascade, Vite lazy loading and the inheritance
 change from generated `@property` registrations.
+
+## Explicit React memo and SSR
+
+Consumers can wrap remaining styled wrappers with stable props in `React.memo`.
+Public mutable recipes and the default `$$styled` behavior do not use automatic
+memoization. Both `ref` and `as` are preserved; React 19-specific ref elision is
+not applied. See [SSR/RSC usage and the memo contract](./ssr-and-rsc.md).

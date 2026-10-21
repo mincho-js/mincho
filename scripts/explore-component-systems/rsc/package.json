@@ -1,0 +1,10 @@
+{
+  "name": "mincho-component-followup-rsc-probe",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "react": "19.2.6",
+    "react-dom": "19.2.6",
+    "react-server-dom-webpack": "19.2.6"
+  }
+}

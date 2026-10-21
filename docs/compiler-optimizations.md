@@ -72,6 +72,21 @@ class names are preserved by all four passes.
 | `compactThemes`  | Adjacent identical theme variable declarations                      | Differing values, conditions, inheritance, and theme selection                                                                                    |
 | `shareAtoms`     | Existing native graph sharing of ordered CSS module prefixes        | Actual entry/lazy boundaries, explicit route/layout reach, cascade barriers, and configured thresholds                                            |
 
+Four additional passes are **opt-in**, including when `optimize: true` is used:
+
+| Option                  | Scope                                                                                         | Preserved cases                                                                                                                |
+| ----------------------- | --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `mergeConditionalRules` | Adjacent generated classes with identical ordered media/supports paths and declarations       | Layers, complex selectors, different paths, fallback/declaration order, file boundaries                                        |
+| `pruneRecipes`          | Private `rules()` / compat `recipe()` with every original use proven static or bounded finite | Public exports, metadata reads, escapes, mutation/getters, dynamic selections, referenced/composed classes                     |
+| `pruneKeyframes`        | Actual captured, nonescaping Mincho keyframes after recipe pruning                            | Global/foreign frames, name collisions, unknown animation syntax/variables, public exports                                     |
+| `internThemeValues`     | Repeated long static literals inside an actual generated theme block                          | Independent public token declarations, parent/child themes, registered properties, substitutions/escapes, nonprofitable output |
+
+These passes do not rename existing classes/public variables or inject a new
+client runtime. Theme helpers are private and block-local; reduced UTF-8 bytes
+do not guarantee smaller gzip/Brotli output. Unknown names join the full liveness
+graph. Theme interning also checks the full graph for helper-name collisions;
+otherwise dirty resource groups reuse bounded pure IR results.
+
 `shareAtoms` does not move arbitrary individual rules across files. The automatic
 policy uses the existing minimum of two boundaries and 4096 bytes, and explicit
 `appCss.sharing` settings take precedence. `appCss.sharing: false` disables this
@@ -87,7 +102,10 @@ CSSOM or computed-style access in the retained JavaScript graph disables resourc
 pruning, because those readers can observe otherwise unused custom properties.
 This guard recognizes standard API names; dynamically constructed lookups,
 external scripts, and reflective access cannot be ruled out by that scan. Set
-`pruneGenerated: false` when such code observes generated custom properties.
+`pruneGenerated: false` when such code observes generated custom properties;
+also disable the corresponding opt-in resource/theme passes if those scripts
+observe their resources. Generic renderer code using CSSOM, including bundled
+React DOM, can conservatively disable resource pruning and theme interning too.
 
 Custom PostCSS configuration disables structural passes. Its transforms still
 run through Vite. Serialization memoization stores only pure, pre-PostCSS text,

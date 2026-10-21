@@ -15,6 +15,9 @@ export interface MinchoCssRoute {
 }
 
 export interface MinchoAppCssOptions {
+  /** Client-build manifest for ordered SSR CSS selection; off by default. */
+  ssrManifest?: boolean | string;
+
   /** Native config by default; single sheet or Mincho rule generation per output chunk. */
   mode?: "native" | "single" | "dist-chunk";
 
@@ -73,6 +76,22 @@ export function resolveAppCssOptimization(
 }
 
 export function validateAppCssOptions(options?: MinchoAppCssOptions): void {
+  const manifest = options?.ssrManifest;
+  if (
+    manifest !== undefined &&
+    typeof manifest !== "boolean" &&
+    (typeof manifest !== "string" ||
+      !manifest ||
+      manifest.startsWith("/") ||
+      manifest.includes("\\") ||
+      manifest
+        .split("/")
+        .some((part) => !part || part === ".." || part === "."))
+  )
+    throw new Error(
+      "appCss.ssrManifest must be a boolean or an output-relative file name."
+    );
+
   const optimization = options?.optimize;
 
   if (optimization !== undefined && typeof optimization !== "boolean") {
