@@ -99,7 +99,10 @@ export function prepareCompilerClassStrategies(
           !call?.isCallExpression() ||
           call.node.callee !== callee.node ||
           call.node.arguments.length !== 1 ||
-          !isIndependentInput(call.node.arguments[0])
+          !isIndependentInput(
+            call.node.arguments[0],
+            conditionNames(init.node.arguments[0]!)
+          )
         )
           return;
 
@@ -137,7 +140,10 @@ export function prepareCompilerClassStrategies(
   if (!calls.length) return;
 
   const wrappers = new Set(calls.map(({ extract }) => extract.node));
-  let closedStyles = !state.opts.extractCalls;
+
+  // A configured extraction API is a barrier when it is called in this file.
+  // Merely configuring one elsewhere must not disable independent private styles.
+  let closedStyles = true;
   program.traverse({
     JSXAttribute(path) {
       // JSX preprocessing runs next and can otherwise introduce an intervening
@@ -287,17 +293,28 @@ function isConfig(node: t.Node | null | undefined): boolean {
       (property) =>
         t.isObjectProperty(property) &&
         !property.computed &&
-        ["properties", "debugId"].includes(propertyName(property.key) ?? "") &&
+        ["properties", "debugId", "conditions"].includes(
+          propertyName(property.key) ?? ""
+        ) &&
         (propertyName(property.key) === "debugId"
           ? t.isStringLiteral(property.value)
-          : t.isObjectExpression(property.value) &&
-            property.value.properties.every(
-              (entry) =>
-                t.isObjectProperty(entry) &&
-                !entry.computed &&
-                independentProperties.has(propertyName(entry.key) ?? "") &&
-                t.isBooleanLiteral(entry.value, { value: true })
-            ))
+          : propertyName(property.key) === "conditions"
+            ? t.isObjectExpression(property.value) &&
+              property.value.properties.every(
+                (entry) =>
+                  t.isObjectProperty(entry) &&
+                  !entry.computed &&
+                  !!propertyName(entry.key) &&
+                  isIndependentCondition(entry.value)
+              )
+            : t.isObjectExpression(property.value) &&
+              property.value.properties.every(
+                (entry) =>
+                  t.isObjectProperty(entry) &&
+                  !entry.computed &&
+                  independentProperties.has(propertyName(entry.key) ?? "") &&
+                  t.isBooleanLiteral(entry.value, { value: true })
+              ))
     )
   );
 }
@@ -321,24 +338,82 @@ const independentProperties = new Set([
   "cursor"
 ]);
 
-function isIndependentInput(node: t.Node | null | undefined): boolean {
+function conditionNames(node: t.Node): Set<string> {
+  if (!t.isObjectExpression(node)) return new Set();
+
+  const conditions = node.properties.find(
+    (entry) =>
+      t.isObjectProperty(entry) && propertyName(entry.key) === "conditions"
+  );
+
+  return new Set(
+    t.isObjectProperty(conditions) && t.isObjectExpression(conditions.value)
+      ? conditions.value.properties.flatMap((entry) =>
+          t.isObjectProperty(entry) ? [`_${propertyName(entry.key)}`] : []
+        )
+      : []
+  );
+}
+
+function isIndependentCondition(node: t.Node): boolean {
+  if (t.isStringLiteral(node))
+    return (
+      /^(?:@media\s+)?(?:\(|screen\b|print\b|all\b|not\b|only\b)/.test(
+        node.value
+      ) && !/[&{};]/.test(node.value)
+    );
+
   return (
+    t.isObjectExpression(node) &&
+    node.properties.length > 0 &&
+    node.properties.every((entry) => {
+      if (
+        !t.isObjectProperty(entry) ||
+        entry.computed ||
+        !t.isStringLiteral(entry.value)
+      )
+        return false;
+
+      const key = propertyName(entry.key);
+      if (key === "selector")
+        return /^&(?::(?:hover|focus|focus-visible|active|disabled))?$/.test(
+          entry.value.value
+        );
+
+      return (
+        ["@media", "@supports", "@layer"].includes(key ?? "") &&
+        !!entry.value.value &&
+        !/[{};]/.test(entry.value.value)
+      );
+    })
+  );
+}
+
+function isIndependentInput(
+  node: t.Node | null | undefined,
+  conditions = new Set<string>(),
+  depth = 0
+): boolean {
+  return (
+    depth < 16 &&
     t.isObjectExpression(node) &&
     node.properties.length > 0 &&
     node.properties.every(
       (property) =>
         t.isObjectProperty(property) &&
         !property.computed &&
-        independentProperties.has(propertyName(property.key) ?? "") &&
-        (t.isStringLiteral(property.value)
-          ? !/url\s*\(/i.test(property.value.value) &&
-            !property.value.value.includes("\\")
-          : t.isNumericLiteral(property.value)
-            ? Number.isFinite(property.value.value)
-            : t.isUnaryExpression(property.value) &&
-              ["-", "+"].includes(property.value.operator) &&
-              t.isNumericLiteral(property.value.argument) &&
-              Number.isFinite(property.value.argument.value))
+        (conditions.has(propertyName(property.key) ?? "")
+          ? isIndependentInput(property.value, conditions, depth + 1)
+          : independentProperties.has(propertyName(property.key) ?? "") &&
+            (t.isStringLiteral(property.value)
+              ? !/url\s*\(/i.test(property.value.value) &&
+                !property.value.value.includes("\\")
+              : t.isNumericLiteral(property.value)
+                ? Number.isFinite(property.value.value)
+                : t.isUnaryExpression(property.value) &&
+                  ["-", "+"].includes(property.value.operator) &&
+                  t.isNumericLiteral(property.value.argument) &&
+                  Number.isFinite(property.value.argument.value)))
     )
   );
 }

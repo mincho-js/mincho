@@ -241,6 +241,14 @@ override the selected profile. `undefined` does not erase an earlier setting.
 | `runtimeCodegen`          | `false`     | `true`     |
 | `defineRulesCxConditions` | Opt-in      | Opt-in     |
 | `jsxRuntimeGuards`        | `false`     | `true`     |
+| `dependencyGraph`         | `false`     | `false`    |
+| `staticStyles`            | `false`     | `false`    |
+| `staticScopedCx`          | `false`     | `false`    |
+| `symbolicTokens`          | `false`     | `false`    |
+
+See [atomic/runtime optimizations](atomic-runtime-optimizations.md) for scoped
+`cx` baking, symbolic token references, conditional atom sharing, and the separate
+`experimental.cssBooleanGates` option (also disabled by default).
 
 ```ts
 minchoEsbuildPlugins({ optimizationMode: "development" });

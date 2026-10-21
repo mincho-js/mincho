@@ -1,6 +1,7 @@
 import type { NodePath } from "@babel/core";
 import { types as t } from "@babel/core";
 import type { PluginState, ProgramScope } from "../types.js";
+import { createCssBooleanGateLowering } from "./cssBooleanGates.js";
 import { isInsideExtractCallsImplementation } from "../extractionCalls/index.js";
 import {
   createClassNameAttributeValue,
@@ -85,6 +86,11 @@ export function preprocessJsxCssProp(
       const normalizedElement: NormalizedJsxCssPropElement = {
         ...analyzedElement,
         dynamicCssVariableLowering:
+          createCssBooleanGateLowering(
+            openingElementPath,
+            analyzedElement,
+            state
+          ) ??
           createOrderedCssLowering(openingElementPath, analyzedElement, {
             splitConditions: state.opts.optimize?.runtimeCodegen === true,
             nonInheritingCssVars: state.opts.experimental?.nonInheritingCssVars

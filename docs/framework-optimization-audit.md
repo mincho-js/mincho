@@ -20,6 +20,7 @@ Mincho는 이미 정적 CSS 추출, dependency/AST/evaluation cache, recipe/cx
 소스 경로·라인, 기대 효과와 제약을 기록한다.
 
 - [StyleX · Griffel · css-hooks 상세 목록](./framework-optimization-audit/atomic-runtime.md)
+- [Atomic/runtime 구현 대응 65개](./framework-optimization-audit/atomic-runtime-implementation.md)
 - [Kuma UI · Panda · Tamagui 상세 목록](./framework-optimization-audit/component-systems.md)
 - [WyW-in-JS · UnoCSS · devup-ui 상세 목록](./framework-optimization-audit/compilers.md)
 - [Mincho의 기존 구현 27개 비교 항목](./framework-optimization-audit/mincho-baseline.md)

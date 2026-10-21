@@ -59,6 +59,9 @@ export interface PluginOptions {
 
     /** Opt-in collapse of proven private static class combinations. */
     compileClass?: boolean;
+
+    /** Compile complete JSX css branches to private CSS variable gates. */
+    cssBooleanGates?: boolean;
   };
 
   /** @internal Prepared sync provider supplied by bundler prepasses only. */

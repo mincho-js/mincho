@@ -106,15 +106,17 @@ override. It also leaves single-importer chunk cleanup to the native bundler.
 because they change generated names. Eligibility is restricted to a private
 `defineRules` owner and a literal composition used as the sole `className` of
 an intrinsic element, for example `css([privateRules.css({ color: "red" })])`.
-Only independent, unconditional longhand declarations qualify.
+Only independent longhand declarations qualify. A conservative subset of private
+named self/media/supports/layer conditions is also supported; see
+[atomic/runtime optimizations](atomic-runtime-optimizations.md).
 
 The global-atom strategy currently reuses atoms within the original file's
 cascade domain. It does not establish a single CSS owner across different files.
 This domain includes the absolute source filename. Build client and SSR output
 from the same project path; matching names across separate checkout paths is not
 part of the experimental contract.
-`compileClass` can replace a proven composition with one class and rule. Public
-exports, `cx`, presets, selectors, conditions, spreads, external composition,
+`compileClass` can replace a proven composition with one class. Public
+exports, `cx`, presets, unsupported selectors/conditions, spreads, external composition,
 and intervening unknown styles retain the scoped implementation. Compilation
 helpers are extracted into the build-time sidecar and removed from client code.
 

@@ -95,6 +95,11 @@ interface CompilerAtomicWrite {
   condition: NormalizedCondition;
 }
 
+const conditionalOrder = new WeakMap<
+  FileScope,
+  { last: Map<string, string>; emitted: Set<string> }
+>();
+
 /** Return canonical atom identities, preserving declaration/conflict order. */
 export function compilerAtomIdentities(
   writes: readonly CompilerAtomicWrite[],
@@ -105,6 +110,14 @@ export function compilerAtomIdentities(
 
   const properties = new Set<string>();
   const identities: string[] = [];
+  const scope = getFileScope();
+  let order = conditionalOrder.get(scope);
+
+  if (!order)
+    conditionalOrder.set(
+      scope,
+      (order = { last: new Map(), emitted: new Set() })
+    );
 
   for (const { property, value, condition } of writes) {
     if (
@@ -114,13 +127,15 @@ export function compilerAtomIdentities(
         (typeof value !== "number" || !Number.isFinite(value))) ||
       (typeof value === "string" &&
         (/url\s*\(/i.test(value) || value.includes("\\"))) ||
-      condition.selector !== "&" ||
-      condition.layer != null ||
-      condition.supports != null ||
-      condition.media != null ||
+      !/^&(?::(?:hover|focus|focus-visible|active|disabled))?$/.test(
+        condition.selector
+      ) ||
       condition.container != null
-    )
+    ) {
+      order.last.clear();
+
       return undefined;
+    }
 
     properties.add(property);
     identities.push(
@@ -133,12 +148,12 @@ export function compilerAtomIdentities(
         property,
         value,
         condition: {
-          selector: "&",
-          supports: null,
-          media: null,
+          selector: condition.selector,
+          supports: condition.supports ?? null,
+          media: condition.media ?? null,
           container: null
         },
-        layer: null,
+        layer: condition.layer ?? null,
 
         // There is one write, and the accepted longhands cannot overlap. The
         // ordinal of an unrelated property must not change this atom's identity
@@ -149,7 +164,29 @@ export function compilerAtomIdentities(
     );
   }
 
-  return identities;
+  // Equal conditional atoms cannot jump across possibly overlapping writes.
+  const blocked = identities.some((identity, index) => {
+    const { property, condition } = writes[index]!;
+    const conditional =
+      condition.selector !== "&" ||
+      condition.layer != null ||
+      condition.media != null ||
+      condition.supports != null;
+
+    return (
+      conditional &&
+      order.emitted.has(identity) &&
+      order.last.get(property) !== identity
+    );
+  });
+
+  for (let index = 0; index < writes.length; index++) {
+    order.last.set(writes[index]!.property, blocked ? "" : identities[index]!);
+
+    if (!blocked) order.emitted.add(identities[index]!);
+  }
+
+  return blocked ? undefined : identities;
 }
 
 export function compilerClassName(

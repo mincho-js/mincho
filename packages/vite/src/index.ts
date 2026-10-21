@@ -113,6 +113,7 @@ export interface MinchoVitePluginOptions {
     nonInheritingCssVars?: boolean;
     globalAtomicClasses?: boolean;
     compileClass?: boolean;
+    cssBooleanGates?: boolean;
     cssChunkSharing?: MinchoCssChunkSharingOptions;
   };
   libraryCss?: {
@@ -1463,6 +1464,9 @@ function createMinchoViteEnvironmentPlugin(
               : {}),
             ...(_options?.experimental?.compileClass !== undefined
               ? { compileClass: _options.experimental.compileClass }
+              : {}),
+            ...(_options?.experimental?.cssBooleanGates !== undefined
+              ? { cssBooleanGates: _options.experimental.cssBooleanGates }
               : {})
           },
           optimize: internalResolveOptimizationOptions(

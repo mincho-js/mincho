@@ -13,6 +13,67 @@ const enabled = {
 };
 
 describe("compiler-owned class strategies", () => {
+  it("allows unused extraction configuration but rejects intervening configured calls", () => {
+    const options = {
+      ...enabled,
+      extractCalls: { "custom-style": ["style"] },
+      preparedExtractCalls: {
+        imports: { "custom-style": ["style"] },
+        localBindings: [],
+        fingerprint: "private-styles-test",
+        protectedFunctions: [],
+        dependencies: []
+      }
+    };
+
+    expect(babelTransform(source, options).result[1]).toContain(
+      "compilePrivateDefineRulesClass"
+    );
+    expect(
+      babelTransform(
+        'import {style} from "custom-style"; style({color:"blue"});' + source,
+        options
+      ).result[1]
+    ).not.toContain("compilePrivateDefineRulesClass");
+  });
+
+  it("accepts literal private named self/media/supports conditions", () => {
+    for (const condition of [
+      '{selector:"&:hover"}',
+      '"@media (min-width: 800px)"',
+      '{"@supports":"(display: grid)","@layer":"components"}'
+    ]) {
+      const input = `import {defineRules, css} from "@mincho-js/css";
+        const a = defineRules({properties:{color:true},conditions:{active:${condition}}});
+        const b = defineRules({properties:{color:true},conditions:{active:${condition}}});
+        const ca = css([a.css({_active:{color:"red"}})]);
+        const cb = css([b.css({_active:{color:"red"}})]);
+        export const App = () => <><div className={ca}/><span className={cb}/></>;`;
+
+      expect(
+        babelTransform(input, { experimental: { globalAtomicClasses: true } })
+          .metadata.minchoClassStrategies
+      ).toMatchObject({ transformedCalls: 2, atomicDomain: "file" });
+    }
+  });
+
+  it.each([
+    '"& > span"',
+    '"&::before"',
+    '"@container card (width > 10px)"',
+    "condition"
+  ])("rejects unsupported conditions: %s", (condition) => {
+    expect(
+      babelTransform(
+        source.replace(
+          "properties: {",
+          `conditions: {active:${condition}}, properties: {`
+        ),
+        enabled
+      ).result[1]
+    ).not.toContain("compilePrivateDefineRulesClass");
+  });
+
   it("preserves default output and independently disabled options", () => {
     const original = babelTransform(source);
 
@@ -167,7 +228,7 @@ describe("compiler-owned class strategies", () => {
 
   it.each([
     'properties: { color: { brand: {color:"red"} } }',
-    'properties: { color: true }, conditions: {hover:"&:hover"}',
+    'properties: { color: true }, conditions: {hover:"& > span"}',
     "properties: { color: true }, presets: other",
     'properties: { color: true }, shortcuts: {brand:{color:"red"}}'
   ])("keeps unknown owner semantics scoped: %s", (config) => {

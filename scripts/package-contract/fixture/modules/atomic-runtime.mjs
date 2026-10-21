@@ -28,7 +28,7 @@ const { values } = parseArgs({
 
 const { profile, bundler, format } = values;
 
-assert.ok(["off", "cx", "tokens", "all"].includes(profile));
+assert.ok(["off", "cx", "tokens", "atoms", "gates", "all"].includes(profile));
 assert.ok(["esbuild", "vite"].includes(bundler));
 assert.ok(["esm", "cjs"].includes(format));
 
@@ -106,6 +106,10 @@ const options = {
     defineRulesCxConditions: true,
     staticScopedCx: enabled("cx"),
     symbolicTokens: enabled("tokens")
+  },
+  experimental: {
+    globalAtomicClasses: enabled("atoms"),
+    cssBooleanGates: enabled("gates")
   },
   execution: { workers: Number(values.workers) },
   cache: values.cache,
@@ -301,6 +305,37 @@ if (values.browser) {
         js,
         /\b(?:const|let|var|function) createCompiledDefineRulesCxRuntime\b/
       );
+    if (enabled("atoms"))
+      assert.equal(classOf(runtime.First), classOf(runtime.Second));
+
+    if (enabled("gates")) {
+      assert.ok(html.every((value) => value.includes("style=")));
+      assert.match(css, /var\(--.*,/);
+
+      const styles = [true, false].map(
+        (active) => runtime.Gate({ active }).props.style
+      );
+
+      assert.ok(Object.keys(styles[0]).length > 0);
+      assert.deepEqual(Object.keys(styles[0]), Object.keys(styles[1]));
+
+      for (const name of Object.keys(styles[0])) {
+        assert.ok(name.startsWith("--"));
+
+        const values = styles.map((style) => style[name]);
+
+        // Older supported React renderers trim these values before setting
+        // them. An empty value removes the override and exposes the CSS reset.
+        assert.ok(
+          values.every(
+            (value) => typeof value === "string" && value.trim().length > 0
+          ),
+          `Gate ${name} must survive React's inline style normalization`
+        );
+        assert.notEqual(values[0], values[1]);
+        assert.equal(values.filter((value) => value === "initial").length, 1);
+      }
+    }
   }
 
   assert.match(runtime.reference, /^var\(--/);

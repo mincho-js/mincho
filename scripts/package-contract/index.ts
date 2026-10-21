@@ -214,9 +214,12 @@ async function main(): Promise<void> {
         join(consumerRoot, "fixture", "modules", "compiler-classes"),
         true
       );
+
       for (const args of [
-        ["--profile", "cx"],
-        ["--profile", "tokens", "--format", "cjs"],
+        ["--profile", "atoms"],
+        ["--profile", "gates", "--format", "cjs"],
+        ["--profile", "all"],
+        ["--profile", "off", "--format", "cjs"],
         ["--profile", "all", "--bundler", "vite", "--workers", "1", "--cache"],
         ["--profile", "all", "--bundler", "vite", "--format", "cjs", "--cache"]
       ]) {

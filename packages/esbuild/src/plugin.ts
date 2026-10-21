@@ -78,6 +78,7 @@ export interface MinchoEsbuildPluginOptions {
     nonInheritingCssVars?: boolean;
     globalAtomicClasses?: boolean;
     compileClass?: boolean;
+    cssBooleanGates?: boolean;
 
     /** Available through the one-shot buildWithMincho API. */
     cssChunkSharing?: MinchoCssChunkSharingOptions;
@@ -520,6 +521,9 @@ export function minchoEsbuildPlugin({
                 : {}),
               ...(experimental?.compileClass !== undefined
                 ? { compileClass: experimental.compileClass }
+                : {}),
+              ...(experimental?.cssBooleanGates !== undefined
+                ? { cssBooleanGates: experimental.cssBooleanGates }
                 : {})
             },
             compilationCache,

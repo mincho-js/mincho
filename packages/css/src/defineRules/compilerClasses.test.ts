@@ -67,6 +67,56 @@ afterEach(() => {
 });
 
 describe("private class generation", () => {
+  it.each([
+    { selector: "&:hover" },
+    { selector: "&:focus-visible" },
+    "@media (min-width: 800px)",
+    { "@supports": "(display: grid)" }
+  ])("shares equal conditional atoms across owners: %s", (condition) => {
+    const owner = () =>
+      createDefineRulesRuntime({
+        properties: { color: true },
+        conditions: { active: condition }
+      } as never);
+
+    const first = compilePrivateDefineRulesClass(
+      owner().css,
+      { _active: { color: "red" } } as never,
+      strategy
+    );
+
+    const count = rules.length;
+    const second = compilePrivateDefineRulesClass(
+      owner().css,
+      { _active: { color: "red" } } as never,
+      strategy
+    );
+
+    expect(atomNames(first)).toEqual(atomNames(second));
+    expect(atomNames(first)[0]).toMatch(/^ma_/);
+    expect(rules).toHaveLength(count);
+  });
+
+  it("keeps competing conditional writes as an order barrier", () => {
+    const owner = () =>
+      createDefineRulesRuntime({
+        properties: { color: true },
+        conditions: { active: { selector: "&:hover" } }
+      } as const);
+
+    const run = (color: string) =>
+      compilePrivateDefineRulesClass(
+        owner().css,
+        { _active: { color } } as never,
+        strategy
+      );
+
+    const first = run("red");
+    run("blue");
+
+    expect(atomNames(run("red"))).not.toEqual(atomNames(first));
+  });
+
   it("keeps public css calls ignoring extra arguments", () => {
     const owner = make();
     const result = Reflect.apply(owner.css, undefined, [
@@ -177,7 +227,7 @@ describe("private class generation", () => {
   it.each([
     { margin: "1px", color: "red" },
     { cursor: 'url("./cursor.svg"), pointer', color: "red" },
-    { color: { _hover: "red" } },
+    { color: { _before: "red" } },
     { color: ["red", "blue"] }
   ])("retains scoped CSS for unsupported writes: %j", (input) => {
     const owner = make();
