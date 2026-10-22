@@ -41,8 +41,7 @@ last active Vite environment closes.
 Syntax-only analysis retains summaries rather than its temporary AST. Mutable
 parser reads reuse small ASTs with an isolated copy that preserves source offsets
 and comments; inputs above 8,192 UTF-16 code units are reparsed. Retained AST
-accounting uses twice the V8-serialized size instead of source bytes, based on
-[local parser measurements](./parser-cache-calibration.md). This policy and its
+accounting uses twice the V8-serialized size instead of source bytes. This policy and its
 memory estimate should be recalibrated when parser/runtime behavior changes.
 
 Custom Babel configuration, opaque plugins and synchronous value providers take
@@ -75,9 +74,6 @@ The [compilation benchmark](./compilation-performance.md#reproducible-compilatio
 also has `logic-24`, `helpers-24`, `tokens-used-24`, `tokens-unused-24` and
 `environments-24` workloads. Development edits call Vite's watcher hooks before
 invalidating the module graph. Use an actual parent/candidate pair and record
-uninstrumented timings separately from `--diagnostics` counters; archived
-framework measurements do not describe this PR's performance.
+uninstrumented timings separately from `--diagnostics` counters.
 
-The [PR 10/11 comparison](./memory-compilation-cache-performance.md) records faster
-esbuild rebuilds and slower Vite development transforms, including raw samples
-and memory measurements. Measure your workload before choosing cache settings.
+Measure your workload before choosing cache settings.

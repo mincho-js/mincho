@@ -27,11 +27,9 @@ minchoVitePlugin({
 });
 ```
 
-`dependencyGraph` and `staticStyles` default to `false` in both profiles. Five
-paired measurement rounds did not establish a consistent build time benefit,
-so these passes require explicit opt-in. See the
-[measurement record](framework-optimization-audit/compiler-results.md) before
-choosing a configuration. The esbuild plugin supports these two options and both
+`dependencyGraph` and `staticStyles` default to `false` in both profiles. Measure
+matching installed consumers before opting in; these passes do not guarantee a
+build-time improvement for every project. The esbuild plugin supports these two options and both
 experimental class options too. `appCss` belongs to the Vite application adapter.
 
 ## Evaluation
@@ -137,9 +135,7 @@ Compile/evaluation cache schemas include the new option and metadata contracts.
 existing bypass/invalidation behavior. The implementation uses existing parser,
 compilation, and worker cache budgets rather than an unbounded source cache.
 
-The [92-item implementation map](framework-optimization-audit/compiler-implementation.md)
-links every audit candidate to its implementation, test, existing behavior, or
-reason for conservative fallback. Build timing and bundle sizes must be compared
+Build timing and bundle sizes must be compared
 on the same installed consumer and toolchain; phase removal alone is not a
 wall-clock speed claim. Native esbuild's root named-import CSS limitation remains
 unchanged: library consumers needing selective CSS should use subpath imports.

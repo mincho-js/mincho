@@ -20,8 +20,7 @@ import { promisify, parseArgs } from "node:util";
 
 const execute = promisify(execFile);
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const defaultOutput =
-  "docs/framework-optimization-audit/component-systems-results.json";
+const defaultOutput = ".cache/benchmarks/component-systems-results.json";
 const { values } = parseArgs({
   options: {
     baseline: { type: "string" },

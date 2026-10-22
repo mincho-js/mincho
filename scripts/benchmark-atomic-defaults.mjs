@@ -27,8 +27,7 @@ const { values } = parseArgs({
     smoke: { type: "boolean", default: false },
     output: {
       type: "string",
-      default:
-        "docs/framework-optimization-audit/atomic-runtime-default-decision.json"
+      default: ".cache/benchmarks/atomic-runtime-default-decision.json"
     }
   }
 });

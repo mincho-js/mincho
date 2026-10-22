@@ -85,17 +85,9 @@ invalidation. Failed reference validation invalidates dependent analyses too.
 This cache entry is not persisted to disk. Source hashing and provider loading
 remain part of a cache hit.
 
-The existing size benchmark's scoped-cx fixture uses configured `extractCalls`
-and three module-initialization calls. Its roughly 4 KB compressed JavaScript
-reduction is not a measured per-render improvement for ordinary `.css.ts`
-consumers. A subsequent [default-decision benchmark](./framework-optimization-audit/atomic-runtime-default-decision.md)
-tested ordinary `.css.ts` consumers, 72 static cx calls and 768 token reads with
-native cold builds, cached rebuilds and development watcher/HMR hooks. Seven
-paired rounds support keeping both options **off by default in development and
-production**. Scoped cx remains useful as an explicit production option for
-matching projects; symbolic tokens need lower verification cost and better
-native reuse before default activation. Browser transport and rendering latency
-were not measured.
+Both options remain off by default in development and production. Measure
+matching installed consumers before enabling them; build-time substitutions do
+not establish a per-render speedup for ordinary `.css.ts` consumers.
 
 ## Conditional atom sharing
 
@@ -142,22 +134,12 @@ evaluation registry copy time. Hash timing excludes key serialization. Detailed 
 are evaluated only with active diagnostics. Phase durations are inclusive; do not
 sum nested phases as total build time.
 
-See [the audit mapping](framework-optimization-audit/atomic-runtime-implementation.md)
-for all 65 source observations. Native esbuild's root named-import CSS limitation
-is unchanged: library consumers should use the documented subpath imports.
-
-The [paired measurements](framework-optimization-audit/atomic-runtime-results.md)
-compare each switch, their combination, and unchanged defaults against `c9298a76`.
-The installed-consumer fixture uses an explicit `extractCalls` bridge to exercise
-serialized scoped-cx artifacts. Module initialization and allocation deltas use
-the generated unminified module; JS/CSS transfer sizes are separately minified.
-Browser checks use minified assets and include SSR hydration before updates.
-They compare the candidate's `all` profile against the baseline's `off` profile;
-they do not isolate any single option's CPU cost.
+Native esbuild's root named-import CSS limitation is unchanged: library
+consumers needing selective CSS should use subpath imports.
 
 ## Reproducing measurements
 
-Build the baseline checkout at `c9298a76` and the candidate checkout with
+Build the baseline and candidate checkouts with
 `mise exec -- yarn install --immutable` and `mise exec -- yarn build:release`
 in each checkout. Use fresh consumer directories for every compiler revision;
 reusing an installed directory can retain cached package tarballs.
@@ -168,8 +150,11 @@ From the candidate checkout:
 mise exec -- yarn node scripts/benchmark-compilation.mjs --pack /path/to/baseline-checkout --candidate /tmp/atomic-baseline-consumer
 mise exec -- yarn node scripts/benchmark-compilation.mjs --pack /path/to/candidate-checkout --candidate /tmp/atomic-candidate-consumer
 mise exec -- yarn node scripts/benchmark-atomic-runtime.mjs --baseline /tmp/atomic-baseline-consumer --candidate /tmp/atomic-candidate-consumer --browser
-mise exec -- yarn node scripts/benchmark-compilation.mjs --baseline /tmp/atomic-baseline-consumer --candidate /tmp/atomic-candidate-consumer --baseline-label c9298a76 --candidate-label atomic-runtime --rounds 5 --formats esm --cases styles-24,shared-24 --bundlers esbuild,vite,vite-dev --output .cache/atomic-default-regression
+mise exec -- yarn node scripts/benchmark-compilation.mjs --baseline /tmp/atomic-baseline-consumer --candidate /tmp/atomic-candidate-consumer --baseline-label baseline --candidate-label candidate --rounds 5 --formats esm --cases styles-24,shared-24 --bundlers esbuild,vite,vite-dev --output .cache/atomic-default-regression
 ```
+
+Full reports default to `.cache/benchmarks/atomic-runtime-results.json` and its
+Markdown companion.
 
 `--browser` requires Chromium; set `--chromium /path/to/chromium` when needed.
 To rerun only the browser checks, replace `--browser` with

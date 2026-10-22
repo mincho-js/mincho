@@ -18,6 +18,6 @@ Targeted regression coverage:
 - [diskCache.test.ts](../packages/integration/src/diskCache.test.ts), [diagnostics.test.ts](../packages/integration/src/diagnostics.test.ts): real persistence/report wiring and unchanged output.
 - [compilationExecution.test.ts](../packages/integration/src/compilationExecution.test.ts): worker lifecycle, abort/close, nested providers and visibility of fresh evaluation context.
 
-The full Integration source suite passed under mise Node 24.21.0: **39 files / 426 tests**, using `mise exec -- yarn workspace @mincho-js/integration exec vitest run --exclude '**/_release/**'`. The Babel source suite also passed: **37 files / 812 tests**. Local logs are `.cache/compiler-audit-integration-final.log` and `.cache/compiler-audit-babel-final.log`.
-
-Transport unit tests fix the compiler identity to isolate the protocol from artifact changes and separately test identity failure; actual worker lifecycle tests run alongside them. The 69 targeted transport/cache/write regressions are included in the full Integration run. These results verify source behavior. Installed npm/PnP consumers, browser behavior and performance measurements are recorded separately in the [implementation status map](./framework-optimization-audit/compiler-implementation.md#구현-범위와-검증-결과).
+Transport unit tests fix compiler identity to isolate the protocol from artifact
+changes and separately test identity failure. Actual worker lifecycle tests run
+alongside them; installed npm/PnP contracts verify the packaged integration.

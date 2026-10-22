@@ -79,9 +79,9 @@ inlined into style object keys, while their value expressions retain their order
 
 `finishCssProps` and fixed-arity variable writers remain experiments in the
 benchmark scripts: neither met the bundle/runtime/allocation acceptance criteria.
-No generic array-based writer or runtime function generator is shipped. See the
-[compiler helper measurements](./performance-runtime.md#compiler-helpers-and-conditional-css-2026-09-21)
-for their costs and the added build analysis cost.
+No generic array-based writer or runtime function generator is shipped. See
+[runtime measurement](./performance-runtime.md#reproduce-the-measurements) for
+reproduction instructions and comparison limits.
 
 ## Options
 

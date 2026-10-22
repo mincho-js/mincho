@@ -16,8 +16,7 @@ const fixture = join(
   repo,
   "scripts/package-contract/fixture/modules/atomic-runtime.mjs"
 );
-const defaultOutput =
-  "docs/framework-optimization-audit/atomic-runtime-results.json";
+const defaultOutput = ".cache/benchmarks/atomic-runtime-results.json";
 
 const { values } = parseArgs({
   options: {
