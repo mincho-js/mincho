@@ -94,7 +94,7 @@ async function compile(
       minchoVitePlugin({
         cache: false,
         ...options,
-        appCss: { mode: "dist-chunk", optimize: true, ...options.appCss },
+        appCss: { mode: "dist-chunk", ...options.appCss },
         diagnostics: { json: "events.json" }
       }),
       observer,
@@ -149,7 +149,7 @@ async function compile(
 
 describe("component-system production passes", () => {
   it.each([
-    { pruneRecipes: true, pruneKeyframes: true },
+    {},
     { pruneRecipes: true, pruneKeyframes: false },
     { pruneRecipes: false, pruneKeyframes: true }
   ])(
@@ -204,11 +204,7 @@ describe("component-system production passes", () => {
         config
       );
 
-      const result = await compile(
-        root,
-        { appCss: { optimize: { pruneRecipes: true, pruneKeyframes: true } } },
-        config
-      );
+      const result = await compile(root, {}, config);
 
       expect(result.text).toBe(baseline.text);
       expect(result.text).toContain("font-size: 90px");
@@ -230,7 +226,7 @@ describe("component-system production passes", () => {
     }
   );
 
-  it("proves scalar-only keyframes and preserves escaping names when pruning is enabled", async () => {
+  it("proves scalar-only keyframes and preserves escaping names by default", async () => {
     const root = await fixture({
       "main.js": `import {keyframes,css} from '@mincho-js/css';
       const unused=keyframes({from:{opacity:0},to:{opacity:0.75}});
@@ -239,9 +235,7 @@ describe("component-system production passes", () => {
       export const style=css({color:'black'});`
     });
 
-    const result = await compile(root, {
-      appCss: { optimize: { pruneKeyframes: true } }
-    });
+    const result = await compile(root);
 
     expect(result.text.match(/@keyframes/g)).toHaveLength(1);
     expect(result.text).not.toContain("opacity: 0.75");
@@ -268,10 +262,7 @@ describe("component-system production passes", () => {
         minchoVitePlugin({
           cache: { type: "memory" },
           execution: { workers: 1 },
-          appCss: {
-            mode: "dist-chunk",
-            optimize: { pruneRecipes: true, pruneKeyframes: true }
-          }
+          appCss: { mode: "dist-chunk" }
         }),
         {
           name: "observe-resource-watch",
@@ -492,10 +483,7 @@ describe("component-system production passes", () => {
         execution: { workers }
       });
 
-      const result = await compile(root, {
-        execution: { workers },
-        appCss: { optimize: { pruneRecipes: true, pruneKeyframes: true } }
-      });
+      const result = await compile(root, { execution: { workers } });
 
       expect(baseline.text).toContain("font-size: 90px");
       expect(result.text).not.toContain("font-size: 90px");

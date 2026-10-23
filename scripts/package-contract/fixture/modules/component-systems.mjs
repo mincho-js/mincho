@@ -374,7 +374,10 @@ for (const asset of css)
   });
 
 if (!values.browser && values.guard === "none") {
-  if (enabled.pruneRecipes && values.scenario === "variants")
+  if (
+    (enabled.pruneRecipes || values.profile === "default") &&
+    values.scenario === "variants"
+  )
     assert.ok(
       !/font-size:\s*171px/.test(cssText),
       "unused recipe selections survived"
