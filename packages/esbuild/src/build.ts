@@ -23,7 +23,11 @@ import {
   type MinchoEsbuildPluginOptions
 } from "./plugin.js";
 import { publishOutputs } from "./publish.js";
-import { emitSharedCss, type MinchoCssManifest } from "./cssSharing.js";
+import {
+  emitSharedCss,
+  staleCssSharingOutputs,
+  type MinchoCssManifest
+} from "./cssSharing.js";
 
 type Remapper = (
   maps: SourceMapInput[],
@@ -77,7 +81,10 @@ export async function buildWithMincho(
 ): Promise<BuildWithMinchoResult> {
   const { mincho, plugins, ...nativeOptions } = options;
   const explicitSharing = mincho?.experimental?.cssChunkSharing;
-  const sharingOptions = explicitSharing ?? false;
+  const sharingOptions =
+    explicitSharing ??
+    ((mincho?.optimizationMode ?? "production") === "production" &&
+      Boolean(nativeOptions.outdir || nativeOptions.outfile));
 
   if (
     nativeOptions.write !== false &&
@@ -164,6 +171,16 @@ export async function buildWithMincho(
   await emitted.transaction.cssSharingDiagnostics?.flush();
 
   if (nativeOptions.write !== false) {
+    const obsolete = sharing
+      ? []
+      : await staleCssSharingOutputs(
+          resolve(
+            emitted.cwd,
+            nativeOptions.outdir ?? dirname(nativeOptions.outfile!)
+          ),
+          emitted.result.outputFiles
+        );
+
     if (!nativeOptions.allowOverwrite) {
       const inputs = new Set(
         Object.keys(emitted.result.metafile.inputs).map((input) =>
@@ -171,15 +188,18 @@ export async function buildWithMincho(
         )
       );
 
-      for (const output of emitted.result.outputFiles) {
-        if (inputs.has(output.path))
+      for (const path of [
+        ...emitted.result.outputFiles.map(({ path }) => path),
+        ...obsolete
+      ]) {
+        if (inputs.has(path))
           throw new Error(
-            `Refusing to overwrite input file ${output.path}. Set allowOverwrite explicitly to permit this.`
+            `Refusing to overwrite input file ${path}. Set allowOverwrite explicitly to permit this.`
           );
       }
     }
 
-    await publishOutputs(emitted.result.outputFiles);
+    await publishOutputs(emitted.result.outputFiles, obsolete);
   }
 
   return {

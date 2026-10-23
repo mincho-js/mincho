@@ -133,9 +133,10 @@ fragments remain supported.
 ## Experimental CSS sharing
 
 `buildWithMincho` can emit a shared stylesheet for an identical prefix of whole
-CSS modules used by multiple entries. Sharing is opt-in in both production and development.
-Set `experimental.cssChunkSharing: true` to use the default
-thresholds of two boundaries and 4,096 source bytes, or override them explicitly:
+CSS modules used by multiple entries. Production builds with an output path
+enable sharing by default, requiring at least two boundaries and 4,096 source
+bytes. Development builds disable it. Set `experimental.cssChunkSharing: false`
+to retain native output, or override the thresholds explicitly:
 
 ```ts
 const result = await buildWithMincho({
@@ -160,10 +161,15 @@ then private CSS. The original native `cssBundle` is retained as
 either the ordered array or the fallback stylesheet; loading both duplicates
 rules and can change the cascade.
 
-Enabling sharing with `true` or threshold options always emits a manifest,
-including fallback entries when no shared group is eligible.
-Existing integrations loading the native `cssBundle`
+Automatic sharing produces no extra CSS or manifest when no eligible prefix
+exists. Explicit `true` or threshold options retain the fallback manifest even
+without a shared group. Existing integrations loading the native `cssBundle`
 continue to work; transfer savings require consuming the ordered manifest.
+
+When a later writing build no longer emits a manifest, it retires the previous
+v1 manifest and its referenced Mincho shared/private CSS, maps and license files
+in the publication transaction. Native fallback CSS and unrelated files remain.
+Failed publication restores retired files; `write: false` never removes them.
 
 This option adds a native CSS-only build from captured inputs after the two
 existing passes. User plugins still run only for `analyze` and `emit`; URLs,

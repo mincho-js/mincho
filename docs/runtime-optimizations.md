@@ -148,8 +148,9 @@ Experimental options have adapter-specific defaults:
   private variables;
   it does not register user-defined properties.
 - `cssChunkSharing` accepts `true` or `{ minBoundaries, minBytes }`, defaulting to
-  2 boundaries and 4,096 source bytes when enabled. It is disabled by default in
-  both adapters and all modes. Explicit `false` disables sharing. It shares compatible whole
+  2 boundaries and 4,096 source bytes when enabled. It is automatic in production
+  `buildWithMincho` builds with an output path, and disabled by default in Vite
+  and development. Explicit `false` disables sharing. It shares compatible whole
   leading CSS module sequences, preserving shared-before-private order and native
   asset handling. Vite retains lazy CSS loading. Missing ownership, unsupported
   CSS or import attributes keep the native layout; arbitrary equal rules are not

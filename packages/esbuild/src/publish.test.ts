@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { promises as fs } from "node:fs";
-import { rename, writeFile } from "node:fs/promises";
+import { rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import type { OutputFile } from "esbuild";
 import { publishOutputs } from "./publish.js";
@@ -11,7 +11,8 @@ vi.mock("node:fs/promises", async (importOriginal) => {
   return {
     ...actual,
     writeFile: vi.fn(actual.writeFile),
-    rename: vi.fn(actual.rename)
+    rename: vi.fn(actual.rename),
+    rm: vi.fn(actual.rm)
   };
 });
 
@@ -20,6 +21,7 @@ const roots: string[] = [];
 afterEach(async () => {
   vi.mocked(writeFile).mockReset().mockImplementation(fs.writeFile);
   vi.mocked(rename).mockReset().mockImplementation(fs.rename);
+  vi.mocked(rm).mockReset().mockImplementation(fs.rm);
   await Promise.all(
     roots.splice(0).map((root) => fs.rm(root, { recursive: true, force: true }))
   );
@@ -109,5 +111,58 @@ it.each(["write", "rename"])(
       expect((await fs.stat(join(root, "two.js"))).mode & 0o7777).toBe(0o640);
     }
     expect((await fs.readdir(root)).sort()).toEqual(["one.js", "two.js"]);
+  }
+);
+
+it.each(["remove", "write", "rename"])(
+  "restores retired files and their modes after a %s failure",
+  async (operation) => {
+    const root = await fixture();
+    const manifest = join(root, "manifest.json");
+    const css = join(root, "shared.css");
+    await fs.writeFile(manifest, "previous manifest", { mode: 0o640 });
+    await fs.writeFile(css, "previous CSS", { mode: 0o600 });
+
+    if (operation === "remove")
+      vi.mocked(rm)
+        .mockImplementationOnce(fs.rm)
+        .mockRejectedValueOnce(new Error("remove failed"));
+    else if (operation === "write")
+      vi.mocked(writeFile)
+        .mockImplementationOnce(fs.writeFile)
+        .mockRejectedValueOnce(new Error("write failed"));
+    else
+      vi.mocked(rename)
+        .mockImplementationOnce(fs.rename)
+        .mockRejectedValueOnce(new Error("rename failed"));
+
+    await expect(
+      publishOutputs(
+        [
+          output(join(root, "one.js"), "new one"),
+          output(join(root, "two.js"), "new two")
+        ],
+        [manifest, css]
+      )
+    ).rejects.toThrow("Touched output files were restored");
+
+    expect(await fs.readFile(manifest, "utf8")).toBe("previous manifest");
+    expect(await fs.readFile(css, "utf8")).toBe("previous CSS");
+    expect(await fs.readFile(join(root, "one.js"), "utf8")).toBe(
+      "previous one"
+    );
+    expect(await fs.readFile(join(root, "two.js"), "utf8")).toBe(
+      "previous two"
+    );
+    if (process.platform !== "win32") {
+      expect((await fs.stat(manifest)).mode & 0o7777).toBe(0o640);
+      expect((await fs.stat(css)).mode & 0o7777).toBe(0o600);
+    }
+    expect((await fs.readdir(root)).sort()).toEqual([
+      "manifest.json",
+      "one.js",
+      "shared.css",
+      "two.js"
+    ]);
   }
 );

@@ -32,30 +32,46 @@ async function replaceFile(path: string, contents: Uint8Array): Promise<void> {
 
 /** Restore touched files on I/O failure; this is not a filesystem-wide atomic rename. */
 export async function publishOutputs(
-  outputs: readonly OutputFile[]
+  outputs: readonly OutputFile[],
+  obsoletePaths: readonly string[] = []
 ): Promise<void> {
   const directory = Symbol("directory");
-  const backups = new Map<string, Buffer | null | typeof directory>();
+  const backups = new Map<
+    string,
+    { contents: Buffer; mode: number } | null | typeof directory
+  >();
+  const outputPaths = new Set(outputs.map(({ path }) => path));
+  const removals = [...new Set(obsoletePaths)].filter(
+    (path) => !outputPaths.has(path)
+  );
 
-  for (const output of outputs) {
-    const backup = await readFile(output.path).catch(
-      (error: NodeJS.ErrnoException) => {
+  for (const path of [...removals, ...outputPaths]) {
+    const backup = await readFile(path)
+      .then(async (contents) => ({
+        contents,
+        mode: (await stat(path)).mode & 0o7777
+      }))
+      .catch((error: NodeJS.ErrnoException) => {
         if (error.code === "ENOENT" || error.code === "ENOTDIR") return null;
 
         // Preserve directories, then let the normal file write report its error.
         if (error.code === "EISDIR") return directory;
 
         throw error;
-      }
-    );
+      });
 
-    backups.set(output.path, backup);
+    backups.set(path, backup);
   }
 
   const attempted: string[] = [];
   const published: string[] = [];
 
   try {
+    for (const path of removals) {
+      attempted.push(path);
+      await rm(path, { force: true });
+    }
+
     for (const output of outputs) {
       attempted.push(output.path);
       await mkdir(dirname(output.path), { recursive: true });
@@ -71,7 +87,10 @@ export async function publishOutputs(
 
       try {
         if (backup === null) await rm(path, { force: true });
-        else await replaceFile(path, backup);
+        else {
+          await replaceFile(path, backup.contents);
+          await chmod(path, backup.mode);
+        }
       } catch (error) {
         rollbackFailures.push(
           `${path}: ${error instanceof Error ? error.message : String(error)}`

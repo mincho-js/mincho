@@ -5,12 +5,14 @@ import {
   readdir,
   readFile,
   rm,
+  symlink,
   writeFile
 } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { build as nativeBuild } from "esbuild";
 import { buildWithMincho } from "./build.js";
 import { minchoEsbuildPlugins } from "./plugin.js";
+import { staleCssSharingOutputs } from "./cssSharing.js";
 
 const roots: string[] = [];
 
@@ -144,7 +146,7 @@ describe("native esbuild CSS sharing", () => {
   });
 
   it.each(["production", "development", "disabled"] as const)(
-    "keeps CSS sharing opt-in in %s mode",
+    "applies the default CSS sharing policy in %s mode",
     async (mode) => {
       const root = await fixture({
         "shared.css": Array.from(
@@ -168,10 +170,17 @@ describe("native esbuild CSS sharing", () => {
         }
       });
 
-      expect(result.minchoCssManifest).toBeUndefined();
-      expect(
-        result.outputFiles!.some((file) => file.path.includes("mincho-css"))
-      ).toBe(false);
+      if (mode === "production") {
+        expect(result.minchoCssManifest!.entries["a.js"]!.css).toHaveLength(2);
+        expect(result.minchoCssManifest!.entries["a.js"]!.css[0]).toBe(
+          result.minchoCssManifest!.entries["b.js"]!.css[0]
+        );
+      } else {
+        expect(result.minchoCssManifest).toBeUndefined();
+        expect(
+          result.outputFiles!.some((file) => file.path.includes("mincho-css"))
+        ).toBe(false);
+      }
     },
     20_000
   );
@@ -191,6 +200,148 @@ describe("native esbuild CSS sharing", () => {
       result.outputFiles!.some((file) => file.path.includes("mincho-css"))
     ).toBe(false);
   });
+
+  it.each(["ineligible", "disabled", "development", "no-css"] as const)(
+    "retires a previous automatic manifest when the next build is %s",
+    async (mode) => {
+      const root = await fixture({
+        "shared.css": Array.from(
+          { length: 180 },
+          (_, i) => `.shared${i} { padding: ${i}px; color: red; }`
+        ).join("\n")
+      });
+      const options = {
+        absWorkingDir: root,
+        entryPoints: ["a.js", "b.js"],
+        outdir: "out",
+        sourcemap: true,
+        mincho: { cache: false as const }
+      };
+      const first = await buildWithMincho(options);
+      expect(first.minchoCssManifest).toBeDefined();
+
+      const directory = join(root, "out/mincho-css");
+      const previousFiles = (await readdir(directory)).map((name) =>
+        join(directory, name)
+      );
+      previousFiles.push(join(root, "out/mincho-css-manifest.json"));
+      const previous = await Promise.all(
+        previousFiles.map((path) => readFile(path, "utf8"))
+      );
+      await writeFile(join(directory, "unrelated.css"), "keep me");
+
+      if (mode === "ineligible")
+        await writeFile(join(root, "shared.css"), ".shared { color: purple; }");
+      if (mode === "no-css") {
+        await writeFile(join(root, "a.js"), "export const a = 1;");
+        await writeFile(join(root, "b.js"), "export const b = 2;");
+      }
+
+      const nextOptions = {
+        ...options,
+        mincho: {
+          cache: false as const,
+          ...(mode === "disabled"
+            ? { experimental: { cssChunkSharing: false as const } }
+            : {}),
+          ...(mode === "development"
+            ? { optimizationMode: "development" as const }
+            : {})
+        }
+      };
+      const preview = await buildWithMincho({ ...nextOptions, write: false });
+      expect(preview.minchoCssManifest).toBeUndefined();
+      expect(
+        await Promise.all(previousFiles.map((path) => readFile(path, "utf8")))
+      ).toEqual(previous);
+
+      const next = await buildWithMincho(nextOptions);
+      expect(next.minchoCssManifest).toBeUndefined();
+      for (const path of previousFiles)
+        await expect(readFile(path)).rejects.toMatchObject({ code: "ENOENT" });
+      expect(await readdir(directory)).toEqual(["unrelated.css"]);
+      expect(await readFile(join(root, "out/a.css"), "utf8")).toContain("blue");
+      expect(await readFile(join(root, "out/b.css"), "utf8")).toContain(
+        "green"
+      );
+    },
+    20_000
+  );
+
+  it("does not follow manifest paths outside owned CSS or remove current outputs", async () => {
+    const root = await fixture({
+      "out/mincho-css-manifest.json": JSON.stringify({
+        version: 1,
+        entries: {
+          "a.js": {
+            css: [
+              "../outside.css",
+              "mincho-css/../../outside.css",
+              "mincho-css/custom.css",
+              "mincho-css/mincho-shared-current.css",
+              "mincho-css/mincho-private-old.css",
+              "a.css"
+            ],
+            fallbackCssBundle: "a.css"
+          }
+        }
+      }),
+      "outside.css": "outside",
+      "out/a.css": "fallback",
+      "out/mincho-css/custom.css": "custom",
+      "out/mincho-css/mincho-shared-current.css": "current",
+      "out/mincho-css/mincho-private-old.css": "old",
+      "out/mincho-css/mincho-private-old.css.map": "old map",
+      "out/mincho-css/mincho-private-old.css.LEGAL.txt": "old license"
+    });
+    const current = join(root, "out/mincho-css/mincho-shared-current.css");
+    const stale = await staleCssSharingOutputs(join(root, "out"), [
+      { path: current, contents: new Uint8Array(), hash: "", text: "" }
+    ]);
+
+    expect(stale.sort()).toEqual(
+      [
+        "mincho-css-manifest.json",
+        "mincho-css/mincho-private-old.css",
+        "mincho-css/mincho-private-old.css.map",
+        "mincho-css/mincho-private-old.css.LEGAL.txt"
+      ]
+        .map((path) => join(root, "out", path))
+        .sort()
+    );
+  });
+
+  it.skipIf(process.platform === "win32").each(["directory", "file"])(
+    "does not retire CSS through a symbolic %s link",
+    async (kind) => {
+      const root = await fixture({
+        "out/mincho-css-manifest.json": JSON.stringify({
+          version: 1,
+          entries: {
+            "a.js": {
+              css: ["mincho-css/mincho-shared-old.css"],
+              fallbackCssBundle: "a.css"
+            }
+          }
+        }),
+        "other/mincho-shared-old.css": "another build"
+      });
+
+      if (kind === "directory")
+        await symlink(join(root, "other"), join(root, "out/mincho-css"));
+      else {
+        await mkdir(join(root, "out/mincho-css"));
+        await symlink(
+          join(root, "other/mincho-shared-old.css"),
+          join(root, "out/mincho-css/mincho-shared-old.css")
+        );
+      }
+
+      expect(await staleCssSharingOutputs(join(root, "out"), [])).toEqual([
+        join(root, "out/mincho-css-manifest.json")
+      ]);
+    }
+  );
 
   it("replays captured CSS without additional user hooks and exposes ordered manifests", async () => {
     const root = await fixture();

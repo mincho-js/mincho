@@ -6,6 +6,7 @@ import {
 } from "@mincho-js/integration";
 import * as esbuild from "esbuild";
 import { createHash } from "node:crypto";
+import { lstat, readFile } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import {
   cssReplayResolutionKey,
@@ -29,6 +30,73 @@ const slash = (path: string) => path.split(sep).join("/");
 
 const identity = (path: string, cwd: string) =>
   isAbsolute(path) ? path : resolve(cwd, path);
+
+/** Only retire files owned by a previous v1 manifest, never arbitrary outputs. */
+export async function staleCssSharingOutputs(
+  outdir: string,
+  outputs: readonly esbuild.OutputFile[]
+): Promise<string[]> {
+  const manifestPath = resolve(outdir, "mincho-css-manifest.json");
+  const current = new Set(outputs.map(({ path }) => path));
+  const optionalStat = (path: string) =>
+    lstat(path).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT" || error.code === "ENOTDIR") return;
+
+      throw error;
+    });
+
+  if (
+    current.has(manifestPath) ||
+    !(await optionalStat(manifestPath))?.isFile()
+  )
+    return [];
+
+  let previous: MinchoCssManifest;
+
+  try {
+    previous = JSON.parse(await readFile(manifestPath, "utf8"));
+  } catch (error) {
+    if (error instanceof SyntaxError) return [];
+
+    throw error;
+  }
+
+  if (
+    previous?.version !== 1 ||
+    !previous.entries ||
+    typeof previous.entries !== "object" ||
+    Array.isArray(previous.entries)
+  )
+    return [];
+
+  const stale = new Set([manifestPath]);
+
+  // A symlinked directory may belong to another build. Do not follow it.
+  if (!(await optionalStat(resolve(outdir, "mincho-css")))?.isDirectory())
+    return [...stale];
+
+  for (const entry of Object.values(previous.entries)) {
+    if (!entry || !Array.isArray(entry.css)) continue;
+
+    for (const css of entry.css) {
+      if (
+        typeof css !== "string" ||
+        css === entry.fallbackCssBundle ||
+        !/^mincho-css\/mincho-(?:shared|private)-[^/\\]+$/.test(css)
+      )
+        continue;
+
+      for (const name of [css, `${css}.map`, `${css}.LEGAL.txt`]) {
+        const path = resolve(outdir, name);
+
+        if (!current.has(path) && (await optionalStat(path))?.isFile())
+          stale.add(path);
+      }
+    }
+  }
+
+  return [...stale];
+}
 
 function loadIdentity(
   namespace: string,
@@ -210,6 +278,10 @@ export async function emitSharedCss(
       estimatedSourceBytesSaved: savedBytes
     }))
   });
+
+  // Automatic production sharing must not add unused files for native layouts.
+  // Explicit callers retain the v1 fallback manifest even without a candidate.
+  if (!groups.length && !emitFallbackManifest) return;
 
   if (groups.length) {
     const entries = new Map<string, readonly string[]>();
