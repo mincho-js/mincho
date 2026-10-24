@@ -1,3 +1,5 @@
+import { recipeFactoryKind, decodeRecipePayload } from "./recipeFactories.js";
+import { compactRecipes } from "./compactRecipes.js";
 import {
   types as t,
   parseSync,
@@ -159,7 +161,7 @@ export function annotateRecipeFactories(
   scopedCx = false
 ): string {
   if (
-    !source.includes("@mincho-js/css/rules/createRuntimeFn") &&
+    !/@mincho-js\/css\/rules\/create\w*RuntimeFn/.test(source) &&
     !(
       scopedCx &&
       source.includes("@mincho-js/css/defineRules/createDefineRulesCxRuntime")
@@ -182,10 +184,7 @@ export function annotateRecipeFactories(
 
       if (
         !reference?.unsafe &&
-        ((reference?.source === "@mincho-js/css/rules/createRuntimeFn" &&
-          ["createRuntimeFn", "createCompiledRuntimeFn"].includes(
-            reference.members.join(".")
-          )) ||
+        (recipeFactoryKind(reference) ||
           (scopedCx && isCompiledScopedCx(path))) &&
         path.node.start != null
       )
@@ -1070,17 +1069,11 @@ function* serializedRecipe(
   const previous = recipes.get(target.path.node);
   if (previous) return previous;
 
-  const factory = getModuleReference(target.path.get("callee"));
+  const factory = recipeFactoryKind(
+    getModuleReference(target.path.get("callee"))
+  );
   if (
-    factory?.unsafe ||
-    !(
-      (factory?.source === "@mincho-js/css/rules/createRuntimeFn" &&
-        ["createRuntimeFn", "createCompiledRuntimeFn"].includes(
-          factory.members.join(".")
-        )) ||
-      (factory?.source === "@mincho-js/css/rules/createClassRuntimeFn" &&
-        factory.members.join(".") === "createCompiledClassRuntimeFn")
-    ) ||
+    !factory ||
     target.path.node.arguments.length < 1 ||
     target.path.node.arguments.length > 3
   )
@@ -1097,10 +1090,8 @@ function* serializedRecipe(
     budget
   );
 
-  const fullCompiled = factory.members.join(".") === "createCompiledRuntimeFn";
-  const compiled =
-    fullCompiled ||
-    factory.members.join(".") === "createCompiledClassRuntimeFn";
+  const fullCompiled = factory.full && factory.compiled;
+  const compiled = factory.compiled;
 
   const varsPath = target.path.get("arguments")[1];
   const propVars =
@@ -1119,7 +1110,9 @@ function* serializedRecipe(
   const result = {
     identity: `${target.module.id}\0${expressionKey(target.path)}`,
     compiled,
-    config: staticData(config),
+    config: factory.packed
+      ? (decodeRecipePayload(staticData(config)) as StaticData)
+      : staticData(config),
     propVars
   };
 
@@ -1291,7 +1284,10 @@ function* componentUsesAreSafe(
       if (
         source === "@mincho-js/react/runtime" ||
         source === "@mincho-js/css/rules/createRuntimeFn" ||
-        source === "@mincho-js/css/rules/createClassRuntimeFn"
+        source === "@mincho-js/css/rules/createClassRuntimeFn" ||
+        /^@mincho-js\/css\/rules\/create(?:Compact|Packed|PackedCompact)RuntimeFn$/.test(
+          source ?? ""
+        )
       )
         continue;
 
@@ -1423,6 +1419,9 @@ function elementIdentityObserved(element: NodePath<t.JSXElement>): boolean {
 
 export function applyRuntimeExpressions(options: {
   ast?: t.File;
+  compactRuntime?: boolean;
+  compactMetadata?: boolean;
+  bundleSize?: import("../bundleSize.js").BundleSizeOptions;
   filename: string;
   source: string;
   replacements: ReadonlyArray<{ key: string; value: string }>;
@@ -1520,6 +1519,7 @@ export function applyRuntimeExpressions(options: {
 
               if (options.runtimeCodegen) pruneRecipeMetadata(program);
               if (options.staticScopedCx) pruneScopedCxFactories(program);
+              compactRecipes(program, options);
             });
           }
         }

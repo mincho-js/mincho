@@ -35,6 +35,11 @@ export {
 export { parseDefineRulesPresetArtifactV5 } from "./presetArtifact.js";
 export { resolveDefineRulesPresetGraphV5 } from "./presetGraph.js";
 export { compilePrivateDefineRulesClass } from "./compilerClasses.js";
+export {
+  beginCompilerClassCost,
+  endCompilerClassCost,
+  type CompilerClassCandidate
+} from "./compilerClasses.js";
 export { factorCssBooleanGates } from "../cssBooleanGates.js";
 
 interface NormalizedDefineRulesRegistryFileScope {

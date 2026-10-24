@@ -38,6 +38,18 @@ export default (viteConfigEnv: ConfigEnv) => {
             "rules",
             "createClassRuntimeFn.ts"
           ),
+          "runtime/createCompactRuntimeFn": join(
+            packageDir,
+            "src/rules/createCompactRuntimeFn.ts"
+          ),
+          "runtime/createPackedRuntimeFn": join(
+            packageDir,
+            "src/rules/createPackedRuntimeFn.ts"
+          ),
+          "runtime/createPackedCompactRuntimeFn": join(
+            packageDir,
+            "src/rules/createPackedCompactRuntimeFn.ts"
+          ),
           "runtime/mapVarProps": join(
             packageDir,
             "src",
@@ -62,8 +74,10 @@ export default (viteConfigEnv: ConfigEnv) => {
     onlyExplicitManualChunks: true,
 
     manualChunks(id: string) {
-      if (/\/src\/rules\/(?:createClassRuntimeFn|utils)\.ts$/.test(id))
+      if (/\/src\/rules\/(?:createClassRuntimeFn)\.ts$/.test(id))
         return "runtime/recipes";
+      if (/\/src\/rules\/(?:utils|runtimeProperties)\.ts$/.test(id))
+        return "runtime/recipe-shared";
       if (/\/src\/classname\/cx\.ts$/.test(id)) return "runtime/classnames";
       if (/\/src\/runtime\/cache\.ts$/.test(id)) return "runtime/cache";
       if (/\/src\/defineRules\/createDefineRulesCxRuntime\.ts$/.test(id))

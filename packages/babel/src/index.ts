@@ -1,3 +1,4 @@
+import { compactRecipes } from "./optimizations/compactRecipes.js";
 import {
   analyzePureFunctions,
   applyPureFunctions
@@ -94,6 +95,10 @@ export function minchoBabelPlugin(): PluginObj<PluginState> {
 
           removeUnusedJsxCssPropCssModuleImports(path);
           removeUnusedGeneratedImports(path);
+          compactRecipes(path, {
+            ...state.opts.optimize,
+            bundleSize: state.opts.bundleSize
+          });
 
           const start = started.get(state);
 
@@ -196,3 +201,16 @@ export {
   applyRuntimeExpressions as internalApplyRuntimeExpressions,
   type RuntimeCandidates as InternalRuntimeCandidates
 } from "./optimizations/runtimeExpressions.js";
+
+export {
+  measureBundleBytes as internalMeasureBundleBytes,
+  bundleSizeMetric as internalBundleSizeMetric
+} from "./bundleSize.js";
+export type { BundleBytes, BundleSizeOptions } from "./bundleSize.js";
+
+export { hasObservablePrototypeMutation as internalHasObservablePrototypeMutation } from "./optimizations/recipeMetadata.js";
+
+export {
+  recipeFactoryKind as internalRecipeFactoryKind,
+  decodeRecipePayload as internalDecodeRecipePayload
+} from "./optimizations/recipeFactories.js";

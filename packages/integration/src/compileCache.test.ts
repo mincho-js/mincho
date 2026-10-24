@@ -74,9 +74,10 @@ describe("sidecar compilation cache", () => {
   });
 
   it("reuses sliced compilation while retaining absent Babel configuration watches and invalidation", async () => {
-    // This fixture uses only relative data modules, so it can live outside the
-    // workspace whose directory fingerprint other test files legitimately change.
+    // Isolate both data modules and Babel's working directory from sibling tests.
     const root = await mkdtemp(join(tmpdir(), "cache-graph-test-"));
+
+    const cwd = vi.spyOn(process, "cwd").mockReturnValue(root);
 
     try {
       await writeFile(
@@ -162,12 +163,15 @@ describe("sidecar compilation cache", () => {
         )
       ).toBe(true);
     } finally {
+      cwd.mockRestore();
       await rm(root, { recursive: true, force: true });
     }
   });
 
   it("invalidates a loaded sibling's Babel configuration before graph slicing", async () => {
     const root = await mkdtemp(join(tmpdir(), "cache-sibling-test-"));
+
+    const cwd = vi.spyOn(process, "cwd").mockReturnValue(root);
 
     try {
       await mkdir(join(root, "app"));
@@ -241,6 +245,7 @@ describe("sidecar compilation cache", () => {
 
       expect(build).toHaveBeenCalledTimes(4);
     } finally {
+      cwd.mockRestore();
       await rm(root, { recursive: true, force: true });
     }
   });
@@ -249,6 +254,8 @@ describe("sidecar compilation cache", () => {
     // Keep sibling fixture creation out of observed workspace directory entries.
     await mkdir(join(process.cwd(), ".cache"), { recursive: true });
     const root = await mkdtemp(join(process.cwd(), ".cache", "cache-test-"));
+
+    const cwd = vi.spyOn(process, "cwd").mockReturnValue(root);
 
     try {
       await writeFile(join(root, "package.json"), '{"name":"cache-test"}');
@@ -288,6 +295,7 @@ describe("sidecar compilation cache", () => {
       expect((await compile(options)).source).toContain("changed");
       expect(build).toHaveBeenCalledTimes(4);
     } finally {
+      cwd.mockRestore();
       await rm(root, { recursive: true, force: true });
     }
   });

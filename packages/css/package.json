@@ -121,6 +121,36 @@
         "types": "./dist/cjs/rules/mapVarProps.d.cts",
         "default": "./dist/cjs/runtime/mapVarProps.cjs"
       }
+    },
+    "./rules/createCompactRuntimeFn": {
+      "import": {
+        "types": "./dist/esm/rules/createCompactRuntimeFn.d.ts",
+        "default": "./dist/esm/runtime/createCompactRuntimeFn.mjs"
+      },
+      "require": {
+        "types": "./dist/cjs/rules/createCompactRuntimeFn.d.cts",
+        "default": "./dist/cjs/runtime/createCompactRuntimeFn.cjs"
+      }
+    },
+    "./rules/createPackedRuntimeFn": {
+      "import": {
+        "types": "./dist/esm/rules/createPackedRuntimeFn.d.ts",
+        "default": "./dist/esm/runtime/createPackedRuntimeFn.mjs"
+      },
+      "require": {
+        "types": "./dist/cjs/rules/createPackedRuntimeFn.d.cts",
+        "default": "./dist/cjs/runtime/createPackedRuntimeFn.cjs"
+      }
+    },
+    "./rules/createPackedCompactRuntimeFn": {
+      "import": {
+        "types": "./dist/esm/rules/createPackedCompactRuntimeFn.d.ts",
+        "default": "./dist/esm/runtime/createPackedCompactRuntimeFn.mjs"
+      },
+      "require": {
+        "types": "./dist/cjs/rules/createPackedCompactRuntimeFn.d.cts",
+        "default": "./dist/cjs/runtime/createPackedCompactRuntimeFn.cjs"
+      }
     }
   },
   "publishConfig": {

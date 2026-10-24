@@ -16,6 +16,7 @@ import {
   registerCompilerClassMethod,
   compilerClassName,
   emitCompilerClass,
+  preferCompilerAtoms,
   type CompilerClassStrategy
 } from "./compilerClasses.js";
 import { createCanonicalWriteKey, createEngineMetadata } from "./metadata.js";
@@ -156,7 +157,46 @@ export function createDefineRulesRuntime<
       ? compilerAtomIdentities(atomicWrites, strategy)
       : undefined;
 
-    if (identities && strategy?.compileClass && atomicWrites.length > 1) {
+    let useComposite = strategy?.compileClass === true;
+    if (
+      identities &&
+      useComposite &&
+      strategy?.globalAtomicClasses &&
+      strategy.sizeAware &&
+      atomicWrites.length > 1
+    ) {
+      const classes = atomicWrites.map(
+        (write, index) =>
+          styleCache.getFragment(write.property, write.value, write.style) ??
+          compilerClassName("atom", identities[index]!)
+      );
+      const composite = compilerClassName(
+        "combination",
+        JSON.stringify(identities)
+      );
+      useComposite = !preferCompilerAtoms(
+        [
+          {
+            className: composite,
+            rules: [
+              { className: composite, style: flattenAtomicWrites(atomicWrites) }
+            ]
+          },
+          {
+            // A private marker contains two 32-bit base-36 hashes, at most seven characters each.
+            className: `__mincho_seg_1z141z3_1y2p0ij ${classes.join(" ")}`,
+            rules: atomicWrites.flatMap((write, index) =>
+              styleCache.hasFragment(write.property, write.value, write.style)
+                ? []
+                : [{ className: classes[index]!, style: write.style }]
+            )
+          }
+        ],
+        strategy.metric
+      );
+    }
+
+    if (identities && useComposite && strategy && atomicWrites.length > 1) {
       // This class is intentionally opaque: it cannot represent independently
       // removable atomic writes. The compiler rejects every cx/preset escape.
       const identity = JSON.stringify(identities);

@@ -168,7 +168,7 @@ for (const [mode, experimental] of Object.entries(modes)) {
 
     for (const value of Object.values(client.classNames))
       assert.ok(
-        atoms(value).every((name) => /^m[ac]_[a-f0-9]{32}$/.test(name))
+        atoms(value).every((name) => /^m[ac]_[A-Za-z0-9_-]{22}$/.test(name))
       );
   }
 
@@ -251,7 +251,7 @@ const optedFallback = await fallback(modes.combined);
 
 assert.equal(text(optedFallback, ".js"), text(scopedFallback, ".js"));
 assert.equal(text(optedFallback, ".css"), text(scopedFallback, ".css"));
-assert.doesNotMatch(text(optedFallback, ".css"), /\.m[ac]_[a-f0-9]{32}/);
+assert.doesNotMatch(text(optedFallback, ".css"), /\.m[ac]_[A-Za-z0-9_-]{22}/);
 
 const report = Object.fromEntries(
   Object.entries(observations).map(([name, value]) => [

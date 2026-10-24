@@ -240,6 +240,7 @@ export type BabelOptions = Omit<
   privateRecipes?: boolean;
   extractCalls?: PluginOptions["extractCalls"];
   jsxCssProp?: boolean;
+  bundleSize?: PluginOptions["bundleSize"];
   optimize?: PluginOptions["optimize"];
   experimental?: PluginOptions["experimental"];
   staticCssEvalProvider?: PluginOptions["staticCssEvalProvider"];
@@ -347,6 +348,7 @@ export async function transformSourceUncached(
     extractCalls,
     jsxCssProp = false,
     optimize,
+    bundleSize,
     experimental,
     staticCssEvalProvider,
     staticCssEvalSourceProvider,
@@ -423,6 +425,7 @@ export async function transformSourceUncached(
     diagnostics,
     jsxCssProp,
     experimental,
+    bundleSize,
     ...(extractCalls !== undefined ? { extractCalls } : {}),
     ...(optimize ? { optimize } : {})
   };

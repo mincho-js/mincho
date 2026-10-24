@@ -15,6 +15,9 @@ export function resolveOptimizationOptions(
     jsxRuntimeGuards: mode === "production",
 
     // These evaluation shortcuts need an explicit opt-in: cost varies by workload.
+    compactRuntime: false,
+    compactMetadata: false,
+    sizeAware: false,
     dependencyGraph: false,
     staticStyles: false,
     staticScopedCx: false,

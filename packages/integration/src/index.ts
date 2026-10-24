@@ -132,3 +132,11 @@ export {
   rebindSymbolicTokenArtifact as internalRebindSymbolicTokenArtifact,
   type SymbolicTokenArtifact as InternalSymbolicTokenArtifact
 } from "./symbolicTokens.js";
+
+export {
+  measureBundleBytes as internalMeasureBundleBytes,
+  bundleSizeMetric as internalBundleSizeMetric
+} from "./bundleSize.js";
+export type { BundleSizeOptions, BundleBytes } from "./bundleSize.js";
+
+export { optimizeCompiledRecipeSource as internalOptimizeCompiledRecipeSource } from "./compiledRecipeSource.js";

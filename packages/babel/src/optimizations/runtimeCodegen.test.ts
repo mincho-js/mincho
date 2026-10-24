@@ -56,6 +56,46 @@ function analyze(source: string, modules: Record<string, string> = {}) {
 }
 
 describe("runtime code generation", () => {
+  it.each(["Compact", "Packed", "PackedCompact"])(
+    "recognizes %s factories when folding literal recipe calls",
+    (stem) => {
+      const config = {
+        defaultClassName: "base",
+        variantClassNames: {},
+        defaultVariants: {},
+        compoundVariants: []
+      };
+      const packed = [
+        1,
+        [
+          "defaultClassName",
+          "base",
+          "variantClassNames",
+          "defaultVariants",
+          "compoundVariants"
+        ],
+        [
+          "o",
+          [
+            [0, ["s", 1]],
+            [2, ["o", []]],
+            [3, ["o", []]],
+            [4, ["a", []]]
+          ]
+        ]
+      ];
+      const payload = stem.startsWith("Packed") ? packed : config;
+      for (const full of [false, true]) {
+        const result = analyze(
+          `import {create${stem}${full ? "" : "Class"}RuntimeFn as make} from '@mincho-js/css/rules/create${stem}RuntimeFn';const r=make(${JSON.stringify(payload)}${full ? ",{}" : ""});globalThis.result=r();`
+        );
+        expect(result.calls).toHaveLength(1);
+        expect(result.calls[0]!.config).toEqual(config);
+        expect(result.calls[0]!.compiled).toBe(true);
+      }
+    }
+  );
+
   it("imports generated class merging from the pure runtime and removes orphan css imports", () => {
     const result = babelTransform(
       'export function App(flag) {return <div className="base" css={flag ? "active" : "inactive"}/>;}',

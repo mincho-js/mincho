@@ -1,3 +1,5 @@
+import { measureBundleBytes } from "./bundleSize.js";
+import type { CompilerClassCandidate } from "@mincho-js/css/defineRules/registry";
 /**
  * CSS adapter protocol adapted from @vanilla-extract/integration, MIT.
  * Copyright (c) 2021 SEEK. See THIRD_PARTY_NOTICES.md in this package.
@@ -44,6 +46,7 @@ import {
   annotateVanillaCssArtifacts,
   collectSelectorCompositions,
   isolateVanillaCssArtifact,
+  generateVanillaCss,
   type VanillaCssArtifact
 } from "./vanillaCssIr.js";
 
@@ -274,6 +277,41 @@ export async function replayVanillaEvaluation(
   return joinEvaluation(imports, value.exports);
 }
 
+/** Measure the same CSS and class payload for fresh, pooled and static evaluation. */
+function compilerClassCost(filePath: string) {
+  return (
+    candidates: readonly CompilerClassCandidate[],
+    metric: "raw" | "gzip" | "brotli"
+  ): readonly number[] => {
+    const costs = candidates.map((candidate) => {
+      const css = generateVanillaCss({
+        origin: filePath,
+        fileScope: { filePath, packageName: "mincho-cost" },
+        localClassNames: candidate.rules.map((rule) => rule.className),
+        composedClassLists: [],
+        usedCompositions: [],
+        cssObjs: candidate.rules.map((rule) => ({
+          type: "local",
+          selector: rule.className,
+          rule: rule.style as import("@vanilla-extract/css").StyleRule
+        }))
+      });
+      return (
+        measureBundleBytes(css)[metric] +
+        measureBundleBytes(JSON.stringify(candidate.className))[metric]
+      );
+    });
+    recordCompilationDiagnostic("bundle-size-class-strategy", {
+      estimate: true,
+      metric,
+      original: costs[0],
+      candidate: costs[1],
+      applied: costs[1]! < costs[0]!
+    });
+    return costs;
+  };
+}
+
 export function processVanillaWithExecution(
   options: VanillaOptions
 ): Promise<string>;
@@ -294,18 +332,41 @@ export async function processVanillaWithExecution(
       "Mincho dist-chunk requires @vanilla-extract/integration 8.0.10 and @vanilla-extract/css 1.20.1"
     );
 
-  const fresh = async () =>
-    consume(
-      options.serializeCssArtifact
-        ? await evaluateVanilla(
-            options,
-            undefined,
-            undefined,
-            createRequire(resolve(options.filePath)),
-            capture
-          )
-        : await processVanillaFile(options)
+  const fresh = async () => {
+    if (options.serializeCssArtifact)
+      return consume(
+        await evaluateVanilla(
+          options,
+          undefined,
+          undefined,
+          createRequire(resolve(options.filePath)),
+          capture
+        )
+      );
+
+    const resourceRegistry = ownRequire(
+      "@mincho-js/css/defineRules/registry"
+    ) as {
+      beginCompilerClassCost?: (
+        cost: ReturnType<typeof compilerClassCost>
+      ) => void;
+      endCompilerClassCost?: () => void;
+    };
+    let evaluated: Promise<string>;
+    resourceRegistry.beginCompilerClassCost?.(
+      compilerClassCost(options.filePath)
     );
+
+    try {
+      // Upstream evaluates synchronously before awaiting CSS serialization.
+      // Release the shared callback before another evaluation can start.
+      evaluated = processVanillaFile(options);
+    } finally {
+      resourceRegistry.endCompilerClassCost?.();
+    }
+
+    return consume(await evaluated);
+  };
 
   const execution = currentCompilationExecution();
 
@@ -488,10 +549,8 @@ async function evaluateVanilla(
     require
   );
 
-  const resourceRegistry = (
-    serializeCssArtifact
-      ? ownRequire("@mincho-js/css/defineRules/registry")
-      : {}
+  const resourceRegistry = ownRequire(
+    "@mincho-js/css/defineRules/registry"
   ) as {
     beginCompilerResourceCapture?: () => Set<string>;
     endCompilerResourceCapture?: () => void;
@@ -499,6 +558,13 @@ async function evaluateVanilla(
     endCompilerStyleCapture?: () => void;
     recordCompilerClass?: (name: string) => void;
     recordCompilerKeyframeRule?: (name: string) => void;
+    beginCompilerClassCost?: (
+      cost: (
+        candidates: readonly CompilerClassCandidate[],
+        metric: "raw" | "gzip" | "brotli"
+      ) => readonly number[]
+    ) => void;
+    endCompilerClassCost?: () => void;
   };
 
   let generatedVariables: Set<string> | undefined;
@@ -521,6 +587,10 @@ async function evaluateVanilla(
         evaluationAdapter.setAdapter(cssAdapter);
 
         try {
+          resourceRegistry.beginCompilerClassCost?.(
+            compilerClassCost(filePath)
+          );
+
           if (
             serializeCssArtifact &&
             resourceRegistry.beginCompilerStyleCapture &&
@@ -529,6 +599,7 @@ async function evaluateVanilla(
             generatedResources = resourceRegistry.beginCompilerStyleCapture();
 
           if (
+            serializeCssArtifact &&
             resourceRegistry.beginCompilerResourceCapture &&
             resourceRegistry.endCompilerResourceCapture
           )
@@ -580,7 +651,11 @@ async function evaluateVanilla(
                 if (generatedResources)
                   resourceRegistry.endCompilerStyleCapture!();
               } finally {
-                evaluationAdapter.removeAdapter();
+                try {
+                  resourceRegistry.endCompilerClassCost?.();
+                } finally {
+                  evaluationAdapter.removeAdapter();
+                }
               }
             }
           }

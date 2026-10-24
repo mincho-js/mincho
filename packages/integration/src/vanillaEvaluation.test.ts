@@ -1,6 +1,10 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { join } from "node:path";
 import { processVanillaFile } from "@vanilla-extract/integration";
+import {
+  beginCompilerClassCost,
+  endCompilerClassCost
+} from "@mincho-js/css/defineRules/registry";
 import { CompilationExecution } from "./compilationExecution.js";
 import { CompilationDiagnostics } from "./diagnostics.js";
 import { compile } from "./compile.js";
@@ -27,7 +31,119 @@ async function compiled(contents: string) {
   ).source;
 }
 
+async function compiledSizeAwareClasses() {
+  return compiled(`
+        import { defineRules } from '@mincho-js/css';
+        import { compilePrivateDefineRulesClass as compileClass } from '@mincho-js/css/defineRules/registry';
+        const rules = defineRules({ properties: { color: true, display: true } });
+        const strategy = { version: 1, source: ${JSON.stringify(filePath)}, globalAtomicClasses: true, compileClass: false };
+        compileClass(rules.css, { color: 'red' }, strategy);
+        compileClass(rules.css, { display: 'flex' }, strategy);
+        export const className = compileClass(rules.css, { color: 'red', display: 'flex' }, {
+          ...strategy, compileClass: true, sizeAware: true, metric: 'raw'
+        });
+      `);
+}
+
 describe("compatible vanilla-extract evaluation", () => {
+  it.each([
+    ["direct", false],
+    ["fresh", false],
+    ["auto", false],
+    ["fresh", true],
+    ["auto", true]
+  ] as const)(
+    "measures class strategies once with %s evaluation and artifacts=%s",
+    async (evaluation, artifacts) => {
+      const source = await compiledSizeAwareClasses();
+      const diagnostics = new CompilationDiagnostics({ console: true });
+      const evaluate = () =>
+        processVanillaWithExecution({
+          source,
+          filePath,
+          serializeVirtualCssPath: () => "",
+          ...(artifacts ? { serializeCssArtifact: () => "" } : {})
+        });
+      let result: string;
+
+      if (evaluation === "direct") {
+        result = await diagnostics.run(filePath, "test", evaluate);
+      } else {
+        const execution = new CompilationExecution({ workers: 0, evaluation });
+        executions.push(execution);
+        result = await diagnostics.run(filePath, "test", () =>
+          execution.run(evaluate)
+        );
+      }
+
+      expect(result).toContain("__mincho_seg_");
+      const decisions = diagnostics
+        .snapshot()
+        .builds.flatMap((build) => build.events)
+        .filter((event) => event.phase === "bundle-size-class-strategy");
+      expect(decisions).toHaveLength(1);
+      expect(decisions[0]?.detail).toMatchObject({
+        applied: true,
+        metric: "raw"
+      });
+    }
+  );
+
+  it.each([false, true])(
+    "restores outer class costs while CSS serialization is pending, rejects=%s",
+    async (reject) => {
+      const source = await compiledSizeAwareClasses();
+      const outerCost = vi.fn(() => [1000, 0]);
+      let release!: () => void;
+      const pending = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      beginCompilerClassCost(outerCost);
+
+      try {
+        const evaluated = processVanillaWithExecution({
+          source,
+          filePath,
+          serializeVirtualCssPath: async () => {
+            await pending;
+            if (reject) throw new Error("CSS serialization failed");
+            return "";
+          }
+        });
+        const result = evaluated.then(
+          (value) => value,
+          (error: Error) => error
+        );
+
+        try {
+          expect(outerCost).not.toHaveBeenCalled();
+          await processVanillaFile({
+            source,
+            filePath,
+            serializeVirtualCssPath: () => ""
+          });
+          expect(outerCost).toHaveBeenCalledTimes(1);
+        } finally {
+          release();
+          await result;
+        }
+
+        if (reject)
+          expect(await result).toEqual(new Error("CSS serialization failed"));
+        else expect(await result).toContain("__mincho_seg_");
+
+        await processVanillaFile({
+          source,
+          filePath,
+          serializeVirtualCssPath: () => ""
+        });
+        expect(outerCost).toHaveBeenCalledTimes(2);
+      } finally {
+        endCompilerClassCost();
+      }
+    }
+  );
+
   it.each(["auto", "fresh"] as const)(
     "defers CSS with %s evaluation, preserving compositions and ordered rules",
     async (evaluation) => {

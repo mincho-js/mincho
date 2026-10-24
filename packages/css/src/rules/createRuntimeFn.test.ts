@@ -1,3 +1,4 @@
+import { createCompactRuntimeFn } from "./createCompactRuntimeFn.js";
 import { describe, expect, it, vi } from "vitest";
 import {
   createCompiledRuntimeFn as compiledFactory,
@@ -54,10 +55,19 @@ const makeComplexConfig = (): PatternResult<TestVariants, TestProps> => ({
   ])
 });
 
-it.each([undefined, { props: true }])(
-  "maps inputs with no property variables to fresh empty results (features: %j)",
-  (features) => {
-    const recipe = compiledFactory<TestVariants, TestProps>(
+it.each([
+  { kind: "compiled", factory: compiledFactory, features: undefined },
+  { kind: "compiled", factory: compiledFactory, features: { props: true } },
+  { kind: "compact", factory: createCompactRuntimeFn, features: undefined },
+  {
+    kind: "compact",
+    factory: createCompactRuntimeFn,
+    features: { props: true }
+  }
+])(
+  "$kind maps inputs with no property variables to fresh empty results (features: $features)",
+  ({ factory, features }) => {
+    const recipe = factory<TestVariants, TestProps>(
       makeConfig(),
       undefined,
       features
@@ -122,7 +132,16 @@ it("reads a mutable direct mapping accessor after all input getters, once per ke
 
 describe.each([
   ["direct", createRuntimeFn],
-  ["compiled", createCompiledRuntimeFn]
+  ["compiled", createCompiledRuntimeFn],
+  [
+    "compact",
+    <
+      V extends VariantGroups,
+      P extends ComplexPropDefinitions<PropTarget | undefined>
+    >(
+      config: PatternResult<V, P>
+    ) => createCompactRuntimeFn(config, config.propVars)
+  ]
 ] as const)("%s recipe runtime", (_name, factory) => {
   it("uses declaration order independently of defaults, keys, and array order", () => {
     const recipe = factory(makeConfig());

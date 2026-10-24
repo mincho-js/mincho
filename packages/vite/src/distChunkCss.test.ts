@@ -556,6 +556,50 @@ describe("component-system production passes", () => {
   });
 });
 
+describe("bundle-size application integrations", () => {
+  it("still eliminates recipe helpers for literal calls when compact strategies are enabled", async () => {
+    const root = await fixture({
+      "main.js":
+        'import {rules} from "@mincho-js/css"; const button=rules({base:{display:"flex"},variants:{size:{small:{color:"red"},large:{color:"blue"}}}});globalThis.rendered=button({size:"small"});'
+    });
+    const result = await compile(root, {
+      optimize: { compactRuntime: true, compactMetadata: true, sizeAware: true }
+    });
+    const modules = result.output.flatMap((item) =>
+      item.type === "chunk"
+        ? Object.entries(item.modules)
+            .filter(([, info]) => info.renderedLength)
+            .map(([id]) => id)
+        : []
+    );
+    expect(
+      modules.some((id) => /create\w*RuntimeFn|runtime\/cache/.test(id))
+    ).toBe(false);
+    expect(result.text).toContain("color: red");
+  });
+
+  it("uses the compact helper for a dynamic small recipe in the final consumer graph", async () => {
+    const root = await fixture({
+      "main.js":
+        'import {rules} from "@mincho-js/css"; const button=rules({base:{display:"flex"},variants:{size:{small:{color:"red"},large:{color:"blue"}}}});globalThis.render=value=>button(value);'
+    });
+    const result = await compile(root, {
+      optimize: { compactRuntime: true, sizeAware: true }
+    });
+    const modules = result.output.flatMap((item) =>
+      item.type === "chunk"
+        ? Object.entries(item.modules)
+            .filter(([, info]) => info.renderedLength)
+            .map(([id]) => id)
+        : []
+    );
+    expect(modules.some((id) => id.includes("createCompactRuntimeFn"))).toBe(
+      true
+    );
+    expect(modules.some((id) => /runtime\/cache/.test(id))).toBe(false);
+  });
+});
+
 describe("shared artifact provenance", () => {
   function fixture(optimize: { mergeConditionalRules?: boolean } = {}) {
     const adapter = createDistChunkCss(() => {});

@@ -1,3 +1,4 @@
+import { preferRuntimeCandidate } from "./bundleSize.js";
 import {
   internalAnalyzeRuntimeExpressions,
   internalApplyRuntimeExpressions
@@ -41,6 +42,20 @@ function digest(value: unknown): string {
   return cacheDigest(JSON.stringify(value) ?? "undefined");
 }
 
+function mayCompactRecipes(
+  options: BabelTransformSourceOptions,
+  source: string
+): boolean {
+  const optimize = options.babel?.optimize;
+
+  return Boolean(
+    (optimize?.compactRuntime || optimize?.compactMetadata) &&
+    // Escaped module specifiers still need the parser to recognize their value.
+    (source.includes("\\") ||
+      /@mincho-js\/css\/rules\/create(?:Class)?RuntimeFn/.test(source))
+  );
+}
+
 /** Per-generation observed arguments only. Never retain evaluated CSS or registry state here. */
 export class RuntimeOptimizations {
   private readonly values = new Map<string, string>();
@@ -59,6 +74,7 @@ export class RuntimeOptimizations {
     if (optimize?.symbolicTokens) provider = tokenReferenceProvider(provider);
 
     if (
+      !mayCompactRecipes(options, result.code) &&
       !options.babel?.privateRecipes &&
       ((optimize?.symbolicTokens !== true &&
         optimize?.staticScopedCx !== true &&
@@ -108,6 +124,8 @@ export class RuntimeOptimizations {
         result.map,
         result.classStringBudget,
         options.sourceMaps,
+        "bundle-size-v1",
+        options.babel?.bundleSize,
         options.babel?.optimize,
         options.babel?.privateRecipes,
         options.babel?.privateRecipes ? result.result[0] : undefined,
@@ -250,6 +268,10 @@ export class RuntimeOptimizations {
   ): Promise<BabelTransformResult> {
     const optimize = options.babel?.optimize;
     const dependencies = new Set<string>();
+    const costGraph = {
+      modules: new Map<string, string>(),
+      resolutions: new Map<string, string>()
+    };
     const analysis = await measureCompilationPhase("static-recipes", () =>
       driveModuleGraph(
         internalAnalyzeRuntimeExpressions({
@@ -269,7 +291,15 @@ export class RuntimeOptimizations {
             : undefined
         }),
         provider,
-        dependencies
+        dependencies,
+        {
+          resolve(importer, source, id) {
+            costGraph.resolutions.set(`${importer}\0${source}`, id);
+          },
+          load(id, source) {
+            costGraph.modules.set(id, source);
+          }
+        }
       )
     ).catch(() => {
       failed();
@@ -430,6 +460,7 @@ export class RuntimeOptimizations {
     });
 
     if (
+      !mayCompactRecipes(options, result.code) &&
       !replacements.length &&
       !elements.length &&
       !finiteCalls.length &&
@@ -440,6 +471,9 @@ export class RuntimeOptimizations {
       return result;
 
     const transformed = internalApplyRuntimeExpressions({
+      compactRuntime: optimize?.compactRuntime,
+      compactMetadata: optimize?.compactMetadata,
+      bundleSize: options.babel?.bundleSize,
       ast: analysis.ast,
       filename: options.filename,
       source: result.code,
@@ -455,6 +489,30 @@ export class RuntimeOptimizations {
       inputSourceMap: result.map ?? undefined
     });
     if (!transformed?.code) return result;
+
+    if (optimize?.sizeAware || optimize?.compactMetadata) {
+      try {
+        const decision = await preferRuntimeCandidate(
+          result.code,
+          transformed.code,
+          options.filename,
+          options.babel?.bundleSize,
+          costGraph
+        );
+        recordCompilationDiagnostic("bundle-size-runtime", {
+          file: options.filename,
+          estimate: true,
+          ...decision
+        });
+        if (!decision.applied) return result;
+      } catch {
+        recordCompilationDiagnostic("bundle-size-runtime-bailout", {
+          file: options.filename,
+          reason: "unmeasurable-helper-graph"
+        });
+        return result;
+      }
+    }
 
     for (const file of analysis.dependencies) dependencies.add(file);
 

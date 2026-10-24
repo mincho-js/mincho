@@ -35,7 +35,11 @@ export interface PluginOptions {
   preparedPureFunctions?: import("./optimizations/pureFunctions.js").PreparedPureFunctions;
   jsxCssProp?: boolean;
   jsxCssPropTransformed?: boolean;
+  bundleSize?: import("./bundleSize.js").BundleSizeOptions;
   optimize?: {
+    compactRuntime?: boolean;
+    compactMetadata?: boolean;
+    sizeAware?: boolean;
     dependencyGraph?: boolean;
     staticStyles?: boolean;
 

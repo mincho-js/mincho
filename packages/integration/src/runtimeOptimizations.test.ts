@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { RuntimeOptimizations } from "./runtimeOptimizations.js";
 import { CompilationCache } from "./compilationCache.js";
+import { CompilationDiagnostics } from "./diagnostics.js";
 import type {
   BabelTransformResult,
   StaticCssEvalSourceProvider
@@ -30,6 +31,120 @@ const provider = (
 const result = (code: string): BabelTransformResult => ({
   code,
   result: ["", ""]
+});
+
+describe("compact recipe candidate filtering", () => {
+  it.each(["compactRuntime", "compactMetadata"] as const)(
+    "skips unrelated modules when %s is enabled",
+    async (option) => {
+      const code = "export const value = 1;";
+      const input = {
+        ...result(code),
+        runtimeCandidates: { recipes: false, styled: false }
+      };
+      const diagnostics = new CompilationDiagnostics({ json: "report.json" });
+      const output = await diagnostics.run("/app.ts", "transform", () =>
+        new RuntimeOptimizations().transform(
+          {
+            filename: "/app.ts",
+            source: code,
+            babel: { optimize: { [option]: true } }
+          },
+          input,
+          provider({})
+        )
+      );
+
+      expect(output).toBe(input);
+      const phases = diagnostics
+        .snapshot()
+        .builds[0]!.events.map((event) => event.phase);
+      expect(phases).toContain("runtime-analysis-skipped");
+      expect(phases).not.toContain("static-recipes");
+      expect(phases).not.toContain("bundle-size-runtime");
+    }
+  );
+
+  it.each(["compactRuntime", "compactMetadata"] as const)(
+    "does not apply or measure an empty analysis with %s",
+    async (option) => {
+      const code = "export const value = 1;";
+      const input = result(code);
+      const diagnostics = new CompilationDiagnostics({ json: "report.json" });
+      const output = await diagnostics.run("/app.ts", "transform", () =>
+        new RuntimeOptimizations().transform(
+          {
+            filename: "/app.ts",
+            source: code,
+            babel: { optimize: { [option]: true } }
+          },
+          input,
+          provider({})
+        )
+      );
+
+      expect(output).toBe(input);
+      const phases = diagnostics
+        .snapshot()
+        .builds[0]!.events.map((event) => event.phase);
+      expect(phases).toContain("static-recipes");
+      expect(phases).not.toContain("bundle-size-runtime");
+    }
+  );
+
+  it.each([
+    'import {createCompiledClassRuntimeFn as make} from "@mincho-js/css/rules/createClassRuntimeFn";',
+    'const {createCompiledClassRuntimeFn:make}=require("@mincho-js/css/rules/createClassRuntimeFn");',
+    'import {createCompiledClassRuntimeFn as make} from "@mincho-js/\\u0063ss/rules/createClassRuntimeFn";'
+  ])("retains supported factory references: %s", async (imports) => {
+    const code = `${imports} export const button=make(${JSON.stringify(config)});`;
+    const output = await new RuntimeOptimizations().transform(
+      {
+        filename: "/app.ts",
+        source: code,
+        babel: {
+          optimize: {
+            compactRuntime: true,
+            staticRecipes: false,
+            styledComponents: false
+          }
+        }
+      },
+      {
+        ...result(code),
+        runtimeCandidates: { recipes: false, styled: false }
+      },
+      provider({})
+    );
+
+    expect(output.code).toContain("createCompactClassRuntimeFn");
+  });
+
+  it("retains runtime codegen work without a factory import in the source", async () => {
+    const code =
+      'import {button} from "/extracted_rules.css.ts"; export const render=size=>button({size});';
+    const output = await new RuntimeOptimizations().transform(
+      {
+        filename: "/app.ts",
+        source: code,
+        babel: {
+          optimize: {
+            compactRuntime: true,
+            runtimeCodegen: true,
+            staticRecipes: true,
+            styledComponents: false
+          }
+        }
+      },
+      result(code),
+      provider({
+        "/extracted_rules.css.ts": `import {createCompiledRuntimeFn} from "@mincho-js/css/rules/createRuntimeFn"; export const button=createCompiledRuntimeFn(${JSON.stringify(config)}, {});`
+      })
+    );
+
+    expect(output.code).not.toContain("button({");
+    expect(output.code).toContain("createCompactClassRuntimeFn");
+  });
 });
 
 describe("private recipe resource proofs", () => {

@@ -12,6 +12,8 @@ export interface CompilerClassStrategy {
   version: 1;
   globalAtomicClasses: boolean;
   compileClass: boolean;
+  sizeAware?: boolean;
+  metric?: "raw" | "gzip" | "brotli";
 
   /** Original module: the conservative cascade and relative URL domain. */
   source: string;
@@ -193,10 +195,80 @@ export function compilerClassName(
   kind: "atom" | "combination",
   identity: string
 ): string {
-  return `m${kind === "atom" ? "a" : "c"}_${sha256(identity).slice(0, 32)}`;
+  // Re-encode the same 128 bits, rather than increasing the collision risk by
+  // truncating the digest. This pure encoder also works in isolated evaluators.
+  const hex = sha256(identity).slice(0, 32);
+  const alphabet =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+  let encoded = "";
+  let bits = 0;
+  let value = 0;
+
+  for (let index = 0; index < hex.length; index += 2) {
+    value = (value << 8) | Number.parseInt(hex.slice(index, index + 2), 16);
+    bits += 8;
+
+    while (bits >= 6) {
+      bits -= 6;
+      encoded += alphabet[(value >>> bits) & 63];
+    }
+    value &= (1 << bits) - 1;
+  }
+
+  if (bits) encoded += alphabet[(value << (6 - bits)) & 63];
+
+  return `m${kind === "atom" ? "a" : "c"}_${encoded}`;
 }
 
 const emittedByFile = new WeakMap<FileScope, Set<string>>();
+
+export type CompilerClassCandidate = {
+  className: string;
+  rules: { className: string; style: CSSRule }[];
+};
+type ClassCost = (
+  candidates: readonly CompilerClassCandidate[],
+  metric: "raw" | "gzip" | "brotli"
+) => readonly number[];
+const costKey = Symbol.for("@mincho-js/compiler-class-cost/v1");
+const costState = globalThis as typeof globalThis & { [costKey]?: ClassCost[] };
+
+export function beginCompilerClassCost(cost: ClassCost): void {
+  (costState[costKey] ??= []).push(cost);
+}
+export function endCompilerClassCost(): void {
+  costState[costKey]?.pop();
+  if (!costState[costKey]?.length) delete costState[costKey];
+}
+
+/** Build host owns compression. No Node APIs or decoder enter the CSS runtime. */
+export function preferCompilerAtoms(
+  candidates: readonly CompilerClassCandidate[],
+  metric: "raw" | "gzip" | "brotli" = "brotli"
+): boolean {
+  const costs = costState[costKey];
+  const cost = costs?.[costs.length - 1];
+  if (!cost) return false;
+  try {
+    const emitted = emittedByFile.get(getFileScope());
+    const measured = cost(
+      candidates.map((candidate) => ({
+        ...candidate,
+        rules: candidate.rules
+          .filter((rule) => !emitted?.has(rule.className))
+          .map((rule) => ({ ...rule, style: transform(rule.style) as CSSRule }))
+      })),
+      metric
+    );
+    return (
+      measured.length === 2 &&
+      measured.every(Number.isFinite) &&
+      measured[1]! < measured[0]!
+    );
+  } catch {
+    return false;
+  }
+}
 
 /** Register the selected identity before CSS/exports/preset metadata see it. */
 export function emitCompilerClass(className: string, style: CSSRule): string {

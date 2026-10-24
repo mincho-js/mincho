@@ -175,4 +175,5 @@ export async function emitSsrCssManifest(
     fileName,
     source: JSON.stringify(checked, null, 2)
   });
+  return checked;
 }

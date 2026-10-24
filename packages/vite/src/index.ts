@@ -1,3 +1,8 @@
+import { measureOutputBundle } from "./bundleMetrics.js";
+import {
+  internalOptimizeCompiledRecipeSource,
+  internalRebindSymbolicTokenArtifact
+} from "@mincho-js/integration";
 import { emitSsrCssManifest } from "./ssrCssManifest.js";
 import { createLibraryRscBoundaries } from "./libraryRsc.js";
 import {
@@ -102,6 +107,7 @@ export interface MinchoVitePluginOptions {
 
   /** Defaults to development for serve and production for build. */
   optimizationMode?: OptimizationMode;
+  bundleSize?: BabelOptions["bundleSize"];
   optimize?: BabelOptions["optimize"];
   babel?: BabelOptions;
   jsxCssProp?: boolean;
@@ -295,6 +301,7 @@ function createMinchoViteEnvironmentPlugin(
   execution.compilationCache = compilationCache;
 
   const runtimeOptimizations = new InternalRuntimeOptimizations();
+
   const cssSharing = createCssSharing(
     _options?.appCss?.sharing ?? _options?.experimental?.cssChunkSharing,
     (detail) => diagnostics.record(config.root, "css-sharing", detail),
@@ -870,6 +877,7 @@ function createMinchoViteEnvironmentPlugin(
         }
 
         diagnosticsClosed = false;
+
         cssSharing.begin();
         distChunkCss.begin();
         execution.begin();
@@ -1330,7 +1338,7 @@ function createMinchoViteEnvironmentPlugin(
           }
 
           let hasGeneratedVirtualCss = false;
-          const registryResult = await tracedRegistry({
+          let registryResult = await tracedRegistry({
             source,
             filePath: moduleInfo.filePath,
             identOption: config.mode === "production" ? "short" : "debug",
@@ -1372,6 +1380,25 @@ function createMinchoViteEnvironmentPlugin(
               return `import "${virtualCssImportPrefix}${cssFileId}";`;
             }
           });
+          registryResult = {
+            ...registryResult,
+            source: await internalOptimizeCompiledRecipeSource(
+              registryResult.source,
+              moduleInfo.filePath,
+              {
+                optimize: compilerOptimizations(),
+                bundleSize: _options?.bundleSize ?? _options?.babel?.bundleSize
+              }
+            )
+          };
+          if (registryResult.symbolicTokens)
+            registryResult = {
+              ...registryResult,
+              symbolicTokens: internalRebindSymbolicTokenArtifact(
+                registryResult.symbolicTokens,
+                registryResult.source
+              )
+            };
 
           if (!current()) return null;
 
@@ -1475,6 +1502,7 @@ function createMinchoViteEnvironmentPlugin(
 
         const transformBabelOptions: BabelOptions = {
           ...babelOptions,
+          bundleSize: _options?.bundleSize ?? babelOptions?.bundleSize,
           experimental: {
             ...babelOptions?.experimental,
             ...(_options?.experimental?.nonInheritingCssVars !== undefined
@@ -1915,8 +1943,11 @@ function createMinchoViteEnvironmentPlugin(
 
         const ssrManifest = _options?.appCss?.ssrManifest;
 
+        let finalCssManifest:
+          | import("./ssr.js").MinchoSsrCssManifest
+          | undefined;
         if (ssrManifest && !config.build.ssr && !config.build.lib)
-          await emitSsrCssManifest(
+          finalCssManifest = await emitSsrCssManifest(
             this,
             config,
             bundle,
@@ -1924,6 +1955,19 @@ function createMinchoViteEnvironmentPlugin(
               ? ssrManifest
               : ".vite/mincho-css-manifest.json",
             _options?.appCss?.routes
+          );
+        if (
+          diagnostics.enabled &&
+          (_options?.diagnostics?.json || _options?.diagnostics?.trace)
+        )
+          diagnostics.record(
+            config.root,
+            "bundle-size-final",
+            measureOutputBundle(
+              bundle,
+              finalCssManifest,
+              config.build.cssCodeSplit
+            )
           );
       }
     },
@@ -6271,6 +6315,9 @@ if (import.meta.vitest) {
                   staticStyles: false,
                   staticScopedCx: false,
                   symbolicTokens: false,
+                  compactRuntime: false,
+                  compactMetadata: false,
+                  sizeAware: false,
                   ...disabledCase.expectedOptions?.optimize
                 },
                 staticCssEvalSourceProvider: expect.any(Object)

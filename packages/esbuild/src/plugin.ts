@@ -1,3 +1,4 @@
+import { internalOptimizeCompiledRecipeSource } from "@mincho-js/integration";
 import {
   type BabelOptions,
   type MinchoDiagnosticsOptions,
@@ -68,6 +69,7 @@ export interface MinchoEsbuildPluginOptions {
 
   /** Defaults to production; set development explicitly for serve/watch contexts. */
   optimizationMode?: OptimizationMode;
+  bundleSize?: BabelOptions["bundleSize"];
   optimize?: BabelOptions["optimize"];
   includeNodeModulesPattern?: RegExp;
   jsxCssProp?: boolean;
@@ -105,6 +107,7 @@ export function minchoEsbuildPlugin({
   cache: cacheOptions,
   execution: executionOptions,
   optimize: optimizationOverrides,
+  bundleSize,
   optimizationMode = "production",
   jsxCssProp,
   extractCalls,
@@ -382,7 +385,7 @@ export function minchoEsbuildPlugin({
             .map((specifier) => `import ${JSON.stringify(specifier)};`)
             .join(
               "\n"
-            )}${ancestorStyleSpecifiers.length === 0 ? "" : "\n"}${registrySource}`;
+            )}${ancestorStyleSpecifiers.length === 0 ? "" : "\n"}${await internalOptimizeCompiledRecipeSource(registrySource, path, { optimize, bundleSize })}`;
 
           return {
             contents,
@@ -512,6 +515,7 @@ export function minchoEsbuildPlugin({
             jsxCssProp,
             extractCalls,
             optimize,
+            bundleSize,
             experimental: {
               ...(experimental?.nonInheritingCssVars !== undefined
                 ? { nonInheritingCssVars: experimental.nonInheritingCssVars }

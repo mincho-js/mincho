@@ -195,6 +195,18 @@ export function prepareCompilerClassStrategies(
         t.cloneNode(call.node.arguments[0] as t.Expression, true),
         t.objectExpression([
           t.objectProperty(t.identifier("version"), t.numericLiteral(1)),
+          ...(state.opts.optimize?.sizeAware
+            ? [
+                t.objectProperty(
+                  t.identifier("sizeAware"),
+                  t.booleanLiteral(true)
+                ),
+                t.objectProperty(
+                  t.identifier("metric"),
+                  t.stringLiteral(state.opts.bundleSize?.metric ?? "brotli")
+                )
+              ]
+            : []),
           t.objectProperty(
             t.identifier("globalAtomicClasses"),
             t.booleanLiteral(globalAtomicClasses === true)

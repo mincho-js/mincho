@@ -12,6 +12,9 @@ import { createDefineRulesCssRuntime } from "./createDefineRulesCssRuntime.js";
 import { createDefineRulesCxRuntime } from "./createDefineRulesCxRuntime.js";
 import {
   compilePrivateDefineRulesClass,
+  compilerClassName,
+  beginCompilerClassCost,
+  endCompilerClassCost,
   type CompilerClassStrategy
 } from "./compilerClasses.js";
 
@@ -47,6 +50,71 @@ const compile = (
 
 const atomNames = (value: string) =>
   value.split(" ").filter((name) => !name.startsWith("__mincho_seg_"));
+
+it("re-encodes all 128 identifier bits deterministically", async () => {
+  const { createHash } = await import("node:crypto");
+  for (const input of ["", "same declaration", "색상:빨강", "a".repeat(1000)]) {
+    const encoded = compilerClassName("atom", input).slice(3);
+    expect(encoded).toHaveLength(22);
+    expect(Buffer.from(encoded, "base64url")).toEqual(
+      createHash("sha256").update(input).digest().subarray(0, 16)
+    );
+  }
+});
+
+it("selects atoms only when both strategies are authorized and their measured cost wins", () => {
+  beginCompilerClassCost(() => [1000, 100]);
+  try {
+    const output = compile(
+      make(),
+      { color: "red", display: "flex" },
+      { ...strategy, compileClass: true, sizeAware: true }
+    );
+    expect(atomNames(output)).toHaveLength(2);
+    expect(atomNames(output).every((name) => name.startsWith("ma_"))).toBe(
+      true
+    );
+  } finally {
+    endCompilerClassCost();
+  }
+  beginCompilerClassCost(() => [100, 100]);
+  try {
+    expect(
+      compile(
+        make(),
+        { color: "blue", display: "grid" },
+        { ...strategy, compileClass: true, sizeAware: true }
+      )
+    ).toMatch(/^mc_/);
+  } finally {
+    endCompilerClassCost();
+  }
+});
+
+it("prices atomic class lists with the emitted segment marker format", () => {
+  let estimatedClassName = "";
+  beginCompilerClassCost((candidates) => {
+    estimatedClassName = candidates[1]!.className;
+    return [100, estimatedClassName.length];
+  });
+
+  try {
+    const output = compile(
+      make(),
+      { color: "red", display: "flex" },
+      { ...strategy, compileClass: true, sizeAware: true, metric: "raw" }
+    );
+
+    expect(atomNames(output)).toHaveLength(2);
+    expect(atomNames(estimatedClassName)).toEqual(atomNames(output));
+    for (const className of [estimatedClassName, output])
+      expect(className.split(" ")[0]).toMatch(
+        /^__mincho_seg_[a-z0-9]{1,7}_[a-z0-9]{1,7}$/
+      );
+  } finally {
+    endCompilerClassCost();
+  }
+});
 
 beforeEach(() => {
   rules = [];
@@ -136,9 +204,9 @@ describe("private class generation", () => {
     const atoms = owner.preset.nodes.flatMap((node) => node.atoms);
 
     expect(atomNames(red)).toHaveLength(2);
-    expect(atomNames(red).every((name) => /^ma_[a-f0-9]{32}$/.test(name))).toBe(
-      true
-    );
+    expect(
+      atomNames(red).every((name) => /^ma_[A-Za-z0-9_-]{22}$/.test(name))
+    ).toBe(true);
     expect(new Set(atoms.map((atom) => atom.className))).toEqual(classes);
     expect(
       new Set(

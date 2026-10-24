@@ -12,7 +12,11 @@ import type { StaticCssEvalSourceProvider } from "./babel.js";
 export async function driveModuleGraph<T>(
   analysis: InternalModuleGraphFlow<T>,
   provider?: StaticCssEvalSourceProvider,
-  watchFiles = new Set<string>()
+  watchFiles = new Set<string>(),
+  observe?: {
+    resolve(importer: string, source: string, id: string): void;
+    load(id: string, source: string): void;
+  }
 ): Promise<T> {
   const loadKeys = new Map<string, string>();
   let step = analysis.next();
@@ -79,6 +83,11 @@ export async function driveModuleGraph<T>(
           : await readFile(request.id, "utf8");
       }
 
+      if (value !== null) {
+        if (request.kind === "resolve")
+          observe?.resolve(request.importer, request.source, value);
+        else if (request.kind === "load") observe?.load(request.id, value);
+      }
       step = analysis.next(value);
     } catch (error) {
       try {
