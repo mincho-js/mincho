@@ -13,17 +13,15 @@ import {
   validateAppCssOptions
 } from "./appCss.js";
 
-it("keeps IR optimization opt-in and honors explicit opt-outs", () => {
-  expect(
-    resolveAppCssOptimization({ mode: "dist-chunk", optimize: true }, true)
-  ).toEqual({
+it("enables production IR defaults and honors explicit opt-outs", () => {
+  expect(resolveAppCssOptimization({ mode: "dist-chunk" }, true)).toEqual({
     mergeRules: true,
     pruneGenerated: true,
     compactThemes: true,
     shareAtoms: true,
     mergeConditionalRules: false,
-    pruneKeyframes: false,
-    pruneRecipes: false,
+    pruneKeyframes: true,
+    pruneRecipes: true,
     internThemeValues: false
   });
   expect(
@@ -46,8 +44,8 @@ it("keeps IR optimization opt-in and honors explicit opt-outs", () => {
     compactThemes: true,
     shareAtoms: false,
     mergeConditionalRules: false,
-    pruneKeyframes: false,
-    pruneRecipes: false,
+    pruneKeyframes: true,
+    pruneRecipes: true,
     internThemeValues: false
   });
   expect(
@@ -62,7 +60,7 @@ it("keeps IR optimization opt-in and honors explicit opt-outs", () => {
 });
 
 it.each([undefined, true, {}])(
-  "keeps private pruning opt-in: %s",
+  "defaults private pruning only in production: %s",
   (optimize) => {
     for (const production of [false, true]) {
       const result = resolveAppCssOptimization(
@@ -70,11 +68,11 @@ it.each([undefined, true, {}])(
         production
       );
 
-      if (optimize === undefined) expect(result).toBeUndefined();
+      if (!production && optimize === undefined) expect(result).toBeUndefined();
       else
         expect(result).toMatchObject({
-          pruneRecipes: false,
-          pruneKeyframes: false
+          pruneRecipes: production,
+          pruneKeyframes: production
         });
     }
   }

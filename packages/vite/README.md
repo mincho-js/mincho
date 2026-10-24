@@ -50,11 +50,11 @@ model. It preserves file/cascade order and uses native Vite processing for
 PostCSS, URL assets, lazy preloads, hashes, HTML and manifests. Conflicting explicit `build.cssCodeSplit`
 settings are errors. Development serving, library builds and SSR are unchanged.
 
-In `dist-chunk` builds, `appCss.optimize.pruneRecipes` and `pruneKeyframes` are
-opt-in in both production and development. Set each flag to `true` to enable it;
-`appCss.optimize: true` and an options object without those flags leave them
-disabled. They remove only compiler-owned resources whose private use is proven;
-public or dynamic recipes and animation references remain.
+In production `dist-chunk` builds, `appCss.optimize.pruneRecipes` and
+`pruneKeyframes` default on when `optimize` is omitted, `true`, or an options
+object. Development-profile builds require explicit `true` flags. They remove
+only compiler-owned resources whose private use is proven; public or dynamic
+recipes and animation references remain.
 Proof analysis runs after CSS capture and is skipped when there are no relevant
 resources, or external CSS, runtime CSSOM access or opaque PostCSS prevents safe
 removal. This is not a general selector purge. Set either flag to `false` to
@@ -75,8 +75,10 @@ native entries and dynamic import targets. Routes do not create lazy JS imports
 or load missing layouts; the router owns those dependencies. Missing route
 modules skip sharing with a diagnostic.
 
-Sharing is opt-in. Only with sharing enabled, a temporary build-end IR preview
-measures eligibility; final CSS is always generated from output chunks. User
+Production `dist-chunk` builds enable guarded module-prefix sharing by default,
+using two boundaries and 4,096 source bytes. Set `appCss.sharing: false` to disable
+it. While sharing is enabled, a temporary build-end IR preview measures
+eligibility; final CSS is always generated from output chunks. User
 `manualChunks` still controls placement. `appCss.sharing` takes precedence over
 `experimental.cssChunkSharing`, including `false`. All native consumers must
 still agree on the shared prefix's order. This shares whole CSS modules rather
@@ -103,7 +105,8 @@ output. See [CSS bundling](../../docs/css-bundling.md) for examples and measurem
 ## Experimental CSS sharing
 
 Application builds can share an identical prefix of whole CSS modules across
-entries and dynamic import boundaries. Sharing is disabled by default:
+entries and dynamic import boundaries. Outside the production `dist-chunk`
+default, enable sharing explicitly:
 
 ```ts
 export default defineConfig({

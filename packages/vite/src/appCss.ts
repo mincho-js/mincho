@@ -27,7 +27,7 @@ export interface MinchoAppCssOptions {
   /** Router manifest entries; their static dependencies determine CSS reach. */
   routes?: readonly MinchoCssRoute[];
 
-  /** Explicit opt-in passes for dist-chunk CSS resources. */
+  /** Safe IR passes, enabled for production dist-chunk builds. */
   optimize?:
     | boolean
     | {
@@ -41,10 +41,10 @@ export interface MinchoAppCssOptions {
         /** Opt-in adjacent rules with identical ordered media/supports paths. */
         mergeConditionalRules?: boolean;
 
-        /** Remove private compiler-owned animations; enabled explicitly. */
+        /** Remove private compiler-owned animations; on in production dist-chunk. */
         pruneKeyframes?: boolean;
 
-        /** Remove proven unused private selections; enabled explicitly. */
+        /** Remove proven unused private selections; on in production dist-chunk. */
         pruneRecipes?: boolean;
 
         /** Experimental block-local sharing of repeated static theme literals. */
@@ -54,10 +54,14 @@ export interface MinchoAppCssOptions {
 
 export function resolveAppCssOptimization(
   options: MinchoAppCssOptions | undefined,
-  _production: boolean
+  production: boolean
 ) {
   const value = options?.optimize;
-  if (options?.mode !== "dist-chunk" || value === false || value === undefined)
+  if (
+    options?.mode !== "dist-chunk" ||
+    value === false ||
+    (!production && value === undefined)
+  )
     return undefined;
 
   const explicit = typeof value === "object" ? value : {};
@@ -67,8 +71,8 @@ export function resolveAppCssOptimization(
     pruneGenerated: explicit.pruneGenerated ?? true,
     compactThemes: explicit.compactThemes ?? true,
     mergeConditionalRules: explicit.mergeConditionalRules ?? false,
-    pruneKeyframes: explicit.pruneKeyframes ?? false,
-    pruneRecipes: explicit.pruneRecipes ?? false,
+    pruneKeyframes: explicit.pruneKeyframes ?? production,
+    pruneRecipes: explicit.pruneRecipes ?? production,
     internThemeValues: explicit.internThemeValues ?? false,
     shareAtoms:
       options.sharing === false ? false : (explicit.shareAtoms ?? true)

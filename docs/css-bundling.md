@@ -10,8 +10,9 @@ tools.
 Vite applications retain native CSS splitting: common styles plus route/feature
 CSS reached through dynamic imports. MPA/SSG builds can use separate page entries.
 Vite owns HTML links, recursive manifest dependencies, lazy CSS preloading,
-asset URLs, hashes and source maps. Sharing remains opt-in; native output can
-already share CSS with less JavaScript metadata.
+asset URLs, hashes and source maps. Production `dist-chunk` builds enable guarded
+module-prefix sharing by default; other Vite modes require explicit sharing.
+Native output can already share CSS with less JavaScript metadata.
 
 ### Vite distribution and route policies
 
@@ -47,12 +48,12 @@ plugins can declare CSS-excluding regular expressions in `transform.filter.id`.
 Use `native` with unsupported toolchains until their adapter contracts are tested.
 External CSS output supports ES/CJS formats.
 
-Sharing remains optional. Only with sharing enabled, a temporary `buildEnd` IR
-preview measures bytes and runs the existing safety classifier; it is never
-emitted. Final CSS is always generated from actual chunk membership. Unsupported
+Sharing is configurable and defaults on for production `dist-chunk` builds.
+While sharing is enabled, a temporary `buildEnd` IR preview measures bytes and
+runs the existing safety classifier; it is never emitted. Final CSS is always generated from actual chunk membership. Unsupported
 sharing layouts, including user `manualChunks`, skip additional sharing while
 retaining chunk-stage generation. Diagnostics expose `css-ir-preview` and
-`css-ir-generate`; default `dist-chunk` has no preview.
+`css-ir-generate`; setting `appCss.sharing: false` disables the sharing preview.
 
 Evaluation caches store raw IR under a separate key/schema from CSS-text results.
 Environment and output state are isolated. Watch builds retain IR for unchanged
@@ -94,7 +95,8 @@ dependencies, including their layouts, contain the **entire** candidate prefix.
 Without a route list, it counts native entry/dynamic-import boundaries. A route
 alias may have its own id and share an entry with another route; repeating the
 same id is an error. An empty list has no eligible routes. `routes` alone does
-not enable sharing: set `sharing: true` or its threshold options.
+not enable sharing outside the automatic production `dist-chunk` policy; use
+`sharing: true` or its threshold options in other supported modes.
 
 Nested `import()` descendants stop route reach and retain their own loading
 boundaries. Two optional widgets within one route do not become two routes for

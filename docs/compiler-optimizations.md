@@ -59,11 +59,10 @@ results use the same bounded cache and invalidate when source/options change.
 
 ## Application CSS
 
-The CSS passes require explicit `appCss.optimize: true` or an options object in
-`appCss.mode: "dist-chunk"` builds using the validated Vite/vanilla-extract adapter.
-Omitting `appCss.optimize` keeps them disabled in both profiles. Native mode,
-development serving, libraries, and SSR keep their existing CSS path. Generated
-class names are preserved by all four passes.
+The CSS passes default on for production `appCss.mode: "dist-chunk"` builds using
+the validated Vite/vanilla-extract adapter. Native mode, development serving,
+libraries, and SSR keep their existing CSS path. Generated class names are
+preserved by all default passes.
 
 | Option           | Applied scope                                                       | Preservation boundaries                                                                                                                           |
 | ---------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -72,7 +71,9 @@ class names are preserved by all four passes.
 | `compactThemes`  | Adjacent identical theme variable declarations                      | Differing values, conditions, inheritance, and theme selection                                                                                    |
 | `shareAtoms`     | Existing native graph sharing of ordered CSS module prefixes        | Actual entry/lazy boundaries, explicit route/layout reach, cascade barriers, and configured thresholds                                            |
 
-Four additional passes are **opt-in**, including when `optimize: true` is used:
+`pruneRecipes` and `pruneKeyframes` also default on for production `dist-chunk`
+builds, including when `optimize` is omitted, `true`, or an options object.
+`mergeConditionalRules` and `internThemeValues` remain **opt-in**:
 
 | Option                  | Scope                                                                                         | Preserved cases                                                                                                                |
 | ----------------------- | --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
@@ -103,7 +104,7 @@ pruning, because those readers can observe otherwise unused custom properties.
 This guard recognizes standard API names; dynamically constructed lookups,
 external scripts, and reflective access cannot be ruled out by that scan. Set
 `pruneGenerated: false` when such code observes generated custom properties;
-also disable the corresponding opt-in resource/theme passes if those scripts
+also disable the corresponding resource/theme passes if those scripts
 observe their resources. Generic renderer code using CSSOM, including bundled
 React DOM, can conservatively disable resource pruning and theme interning too.
 
