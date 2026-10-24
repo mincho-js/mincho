@@ -23,6 +23,7 @@ export interface LibraryCssLinkerOptions {
 }
 
 export interface LibraryCssRenderInput {
+  clientDirective?: boolean;
   code: string;
   chunk: LibraryCssChunk;
   chunks: Record<string, LibraryCssChunk>;
@@ -101,7 +102,13 @@ export function createLibraryCssLinker(options: LibraryCssLinkerOptions) {
       }
 
       const chunkMode = options.cssCodeSplit && options.mode === "chunk";
-      if (!chunkMode && !chunk.isEntry && !chunk.isDynamicEntry) return null;
+      if (
+        !chunkMode &&
+        !chunk.isEntry &&
+        !chunk.isDynamicEntry &&
+        !input.clientDirective
+      )
+        return null;
       if (format !== "es" && format !== "cjs") return null;
 
       const ownCss = options.cssCodeSplit
@@ -137,7 +144,7 @@ export function createLibraryCssLinker(options: LibraryCssLinkerOptions) {
         if (!chunk.imports.includes(specifier)) specifiers.add(specifier);
       }
 
-      if (!specifiers.size) return null;
+      if (!specifiers.size && !input.clientDirective) return null;
 
       const statements = [...specifiers].map((specifier) =>
         format === "es"
@@ -160,7 +167,13 @@ export function createLibraryCssLinker(options: LibraryCssLinkerOptions) {
           ? ""
           : "\n";
 
-      edit.appendLeft(insertion, `${separator}${statements.join("\n")}\n`);
+      if (statements.length)
+        edit.appendLeft(insertion, `${separator}${statements.join("\n")}\n`);
+
+      if (input.clientDirective) {
+        const hashbangEnd = code.startsWith("#!") ? code.indexOf("\n") + 1 : 0;
+        edit.prependLeft(hashbangEnd, '"use client";\n');
+      }
 
       for (const specifier of specifiers) {
         if (!chunk.imports.includes(specifier)) chunk.imports.push(specifier);

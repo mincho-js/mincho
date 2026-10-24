@@ -9,6 +9,7 @@ export default (viteConfigEnv: ConfigEnv) => {
     build: {
       lib: {
         entry: {
+          stylesheets: resolve(process.cwd(), "src/stylesheets.ts"),
           index: resolve(process.cwd(), "src/index.ts"),
           runtime: resolve(process.cwd(), "src/runtime.ts"),
           "jsx-runtime": resolve(process.cwd(), "src/jsx-runtime.ts"),

@@ -169,3 +169,34 @@ export function collectPackedPackageGraph(preset: typeof packedPreset): {
 
   return { graph, styles: getDefineRulesPackageStyleSpecifiers(graph) };
 }
+
+// SSR helpers remain separate from the Node-only Vite plugin entry.
+import {
+  resolveSsrStylesheets,
+  createSsrCssCollector,
+  type MinchoSsrCssManifest
+} from "@mincho-js/vite/ssr";
+import { Stylesheets } from "@mincho-js/react/stylesheets";
+
+const ssrCss: MinchoSsrCssManifest = {
+  version: 1,
+  base: "/",
+  entries: {},
+  modules: {},
+  routes: { home: ["home.css"] }
+};
+
+const sheets = resolveSsrStylesheets(ssrCss, { routes: ["home"] });
+Stylesheets({ stylesheets: sheets });
+
+const collector = createSsrCssCollector(ssrCss);
+collector.collect({ routes: ["home"] });
+collector.flush();
+
+// @ts-expect-error Event handlers disable React stylesheet resource handling.
+Stylesheets({ stylesheets: sheets, onLoad: () => {} });
+
+import { loadStylesheets } from "@mincho-js/vite/css-loading";
+
+const browserStylesheetLoader: typeof loadStylesheets = loadStylesheets;
+void browserStylesheetLoader;

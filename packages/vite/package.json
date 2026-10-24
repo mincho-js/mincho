@@ -32,6 +32,26 @@
         "types": "./dist/cjs/index.d.cts",
         "default": "./dist/cjs/index.cjs"
       }
+    },
+    "./ssr": {
+      "import": {
+        "types": "./dist/esm/ssr.d.ts",
+        "default": "./dist/esm/ssr.mjs"
+      },
+      "require": {
+        "types": "./dist/cjs/ssr.d.cts",
+        "default": "./dist/cjs/ssr.cjs"
+      }
+    },
+    "./css-loading": {
+      "import": {
+        "types": "./dist/esm/css-loading.d.ts",
+        "default": "./dist/esm/css-loading.mjs"
+      },
+      "require": {
+        "types": "./dist/cjs/css-loading.d.cts",
+        "default": "./dist/cjs/css-loading.cjs"
+      }
     }
   },
   "publishConfig": {

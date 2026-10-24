@@ -85,6 +85,16 @@
         "types": "./dist/cjs/compiled-jsx-dev-runtime.d.cts",
         "default": "./dist/cjs/compiled-jsx-dev-runtime.cjs"
       }
+    },
+    "./stylesheets": {
+      "import": {
+        "types": "./dist/esm/stylesheets.d.ts",
+        "default": "./dist/esm/stylesheets.mjs"
+      },
+      "require": {
+        "types": "./dist/cjs/stylesheets.d.cts",
+        "default": "./dist/cjs/stylesheets.cjs"
+      }
     }
   },
   "files": [

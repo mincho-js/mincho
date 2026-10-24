@@ -47,9 +47,19 @@ export default defineConfig({
 one sheet. `"dist-chunk"` collects raw Mincho rules during evaluation and generates
 CSS from style markers in each final output chunk, following UnoCSS's chunk-stage
 model. It preserves file/cascade order and uses native Vite processing for
-PostCSS, URL assets, lazy preloads, hashes, HTML and manifests. It does not purge
-selectors or merge unrelated rules. Conflicting explicit `build.cssCodeSplit`
+PostCSS, URL assets, lazy preloads, hashes, HTML and manifests. Conflicting explicit `build.cssCodeSplit`
 settings are errors. Development serving, library builds and SSR are unchanged.
+
+In `dist-chunk` builds, `appCss.optimize.pruneRecipes` and `pruneKeyframes` are
+opt-in in both production and development. Set each flag to `true` to enable it;
+`appCss.optimize: true` and an options object without those flags leave them
+disabled. They remove only compiler-owned resources whose private use is proven;
+public or dynamic recipes and animation references remain.
+Proof analysis runs after CSS capture and is skipped when there are no relevant
+resources, or external CSS, runtime CSSOM access or opaque PostCSS prevents safe
+removal. This is not a general selector purge. Set either flag to `false` to
+disable it, or `appCss.optimize: false` to disable all IR passes. Conditional rule
+merging and theme value interning also remain opt-in.
 
 The private adapter currently requires Vite **7.3.3**, vanilla-extract integration
 **8.0.10** and CSS **1.20.1**. Unsupported versions, Lightning CSS transformation,
@@ -108,8 +118,10 @@ export default defineConfig({
 `cssChunkSharing: true` uses the same thresholds. Vite owns CSS extraction,
 asset URLs, source maps, content hashes, HTML links, manifest data and dynamic
 import preloading. Shared CSS precedes each boundary's private CSS, and styles
-used only by lazy modules remain lazy. Consume Vite's normal HTML or manifest;
-there is no separate Mincho CSS manifest or browser style insertion runtime.
+used only by lazy modules remain lazy. CSS sharing uses Vite's normal HTML or
+manifest without adding a Mincho-specific manifest or browser loader. For
+opt-in SSR stylesheet selection and loading, use `appCss.ssrManifest` and
+`@mincho-js/vite/css-loading`; see [SSR and RSC](../../docs/ssr-and-rsc.md).
 
 Sharing can reduce combined CSS transfers when several boundaries are visited,
 at the cost of an additional stylesheet request and build analysis. Only

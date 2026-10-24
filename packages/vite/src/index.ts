@@ -1,3 +1,5 @@
+import { emitSsrCssManifest } from "./ssrCssManifest.js";
+import { createLibraryRscBoundaries } from "./libraryRsc.js";
 import {
   type BabelOptions,
   type MinchoDiagnosticsOptions,
@@ -109,6 +111,9 @@ export interface MinchoVitePluginOptions {
 
   /** Client application CSS distribution and optional route-aware sharing. */
   appCss?: MinchoAppCssOptions;
+
+  /** Preserve explicit client library entries; reject mixed boundaries. */
+  libraryRsc?: boolean;
   experimental?: {
     nonInheritingCssVars?: boolean;
     globalAtomicClasses?: boolean;
@@ -296,6 +301,7 @@ function createMinchoViteEnvironmentPlugin(
     _options?.appCss?.routes
   );
 
+  const libraryRsc = createLibraryRscBoundaries();
   const runtimeOwners = new Set<string>();
   const distChunkCss = createDistChunkCss(
     (phase, detail) => diagnostics.record(config.root, phase, detail),
@@ -905,7 +911,7 @@ function createMinchoViteEnvironmentPlugin(
         abortOutputLinkers(new Error("Vite started a new build generation"));
         validatedUnsplitCssByDirectory.clear();
 
-        if (config.build.lib && this.load) {
+        if (config.command === "build" && config.build.lib && this.load) {
           const entry = config.build.lib.entry;
           if (entry === undefined) return;
 
@@ -946,10 +952,26 @@ function createMinchoViteEnvironmentPlugin(
       server = serverInstance;
     },
 
+    moduleParsed(info) {
+      if (_options?.libraryRsc) libraryRsc.record(info);
+    },
+
     async configResolved(this: void, resolvedConfig: ResolvedConfig) {
       cancelDiagnosticsFlush();
       diagnosticsClosed = false;
       config = resolvedConfig;
+
+      if (_options?.appCss?.ssrManifest && config.build.lib)
+        throw new Error(
+          "appCss.ssrManifest is only available for application builds."
+        );
+      if (
+        _options?.libraryRsc &&
+        config.command === "build" &&
+        consumer === "client" &&
+        !config.build.lib
+      )
+        throw new Error("libraryRsc is only available for library builds.");
 
       const cssOptimization = resolveAppCssOptimization(
         _options?.appCss,
@@ -1832,6 +1854,9 @@ function createMinchoViteEnvironmentPlugin(
           }
 
           return await linker.renderChunk({
+            clientDirective: _options?.libraryRsc
+              ? await libraryRsc.clientDirective(chunk, this, meta.chunks)
+              : false,
             code,
             chunk,
             chunks: meta.chunks,
@@ -1887,6 +1912,19 @@ function createMinchoViteEnvironmentPlugin(
           .get(outputOptions)
           ?.validateBundle(bundle, { validatedUnsplitCss });
         outputLinkers.delete(outputOptions);
+
+        const ssrManifest = _options?.appCss?.ssrManifest;
+
+        if (ssrManifest && !config.build.ssr && !config.build.lib)
+          await emitSsrCssManifest(
+            this,
+            config,
+            bundle,
+            typeof ssrManifest === "string"
+              ? ssrManifest
+              : ".vite/mincho-css-manifest.json",
+            _options?.appCss?.routes
+          );
       }
     },
 

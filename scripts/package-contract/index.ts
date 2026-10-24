@@ -41,6 +41,8 @@ async function writeConsumerManifest(
     esbuild: "0.27.7",
     react: "19.2.6",
     "react-dom": "19.2.6",
+    "react-server-dom-webpack": "19.2.6",
+    webpack: "5.111.1",
     vite: "7.3.3"
   });
   await writeFile(
@@ -205,6 +207,11 @@ async function main(): Promise<void> {
         true
       );
       await runNode(
+        ["fixture/modules/ssr-resources.mjs"],
+        join(consumerRoot, "fixture", "modules", "ssr-resources"),
+        true
+      );
+      await runNode(
         ["fixture/modules/runtime-codegen.mjs"],
         join(consumerRoot, "fixture", "modules"),
         true
@@ -235,6 +242,7 @@ async function main(): Promise<void> {
         join(consumerRoot, "fixture", "modules"),
         true
       );
+
       for (const args of [
         ["--scenario", "variants", "--workers", "1"],
         ["--scenario", "variants", "--format", "cjs"],
