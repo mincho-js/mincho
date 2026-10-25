@@ -15,6 +15,7 @@ export interface MinchoCssRoute {
 }
 
 export interface MinchoAppCssOptions {
+  usage?: import("@mincho-js/integration").ClosedAppUsageOptions;
   /** Client-build manifest for ordered SSR CSS selection; off by default. */
   ssrManifest?: boolean | string;
 
@@ -31,6 +32,7 @@ export interface MinchoAppCssOptions {
   optimize?:
     | boolean
     | {
+        scopedResourceAnalysis?: boolean;
         mergeRules?: boolean;
         pruneGenerated?: boolean;
         compactThemes?: boolean;
@@ -67,6 +69,7 @@ export function resolveAppCssOptimization(
   const explicit = typeof value === "object" ? value : {};
 
   return {
+    scopedResourceAnalysis: explicit.scopedResourceAnalysis ?? false,
     mergeRules: explicit.mergeRules ?? true,
     pruneGenerated: explicit.pruneGenerated ?? true,
     compactThemes: explicit.compactThemes ?? true,
@@ -80,6 +83,18 @@ export function resolveAppCssOptimization(
 }
 
 export function validateAppCssOptions(options?: MinchoAppCssOptions): void {
+  if (
+    options?.usage &&
+    (options.usage.mode !== "closed" || options.mode !== "dist-chunk")
+  )
+    throw new Error(
+      "appCss.usage requires mode closed and appCss.mode dist-chunk."
+    );
+  for (const entry of options?.usage?.preserve ?? [])
+    if (!entry.module || entry.exports?.some((name) => !name))
+      throw new Error(
+        "appCss.usage.preserve requires module paths and non-empty export names."
+      );
   const manifest = options?.ssrManifest;
   if (
     manifest !== undefined &&
@@ -111,6 +126,7 @@ export function validateAppCssOptions(options?: MinchoAppCssOptions): void {
     for (const [name, value] of Object.entries(optimization))
       if (
         ![
+          "scopedResourceAnalysis",
           "mergeRules",
           "pruneGenerated",
           "compactThemes",

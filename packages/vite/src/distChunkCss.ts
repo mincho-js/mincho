@@ -1,7 +1,12 @@
 import { createHash } from "node:crypto";
+import { resolve } from "node:path";
 import { normalizePath } from "@rollup/pluginutils";
 import {
   internalGenerateVanillaCss,
+  internalAnalyzeCssObservability,
+  internalAnalyzeClosedAppUsage,
+  internalStaticModuleSpecifiers,
+  type ClosedAppUsageOptions,
   internalHashVanillaCssArtifact,
   internalOptimizeVanillaCssArtifacts,
   internalCssVariableLivenessOpaque,
@@ -73,6 +78,21 @@ function mergeProvenance(values: Iterable<Provenance>): Provenance {
       ? {
           resources: {
             version: 2 as const,
+            fonts: [
+              ...new Set(
+                contributions.flatMap((value) => value!.resources!.fonts ?? [])
+              )
+            ].sort(),
+            publicFonts: [
+              ...new Set(
+                contributions.flatMap(
+                  (value) =>
+                    value!.resources!.publicFonts ??
+                    value!.resources!.fonts ??
+                    []
+                )
+              )
+            ].sort(),
             keyframes: [
               ...new Set(
                 contributions.flatMap((value) => value!.resources!.keyframes)
@@ -195,6 +215,8 @@ export function createDistChunkCss(
   let optimization: InternalCssIrOptimizationOptions | undefined;
   let config: ResolvedConfig;
   let enabled = false;
+
+  let usage: ClosedAppUsageOptions | undefined;
   let cssTransform: Transform | undefined;
   let cssPostTransform: Transform | undefined;
   let outputNumber = 0;
@@ -264,6 +286,14 @@ export function createDistChunkCss(
               resources: {
                 ...value.resources,
                 recipeUses: recipeUses.get(owner),
+                publicFonts: value.resources.publicFonts?.filter(
+                  (name) =>
+                    !privateResourceReferences
+                      .get(owner)
+                      ?.some(
+                        (reference) => reference.replace(/^"|"$/g, "") === name
+                      )
+                ),
                 publicKeyframes: value.resources.publicKeyframes.filter(
                   (name) =>
                     !privateResourceReferences.get(owner)?.includes(name)
@@ -328,6 +358,9 @@ export function createDistChunkCss(
   };
 
   return {
+    setUsage(value: ClosedAppUsageOptions | undefined) {
+      usage = value;
+    },
     get enabled() {
       return enabled;
     },
@@ -484,7 +517,7 @@ export function createDistChunkCss(
 
     async plan(
       context: Pick<Rollup.PluginContext, "getModuleIds"> &
-        Partial<Pick<Rollup.PluginContext, "getModuleInfo">>,
+        Partial<Pick<Rollup.PluginContext, "getModuleInfo" | "resolve">>,
       preview?: (id: string, source: string) => void
     ) {
       if (!enabled) return;
@@ -549,9 +582,48 @@ export function createDistChunkCss(
         } else {
           // Runtime CSSOM reads/writes can observe otherwise private resources.
           // A string/key match is intentionally conservative, including aliases.
-          const opaqueRuntime = [...live].some((id) =>
-            runtimeCssAccess.test(context.getModuleInfo?.(id)?.code ?? "")
-          );
+          const observations = optimization.scopedResourceAnalysis
+            ? [...live]
+                .filter(
+                  (id) =>
+                    !id.startsWith(prefix) &&
+                    !/\.(?:css|scss|sass|less)(?:[?#]|$)/.test(id)
+                )
+                .map((id) => {
+                  const info = context.getModuleInfo?.(id);
+                  return !info ||
+                    info.isExternal ||
+                    typeof info.code !== "string"
+                    ? {
+                        whole: true,
+                        variables: [],
+                        names: [],
+                        reasons: ["unknown-runtime-source"]
+                      }
+                    : internalAnalyzeCssObservability(info.code);
+                })
+            : [];
+          const opaqueRuntime = optimization.scopedResourceAnalysis
+            ? observations.some((item) => item.whole)
+            : [...live].some((id) =>
+                runtimeCssAccess.test(context.getModuleInfo?.(id)?.code ?? "")
+              );
+          const observedVariables = [
+            ...new Set(observations.flatMap((item) => item.variables))
+          ];
+
+          const observedNames = [
+            ...new Set(observations.flatMap((item) => item.names))
+          ];
+          if (optimization.scopedResourceAnalysis)
+            report("css-observability", {
+              whole: opaqueRuntime,
+              variables: observedVariables,
+              names: observedNames,
+              reasons: [
+                ...new Set(observations.flatMap((item) => item.reasons))
+              ]
+            });
 
           const external =
             opaqueRuntime ||
@@ -636,8 +708,123 @@ export function createDistChunkCss(
                     : "no-candidates"
             });
 
+          let closedUsage:
+            | ReturnType<typeof internalAnalyzeClosedAppUsage>
+            | undefined;
+          if (usage) {
+            const modules = [];
+            for (const id of live) {
+              const info = context.getModuleInfo?.(id);
+              if (
+                !info?.code ||
+                id.startsWith(prefix) ||
+                /\.(?:css|scss|sass|less)(?:[?#]|$)/.test(id)
+              )
+                continue;
+              const imports = new Map<string, string>();
+              let unresolved = false;
+              for (const source of [
+                ...info.importedIdResolutions,
+                ...info.dynamicallyImportedIdResolutions
+              ])
+                if (!source.external) imports.set(source.id, source.id);
+              for (const source of internalStaticModuleSpecifiers(info.code)) {
+                if (imports.has(source)) continue;
+                const resolved = await context.resolve?.(source, id, {
+                  skipSelf: false
+                });
+                if (resolved && !resolved.external)
+                  imports.set(source, resolved.id);
+                if (!resolved) unresolved = true;
+              }
+              modules.push({
+                id,
+                code: info.code,
+                imports,
+                unresolved,
+                entry: info.isEntry
+              });
+            }
+            const preserve = usage.preserve?.map((item) => ({
+              ...item,
+              module: normalizePath(resolve(config.root, item.module))
+            }));
+            for (const item of preserve ?? [])
+              if (!modules.some((module) => module.id === item.module))
+                throw new Error(
+                  `appCss.usage.preserve refers to a module absent from the graph: ${item.module}`
+                );
+            closedUsage = internalAnalyzeClosedAppUsage(modules, {
+              ...usage,
+              preserve
+            });
+            report("closed-app-usage", {
+              opaque: closedUsage.opaque,
+              reason: closedUsage.reason,
+              recipes: closedUsage.recipes
+            });
+          }
           const input = new Map(
-            selected.map(([id, artifact]) => [id, artifact.data])
+            selected.map(([id, artifact]) => {
+              const data = artifact.data;
+              if (!data.provenance) return [id, data] as const;
+              const closed =
+                closedUsage && !closedUsage.opaque ? closedUsage : undefined;
+              return [
+                id,
+                {
+                  ...data,
+                  provenance: {
+                    ...data.provenance,
+                    publicReferences: [
+                      ...new Set([
+                        ...data.provenance.publicReferences.filter(
+                          (name) =>
+                            !closed || closed.variableReferences.includes(name)
+                        ),
+                        ...observedVariables
+                      ])
+                    ],
+                    resources: data.provenance.resources && {
+                      ...data.provenance.resources,
+                      publicKeyframes: [
+                        ...new Set([
+                          ...data.provenance.resources.publicKeyframes,
+                          ...observedNames
+                        ])
+                      ],
+                      publicFonts: [
+                        ...new Set([
+                          ...(data.provenance.resources.publicFonts ?? []),
+                          ...observedNames
+                        ])
+                      ],
+                      recipeUses: data.provenance.resources.recipes
+                        .map(
+                          (recipe) =>
+                            closed?.recipes.find(
+                              (use) => use.id === recipe.id
+                            ) ??
+                            data.provenance!.resources!.recipeUses?.find(
+                              (use) => use.id === recipe.id
+                            ) ?? { id: recipe.id, used: null }
+                        )
+                        .map((use) =>
+                          observedNames.some((name) =>
+                            data
+                              .provenance!.resources!.recipes.find(
+                                (recipe) => recipe.id === use.id
+                              )
+                              ?.references.includes(name)
+                          )
+                            ? { ...use, used: null }
+                            : use
+                        )
+                    }
+                  }
+                }
+              ] as const;
+            })
           );
 
           const componentPasses =
@@ -679,6 +866,9 @@ export function createDistChunkCss(
               JSON.stringify([
                 ids.map((id) => [id, fingerprints.get(id)]),
                 settings,
+                observedVariables,
+                observedNames,
+                closedUsage,
                 external,
                 variableBarrier,
                 resourceBarrier
