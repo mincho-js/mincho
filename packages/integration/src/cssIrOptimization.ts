@@ -7,6 +7,8 @@ type CssObject = VanillaCssArtifact["cssObjs"][number];
 type RecordValue = Record<string, unknown>;
 
 export interface CssIrOptimizationOptions {
+  scopedResourceAnalysis?: boolean;
+  bundleSize?: import("./bundleSize.js").BundleSizeOptions;
   mergeRules: boolean;
   pruneGenerated: boolean;
   compactThemes: boolean;

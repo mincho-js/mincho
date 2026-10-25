@@ -139,4 +139,12 @@ export {
 } from "./bundleSize.js";
 export type { BundleSizeOptions, BundleBytes } from "./bundleSize.js";
 
+export { analyzeCssObservability as internalAnalyzeCssObservability } from "./cssObservability.js";
+
+export {
+  analyzeClosedAppUsage as internalAnalyzeClosedAppUsage,
+  staticModuleSpecifiers as internalStaticModuleSpecifiers
+} from "./closedAppUsage.js";
+export type { ClosedAppUsageOptions } from "./closedAppUsage.js";
+
 export { optimizeCompiledRecipeSource as internalOptimizeCompiledRecipeSource } from "./compiledRecipeSource.js";

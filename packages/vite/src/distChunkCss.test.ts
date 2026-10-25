@@ -1,5 +1,6 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { transformFromAstSync, types as t } from "@babel/core";
 import {
   InternalCompilationCache,
   type InternalVanillaCssArtifact
@@ -557,6 +558,240 @@ describe("component-system production passes", () => {
 });
 
 describe("bundle-size application integrations", () => {
+  it.each([false, true])(
+    "merges usage from repeated compiled recipe IDs (unknown: %s)",
+    async (unknown) => {
+      const root = await fixture({
+        "main.js":
+          'import {button} from "./button.js"; globalThis.first=button({size:"small"});',
+        "button.js":
+          'import {rules} from "@mincho-js/css"; export const button=rules({base:{display:"flex"},variants:{size:{small:{color:"red"},large:{color:"blue"},unused:{color:"green"}}}});'
+      });
+      const baseline = await compile(root, { appCss: { optimize: false } });
+      const base = /\.([\w-]+)\s*\{\s*display: flex;/.exec(baseline.text)?.[1];
+      const variants = Object.fromEntries(
+        [
+          ["small", "red"],
+          ["large", "blue"],
+          ["unused", "green"]
+        ].map(([name, color]) => [
+          name,
+          new RegExp(`\\.([\\w-]+)\\s*\\{\\s*color: ${color};`).exec(
+            baseline.text
+          )?.[1]
+        ])
+      );
+      expect(base).toBeDefined();
+      for (const name of Object.values(variants)) expect(name).toBeDefined();
+      const generated = transformFromAstSync(
+        t.program(
+          [
+            t.importDeclaration(
+              [
+                t.importSpecifier(
+                  t.identifier("createCompiledClassRuntimeFn"),
+                  t.identifier("createCompiledClassRuntimeFn")
+                )
+              ],
+              t.stringLiteral("@mincho-js/css/rules/createClassRuntimeFn")
+            ),
+            t.exportNamedDeclaration(
+              t.variableDeclaration("const", [
+                t.variableDeclarator(
+                  t.identifier("duplicate"),
+                  t.callExpression(
+                    t.identifier("createCompiledClassRuntimeFn"),
+                    [
+                      t.valueToNode({
+                        defaultClassName: base,
+                        variantClassNames: { size: variants },
+                        defaultVariants: {},
+                        compoundVariants: []
+                      })
+                    ]
+                  )
+                )
+              ])
+            )
+          ],
+          [],
+          "module"
+        ),
+        undefined,
+        { babelrc: false, configFile: false }
+      );
+      expect(generated?.code).toBeTypeOf("string");
+      await writeFile(join(root, "duplicate.js"), generated!.code!);
+      await writeFile(
+        join(root, "main.js"),
+        'import {button} from "./button.js"; import {duplicate} from "./duplicate.js"; globalThis.first=button({size:"small"});' +
+          (unknown
+            ? "globalThis.render=size=>duplicate({size});"
+            : 'globalThis.render=()=>duplicate({size:"large"});')
+      );
+      const result = await compile(root, {
+        appCss: {
+          usage: { mode: "closed" },
+          optimize: { pruneRecipes: true }
+        }
+      });
+      expect(result.text).toContain("display: flex");
+      expect(result.text).toContain("color: red");
+      expect(result.text).toContain("color: blue");
+      expect(result.text.includes("color: green")).toBe(unknown);
+    }
+  );
+
+  it.each([
+    { scope: "module", dynamic: false },
+    { scope: "function", dynamic: false },
+    { scope: "module", dynamic: true },
+    { scope: "function", dynamic: true }
+  ])(
+    "keeps CSS for precomputed recipe class strings in $scope scope (dynamic: $dynamic)",
+    async ({ scope, dynamic }) => {
+      const root = await fixture({
+        "main.js":
+          'import {button} from "./button.js"; globalThis.render=()=>button({size:"small"});',
+        "button.js":
+          'import {rules} from "@mincho-js/css"; export const button=rules({base:{display:"flex"},variants:{size:{small:{color:"red"},large:{color:"blue"}}}});'
+      });
+      const baseline = await compile(root, { appCss: { optimize: false } });
+      const base = /\.([\w-]+)\s*\{\s*display: flex;/.exec(baseline.text)?.[1];
+      const small = /\.([\w-]+)\s*\{\s*color: red;/.exec(baseline.text)?.[1];
+      expect(base).toBeDefined();
+      expect(small).toBeDefined();
+      expect(baseline.text).toContain("color: blue");
+      const declaration = t.variableDeclaration("const", [
+        t.variableDeclarator(
+          t.identifier("cls"),
+          dynamic
+            ? t.templateLiteral(
+                [
+                  t.templateElement({ raw: `${base} ${small} ` }),
+                  t.templateElement({ raw: "" }, true)
+                ],
+                [
+                  t.memberExpression(
+                    t.identifier("globalThis"),
+                    t.identifier("extra")
+                  )
+                ]
+              )
+            : t.stringLiteral(`${base} ${small}`)
+        )
+      ]);
+      const generated = transformFromAstSync(
+        t.program(
+          [
+            t.exportNamedDeclaration(
+              scope === "function"
+                ? t.functionDeclaration(
+                    t.identifier("render"),
+                    [],
+                    t.blockStatement([
+                      declaration,
+                      t.returnStatement(t.identifier("cls"))
+                    ])
+                  )
+                : declaration
+            )
+          ],
+          [],
+          "module"
+        ),
+        undefined,
+        { babelrc: false, configFile: false }
+      );
+      expect(generated?.code).toBeTypeOf("string");
+      await writeFile(join(root, "classes.js"), generated!.code!);
+      await writeFile(
+        join(root, "main.js"),
+        scope === "function"
+          ? 'import "./button.js"; import {render} from "./classes.js"; globalThis.render=render;'
+          : 'import "./button.js"; import {cls} from "./classes.js"; globalThis.render=()=>cls;'
+      );
+      const result = await compile(root, {
+        appCss: {
+          usage: { mode: "closed" },
+          optimize: { scopedResourceAnalysis: true, pruneRecipes: true }
+        }
+      });
+
+      expect(result.text).toContain("display: flex");
+      expect(result.text).toContain("color: red");
+      expect(result.text).not.toContain("color: blue");
+    }
+  );
+
+  it.each([
+    {
+      observer:
+        'globalThis.read = element => getComputedStyle(element)["animation-name"];',
+      preservesUnused: true
+    },
+    {
+      observer:
+        'globalThis.update = (element, value) => {element.style["font-family"] = value;};',
+      preservesUnused: true
+    },
+    {
+      observer: "globalThis.read = () => document?.fonts;",
+      preservesUnused: true
+    },
+    {
+      observer: "globalThis.insert = (sheet, rule) => sheet?.insertRule(rule);",
+      preservesUnused: true
+    },
+    {
+      observer: "globalThis.read = element => element.style?.color;",
+      preservesUnused: false
+    }
+  ])(
+    "preserves required CSS for $observer",
+    async ({ observer, preservesUnused }) => {
+      const root = await fixture({
+        "main.js": `import {rules} from "@mincho-js/css";
+        const button = rules({variants:{size:{small:{color:"red"},large:{color:"blue"}}}});
+        globalThis.result = button({size:"small"}); ${observer}`
+      });
+      const result = await compile(root, {
+        appCss: {
+          optimize: { scopedResourceAnalysis: true, pruneRecipes: true }
+        }
+      });
+      expect(result.text).toContain("color: red");
+      expect(result.text.includes("color: blue")).toBe(preservesUnused);
+      expect(
+        result.events.some(
+          (event) =>
+            event.phase === "css-observability" &&
+            (event.detail as { whole?: boolean })?.whole
+        )
+      ).toBe(preservesUnused);
+    }
+  );
+
+  it("preserves CSS when external runtime code cannot be inspected", async () => {
+    const root = await fixture({
+      "main.js":
+        'import "external-runtime";import {rules} from "@mincho-js/css";const button=rules({variants:{size:{small:{color:"red"},large:{color:"blue"}}}});globalThis.result=button({size:"small"});'
+    });
+    const result = await compile(
+      root,
+      { appCss: { optimize: { scopedResourceAnalysis: true } } },
+      { build: { rollupOptions: { external: ["external-runtime"] } } }
+    );
+    expect(result.text).toContain("color: blue");
+    expect(
+      result.events.some(
+        (event) =>
+          event.phase === "css-observability" &&
+          (event.detail as { whole?: boolean })?.whole
+      )
+    ).toBe(true);
+  });
+
   it("still eliminates recipe helpers for literal calls when compact strategies are enabled", async () => {
     const root = await fixture({
       "main.js":
@@ -598,11 +833,103 @@ describe("bundle-size application integrations", () => {
     );
     expect(modules.some((id) => /runtime\/cache/.test(id))).toBe(false);
   });
+
+  it("analyzes a complete app graph and scopes unrelated property observations", async () => {
+    const root = await fixture({
+      "main.js":
+        'import {button} from "./button.js"; globalThis.render=()=>button({size:"small"}); globalThis.read=el=>getComputedStyle(el).getPropertyValue("--external");',
+      "button.js":
+        'import {rules} from "@mincho-js/css"; export const button=rules({base:{display:"flex"},variants:{size:{small:{color:"red"},large:{color:"blue"}}}});'
+    });
+    const baseline = await compile(root, { appCss: { optimize: false } });
+    const result = await compile(root, {
+      appCss: {
+        usage: { mode: "closed" },
+        optimize: { scopedResourceAnalysis: true, pruneRecipes: true }
+      }
+    });
+    expect(baseline.text).toContain("blue");
+    expect(result.text).toContain("red");
+    expect(result.text).not.toContain("blue");
+    const preserved = await compile(root, {
+      appCss: {
+        usage: {
+          mode: "closed",
+          preserve: [{ module: "button.js", exports: ["button"] }]
+        },
+        optimize: { scopedResourceAnalysis: true, pruneRecipes: true }
+      }
+    });
+    expect(preserved.text).toContain("blue");
+  });
+
+  it.each([
+    {
+      name: "default-exported recipes",
+      preservesUnselected: true,
+      declaration: "export default RECIPE;",
+      consumer:
+        'import button from "./button.js"; globalThis.render=()=>button({size:"large"});'
+    },
+    {
+      name: "default aliases of named recipes",
+      preservesUnselected: false,
+      declaration: "const button = RECIPE; export {button as default};",
+      consumer:
+        'import button from "./button.js"; globalThis.render=()=>button({size:"large"});'
+    },
+    {
+      name: "recipes nested in objects",
+      preservesUnselected: true,
+      declaration: "export const ui = {button: RECIPE};",
+      consumer:
+        'import {ui} from "./button.js"; globalThis.render=()=>ui.button({size:"large"});'
+    },
+    {
+      name: "namespace reexports in lazy modules",
+      preservesUnselected: true,
+      declaration: "export const button = RECIPE;",
+      consumer:
+        'globalThis.render=()=>import("./bridge.js").then(module=>module.ns.button({size:"large"}));'
+    },
+    {
+      name: "aliases exceeding the analysis depth limit",
+      preservesUnselected: true,
+      declaration: "export const button = RECIPE;",
+      consumer: `import {button} from "./button.js"; ${Array.from(
+        { length: 130 },
+        (_, index) =>
+          `const alias${index} = ${index ? `alias${index - 1}` : "button"};`
+      ).join("\n")} globalThis.render=()=>alias129({size:"large"});`
+    }
+  ])(
+    "preserves CSS for $name in a closed app",
+    async ({ declaration, consumer, preservesUnselected }) => {
+      const root = await fixture({
+        "main.js": consumer,
+        "button.js": `import {rules} from "@mincho-js/css"; ${declaration.replace("RECIPE", 'rules({base:{display:"flex"},variants:{size:{small:{color:"red"},large:{color:"blue"}}}})')}`,
+        "bridge.js": 'export * as ns from "./button.js";'
+      });
+      const result = await compile(root, {
+        appCss: {
+          usage: { mode: "closed" },
+          optimize: { scopedResourceAnalysis: true, pruneRecipes: true }
+        }
+      });
+
+      expect(result.text).toContain("display: flex");
+      expect(result.text).toContain("color: blue");
+      expect(result.text.includes("color: red")).toBe(preservesUnselected);
+    }
+  );
 });
 
 describe("shared artifact provenance", () => {
-  function fixture(optimize: { mergeConditionalRules?: boolean } = {}) {
-    const adapter = createDistChunkCss(() => {});
+  function fixture(
+    optimize: { mergeConditionalRules?: boolean } = {},
+    report: Parameters<typeof createDistChunkCss>[0] = () => {}
+  ) {
+    const adapter = createDistChunkCss(report);
     adapter.configure(
       {
         command: "build",
@@ -670,7 +997,14 @@ describe("shared artifact provenance", () => {
 
           ...(code === undefined
             ? {}
-            : { getModuleInfo: () => ({ code }) as Rollup.ModuleInfo })
+            : {
+                getModuleInfo: () =>
+                  ({
+                    code,
+                    importedIdResolutions: [],
+                    dynamicallyImportedIdResolutions: []
+                  }) as unknown as Rollup.ModuleInfo
+              })
         },
         (_id, css) => sources.push(css)
       );
@@ -680,6 +1014,68 @@ describe("shared artifact provenance", () => {
 
     return { adapter, data, publish, preview };
   }
+
+  it.each([false, true])(
+    "resolves closed-usage imports concurrently without retrying resolved IDs (missing: %s)",
+    async (missing) => {
+      const reports: unknown[] = [];
+      const { adapter, data, publish } = fixture({}, (phase, detail) => {
+        if (phase === "closed-app-usage") reports.push(detail);
+      });
+      adapter.setUsage({ mode: "closed" });
+      const owner = "/project/consumer.js";
+      const cached = "/resolved.js";
+      const id = publish(owner, [data(["--one"])]);
+      const calls: string[] = [];
+      let active = 0;
+      let peak = 0;
+      await adapter.plan({
+        getModuleIds: () => [owner, id, cached].values(),
+        getModuleInfo: (moduleId) =>
+          ({
+            id: moduleId,
+            code:
+              moduleId === owner
+                ? 'import "./first"; import "./second"; import "optional"; import "/resolved.js";'
+                : "export {};",
+            importedIdResolutions: [{ id: cached, external: false }],
+            dynamicallyImportedIdResolutions: [],
+            isEntry: moduleId === owner
+          }) as unknown as Rollup.ModuleInfo,
+        resolve: async (source) => {
+          calls.push(source);
+          peak = Math.max(peak, ++active);
+          await Promise.resolve();
+          active--;
+          return source === "optional" && missing
+            ? null
+            : ({ id: source, external: true } as Rollup.ResolvedId);
+        }
+      });
+      expect(calls).toEqual(["./first", "./second", "optional"]);
+      expect(peak).toBe(3);
+      expect(reports).toEqual([
+        expect.objectContaining({
+          opaque: missing,
+          reason: missing ? "open-or-opaque-graph" : "closed-import-graph"
+        })
+      ]);
+    }
+  );
+
+  it("keeps public CSS when closed-usage parsing fails", async () => {
+    const { adapter, data, publish, preview } = fixture();
+    adapter.setUsage({ mode: "closed" });
+    const owner = "/project/consumer.js";
+    const id = publish(owner, [data(["--one"])]);
+    const css = await preview(
+      [owner, id],
+      'import value from "./data.json" assert {type:"json"};'
+    );
+
+    expect(css).toContain("--one: red");
+    expect(css).toContain("color: black");
+  });
 
   it("keeps public variables across groups and updates use-only visibility", async () => {
     const { adapter, data, publish, preview } = fixture({

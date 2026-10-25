@@ -969,6 +969,8 @@ function createMinchoViteEnvironmentPlugin(
       diagnosticsClosed = false;
       config = resolvedConfig;
 
+      distChunkCss.setUsage(_options?.appCss?.usage);
+
       if (_options?.appCss?.ssrManifest && config.build.lib)
         throw new Error(
           "appCss.ssrManifest is only available for application builds."
