@@ -16,6 +16,8 @@ import {
 it("enables production IR defaults and honors explicit opt-outs", () => {
   expect(resolveAppCssOptimization({ mode: "dist-chunk" }, true)).toEqual({
     scopedResourceAnalysis: false,
+    crossFileRules: false,
+    dedupeResources: false,
     mergeRules: true,
     pruneGenerated: true,
     compactThemes: true,
@@ -41,6 +43,8 @@ it("enables production IR defaults and honors explicit opt-outs", () => {
     )
   ).toEqual({
     scopedResourceAnalysis: false,
+    crossFileRules: false,
+    dedupeResources: false,
     mergeRules: false,
     pruneGenerated: true,
     compactThemes: true,

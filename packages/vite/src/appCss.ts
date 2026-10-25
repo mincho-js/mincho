@@ -33,6 +33,8 @@ export interface MinchoAppCssOptions {
     | boolean
     | {
         scopedResourceAnalysis?: boolean;
+        crossFileRules?: boolean;
+        dedupeResources?: boolean;
         mergeRules?: boolean;
         pruneGenerated?: boolean;
         compactThemes?: boolean;
@@ -70,6 +72,8 @@ export function resolveAppCssOptimization(
 
   return {
     scopedResourceAnalysis: explicit.scopedResourceAnalysis ?? false,
+    crossFileRules: explicit.crossFileRules ?? false,
+    dedupeResources: explicit.dedupeResources ?? false,
     mergeRules: explicit.mergeRules ?? true,
     pruneGenerated: explicit.pruneGenerated ?? true,
     compactThemes: explicit.compactThemes ?? true,
@@ -127,6 +131,8 @@ export function validateAppCssOptions(options?: MinchoAppCssOptions): void {
       if (
         ![
           "scopedResourceAnalysis",
+          "crossFileRules",
+          "dedupeResources",
           "mergeRules",
           "pruneGenerated",
           "compactThemes",

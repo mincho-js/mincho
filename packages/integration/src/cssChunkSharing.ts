@@ -3,7 +3,19 @@ import { createHash } from "node:crypto";
 /** Whole-module CSS sharing; default activation depends on the build adapter. */
 export type MinchoCssChunkSharingOptions =
   | boolean
-  | { minBoundaries?: number; minBytes?: number };
+  | {
+      minBoundaries?: number;
+      minBytes?: number;
+      cost?:
+        | false
+        | {
+            maxInitialIncreaseBytes?: number;
+            scenarios?: readonly {
+              entry: string;
+              routes?: readonly string[];
+            }[];
+          };
+    };
 
 export interface CssSharingBoundary {
   id: string;
@@ -26,7 +38,16 @@ export interface CssSharingGroup {
 
 export function resolveCssChunkSharingOptions(
   options: MinchoCssChunkSharingOptions | undefined
-): { minBoundaries: number; minBytes: number } | undefined {
+):
+  | {
+      minBoundaries: number;
+      minBytes: number;
+      cost?: Exclude<
+        Extract<MinchoCssChunkSharingOptions, object>["cost"],
+        false
+      >;
+    }
+  | undefined {
   if (!options) return;
 
   const { minBoundaries = 2, minBytes = 4096 } =
@@ -36,7 +57,33 @@ export function resolveCssChunkSharingOptions(
   if (!Number.isSafeInteger(minBytes) || minBytes < 0)
     throw new Error("cssChunkSharing.minBytes must be an integer >= 0.");
 
-  return { minBoundaries, minBytes };
+  const cost = typeof options === "object" ? options.cost : undefined;
+  if (
+    cost !== undefined &&
+    cost !== false &&
+    (typeof cost !== "object" || cost === null || Array.isArray(cost))
+  )
+    throw new Error(
+      "cssChunkSharing.cost must be false or a cost options object."
+    );
+  if (
+    cost &&
+    (!Number.isSafeInteger(cost.maxInitialIncreaseBytes ?? 0) ||
+      (cost.maxInitialIncreaseBytes ?? 0) < 0)
+  )
+    throw new Error(
+      "cssChunkSharing.cost.maxInitialIncreaseBytes must be an integer >= 0."
+    );
+  if (
+    cost &&
+    cost.scenarios?.some(
+      (scenario) => !scenario.entry || scenario.routes?.some((route) => !route)
+    )
+  )
+    throw new Error(
+      "cssChunkSharing.cost.scenarios requires non-empty entry and route ids."
+    );
+  return { minBoundaries, minBytes, ...(cost ? { cost } : {}) };
 }
 
 /**

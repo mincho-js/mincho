@@ -653,6 +653,30 @@ describe("native esbuild CSS sharing", () => {
     }
   });
 
+  it.each([false, true])(
+    "rejects Vite-only CSS cost scenarios (wrapper: %s)",
+    async (wrapper) => {
+      const root = await fixture();
+      const options = {
+        absWorkingDir: root,
+        entryPoints: ["a.js", "b.js"],
+        outdir: "out",
+        write: false,
+        logLevel: "silent" as const
+      };
+      const mincho = {
+        experimental: {
+          cssChunkSharing: { cost: { maxInitialIncreaseBytes: 0 } }
+        }
+      };
+      await expect(
+        wrapper
+          ? buildWithMincho({ ...options, mincho })
+          : nativeBuild({ ...options, plugins: minchoEsbuildPlugins(mincho) })
+      ).rejects.toThrow(/cost scenarios.*Vite application adapter only/);
+    }
+  );
+
   it("rejects unsupported direct plugin builds", async () => {
     await expect(
       nativeBuild({

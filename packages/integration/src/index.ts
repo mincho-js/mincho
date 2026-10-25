@@ -140,6 +140,12 @@ export {
 export type { BundleSizeOptions, BundleBytes } from "./bundleSize.js";
 
 export { analyzeCssObservability as internalAnalyzeCssObservability } from "./cssObservability.js";
+export { optimizeCssChunk as internalOptimizeCssChunk } from "./cssChunkOptimization.js";
+
+export {
+  evaluateCssSharingCost as internalEvaluateCssSharingCost,
+  createCssSharingCostEvaluator as internalCreateCssSharingCostEvaluator
+} from "./cssSharingCost.js";
 
 export {
   analyzeClosedAppUsage as internalAnalyzeClosedAppUsage,

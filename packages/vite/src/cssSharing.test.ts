@@ -1,8 +1,24 @@
-import { afterEach, describe, expect, it } from "vitest";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
-import { build, type Plugin, type Rollup } from "vite";
-import { minchoVitePlugins } from "./index.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { join, resolve, win32 } from "node:path";
+import * as vite from "vite";
+import { build, type Plugin, type Rollup, type ResolvedConfig } from "vite";
+import { minchoVitePlugins, type MinchoVitePluginOptions } from "./index.js";
+import { createCssSharing } from "./cssSharing.js";
+
+vi.mock("vite", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("vite")>();
+  return {
+    ...actual,
+    normalizePath: vi.fn(actual.normalizePath),
+    transformWithEsbuild: vi.fn(actual.transformWithEsbuild)
+  };
+});
+
+vi.mock("node:path", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:path")>();
+  return { ...actual, resolve: vi.fn(actual.resolve) };
+});
 
 const roots: string[] = [];
 
@@ -28,10 +44,286 @@ async function fixture(shared = ".shared { color: red; }") {
 }
 
 afterEach(async () => {
+  vi.mocked(resolve).mockReset();
+  vi.mocked(vite.normalizePath).mockReset();
+  vi.mocked(vite.transformWithEsbuild).mockReset();
   await Promise.all(
     roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))
   );
 });
+
+async function costBuild(root: string, options: MinchoVitePluginOptions) {
+  const result = await build({
+    root,
+    configFile: false,
+    logLevel: "silent",
+    plugins: minchoVitePlugins(options),
+    build: {
+      write: false,
+      minify: true,
+      rollupOptions: {
+        input: { a: join(root, "a.html"), b: join(root, "b.html") }
+      }
+    }
+  });
+  return (Array.isArray(result) ? result[0] : result) as Rollup.RollupOutput;
+}
+
+it("checks compressed cold costs before emitting shared chunks", async () => {
+  const root = await fixture(".shared { color: red; }".repeat(200));
+  for (const cost of [undefined, { maxInitialIncreaseBytes: 0 }]) {
+    const output = await costBuild(root, {
+      appCss: { sharing: { minBytes: 0, cost } }
+    });
+    expect(
+      output.output.some((item) => item.fileName.includes("mincho-shared"))
+    ).toBe(!cost);
+  }
+});
+
+it.each([
+  "direct",
+  "wrapped",
+  "other-entry-first",
+  "alias",
+  "eager",
+  "unreachable",
+  "windows"
+])("resolves compressed cost scenario routes (%s)", async (mode) => {
+  const root = mode === "windows" ? "C:/project" : "/project";
+  if (mode === "windows") {
+    vi.mocked(resolve).mockImplementation(win32.resolve);
+    vi.mocked(vite.normalizePath).mockImplementation((id) =>
+      id.replace(/\\/g, "/")
+    );
+  }
+  const id = (file: string) => `${root}/${file}`;
+  const reports: unknown[] = [];
+  const routeEntry = mode === "alias" ? "a" : "a.js";
+  const sharing = createCssSharing(
+    {
+      minBytes: 0,
+      cost: { scenarios: [{ entry: "index.html", routes: ["a", "b"] }] }
+    },
+    (detail) => reports.push(detail),
+    [
+      { id: "a", entry: routeEntry },
+      { id: "b", entry: "b.js" }
+    ],
+    { metric: "raw" }
+  );
+  sharing.configure({
+    command: "build",
+    root,
+    css: {},
+    plugins: [],
+    build: { cssCodeSplit: true, cssMinify: false, rollupOptions: {} }
+  } as unknown as ResolvedConfig);
+  sharing.begin();
+  sharing.record(
+    id("shared.css"),
+    ".shared { color: red; }".repeat(200),
+    false
+  );
+  const graph = new Map<string, Rollup.ModuleInfo>();
+  const add = (
+    file: string,
+    imported: string[] = [],
+    dynamic: string[] = [],
+    entry = false
+  ) => {
+    graph.set(id(file), {
+      id: id(file),
+      isEntry: entry,
+      isExternal: false,
+      isIncluded: true,
+      importedIds: imported.map(id),
+      dynamicallyImportedIds: dynamic.map(id),
+      dynamicImporters: []
+    } as unknown as Rollup.ModuleInfo);
+  };
+  if (mode === "other-entry-first") {
+    add("other.html", [], ["other-shell.js"], true);
+    add("other-shell.js", ["a.js"]);
+  }
+  const direct = mode === "direct" || mode === "windows";
+  add(
+    "index.html",
+    mode === "eager" ? ["a.js"] : [],
+    mode === "unreachable" || mode === "eager"
+      ? ["b-shell.js"]
+      : direct
+        ? ["a.js", "b.js"]
+        : ["a-shell.js", "b-shell.js"],
+    true
+  );
+  if (mode === "unreachable") add("other.html", [], ["a-shell.js"], true);
+  add("a-shell.js", ["a.js"]);
+  add("b-shell.js", ["b.js"]);
+  add("a.js", ["shared.css"]);
+  add("b.js", ["shared.css"]);
+  add("shared.css");
+  for (const info of graph.values())
+    for (const target of info.dynamicallyImportedIds) {
+      const dependency = graph.get(target)!;
+      graph.set(target, {
+        ...dependency,
+        dynamicImporters: [...dependency.dynamicImporters, info.id]
+      });
+    }
+  const result = sharing.plan({
+    getModuleIds: () => graph.keys(),
+    getModuleInfo: (moduleId) => graph.get(moduleId) ?? null,
+    getWatchFiles: () => [],
+    warn: () => {},
+    resolve: async (source) =>
+      source === id("a")
+        ? ({ id: id("a.js"), external: false } as Rollup.ResolvedId)
+        : null
+  });
+  if (mode === "unreachable")
+    await expect(result).rejects.toThrow("Unreachable CSS cost route: a");
+  else {
+    await expect(result).resolves.toBeUndefined();
+    expect(reports).toContainEqual(
+      expect.objectContaining({ phase: "compressed-cost", metric: "raw" })
+    );
+  }
+});
+
+it("builds compressed cost scenarios for routes inside dynamic shells", async () => {
+  const root = await fixture(".shared { color: red; }".repeat(200));
+  for (const [file, source] of Object.entries({
+    "a.html": '<script type="module" src="/main.js"></script>',
+    "main.js":
+      'globalThis.a=()=>import("./a-shell.js");globalThis.b=()=>import("./b-shell.js");',
+    "a-shell.js": 'export { route } from "./a.js";',
+    "b-shell.js": 'export { route } from "./b.js";',
+    "a.js": 'import "./shared.css"; import "./a.css"; export const route="a";',
+    "b.js": 'import "./shared.css"; import "./b.css"; export const route="b";'
+  }))
+    await writeFile(join(root, file), source);
+  const result = await costBuild(root, {
+    bundleSize: { metric: "raw" },
+    diagnostics: { json: "costs.json" },
+    appCss: {
+      routes: [
+        { id: "a", entry: "a.js" },
+        { id: "b", entry: "b.js" }
+      ],
+      sharing: {
+        minBytes: 0,
+        cost: { scenarios: [{ entry: "a.html", routes: ["a", "b"] }] }
+      }
+    }
+  });
+  expect(
+    result.output.some(
+      (item) => item.type === "asset" && item.fileName.endsWith(".css")
+    )
+  ).toBe(true);
+  const report = JSON.parse(await readFile(join(root, "costs.json"), "utf8"));
+  expect(
+    report.builds.flatMap((value: { events: unknown[] }) => value.events)
+  ).toContainEqual(
+    expect.objectContaining({
+      phase: "css-sharing",
+      detail: expect.objectContaining({
+        phase: "compressed-cost",
+        metric: "raw",
+        estimate: true
+      })
+    })
+  );
+});
+
+it.each([undefined, "raw"] as const)(
+  "resolves CSS sharing metrics with Babel fallback and root precedence (%s)",
+  async (metric) => {
+    const root = await fixture(".shared { color: red; }".repeat(200));
+    await costBuild(root, {
+      babel: { bundleSize: { metric: "gzip" } },
+      bundleSize: metric && { metric },
+      diagnostics: { json: "costs.json" },
+      appCss: { sharing: { minBytes: 0, cost: { maxInitialIncreaseBytes: 0 } } }
+    });
+    const report = JSON.parse(await readFile(join(root, "costs.json"), "utf8"));
+    const decisions = report.builds
+      .flatMap(
+        (b: {
+          events: {
+            phase: string;
+            detail?: { phase?: string; metric?: string };
+          }[];
+        }) => b.events
+      )
+      .filter(
+        (event: { phase: string; detail?: { phase?: string } }) =>
+          event.phase === "css-sharing" &&
+          event.detail?.phase === "compressed-cost"
+      );
+    expect(decisions.length).toBeGreaterThan(0);
+    for (const event of decisions)
+      expect(event.detail.metric).toBe(metric ?? "gzip");
+  }
+);
+
+it.each([false, true])(
+  "measures only live CSS and tolerates unavailable cost transforms (failure: %s)",
+  async (failure) => {
+    const reports: unknown[] = [];
+    const sharing = createCssSharing(
+      { minBytes: 0, cost: { maxInitialIncreaseBytes: 0 } },
+      (detail) => reports.push(detail)
+    );
+    sharing.configure({
+      command: "build",
+      root: process.cwd(),
+      css: {},
+      plugins: [],
+      build: { cssCodeSplit: true, cssMinify: true, rollupOptions: {} }
+    } as unknown as ResolvedConfig);
+    sharing.begin();
+    sharing.record("/shared.css", ".shared{color:red}", false);
+    sharing.record("/removed.scss", ".removed{color:blue}", false);
+    const transform = vi.mocked(vite.transformWithEsbuild);
+    if (failure)
+      transform.mockRejectedValueOnce(new Error("measurement unavailable"));
+    const ids = ["/a.js", "/b.js", "/shared.css"];
+    await expect(
+      sharing.plan({
+        getModuleIds: () => ids.values(),
+        getModuleInfo: (id) =>
+          ({
+            id,
+            isEntry: id.endsWith(".js"),
+            isExternal: false,
+            importedIds: id.endsWith(".js") ? ["/shared.css"] : [],
+            dynamicallyImportedIds: [],
+            dynamicImporters: []
+          }) as unknown as Rollup.ModuleInfo,
+        getWatchFiles: () => [],
+        warn: () => {},
+        resolve: async () => null
+      })
+    ).resolves.toBeUndefined();
+    expect(transform.mock.calls.map((call) => call[1])).toEqual([
+      "/shared.css.css"
+    ]);
+    expect(reports).toContainEqual(
+      expect.objectContaining(
+        failure
+          ? {
+              applied: false,
+              phase: "compressed-cost",
+              reason: "css-cost-measurement-failed"
+            }
+          : { applied: false, phase: "compressed-cost", metric: "brotli" }
+      )
+    );
+    expect(sharing.outputOptions({ format: "es" })).toBeNull();
+  }
+);
 
 async function compile(
   root: string,

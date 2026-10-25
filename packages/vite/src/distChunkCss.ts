@@ -7,6 +7,7 @@ import {
   internalAnalyzeClosedAppUsage,
   internalStaticModuleSpecifiers,
   type ClosedAppUsageOptions,
+  internalOptimizeCssChunk,
   internalHashVanillaCssArtifact,
   internalOptimizeVanillaCssArtifacts,
   internalCssVariableLivenessOpaque,
@@ -215,6 +216,20 @@ export function createDistChunkCss(
   let optimization: InternalCssIrOptimizationOptions | undefined;
   let config: ResolvedConfig;
   let enabled = false;
+  let observedCss = false;
+  let opaqueResources = false;
+  let opaquePostcss = false;
+  // Artifact tokens survive output-format changes, but never a new build plan.
+  const resourceTokens = new Map<string, Set<string>>();
+  let chunkTokens = new WeakMap<
+    Record<string, Rollup.RenderedChunk>,
+    Map<Rollup.RenderedChunk, Set<string>>
+  >();
+
+  const resetResourceTokens = () => {
+    resourceTokens.clear();
+    chunkTokens = new WeakMap();
+  };
 
   let usage: ClosedAppUsageOptions | undefined;
   let cssTransform: Transform | undefined;
@@ -423,6 +438,7 @@ export function createDistChunkCss(
     },
 
     begin() {
+      resetResourceTokens();
       outputs = new WeakMap();
       chunks = undefined;
       optimized.clear();
@@ -488,6 +504,7 @@ export function createDistChunkCss(
     clearOwner,
 
     clear() {
+      resetResourceTokens();
       artifacts.clear();
       optimized.clear();
       owners.clear();
@@ -523,6 +540,11 @@ export function createDistChunkCss(
       if (!enabled) return;
 
       optimized.clear();
+
+      resetResourceTokens();
+      observedCss = false;
+      opaqueResources = false;
+      opaquePostcss = !!optimization && hasOpaquePostcss(config);
 
       const live = new Set(context.getModuleIds());
       const liveOwners = new Set([...live].map(ownerModuleId));
@@ -574,7 +596,7 @@ export function createDistChunkCss(
         );
 
       if (optimization && selected.length) {
-        if (hasOpaquePostcss(config)) {
+        if (opaquePostcss) {
           report("css-ir-optimize", {
             applied: false,
             reason: "opaque-postcss"
@@ -633,12 +655,14 @@ export function createDistChunkCss(
               )
             );
 
+          observedCss = opaqueRuntime;
           const resourceBarrier = selected.some(
             ([, { data }]) =>
               !data.provenance ||
               data.provenance.opaque ||
               data.provenance.resources?.version !== 2
           );
+          opaqueResources = external || resourceBarrier;
 
           const candidates = { recipes: 0, keyframes: 0 };
 
@@ -985,13 +1009,76 @@ export function createDistChunkCss(
       }
 
       const modules: typeof chunk.modules = {};
+      const ordered = Object.keys(chunk.modules).filter(
+        (id) =>
+          id.startsWith(prefix) ||
+          /\.(?:css|scss|sass|less|styl|stylus|pcss|postcss)(?:[?#]|$)/.test(id)
+      );
+      const perChunk = new Map<string, Artifact>();
+      if (optimization?.crossFileRules || optimization?.dedupeResources) {
+        const originals = ordered.map(
+          (id) => optimized.get(id) ?? artifacts.get(id)
+        );
+        const outsideResources = new Set<string>();
+        if (optimization.dedupeResources) {
+          let tokensByChunk = chunkTokens.get(allChunks);
+          if (!tokensByChunk) {
+            // Snapshot before rendering adds native synthetic CSS modules.
+            tokensByChunk = new Map();
+            for (const current of Object.values(allChunks)) {
+              const tokens = new Set<string>();
+              for (const id of Object.keys(current.modules)) {
+                const data = (optimized.get(id) ?? artifacts.get(id))?.data;
+                if (!data) continue;
+                let names = resourceTokens.get(id);
+                if (!names) {
+                  names = new Set(
+                    JSON.stringify(data.cssObjs).match(/[A-Za-z_][\w-]*/g) ?? []
+                  );
+                  resourceTokens.set(id, names);
+                }
+                for (const name of names) tokens.add(name);
+              }
+              tokensByChunk.set(current, tokens);
+            }
+            chunkTokens.set(allChunks, tokensByChunk);
+          }
+          for (const [other, tokens] of tokensByChunk)
+            if (other !== chunk)
+              for (const name of tokens) outsideResources.add(name);
+        }
+        const result = internalOptimizeCssChunk(
+          originals.map((artifact) => artifact?.data),
+          {
+            ...optimization,
+
+            outsideResources,
+            observed: observedCss,
+            opaqueTransform: opaquePostcss,
+            opaqueResources
+          }
+        );
+        result.artifacts.forEach((data, index) => {
+          if (data && originals[index])
+            perChunk.set(ordered[index]!, {
+              ...originals[index]!,
+              data,
+              serializationKey: `chunk-v1:${internalHashVanillaCssArtifact(data)}`
+            });
+        });
+        report("css-chunk-optimize", {
+          chunk: chunk.fileName,
+          ...result.diagnostics
+        });
+      }
 
       for (const [id, module] of Object.entries(chunk.modules)) {
         modules[id] = module;
 
         if (!id.startsWith(prefix)) continue;
 
-        const artifact = optimized.get(id) ?? artifacts.get(id);
+        const artifact =
+          perChunk.get(id) ?? optimized.get(id) ?? artifacts.get(id);
         if (!artifact)
           throw new Error(`[mincho] Missing dist-chunk style artifact: ${id}`);
 

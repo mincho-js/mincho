@@ -301,11 +301,13 @@ function createMinchoViteEnvironmentPlugin(
   execution.compilationCache = compilationCache;
 
   const runtimeOptimizations = new InternalRuntimeOptimizations();
+  const bundleSize = _options?.bundleSize ?? _options?.babel?.bundleSize;
 
   const cssSharing = createCssSharing(
     _options?.appCss?.sharing ?? _options?.experimental?.cssChunkSharing,
     (detail) => diagnostics.record(config.root, "css-sharing", detail),
-    _options?.appCss?.routes
+    _options?.appCss?.routes,
+    bundleSize
   );
 
   const libraryRsc = createLibraryRscBoundaries();
@@ -992,7 +994,10 @@ function createMinchoViteEnvironmentPlugin(
       distChunkCss.configure(
         config,
         _options?.appCss?.mode === "dist-chunk" && consumer === "client",
-        cssOptimization
+        cssOptimization && {
+          ...cssOptimization,
+          bundleSize
+        }
       );
       plugin.renderChunk.order = distChunkCss.enabled ? "pre" : "post";
       rootRealpath = await getRealpathOrResolvedPath(config.root);
@@ -1389,7 +1394,7 @@ function createMinchoViteEnvironmentPlugin(
               moduleInfo.filePath,
               {
                 optimize: compilerOptimizations(),
-                bundleSize: _options?.bundleSize ?? _options?.babel?.bundleSize
+                bundleSize
               }
             )
           };
@@ -1504,7 +1509,7 @@ function createMinchoViteEnvironmentPlugin(
 
         const transformBabelOptions: BabelOptions = {
           ...babelOptions,
-          bundleSize: _options?.bundleSize ?? babelOptions?.bundleSize,
+          bundleSize,
           experimental: {
             ...babelOptions?.experimental,
             ...(_options?.experimental?.nonInheritingCssVars !== undefined

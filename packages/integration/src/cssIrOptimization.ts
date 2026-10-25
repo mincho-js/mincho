@@ -8,6 +8,8 @@ type RecordValue = Record<string, unknown>;
 
 export interface CssIrOptimizationOptions {
   scopedResourceAnalysis?: boolean;
+  crossFileRules?: boolean;
+  dedupeResources?: boolean;
   bundleSize?: import("./bundleSize.js").BundleSizeOptions;
   mergeRules: boolean;
   pruneGenerated: boolean;

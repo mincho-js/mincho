@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { transformFromAstSync, types as t } from "@babel/core";
 import {
   InternalCompilationCache,
+  type InternalCssIrOptimizationOptions,
   type InternalVanillaCssArtifact
 } from "@mincho-js/integration";
 import {
@@ -13,13 +14,15 @@ import {
   type UserConfig,
   type ResolvedConfig
 } from "vite";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { minchoVitePlugin, type MinchoVitePluginOptions } from "./index.js";
 import { createDistChunkCss } from "./distChunkCss.js";
+import * as cssOptimizationGuard from "./cssOptimizationGuard.js";
 
 const roots: string[] = [];
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await Promise.all(
     roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))
   );
@@ -558,6 +561,47 @@ describe("component-system production passes", () => {
 });
 
 describe("bundle-size application integrations", () => {
+  it.each(["before", "between", "observed"] as const)(
+    "keeps native CSS ordering barriers separate from CSSOM observation (%s)",
+    async (position) => {
+      const root = await fixture({
+        "main.js": [
+          position !== "between" ? 'import "./home.css";' : "",
+          'import {style as a} from "./a-style.js";',
+          position === "between" ? 'import "./home.css";' : "",
+          'import {style as b} from "./b-style.js"; globalThis.classes=[a,b];',
+          position === "observed"
+            ? "globalThis.read=()=>document.styleSheets;"
+            : ""
+        ].join("\n"),
+        "a-style.js":
+          'import {css} from "@mincho-js/css"; export const style = css({color:"blue"}, "first");',
+        "b-style.js":
+          'import {css} from "@mincho-js/css"; export const style = css({color:"blue"}, "second");'
+      });
+      const result = await compile(root, {
+        bundleSize: { metric: "raw" },
+        appCss: {
+          optimize: {
+            mergeRules: false,
+            crossFileRules: true,
+            dedupeResources: true
+          }
+        }
+      });
+      expect(result.text.match(/color: blue/g)).toHaveLength(
+        position === "before" ? 1 : 2
+      );
+      const diagnostics = result.events.filter(
+        (event) => event.phase === "css-chunk-optimize"
+      );
+      expect(diagnostics.length).toBeGreaterThan(0);
+      expect(
+        diagnostics.some((event) => event.detail?.reason === "observed-cssom")
+      ).toBe(position === "observed");
+    }
+  );
+
   it.each([false, true])(
     "merges usage from repeated compiled recipe IDs (unknown: %s)",
     async (unknown) => {
@@ -926,7 +970,7 @@ describe("bundle-size application integrations", () => {
 
 describe("shared artifact provenance", () => {
   function fixture(
-    optimize: { mergeConditionalRules?: boolean } = {},
+    optimize: Partial<InternalCssIrOptimizationOptions> = {},
     report: Parameters<typeof createDistChunkCss>[0] = () => {}
   ) {
     const adapter = createDistChunkCss(report);
@@ -1014,6 +1058,63 @@ describe("shared artifact provenance", () => {
 
     return { adapter, data, publish, preview };
   }
+
+  it("reuses resource tokens and PostCSS guards across chunks and output formats, then refreshes for watch", async () => {
+    const { adapter, data, publish, preview } = fixture({
+      dedupeResources: true
+    });
+    const guard = vi.spyOn(cssOptimizationGuard, "hasOpaquePostcss");
+    const stringify = vi.spyOn(JSON, "stringify");
+
+    for (const color of ["red", "blue"]) {
+      adapter.begin();
+      const entries = ["one", "two", "three"].map((name) => {
+        const value = data([]);
+        value.origin = `/project/${name}.css.ts`;
+        value.fileScope.filePath = `${name}.css.ts`;
+        value.localClassNames = [name];
+        value.cssObjs = [{ type: "local", selector: name, rule: { color } }];
+        return [value.origin, publish(value.origin, [value])] as const;
+      });
+      guard.mockClear();
+      expect(await preview(entries.flat())).toContain(`color: ${color}`);
+      stringify.mockClear();
+
+      for (const format of ["es", "cjs"] as const) {
+        const output = { format } as Rollup.NormalizedOutputOptions;
+        const chunks = Object.fromEntries(
+          entries.map(([, id], index) => [
+            `${index}.js`,
+            {
+              fileName: `${index}.js`,
+              modules: {
+                [id]: {
+                  code: null,
+                  originalLength: 0,
+                  renderedLength: 0,
+                  removedExports: [],
+                  renderedExports: []
+                }
+              }
+            } as unknown as Rollup.RenderedChunk
+          ])
+        );
+        for (const chunk of Object.values(chunks))
+          await adapter.render(
+            {} as Rollup.PluginContext,
+            chunk,
+            output,
+            chunks
+          );
+      }
+      expect(guard).toHaveBeenCalledTimes(1);
+      expect(
+        stringify.mock.calls.filter(
+          ([value]) => Array.isArray(value) && value[0]?.type === "local"
+        )
+      ).toHaveLength(3);
+    }
+  });
 
   it.each([false, true])(
     "resolves closed-usage imports concurrently without retrying resolved IDs (missing: %s)",

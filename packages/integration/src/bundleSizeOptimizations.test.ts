@@ -1,11 +1,58 @@
 import { parseSync, traverse, type NodePath } from "@babel/core";
+import type { StyleRule } from "@vanilla-extract/css";
 import { describe, it, expect, vi } from "vitest";
 import { analyzeCssObservability } from "./cssObservability.js";
+import { optimizeCssChunk } from "./cssChunkOptimization.js";
 import { analyzeClosedAppUsage } from "./closedAppUsage.js";
+import {
+  evaluateCssSharingCost,
+  createCssSharingCostEvaluator
+} from "./cssSharingCost.js";
+import * as bundleSizeCosts from "./bundleSize.js";
 import {
   measureRuntimeCandidate,
   preferRuntimeCandidate
 } from "./bundleSize.js";
+import { generateVanillaCss, type VanillaCssArtifact } from "./vanillaCssIr.js";
+const artifact = (
+  name: string,
+  rule = {
+    color: "red",
+    backgroundColor: "blue",
+    display: "flex"
+  }
+): VanillaCssArtifact => ({
+  origin: `/${name}.css.ts`,
+  fileScope: {
+    filePath: `${name}.css.ts`,
+    packageName: "test"
+  },
+  cssObjs: [
+    {
+      type: "local",
+      selector: name,
+      rule
+    }
+  ],
+  localClassNames: [name],
+  composedClassLists: [],
+  usedCompositions: [],
+  provenance: {
+    version: 1,
+    opaque: false,
+    publicReferences: [],
+    generatedVariables: [],
+    resources: {
+      version: 2,
+      recipes: [],
+      keyframes: [],
+      publicKeyframes: [],
+      fonts: [],
+      publicFonts: [],
+      themes: []
+    }
+  }
+});
 const config = {
   defaultClassName: "base",
   variantClassNames: {
@@ -171,6 +218,266 @@ describe("bundle-size safety and costs", () => {
     }
   );
 
+  it("groups adjacent identical declarations while preserving both class names and inputs", () => {
+    const a = artifact("one"),
+      b = artifact("two");
+    const output = optimizeCssChunk([a, b], {
+      crossFileRules: true,
+      bundleSize: {
+        metric: "raw"
+      }
+    });
+    expect(output.diagnostics.applied).toBe(1);
+    expect(
+      output.artifacts
+        .map((value) => value && generateVanillaCss(value))
+        .join("\n")
+    ).toContain(".one, .two");
+    expect(a.cssObjs).toHaveLength(1);
+    expect(b.cssObjs).toHaveLength(1);
+    expect(
+      optimizeCssChunk([a, undefined, b], {
+        crossFileRules: true
+      }).diagnostics.applied
+    ).toBe(0);
+    expect(
+      optimizeCssChunk([a, b], {
+        crossFileRules: true,
+        observed: true
+      }).diagnostics.applied
+    ).toBe(0);
+  });
+
+  it.each<{
+    name: string;
+    side: "left" | "right";
+    conditional: boolean;
+    rule: StyleRule;
+  }>([
+    {
+      name: "earlier conditions emitted after a plain left boundary",
+      side: "left",
+      conditional: false,
+      rule: { "@media": { all: { color: "blue" } } }
+    },
+    {
+      name: "earlier nested selector conditions",
+      side: "left",
+      conditional: false,
+      rule: { selectors: { "&": { "@media": { all: { color: "blue" } } } } }
+    },
+    {
+      name: "later plain rules emitted before a conditional right boundary",
+      side: "right",
+      conditional: true,
+      rule: { color: "blue" }
+    },
+    {
+      name: "later plain selectors inside a conditional root",
+      side: "right",
+      conditional: true,
+      rule: {
+        "@media": { screen: { color: "green" } },
+        selectors: { "&": { color: "blue" } }
+      }
+    },
+    {
+      name: "left conditions grouped ahead of another query",
+      side: "left",
+      conditional: true,
+      rule: { "@media": { all: { color: "green" }, screen: { color: "blue" } } }
+    },
+    {
+      name: "right conditions sorted behind another query",
+      side: "right",
+      conditional: true,
+      rule: { "@media": { screen: { color: "blue" }, all: { color: "green" } } }
+    }
+  ])(
+    "preserves emitted CSS order with $name",
+    ({ side, conditional, rule }) => {
+      const left = artifact("one"),
+        right = artifact("two");
+      if (conditional)
+        for (const value of [left, right])
+          value.cssObjs = [
+            {
+              type: "local",
+              selector: value.localClassNames[0]!,
+              rule: {
+                "@media": {
+                  all: {
+                    color: "red",
+                    backgroundColor: "blue",
+                    display: "flex"
+                  }
+                }
+              }
+            }
+          ];
+      const target = side === "left" ? left : right;
+      target.localClassNames.push("obstacle");
+      const obstacle = { type: "local" as const, selector: "obstacle", rule };
+      if (side === "left") target.cssObjs.unshift(obstacle);
+      else target.cssObjs.push(obstacle);
+      const before = [left, right].map(generateVanillaCss).join("\n");
+      expect(before).toContain(".obstacle");
+      const result = optimizeCssChunk([left, right], {
+        crossFileRules: true,
+        bundleSize: { metric: "raw" }
+      });
+      expect(result.diagnostics.applied).toBe(0);
+      expect(
+        result.artifacts
+          .map((value) => value && generateVanillaCss(value))
+          .join("\n")
+      ).toBe(before);
+    }
+  );
+
+  it.each([
+    ["@media", "all"],
+    ["@supports", "(display: grid)"],
+    ["@layer", "theme"]
+  ])("groups emitted-adjacent identical %s rules", (condition, query) => {
+    const left = artifact("one"),
+      right = artifact("two");
+    for (const value of [left, right])
+      value.cssObjs = [
+        {
+          type: "local",
+          selector: value.localClassNames[0]!,
+          rule: {
+            [condition]: {
+              [query]: {
+                color: "red",
+                backgroundColor: "blue",
+                display: "flex"
+              }
+            }
+          }
+        }
+      ];
+    const result = optimizeCssChunk([left, right], {
+      crossFileRules: true,
+      bundleSize: { metric: "raw" }
+    });
+    expect(result.diagnostics.applied).toBe(1);
+    expect(
+      result.artifacts
+        .map((value) => value && generateVanillaCss(value))
+        .join("\n")
+    ).toContain(".one, .two");
+  });
+
+  it.each([false, true])(
+    "keeps safe grouping with surrounding rules (conditional: %s)",
+    (conditional) => {
+      const left = artifact("one"),
+        right = artifact("two");
+      if (conditional)
+        for (const value of [left, right])
+          value.cssObjs = [
+            {
+              type: "local",
+              selector: value.localClassNames[0]!,
+              rule: {
+                "@media": {
+                  all: {
+                    color: "red",
+                    backgroundColor: "blue",
+                    display: "flex"
+                  }
+                }
+              }
+            }
+          ];
+      left.localClassNames.push("before");
+      left.cssObjs.unshift({
+        type: "local",
+        selector: "before",
+        rule: { color: "black" }
+      });
+      right.localClassNames.push("after");
+      right.cssObjs.push({
+        type: "local",
+        selector: "after",
+        rule: { "@media": { screen: { color: "white" } } }
+      });
+      const result = optimizeCssChunk([left, right], {
+        crossFileRules: true,
+        bundleSize: { metric: "raw" }
+      });
+      expect(result.diagnostics.applied).toBe(1);
+      const output = result.artifacts
+        .map((value) => value && generateVanillaCss(value))
+        .join("\n");
+      expect(output).toContain(".one, .two");
+      expect(output.indexOf(".before")).toBeLessThan(
+        output.indexOf(".one, .two")
+      );
+      expect(output.indexOf(".after")).toBeGreaterThan(
+        output.indexOf(".one, .two")
+      );
+    }
+  );
+
+  it("deduplicates CSS-contained keyframes and pins names observed outside the chunk", () => {
+    const a = artifact("one"),
+      b = artifact("two");
+    for (const [item, name] of [
+      [a, "animOne"],
+      [b, "animTwo"]
+    ] as const) {
+      item.provenance!.resources!.keyframes.push(name);
+      item.cssObjs = [
+        {
+          type: "keyframes",
+          name,
+          rule: {
+            from: {
+              opacity: 0
+            },
+            to: {
+              opacity: 1
+            }
+          }
+        },
+        {
+          type: "local",
+          selector: item.localClassNames[0]!,
+          rule: {
+            animationName: name
+          }
+        }
+      ];
+    }
+    const output = optimizeCssChunk([a, b], {
+      dedupeResources: true,
+      bundleSize: {
+        metric: "raw"
+      }
+    });
+    expect(output.diagnostics.applied).toBe(1);
+    const css = output.artifacts
+      .map((value) => value && generateVanillaCss(value))
+      .join("\n");
+    expect(css.match(/@keyframes/g)).toHaveLength(1);
+    expect(css).not.toContain("animTwo");
+    expect(
+      optimizeCssChunk([a, b], {
+        dedupeResources: true,
+        opaqueResources: true,
+        bundleSize: { metric: "raw" }
+      }).diagnostics.reason
+    ).toBe("opaque-resources");
+    expect(
+      optimizeCssChunk([a, b], {
+        dedupeResources: true,
+        outsideResources: new Set(["animTwo"])
+      }).diagnostics.applied
+    ).toBe(0);
+  });
   it("charges actual compact helper dependencies and preserves ties", async () => {
     const after = recipe
       .replaceAll("createCompiledClassRuntimeFn", "createCompactClassRuntimeFn")
@@ -194,6 +501,283 @@ describe("bundle-size safety and costs", () => {
     expect(
       (await measureRuntimeCandidate(after, process.cwd() + "/fixture.ts")).raw
     ).toBeGreaterThan(after.length);
+  });
+  it.each([
+    ["fontFamily", "FontTwo", 1],
+    ["content", '"FontTwo"', 0],
+    ["content", '"prefix-FontTwo FontTwo-suffix"', 1],
+    ["fontFamily", "var(--font)", 0]
+  ] as const)(
+    "handles metacharacter font names and pins exact unknown references (%s: %s)",
+    (property, value, applied) => {
+      const items = ["FontOne", "FontTwo", "C++ Font("].map((name) => {
+        const item = artifact(name === "FontOne" ? "one" : "two");
+        item.provenance!.resources!.fonts = [name];
+        item.cssObjs = [
+          {
+            type: "fontFace",
+            rule: {
+              fontFamily: `"${name}"`,
+              src: "local(Font)"
+            }
+          },
+          {
+            type: "local",
+            selector: item.localClassNames[0]!,
+            rule: { fontFamily: `"${name}"` }
+          }
+        ];
+        return item;
+      });
+      items[1]!.cssObjs.push({
+        type: "local",
+        selector: "two",
+        rule: { [property]: value }
+      });
+      const output = optimizeCssChunk(items, {
+        dedupeResources: true,
+        bundleSize: { metric: "raw" }
+      });
+      expect(output.diagnostics.applied).toBe(applied);
+      const css = output.artifacts
+        .map((item) => item && generateVanillaCss(item))
+        .join("\n");
+      expect(css).toContain("C++ Font(");
+      expect(css.match(/@font-face/g)).toHaveLength(3 - applied);
+    }
+  );
+
+  it.each([
+    [[], 500, "no-route-visits"],
+    [["main"], 500, "no-route-visits"],
+    [[], 0, "initial-or-route-cost"],
+    [["route"], 500, "initial-or-route-cost"]
+  ] as const)(
+    "explains entry-only cost decisions (%j, %s)",
+    (visits, allowance, reason) => {
+      const result = evaluateCssSharingCost({
+        boundaries: ["main", "route"].map((id) => ({
+          id,
+          modules: ["common"]
+        })),
+        sources: new Map([["common", ".common{color:red}"]]),
+        shared: ["common"],
+        scenarios: [{ entry: "main", boundaries: visits }],
+        maxInitialIncreaseBytes: allowance,
+        bundleSize: { metric: "raw" }
+      });
+      expect(result.applied).toBe(false);
+      expect(result.reason).toBe(reason);
+    }
+  );
+
+  it.each(
+    [
+      [
+        'Inter, "Inter Display", sans-serif',
+        'Brand, "Inter Display", sans-serif'
+      ],
+      [
+        "  'Inter' , Inter Display, serif  ",
+        "  'Brand' , Inter Display, serif  "
+      ],
+      [
+        '"Other, Inter", Inter, "Inter, Display"',
+        '"Other, Inter", Brand, "Inter, Display"'
+      ],
+      ['"Inter",\tInter\n', '"Brand",\tBrand\n']
+    ].flatMap(
+      ([family, expected]): [string | string[], string | string[]][] => [
+        [family!, expected!],
+        [[family!], [expected!]]
+      ]
+    )
+  )(
+    "rewrites only complete font families while preserving quoting and spacing (%s)",
+    (family, expected) => {
+      const items = ["Brand", "Inter"].map((font) => {
+        const item = artifact(font.toLowerCase());
+        item.provenance!.resources!.fonts = [font];
+        item.cssObjs = [
+          {
+            type: "fontFace",
+            rule: { fontFamily: `"${font}"`, src: "local(Font)" }
+          }
+        ];
+        return item;
+      });
+      items[1]!.cssObjs.push({
+        type: "local",
+        selector: "inter",
+        rule: {
+          fontFamily: family,
+          "@media": { screen: { fontFamily: family } }
+        }
+      });
+      const result = optimizeCssChunk(items, {
+        dedupeResources: true,
+        bundleSize: { metric: "raw" }
+      });
+      expect(result.diagnostics.applied).toBe(1);
+      expect(result.artifacts[1]!.cssObjs[0]).toMatchObject({
+        rule: {
+          fontFamily: expected,
+          "@media": { screen: { fontFamily: expected } }
+        }
+      });
+      expect(items[1]!.cssObjs[1]).toMatchObject({
+        rule: { fontFamily: family }
+      });
+    }
+  );
+
+  it("keeps font and keyframe aliases in their own resource namespace", () => {
+    const items = ["one", "two"].map((suffix) => {
+      const item = artifact(suffix);
+      const font = `Font_${suffix}`,
+        animation = `Animation_${suffix}`;
+      item.provenance!.resources!.fonts = [font];
+      item.provenance!.resources!.keyframes = [animation];
+      item.cssObjs = [
+        { type: "fontFace", rule: { fontFamily: font, src: "local(Font)" } },
+        {
+          type: "keyframes",
+          name: animation,
+          rule: { from: { opacity: 0 }, to: { opacity: 1 } }
+        },
+        {
+          type: "local",
+          selector: suffix,
+          rule: { fontFamily: "Animation_two", animationName: "Font_two" }
+        }
+      ];
+      return item;
+    });
+    const result = optimizeCssChunk(items, {
+      dedupeResources: true,
+      bundleSize: { metric: "raw" }
+    });
+    expect(result.diagnostics.applied).toBe(2);
+    expect(result.artifacts[1]!.cssObjs[0]).toMatchObject({
+      rule: { fontFamily: "Animation_two", animationName: "Font_two" }
+    });
+  });
+
+  it("compresses invariant boundary costs once per build and metric without changing decisions", () => {
+    for (const metric of ["raw", "gzip", "brotli"] as const) {
+      for (const color of ["red", "blue"]) {
+        const options = {
+          boundaries: [
+            { id: "main", modules: ["first", "second", "entry"] },
+            { id: "route", modules: ["first", "second", "route"] }
+          ],
+          sources: new Map([
+            ["first", `.first{color:${color}}`],
+            ["second", ".second{display:flex}"],
+            ["entry", ".entry{padding:1px}"],
+            ["route", ".route{margin:1px}"]
+          ]),
+          scenarios: [{ entry: "main", boundaries: ["route"] }],
+          bundleSize: { metric },
+          maxInitialIncreaseBytes: 500
+        };
+        const measure = vi.spyOn(bundleSizeCosts, "measureBundleBytes");
+        const candidates = [["first"], ["first", "second"]];
+        let actual;
+        try {
+          const evaluate = createCssSharingCostEvaluator(options);
+          actual = candidates.map(evaluate);
+          for (const boundary of options.boundaries) {
+            const before = boundary.modules
+              .map((id) => options.sources.get(id))
+              .join("\n");
+            expect(
+              measure.mock.calls.filter(([source]) => source === before)
+            ).toHaveLength(1);
+          }
+        } finally {
+          measure.mockRestore();
+        }
+        expect(actual).toEqual(
+          candidates.map((shared) =>
+            evaluateCssSharingCost({ ...options, shared })
+          )
+        );
+      }
+    }
+  });
+
+  it("reuses filtered boundary costs without colliding ordered module IDs", () => {
+    const sources = new Map([
+      ["a", ".a{color:red}"],
+      ["b", ".b{color:blue}"],
+      ["a,b", ".collision{display:block}"],
+      ["untouched", ".untouched{padding:3px}"]
+    ]);
+    const measure = vi.spyOn(bundleSizeCosts, "measureBundleBytes");
+    try {
+      const evaluate = createCssSharingCostEvaluator({
+        boundaries: [
+          { id: "main", modules: ["a", "b"] },
+          { id: "collision", modules: ["a,b"] },
+          { id: "other", modules: ["untouched"] }
+        ],
+        sources,
+        scenarios: [{ entry: "main", boundaries: ["collision"] }],
+        bundleSize: { metric: "raw" }
+      });
+      for (const candidate of [["a"], ["a", "b"], ["a"]]) {
+        const result = evaluate(candidate);
+        const visits = result.scenarios[0]!.visits;
+        const before = sources.get("a")!.length + 1 + sources.get("b")!.length;
+        expect(visits[0]!.before).toBe(before);
+        expect(visits[1]!.before).toBe(before + sources.get("a,b")!.length);
+      }
+      for (const id of ["b", "untouched", "a,b"])
+        expect(
+          measure.mock.calls.filter(([source]) => source === sources.get(id))
+        ).toHaveLength(1);
+    } finally {
+      measure.mockRestore();
+    }
+  });
+
+  it("uses per-asset compression and rejects a cold-load regression", () => {
+    const sources = new Map([
+      ["common", "x".repeat(10000)],
+      ["a", ".a{color:red}"],
+      ["b", ".b{color:blue}"]
+    ]);
+    const options = {
+      boundaries: [
+        {
+          id: "main",
+          modules: ["common", "a"]
+        },
+        {
+          id: "route",
+          modules: ["common", "b"]
+        }
+      ],
+      sources,
+      shared: ["common"],
+      scenarios: [
+        {
+          entry: "main",
+          boundaries: ["route"]
+        }
+      ]
+    };
+    expect(evaluateCssSharingCost(options).applied).toBe(false);
+    expect(
+      evaluateCssSharingCost({
+        ...options,
+        bundleSize: {
+          metric: "raw"
+        },
+        maxInitialIncreaseBytes: 500
+      }).applied
+    ).toBe(true);
   });
   it("follows internal exports, pins escapes and honors export preservation", () => {
     const modules = [

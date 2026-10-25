@@ -123,6 +123,13 @@ export function minchoEsbuildPlugin({
 
     setup(build) {
       if (
+        typeof experimental?.cssChunkSharing === "object" &&
+        experimental.cssChunkSharing.cost
+      )
+        throw new Error(
+          "CSS sharing cost scenarios are currently supported by the Vite application adapter only."
+        );
+      if (
         experimental?.cssChunkSharing &&
         !getBuildTransaction(build.initialOptions)
       )

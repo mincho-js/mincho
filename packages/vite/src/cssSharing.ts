@@ -1,13 +1,20 @@
 import {
   internalIsShareableCss,
+  internalCreateCssSharingCostEvaluator,
+  type BundleSizeOptions,
   internalPlanCssChunkSharing,
   internalResolveCssChunkSharingOptions,
   type InternalCssSharingBoundary,
   type InternalCssSharingGroup,
   type MinchoCssChunkSharingOptions
 } from "@mincho-js/integration";
-import { relative } from "node:path";
-import { normalizePath, type ResolvedConfig, type Rollup } from "vite";
+import {
+  normalizePath,
+  transformWithEsbuild,
+  type ResolvedConfig,
+  type Rollup
+} from "vite";
+import { relative, resolve } from "node:path";
 import {
   collectCssRouteReach,
   routesForCssModules,
@@ -28,7 +35,8 @@ const cssRequest =
 export function createCssSharing(
   option?: MinchoCssChunkSharingOptions,
   report: (detail: unknown) => void = () => {},
-  routes?: readonly MinchoCssRoute[]
+  routes?: readonly MinchoCssRoute[],
+  bundleSize?: BundleSizeOptions
 ) {
   let options = internalResolveCssChunkSharingOptions(option);
   const sources = new Map<string, { source: string; owned: boolean }>();
@@ -204,6 +212,9 @@ export function createCssSharing(
       }
 
       const boundaries: InternalCssSharingBoundary[] = [];
+      const staticClosures = options.cost?.scenarios
+        ? new Map<string, ReadonlySet<string>>()
+        : undefined;
 
       for (const id of ids) {
         const info = context.getModuleInfo(id);
@@ -227,17 +238,170 @@ export function createCssSharing(
 
         visit(id);
         boundaries.push({ id, modules: ordered });
+        staticClosures?.set(id, visited);
       }
 
+      const measuredSources = new Map<string, string>();
+      const scenarios: { entry: string; boundaries: string[] }[] = [];
+      if (
+        options.cost &&
+        (config.build.cssMinify === "lightningcss" ||
+          config.css.transformer === "lightningcss")
+      ) {
+        report({
+          applied: false,
+          phase: "compressed-cost",
+          reason: "unsupported-native-minifier-cost"
+        });
+        return;
+      }
+      if (options.cost) {
+        for (const id of modules.keys()) {
+          const input = sources.get(id);
+          if (!input) continue;
+
+          try {
+            const measured = await transformWithEsbuild(
+              input.source,
+              id + ".css",
+              {
+                loader: "css",
+                minify: !!config.build.cssMinify,
+                target: config.build.cssTarget || undefined
+              }
+            );
+            measuredSources.set(id, measured.code);
+          } catch {
+            // Cost estimation is optional; Vite still validates the real CSS.
+            report({
+              applied: false,
+              phase: "compressed-cost",
+              reason: "css-cost-measurement-failed",
+              id
+            });
+            return;
+          }
+        }
+        const entries = boundaries
+          .filter((boundary) => context.getModuleInfo(boundary.id)?.isEntry)
+          .map((boundary) => boundary.id);
+        const reach = (entry: string) => {
+          const seen = new Set<string>();
+          const visit = (id: string) => {
+            if (seen.has(id)) return;
+            seen.add(id);
+            const info = context.getModuleInfo(id);
+            if (info)
+              for (const next of [
+                ...info.importedIds,
+                ...info.dynamicallyImportedIds
+              ])
+                visit(next);
+          };
+          visit(entry);
+          return seen;
+        };
+        if (options.cost.scenarios)
+          for (const scenario of options.cost.scenarios) {
+            const entryTarget = normalizePath(
+              resolve(config.root, scenario.entry)
+            );
+            const entry = entries.find(
+              (id) => id === scenario.entry || id === entryTarget
+            );
+            if (!entry)
+              throw new Error(`Unknown CSS cost entry: ${scenario.entry}`);
+            const reachable = reach(entry);
+            const reachableBoundaries = boundaries.filter((value) =>
+              reachable.has(value.id)
+            );
+            const selected: string[] = [];
+            for (const routeId of scenario.routes ?? []) {
+              const route = routes?.find((value) => value.id === routeId);
+              const file = route?.entry ?? routeId;
+              // Use the same direct-ID, normalized-path and resolver fallback
+              // as collectCssRouteReach (including extensionless route entries).
+              const candidate = context.getModuleInfo(file)
+                ? file
+                : normalizePath(resolve(config.root, file));
+              const resolved = context.getModuleInfo(candidate)
+                ? { id: candidate, external: false }
+                : await context.resolve(candidate, undefined, {
+                    skipSelf: true
+                  });
+              const info = resolved && context.getModuleInfo(resolved.id);
+              const target =
+                resolved &&
+                !resolved.external &&
+                info?.isIncluded &&
+                !info.isExternal
+                  ? resolved.id
+                  : undefined;
+              // An eager route adds no new boundary. Otherwise use its direct
+              // dynamic boundary or a reachable shell that statically loads it.
+              const boundary =
+                target &&
+                (reachableBoundaries.find(
+                  (value) =>
+                    value.id === entry &&
+                    staticClosures?.get(value.id)?.has(target)
+                ) ??
+                  reachableBoundaries.find((value) => value.id === target) ??
+                  reachableBoundaries.find(
+                    (value) =>
+                      !context.getModuleInfo(value.id)?.isEntry &&
+                      staticClosures?.get(value.id)?.has(target)
+                  ));
+              if (!boundary || !reachable.has(boundary.id))
+                throw new Error(`Unreachable CSS cost route: ${routeId}`);
+              selected.push(boundary.id);
+            }
+            scenarios.push({ entry, boundaries: selected });
+          }
+        else
+          for (const entry of entries) {
+            const reachable = reach(entry);
+            scenarios.push({ entry, boundaries: [] });
+            for (const boundary of boundaries)
+              if (boundary.id !== entry && reachable.has(boundary.id))
+                scenarios.push({ entry, boundaries: [boundary.id] });
+            scenarios.push({
+              entry,
+              boundaries: boundaries
+                .filter(
+                  (boundary) =>
+                    boundary.id !== entry && reachable.has(boundary.id)
+                )
+                .map((boundary) => boundary.id)
+            });
+          }
+      }
+      let evaluateCost:
+        | ReturnType<typeof internalCreateCssSharingCostEvaluator>
+        | undefined;
       groups = internalPlanCssChunkSharing(
         boundaries,
         modules,
         routeReach ? { ...thresholds, minBoundaries: 2 } : thresholds,
-        routeReach
-          ? (ids) =>
-              routesForCssModules(ids, routeReach!).length >=
+        (ids) => {
+          if (
+            routeReach &&
+            routesForCssModules(ids, routeReach).length <
               thresholds.minBoundaries
-          : undefined,
+          )
+            return false;
+          if (!options?.cost) return true;
+          evaluateCost ??= internalCreateCssSharingCostEvaluator({
+            boundaries,
+            sources: measuredSources,
+            scenarios,
+            maxInitialIncreaseBytes: options.cost.maxInitialIncreaseBytes,
+            bundleSize
+          });
+          const decision = evaluateCost(ids);
+          report({ ...decision, modules: ids, phase: "compressed-cost" });
+          return decision.applied;
+        },
         (id) => normalizePath(relative(config.root, id))
       );
 
