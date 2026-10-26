@@ -3,6 +3,7 @@ import {
   internalOptimizeCompiledRecipeSource,
   internalRebindSymbolicTokenArtifact
 } from "@mincho-js/integration";
+import { createAppThemes } from "./appThemes.js";
 import { emitSsrCssManifest } from "./ssrCssManifest.js";
 import { createLibraryRscBoundaries } from "./libraryRsc.js";
 import {
@@ -303,6 +304,7 @@ function createMinchoViteEnvironmentPlugin(
   const runtimeOptimizations = new InternalRuntimeOptimizations();
   const bundleSize = _options?.bundleSize ?? _options?.babel?.bundleSize;
 
+  const appThemes = createAppThemes(_options?.appCss?.themes);
   const cssSharing = createCssSharing(
     _options?.appCss?.sharing ?? _options?.experimental?.cssChunkSharing,
     (detail) => diagnostics.record(config.root, "css-sharing", detail),
@@ -879,7 +881,7 @@ function createMinchoViteEnvironmentPlugin(
         }
 
         diagnosticsClosed = false;
-
+        await appThemes.start(this);
         cssSharing.begin();
         distChunkCss.begin();
         execution.begin();
@@ -970,7 +972,7 @@ function createMinchoViteEnvironmentPlugin(
       cancelDiagnosticsFlush();
       diagnosticsClosed = false;
       config = resolvedConfig;
-
+      appThemes.configure(config, _options?.appCss?.mode);
       distChunkCss.setUsage(_options?.appCss?.usage);
 
       if (_options?.appCss?.ssrManifest && config.build.lib)
@@ -1953,7 +1955,11 @@ function createMinchoViteEnvironmentPlugin(
         let finalCssManifest:
           | import("./ssr.js").MinchoSsrCssManifest
           | undefined;
-        if (ssrManifest && !config.build.ssr && !config.build.lib)
+        if (
+          (ssrManifest || _options?.appCss?.themes) &&
+          !config.build.ssr &&
+          !config.build.lib
+        )
           finalCssManifest = await emitSsrCssManifest(
             this,
             config,
@@ -1961,7 +1967,8 @@ function createMinchoViteEnvironmentPlugin(
             typeof ssrManifest === "string"
               ? ssrManifest
               : ".vite/mincho-css-manifest.json",
-            _options?.appCss?.routes
+            _options?.appCss?.routes,
+            (manifest) => appThemes.attach(this, manifest, bundle)
           );
         if (
           diagnostics.enabled &&
@@ -1983,6 +1990,7 @@ function createMinchoViteEnvironmentPlugin(
       if (error) {
         compilationCache?.clear();
       } else {
+        distChunkCss.setColorThemes(await appThemes.colorContract(this));
         await distChunkCss.plan(
           this,
           cssSharing.needsPreview ? cssSharing.recordArtifact : undefined

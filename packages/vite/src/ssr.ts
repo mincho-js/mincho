@@ -1,6 +1,12 @@
+import {
+  resolveThemePreference,
+  type MinchoThemeRegistry,
+  type MinchoThemeSnapshot
+} from "./themeTypes.js";
 /** Client-build data. Module keys are relative to the Vite project root. */
 export interface MinchoSsrCssManifest {
-  readonly version: 1;
+  readonly version: 1 | 2;
+  readonly themes?: MinchoThemeRegistry;
   readonly base: string;
   readonly entries: Readonly<Record<string, readonly string[]>>;
   readonly modules: Readonly<Record<string, readonly string[]>>;
@@ -8,6 +14,8 @@ export interface MinchoSsrCssManifest {
 }
 
 export interface MinchoSsrCssSelection {
+  /** Explicit theme ids from a v2 client manifest. */
+  themes?: readonly string[];
   /** Select this document's HTML/JS entry; other MPA entries stay excluded. */
   entries?: readonly string[];
   routes?: readonly string[];
@@ -36,7 +44,10 @@ export function resolveSsrStylesheets(
   selection: MinchoSsrCssSelection,
   options: MinchoSsrCssOptions = {}
 ): MinchoSsrStylesheet[] {
-  if (manifest.version !== 1)
+  if (
+    (manifest.version !== 1 && manifest.version !== 2) ||
+    (manifest.version === 2 && !manifest.themes)
+  )
     throw new Error("Unsupported Mincho SSR CSS manifest version.");
 
   const relative = manifest.base === "" || manifest.base === "./";
@@ -59,12 +70,21 @@ export function resolveSsrStylesheets(
   const hrefs = new Set<string>();
   const result: MinchoSsrStylesheet[] = [];
 
-  for (const kind of ["entries", "routes", "modules"] as const) {
+  const tables = {
+    ...manifest,
+    themes: Object.fromEntries(
+      Object.entries(manifest.themes?.entries ?? {}).map(([id, theme]) => [
+        id,
+        theme.css
+      ])
+    )
+  };
+  for (const kind of ["entries", "routes", "modules", "themes"] as const) {
     for (const id of selection[kind] ?? []) {
-      if (!Object.hasOwn(manifest[kind], id))
+      if (!Object.hasOwn(tables[kind], id))
         throw new Error(`Unknown Mincho SSR CSS ${kind} id: ${id}`);
 
-      for (const file of manifest[kind][id]!) {
+      for (const file of tables[kind][id]!) {
         const href = relative
           ? new URL(file, options.assetBaseUrl).href
           : `${manifest.base.replace(/\/$/, "")}/${file}`;
@@ -111,5 +131,41 @@ export function createSsrCssCollector(
 
       return links;
     }
+  };
+}
+
+/** Resolve links and root attributes together before streaming the document shell. */
+export function resolveSsrTheme(
+  manifest: MinchoSsrCssManifest,
+  options: MinchoSsrCssOptions & {
+    preference?: string;
+    systemScheme?: "light" | "dark";
+    selection?: MinchoSsrCssSelection;
+  } = {}
+) {
+  if (manifest.version !== 2 || !manifest.themes)
+    throw new Error("Theme resolution requires a Mincho v2 theme manifest.");
+  const preference = options.preference ?? manifest.themes.default;
+  const resolved = resolveThemePreference(
+    manifest.themes,
+    preference,
+    options.systemScheme
+  );
+  const selector = manifest.themes.entries[resolved]!.selector;
+  const attributes: Record<string, string> =
+    "className" in selector
+      ? { class: selector.className }
+      : { [selector.attribute]: selector.value };
+  return {
+    attributes,
+    snapshot: { preference, resolved, status: "ready" } as MinchoThemeSnapshot,
+    stylesheets: resolveSsrStylesheets(
+      manifest,
+      {
+        ...options.selection,
+        themes: [...(options.selection?.themes ?? []), resolved]
+      },
+      options
+    )
   };
 }

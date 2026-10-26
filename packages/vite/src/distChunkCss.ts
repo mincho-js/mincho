@@ -231,6 +231,14 @@ export function createDistChunkCss(
     chunkTokens = new WeakMap();
   };
 
+  let colorThemes:
+    | {
+        light: string;
+        dark: string;
+        targets: readonly string[];
+        observedVariables?: readonly string[];
+      }
+    | undefined;
   let usage: ClosedAppUsageOptions | undefined;
   let cssTransform: Transform | undefined;
   let cssPostTransform: Transform | undefined;
@@ -373,6 +381,9 @@ export function createDistChunkCss(
   };
 
   return {
+    setColorThemes(value: typeof colorThemes) {
+      colorThemes = value;
+    },
     setUsage(value: ClosedAppUsageOptions | undefined) {
       usage = value;
     },
@@ -633,7 +644,7 @@ export function createDistChunkCss(
           const observedVariables = [
             ...new Set(observations.flatMap((item) => item.variables))
           ];
-
+          if (colorThemes) colorThemes.observedVariables = observedVariables;
           const observedNames = [
             ...new Set(observations.flatMap((item) => item.names))
           ];
@@ -1015,7 +1026,11 @@ export function createDistChunkCss(
           /\.(?:css|scss|sass|less|styl|stylus|pcss|postcss)(?:[?#]|$)/.test(id)
       );
       const perChunk = new Map<string, Artifact>();
-      if (optimization?.crossFileRules || optimization?.dedupeResources) {
+      if (
+        optimization?.crossFileRules ||
+        optimization?.dedupeResources ||
+        optimization?.compactColorThemes
+      ) {
         const originals = ordered.map(
           (id) => optimized.get(id) ?? artifacts.get(id)
         );
@@ -1051,7 +1066,7 @@ export function createDistChunkCss(
           originals.map((artifact) => artifact?.data),
           {
             ...optimization,
-
+            colorThemes,
             outsideResources,
             observed: observedCss,
             opaqueTransform: opaquePostcss,

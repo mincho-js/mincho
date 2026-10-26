@@ -1,4 +1,11 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  symlink,
+  writeFile
+} from "node:fs/promises";
 import { join } from "node:path";
 import { transformFromAstSync, types as t } from "@babel/core";
 import {
@@ -836,6 +843,49 @@ describe("bundle-size application integrations", () => {
     ).toBe(true);
   });
 
+  it("compacts registered color themes only under the explicit inheritance and browser contract", async () => {
+    const values = (color: string) =>
+      JSON.stringify(
+        Object.fromEntries(
+          Array.from({ length: 100 }, (_, i) => [
+            `--long-app-color-variable-${i}`,
+            color
+          ])
+        )
+      );
+    const root = await fixture({
+      "main.js": "globalThis.app=true;",
+      "theme.js": `import {css} from '@mincho-js/css';export const light=css({colorScheme:'light',vars:${values("#fff")}});export const dark=css({colorScheme:'dark',vars:${values("#000")}});`,
+      "light.js": 'export {light as themeClass} from "./theme.js";',
+      "dark.js": 'export {dark as themeClass} from "./theme.js";'
+    });
+    const result = await compile(
+      root,
+      {
+        bundleSize: { metric: "raw" },
+        appCss: {
+          optimize: { compactColorThemes: true },
+          themes: {
+            default: "light",
+            entries: [
+              { id: "light", entry: "light.js" },
+              { id: "dark", entry: "dark.js" }
+            ],
+            colorScheme: {
+              light: "light",
+              dark: "dark",
+              inheritance: "uniform"
+            }
+          }
+        }
+      },
+      { build: { cssTarget: "chrome123" } }
+    );
+    expect(result.text).toContain("light-dark(#fff, #000)");
+    expect(result.text).toContain("color-scheme: light");
+    expect(result.text).toContain("color-scheme: dark");
+  });
+
   it("still eliminates recipe helpers for literal calls when compact strategies are enabled", async () => {
     const root = await fixture({
       "main.js":
@@ -877,6 +927,77 @@ describe("bundle-size application integrations", () => {
     );
     expect(modules.some((id) => /runtime\/cache/.test(id))).toBe(false);
   });
+
+  it.each([
+    { linked: false, preserveSymlinks: false },
+    { linked: true, preserveSymlinks: false },
+    { linked: true, preserveSymlinks: true }
+  ])(
+    "emits lazy theme CSS and a v2 registry with statically extracted selectors: %j",
+    async ({ linked, preserveSymlinks }) => {
+      const root = await fixture({
+        "main.js": 'globalThis.app="ready";',
+        "light.js":
+          'import {css} from "@mincho-js/css"; export const themeClass=css({color:"white",backgroundColor:"black"});',
+        "dark.js":
+          'import {css} from "@mincho-js/css"; export const themeClass=css({color:"black",backgroundColor:"white"});'
+      });
+      const buildRoot = linked ? `${root}-linked` : root;
+      if (linked) {
+        await symlink(root, buildRoot, "junction");
+        roots.push(buildRoot);
+      }
+      const result = await compile(
+        buildRoot,
+        {
+          appCss: {
+            themes: {
+              default: "light",
+              system: { light: "light", dark: "dark" },
+              entries: [
+                { id: "light", entry: "light.js" },
+                { id: "dark", entry: "dark.js" }
+              ]
+            }
+          }
+        },
+        {
+          resolve: { preserveSymlinks },
+          build: linked
+            ? { rollupOptions: { input: join(buildRoot, "main.js") } }
+            : undefined
+        }
+      );
+      const registry = result.output.find(
+        (asset) =>
+          asset.type === "asset" &&
+          asset.fileName === ".vite/mincho-css-manifest.json"
+      );
+      expect(registry?.type).toBe("asset");
+      const manifest = JSON.parse(
+        String((registry as Rollup.OutputAsset).source)
+      );
+      expect(manifest.version).toBe(2);
+      expect(manifest.entries[linked ? "main.js" : "index.html"]).toEqual([]);
+      expect(manifest.themes.entries.light.css).toHaveLength(1);
+      expect(manifest.modules["light.js"]).toEqual(
+        manifest.themes.entries.light.css
+      );
+      expect(manifest.entries["light.js"]).toEqual(
+        manifest.themes.entries.light.css
+      );
+      expect(manifest.themes.entries.dark.css).toHaveLength(1);
+      expect(manifest.themes.entries.light.css).not.toEqual(
+        manifest.themes.entries.dark.css
+      );
+      expect(result.text).toContain(
+        "." + manifest.themes.entries.light.selector.className
+      );
+      expect(result.text).toContain(
+        "." + manifest.themes.entries.dark.selector.className
+      );
+    }
+  );
 
   it("analyzes a complete app graph and scopes unrelated property observations", async () => {
     const root = await fixture({

@@ -10,6 +10,7 @@ export default (viteConfigEnv: ConfigEnv) => {
       lib: {
         entry: {
           "css-loading": join(process.cwd(), "src/css-loading.ts"),
+          themes: join(process.cwd(), "src/themes.ts"),
           ssr: join(process.cwd(), "src/ssr.ts"),
           index: join(process.cwd(), "src", "index.ts"),
           packageGraphWorker: join(

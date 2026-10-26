@@ -212,6 +212,11 @@ async function main(): Promise<void> {
         true
       );
       await runNode(
+        ["fixture/modules/themes-browser.mjs"],
+        join(consumerRoot, "fixture", "modules", "themes-browser"),
+        true
+      );
+      await runNode(
         ["fixture/modules/runtime-codegen.mjs"],
         join(consumerRoot, "fixture", "modules"),
         true

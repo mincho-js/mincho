@@ -52,6 +52,16 @@
         "types": "./dist/cjs/css-loading.d.cts",
         "default": "./dist/cjs/css-loading.cjs"
       }
+    },
+    "./themes": {
+      "import": {
+        "types": "./dist/esm/themes.d.ts",
+        "default": "./dist/esm/themes.mjs"
+      },
+      "require": {
+        "types": "./dist/cjs/themes.d.cts",
+        "default": "./dist/cjs/themes.cjs"
+      }
     }
   },
   "publishConfig": {

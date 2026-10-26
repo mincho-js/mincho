@@ -9,12 +9,33 @@ type CssOutputChunk = Rollup.OutputChunk & {
   viteMetadata?: { importedCss?: Set<string> };
 };
 
+/** Map logical and real module IDs to the same root-relative SSR manifest key. */
+export async function createSsrModuleKey(root: string) {
+  const roots = [root, await realpath(root)];
+
+  return (id: string) => {
+    if (id.includes("\0")) return undefined;
+    if (!isAbsolute(id)) return normalizePath(id);
+
+    const paths = roots.map((root) => normalizePath(relative(root, id)));
+
+    return (
+      paths.find(
+        (path) => !isAbsolute(path) && path !== ".." && !path.startsWith("../")
+      ) ?? paths[0]
+    );
+  };
+}
+
 export async function emitSsrCssManifest(
   context: Pick<Rollup.PluginContext, "resolve" | "emitFile" | "getModuleInfo">,
   config: ResolvedConfig,
   bundle: Rollup.OutputBundle,
   fileName: string,
-  routes: readonly MinchoCssRoute[] = []
+  routes: readonly MinchoCssRoute[] = [],
+  finalize?: (
+    manifest: MinchoSsrCssManifest
+  ) => MinchoSsrCssManifest | Promise<MinchoSsrCssManifest>
 ) {
   if (config.experimental.renderBuiltUrl)
     throw new Error(
@@ -87,20 +108,7 @@ export async function emitSsrCssManifest(
     return [...css];
   }
 
-  const roots = [config.root, await realpath(config.root)];
-
-  function moduleKey(id: string) {
-    if (id.includes("\0")) return undefined;
-    if (!isAbsolute(id)) return normalizePath(id);
-
-    const paths = roots.map((root) => normalizePath(relative(root, id)));
-
-    return (
-      paths.find(
-        (path) => !isAbsolute(path) && path !== ".." && !path.startsWith("../")
-      ) ?? paths[0]
-    );
-  }
+  const moduleKey = await createSsrModuleKey(config.root);
 
   for (const chunk of chunks) {
     const css = cssFor(chunk);
@@ -169,7 +177,9 @@ export async function emitSsrCssManifest(
     manifest.routes[route.id] = [...css];
   }
 
-  const checked: MinchoSsrCssManifest = manifest;
+  const checked: MinchoSsrCssManifest = finalize
+    ? await finalize(manifest)
+    : manifest;
   context.emitFile({
     type: "asset",
     fileName,

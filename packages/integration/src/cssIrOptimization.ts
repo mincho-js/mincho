@@ -10,6 +10,7 @@ export interface CssIrOptimizationOptions {
   scopedResourceAnalysis?: boolean;
   crossFileRules?: boolean;
   dedupeResources?: boolean;
+  compactColorThemes?: boolean;
   bundleSize?: import("./bundleSize.js").BundleSizeOptions;
   mergeRules: boolean;
   pruneGenerated: boolean;

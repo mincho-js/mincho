@@ -16,6 +16,7 @@ export interface MinchoCssRoute {
 
 export interface MinchoAppCssOptions {
   usage?: import("@mincho-js/integration").ClosedAppUsageOptions;
+  themes?: import("./appThemes.js").MinchoAppThemesOptions;
   /** Client-build manifest for ordered SSR CSS selection; off by default. */
   ssrManifest?: boolean | string;
 
@@ -35,6 +36,7 @@ export interface MinchoAppCssOptions {
         scopedResourceAnalysis?: boolean;
         crossFileRules?: boolean;
         dedupeResources?: boolean;
+        compactColorThemes?: boolean;
         mergeRules?: boolean;
         pruneGenerated?: boolean;
         compactThemes?: boolean;
@@ -74,6 +76,7 @@ export function resolveAppCssOptimization(
     scopedResourceAnalysis: explicit.scopedResourceAnalysis ?? false,
     crossFileRules: explicit.crossFileRules ?? false,
     dedupeResources: explicit.dedupeResources ?? false,
+    compactColorThemes: explicit.compactColorThemes ?? false,
     mergeRules: explicit.mergeRules ?? true,
     pruneGenerated: explicit.pruneGenerated ?? true,
     compactThemes: explicit.compactThemes ?? true,
@@ -133,6 +136,7 @@ export function validateAppCssOptions(options?: MinchoAppCssOptions): void {
           "scopedResourceAnalysis",
           "crossFileRules",
           "dedupeResources",
+          "compactColorThemes",
           "mergeRules",
           "pruneGenerated",
           "compactThemes",

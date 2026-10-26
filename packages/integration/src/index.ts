@@ -148,6 +148,11 @@ export {
 } from "./cssSharingCost.js";
 
 export {
+  readStaticStringExport as internalReadStaticStringExport,
+  readStaticStringExportGraph as internalReadStaticStringExportGraph
+} from "./staticStringExport.js";
+
+export {
   analyzeClosedAppUsage as internalAnalyzeClosedAppUsage,
   staticModuleSpecifiers as internalStaticModuleSpecifiers
 } from "./closedAppUsage.js";

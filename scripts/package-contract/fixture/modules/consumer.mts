@@ -200,3 +200,19 @@ import { loadStylesheets } from "@mincho-js/vite/css-loading";
 
 const browserStylesheetLoader: typeof loadStylesheets = loadStylesheets;
 void browserStylesheetLoader;
+
+import {
+  createThemeController,
+  type MinchoThemePersistence
+} from "@mincho-js/vite/themes";
+import { resolveSsrTheme } from "@mincho-js/vite/ssr";
+const themeControllerFactory: typeof createThemeController =
+  createThemeController;
+const ssrThemeResolver: typeof resolveSsrTheme = resolveSsrTheme;
+const themeStorage: MinchoThemePersistence = {
+  read: () => null,
+  write: (_preference: string) => {}
+};
+void themeControllerFactory;
+void ssrThemeResolver;
+void themeStorage;

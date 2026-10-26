@@ -4,36 +4,26 @@ import { describe, it, expect, vi } from "vitest";
 import { analyzeCssObservability } from "./cssObservability.js";
 import { optimizeCssChunk } from "./cssChunkOptimization.js";
 import { analyzeClosedAppUsage } from "./closedAppUsage.js";
+import { readStaticStringExport } from "./staticStringExport.js";
 import {
   evaluateCssSharingCost,
   createCssSharingCostEvaluator
 } from "./cssSharingCost.js";
 import * as bundleSizeCosts from "./bundleSize.js";
+import { supportsLightDark, compactColorThemes } from "./colorThemes.js";
 import {
   measureRuntimeCandidate,
   preferRuntimeCandidate
 } from "./bundleSize.js";
 import { generateVanillaCss, type VanillaCssArtifact } from "./vanillaCssIr.js";
+
 const artifact = (
   name: string,
-  rule = {
-    color: "red",
-    backgroundColor: "blue",
-    display: "flex"
-  }
+  rule = { color: "red", backgroundColor: "blue", display: "flex" }
 ): VanillaCssArtifact => ({
   origin: `/${name}.css.ts`,
-  fileScope: {
-    filePath: `${name}.css.ts`,
-    packageName: "test"
-  },
-  cssObjs: [
-    {
-      type: "local",
-      selector: name,
-      rule
-    }
-  ],
+  fileScope: { filePath: `${name}.css.ts`, packageName: "test" },
+  cssObjs: [{ type: "local", selector: name, rule }],
   localClassNames: [name],
   composedClassLists: [],
   usedCompositions: [],
@@ -55,32 +45,21 @@ const artifact = (
 });
 const config = {
   defaultClassName: "base",
-  variantClassNames: {
-    size: {
-      small: "small",
-      large: "large"
-    }
-  },
-  defaultVariants: {
-    size: "small"
-  },
+  variantClassNames: { size: { small: "small", large: "large" } },
+  defaultVariants: { size: "small" },
   compoundVariants: []
 };
 const recipe = `import {createCompiledClassRuntimeFn} from '@mincho-js/css/rules/createClassRuntimeFn'; export const button=createCompiledClassRuntimeFn(${JSON.stringify(config)});`;
+
 describe("bundle-size safety and costs", () => {
   it("scopes literal property observations and pins unknown CSSOM operations", () => {
     expect(
       analyzeCssObservability(
         'getComputedStyle(el).getPropertyValue("--observed")'
       )
-    ).toMatchObject({
-      whole: false,
-      variables: ["--observed"]
-    });
+    ).toMatchObject({ whole: false, variables: ["--observed"] });
     expect(analyzeCssObservability("getComputedStyle(el).color")).toMatchObject(
-      {
-        whole: false
-      }
+      { whole: false }
     );
     for (const code of [
       "getComputedStyle(el)",
@@ -105,10 +84,7 @@ describe("bundle-size safety and costs", () => {
       expect(analyzeCssObservability(code).whole).toBe(true);
     expect(
       analyzeCssObservability('element.style.animationName="privateAnim"')
-    ).toMatchObject({
-      whole: false,
-      names: ["privateAnim"]
-    });
+    ).toMatchObject({ whole: false, names: ["privateAnim"] });
   });
   it.each([
     'getComputedStyle(el)["animation-name"]',
@@ -223,9 +199,7 @@ describe("bundle-size safety and costs", () => {
       b = artifact("two");
     const output = optimizeCssChunk([a, b], {
       crossFileRules: true,
-      bundleSize: {
-        metric: "raw"
-      }
+      bundleSize: { metric: "raw" }
     });
     expect(output.diagnostics.applied).toBe(1);
     expect(
@@ -236,15 +210,12 @@ describe("bundle-size safety and costs", () => {
     expect(a.cssObjs).toHaveLength(1);
     expect(b.cssObjs).toHaveLength(1);
     expect(
-      optimizeCssChunk([a, undefined, b], {
-        crossFileRules: true
-      }).diagnostics.applied
+      optimizeCssChunk([a, undefined, b], { crossFileRules: true }).diagnostics
+        .applied
     ).toBe(0);
     expect(
-      optimizeCssChunk([a, b], {
-        crossFileRules: true,
-        observed: true
-      }).diagnostics.applied
+      optimizeCssChunk([a, b], { crossFileRules: true, observed: true })
+        .diagnostics.applied
     ).toBe(0);
   });
 
@@ -434,29 +405,18 @@ describe("bundle-size safety and costs", () => {
         {
           type: "keyframes",
           name,
-          rule: {
-            from: {
-              opacity: 0
-            },
-            to: {
-              opacity: 1
-            }
-          }
+          rule: { from: { opacity: 0 }, to: { opacity: 1 } }
         },
         {
           type: "local",
           selector: item.localClassNames[0]!,
-          rule: {
-            animationName: name
-          }
+          rule: { animationName: name }
         }
       ];
     }
     const output = optimizeCssChunk([a, b], {
       dedupeResources: true,
-      bundleSize: {
-        metric: "raw"
-      }
+      bundleSize: { metric: "raw" }
     });
     expect(output.diagnostics.applied).toBe(1);
     const css = output.artifacts
@@ -750,42 +710,25 @@ describe("bundle-size safety and costs", () => {
     ]);
     const options = {
       boundaries: [
-        {
-          id: "main",
-          modules: ["common", "a"]
-        },
-        {
-          id: "route",
-          modules: ["common", "b"]
-        }
+        { id: "main", modules: ["common", "a"] },
+        { id: "route", modules: ["common", "b"] }
       ],
       sources,
       shared: ["common"],
-      scenarios: [
-        {
-          entry: "main",
-          boundaries: ["route"]
-        }
-      ]
+      scenarios: [{ entry: "main", boundaries: ["route"] }]
     };
     expect(evaluateCssSharingCost(options).applied).toBe(false);
     expect(
       evaluateCssSharingCost({
         ...options,
-        bundleSize: {
-          metric: "raw"
-        },
+        bundleSize: { metric: "raw" },
         maxInitialIncreaseBytes: 500
       }).applied
     ).toBe(true);
   });
   it("follows internal exports, pins escapes and honors export preservation", () => {
     const modules = [
-      {
-        id: "/recipe",
-        code: recipe,
-        imports: new Map()
-      },
+      { id: "/recipe", code: recipe, imports: new Map() },
       {
         id: "/app",
         code: 'import {button} from "./recipe"; globalThis.result=button({size:"small"})',
@@ -793,28 +736,14 @@ describe("bundle-size safety and costs", () => {
         entry: true
       }
     ];
-    expect(
-      analyzeClosedAppUsage(modules, {
-        mode: "closed"
-      })
-    ).toMatchObject({
+    expect(analyzeClosedAppUsage(modules, { mode: "closed" })).toMatchObject({
       opaque: false,
-      recipes: [
-        {
-          id: "base",
-          used: ["base", "small"]
-        }
-      ]
+      recipes: [{ id: "base", used: ["base", "small"] }]
     });
     expect(
       analyzeClosedAppUsage(modules, {
         mode: "closed",
-        preserve: [
-          {
-            module: "/recipe",
-            exports: ["button"]
-          }
-        ]
+        preserve: [{ module: "/recipe", exports: ["button"] }]
       }).recipes[0]!.used
     ).toBeNull();
     const unknown = [
@@ -825,25 +754,28 @@ describe("bundle-size safety and costs", () => {
       }
     ];
     expect(
-      analyzeClosedAppUsage(unknown, {
-        mode: "closed"
-      }).recipes[0]!.used
+      analyzeClosedAppUsage(unknown, { mode: "closed" }).recipes[0]!.used
     ).toBeNull();
     expect(
       analyzeClosedAppUsage(
         [
           ...modules,
-          {
-            id: "/dynamic",
-            imports: new Map(),
-            code: "import(path)"
-          }
+          { id: "/dynamic", imports: new Map(), code: "import(path)" }
         ],
-        {
-          mode: "closed"
-        }
+        { mode: "closed" }
       ).opaque
     ).toBe(true);
+  });
+  it("resolves theme class literals without evaluating modules", () => {
+    expect(
+      readStaticStringExport(
+        'const pair=["theme",{}];export const [themeClass]=pair;',
+        "themeClass"
+      )
+    ).toBe("theme");
+    expect(
+      readStaticStringExport("export const themeClass=run();", "themeClass")
+    ).toBeUndefined();
   });
   it("keeps selected classes through compact factories and internal reexports", () => {
     const compact = recipe
@@ -851,11 +783,7 @@ describe("bundle-size safety and costs", () => {
       .replace("/createClassRuntimeFn", "/createCompactRuntimeFn");
     const result = analyzeClosedAppUsage(
       [
-        {
-          id: "/recipe",
-          code: compact,
-          imports: new Map()
-        },
+        { id: "/recipe", code: compact, imports: new Map() },
         {
           id: "/bridge",
           code: 'export {button as alias} from "./recipe"',
@@ -868,18 +796,11 @@ describe("bundle-size safety and costs", () => {
           entry: true
         }
       ],
-      {
-        mode: "closed"
-      }
+      { mode: "closed" }
     );
     expect(result).toMatchObject({
       opaque: false,
-      recipes: [
-        {
-          id: "base",
-          used: ["base", "large"]
-        }
-      ]
+      recipes: [{ id: "base", used: ["base", "large"] }]
     });
   });
 
@@ -1271,6 +1192,108 @@ describe("bundle-size safety and costs", () => {
     expect(result).toMatchObject({
       opaque: true,
       recipes: [{ id: "base", used: null }]
+    });
+  });
+
+  it.each(["--observed", "var(--observed)"])(
+    "keeps runtime-observed color theme variable %s unchanged",
+    (key) => {
+      const value = artifact("light");
+      value.localClassNames.push("dark");
+      value.cssObjs = ["light", "dark"].map((name) => ({
+        type: "local",
+        selector: name,
+        rule: {
+          colorScheme: name,
+          vars: Object.fromEntries(
+            Array.from({ length: 100 }, (_, i) => [
+              i === 0 ? key : `--very-long-contract-variable-name-${i}`,
+              name === "light" ? "#fff" : "#000"
+            ])
+          )
+        }
+      }));
+      const input = [value];
+      const contract = {
+        light: "light",
+        dark: "dark",
+        inheritance: "uniform" as const,
+        targets: ["chrome123"]
+      };
+      expect(
+        compactColorThemes(input, contract, { metric: "raw" }).applied
+      ).toBe(1);
+      const result = compactColorThemes(
+        input,
+        { ...contract, observedVariables: ["--observed"] },
+        { metric: "raw" }
+      );
+      expect(result.applied).toBe(0);
+      expect(result.artifacts).toBe(input);
+    }
+  );
+
+  it("requires compatible pinned browser targets and explicit color schemes", () => {
+    expect(supportsLightDark(["chrome123", "safari17.5", "firefox120"])).toBe(
+      true
+    );
+    expect(supportsLightDark(["safari17.4"])).toBe(false);
+    expect(supportsLightDark(["esnext"])).toBe(false);
+    const value = artifact("light");
+    value.localClassNames.push("dark");
+    value.cssObjs = ["light", "dark"].map((name) => ({
+      type: "local",
+      selector: name,
+      rule: {
+        colorScheme: name,
+        vars: Object.fromEntries(
+          Array.from({ length: 100 }, (_, i) => [
+            `--very-long-contract-variable-name-${i}`,
+            name === "light" ? "#fff" : "#000"
+          ])
+        )
+      }
+    }));
+    expect(
+      compactColorThemes(
+        [value],
+        {
+          light: "light",
+          dark: "dark",
+          inheritance: "uniform",
+          targets: ["chrome123"]
+        },
+        { metric: "raw" }
+      ).applied
+    ).toBe(1);
+    const input = [value];
+    expect(compactColorThemes(input, undefined)).toEqual({
+      artifacts: input,
+      applied: 0,
+      reason: "missing-color-contract"
+    });
+    expect(
+      compactColorThemes(input, {
+        light: "light",
+        dark: "dark",
+        inheritance: "uniform",
+        targets: ["chrome122"]
+      })
+    ).toEqual({
+      artifacts: input,
+      applied: 0,
+      reason: "unsupported-css-targets"
+    });
+    expect(
+      compactColorThemes(
+        input,
+        { light: "light", dark: "dark", targets: ["chrome123"] },
+        { metric: "raw" }
+      )
+    ).toEqual({
+      artifacts: input,
+      applied: 0,
+      reason: "missing-uniform-inheritance"
     });
   });
 });

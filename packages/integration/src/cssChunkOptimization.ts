@@ -1,3 +1,4 @@
+import { compactColorThemes, type ColorThemeContract } from "./colorThemes.js";
 import { dedupeCssResources } from "./cssResourceDeduplication.js";
 import { generateVanillaCss, type VanillaCssArtifact } from "./vanillaCssIr.js";
 import {
@@ -68,6 +69,8 @@ export function optimizeCssChunk(
     opaqueTransform?: boolean;
     opaqueResources?: boolean;
     outsideResources?: ReadonlySet<string>;
+    compactColorThemes?: boolean;
+    colorThemes?: ColorThemeContract;
   }
 ) {
   let artifacts = input.map(
@@ -193,7 +196,19 @@ export function optimizeCssChunk(
     diagnostics.applied += result.diagnostics.applied;
     diagnostics.bailout += result.diagnostics.bailout;
   }
-
+  if (options.compactColorThemes) {
+    const result = compactColorThemes(
+      artifacts,
+      options.colorThemes,
+      options.bundleSize
+    );
+    artifacts = [...result.artifacts];
+    diagnostics.applied += result.applied;
+    diagnostics.colorThemes = {
+      applied: result.applied,
+      reason: result.reason
+    };
+  }
   diagnostics.reason = diagnostics.applied
     ? "estimated-chunk-win"
     : diagnostics.candidates
