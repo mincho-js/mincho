@@ -51,30 +51,38 @@ describe("extension serialization", () => {
       const parent = await buildModule(
         "parent",
         `
-        import { rules } from "@mincho-js/css";
+        import { rules, defineRules } from "@mincho-js/css";
         export const rule = rules({
           color: "crimson", props: ["width"],
           variants: { size: { small: { padding: 4 } } }
         }, "parent");
+        export const definitions = defineRules({ properties: { color: { brand: "navy" }, background: true } });
+        export const atomic = definitions.css({ color: "brand" });
       `
       );
       const child = await buildModule(
         "child",
         `
-        import { rules } from "@mincho-js/css";
-        import { rule as parent } from "../parent/index.mjs";
+        import { rules, defineRules } from "@mincho-js/css";
+        import { rule as parent, definitions as parentDefinitions } from "../parent/index.mjs";
+        export const hydratedAtomic = parentDefinitions.css({ background: "lightcyan" });
         export const rule = rules.extends(parent, {
           color: "royalblue", props: ["width"],
           variants: { size: { small: { margin: 8 }, large: { padding: 16 } } }
         }, "child");
+        export const definitions = defineRules.extends(parentDefinitions, { properties: { display: ["grid"] } });
+        export const atomic = definitions.css({ color: "brand" });
       `
       );
       const grandchild = await buildModule(
         "grandchild",
         `
-        import { rules } from "@mincho-js/css";
-        import { rule as parent } from "../child/index.mjs";
+        import { rules, defineRules } from "@mincho-js/css";
+        import { rule as parent, definitions as parentDefinitions } from "../child/index.mjs";
         export const rule = rules.extends(parent, { backgroundColor: "goldenrod" }, "grandchild");
+        export const definitions = defineRules.extends(parentDefinitions, { properties: { color: { accent: "indigo" } } });
+        export const atomic = definitions.css({ color: "brand" });
+        export const raw = definitions.css.raw({ color: "accent", display: "grid" });
       `
       );
 
@@ -84,6 +92,8 @@ describe("extension serialization", () => {
           props(values: { width: number }): object;
           classNames: { base: string; variants: { size: { small: string } } };
         };
+        atomic: string;
+        raw?: object;
       };
       const importedParent = (await import(
         pathToFileURL(parent.outputPath).href
@@ -110,10 +120,16 @@ describe("extension serialization", () => {
       expect(importedGrandchild.rule.props({ width: 12 })).toEqual(
         importedParent.rule.props({ width: 12 })
       );
+      expect(importedGrandchild.raw).toEqual({
+        color: "indigo",
+        display: "grid"
+      });
       expect(child.css).toContain("royalblue");
+      expect(child.css).toContain("lightcyan");
       expect(child.css).not.toContain("crimson");
+      expect(child.css).not.toContain("navy");
       expect(grandchild.css).toContain("goldenrod");
-      expect(grandchild.css).not.toMatch(/crimson|royalblue/);
+      expect(grandchild.css).not.toMatch(/crimson|royalblue|navy/);
       expect(child.ancestorStyleSpecifiers).toEqual([
         "@test/extends-parent/style.css"
       ]);

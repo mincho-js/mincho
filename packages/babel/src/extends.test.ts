@@ -30,6 +30,26 @@ function transform(source: string, optimize = false) {
 }
 
 describe("extension calls", () => {
+  it("keeps preset-observable parents outside private class strategies", () => {
+    const options: PluginOptions = {
+      result: ["", ""],
+      experimental: { globalAtomicClasses: true, compileClass: true }
+    };
+    transformSync(
+      `
+      import { css, defineRules } from "@mincho-js/css";
+      const parent = defineRules({ properties: { color: true, display: true } });
+      export const before = css(parent.css({ color: "red", display: "flex" }));
+      const child = defineRules.extends(parent, {});
+      export const after = css(child.css({ color: "red", display: "flex" }));
+    `,
+      { filename: "extends.ts", plugins: [[minchoBabelPlugin(), options]] }
+    );
+
+    expect(options.result[1]).toContain("defineRules.extends");
+    expect(options.result[1]).not.toContain("compilePrivateDefineRulesClass");
+  });
+
   it.each([
     [
       'const { rules } = require("@mincho-js/css");',
@@ -107,5 +127,26 @@ describe("extension calls", () => {
     expect(output.code).toContain('unrelated.extends("value")');
     expect(output.code).toContain('rules.extends("value")');
     expect(output.css).not.toContain("extends(");
+  });
+
+  it.each([
+    "const { css, cx } = defineRules.extends(parent, { properties: { color: true } });",
+    "const owner = defineRules.extends(parent, { properties: { color: true } });"
+  ])("recognizes derived scoped cx runtimes: %s", (declaration) => {
+    const owner = declaration.includes("const owner") ? "owner." : "";
+    const output = transform(
+      `
+      import { defineRules } from "@mincho-js/css";
+      const parent = defineRules({ properties: { display: true } });
+      ${declaration}
+      export function button(active: boolean) {
+        return ${owner}cx(${owner}css({ color: "red" }), active && ${owner}css({ color: "blue" }));
+      }
+    `,
+      true
+    );
+    expect(JSON.stringify(output.metadata)).toContain(
+      '"callee":"local-defineRules"'
+    );
   });
 });

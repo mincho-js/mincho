@@ -1,4 +1,5 @@
 import { defineRules } from "@mincho-js/css";
+import { definitions as parentDefinitions } from "@mincho-js-proof/diamond-a/rules";
 import { preset as diamondPreset } from "@mincho-js-proof/diamond-d/preset";
 
 const local = defineRules({
@@ -14,3 +15,8 @@ export const card = local.css({
   padding: 13
 });
 export const preset = local.preset;
+
+const extendedDefinitions = defineRules.extends(parentDefinitions, {
+  properties: { display: ["grid"] }
+});
+export const extendedAtomic = extendedDefinitions.css({ display: "grid" });

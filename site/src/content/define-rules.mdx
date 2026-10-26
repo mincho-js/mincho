@@ -576,6 +576,59 @@ Published component packages following the repository contract separate runtime 
 
 Only V5 serialized presets are supported. Local function-based authoring does not imply serializability: registry extraction rejects function-valued configuration and unsupported context values. See the [CSS package contract](https://github.com/mincho-js/mincho/blob/main/packages/css/README.md#preset-snapshots-and-registration-order) for snapshot, serialization, scoped merging and CSS ownership details.
 
+## Extending Definitions
+
+Use `defineRules.extends(parent, config)` to inherit an existing result:
+
+```ts
+const baseRules = defineRules({
+  properties: {
+    color: { brand: 'blue', muted: 'gray' },
+    display: ['flex']
+  },
+  shortcuts: { text: 'color' },
+  conditions: { desktop: '(min-width: 1024px)' }
+})
+
+const componentRules = defineRules.extends(baseRules, {
+  properties: {
+    color: { brand: 'purple', accent: 'orange' },
+    display: ['grid']
+  },
+  shortcuts: { ink: 'text' }
+})
+
+componentRules.css({ text: 'muted', display: 'grid' })
+componentRules.css({ ink: 'accent' })
+// componentRules.css({ display: 'flex' }) // Type error: the array was replaced.
+```
+
+The parent is unchanged and the child can be extended again. Both inherited and
+new definitions participate in type inference, including shortcut references.
+
+| Configuration | Extension behavior |
+| --- | --- |
+| `properties` | Inherit property names and merge named-value maps by key. The child replaces values with the same name. |
+| Arrays, functions, booleans | Replace the complete property definition. Allowed-value arrays are not concatenated. |
+| `conditions`, `shortcuts` | Inherit names; replace the entire definition of a repeated name. |
+| `context` | Inherit the original object when omitted; replace it when supplied, including explicit `undefined`. |
+| `presets` | Reuse the parent's snapshot at extension time together with any child presets. |
+| `debugId` | Use the child's configuration. |
+
+The return value still provides `css`, `css.raw`, `cx`, and `preset`. Previously
+emitted parent atoms are reused through the existing V5 preset graph. Later
+changes to the parent's emitted styles do not change the child's inherited
+snapshot.
+
+Definitions imported from built packages can also be extended. Their CSS function
+carries the configuration needed to restore inheritance, and the build integration
+preserves parent CSS imports before child CSS. Older producers without extension
+metadata need to be rebuilt. Packages must expose the existing `style.css` export.
+When using vanilla-extract directly in `.css.ts` files, explicitly import the
+parent package's `style.css` before the child styles.
+The existing serialization restrictions for function-valued definitions and
+non-serializable context also apply to extensions.
+
 ---
 
 ## Future Possibilities

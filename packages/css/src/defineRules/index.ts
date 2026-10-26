@@ -9,6 +9,16 @@ import type { Serializable } from "../rules/types.js";
 import { identifierName } from "../utils.js";
 import { createDefineRulesRuntime } from "./runtime.js";
 import { defineRulesPropertyValues } from "./propertyValues.js";
+import {
+  getDefineRulesDefinition,
+  isDefinitionRecord,
+  mergeProperties
+} from "./extension.js";
+import type {
+  DefineRulesExtendsConfig,
+  ExtendedProperties,
+  MergeDefinitions
+} from "./extension.js";
 import { SEGMENT_MARKER_PREFIX } from "./metadata.js";
 import { cx } from "../classname/cx.js";
 import { css as rootCss } from "../css/index.js";
@@ -49,12 +59,12 @@ const DEFINE_RULES_CX_RUNTIME_IMPORT_NAME =
 
 // == Define Rules =============================================================
 function defineRulesImpl<
-  const Properties extends DefineRulesProperties,
+  const Properties extends DefineRulesProperties = Record<never, never>,
   const Shortcuts extends DefineRulesShortcuts<
     Properties,
     Shortcuts,
     Conditions
-  >,
+  > = Record<never, never>,
   const Conditions extends DefineRulesConditions = DefineRulesEmptyConditions,
   const Context = undefined
 >(
@@ -106,8 +116,68 @@ function defineRulesImpl<
 }
 
 export const defineRules = Object.assign(defineRulesImpl, {
+  extends: defineRulesExtends,
   propertyValues: defineRulesPropertyValues
 });
+
+function defineRulesExtends<
+  ParentProperties extends DefineRulesProperties,
+  ParentShortcuts extends object,
+  ParentConditions extends DefineRulesConditions,
+  ParentContext,
+  const Properties extends DefineRulesProperties = Record<never, never>,
+  const Shortcuts extends object = Record<never, never>,
+  const Conditions extends DefineRulesConditions = DefineRulesEmptyConditions,
+  const Context = ParentContext
+>(
+  parent: DefineRulesRuntimeResult<
+    ParentProperties,
+    ParentShortcuts,
+    ParentConditions,
+    ParentContext
+  >,
+  config: DefineRulesExtendsConfig<
+    ParentProperties,
+    ParentShortcuts,
+    ParentConditions,
+    Properties,
+    Shortcuts,
+    Conditions,
+    Context
+  >
+): DefineRulesRuntimeResult<
+  ExtendedProperties<ParentProperties, Properties>,
+  MergeDefinitions<ParentShortcuts, Shortcuts>,
+  MergeDefinitions<ParentConditions, Conditions>,
+  Context
+> {
+  const inherited = getDefineRulesDefinition(parent);
+  if (!isDefinitionRecord(config)) {
+    throw new Error("defineRules.extends() expected extension config.");
+  }
+  if (typeof parent.cx !== "function" || parent.preset == null) {
+    throw new Error("defineRules.extends() expected a defineRules() result.");
+  }
+  const merged = {
+    debugId: config.debugId,
+    properties: mergeProperties(inherited.properties, config.properties),
+    conditions: { ...inherited.conditions, ...config.conditions },
+    shortcuts: { ...inherited.shortcuts, ...config.shortcuts },
+    context: Object.prototype.hasOwnProperty.call(config, "context")
+      ? config.context
+      : inherited.context,
+    presets:
+      config.presets === undefined
+        ? parent.preset
+        : [parent.preset, config.presets]
+  };
+  return defineRulesImpl(merged) as unknown as DefineRulesRuntimeResult<
+    ExtendedProperties<ParentProperties, Properties>,
+    MergeDefinitions<ParentShortcuts, Shortcuts>,
+    MergeDefinitions<ParentConditions, Conditions>,
+    Context
+  >;
+}
 
 function addDefineRulesCxSerializer<CxFunction extends object>(
   cx: CxFunction,

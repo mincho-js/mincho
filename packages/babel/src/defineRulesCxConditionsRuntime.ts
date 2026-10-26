@@ -2,6 +2,7 @@ import { referencesModuleExport } from "./commonjs/bindings.js";
 import { type NodePath, types as t } from "@babel/core";
 import type { Binding } from "@babel/traverse";
 import type { PluginState } from "./types.js";
+import { referencesMinchoMember } from "./extractionCalls/rules.js";
 import {
   DEFINE_RULES_CX_RUNTIME_IMPORT_NAME,
   DEFINE_RULES_CX_RUNTIME_IMPORT_PATH,
@@ -173,11 +174,16 @@ export function getConstantBindingInitPath(
 function isDefineRulesCall(path: NodePath<t.Expression>): boolean {
   return (
     path.isCallExpression() &&
-    referencesModuleExport(
+    (referencesModuleExport(
       path.get("callee"),
       DEFINE_RULES_IMPORT_PATH,
       DEFINE_RULES_IMPORT_NAME
-    )
+    ) ||
+      referencesMinchoMember(
+        path.get("callee"),
+        DEFINE_RULES_IMPORT_NAME,
+        "extends"
+      ))
   );
 }
 

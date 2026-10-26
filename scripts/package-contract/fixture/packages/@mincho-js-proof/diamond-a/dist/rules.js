@@ -1,4 +1,7 @@
 import { createRuntimeFn } from "@mincho-js/css/rules/createRuntimeFn";
+import { createDefineRulesCssRuntime } from "@mincho-js/css/defineRules/createDefineRulesCssRuntime";
+import { createDefineRulesCxRuntime } from "@mincho-js/css/defineRules/createDefineRulesCxRuntime";
+import { preset } from "./preset.js";
 
 export const rule = createRuntimeFn({
   defaultClassName: "extends_parent_base",
@@ -12,3 +15,12 @@ export const rule = createRuntimeFn({
   },
   extension: { version: 1, stylePackages: ["@mincho-js-proof/diamond-a"] }
 });
+
+export const definitions = {
+  css: createDefineRulesCssRuntime({
+    properties: { display: ["flex"], color: { brand: "steelblue" } },
+    presets: preset
+  }),
+  cx: createDefineRulesCxRuntime({ classWrites: [["diamond_a_display", 1]] }),
+  preset
+};

@@ -23,6 +23,8 @@ import { createCanonicalWriteKey, createEngineMetadata } from "./metadata.js";
 import type { CompiledSegment, EngineMetadata } from "./metadata.js";
 import { createRuntimePresetState } from "./runtimePreset.js";
 import { createPresetOriginId } from "./presetCanonical.js";
+import { defineRulesDefinition } from "./extension.js";
+import type { DefineRulesDefinitionMetadata } from "./extension.js";
 import { createDefineRulesCxRuntimeArtifact } from "./cxRuntimeArtifact.js";
 import type { DefineRulesCxRuntimeArtifact } from "./cxRuntimeArtifact.js";
 import type {
@@ -51,14 +53,15 @@ type DefineRulesRuntimeCx = Cx;
 
 export interface DefineRulesRuntimeResult<
   Properties extends DefineRulesProperties,
-  Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts, Conditions>,
+  Shortcuts extends object,
   Conditions extends DefineRulesConditions = DefineRulesEmptyConditions,
   Context = undefined
 > {
   css: DefineRulesCss<
     DefineRulesComplexCssInput<Properties, Shortcuts, Conditions>,
     Context
-  >;
+  > &
+    DefineRulesDefinitionMetadata<Properties, Shortcuts, Conditions, Context>;
   cx: DefineRulesRuntimeCx;
   readonly preset: DefineRulesPresetArtifactV5;
 }
@@ -267,7 +270,13 @@ export function createDefineRulesRuntime<
 
   const css = Object.assign(cssImpl, {
     raw: cssRaw
-  }) as DefineRulesCss<CssInput, Context>;
+  }) as DefineRulesRuntimeResult<
+    Properties,
+    Shortcuts,
+    Conditions,
+    Context
+  >["css"];
+  Object.defineProperty(css, defineRulesDefinition, { value: config });
 
   registerCompilerClassMethod(css, emitCss);
 

@@ -106,7 +106,7 @@ type Simplify<Value> = { [Key in keyof Value]: Value[Key] };
 
 type ShortcutValue<
   Properties extends DefineRulesProperties,
-  Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts, Conditions>,
+  Shortcuts extends object,
   ShortcutsKey extends keyof Shortcuts,
   Conditions extends DefineRulesConditions = DefineRulesEmptyConditions
 > =
@@ -120,7 +120,7 @@ type ShortcutValue<
 
 export type DefineRulesShortcuts<
   Properties extends DefineRulesProperties,
-  Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts, Conditions>,
+  Shortcuts extends object,
   Conditions extends DefineRulesConditions = DefineRulesEmptyConditions
 > = {
   [ShortcutsKey in keyof Shortcuts]: ShortcutValue<
@@ -291,7 +291,7 @@ type ResolvePropertiesValue<Key, Value> =
 
 type ShortcutsInput<
   Properties extends Record<string, unknown>,
-  Shortcuts extends Record<string, unknown>,
+  Shortcuts extends object,
   Conditions extends DefineRulesConditions
 > = {
   [Key in keyof Shortcuts]?: ResolveConditionableValue<
@@ -302,7 +302,7 @@ type ShortcutsInput<
 
 type ResolveShortcutValue<
   Properties extends Record<string, unknown>,
-  Shortcuts extends Record<string, unknown>,
+  Shortcuts extends object,
   Conditions extends DefineRulesConditions,
   Value
 > = Value extends readonly unknown[]
@@ -315,7 +315,7 @@ type ResolveShortcutValue<
 
 type ResolveShortcutArrayRef<
   Properties extends Record<string, unknown>,
-  Shortcuts extends Record<string, unknown>,
+  Shortcuts extends object,
   Conditions extends DefineRulesConditions,
   Targets extends readonly unknown[]
 > = Targets extends readonly [infer H, ...infer R]
@@ -325,7 +325,7 @@ type ResolveShortcutArrayRef<
 
 type ResolveShortcutRef<
   Properties extends Record<string, unknown>,
-  Shortcuts extends Record<string, unknown>,
+  Shortcuts extends object,
   Conditions extends DefineRulesConditions,
   Ref
 > = [Ref] extends [keyof Properties]
@@ -336,7 +336,7 @@ type ResolveShortcutRef<
 
 type DefineRulesNestedConditionInput<
   Properties extends DefineRulesProperties,
-  Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts, Conditions>,
+  Shortcuts extends object,
   Conditions extends DefineRulesConditions
 > = keyof Conditions extends never
   ? DefineRulesEmptyConditions
@@ -350,7 +350,7 @@ type DefineRulesNestedConditionInput<
 
 type DefineRulesNestedCssInput<
   Properties extends DefineRulesProperties,
-  Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts, Conditions>,
+  Shortcuts extends object,
   Conditions extends DefineRulesConditions
 > = DefineRulesCssInput<Properties, Shortcuts, Conditions> &
   DefineRulesTransformNestedInput;
@@ -359,7 +359,7 @@ type DefineRulesTransformNestedInput = Record<string, unknown>;
 
 export type DefineRulesCssInput<
   Properties extends DefineRulesProperties,
-  Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts, Conditions>,
+  Shortcuts extends object,
   Conditions extends DefineRulesConditions = DefineRulesEmptyConditions
 > = PropertiesInput<Properties, Conditions> &
   ShortcutsInput<
@@ -371,7 +371,7 @@ export type DefineRulesCssInput<
 
 export type DefineRulesInlineCssInput<
   Properties extends DefineRulesProperties,
-  Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts, Conditions>,
+  Shortcuts extends object,
   Conditions extends DefineRulesConditions = DefineRulesEmptyConditions,
   CssInput = DefineRulesCssInput<Properties, Shortcuts, Conditions>
 > = keyof {
@@ -382,7 +382,7 @@ export type DefineRulesInlineCssInput<
 
 export type DefineRulesComplexCssInput<
   Properties extends DefineRulesProperties,
-  Shortcuts extends DefineRulesShortcuts<Properties, Shortcuts, Conditions>,
+  Shortcuts extends object,
   Conditions extends DefineRulesConditions = DefineRulesEmptyConditions
 > =
   | DefineRulesCssInput<Properties, Shortcuts, Conditions>

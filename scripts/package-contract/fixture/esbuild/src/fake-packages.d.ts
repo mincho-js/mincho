@@ -5,9 +5,13 @@ declare module "@mincho-js-proof/diamond-d/preset" {
 }
 
 declare module "@mincho-js-proof/diamond-a/rules" {
-  import type { RuntimeFn } from "@mincho-js/css";
+  import type { DefineRulesRuntimeResult, RuntimeFn } from "@mincho-js/css";
   export const rule: RuntimeFn<
     { size: { small: { letterSpacing: 1 } } },
     ["width"]
+  >;
+  export const definitions: DefineRulesRuntimeResult<
+    { display: readonly ["flex"]; color: { brand: "steelblue" } },
+    Record<never, never>
   >;
 }

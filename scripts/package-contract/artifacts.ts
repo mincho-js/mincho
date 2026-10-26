@@ -99,6 +99,10 @@ export async function assertBuildArtifacts(options: {
       count(css, "mediumseagreen") === 1,
       `${label} lost or duplicated extended rules CSS`
     );
+    assertContract(
+      css.includes("display: grid"),
+      `${label} lost extended defineRules CSS`
+    );
   }
   for (const [label, runtime] of [
     ["Vite", viteStatic],
