@@ -135,6 +135,28 @@ export function pruneRecipeMetadata(program: NodePath<t.Program>): boolean {
       }
 
       const disabled = Object.entries(features).filter(([, used]) => !used);
+
+      // Extension metadata is observable only when the recipe escapes this
+      // closed use graph. Do not retain package names or unused selector tables
+      // in application runtimes, and never discard expressions with effects.
+      config.properties = config.properties.filter((property) => {
+        if (!t.isObjectProperty(property) || property.computed) return true;
+        const name = t.isIdentifier(property.key)
+          ? property.key.name
+          : t.isStringLiteral(property.key)
+            ? property.key.value
+            : undefined;
+        if (
+          name !== "extension" &&
+          !(name === "classNameReferences" && !features.classNames)
+        )
+          return true;
+        if (!isLiteralMetadata(property.value)) return true;
+
+        changed = true;
+        return false;
+      });
+
       if (!disabled.length) return;
 
       const propVars = init.node.arguments[1];
@@ -180,4 +202,27 @@ export function pruneRecipeMetadata(program: NodePath<t.Program>): boolean {
   });
 
   return changed;
+}
+
+function isLiteralMetadata(node: t.Node, depth = 0): boolean {
+  if (depth > 50) return false;
+  if (
+    t.isStringLiteral(node) ||
+    t.isNumericLiteral(node) ||
+    t.isBooleanLiteral(node) ||
+    t.isNullLiteral(node)
+  )
+    return true;
+  if (t.isArrayExpression(node))
+    return node.elements.every(
+      (item) => item !== null && isLiteralMetadata(item, depth + 1)
+    );
+  if (t.isObjectExpression(node))
+    return node.properties.every(
+      (item) =>
+        t.isObjectProperty(item) &&
+        !item.computed &&
+        isLiteralMetadata(item.value, depth + 1)
+    );
+  return false;
 }

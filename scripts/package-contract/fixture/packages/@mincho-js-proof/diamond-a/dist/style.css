@@ -1,3 +1,10 @@
 .diamond_a_display {
   display: flex;
 }
+.extends_parent_base {
+  border-top-color: darkmagenta;
+  width: var(--extends_width);
+}
+.extends_parent_small {
+  letter-spacing: 1px;
+}

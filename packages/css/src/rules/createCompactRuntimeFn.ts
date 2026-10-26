@@ -16,6 +16,7 @@ import {
 } from "./runtimeProperties.js";
 import { transformVariantSelection } from "./utils.js";
 import { mapVarProps } from "./mapVarProps.js";
+import { attachRulesConfig } from "./metadata.js";
 import type { CompiledRuntimeFeatures } from "./createRuntimeFn.js";
 
 /** Compiler-only immutable recipes whose original runtime never enables its cache. */
@@ -82,5 +83,12 @@ export function createCompactRuntimeFn<
   >;
   if (features?.props !== false)
     runtime.props = (input) => mapVarProps(propVars ?? {}, input) as CSSRule;
+
+  if (config.extension)
+    attachRulesConfig(runtime, {
+      ...config,
+      propVars: propVars ?? ({} as PropVars<Props>)
+    });
+
   return runtime;
 }

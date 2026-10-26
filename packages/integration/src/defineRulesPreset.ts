@@ -21,6 +21,8 @@ import { processVanillaFile } from "@vanilla-extract/integration";
 import { processCachedEvaluation } from "./evaluationResultCache.js";
 import {
   collectDefineRulesPackageGraph,
+  collectRulesPackageGraph,
+  mergeDefineRulesPackageGraphs,
   getDefineRulesPackageStyleSpecifiers,
   type DefineRulesPackageGraph,
   type DefineRulesPackageGraphArtifact
@@ -44,14 +46,20 @@ export interface DefineRulesPresetRegistryResult {
 }
 
 export function getDefineRulesAncestorStyleSpecifiers(registrySession: {
+  readonly rulesStylePackages?: DefineRulesRegistrySession["rulesStylePackages"];
   readonly instances: readonly {
     getPresetSnapshot(): DefineRulesPackageGraphArtifact;
   }[];
 }): string[] {
   return getDefineRulesPackageStyleSpecifiers(
-    collectDefineRulesPackageGraph(
-      registrySession.instances.map((instance) => instance.getPresetSnapshot())
-    )
+    mergeDefineRulesPackageGraphs([
+      collectDefineRulesPackageGraph(
+        registrySession.instances.map((instance) =>
+          instance.getPresetSnapshot()
+        )
+      ),
+      collectRulesPackageGraph(registrySession.rulesStylePackages ?? [])
+    ])
   );
 }
 
@@ -80,9 +88,12 @@ export async function processDefineRulesPresetRegistryFile(
         const presetArtifacts =
           validateDefineRulesRegistrySessionArtifacts(registrySession);
 
-        const packageGraph = collectDefineRulesPackageGraph(presetArtifacts, {
-          owner: options.filePath
-        });
+        const packageGraph = mergeDefineRulesPackageGraphs([
+          collectDefineRulesPackageGraph(presetArtifacts, {
+            owner: options.filePath
+          }),
+          collectRulesPackageGraph(registrySession.rulesStylePackages ?? [])
+        ]);
 
         const annotated = internalAnnotateRecipeFactories(
           source,

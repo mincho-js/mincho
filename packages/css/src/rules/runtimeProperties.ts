@@ -33,16 +33,26 @@ export function attachRuntimeProperties<Variants extends VariantGroups>(
   if (features?.classNames !== false)
     runtimeFn.classNames = {
       get base() {
-        return compiled
-          ? (baseClass ??= config.defaultClassName.split(" ")[0])
-          : config.defaultClassName.split(" ")[0];
+        if (compiled && baseClass !== undefined) return baseClass;
+
+        const value =
+          config.classNameReferences?.base ??
+          config.defaultClassName.split(" ")[0];
+
+        if (compiled) baseClass = value;
+
+        return value;
       },
 
       get variants() {
         const getClasses = () =>
-          mapValues(config.variantClassNames, (classNames) =>
-            mapValues(classNames, (className) => className.split(" ")[0])
-          ) as RecipeClassNames<Variants>["variants"];
+          config.classNameReferences !== undefined
+            ? (mapValues(config.classNameReferences.variants, (group) => ({
+                ...group
+              })) as RecipeClassNames<Variants>["variants"])
+            : (mapValues(config.variantClassNames, (classNames) =>
+                mapValues(classNames, (className) => className.split(" ")[0])
+              ) as RecipeClassNames<Variants>["variants"]);
 
         return compiled
           ? (mapValues((variantClasses ??= getClasses()), (classNames) => ({

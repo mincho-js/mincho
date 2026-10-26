@@ -7,3 +7,11 @@ declare module "@mincho-js-proof/diamond-d/preset" {
 
   export const preset: DefineRulesPresetInput;
 }
+
+declare module "@mincho-js-proof/diamond-a/rules" {
+  import type { RuntimeFn } from "@mincho-js/css";
+  export const rule: RuntimeFn<
+    { size: { small: { letterSpacing: 1 } } },
+    ["width"]
+  >;
+}

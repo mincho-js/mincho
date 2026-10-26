@@ -529,7 +529,7 @@ export function* analyzeRuntimeExpressions(options: {
               owner.program.scope.generateUidIdentifier("recipeClasses");
 
             const init = t.callExpression(t.cloneNode(classFactory), [
-              staticDataExpression(recipe.config),
+              staticDataExpression(classOnlyRecipeConfig(recipe.config)),
               t.objectExpression(
                 ["variants", "classNames"].map((name) =>
                   t.objectProperty(t.identifier(name), t.booleanLiteral(false))
@@ -1574,4 +1574,15 @@ function staticData(node: t.Expression): StaticData {
   }
 
   throw new Error("Non-static value");
+}
+
+/** Generated call-only helpers cannot expose selector or extension metadata. */
+function classOnlyRecipeConfig(config: StaticData): StaticData {
+  return config && typeof config === "object" && !Array.isArray(config)
+    ? Object.fromEntries(
+        Object.entries(config).filter(
+          ([key]) => key !== "extension" && key !== "classNameReferences"
+        )
+      )
+    : config;
 }

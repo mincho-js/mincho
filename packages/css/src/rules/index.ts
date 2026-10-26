@@ -1,7 +1,7 @@
 import deepmerge from "@fastify/deepmerge";
 import { createVar, fallbackVar } from "@vanilla-extract/css";
 import { addFunctionSerializer } from "@vanilla-extract/css/functionSerializer";
-import { setFileScope } from "@vanilla-extract/css/fileScope";
+import { getFileScope, setFileScope } from "@vanilla-extract/css/fileScope";
 import type {
   ComplexCSSRule,
   CSSRule,
@@ -16,6 +16,8 @@ import {
   compilerRecipeStart,
   recordCompilerRecipe
 } from "../compilerResources.js";
+import { getRulesConfig } from "./metadata.js";
+import { registerRulesStyleDependencies } from "../defineRules/registry.js";
 import type {
   ComplexPropDefinitions,
   ConditionalVariants,
@@ -34,6 +36,11 @@ import type {
   VariantStyle,
   RecipeStyleRule
 } from "./types.js";
+import type {
+  ExtendedProps,
+  ExtendedVariants,
+  RulesExtendsOptions
+} from "./types.js";
 import {
   mapValues,
   transformToggleVariants,
@@ -42,6 +49,7 @@ import {
 
 // == Rules ====================================================================
 export const rules = Object.assign(rulesImpl, {
+  extends: rulesExtends,
   multiple: rulesMultiple,
   raw: rulesRaw,
   with: rulesWith
@@ -87,6 +95,32 @@ function rulesWith<
     return rulesRaw(callback(style)) as RulePattern;
   }
 
+  function rulesWithExtends<
+    ParentVariants extends VariantGroups,
+    ParentProps extends ComplexPropDefinitions<PropTarget | undefined>
+  >(
+    parent: RuntimeFn<ParentVariants, ParentProps>,
+    style: RestrictedCSSRule,
+    debugId?: string
+  ) {
+    return rulesExtends<
+      ParentVariants,
+      ParentProps,
+      Variants,
+      ToggleVariants,
+      Props
+    >(
+      parent,
+      callback(style) as unknown as RulesExtendsOptions<
+        ParentVariants,
+        Variants,
+        ToggleVariants,
+        Props
+      >,
+      debugId
+    );
+  }
+
   function rulesWithMultiple<
     RuleMap extends Record<string | number, RestrictedCSSRule>
   >(ruleMap: RuleMap, debugId?: string): TransformRuleMap<RuleMap> {
@@ -100,6 +134,7 @@ function rulesWith<
   }
 
   return Object.assign(rulesWithImpl, {
+    extends: rulesWithExtends,
     raw: rulesWithRaw,
     multiple: rulesWithMultiple
   });
@@ -108,6 +143,46 @@ function rulesWith<
 // == Rules Impl ===============================================================
 const mergeObject = deepmerge();
 
+function rulesExtends<
+  ParentVariants extends VariantGroups,
+  ParentProps extends ComplexPropDefinitions<PropTarget | undefined>,
+  Variants extends VariantGroups | undefined = undefined,
+  ToggleVariants extends VariantDefinitions | undefined = undefined,
+  Props extends ComplexPropDefinitions<PropTarget> | undefined = undefined
+>(
+  parent: RuntimeFn<ParentVariants, ParentProps>,
+  options: RulesExtendsOptions<ParentVariants, Variants, ToggleVariants, Props>,
+  debugId?: string
+): RuntimeFn<
+  ExtendedVariants<ParentVariants, Variants, ToggleVariants>,
+  ExtendedProps<ParentProps, Props>
+> {
+  const inherited = getRulesConfig(parent);
+  if (
+    typeof options !== "object" ||
+    options === null ||
+    Array.isArray(options)
+  ) {
+    throw new Error("rules.extends() expected extension options.");
+  }
+  if (debugId !== undefined && typeof debugId !== "string") {
+    throw new Error("rules.extends() debugId must be a string.");
+  }
+  return compileRules(
+    options as unknown as PatternOptions<Variants, ToggleVariants, Props>,
+    debugId,
+    inherited as InheritedRulesConfig
+  ) as unknown as RuntimeFn<
+    ExtendedVariants<ParentVariants, Variants, ToggleVariants>,
+    ExtendedProps<ParentProps, Props>
+  >;
+}
+
+type InheritedRulesConfig = PatternResult<
+  VariantGroups,
+  ComplexPropDefinitions<PropTarget | undefined>
+>;
+
 export function rulesImpl<
   Variants extends VariantGroups | undefined = undefined,
   ToggleVariants extends VariantDefinitions | undefined = undefined,
@@ -115,6 +190,21 @@ export function rulesImpl<
 >(
   options: PatternOptions<Variants, ToggleVariants, Props>,
   debugId?: string
+): RuntimeFn<
+  ConditionalVariants<Variants, ToggleVariants>,
+  Exclude<Props, undefined>
+> {
+  return compileRules(options, debugId);
+}
+
+function compileRules<
+  Variants extends VariantGroups | undefined = undefined,
+  ToggleVariants extends VariantDefinitions | undefined = undefined,
+  Props extends ComplexPropDefinitions<PropTarget> | undefined = undefined
+>(
+  options: PatternOptions<Variants, ToggleVariants, Props>,
+  debugId?: string,
+  inherited?: InheritedRulesConfig
 ): RuntimeFn<
   ConditionalVariants<Variants, ToggleVariants>,
   Exclude<Props, undefined>
@@ -131,29 +221,50 @@ export function rulesImpl<
   } = options;
 
   type PureProps = Exclude<Props, undefined>;
-
-  const propVars = {} as PropVars<PureProps>;
+  const propVars = { ...inherited?.propVars } as PropVars<PureProps>;
   const propStyles: CSSRule = {};
 
   if (Array.isArray(props)) {
     for (const prop of props) {
       if (typeof prop === "string") {
         const debugName = getDebugName(debugId, prop);
-        const propVar = createVar(debugName);
+        const inheritedVar = getInheritedPropVar(inherited?.propVars, prop);
+        const propVar =
+          inheritedVar === undefined
+            ? createVar(debugName)
+            : `var(${inheritedVar})`;
         propVars[prop as keyof PropDefinitionOutput<PureProps>] =
           getVarName(propVar);
         setCSSProperty(propStyles, prop, propVar);
       } else {
-        processPropObject(prop, propVars, propStyles, debugId);
+        processPropObject(
+          prop,
+          propVars,
+          propStyles,
+          debugId,
+          inherited?.propVars
+        );
       }
     }
   } else {
-    processPropObject(props, propVars, propStyles, debugId);
+    processPropObject(
+      props,
+      propVars,
+      propStyles,
+      debugId,
+      inherited?.propVars
+    );
   }
 
   let defaultClassName: string;
-
-  if (!base || typeof base === "string") {
+  if (
+    inherited !== undefined &&
+    base === undefined &&
+    Object.keys(baseStyles).length === 0 &&
+    Object.keys(propStyles).length === 0
+  ) {
+    defaultClassName = "";
+  } else if (!base || typeof base === "string") {
     const baseClassName = css([baseStyles, propStyles], debugId);
     defaultClassName = base ? `${baseClassName} ${base}` : baseClassName;
   } else {
@@ -175,10 +286,9 @@ export function rulesImpl<
     variants,
     transformToggleVariants(toggles)
   ) as CombinedVariants;
-
-  // @ts-expect-error - Temporarily ignoring the error as the PatternResult type is not fully defined
-  const variantClassNames: PatternResult<CombinedVariants>["variantClassNames"] =
-    mapValues(mergedVariants, (variantGroup, variantGroupName) => {
+  const ownVariantClassNames = mapValues(
+    mergedVariants,
+    (variantGroup, variantGroupName) => {
       // TODO: Use css.with supported data mapping when available
       // Transform variant values before passing to css.multiple
       const transformedVariants: Record<string | number, ComplexCSSRule> = {};
@@ -195,15 +305,31 @@ export function rulesImpl<
         transformedVariants,
         getDebugName(debugId, String(variantGroupName))
       );
-    });
+    }
+  );
 
-  const compounds: Array<[VariantObjectSelection<CombinedVariants>, string]> =
-    [];
+  const variantClassNames = (
+    inherited
+      ? mergeObject(inherited.variantClassNames, ownVariantClassNames)
+      : ownVariantClassNames
+  ) as InheritedRulesConfig["variantClassNames"];
+  if (inherited)
+    for (const [name, group] of Object.entries(ownVariantClassNames)) {
+      for (const [value, className] of Object.entries(group)) {
+        variantClassNames[name][value] = joinClasses(
+          getInheritedVariantClass(inherited, name, value),
+          className
+        );
+      }
+    }
+  const compounds = [...(inherited?.compoundVariants ?? [])] as Array<
+    [VariantObjectSelection<CombinedVariants>, string]
+  >;
 
   // Only support condition-based compoundVariants (function style)
   if (typeof compoundVariants === "function") {
     const variantConditions = mapValues(
-      mergedVariants,
+      variantClassNames,
       (variantGroup, variantName) =>
         mapValues(variantGroup, (_, optionKey) => ({
           [variantName]:
@@ -231,11 +357,55 @@ export function rulesImpl<
     });
   }
 
+  const packageName = getFileScope().packageName;
+  const inheritedPackages = inherited?.extension?.stylePackages ?? [];
+  registerRulesStyleDependencies(inheritedPackages, packageName);
+  const inheritedReferences =
+    inherited?.classNameReferences ??
+    (inherited === undefined
+      ? undefined
+      : {
+          base: inherited.defaultClassName.split(" ")[0],
+          variants: mapValues(inherited.variantClassNames, (group) =>
+            mapValues(group, (className) => className.split(" ")[0])
+          )
+        });
   const config: Omit<PatternResult<CombinedVariants, PureProps>, "propVars"> = {
-    defaultClassName,
-    variantClassNames,
-    defaultVariants: transformVariantSelection(defaultVariants),
-    compoundVariants: compounds
+    defaultClassName: inherited
+      ? joinClasses(inherited.defaultClassName, defaultClassName)
+      : defaultClassName,
+    variantClassNames: variantClassNames as PatternResult<
+      CombinedVariants,
+      PureProps
+    >["variantClassNames"],
+    defaultVariants: {
+      ...inherited?.defaultVariants,
+      ...transformVariantSelection(defaultVariants)
+    },
+    compoundVariants: compounds,
+    ...(inherited
+      ? {
+          classNameReferences: {
+            base:
+              defaultClassName.split(" ")[0] || inheritedReferences?.base || "",
+            variants: mergeObject(
+              inheritedReferences?.variants ?? {},
+              mapValues(ownVariantClassNames, (group) =>
+                mapValues(group, (className) => className.split(" ")[0])
+              )
+            ) as PatternResult<CombinedVariants, PureProps>["variantClassNames"]
+          }
+        }
+      : {}),
+    extension: {
+      version: 1,
+      stylePackages: [
+        ...new Set([
+          ...inheritedPackages,
+          ...(packageName === undefined ? [] : [packageName])
+        ])
+      ]
+    }
   };
 
   recordCompilerRecipe(config, resourceStart);
@@ -255,6 +425,37 @@ export function rulesImpl<
   );
 }
 
+function joinClasses(parent: string | undefined, child: string): string {
+  return [
+    ...new Set(`${parent ?? ""} ${child}`.split(/\s+/).filter(Boolean))
+  ].join(" ");
+}
+
+function getInheritedPropVar(
+  vars: Record<string, PureCSSVarKey> | undefined,
+  name: string
+) {
+  return vars !== undefined && Object.prototype.hasOwnProperty.call(vars, name)
+    ? vars[name]
+    : undefined;
+}
+
+function getInheritedVariantClass(
+  config: InheritedRulesConfig | undefined,
+  name: string,
+  value: string
+) {
+  if (
+    config === undefined ||
+    !Object.prototype.hasOwnProperty.call(config.variantClassNames, name)
+  )
+    return undefined;
+  const group = config.variantClassNames[name];
+  return Object.prototype.hasOwnProperty.call(group, value)
+    ? group[value]
+    : undefined;
+}
+
 // Helper function to safely set properties on a CSSRule
 function setCSSProperty(
   styles: CSSRule,
@@ -269,11 +470,16 @@ function processPropObject<Target extends PropTarget>(
   props: PropDefinition<Target>,
   propVars: Record<string, PureCSSVarKey>,
   propStyles: CSSRule,
-  debugId?: string
+  debugId?: string,
+  inheritedVars?: Record<string, PureCSSVarKey>
 ) {
   Object.entries(props).forEach(([propName, propValue]) => {
     const debugName = getDebugName(debugId, propName);
-    const propVar = createVar(debugName);
+    const inheritedVar = getInheritedPropVar(inheritedVars, propName);
+    const propVar =
+      inheritedVar === undefined
+        ? createVar(debugName)
+        : `var(${inheritedVar})`;
     propVars[propName] = getVarName(propVar);
 
     const isBaseValue = propValue?.base !== undefined;

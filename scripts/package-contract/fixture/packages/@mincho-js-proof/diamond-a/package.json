@@ -5,6 +5,10 @@
   "sideEffects": [
     "./dist/style.css"
   ],
+  "dependencies": {
+    "@mincho-js/css": "*",
+    "@vanilla-extract/css": "1.20.1"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -13,6 +17,10 @@
     "./preset": {
       "types": "./dist/preset.d.ts",
       "default": "./dist/preset.js"
+    },
+    "./rules": {
+      "types": "./dist/rules.d.ts",
+      "default": "./dist/rules.js"
     },
     "./style.css": {
       "default": "./dist/style.css"

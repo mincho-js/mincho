@@ -22,10 +22,11 @@ for (const mode of ["import", "require"]) {
     logLevel: "silent"
   });
 
+  // A shared graph chunk may use .js inside the integration ESM package.
   for (const [input, metadata] of Object.entries(metafile.inputs)) {
     assert.match(
       input,
-      /\/(?:package-graph|defineRulesPackageGraph)[^/]*\.(?:mjs|cjs)$/,
+      /\/(?:package-graph|defineRulesPackageGraph)[^/]*\.(?:mjs|cjs|js)$/,
       `${mode}: graph entry pulled in ${input}`
     );
     assert.equal(

@@ -313,7 +313,7 @@ export class RuntimeOptimizations {
         privateResourceReferences: analysis.privateResourceReferences,
         privateRecipeUses: analysis.privateRecipes.map(
           ({ recipe, selections }) => {
-            const config = recipe.config as Parameters<
+            const config = recipe.config as unknown as Parameters<
               typeof createClassRuntimeFn
             >[0];
 
@@ -387,7 +387,7 @@ export class RuntimeOptimizations {
       try {
         const values = item.calls.map((call) => {
           const runtime = createClassRuntimeFn(
-            call.config as Parameters<typeof createClassRuntimeFn>[0]
+            call.config as unknown as Parameters<typeof createClassRuntimeFn>[0]
           );
 
           return runtime(call.options as Parameters<typeof runtime>[0]);
@@ -429,7 +429,7 @@ export class RuntimeOptimizations {
       if (value === undefined) {
         try {
           const runtime = createClassRuntimeFn(
-            call.config as Parameters<typeof createClassRuntimeFn>[0]
+            call.config as unknown as Parameters<typeof createClassRuntimeFn>[0]
           );
 
           value = runtime(call.options as Parameters<typeof runtime>[0]);

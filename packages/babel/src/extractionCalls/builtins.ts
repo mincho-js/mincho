@@ -1,5 +1,6 @@
 import type { NodePath, types as t } from "@babel/core";
 import { referencesModuleExport } from "../commonjs/bindings.js";
+import { isRulesExtractionCall } from "./rules.js";
 
 const vanillaExtractAPIs = [
   "style",
@@ -61,6 +62,8 @@ export function isBuiltInExtractionCall(
   callee: NodePath<t.Node>,
   strict = false
 ): boolean {
+  if (isRulesExtractionCall(callee, strict)) return true;
+
   return Object.entries(builtInExtractionCalls).some(([source, apis]) =>
     apis.some((api) => referencesModuleExport(callee, source, api, strict))
   );

@@ -56,6 +56,33 @@ function analyze(source: string, modules: Record<string, string> = {}) {
 }
 
 describe("runtime code generation", () => {
+  it("prunes only unobservable literal extension metadata and preserves exported recipes", () => {
+    const factory =
+      'import {createCompiledRuntimeFn as make} from "@mincho-js/css/rules/createRuntimeFn";';
+    const recipe =
+      'make({defaultClassName:"parent child",variantClassNames:{},defaultVariants:{},compoundVariants:[],classNameReferences:{base:"child",variants:{}},extension:{version:1,stylePackages:["@test/parent"]}}, {})';
+
+    const local = optimize(`${factory} const r = ${recipe}; r();`);
+    expect(local).toContain("createCompiledClassRuntimeFn");
+    expect(local).not.toContain("stylePackages");
+    expect(local).not.toContain("classNameReferences");
+
+    const exported = optimize(`${factory} export const r = ${recipe};`);
+    expect(exported).toContain("stylePackages");
+    expect(exported).toContain("classNameReferences");
+
+    const selector = optimize(
+      `${factory} const r = ${recipe}; console.log(r.classNames.base);`
+    );
+    expect(selector).toContain("classNameReferences");
+    expect(selector).not.toContain("stylePackages");
+
+    const effects = optimize(
+      `${factory} const r = ${recipe.replace('extension:{version:1,stylePackages:["@test/parent"]}', "extension:observe()")}; r();`
+    );
+    expect(effects).toContain("observe()");
+  });
+
   it.each(["Compact", "Packed", "PackedCompact"])(
     "recognizes %s factories when folding literal recipe calls",
     (stem) => {

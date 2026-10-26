@@ -1348,5 +1348,25 @@
     "count": 2,
     "reason": "Runtime cost measurement passes esbuild its built-in TSX loader for stdin and in-memory graph modules. These syntax names are not Webpack loader package dependencies.",
     "expires": "2026-12-31"
+  },
+  {
+    "id": "contract-rules-extends-esbuild-parent",
+    "file": "scripts/package-contract/fixture/esbuild/src/index.ts",
+    "type": "error",
+    "message": "Undeclared dependency on @mincho-js-proof/diamond-a",
+    "source": "import { rule as parentRule } from \"@mincho-js-proof/diamond-a/rules\";",
+    "count": 1,
+    "reason": "This consumer fixture is copied into an isolated npm or strict PnP project; scripts/package-contract/index.ts declares and installs its packed proof packages before executing it.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "contract-rules-extends-vite-parent",
+    "file": "scripts/package-contract/fixture/vite/src/static.ts",
+    "type": "error",
+    "message": "Undeclared dependency on @mincho-js-proof/diamond-a",
+    "source": "import { rule as parentRule } from \"@mincho-js-proof/diamond-a/rules\";",
+    "count": 1,
+    "reason": "This consumer fixture is copied into an isolated npm or strict PnP project; scripts/package-contract/index.ts declares and installs its packed proof packages before executing it.",
+    "expires": "2026-12-31"
   }
 ]

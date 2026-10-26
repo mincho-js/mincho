@@ -81,6 +81,72 @@ const myRule = rules({
 })
 ```
 
+## Extending Rules
+
+Use `rules.extends(parent, options, debugId?)` to inherit an existing rule:
+
+```ts
+const button = rules({
+  color: 'white',
+  variants: {
+    size: {
+      small: { padding: 8 },
+      large: { padding: 16 }
+    }
+  },
+  props: ['width'],
+  defaultVariants: { size: 'small' }
+})
+
+const accentButton = rules.extends(button, {
+  backgroundColor: 'purple',
+  variants: {
+    size: {
+      large: { padding: 24 },
+      huge: { padding: 32 }
+    }
+  },
+  defaultVariants: { size: 'large' }
+}, 'accentButton')
+
+accentButton({ size: 'small' })
+accentButton({ size: 'huge' })
+accentButton.props({ width: 200 })
+```
+
+The child includes inherited base, variant, and compound classes together with
+classes for its additional styles. Existing styles are reused and the parent is
+unchanged. With equal CSS precedence, child declarations win because parent CSS
+is loaded first through the module dependency chain; this also applies to child
+base styles overlapping parent variants.
+
+- Variant groups and toggles are inherited, and new values can be added.
+- Defaults are merged by variant name. Compound conditions from both rules apply;
+  child compound callbacks can reference inherited and new variants.
+- Inherited props keep their CSS variables. Redefining a prop adds declarations
+  for the child's targets and fallbacks; inherited target declarations remain.
+- `classNames.base` and `classNames.variants` reference the child's single class
+  when it adds a style, otherwise the parent's class. Calling the rule includes
+  all required classes.
+- An empty extension reuses the parent's classes. Extension results can be
+  extended again.
+
+Typed factories also support extension through their existing callback:
+
+```ts
+const coloredRules = rules.with<{ color: string }>(
+  ({ color }) => ({ color })
+)
+const coloredButton = coloredRules.extends(button, { color: 'navy' })
+```
+
+Imported, serialized rules can be extended when their producer includes extension
+metadata. Rebuild older producers before extending their results. Packaged styles
+must expose the existing `style.css` export so the build integration can preserve
+parent CSS imports.
+When using vanilla-extract directly in `.css.ts` files, explicitly import the
+parent package's `style.css` before the child styles.
+
 ## Variants
 
 Define multiple style variations that can be selected at runtime. Each variant group contains named options.

@@ -33,6 +33,7 @@ function copyRegistry<T>(value: T): T {
 
 function snapshotRegistry(session: DefineRulesRegistrySession) {
   return copyRegistry({
+    rulesStylePackages: session.rulesStylePackages,
     nextRegistrationIndex: session.nextRegistrationIndex,
     nextRegistrationIndexByFileScope: session.nextRegistrationIndexByFileScope,
     instances: session.instances.map((instance) => ({
@@ -150,7 +151,7 @@ export async function processCachedEvaluation<T>(
       return fresh();
     }
 
-    const key = `evaluation-result-v3:${cacheDigest(
+    const key = `evaluation-result-v4:${cacheDigest(
       JSON.stringify([
         options.serializeCssArtifact ? "css-ir-resources-v4" : "css-text",
         options.cssSourceFile,
@@ -211,6 +212,7 @@ export async function processCachedEvaluation<T>(
 
     return measureCompilationPhase("evaluation-replay", async () => {
       const registry = copyRegistry(value.registry);
+      session.rulesStylePackages = registry.rulesStylePackages;
       session.nextRegistrationIndex = registry.nextRegistrationIndex;
       session.nextRegistrationIndexByFileScope =
         registry.nextRegistrationIndexByFileScope;

@@ -61,6 +61,21 @@ export interface DefineRulesRegistrySession {
   instances: DefineRulesRegistryInstance[];
   nextRegistrationIndex: number;
   nextRegistrationIndexByFileScope: Record<string, number>;
+  rulesStylePackages?: { packages: string[]; localPackage?: string }[];
+}
+
+// Rules inherit compiled classes, so their CSS dependencies must survive extraction.
+export function registerRulesStyleDependencies(
+  packages: readonly string[],
+  localPackage?: string
+): void {
+  const session = getActiveDefineRulesRegistrySession();
+  if (session === undefined || packages.length === 0) return;
+
+  (session.rulesStylePackages ??= []).push({
+    packages: [...packages],
+    localPackage
+  });
 }
 
 const DEFINE_RULES_REGISTRY_STACK = Symbol.for(

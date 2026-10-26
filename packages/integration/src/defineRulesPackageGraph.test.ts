@@ -3,6 +3,7 @@ import { parseDefineRulesPresetArtifactV5 } from "@mincho-js/css/defineRules/reg
 import { describe, expect, it } from "vitest";
 import {
   collectDefineRulesPackageGraph,
+  collectRulesPackageGraph,
   getDefineRulesPackageStyleSpecifiers,
   mergeDefineRulesPackageGraphs
 } from "./defineRulesPackageGraph.js";
@@ -12,6 +13,50 @@ type DefineRulesPresetArtifactV5 = ReturnType<
 >;
 
 type Node = DefineRulesPresetArtifactV5["nodes"][number];
+
+describe("recipe package dependencies", () => {
+  it("allows repeated recipes from the same package", () => {
+    const graph = collectRulesPackageGraph([
+      { packages: ["base", "base"], localPackage: "app" },
+      { packages: ["app"], localPackage: "app" }
+    ]);
+
+    expect(getDefineRulesPackageStyleSpecifiers(graph)).toEqual([
+      "base/style.css"
+    ]);
+  });
+
+  it.each([
+    { packages: ["a", "b"], localPackage: "a" },
+    { packages: ["a", "b", "a"], localPackage: "app" }
+  ])("rejects a package cycle in %j", (chain) => {
+    const graph = collectRulesPackageGraph([chain]);
+
+    expect(() => getDefineRulesPackageStyleSpecifiers(graph)).toThrow(
+      "a -> b -> a"
+    );
+  });
+
+  it("merges independent recipe ancestries with preset constraints", () => {
+    const recipes = collectRulesPackageGraph([
+      { packages: ["b"], localPackage: "app" },
+      { packages: ["a"], localPackage: "app" }
+    ]);
+    const presets = collectDefineRulesPackageGraph([
+      createArtifact([
+        { packageName: "a" },
+        { packageName: "b", parents: [0] },
+        { packageName: "app", parents: [1] }
+      ])
+    ]);
+
+    expect(
+      getDefineRulesPackageStyleSpecifiers(
+        mergeDefineRulesPackageGraphs([recipes, presets])
+      )
+    ).toEqual(["a/style.css", "b/style.css"]);
+  });
+});
 
 function createArtifact(
   definitions: readonly { packageName: string; parents?: readonly number[] }[],

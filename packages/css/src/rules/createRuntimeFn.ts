@@ -1,5 +1,6 @@
 import type { CSSRule } from "@mincho-js/transform-to-vanilla";
 import { mapVarProps } from "./mapVarProps.js";
+import { attachRulesConfig } from "./metadata.js";
 import {
   createClassRuntimeFn,
   createCompiledClassRuntimeFn,
@@ -37,6 +38,8 @@ export const createRuntimeFn = <
     return result;
   };
 
+  attachRulesConfig(runtime, config);
+
   return runtime;
 };
 
@@ -57,6 +60,12 @@ export const createCompiledRuntimeFn = <
 
   if (features?.props !== false)
     runtime.props = (input) => mapVarProps(propVars ?? {}, input) as CSSRule;
+
+  if (config.extension)
+    attachRulesConfig(runtime, {
+      ...config,
+      propVars: propVars ?? ({} as PropVars<Props>)
+    });
 
   return runtime;
 };

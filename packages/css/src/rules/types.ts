@@ -141,6 +141,11 @@ export type ClassRuntimeConfig<Variants extends VariantGroups> = {
   variantClassNames: VariantsClassNames<Variants>;
   defaultVariants: VariantObjectSelection<Variants>;
   compoundVariants: Array<[VariantObjectSelection<Variants>, string]>;
+  classNameReferences?: RecipeClassNames<Variants>;
+  extension?: {
+    version: 1;
+    stylePackages: readonly string[];
+  };
 };
 
 export type PatternResult<
@@ -198,10 +203,67 @@ export interface PatternOptions<
   >;
 }
 
-export interface RecipeClassNames<Variants extends VariantGroups> {
+type Present<Value> = [Value] extends [undefined]
+  ? Record<never, never>
+  : Value;
+
+type MergeVariantGroups<
+  Parent extends VariantGroups,
+  Child extends VariantGroups
+> = {
+  [Key in keyof Parent | keyof Child]: Key extends keyof Child
+    ? Key extends keyof Parent
+      ? Omit<Parent[Key], keyof Child[Key]> & Child[Key]
+      : Child[Key]
+    : Key extends keyof Parent
+      ? Parent[Key]
+      : never;
+};
+
+export type ExtendedVariants<
+  Parent extends VariantGroups,
+  Variants extends VariantGroups | undefined,
+  Toggles extends VariantDefinitions | undefined
+> = Extract<
+  MergeVariantGroups<
+    Present<Parent>,
+    Present<ConditionalVariants<Variants, Toggles>>
+  >,
+  VariantGroups
+>;
+
+type PropEntries<Props> = [Props] extends [undefined]
+  ? []
+  : Props extends unknown[]
+    ? Props
+    : [Props];
+
+export type ExtendedProps<
+  Parent extends ComplexPropDefinitions<PropTarget | undefined>,
+  Props extends ComplexPropDefinitions<PropTarget> | undefined
+> = [...PropEntries<Parent>, ...PropEntries<Props>];
+
+export type RulesExtendsOptions<
+  Parent extends VariantGroups,
+  Variants extends VariantGroups | undefined,
+  Toggles extends VariantDefinitions | undefined,
+  Props extends ComplexPropDefinitions<PropTarget> | undefined
+> = Omit<
+  PatternOptions<Variants, Toggles, Props>,
+  "defaultVariants" | "compoundVariants"
+> & {
+  defaultVariants?: VariantSelection<
+    ExtendedVariants<Parent, Variants, Toggles>
+  >;
+  compoundVariants?: CompoundVariant<
+    ExtendedVariants<Parent, Variants, Toggles>
+  >;
+};
+
+export type RecipeClassNames<Variants extends VariantGroups> = {
   base: string;
   variants: VariantsClassNames<Variants>;
-}
+};
 
 export interface ClassRuntimeFn<Variants extends VariantGroups> {
   (options?: ResolveComplex<VariantSelection<Variants>>): string;

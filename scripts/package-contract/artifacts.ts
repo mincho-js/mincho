@@ -87,6 +87,48 @@ export async function assertBuildArtifacts(options: {
   assertDiamondSelectorsOnce(packageCss, "installed package diamond CSS");
   assertDiamondSelectorsOnce(viteCss, "Vite consumer CSS");
   assertDiamondSelectorsOnce(esbuildCss, "esbuild consumer CSS");
+  for (const [label, css] of [
+    ["Vite", viteCss],
+    ["esbuild", esbuildCss]
+  ]) {
+    assertContract(
+      count(css, ".extends_parent_base") === 1,
+      `${label} lost or duplicated inherited rules CSS`
+    );
+    assertContract(
+      count(css, "mediumseagreen") === 1,
+      `${label} lost or duplicated extended rules CSS`
+    );
+  }
+  for (const [label, runtime] of [
+    ["Vite", viteStatic],
+    ["esbuild", esbuildJs]
+  ]) {
+    assertContract(
+      runtime.includes("extends_parent_base"),
+      `${label} lost the parent rule class`
+    );
+    assertContract(
+      runtime.includes("--extends_width"),
+      `${label} lost the inherited prop variable`
+    );
+  }
+  for (const format of ["esm/static.mjs", "cjs/static.cjs"]) {
+    const runtime = await source(join(viteRoot, format));
+    const ancestorImport = runtime.indexOf(
+      '"@mincho-js-proof/diamond-a/style.css"'
+    );
+    const childImport = runtime.indexOf('"../static.css"');
+    assertContract(
+      ancestorImport >= 0 && childImport > ancestorImport,
+      `Vite ${format} must import parent CSS before child CSS`
+    );
+  }
+  const parentVariant = esbuildCss.indexOf(".extends_parent_small");
+  assertContract(
+    parentVariant >= 0 && parentVariant < esbuildCss.indexOf("mediumseagreen"),
+    "esbuild must emit parent variant CSS before child base CSS"
+  );
   assertContract(
     count(sharedCss, "rebeccapurple") === 1,
     "ancestor selector count changed"

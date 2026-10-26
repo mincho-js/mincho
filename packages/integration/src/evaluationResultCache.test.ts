@@ -7,6 +7,7 @@ import { CompilationCache } from "./compilationCache.js";
 import { CompilationExecution } from "./compilationExecution.js";
 import { CompilationDiagnostics } from "./diagnostics.js";
 import * as diskCache from "./diskCache.js";
+import * as evaluationProof from "./evaluationProof.js";
 import { getActiveDefineRulesRegistrySession } from "@mincho-js/css/defineRules/registry";
 import { generateVanillaCss, type VanillaCssArtifact } from "./vanillaCssIr.js";
 import {
@@ -58,6 +59,55 @@ function runtime(evaluation: "auto" | "fresh" = "auto", enabled = true) {
 }
 
 describe("serialized evaluation results", () => {
+  it("replays inherited recipe CSS dependencies and their package ordering", async () => {
+    // Exercise snapshot replay independently of the intentionally conservative
+    // language proof, which currently falls back for imported recipe factories.
+    vi.spyOn(evaluationProof, "proveReusableEvaluation").mockReturnValue({
+      modules: ["@mincho-js/css", "@mincho-js/css/rules/createRuntimeFn"]
+    });
+
+    const source = await compiled(`
+      import { rules } from "@mincho-js/css";
+      import { createCompiledRuntimeFn } from "@mincho-js/css/rules/createRuntimeFn";
+      const parent = createCompiledRuntimeFn({
+        defaultClassName: "parent", variantClassNames: {}, defaultVariants: {}, compoundVariants: [],
+        extension: { version: 1, stylePackages: ["@test/ancestor", "@test/parent"] }
+      }, {});
+      export const child = rules.extends(parent, { color: "blue" });
+    `);
+    const execution = runtime();
+    const diagnostics = new CompilationDiagnostics({ console: true });
+    const run = () =>
+      runDefineRulesPresetRegistryStep(() =>
+        diagnostics.run(filePath, "test", () =>
+          execution.run(() =>
+            processDefineRulesPresetRegistryFile({
+              source,
+              filePath,
+              serializeVirtualCssPath: () => ""
+            })
+          )
+        )
+      );
+    const first = await run();
+    const second = await run();
+
+    expect(first.ancestorStyleSpecifiers).toEqual([
+      "@test/ancestor/style.css",
+      "@test/parent/style.css"
+    ]);
+    expect(second.ancestorStyleSpecifiers).toEqual(
+      first.ancestorStyleSpecifiers
+    );
+    expect(second.packageGraph).toEqual(first.packageGraph);
+    expect(
+      diagnostics
+        .snapshot()
+        .builds.flatMap((build) => build.events)
+        .filter((event) => event.phase === "evaluation-result-hit")
+    ).toHaveLength(1);
+  });
+
   it("replays raw CSS artifacts and separates IR from CSS-text cache entries", async () => {
     const source = await compiled(
       'import {style} from "@vanilla-extract/css"; export const box=style({color:"red"});'

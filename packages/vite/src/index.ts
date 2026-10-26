@@ -1458,13 +1458,28 @@ function createMinchoViteEnvironmentPlugin(
           if (publication) publication.publish = publish;
           else publish();
 
+          const runtimeSource =
+            config.command !== "build" || !config.build.lib
+              ? [
+                  ...registryResult.ancestorStyleSpecifiers.map(
+                    (specifier) => `import ${JSON.stringify(specifier)};`
+                  ),
+                  registryResult.source
+                ].join("\n")
+              : registryResult.source;
+
           rememberRuntimeModule(
             id,
-            registryResult.source,
+            runtimeSource,
             registryResult.symbolicTokens
+              ? internalRebindSymbolicTokenArtifact(
+                  registryResult.symbolicTokens,
+                  runtimeSource
+                )
+              : undefined
           );
 
-          return registryResult.source;
+          return runtimeSource;
         } catch (error) {
           if (current()) clearGeneratedCssForOwner(moduleInfo.originalPath);
 

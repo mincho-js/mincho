@@ -179,6 +179,35 @@ export function collectDefineRulesPackageGraph(
   return graph.finish();
 }
 
+/** A recipe has one parent; retain each ancestry before combining module graphs. */
+export function collectRulesPackageGraph(
+  chains: readonly {
+    readonly packages: readonly string[];
+    readonly localPackage?: string;
+  }[]
+): DefineRulesPackageGraph {
+  const graph = createGraphBuilder();
+
+  for (const { packages, localPackage } of chains) {
+    // Repeated packages still constrain order, including a return to the root.
+    // The graph builder deduplicates nodes and ignores same-package edges.
+    const chain = [
+      ...packages,
+      ...(localPackage === undefined ? [] : [localPackage])
+    ];
+
+    if (localPackage !== undefined) graph.localPackages.add(localPackage);
+
+    for (let index = 0; index < chain.length; index++) {
+      graph.addPackage(chain[index]);
+
+      if (index > 0) graph.addDependency(chain[index - 1], chain[index], []);
+    }
+  }
+
+  return graph.finish();
+}
+
 /** Union independently collected modules before deriving an output's CSS order. */
 export function mergeDefineRulesPackageGraphs(
   graphs: readonly DefineRulesPackageGraph[]

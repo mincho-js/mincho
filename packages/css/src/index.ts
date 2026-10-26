@@ -43,6 +43,11 @@ export type {
   ResolveComplex,
   PropDefinitionOutput
 } from "./rules/types.js";
+export type {
+  RulesExtendsOptions,
+  ExtendedVariants,
+  ExtendedProps
+} from "./rules/types.js";
 export { globalTheme, theme } from "./theme/index.js";
 export type { ThemeContract, ThemeResult } from "./theme/index.js";
 export type {
