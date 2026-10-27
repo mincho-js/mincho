@@ -5,7 +5,7 @@ description: Skip action if the same content was already run
 runs:
   using: composite
   steps:
-    - uses: fkirc/skip-duplicate-actions@v5
+    - uses: fkirc/skip-duplicate-actions@b974a9395958c231af965b70070979a577efa578 # v5.3.2
       with:
         concurrent_skipping: same_content_newer
         skip_after_successful_duplicate: "true"
