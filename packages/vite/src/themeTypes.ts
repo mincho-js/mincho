@@ -1,6 +1,5 @@
 export type MinchoThemeSelector =
-  | { className: string }
-  | { attribute: string; value: string };
+  { className: string } | { attribute: string; value: string };
 export interface MinchoThemeRegistry {
   default: string;
   system?: { light: string; dark: string };

@@ -122,8 +122,7 @@ export function beginDefineRulesRegistrySession(): DefineRulesRegistrySession {
 }
 
 export function endDefineRulesRegistrySession():
-  | DefineRulesRegistrySession
-  | undefined {
+  DefineRulesRegistrySession | undefined {
   const registryGlobal = globalThis as DefineRulesRegistryGlobal;
   const stack = registryGlobal[DEFINE_RULES_REGISTRY_STACK];
   const session = stack?.pop();
@@ -134,8 +133,7 @@ export function endDefineRulesRegistrySession():
 }
 
 export function getActiveDefineRulesRegistrySession():
-  | DefineRulesRegistrySession
-  | undefined {
+  DefineRulesRegistrySession | undefined {
   const registryGlobal = globalThis as DefineRulesRegistryGlobal;
   const stack = registryGlobal[DEFINE_RULES_REGISTRY_STACK];
 

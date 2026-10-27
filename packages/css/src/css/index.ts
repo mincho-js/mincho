@@ -182,8 +182,7 @@ function cssWith<const F extends CssWithCallback>(
 ): CssWithMixinResult<CssWithCallbackArgs<F>>;
 function cssWith<const T extends CSSRule, const F extends CssWithCallback>(
   callback?:
-    | ((style: CSSRuleWith<T>) => ComplexCSSRule)
-    | (F & IsMultiArgCallback<F>)
+    ((style: CSSRuleWith<T>) => ComplexCSSRule) | (F & IsMultiArgCallback<F>)
 ): CssWithStyleResult<T> & CssWithMixinResult<CssWithCallbackArgs<F>> {
   type RestrictedCSSRule = CSSRuleWith<T>;
   type CssWithRuntimeCallback = (...args: unknown[]) => ComplexCSSRule;

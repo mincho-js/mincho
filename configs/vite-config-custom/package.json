@@ -21,7 +21,7 @@
     "check": "yarn g:check"
   },
   "devDependencies": {
-    "@types/node": "^25.6.2",
+    "@types/node": "^25.9.9",
     "eslint-config-custom": "workspace:^",
     "prettier-config-custom": "workspace:^",
     "tsconfig-custom": "workspace:^",
@@ -29,10 +29,10 @@
     "vite-plugin-dts-build": "^0.2.3",
     "vite-plugin-externalize-deps": "^0.10.0",
     "vite-tsconfig-paths": "^6.1.1",
-    "vitest": "^4.1.5"
+    "vitest": "^4.1.12"
   },
   "dependencies": {
     "typescript": "^5.9.3",
-    "vite": "^7.3.3"
+    "vite": "^7.3.7"
   }
 }

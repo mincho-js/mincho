@@ -331,8 +331,7 @@ export function resolveStaticExportMapEntry(
 export function getStaticExportEntryExpression(
   record: ImportedStaticCssEvalModuleRecord,
   exportEntry:
-    | ExportMapLocalEntry
-    | Extract<ExportMapEntry, { kind: "expression" }>
+    ExportMapLocalEntry | Extract<ExportMapEntry, { kind: "expression" }>
 ):
   | { kind: "resolved"; expression: t.Expression; localName: string | null }
   | { kind: "error"; diagnostic: StaticCssEvalDiagnostic } {

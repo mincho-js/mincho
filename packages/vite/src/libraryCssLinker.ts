@@ -179,7 +179,10 @@ export function createLibraryCssLinker(options: LibraryCssLinkerOptions) {
         if (!chunk.imports.includes(specifier)) chunk.imports.push(specifier);
       }
 
-      return { code: edit.toString(), map: edit.generateMap({ hires: true }) };
+      return {
+        code: edit.toString(),
+        map: edit.generateMap({ hires: true }).toString()
+      };
     },
 
     abort(error: Error) {

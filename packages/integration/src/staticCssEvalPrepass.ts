@@ -128,8 +128,7 @@ interface StaticCssEvalPrepassReference {
 }
 
 type StaticCssEvalPrepassMemberExpression =
-  | t.MemberExpression
-  | t.OptionalMemberExpression;
+  t.MemberExpression | t.OptionalMemberExpression;
 
 interface StaticCssEvalPrepassLocalWalkFrame {
   readonly recordId: string;
@@ -1808,8 +1807,7 @@ if (import.meta.vitest) {
   };
 
   type YarnNodeLinkerFixtureLoadEntry =
-    | YarnNodeLinkerFixtureSourceEntry
-    | YarnNodeLinkerFixtureExternalEntry;
+    YarnNodeLinkerFixtureSourceEntry | YarnNodeLinkerFixtureExternalEntry;
 
   type YarnNodeLinkerFixture = {
     readonly nodeLinker: YarnNodeLinker;

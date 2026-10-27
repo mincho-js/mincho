@@ -1601,7 +1601,7 @@ describe("chunk-stage Mincho CSS generation", () => {
       )
     ).not.toThrow();
     expect(() => adapter.configure(config, true)).toThrow(
-      "validated Vite 7.3.3 CSS adapter"
+      "validated Vite 7.3.3 or 7.3.7 CSS adapter"
     );
   });
 

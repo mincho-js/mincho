@@ -14,10 +14,7 @@ export interface PartialEvalBindingSource {
 }
 
 type DestructuredPattern =
-  | t.Identifier
-  | t.ObjectPattern
-  | t.ArrayPattern
-  | t.VoidPattern;
+  t.Identifier | t.ObjectPattern | t.ArrayPattern | t.VoidPattern;
 
 export function getDestructuredBindingSource(
   binding: Binding,

@@ -17,8 +17,7 @@ import type {
 } from "./types.js";
 
 type DynamicCssVariableDeclarationBranchExpression =
-  | t.ConditionalExpression
-  | t.LogicalExpression;
+  t.ConditionalExpression | t.LogicalExpression;
 
 export function getDynamicCssVariableRule(options: {
   readonly expression: t.Expression;

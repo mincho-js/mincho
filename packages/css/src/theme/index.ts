@@ -2441,8 +2441,7 @@ if (import.meta.vitest) {
       const unionCSSVarByPath = {
         ...tokens,
         cssVarByPath: tokens.cssVarByPath as
-          | undefined
-          | typeof tokens.cssVarByPath
+          undefined | typeof tokens.cssVarByPath
       };
       const assertReservedInputTypes = () => {
         // @ts-expect-error: vars can contain a contract object.

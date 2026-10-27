@@ -13,12 +13,7 @@ import { recordCompilationDiagnostic } from "./diagnostics.js";
 import { configurationFiles } from "./compilationInputs.js";
 
 type Value =
-  | null
-  | string
-  | number
-  | boolean
-  | Value[]
-  | { [key: string]: Value };
+  null | string | number | boolean | Value[] | { [key: string]: Value };
 
 type Demand = Set<string>; // JSON member paths; [] means the complete value.
 
@@ -350,13 +345,11 @@ function inspect(
               local: declaration.id.name
             });
         }
-      } else if (
-        !(
-          t.isTSTypeAliasDeclaration(node) ||
-          t.isTSInterfaceDeclaration(node) ||
-          t.isEmptyStatement(node)
-        )
-      )
+      } else if (!(
+        t.isTSTypeAliasDeclaration(node) ||
+        t.isTSInterfaceDeclaration(node) ||
+        t.isEmptyStatement(node)
+      ))
         module.closed = false;
     }
 

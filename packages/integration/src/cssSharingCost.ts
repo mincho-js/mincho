@@ -14,9 +14,7 @@ export interface CssSharingCostDecision {
   }[];
   estimate: true;
   reason:
-    | "compressed-transfer-win"
-    | "initial-or-route-cost"
-    | "no-route-visits";
+    "compressed-transfer-win" | "initial-or-route-cost" | "no-route-visits";
 }
 
 export interface CssSharingCostOptions {

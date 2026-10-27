@@ -1056,7 +1056,7 @@
     "message": "Unmet transitive peer dependency on vite@^7.3.3, via @mincho-js/vite@workspace:^",
     "source": "\"@mincho-js/vite\": \"workspace:^\",",
     "count": 1,
-    "reason": "This private application declares matching vite ^7.3.3 in devDependencies for its Vite compilation. It deploys built browser assets; Vite is not a missing runtime dependency.",
+    "reason": "This private application declares matching vite ^7.3.7 in devDependencies for its Vite compilation. It deploys built browser assets; Vite is not a missing runtime dependency.",
     "expires": "2026-12-31"
   },
   {

@@ -219,13 +219,11 @@ export function* analyzeStyledRuntime(
         )
           component.safe = false;
         else if (parent.isJSXOpeningElement()) component.elements.push(element);
-      } else if (
-        !(
-          parent?.isCallExpression() &&
-          parent.get("arguments")[0] === reference &&
-          [...components.values()].some((item) => item.path === parent)
-        )
-      )
+      } else if (!(
+        parent?.isCallExpression() &&
+        parent.get("arguments")[0] === reference &&
+        [...components.values()].some((item) => item.path === parent)
+      ))
         component.safe = false;
     }
 

@@ -40,9 +40,9 @@ Repeated references to the same artifact are emitted once per chunk; unrelated
 equal declarations are not merged. This does not purge selectors or rename
 classes, nor promise a CSS file for every JS chunk.
 
-The private adapter is validated against **Vite 7.3.3**, **vanilla-extract
-integration 8.0.10** and **vanilla-extract CSS 1.20.1**. Other versions, missing
-hooks, Lightning CSS transformation, and opaque third-party CSS transforms fail
+The private adapter is validated against **Vite 7.3.3/7.3.7**, **vanilla-extract
+integration 8.0.10/8.0.11** and **vanilla-extract CSS 1.20.1/1.21.3**. Other versions,
+missing hooks, Lightning CSS transformation, and opaque third-party CSS transforms fail
 explicitly for `dist-chunk`. Vite's PostCSS configuration is supported. JS-only
 plugins can declare CSS-excluding regular expressions in `transform.filter.id`.
 Use `native` with unsupported toolchains until their adapter contracts are tested.

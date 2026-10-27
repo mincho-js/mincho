@@ -7,10 +7,7 @@ type PartialEvalStringOrNumberMemberName = string | number;
 export function isStaticPrimitiveLiteralExpression(
   expression: t.Expression
 ): expression is
-  | t.StringLiteral
-  | t.NumericLiteral
-  | t.BooleanLiteral
-  | t.NullLiteral {
+  t.StringLiteral | t.NumericLiteral | t.BooleanLiteral | t.NullLiteral {
   return (
     t.isStringLiteral(expression) ||
     t.isNumericLiteral(expression) ||

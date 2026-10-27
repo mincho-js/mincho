@@ -72,8 +72,7 @@ export interface CreatePartialEvalDiagnosticOptions {
 }
 
 export type PartialEvalResult =
-  | PartialEvalConfidentResult
-  | PartialEvalDeoptResult;
+  PartialEvalConfidentResult | PartialEvalDeoptResult;
 
 export interface PartialEvalConfidentResult {
   readonly kind: "confident";

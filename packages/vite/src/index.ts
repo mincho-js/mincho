@@ -89,12 +89,10 @@ function extractedCssFileFilter(filePath: string) {
     return false;
   }
 
-  if (
-    !(
-      afterExtracted.endsWith(".css.ts") ||
-      afterExtracted.endsWith(".css.ts?used")
-    )
-  ) {
+  if (!(
+    afterExtracted.endsWith(".css.ts") ||
+    afterExtracted.endsWith(".css.ts?used")
+  )) {
     return false;
   }
 
@@ -1968,8 +1966,7 @@ function createMinchoViteEnvironmentPlugin(
         const ssrManifest = _options?.appCss?.ssrManifest;
 
         let finalCssManifest:
-          | import("./ssr.js").MinchoSsrCssManifest
-          | undefined;
+          import("./ssr.js").MinchoSsrCssManifest | undefined;
         if (
           (ssrManifest || _options?.appCss?.themes) &&
           !config.build.ssr &&
@@ -2143,8 +2140,7 @@ function createMinchoViteEnvironmentPlugin(
 }
 
 let collectDefineRulesPresetViteRegistrySource:
-  | ((source: string) => void)
-  | undefined;
+  ((source: string) => void) | undefined;
 
 async function processDefineRulesPresetViteFile(
   options: Parameters<typeof processDefineRulesPresetRegistryFile>[0]
@@ -2205,9 +2201,7 @@ if (import.meta.vitest) {
         | {
             cssFileName?: string;
             entry?:
-              | string
-              | readonly string[]
-              | Readonly<Record<string, string>>;
+              string | readonly string[] | Readonly<Record<string, string>>;
           }
         | false;
       watch: unknown;

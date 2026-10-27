@@ -15,8 +15,7 @@ export type DefineRulesCxCalleeKind =
   | "provider-createDefineRulesCxRuntime";
 
 export type DefineRulesCxClassOperandSource =
-  | "local-css-call"
-  | "provider-marker";
+  "local-css-call" | "provider-marker";
 
 export type DefineRulesCxOperandMetadata =
   | {

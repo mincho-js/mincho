@@ -44,8 +44,7 @@ export type MergeDefinitions<Parent, Child> = {
 };
 
 type MergePropertyValue<Parent, Child> = Parent extends
-  | readonly unknown[]
-  | ((...args: never[]) => unknown)
+  readonly unknown[] | ((...args: never[]) => unknown)
   ? Child
   : Child extends readonly unknown[] | ((...args: never[]) => unknown)
     ? Child

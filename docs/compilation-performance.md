@@ -198,7 +198,7 @@ It accepts trusted compiler helpers, plain data and a small set of Mincho and
 official vanilla-extract calls. Unknown calls, callbacks, getters, asynchronous
 work, global/prototype mutation and unrecognized helpers use vanilla-extract's
 fresh evaluator. The compatibility processor currently requires vanilla-extract
-integration 8.0.10 and matching adapter/file-scope instances. Other versions
+integration 8.0.10/8.0.11 and matching adapter/file-scope instances. Other versions
 remain supported through the fresh evaluator. Each leased context gets fresh
 CommonJS bindings; the lease covers CSS serialization and artifact validation,
 and a failure discards the context. Script/proof caching is bounded to 512

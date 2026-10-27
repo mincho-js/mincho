@@ -27,16 +27,14 @@ export function transformVariantSelection<
   ToggleVariants extends VariantDefinitions
 >(
   variants?:
-    | VariantSelection<Variants & ToggleVariantMap<ToggleVariants>>
-    | undefined
+    VariantSelection<Variants & ToggleVariantMap<ToggleVariants>> | undefined
 ): VariantObjectSelection<Variants & ToggleVariantMap<ToggleVariants>>;
 export function transformVariantSelection<
   Variants extends VariantGroups,
   ToggleVariants extends VariantDefinitions
 >(
   variants?:
-    | VariantSelection<Variants & ToggleVariantMap<ToggleVariants>>
-    | undefined
+    VariantSelection<Variants & ToggleVariantMap<ToggleVariants>> | undefined
 ): VariantObjectSelection<Variants & ToggleVariantMap<ToggleVariants>> {
   if (Array.isArray(variants)) {
     return variants.reduce<

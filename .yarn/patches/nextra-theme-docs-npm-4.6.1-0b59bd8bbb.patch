@@ -1,0 +1,14 @@
+diff --git a/dist/schemas.js b/dist/schemas.js
+index 060d0b98b76515e4f0a1cd9edb3c3f5d31597540..07eb21db000ea3e3cc525c708b2bfec4aea06f1c 100644
+--- a/dist/schemas.js
++++ b/dist/schemas.js
+@@ -65,7 +65,8 @@ const LayoutPropsSchema = z.strictObject({
+   banner: reactNode.optional().meta({
+     description: "Rendered [`<Banner>` component](/docs/built-ins/banner). E.g. `<Banner {...bannerProps} />`"
+   }),
+-  children: reactNode,
++  // Layout strips children before parsing: https://github.com/shuding/nextra/issues/5036
++  children: reactNode.optional(),
+   copyPageButton: z.boolean().default(true).meta({
+     description: "Hide/show copy page content button."
+   }),

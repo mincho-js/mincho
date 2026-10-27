@@ -252,13 +252,11 @@ export function* evaluateStaticExpression(
     const candidate = target.path;
     yield* proveFunction(graph, target.module, candidate, budget);
 
-    if (
-      !(
-        candidate.isFunctionDeclaration() ||
-        candidate.isFunctionExpression() ||
-        candidate.isArrowFunctionExpression()
-      )
-    )
+    if (!(
+      candidate.isFunctionDeclaration() ||
+      candidate.isFunctionExpression() ||
+      candidate.isArrowFunctionExpression()
+    ))
       return deopt();
 
     const fn = candidate as NodePath<

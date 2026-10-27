@@ -57,14 +57,12 @@ export type VariantGroups = Record<string, VariantDefinitions>;
 
 export type VariantObjectSelection<Variants extends VariantGroups> = {
   [VariantGroup in keyof Variants]?:
-    | BooleanMap<keyof Variants[VariantGroup]>
-    | undefined;
+    BooleanMap<keyof Variants[VariantGroup]> | undefined;
 };
 
 export type VariantToggleSelection<Variants extends VariantGroups> = {
   [VariantGroup in keyof Variants]: keyof Variants[VariantGroup] extends
-    | "true"
-    | "false"
+    "true" | "false"
     ? VariantGroup
     : never;
 }[keyof Variants];
@@ -82,8 +80,7 @@ export type VariantsClassNames<Variants extends VariantGroups> = {
 export type PropTarget = keyof ResolvedProperties;
 
 export type ComplexPropDefinitions<PropKeys extends PropTarget | undefined> =
-  | PropDefinition<PropKeys>
-  | Array<PropKeys | PropDefinition<PropKeys>>;
+  PropDefinition<PropKeys> | Array<PropKeys | PropDefinition<PropKeys>>;
 
 export type PropDefinition<PropKeys extends PropTarget | undefined> = {
   [Key in NonNullableString | PropTarget]?: {
@@ -165,7 +162,9 @@ export type VariantStringMap<Variants extends VariantGroups> = {
 };
 
 export type BrandValue<Variants extends VariantGroups> = {
-  [VariantKey in keyof Variants]: VariantStringMap<Variants>[VariantKey][keyof Variants[VariantKey]];
+  [
+    VariantKey in keyof Variants
+  ]: VariantStringMap<Variants>[VariantKey][keyof Variants[VariantKey]];
 }[keyof Variants];
 
 export type CompoundVariant<Variants extends VariantGroups> = (

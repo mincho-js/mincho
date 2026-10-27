@@ -2,9 +2,7 @@ import { types as t } from "@babel/core";
 import type { StaticCssEvalBabelScope } from "./cjsHelperLookup.js";
 
 export type EsbuildHelperFunction =
-  | t.ArrowFunctionExpression
-  | t.FunctionDeclaration
-  | t.FunctionExpression;
+  t.ArrowFunctionExpression | t.FunctionDeclaration | t.FunctionExpression;
 
 type EsbuildHelperExpression = t.ArrowFunctionExpression | t.FunctionExpression;
 

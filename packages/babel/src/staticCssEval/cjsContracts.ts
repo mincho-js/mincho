@@ -1,8 +1,7 @@
 import type { StaticCssEvalDiagnosticId } from "./types.js";
 
 export type StaticCssEvalCjsGrammarContractStatus =
-  | "accepted-static-grammar"
-  | "rejected-static-grammar";
+  "accepted-static-grammar" | "rejected-static-grammar";
 
 export interface StaticCssEvalCjsGrammarContractEntry {
   readonly construct: string;

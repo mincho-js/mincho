@@ -156,11 +156,7 @@ export type BindingProvenance =
     };
 
 export type ResolutionDependencyKind =
-  | "local"
-  | "imported"
-  | "reexported"
-  | "namespace-member"
-  | "unresolved";
+  "local" | "imported" | "reexported" | "namespace-member" | "unresolved";
 
 export interface ResolutionDependency {
   file: string;
@@ -471,9 +467,7 @@ export const STATIC_CSS_EVAL_GUARDRAILS = [
 ] as const;
 
 export type StaticCssEvalSupportStatus =
-  | "preserved"
-  | "supported"
-  | "unsupported";
+  "preserved" | "supported" | "unsupported";
 
 export interface StaticCssEvalSupportMatrixEntry {
   construct: string;

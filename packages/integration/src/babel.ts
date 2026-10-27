@@ -415,8 +415,7 @@ export async function transformSourceUncached(
       : sourceProvider;
 
   let staticCssEvalPrepass:
-    | Awaited<ReturnType<typeof createStaticCssEvalPrepass>>
-    | undefined;
+    Awaited<ReturnType<typeof createStaticCssEvalPrepass>> | undefined;
 
   const observedStaticCssEvalMetadata = createEmptyStaticCssEvalMetadata();
   const extractCallsDependencies = new Set<string>();
@@ -433,8 +432,7 @@ export async function transformSourceUncached(
   let result: BabelFileResult;
   let commonJsTransformed = false;
   let preparedProgram:
-    | ReturnType<typeof internalParseModuleProgram>
-    | undefined;
+    ReturnType<typeof internalParseModuleProgram> | undefined;
 
   try {
     if (

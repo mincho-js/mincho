@@ -2056,7 +2056,8 @@ describe("minchoBabelPlugin", () => {
         failure = captureJsxCssPropFailure(source, { jsxCssProp: true });
       } catch (error) {
         throw new Error(
-          `${label}: ${error instanceof Error ? error.message : String(error)}`
+          `${label}: ${error instanceof Error ? error.message : String(error)}`,
+          { cause: error }
         );
       }
 
@@ -2636,7 +2637,8 @@ describe("minchoBabelPlugin", () => {
         failure = captureJsxCssPropFailure(source, { jsxCssProp: true });
       } catch (error) {
         throw new Error(
-          `${reason}: ${error instanceof Error ? error.message : String(error)}`
+          `${reason}: ${error instanceof Error ? error.message : String(error)}`,
+          { cause: error }
         );
       }
 

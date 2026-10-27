@@ -1095,8 +1095,7 @@ if (import.meta.vitest) {
         }).not.toThrow();
 
         const recipeConfig = recipeArgs?.[0] as
-          | { properties?: Record<string, unknown> }
-          | undefined;
+          { properties?: Record<string, unknown> } | undefined;
 
         const recipeProperties = recipeConfig?.properties;
 
@@ -2489,8 +2488,7 @@ if (import.meta.vitest) {
 
       const getDefineRulesRecipeConfig = <Context>(fn: object) =>
         getDefineRulesRecipe(fn)?.args?.[0] as
-          | DefineRulesRecipeConfig<Context>
-          | undefined;
+          DefineRulesRecipeConfig<Context> | undefined;
 
       const expectedNonSerializableContextDiagnostic = (path: string) =>
         `defineRules serialized css does not support non-serializable context at ${path}`;

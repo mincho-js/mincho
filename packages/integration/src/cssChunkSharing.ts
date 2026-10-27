@@ -239,7 +239,7 @@ export function isShareableCss(source: string): boolean {
   const parts: string[] = [];
   let unmaskedStart = 0;
 
-  for (let index = 0; index < source.length; ) {
+  for (let index = 0; index < source.length;) {
     const start = index;
     const character = source[index];
 

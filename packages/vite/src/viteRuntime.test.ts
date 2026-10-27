@@ -572,12 +572,14 @@ describe("mincho with the Vite runtime", () => {
         name: "replace-before-mincho",
         enforce: "pre",
 
-        transform(code, id) {
+        async transform(code, id) {
           if (id === entry) {
-            return transformWithEsbuild(code, id, {
+            const result = await transformWithEsbuild(code, id, {
               define: { __MARKER__: '"after"' },
               sourcemap: true
             });
+
+            return { ...result, map: JSON.stringify(result.map) };
           }
         }
       },

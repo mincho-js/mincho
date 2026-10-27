@@ -275,8 +275,7 @@ function isFirstLevelArrayClassValueBranch(expression: t.Expression): boolean {
 type ConditionalCssRuleBranchClassification = "css-rule" | "class-value";
 
 type ArrayClassNameBranchClassification =
-  | ConditionalCssRuleBranchClassification
-  | "array-class-value";
+  ConditionalCssRuleBranchClassification | "array-class-value";
 
 export function isConditionalCssRuleBranchExpression(
   expression: t.Expression,

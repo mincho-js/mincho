@@ -1,5 +1,4 @@
 import { MessageChannel } from "node:worker_threads";
-import type Tinypool from "tinypool";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CompilationExecution } from "./compilationExecution.js";
 import { runCompilerJob } from "./compilerWorker.js";
@@ -14,6 +13,8 @@ import type {
 } from "./compilerProtocol.js";
 import type { ScopedDependencyOptions } from "./compile.js";
 import type { BabelTransformSourceOptions } from "./babel.js";
+
+type CompilerPool = Parameters<CompilationExecution["dispatch"]>[3];
 
 const transportIdentity = vi.hoisted(() =>
   vi.fn(async () => "transport-test-compiler")
@@ -91,7 +92,7 @@ describe("worker source transport", () => {
 
         return runCompilerJob(job);
       }
-    } as unknown as Tinypool;
+    } satisfies CompilerPool;
 
     for (let index = 0; index < 2; index++) {
       const result = await runtime.cpu(
@@ -305,7 +306,7 @@ describe("worker source transport", () => {
 
         return runCompilerJob(job);
       }
-    } as unknown as Tinypool;
+    } satisfies CompilerPool;
 
     const run = () =>
       runtime.cpu(
@@ -346,7 +347,7 @@ describe("worker source transport", () => {
 
         return runCompilerJob(job);
       }
-    } as unknown as Tinypool;
+    } satisfies CompilerPool;
 
     for (let index = 0; index < 2; index++)
       expect(
@@ -384,7 +385,7 @@ describe("worker source transport", () => {
           duration: 0
         };
       }
-    } as unknown as Tinypool;
+    } satisfies CompilerPool;
 
     for (let index = 0; index < 2; index++)
       expect(
@@ -430,7 +431,7 @@ describe("worker source transport", () => {
 
         return { ok: true, value: source, duration: 0 };
       }
-    } as unknown as Tinypool;
+    } satisfies CompilerPool;
 
     const provider = {
       load: (id: string) => {

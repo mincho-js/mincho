@@ -88,11 +88,7 @@ export interface SameFileBindingStackFrame {
 }
 
 export type SameFileDeclarationKind =
-  | "const"
-  | "let"
-  | "var"
-  | "function"
-  | "class";
+  "const" | "let" | "var" | "function" | "class";
 
 export interface LiteralValidationState {
   count: number;

@@ -56,7 +56,7 @@ const ownRequire = createRequire(import.meta.url);
 const originalNodeEnv = process.env.NODE_ENV;
 let compatible: boolean | undefined;
 
-function compatibleIntegration(): boolean {
+function compatibleAdapters(): boolean {
   if (compatible !== undefined) return compatible;
 
   try {
@@ -67,7 +67,15 @@ function compatibleIntegration(): boolean {
     const version = JSON.parse(
       readFileSync(join(directory, "package.json"), "utf8")
     ).version;
-    compatible = version === "8.0.10" || version === "8.0.11";
+    const cssVersion = JSON.parse(
+      readFileSync(
+        ownRequire.resolve("@vanilla-extract/css/package.json"),
+        "utf8"
+      )
+    ).version;
+    compatible =
+      (version === "8.0.10" || version === "8.0.11") &&
+      (cssVersion === "1.20.1" || cssVersion === "1.21.3");
   } catch {
     compatible = false;
   }
@@ -241,7 +249,7 @@ export interface EvaluationCapture {
 }
 
 export function evaluationEnvironment(): unknown {
-  return [originalNodeEnv, process.env.NODE_ENV, compatibleIntegration()];
+  return [originalNodeEnv, process.env.NODE_ENV, compatibleAdapters()];
 }
 
 function joinEvaluation(imports: readonly string[], exports: string): string {
@@ -327,9 +335,9 @@ export async function processVanillaWithExecution(
   consume: (source: string) => unknown = (source) => source,
   capture?: EvaluationCapture
 ): Promise<unknown> {
-  if (options.serializeCssArtifact && !compatibleIntegration())
+  if (options.serializeCssArtifact && !compatibleAdapters())
     throw new Error(
-      "Mincho dist-chunk requires @vanilla-extract/integration 8.0.10 and @vanilla-extract/css 1.20.1"
+      "Mincho dist-chunk requires the validated @vanilla-extract/integration 8.0.10/8.0.11 and @vanilla-extract/css 1.20.1/1.21.3 adapters"
     );
 
   const fresh = async () => {
@@ -373,7 +381,7 @@ export async function processVanillaWithExecution(
   if (
     options.staticStyles &&
     execution?.evaluation !== "fresh" &&
-    compatibleIntegration()
+    compatibleAdapters()
   ) {
     const program = readStaticStyleProgram(options.source);
 
@@ -402,7 +410,7 @@ export async function processVanillaWithExecution(
     !execution ||
     !execution.cacheEnabled ||
     execution.evaluation === "fresh" ||
-    !compatibleIntegration()
+    !compatibleAdapters()
   )
     return fresh();
 

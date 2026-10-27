@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type Tinypool from "tinypool";
 import {
   CompilationExecution,
   currentCompilationExecution,
@@ -327,7 +326,7 @@ describe("compiler workers", () => {
                 code: "ENOENT"
               });
             }
-          } as unknown as Tinypool;
+          } satisfies Parameters<CompilationExecution["dispatch"]>[3];
 
           vi.spyOn(runtime, "dispatch").mockImplementationOnce(
             (kind, input, provider, _pool, partitions) =>

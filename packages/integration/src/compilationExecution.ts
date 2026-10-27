@@ -1,5 +1,5 @@
 import { AsyncLocalStorage, AsyncResource } from "node:async_hooks";
-import { MessageChannel } from "node:worker_threads";
+import { MessageChannel, type MessagePort } from "node:worker_threads";
 import { internalResolveFromModule as resolveFromModule } from "@mincho-js/babel";
 import type Tinypool from "tinypool";
 import {
@@ -50,6 +50,14 @@ import {
 const active = new AsyncLocalStorage<CompilationExecution>();
 const providerRequest = new AsyncLocalStorage<boolean>();
 let environmentId = 0;
+
+// Keep the worker implementation's Node-version-specific types out of declarations.
+interface CompilerPool {
+  run(
+    job: CompilerJob,
+    options: { transferList: MessagePort[]; signal: AbortSignal }
+  ): Promise<CompilerResponse>;
+}
 
 interface SharedPool {
   pool?: Promise<Tinypool>;
@@ -205,7 +213,7 @@ export class CompilationExecution {
     file: string,
     source: string | number,
     operation: (
-      pool: () => Promise<Tinypool>,
+      pool: () => Promise<CompilerPool>,
       partitions: number,
       assertCurrent: () => void
     ) => Promise<T>,
@@ -329,7 +337,9 @@ export class CompilationExecution {
 
           this.stale(generation);
 
-          return pool;
+          // Tinypool 2 infers a serialization-options overload for transferList
+          // with Node 25 types, although its runtime still expects an array.
+          return pool as unknown as CompilerPool;
         };
 
         const result = await operation(getPool, budget.budget + 1, () =>
@@ -381,7 +391,7 @@ export class CompilationExecution {
     kind: "transform" | "scoped",
     input: BabelTransformSourceOptions | ScopedDependencyOptions,
     provider: StaticCssEvalSourceProvider | undefined,
-    pool: Tinypool,
+    pool: CompilerPool,
     partitions: number
   ): Promise<CompilerResponse> {
     const generation = this.generation;
@@ -523,12 +533,7 @@ export class CompilationExecution {
     try {
       const start = performance.now();
 
-      // Tinypool 2 types use the last postMessage overload, which changed in Node 25.
-      const transferList = [port2] as unknown as NonNullable<
-        Parameters<Tinypool["run"]>[1]
-      >["transferList"];
-
-      const response = (await pool
+      const response = await pool
         .run(
           {
             kind,
@@ -542,7 +547,7 @@ export class CompilationExecution {
             batchProviderRequests: this.cacheEnabled,
             port: port2
           } as CompilerJob,
-          { transferList, signal: this.abort.signal }
+          { transferList: [port2], signal: this.abort.signal }
         )
         .catch((error: NodeJS.ErrnoException) => {
           // User compilation failures are returned as CompilerResponse objects.
@@ -557,7 +562,7 @@ export class CompilationExecution {
             });
 
           throw error;
-        })) as CompilerResponse;
+        });
 
       recordCompilationDiagnostic("worker-run", {
         milliseconds: response.duration,

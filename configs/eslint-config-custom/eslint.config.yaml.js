@@ -1,7 +1,7 @@
 // @ts-check
 
 import { defineConfig } from "eslint/config";
-import yamlParser from "yaml-eslint-parser";
+import * as yamlParser from "yaml-eslint-parser";
 import eslintPluginYml from "eslint-plugin-yml";
 import baseConfig from "./eslint.config.base.js";
 

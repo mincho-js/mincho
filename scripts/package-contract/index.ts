@@ -32,18 +32,18 @@ async function writeConsumerManifest(
 
   const dependencies = { ...packedResolutions };
   Object.assign(dependencies, {
-    "@vanilla-extract/css": "1.20.1",
-    "@vanilla-extract/integration": "8.0.10",
+    "@vanilla-extract/css": "1.21.3",
+    "@vanilla-extract/integration": "8.0.11",
     "@vanilla-extract/dynamic": "2.1.5",
     "@vanilla-extract/recipes": "0.5.7",
     "@vanilla-extract/sprinkles": "1.7.1",
-    "@vanilla-extract/vite-plugin": "5.2.2",
-    esbuild: "0.27.7",
-    react: "19.2.6",
-    "react-dom": "19.2.6",
-    "react-server-dom-webpack": "19.2.6",
-    webpack: "5.111.1",
-    vite: "7.3.3"
+    "@vanilla-extract/vite-plugin": "5.2.6",
+    esbuild: "0.28.2",
+    react: "19.3.1",
+    "react-dom": "19.3.1",
+    "react-server-dom-webpack": "19.3.1",
+    webpack: "5.112.2",
+    vite: "7.3.7"
   });
   await writeFile(
     join(consumerRoot, "package.json"),
@@ -58,15 +58,15 @@ async function writeConsumerManifest(
         // dependencies. Keep the complete test closure on these exact tarballs.
         resolutions: {
           ...packedResolutions,
-          "@vanilla-extract/integration": "8.0.10"
+          "@vanilla-extract/integration": "8.0.11"
         },
         overrides: {
           "@vanilla-extract/integration": "$@vanilla-extract/integration"
         },
         devDependencies: {
           typescript: "5.9.3",
-          "@types/node": "25.6.2",
-          "@types/react": "19.2.14"
+          "@types/node": "26.6.6",
+          "@types/react": "19.3.0"
         }
       },
       null,

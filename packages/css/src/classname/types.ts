@@ -55,10 +55,9 @@ export type ClassValue<
   ClassKey extends ClassStringable | undefined = undefined
 > = [ClassKey] extends [undefined]
   ? ClassPrimitive | ClassDictionary<ClassStringable> | ClassValue<undefined>[]
-  :
-      | ClassKey
-      | ClassDictionary<Exclude<ClassKey, undefined>>
-      | ClassValue<ClassKey>[];
+  : | ClassKey
+    | ClassDictionary<Exclude<ClassKey, undefined>>
+    | ClassValue<ClassKey>[];
 
 // == cx().multiple Types ======================================================
 /*

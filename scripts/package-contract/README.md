@@ -47,12 +47,14 @@ API presets. Its ESM/CJS copies must produce equal package order and witnesses.
 ESM and CommonJS entry points. It compares transformed JS, source maps and
 dependency metadata with inline execution, observes a verified source payload
 hit, and checks equivalent CSS from worker-enabled Vite and esbuild builds.
-Both installed consumers also type-check the public execution settings.
+Both installed consumers also type-check the public execution settings using
+TypeScript 5.9.3 and Node 26 types with `skipLibCheck: false`. This detects
+declarations that leak internal dependencies tied to older Node types.
 `modules/guarded-evaluation.mjs` checks default guarded context reuse and explicit
 fresh evaluation through ESM and CommonJS. It compares emitted CSS and package
 graphs, verifies serialized result replay uses isolated registry sessions, and
 checks that disabling evaluation result caching still allows context reuse.
-The consumer pins vanilla-extract integration 8.0.10, matching the workspace
+The consumer pins vanilla-extract integration 8.0.11, matching the workspace
 lockfile and respecting the strict PnP dependency age gate.
 
 `modules/compiler-classes.mjs` verifies the optional private class strategies

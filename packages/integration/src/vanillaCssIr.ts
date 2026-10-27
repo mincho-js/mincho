@@ -1,4 +1,4 @@
-/** Vanilla-extract 1.20.1 adapter data, before CSS serialization. */
+/** Vanilla-extract 1.20.1/1.21.3 adapter data, before CSS serialization. */
 import type { Adapter, FileScope } from "@vanilla-extract/css";
 import { createHash } from "node:crypto";
 import { setAdapter, removeAdapter } from "@vanilla-extract/css/adapter";

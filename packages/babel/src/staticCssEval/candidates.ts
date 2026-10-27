@@ -14,8 +14,7 @@ export interface CollectJsxCssPropStaticCssEvalCandidatesOptions {
 }
 
 export type StaticMemberReference =
-  | SupportedStaticMemberReference
-  | UnsupportedStaticMemberReference;
+  SupportedStaticMemberReference | UnsupportedStaticMemberReference;
 
 interface SupportedStaticMemberReference {
   kind: "supported";

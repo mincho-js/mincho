@@ -14,9 +14,9 @@ const known: Readonly<Record<string, readonly string[]>> = {
   "@vanilla-extract/css": ["style", "globalStyle", "keyframes"]
 };
 
-const versions: Readonly<Record<string, string>> = {
-  "@mincho-js/css": "0.2.2",
-  "@vanilla-extract/css": "1.20.1"
+const versions: Readonly<Record<string, readonly string[]>> = {
+  "@mincho-js/css": ["0.2.2", "1.0.0"],
+  "@vanilla-extract/css": ["1.20.1", "1.21.3"]
 };
 
 // This only rules candidates out. Escapes or comments can obscure import tokens,
@@ -25,12 +25,7 @@ const namedIntrinsicImport =
   /\bimport\s*\{[^{}]*\b(?:css|globalCss|style|globalStyle|keyframes)\b/;
 
 type Literal =
-  | null
-  | boolean
-  | number
-  | string
-  | Literal[]
-  | { [key: string]: Literal };
+  null | boolean | number | string | Literal[] | { [key: string]: Literal };
 
 interface Operation {
   local?: string;
@@ -164,7 +159,8 @@ export function staticStyleModules(
       if (require.resolve(name) !== ownRequire.resolve(name)) return;
 
     for (const name of modules)
-      if (packageVersion(require, name) !== versions[name]) return;
+      if (!versions[name]!.includes(packageVersion(require, name) ?? ""))
+        return;
 
     return [...modules, "@vanilla-extract/css/fileScope"];
   } catch {

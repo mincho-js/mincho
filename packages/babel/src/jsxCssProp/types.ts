@@ -86,12 +86,10 @@ export type NormalizedJsxCssPropElement = {
   readonly classNameAttribute: t.JSXAttribute | null;
   readonly styleAttribute: t.JSXAttribute | null;
   readonly attributesBeforeCss: readonly (
-    | t.JSXAttribute
-    | t.JSXSpreadAttribute
+    t.JSXAttribute | t.JSXSpreadAttribute
   )[];
   readonly attributesAfterCss: readonly (
-    | t.JSXAttribute
-    | t.JSXSpreadAttribute
+    t.JSXAttribute | t.JSXSpreadAttribute
   )[];
   readonly hasSpreadBeforeCss: boolean;
   readonly hasSpreadAfterCss: boolean;
@@ -135,8 +133,7 @@ export type DynamicCssVariableBranchFragment = {
 };
 
 export type DynamicCssVariableFragment =
-  | DynamicCssVariableStaticFragment
-  | DynamicCssVariableBranchFragment;
+  DynamicCssVariableStaticFragment | DynamicCssVariableBranchFragment;
 
 export type DynamicCssVariableDirectRule = {
   readonly kind: "direct";
@@ -150,8 +147,7 @@ export type DynamicCssVariableBranchRule = {
 };
 
 export type DynamicCssVariableRule =
-  | DynamicCssVariableDirectRule
-  | DynamicCssVariableBranchRule;
+  DynamicCssVariableDirectRule | DynamicCssVariableBranchRule;
 
 export type SpreadAggregatedCssPropLowering = {
   readonly declarations: t.VariableDeclaration[];

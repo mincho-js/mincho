@@ -44,8 +44,7 @@ type DefineRulesCustomProperties = Partial<
   >
 >;
 export type DefineRulesProperties =
-  | DefineRulesCssProperties
-  | DefineRulesCustomProperties;
+  DefineRulesCssProperties | DefineRulesCustomProperties;
 
 export interface DefineRulesPropertyValuesEntry<
   Source = unknown,
@@ -143,8 +142,7 @@ export interface DefineRulesPresetCompiledUnknownEntry {
 }
 
 export type DefineRulesPresetCompiledEntry =
-  | DefineRulesPresetCompiledKnownEntry
-  | DefineRulesPresetCompiledUnknownEntry;
+  DefineRulesPresetCompiledKnownEntry | DefineRulesPresetCompiledUnknownEntry;
 
 export interface DefineRulesPresetCompiledSegment {
   entries: DefineRulesPresetCompiledEntry[];
@@ -196,8 +194,7 @@ export type DefineRulesPresetArtifactV5 = {
 };
 
 export type DefineRulesPresetInput =
-  | DefineRulesPresetArtifactV5
-  | readonly DefineRulesPresetInput[];
+  DefineRulesPresetArtifactV5 | readonly DefineRulesPresetInput[];
 
 type DefineRulesNestedCallback = (...args: never[]) => unknown;
 
@@ -268,10 +265,9 @@ type DefineRulesPropertyConditionInput<
 > = keyof Conditions extends never
   ? never
   : { base?: Value } & {
-      [Alias in DefineRulesConditionAliasKey<Conditions>]?: ResolveConditionableValue<
-        Value,
-        Conditions
-      >;
+      [
+        Alias in DefineRulesConditionAliasKey<Conditions>
+      ]?: ResolveConditionableValue<Value, Conditions>;
     };
 
 type ResolvePropertiesValue<Key, Value> =
@@ -341,11 +337,9 @@ type DefineRulesNestedConditionInput<
 > = keyof Conditions extends never
   ? DefineRulesEmptyConditions
   : {
-      [Alias in DefineRulesConditionAliasKey<Conditions>]?: DefineRulesNestedCssInput<
-        Properties,
-        Shortcuts,
-        Conditions
-      >;
+      [
+        Alias in DefineRulesConditionAliasKey<Conditions>
+      ]?: DefineRulesNestedCssInput<Properties, Shortcuts, Conditions>;
     };
 
 type DefineRulesNestedCssInput<
@@ -375,9 +369,9 @@ export type DefineRulesInlineCssInput<
   Conditions extends DefineRulesConditions = DefineRulesEmptyConditions,
   CssInput = DefineRulesCssInput<Properties, Shortcuts, Conditions>
 > = keyof {
-  [Key in keyof CssInput as boolean extends CssInput[Key]
-    ? Key
-    : never]: CssInput[Key];
+  [
+    Key in keyof CssInput as boolean extends CssInput[Key] ? Key : never
+  ]: CssInput[Key];
 };
 
 export type DefineRulesComplexCssInput<

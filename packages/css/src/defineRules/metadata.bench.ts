@@ -36,12 +36,9 @@ const fullResultInput: ClassValue[] = [
   [registeredClassLists[1], { [displayFlex]: true }],
   [paddingSmall, [paddingLarge]]
 ];
-const repeatedExternalProps = Array.from(
-  { length: 5 },
-  (_, index): Props => ({
-    className: `external-prop-${index} ${colorRed} ${colorBlue} ${displayFlex}`
-  })
-);
+const repeatedExternalProps = Array.from({ length: 5 }, (_, index): Props => ({
+  className: `external-prop-${index} ${colorRed} ${colorBlue} ${displayFlex}`
+}));
 let cacheEvictionBatch = 0;
 let uniqueExternalBatch = 0;
 

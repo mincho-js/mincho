@@ -180,7 +180,7 @@ export async function createRealProducerPackages(
               producer.ancestorPackages.map((ancestor) => [ancestor, "0.0.0"])
             )
           },
-          peerDependencies: { "@vanilla-extract/css": "^1.20.1" },
+          peerDependencies: { "@vanilla-extract/css": "^1.21.3" },
           exports: {
             ".": { types: "./dist/index.d.ts", default: "./dist/index.js" },
             "./preset": {

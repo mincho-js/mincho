@@ -19,10 +19,7 @@ interface WriteOptions {
 
 interface PendingWrite {
   bytes: () =>
-    | string
-    | Uint8Array
-    | undefined
-    | Promise<string | Uint8Array | undefined>;
+    string | Uint8Array | undefined | Promise<string | Uint8Array | undefined>;
   options: WriteOptions;
   io: CompilationIoPool;
   promise: Promise<AtomicWriteResult>;
@@ -56,7 +53,7 @@ async function sameContents(path: string, bytes: Buffer): Promise<boolean> {
     // alone would miss external replacement, corruption, and disk eviction.
     const scratch = Buffer.allocUnsafe(Math.min(64 * 1024, bytes.length));
 
-    for (let offset = 0; offset < bytes.length; ) {
+    for (let offset = 0; offset < bytes.length;) {
       const { bytesRead } = await file.read(
         scratch,
         0,

@@ -72,12 +72,9 @@ type AnonymousCSSPropertyValue<Property extends KeyofAnonymousCSSProperties> =
   CSSPropertyValue<WithAnonymousCSSProperties[Property]>;
 
 type CSSPropertyValue<PropertyValue> =
-  | PropertyValue
-  | CSSVarFunction
-  | Array<PropertyValue | CSSVarFunction>;
+  PropertyValue | CSSVarFunction | Array<PropertyValue | CSSVarFunction>;
 type NestedPropertyValue<PropertyValue> =
-  | PropertyValue
-  | PropertyBasedCondition<PropertyValue>;
+  PropertyValue | PropertyBasedCondition<PropertyValue>;
 
 type NestedProperty<Property extends KeyofNestedPropertiesMap> = {
   [NestedProperty in keyof NestedPropertiesMap[Property]]?: NestedPropertyValue<
@@ -118,12 +115,9 @@ export type CSSVarValue = `${string | number}`;
 
 // https://github.com/vanilla-extract-css/vanilla-extract/blob/master/packages/private/src/types.ts
 export type PureCSSVarFunction =
-  | `var(--${string})`
-  | `var(--${string}, ${CSSVarValue})`;
+  `var(--${string})` | `var(--${string}, ${CSSVarValue})`;
 export type CSSVarFunction =
-  | PureCSSVarFunction
-  | `$${string}`
-  | `$${string}(${CSSVarValue})`;
+  PureCSSVarFunction | `$${string}` | `$${string}(${CSSVarValue})`;
 
 // -- Merge Properties --------------------------------------------------------
 // Instead of enabling all properties, we recommend enabling only some properties.
@@ -248,10 +242,7 @@ export interface ResolvedProperties extends Properties<
 > {}
 
 type CSSKeyframeFromTo =
-  | "from"
-  | "to"
-  | `${IntRange<1, 10>}0%`
-  | `${number & NonNullable<unknown>}%`;
+  "from" | "to" | `${IntRange<1, 10>}0%` | `${number & NonNullable<unknown>}%`;
 
 // == Tests ====================================================================
 // Ignore errors when compiling to CommonJS.

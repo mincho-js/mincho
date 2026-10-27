@@ -3,17 +3,13 @@ import type { CSSProperties, JSX as ReactJSX } from "react";
 
 type ComplexCSSRuleArrayItem = Extract<ComplexCSSRule, unknown[]>[number];
 type MinchoCssPropRecursiveArrayItem =
-  | ComplexCSSRuleArrayItem
-  | ClassPrimitive
-  | MinchoCssPropRecursiveArray;
+  ComplexCSSRuleArrayItem | ClassPrimitive | MinchoCssPropRecursiveArray;
 type MinchoCssPropRecursiveArray =
   | MinchoCssPropRecursiveArrayItem[]
   | readonly MinchoCssPropRecursiveArrayItem[];
 
 export type MinchoCssPropValue =
-  | ComplexCSSRule
-  | ClassPrimitive
-  | MinchoCssPropRecursiveArray;
+  ComplexCSSRule | ClassPrimitive | MinchoCssPropRecursiveArray;
 
 type MinchoCssProp = {
   css?: MinchoCssPropValue;

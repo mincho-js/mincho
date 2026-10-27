@@ -377,8 +377,7 @@ export function createCssSharing(
           }
       }
       let evaluateCost:
-        | ReturnType<typeof internalCreateCssSharingCostEvaluator>
-        | undefined;
+        ReturnType<typeof internalCreateCssSharingCostEvaluator> | undefined;
       groups = internalPlanCssChunkSharing(
         boundaries,
         modules,

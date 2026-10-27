@@ -421,12 +421,10 @@ export function analyzeClosedAppUsage(
 
   return {
     opaque,
-    recipes: [...usedById].map(
-      ([id, used]): PrivateRecipeUse => ({
-        id,
-        used: used === null ? null : [...used].sort()
-      })
-    ),
+    recipes: [...usedById].map(([id, used]): PrivateRecipeUse => ({
+      id,
+      used: used === null ? null : [...used].sort()
+    })),
     variableReferences: [...variableReferences].sort(),
     reason: opaque ? "open-or-opaque-graph" : "closed-import-graph"
   };

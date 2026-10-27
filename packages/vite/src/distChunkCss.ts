@@ -277,7 +277,7 @@ export function createDistChunkCss(
     // CSS transforms, URL resolution and asset emission still run every time.
     const value = cache
       ? await cache.run(
-          `css-ir-text-ve1.20.1-v2:${artifact.serializationKey ?? id}`,
+          `css-ir-text-ve1.21.3-v3:${artifact.serializationKey ?? id}`,
           create
         )
       : (await create()).value;
@@ -435,9 +435,13 @@ export function createDistChunkCss(
         config.plugins.find((plugin) => plugin.name === "vite:css-post")
       );
 
-      if (version !== "7.3.3" || !cssTransform || !cssPostTransform)
+      if (
+        !["7.3.3", "7.3.7"].includes(version) ||
+        !cssTransform ||
+        !cssPostTransform
+      )
         throw new Error(
-          `[mincho] dist-chunk requires the validated Vite 7.3.3 CSS adapter (found ${version}). Use appCss.mode: "native" for other Vite versions.`
+          `[mincho] dist-chunk requires the validated Vite 7.3.3 or 7.3.7 CSS adapter (found ${version}). Use appCss.mode: "native" for other Vite versions.`
         );
       if (
         !config.build.cssCodeSplit ||
@@ -744,8 +748,7 @@ export function createDistChunkCss(
             });
 
           let closedUsage:
-            | ReturnType<typeof internalAnalyzeClosedAppUsage>
-            | undefined;
+            ReturnType<typeof internalAnalyzeClosedAppUsage> | undefined;
           if (usage) {
             const modules = [];
             for (const id of live) {
@@ -909,7 +912,7 @@ export function createDistChunkCss(
           for (const ids of componentPasses
             ? groups
             : [[...input.keys()].sort()]) {
-            const key = `css-ir-opt-resources-v6-ve1.20.1:${digest(
+            const key = `css-ir-opt-resources-v7-ve1.21.3:${digest(
               JSON.stringify([
                 ids.map((id) => [id, fingerprints.get(id)]),
                 settings,

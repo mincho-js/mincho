@@ -137,15 +137,10 @@ export type ImportedStaticCssEvalLiteralResult =
   | { kind: "error"; diagnostic: StaticCssEvalDiagnostic };
 
 export type ImportedStaticCssEvalLiteralReferenceResult =
-  | ImportedStaticCssEvalLiteralResult
-  | { kind: "not-candidate" };
+  ImportedStaticCssEvalLiteralResult | { kind: "not-candidate" };
 
 export type ImportedStaticCssEvalDeclarationKind =
-  | "const"
-  | "let"
-  | "var"
-  | "function"
-  | "class";
+  "const" | "let" | "var" | "function" | "class";
 
 export interface ImportedStaticCssEvalLiteralEvaluationOptions {
   readonly expression: t.Expression;

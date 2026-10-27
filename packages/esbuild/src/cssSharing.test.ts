@@ -475,9 +475,12 @@ describe("native esbuild CSS sharing", () => {
     expect(result.minchoCssManifest!.entries["a.js"]!.css).toHaveLength(2);
 
     const css = result
-      .minchoCssManifest!.entries[
-        "a.js"
-      ]!.css.map((file) => result.outputFiles!.find((output) => output.path === join(root, "out", file))!.text)
+      .minchoCssManifest!.entries["a.js"]!.css.map(
+        (file) =>
+          result.outputFiles!.find(
+            (output) => output.path === join(root, "out", file)
+          )!.text
+      )
       .join("\n");
 
     expect(css).toContain("red");

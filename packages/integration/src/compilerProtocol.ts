@@ -59,8 +59,7 @@ export interface WorkerFailure {
 }
 
 export type ProviderResponse = { id: number } & (
-  | { ok: true; value: unknown }
-  | { ok: false; error: WorkerFailure }
+  { ok: true; value: unknown } | { ok: false; error: WorkerFailure }
 );
 
 export type CompilerResponse = {

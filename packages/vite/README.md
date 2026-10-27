@@ -61,9 +61,9 @@ removal. This is not a general selector purge. Set either flag to `false` to
 disable it, or `appCss.optimize: false` to disable all IR passes. Conditional rule
 merging and theme value interning also remain opt-in.
 
-The private adapter currently requires Vite **7.3.3**, vanilla-extract integration
-**8.0.10** and CSS **1.20.1**. Unsupported versions, Lightning CSS transformation,
-or opaque third-party CSS transforms fail explicitly; use `native` for those
+The private adapter supports Vite **7.3.3/7.3.7**, vanilla-extract integration
+**8.0.10/8.0.11** and CSS **1.20.1/1.21.3**. Unsupported versions, Lightning CSS
+transformation, or opaque third-party CSS transforms fail explicitly; use `native` for those
 toolchains. Native PostCSS is supported, and JS-only plugins can declare a
 CSS-excluding `transform.filter.id`.
 
