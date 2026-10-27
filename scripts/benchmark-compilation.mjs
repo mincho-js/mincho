@@ -187,7 +187,7 @@ if (values.pack) {
         dependencies,
         ...(values.linker === "pnp"
           ? {
-              packageManager: "yarn@4.18.0",
+              packageManager: "yarn@4.18.1",
               resolutions: dependencies
             }
           : {})

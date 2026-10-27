@@ -31,7 +31,7 @@ exercise the release artifacts rather than the workspace source.
 
 ## Installed consumers
 
-The same tarballs are installed into separate npm and Yarn 4.18.0 strict PnP
+The same tarballs are installed into separate npm and Yarn 4.18.1 strict PnP
 consumers. PnP has no fallback, and a negative undeclared-dependency check runs
 alongside ESM/CJS imports and strict declaration checks. The verifier resolves
 installed files through the consumer's PnP API without replacing the workspace's

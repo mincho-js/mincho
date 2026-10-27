@@ -52,7 +52,7 @@ async function writeConsumerManifest(
         name: "mincho-package-contract",
         private: true,
         type: "module",
-        packageManager: "yarn@4.18.0",
+        packageManager: "yarn@4.18.1",
         dependencies,
         // Yarn resolves transitive semver descriptors separately from root file
         // dependencies. Keep the complete test closure on these exact tarballs.
@@ -121,7 +121,7 @@ async function main(): Promise<void> {
         );
       }
 
-      const yarnPath = join(repoRoot, ".yarn", "releases", "yarn-4.18.0.cjs");
+      const yarnPath = join(repoRoot, ".yarn", "releases", "yarn-4.18.1.cjs");
 
       if (linker === "pnp") {
         await writeFile(
