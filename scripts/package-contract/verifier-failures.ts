@@ -82,20 +82,25 @@ export function assertVerifierFailurePaths(): void {
     ["esm/direct-preset.mjs", "cjs/direct-preset.cjs"]
   );
 
-  assertFailure(
-    "workspace-path dependency",
-    "retains a workspace-path dependency",
-    () =>
-      assertNoWorkspaceDependencySpecs({
-        name: "@package-contract/bad-dependency",
-        version: "0.0.0",
-        private: false,
-        dependencies: { "@mincho-js/css": "workspace:^" },
-        optionalDependencies: {},
-        exports: "./index.js",
-        files: []
-      })
-  );
+  for (const field of ["dependencies", "optionalDependencies"]) {
+    for (const specifier of ["workspace:^", "catalog:", "catalog:tools"]) {
+      assertFailure(
+        `${field} with ${specifier}`,
+        "retains a workspace-only dependency",
+        () =>
+          assertNoWorkspaceDependencySpecs({
+            name: "@package-contract/bad-dependency",
+            version: "0.0.0",
+            private: false,
+            dependencies: {},
+            optionalDependencies: {},
+            [field]: { "@mincho-js/css": specifier },
+            exports: "./index.js",
+            files: []
+          })
+      );
+    }
+  }
   assertFailure(
     "missing style export",
     "is missing the ./style.css export",

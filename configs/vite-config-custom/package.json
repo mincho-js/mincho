@@ -21,18 +21,18 @@
     "check": "yarn g:check"
   },
   "devDependencies": {
-    "@types/node": "^25.9.9",
+    "@types/node": "catalog:",
     "eslint-config-custom": "workspace:^",
     "prettier-config-custom": "workspace:^",
     "tsconfig-custom": "workspace:^",
-    "vite-config-builder": "^0.1.1",
-    "vite-plugin-dts-build": "^0.2.3",
-    "vite-plugin-externalize-deps": "^0.10.0",
-    "vite-tsconfig-paths": "^6.1.1",
-    "vitest": "^4.1.12"
+    "vite-config-builder": "catalog:",
+    "vite-plugin-dts-build": "catalog:",
+    "vite-plugin-externalize-deps": "catalog:",
+    "vite-tsconfig-paths": "catalog:",
+    "vitest": "catalog:"
   },
   "dependencies": {
-    "typescript": "^5.9.3",
-    "vite": "^7.3.7"
+    "typescript": "catalog:",
+    "vite": "catalog:"
   }
 }

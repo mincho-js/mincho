@@ -125,6 +125,14 @@ The pinned Doctor checks installed lockfile entries; new warnings, errors, incom
 Reviewed false positives are recorded with stable IDs, exact source matches, occurrence counts, reasons, and review deadlines in [the Doctor exceptions](scripts/doctor/exceptions.json). CI reports each decision as `ALLOW`, `NEW`, `EXPIRED`, `STALE`, `BROAD`, `AMBIGUOUS`, or `ERROR`.
 Use `yarn doctor:raw` to inspect all upstream diagnostics, or `yarn test:doctor` to test the exception checker. See [Doctor maintenance](scripts/doctor/README.md).
 
+External dependency versions are centralized in the `catalog` map in [.yarnrc.yml](.yarnrc.yml).
+Workspace `dependencies` and `devDependencies` refer to those entries with `"catalog:"`; edit the catalog and run `yarn install` to update a shared version.
+
+Keep TypeScript on version 5 for Node10 module-resolution support. Public `peerDependencies` retain their compatibility ranges, while workspace links, patches, Git pins, security resolutions, and isolated consumer fixtures keep explicit specifications.
+
+Yarn 4.18.1 includes catalog support and replaces catalog references with normal version ranges during `yarn pack`, so published packages do not require catalogs in consumers.
+Validate changes with `yarn install --immutable`, `yarn constraints`, `yarn doctor`, `yarn audit`, and the affected package checks. The installed-consumer contract also rejects unresolved catalog references in release dependencies.
+
 ### Working process
 
 We work in an [RFC](https://en.wikipedia.org/wiki/Request_for_Comments) - [TDD](https://en.wikipedia.org/wiki/Test-driven_development) way.

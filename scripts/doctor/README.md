@@ -73,9 +73,10 @@ The reviewed exceptions cover:
 - esbuild syntax-loader options mistaken for Webpack loader packages, and Vite's
   explicit `preview` command mistaken for an automatic lifecycle hook.
 
-The Yarn patch for Doctor 4.0.7 reads normalized descriptors from the installed
-resolution map, including package extensions and pinned versions, instead of
-trying to resolve bare version ranges against registry resolvers. It also adds
+The Yarn patch for Doctor 4.0.7 applies Yarn's dependency hooks and descriptor
+binding before reading the installed resolution map. This supports default and
+named catalogs, package extensions, and pinned versions without resolving new
+versions from the registry. It also adds
 JSON output with warnings, source locations for lifecycle warnings, and a
 completion record, and reports exceptions the upstream scanner silently catches.
 Keep these changes when updating Doctor, or verify that upstream provides the

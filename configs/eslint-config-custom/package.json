@@ -19,19 +19,19 @@
     }
   },
   "devDependencies": {
-    "@eslint/js": "^10.0.1",
-    "@types/node": "^25.9.9",
-    "@typescript-eslint/parser": "^8.72.0",
-    "eslint": "^10.13.0",
-    "eslint-config-prettier": "^10.1.8",
-    "eslint-plugin-prettier": "^5.5.7",
-    "eslint-plugin-yml": "^3.9.0",
-    "globals": "^17.13.0",
-    "prettier": "^3.9.10",
+    "@eslint/js": "catalog:",
+    "@types/node": "catalog:",
+    "@typescript-eslint/parser": "catalog:",
+    "eslint": "catalog:",
+    "eslint-config-prettier": "catalog:",
+    "eslint-plugin-prettier": "catalog:",
+    "eslint-plugin-yml": "catalog:",
+    "globals": "catalog:",
+    "prettier": "catalog:",
     "prettier-config-custom": "workspace:^",
-    "typescript": "^5.9.3",
-    "typescript-eslint": "^8.72.0",
-    "yaml-eslint-parser": "^2.1.0"
+    "typescript": "catalog:",
+    "typescript-eslint": "catalog:",
+    "yaml-eslint-parser": "catalog:"
   },
   "prettier": "prettier-config-custom"
 }

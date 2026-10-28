@@ -1,26 +1,32 @@
 diff --git a/lib/cli.js b/lib/cli.js
-index 2c8ddb309d49c3ae59b3036ba3667e2c967fdff4..3fa46faabf248bb315f59bd5b7857b1f47cad25e 100644
+index 2c8ddb309d49c3ae59b3036ba3667e2c967fdff4..135c2968b2b21c3408bdb42fe10c4f3acd22b4f0 100644
 --- a/lib/cli.js
 +++ b/lib/cli.js
-@@ -187,18 +187,14 @@ async function checkForUnmetPeerDependency(workspace, dependencyType, via, peer,
+@@ -186,23 +186,24 @@ async function checkForUnmetPeerDependency(workspace, dependencyType, via, peer,
+     const prettyLocation = ast.prettyNodeLocation(configuration, propertyNode);
      report.reportError(core_1.MessageName.UNNAMED, `${prettyLocation}: Unmet transitive peer dependency on ${core_1.structUtils.prettyDescriptor(configuration, peer)}, via ${core_1.structUtils.prettyDescriptor(configuration, via)}`);
  }
- async function makeResolveFn(project) {
+-async function makeResolveFn(project) {
 -    const cache = await core_1.Cache.find(project.configuration);
--    const resolver = project.configuration.makeResolver();
++async function makeResolveFn(workspace) {
++    const { project } = workspace;
++    await project.restoreInstallState();
+     const resolver = project.configuration.makeResolver();
 -    const fetcher = project.configuration.makeFetcher();
 -    const checksums = project.storedChecksums;
 -    const yarnReport = new core_1.ThrowReport();
 -    const fetchOptions = { project, fetcher, cache, checksums, report: yarnReport, cacheOptions: { skipIntegrityCheck: true } };
 -    const resolveOptions = { ...fetchOptions, resolver, fetchOptions };
-+    await project.restoreInstallState();
++    const resolveOptions = { project, resolver, report: new core_1.ThrowReport() };
      return async (descriptor) => {
 -        const candidates = await resolver.getCandidates(descriptor, {}, resolveOptions);
 -        if (candidates.length === 0)
 -            return null;
 -        return await resolver.resolve(candidates[0], resolveOptions);
 +        const normalized = project.configuration.normalizeDependency(descriptor);
-+        const resolution = project.storedResolutions.get(normalized.descriptorHash);
++        const reduced = await project.configuration.reduceHook(hooks => hooks.reduceDependency, normalized, project, workspace.anchoredLocator, normalized, { resolver, resolveOptions });
++        const bound = resolver.bindDescriptor(reduced, workspace.anchoredLocator, resolveOptions);
++        const resolution = project.storedResolutions.get(bound.descriptorHash);
 +        const pkg = project.storedPackages.get(resolution);
 +        if (!pkg)
 +            throw new Error(`Dependency is absent from the installed lockfile; run yarn install`);
@@ -28,7 +34,12 @@ index 2c8ddb309d49c3ae59b3036ba3667e2c967fdff4..3fa46faabf248bb315f59bd5b7857b1f
      };
  }
  async function processManifest(workspace, { configuration, report }) {
-@@ -231,8 +227,11 @@ async function processWorkspace(workspace, { configuration, fileList, report })
+-    const resolveFn = await makeResolveFn(workspace.project);
++    const resolveFn = await makeResolveFn(workspace);
+     for (const dependencyType of core_1.Manifest.hardDependencies) {
+         for (const viaDescriptor of workspace.manifest[dependencyType].values()) {
+             let pkg;
+@@ -231,8 +232,11 @@ async function processWorkspace(workspace, { configuration, fileList, report })
      const progress = core_1.StreamReport.progressViaCounter(fileList.length + 1);
      const reportedProgress = report.reportProgress(progress);
      for (const scriptName of workspace.manifest.scripts.keys())
@@ -42,7 +53,7 @@ index 2c8ddb309d49c3ae59b3036ba3667e2c967fdff4..3fa46faabf248bb315f59bd5b7857b1f
      if (Array.isArray(workspace.manifest.raw.bundleDependencies) || Array.isArray(workspace.manifest.raw.bundledDependencies))
          report.reportWarning(core_1.MessageName.UNNAMED, `The bundleDependencies (or bundledDependencies) field is not supported anymore; prefer using a bundler`);
      for (const p of fileList) {
-@@ -249,6 +248,7 @@ class EntryCommand extends clipanion_1.Command {
+@@ -249,6 +253,7 @@ class EntryCommand extends clipanion_1.Command {
      constructor() {
          super(...arguments);
          this.cwd = clipanion_1.Option.String({ required: false });
@@ -50,7 +61,7 @@ index 2c8ddb309d49c3ae59b3036ba3667e2c967fdff4..3fa46faabf248bb315f59bd5b7857b1f
      }
      async execute() {
          const cwd = fslib_1.npath.toPortablePath(fslib_1.npath.resolve(this.cwd ?? `.`));
-@@ -270,9 +270,14 @@ class EntryCommand extends clipanion_1.Command {
+@@ -270,9 +275,14 @@ class EntryCommand extends clipanion_1.Command {
          const report = await core_1.StreamReport.start({
              configuration,
              stdout: this.context.stdout,
@@ -65,7 +76,7 @@ index 2c8ddb309d49c3ae59b3036ba3667e2c967fdff4..3fa46faabf248bb315f59bd5b7857b1f
              const progress = core_1.StreamReport.progressViaCounter(allManifestFolders.length);
              const reportedProgress = report.reportProgress(progress);
              try {
-@@ -298,9 +303,13 @@ class EntryCommand extends clipanion_1.Command {
+@@ -298,9 +308,13 @@ class EntryCommand extends clipanion_1.Command {
                                  fileList,
                                  report,
                              });
@@ -80,7 +91,7 @@ index 2c8ddb309d49c3ae59b3036ba3667e2c967fdff4..3fa46faabf248bb315f59bd5b7857b1f
                      progress.tick();
                  }
              }
-@@ -310,6 +319,7 @@ class EntryCommand extends clipanion_1.Command {
+@@ -310,6 +324,7 @@ class EntryCommand extends clipanion_1.Command {
              }
              report.reportSeparator();
              await reportedProgress;

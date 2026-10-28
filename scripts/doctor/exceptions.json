@@ -703,8 +703,8 @@
     "id": "site-package-build-peer-01",
     "file": "site/package.json",
     "type": "error",
-    "message": "Unmet transitive peer dependency on typescript@*, via nextra@^4.6.1",
-    "source": "\"nextra\": \"^4.6.1\",",
+    "message": "Unmet transitive peer dependency on typescript@*, via nextra@catalog:",
+    "source": "\"nextra\": \"catalog:\",",
     "count": 1,
     "reason": "The private documentation app provides Nextra's TypeScript build peer through devDependencies; TypeScript is installed for the Next build and is not a runtime source import in Nextra.",
     "expires": "2026-12-31"

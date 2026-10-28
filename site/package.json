@@ -9,17 +9,17 @@
     "start": "next start"
   },
   "dependencies": {
-    "next": "^16.4.3",
-    "nextra": "^4.6.1",
+    "next": "catalog:",
+    "nextra": "catalog:",
     "nextra-theme-docs": "patch:nextra-theme-docs@npm%3A4.6.1#~/.yarn/patches/nextra-theme-docs-npm-4.6.1-0b59bd8bbb.patch",
-    "react": "^19.3.1",
-    "react-dom": "^19.3.1"
+    "react": "catalog:",
+    "react-dom": "catalog:"
   },
   "devDependencies": {
-    "@types/mdx": "^2.0.14",
-    "@types/node": "^25.9.9",
-    "@types/react": "^19.3.0",
-    "next-rspack": "16.4.3",
-    "typescript": "^5.9.3"
+    "@types/mdx": "catalog:",
+    "@types/node": "catalog:",
+    "@types/react": "catalog:",
+    "next-rspack": "catalog:",
+    "typescript": "catalog:"
   }
 }

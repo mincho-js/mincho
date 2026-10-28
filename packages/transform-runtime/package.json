@@ -46,12 +46,12 @@
   "prettier": "prettier-config-custom",
   "devDependencies": {
     "@mincho-js/debug-log": "workspace:^",
-    "@types/node": "^25.9.9",
+    "@types/node": "catalog:",
     "eslint-config-custom": "workspace:^",
     "prettier-config-custom": "workspace:^",
     "tsconfig-custom": "workspace:^",
-    "vite": "^7.3.7",
+    "vite": "catalog:",
     "vite-config-custom": "workspace:^",
-    "vitest": "^4.1.12"
+    "vitest": "catalog:"
   }
 }

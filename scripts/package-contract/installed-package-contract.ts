@@ -36,8 +36,8 @@ export function assertNoWorkspaceDependencySpecs(
     ...manifest.optionalDependencies
   })) {
     assertContract(
-      !/^(?:workspace:|file:|link:|portal:)/.test(specifier),
-      `${manifest.name} retains a workspace-path dependency: ${name} -> ${specifier}`
+      !/^(?:workspace:|catalog:|file:|link:|portal:)/.test(specifier),
+      `${manifest.name} retains a workspace-only dependency: ${name} -> ${specifier}`
     );
   }
 }
