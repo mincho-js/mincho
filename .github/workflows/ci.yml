@@ -131,7 +131,7 @@ jobs:
       - name: Setup Yarn download cache
         uses: ./.github/actions/node-setup
 
-      - name: Verify clean release payloads in isolated consumers
+      - name: Verify clean package release payloads in isolated consumers
         run: yarn verify:production-contract
 
       - name: Preserve packed package artifacts

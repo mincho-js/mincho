@@ -24,6 +24,12 @@ build caches, builds fresh release payloads, and runs the isolated consumers.
 The release build remains necessary to check the exact packed production output
 without depending on another job's workspace or build cache.
 
+`build:release` builds `packages/*`, the `@examples/shared-component` consumer
+fixture, and their build dependencies. The standalone `react-babel`, `react-swc`
+and `mincho-docs` application builds are covered by the workspace CI task graph
+and are excluded from release preparation. The shared-component fixture remains
+necessary because the installed consumers import its packed JavaScript and CSS.
+
 Workspace tests run in the `build` job, while workspace type checks and lint run
 in `typecheck`. The production contract does not repeat `test:all --force`;
 its installed-consumer runtime, declaration, bundling and package metadata checks

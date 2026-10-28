@@ -45,7 +45,7 @@
     "coverage": "yarn task coverage",
     "coverage:all": "yarn task coverage:all",
     "forallpackages": "yarn workspaces foreach -Aptv --no-private --verbose",
-    "build:release": "PACKAGE_PUBLISH=true yarn build && yarn forallpackages exec \"rimraf _release && yarn pack && mkdir _release && tar zxvf package.tgz --directory _release && rimraf package.tgz\"",
+    "build:release": "PACKAGE_PUBLISH=true yarn task build --filter='./packages/*' --filter=@examples/shared-component && yarn forallpackages exec \"rimraf _release && yarn pack && mkdir _release && tar zxvf package.tgz --directory _release && rimraf package.tgz\"",
     "changeset:version": "yarn changeset version",
     "publish": "yarn build:release && yarn check:package-contract && yarn check:vite-native-css-contract && yarn changeset publish",
     "g:clean": "cd $INIT_CWD && yarn run -T rimraf .cache _release dist coverage .turbo tsconfig.tsbuildinfo node_modules/.vite",
