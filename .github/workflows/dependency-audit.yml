@@ -22,5 +22,10 @@ jobs:
       - name: Setup
         uses: ./.github/actions/node-setup
 
-      - name: Check package audit
-        run: yarn npm audit --all
+      - name: Check security advisories
+        run: yarn audit
+
+      # Upstream maintenance notices do not suppress any security advisories.
+      - name: Report upstream deprecations
+        continue-on-error: true
+        run: yarn npm audit --all --recursive

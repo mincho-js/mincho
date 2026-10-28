@@ -23,6 +23,7 @@
     "lint:action": "yarn run -T eslint '.github/**/*.{js,yaml,yml}' --cache --cache-location .cache/eslint_action",
     "fix": "yarn fix:action && yarn task fix",
     "fix:action": "yarn lint:action --fix",
+    "audit": "yarn npm audit --all --recursive --no-deprecations",
     "check": "yarn task check",
     "check:all": "yarn task check:all",
     "check:peers": "yarn explain peer-requirements | grep -q '✘' && exit 1 || exit 0",
