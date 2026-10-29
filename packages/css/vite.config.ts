@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import type { ConfigEnv, Plugin } from "vite";
 import { NodeConfig } from "vite-config-custom";
+import { layoutCss } from "./src/layout/stylesheet.js";
 
 // == Vite Config =============================================================
 // https://vitejs.dev/config/#build-lib
@@ -13,6 +14,8 @@ export default (viteConfigEnv: ConfigEnv) => {
         entry: {
           index: join(packageDir, "src", "index.ts"),
           compat: join(packageDir, "src", "compat.ts"),
+          "layout/index": join(packageDir, "src/layout/index.ts"),
+          "layout/core": join(packageDir, "src/layout/core.ts"),
           "runtime/classname": join(packageDir, "src", "classname", "index.ts"),
           "defineRules/createDefineRulesCssRuntime": join(
             packageDir,
@@ -99,6 +102,17 @@ function pureRuntimeBoundaries(): Plugin {
     name: "mincho-pure-runtime-boundaries",
 
     generateBundle(output) {
+      this.emitFile({
+        type: "asset",
+        fileName: `${output.format === "es" ? "esm" : "cjs"}/layout/package.json`,
+        source: JSON.stringify({ sideEffects: false }) + "\n"
+      });
+      if (output.format === "es")
+        this.emitFile({
+          type: "asset",
+          fileName: "esm/layout.css",
+          source: layoutCss
+        });
       this.emitFile({
         type: "asset",
         fileName: `${output.format === "es" ? "esm" : "cjs"}/runtime/package.json`,

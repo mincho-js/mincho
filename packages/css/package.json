@@ -151,7 +151,28 @@
         "types": "./dist/cjs/rules/createPackedCompactRuntimeFn.d.cts",
         "default": "./dist/cjs/runtime/createPackedCompactRuntimeFn.cjs"
       }
-    }
+    },
+    "./layout": {
+      "import": {
+        "types": "./dist/esm/layout/index.d.ts",
+        "default": "./dist/esm/layout/index.mjs"
+      },
+      "require": {
+        "types": "./dist/cjs/layout/index.d.cts",
+        "default": "./dist/cjs/layout/index.cjs"
+      }
+    },
+    "./layout/core": {
+      "import": {
+        "types": "./dist/esm/layout/core.d.ts",
+        "default": "./dist/esm/layout/core.mjs"
+      },
+      "require": {
+        "types": "./dist/cjs/layout/core.d.cts",
+        "default": "./dist/cjs/layout/core.cjs"
+      }
+    },
+    "./layout.css": "./dist/esm/layout.css"
   },
   "publishConfig": {
     "directory": "_release/package"
@@ -186,6 +207,7 @@
     "eslint-config-custom": "workspace:^",
     "prettier-config-custom": "workspace:^",
     "tsconfig-custom": "workspace:^",
+    "tslib": "catalog:",
     "vite": "catalog:",
     "vite-config-custom": "workspace:^",
     "vitest": "catalog:"
