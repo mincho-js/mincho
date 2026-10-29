@@ -2055,6 +2055,7 @@ __metadata:
     react: "catalog:"
     react-dom: "catalog:"
     tsconfig-custom: "workspace:^"
+    tslib: "catalog:"
     vite: "catalog:"
     vite-config-custom: "workspace:^"
     vitest: "catalog:"

@@ -95,6 +95,16 @@
         "types": "./dist/cjs/stylesheets.d.cts",
         "default": "./dist/cjs/stylesheets.cjs"
       }
+    },
+    "./layout": {
+      "import": {
+        "types": "./dist/esm/layout/index.d.ts",
+        "default": "./dist/esm/layout/index.mjs"
+      },
+      "require": {
+        "types": "./dist/cjs/layout/index.d.cts",
+        "default": "./dist/cjs/layout/index.cjs"
+      }
     }
   },
   "files": [
@@ -128,6 +138,7 @@
     "react": "catalog:",
     "react-dom": "catalog:",
     "tsconfig-custom": "workspace:^",
+    "tslib": "catalog:",
     "vite": "catalog:",
     "vite-config-custom": "workspace:^",
     "vitest": "catalog:"

@@ -3,16 +3,11 @@
   "compilerOptions": {
     "rootDir": "./src",
     "baseUrl": "./",
+    "jsx": "react-jsx",
     "tsBuildInfoFile": "./.cache/typescript/tsbuildinfo-esm",
     "outDir": "./dist/esm",
     "declarationDir": "./dist/esm"
   },
-  "include": [
-    "src/**/*.ts",
-    "__tests__/**/*.ts"
-  ],
-  "exclude": [
-    "dist",
-    "_release"
-  ]
+  "include": ["src/**/*.ts", "src/**/*.tsx", "__tests__/**/*.ts"],
+  "exclude": ["dist", "_release"]
 }
