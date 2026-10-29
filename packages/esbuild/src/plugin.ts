@@ -54,6 +54,7 @@ import {
   resolveStaticCssEvalImportFromFileSystem,
   stripStaticCssEvalQuery
 } from "./staticCssEvalSourceProvider.js";
+import { appendInlineSourceMap } from "./inlineSourceMap.js";
 
 const integrationHelpers = {
   babelTransformSource,
@@ -632,7 +633,7 @@ export function minchoEsbuildPlugin({
 
         return {
           contents: map
-            ? `${code}\n//# sourceMappingURL=data:application/json;base64,${Buffer.from(JSON.stringify(map)).toString("base64")}`
+            ? appendInlineSourceMap(code, JSON.stringify(map))
             : code,
           loader,
           pluginData: {

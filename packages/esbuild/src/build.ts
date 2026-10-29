@@ -28,6 +28,7 @@ import {
   staleCssSharingOutputs,
   type MinchoCssManifest
 } from "./cssSharing.js";
+import { appendInlineSourceMap } from "./inlineSourceMap.js";
 
 type Remapper = (
   maps: SourceMapInput[],
@@ -554,7 +555,7 @@ function createObserver(
 
     return {
       ...result,
-      contents: `${edited.toString()}\n//# sourceMappingURL=data:application/json;base64,${Buffer.from(map).toString("base64")}\n`
+      contents: appendInlineSourceMap(edited.toString(), map) + "\n"
     };
   };
 
