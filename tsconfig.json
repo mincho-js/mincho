@@ -36,6 +36,9 @@
       "path": "packages/vite"
     },
     {
+      "path": "examples/layout-playground"
+    },
+    {
       "path": "examples/react-babel"
     },
     {

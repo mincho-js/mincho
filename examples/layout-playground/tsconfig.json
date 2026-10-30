@@ -1,0 +1,17 @@
+{
+  "files": [],
+  "references": [
+    {
+      "path": "../../packages/css"
+    },
+    {
+      "path": "../../packages/react"
+    },
+    {
+      "path": "../../packages/esbuild"
+    },
+    {
+      "path": "./tsconfig.app.json"
+    }
+  ]
+}

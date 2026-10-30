@@ -1,0 +1,35 @@
+{
+  "name": "@examples/layout-playground",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "check": "yarn run -T tsc --project tsconfig.app.json",
+    "lint": "yarn g:lint",
+    "test": "yarn g:test",
+    "test:browser": "MINCHO_LAYOUT_BROWSER=1 yarn g:test tests/browser.test.ts"
+  },
+  "prettier": "prettier-config-custom",
+  "dependencies": {
+    "@mincho-js/css": "workspace:^",
+    "@mincho-js/react": "workspace:^",
+    "@vanilla-extract/css": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:"
+  },
+  "devDependencies": {
+    "@mincho-js/esbuild": "workspace:^",
+    "@types/node": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "esbuild": "catalog:",
+    "eslint-config-custom": "workspace:^",
+    "playwright": "catalog:",
+    "prettier-config-custom": "workspace:^",
+    "tsconfig-custom": "workspace:^",
+    "vite": "catalog:",
+    "vitest": "catalog:"
+  }
+}

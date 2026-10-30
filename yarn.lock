@@ -1244,6 +1244,29 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@examples/layout-playground@workspace:examples/layout-playground":
+  version: 0.0.0-use.local
+  resolution: "@examples/layout-playground@workspace:examples/layout-playground"
+  dependencies:
+    "@mincho-js/css": "workspace:^"
+    "@mincho-js/esbuild": "workspace:^"
+    "@mincho-js/react": "workspace:^"
+    "@types/node": "catalog:"
+    "@types/react": "catalog:"
+    "@types/react-dom": "catalog:"
+    "@vanilla-extract/css": "catalog:"
+    esbuild: "catalog:"
+    eslint-config-custom: "workspace:^"
+    playwright: "catalog:"
+    prettier-config-custom: "workspace:^"
+    react: "catalog:"
+    react-dom: "catalog:"
+    tsconfig-custom: "workspace:^"
+    vite: "catalog:"
+    vitest: "catalog:"
+  languageName: unknown
+  linkType: soft
+
 "@examples/shared-component@workspace:^, @examples/shared-component@workspace:examples/shared-component":
   version: 0.0.0-use.local
   resolution: "@examples/shared-component@workspace:examples/shared-component"
@@ -1966,7 +1989,7 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@mincho-js/esbuild@workspace:packages/esbuild":
+"@mincho-js/esbuild@workspace:^, @mincho-js/esbuild@workspace:packages/esbuild":
   version: 0.0.0-use.local
   resolution: "@mincho-js/esbuild@workspace:packages/esbuild"
   dependencies:
@@ -11000,6 +11023,26 @@ __metadata:
     mlly: "npm:^1.7.4"
     pathe: "npm:^2.0.1"
   checksum: 10/6d491f2244597b24fb59a50e3c258f27da3839555d2a4e112b31bcf536e9359fc4edc98639cd74d2cf16fcd4269e5a09d99fc05d89e2acc896a2f027c2f6ec44
+  languageName: node
+  linkType: hard
+
+"playwright-core@npm:1.64.1":
+  version: 1.64.1
+  resolution: "playwright-core@npm:1.64.1"
+  bin:
+    playwright-core: cli.js
+  checksum: 10/4a173590bc784d8d5bfe2cace53ccc31316dac11475660b59cea24a2e833875d87183d41a957a20355301ac2b339a17940faaf0b42217156fa9c0c3cfdd4633c
+  languageName: node
+  linkType: hard
+
+"playwright@npm:^1.64.1":
+  version: 1.64.1
+  resolution: "playwright@npm:1.64.1"
+  dependencies:
+    playwright-core: "npm:1.64.1"
+  bin:
+    playwright: cli.js
+  checksum: 10/1096fa91e433f84c8677433a26052aa4f269bf0811aa793fe667d7053feb1c2852e9f10f9f0cced77fa2678f8580ed47192f29adbc9c027efa5ba87b38e23e50
   languageName: node
   linkType: hard
 

@@ -115,6 +115,12 @@ jobs:
       - name: Test
         run: yarn test
 
+      - name: Install layout test browser
+        run: yarn workspace @examples/layout-playground playwright install --with-deps chromium
+
+      - name: Verify layout geometry in Chromium
+        run: yarn workspace @examples/layout-playground test:browser
+
   production-contract:
     needs: pre_job
     if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
