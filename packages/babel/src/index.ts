@@ -26,6 +26,7 @@ import {
   removeUnusedGeneratedImports
 } from "./optimizations/runtimeCodegen.js";
 import { pruneRecipeMetadata } from "./optimizations/recipeMetadata.js";
+import { lowerLayoutJsx } from "./optimizations/layoutJsx.js";
 import { optimizeLocalScopedCx } from "./optimizations/localScopedCx.js";
 import {
   prepareCompilerClassStrategies,
@@ -73,6 +74,8 @@ export function minchoBabelPlugin(): PluginObj<PluginState> {
           }
 
           preprocess(path, prepareExtractCalls(path, state));
+          if (state.opts.optimize?.styledComponents === true)
+            lowerLayoutJsx(path);
           prepareCompilerClassStrategies(path, state);
           state.opts.jsxCssPropTransformed = preprocessJsxCssProp(path, state);
         },

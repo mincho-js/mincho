@@ -5,7 +5,7 @@ import {
   setAdapter
 } from "@vanilla-extract/css/adapter";
 import { endFileScope, setFileScope } from "@vanilla-extract/css/fileScope";
-import { box, hstack, item, stackLayout } from "./index.js";
+import { box, compileLayoutClass, hstack, item, stackLayout } from "./index.js";
 import { resolveLayout } from "./layout.js";
 
 const output: unknown[] = [];
@@ -63,6 +63,31 @@ describe("extracted className patterns", () => {
     expect(output).toEqual([]);
   });
 
+  it("reuses normalized compiled declarations within each file evaluation", () => {
+    const first = compileLayoutClass("HStack", { width: 400, gap: 8 });
+    expect(
+      compileLayoutClass("Stack", {
+        gap: 8,
+        width: 400,
+        axis: "horizontal",
+        padding: 0
+      })
+    ).toBe(first);
+    const second = compileLayoutClass("Item", { width: 80 });
+    expect(
+      compileLayoutClass("Item", { width: 80, height: "hug-contents" })
+    ).toBe(second);
+    expect(output).toHaveLength(2);
+    endFileScope();
+    setFileScope("src/toolbar.css.ts", "layout-test");
+    compileLayoutClass("Item", { width: 80 });
+    expect(output).toHaveLength(3);
+    endFileScope();
+    setFileScope("src/other.css.ts", "layout-test");
+    expect(compileLayoutClass("Item", { width: 80 })).not.toBe(second);
+    expect(output).toHaveLength(4);
+  });
+
   it("uses the same fractional stretch factors in standalone and compiled items", () => {
     item(
       { width: { mode: "stretch", weight: 0.2 } },
@@ -74,5 +99,27 @@ describe("extracted className patterns", () => {
     expect(output[0]).toMatchObject({
       rule: { flexGrow: Number(style["--mincho-layout-grow-w"]) }
     });
+  });
+
+  it("compiles the React renderer's declarations into one attribute-scoped class", () => {
+    const props = { width: "stretch", gapBefore: 20, shrink: true } as const;
+    expect(compileLayoutClass("Item", props)).toEqual(expect.any(String));
+    const { style } = resolveLayout("Item", props);
+    const rule = (
+      output[0] as {
+        rule: { selectors: Record<string, Record<string, unknown>> };
+      }
+    ).rule.selectors["[data-mincho-layout]&"];
+    expect(rule.vars).toEqual(
+      Object.fromEntries(
+        Object.entries(style)
+          .filter(([key]) => key.startsWith("--"))
+          .map(([key, value]) => [key, String(value)])
+      )
+    );
+    expect(rule).toMatchObject({ position: "static", padding: 0 });
+    expect(() => compileLayoutClass("Box", { gapBefore: 20 })).toThrow(
+      "E_LAYOUT_CAPABILITY"
+    );
   });
 });

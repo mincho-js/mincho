@@ -1,5 +1,6 @@
 import { style as css } from "@vanilla-extract/css";
 import type { StyleRule } from "@vanilla-extract/css";
+import { getFileScope } from "@vanilla-extract/css/fileScope";
 import { fail } from "./diagnostics.js";
 import {
   nativeBox,
@@ -7,6 +8,8 @@ import {
   normalizeBox,
   normalizeStack
 } from "./normalize.js";
+import { resolveLayout } from "./layout.js";
+import type { LayoutKind, LayoutProps } from "./layout.js";
 import { nativeItems } from "./relations.js";
 import type {
   BoxOptions,
@@ -83,3 +86,44 @@ export function stackLayout(
     )
   };
 }
+
+/**
+ * @internal Emitted by the Mincho compiler for static Layout JSX. Returns a
+ * class with the same parent-independent declarations the React renderer
+ * writes inline; `@mincho-js/css/layout.css` applies them for the actual
+ * parent. The attribute keeps them above single-class decoration.
+ */
+export function compileLayoutClass(
+  kind: LayoutKind,
+  props: LayoutProps,
+  debugId?: string
+): string {
+  const { style } = resolveLayout(kind, props);
+  // File-scope objects belong to one evaluation. Never reuse a class from an
+  // earlier build, or from a different lazy CSS asset that may not be loaded.
+  const scope = getFileScope();
+  let classes = compiledClasses.get(scope);
+  if (!classes) compiledClasses.set(scope, (classes = new Map()));
+  const key = JSON.stringify(
+    Object.entries(style).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+  );
+  const existing = classes.get(key);
+  if (existing) return existing;
+  const vars: Record<string, string> = {};
+  const rule: Record<string, unknown> = { vars };
+  for (const [key, value] of Object.entries(style)) {
+    if (key.startsWith("--")) vars[key] = String(value);
+    else rule[key] = value;
+  }
+  const className = css(
+    { selectors: { "[data-mincho-layout]&": rule as StyleRule } },
+    debugId
+  );
+  classes.set(key, className);
+  return className;
+}
+
+const compiledClasses = new WeakMap<
+  ReturnType<typeof getFileScope>,
+  Map<string, string>
+>();

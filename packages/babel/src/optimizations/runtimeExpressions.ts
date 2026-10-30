@@ -1,3 +1,4 @@
+import { flattenJsxElement } from "./intrinsicElements.js";
 import { recipeFactoryKind, decodeRecipePayload } from "./recipeFactories.js";
 import { compactRecipes } from "./compactRecipes.js";
 import {
@@ -1491,24 +1492,20 @@ export function applyRuntimeExpressions(options: {
 
               for (const { path, element } of matches.reverse()) {
                 const opening = path.node.openingElement;
-                opening.name = t.jsxIdentifier(element.tag);
-
-                if (path.node.closingElement)
-                  path.node.closingElement.name = t.jsxIdentifier(element.tag);
-
-                opening.attributes = opening.attributes.filter(
+                const attributes = opening.attributes.filter(
                   (attribute) =>
                     !t.isJSXAttribute(attribute) ||
                     !t.isJSXIdentifier(attribute.name) ||
                     (attribute.name.name !== "className" &&
                       !element.variants.includes(attribute.name.name))
                 );
-                opening.attributes.push(
+                attributes.push(
                   t.jsxAttribute(
                     t.jsxIdentifier("className"),
                     t.jsxExpressionContainer(t.stringLiteral(element.className))
                   )
                 );
+                flattenJsxElement(path, element.tag, attributes);
               }
 
               applyStyledRuntime(

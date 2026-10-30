@@ -21,7 +21,15 @@ import {
   type UserConfig,
   type ResolvedConfig
 } from "vite";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  it,
+  vi
+} from "vitest";
 import { minchoVitePlugin, type MinchoVitePluginOptions } from "./index.js";
 import { createDistChunkCss } from "./distChunkCss.js";
 import * as cssOptimizationGuard from "./cssOptimizationGuard.js";
@@ -35,12 +43,12 @@ afterEach(async () => {
   );
 });
 
-async function fixture(extra: Record<string, string> = {}) {
+async function fixture(extra: Record<string, string> = {}, cleanup = true) {
   const parent = join(process.cwd(), ".cache");
   await mkdir(parent, { recursive: true });
 
   const root = await mkdtemp(join(parent, "dist-chunk-"));
-  roots.push(root);
+  if (cleanup) roots.push(root);
 
   const files = {
     "package.json":
@@ -159,26 +167,37 @@ async function compile(
 }
 
 describe("component-system production passes", () => {
-  it.each([
-    {},
-    { pruneRecipes: true, pruneKeyframes: false },
-    { pruneRecipes: false, pruneKeyframes: true }
-  ])(
-    "skips proof analysis and preserves output with no captured resources: %j",
-    async (optimize) => {
-      const root = await fixture({
-        "main.js": `import {css,createVar} from '@mincho-js/css';
+  describe("without captured resources", () => {
+    let root: string;
+    let baseline: string;
+
+    beforeAll(async () => {
+      root = await fixture(
+        {
+          "main.js": `import {css,createVar} from '@mincho-js/css';
         const token=createVar(); export const a=css({vars:{[token]:'red'},color:'black'});
         export const b=css({color:'black'});`
-      });
-
-      const baseline = await compile(root, {
+        },
+        false
+      );
+      const result = await compile(root, {
         appCss: { optimize: { pruneRecipes: false, pruneKeyframes: false } }
       });
+      baseline = result.text;
+    }, 20_000);
 
+    afterAll(async () => {
+      if (root) await rm(root, { recursive: true, force: true });
+    });
+
+    it.each([
+      {},
+      { pruneRecipes: true, pruneKeyframes: false },
+      { pruneRecipes: false, pruneKeyframes: true }
+    ])("skips proof analysis and preserves output: %j", async (optimize) => {
       const result = await compile(root, { appCss: { optimize } });
 
-      expect(result.text).toBe(baseline.text);
+      expect(result.text).toBe(baseline);
       expect(
         result.events.some(
           (event) => event.phase === "private-resource-analysis"
@@ -192,8 +211,8 @@ describe("component-system production passes", () => {
         reason: "no-candidates",
         candidates: { recipes: 0, keyframes: 0 }
       });
-    }
-  );
+    });
+  });
 
   it.each(["cssom", "external", "postcss"])(
     "skips private proofs behind the %s guard",

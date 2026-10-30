@@ -46,6 +46,16 @@ export const builtInExtractionCalls: Readonly<
   // Internal helper emitted only after the private class/owner proof. Keep it
   // in the shared extraction matcher so every adapter uses the same sidecar.
   "@mincho-js/css/defineRules/registry": ["compilePrivateDefineRulesClass"],
+  // Emitted only by the layout JSX lowering.
+  "@mincho-js/css/layout": [
+    "box",
+    "stack",
+    "hstack",
+    "vstack",
+    "item",
+    "stackLayout",
+    "compileLayoutClass"
+  ],
   "@vanilla-extract/css": vanillaExtractAPIs,
   "@vanilla-extract/recipes": ["recipe"],
   "@vanilla-extract/sprinkles": [

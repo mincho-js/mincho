@@ -51,6 +51,7 @@ export interface PluginOptions {
     defineRulesCxConditions?: boolean;
     pureFunctions?: boolean;
     staticRecipes?: boolean;
+    /** Flatten proven styled and Layout components to intrinsic elements. */
     styledComponents?: boolean;
     runtimeCodegen?: boolean;
     jsxRuntimeGuards?: boolean;

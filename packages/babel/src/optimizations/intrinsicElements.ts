@@ -1,3 +1,5 @@
+import { types as t, type NodePath } from "@babel/core";
+
 // Explicit platform elements; custom elements and components can forward props elsewhere.
 const intrinsicElements = new Set(
   (
@@ -8,4 +10,16 @@ const intrinsicElements = new Set(
 
 export function isIntrinsicElement(name: string): boolean {
   return intrinsicElements.has(name);
+}
+
+/** Shared host replacement after each component adapter proves its props safe. */
+export function flattenJsxElement(
+  path: NodePath<t.JSXElement>,
+  tag: string,
+  attributes: Array<t.JSXAttribute | t.JSXSpreadAttribute>
+): void {
+  path.node.openingElement.name = t.jsxIdentifier(tag);
+  path.node.openingElement.attributes = attributes;
+  if (path.node.closingElement)
+    path.node.closingElement.name = t.jsxIdentifier(tag);
 }
