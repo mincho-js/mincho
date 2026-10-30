@@ -24,6 +24,24 @@ function assertClasses(css, classNames, label) {
   }
 }
 
+// These layout fixtures emit unconditional class selectors only.
+function classRules(css, classNames) {
+  const classes = new Set(
+    classNames
+      .split(/\s+/)
+      .filter(Boolean)
+      .map((name) => `.${name}`)
+  );
+  return [
+    ...css.replace(/\/\*[\s\S]*?\*\//g, "").matchAll(/([^{}]+)\{([^{}]*)\}/g)
+  ]
+    .filter(([, selectors]) =>
+      selectors.split(",").some((selector) => classes.has(selector.trim()))
+    )
+    .map(([, , body]) => body)
+    .join("\n");
+}
+
 for (const mode of ["import", "require"]) {
   const [esbuild, minchoVite] = await Promise.all(
     ["@mincho-js/esbuild", "@mincho-js/vite"].map((name) =>
@@ -35,6 +53,8 @@ for (const mode of ["import", "require"]) {
     "vanilla-extract",
     "extract-calls",
     "extract-calls-commonjs",
+    "layout",
+    "layout-calls",
     "commonjs-conditions"
   ]) {
     const root = join(import.meta.dirname, "../extraction", name);
@@ -78,6 +98,9 @@ for (const mode of ["import", "require"]) {
     ];
 
     for (const vanilla of [false, true]) {
+      // Authored .css.ts modules are owned by the vanilla-extract Vite plugin.
+      // Mincho itself owns the virtual sidecars for ordinary TS/TSX calls.
+      if (name === "layout" && !vanilla) continue;
       const viteResult = await vite({
         root,
         configFile: false,
@@ -115,9 +138,45 @@ for (const mode of ["import", "require"]) {
     }
 
     for (const { code, css, label } of outputs) {
+      if (name === "layout" || name === "layout-calls") {
+        assert.doesNotMatch(
+          code,
+          /normalizeBox|normalizeRelations|appendCss/,
+          label
+        );
+      }
       const runtime = evaluate(code);
 
-      if (conditions) {
+      if (name === "layout" || name === "layout-calls") {
+        assertClasses(css, runtime.toolbar, label);
+        assertClasses(css, runtime.staticLayout.className, label);
+        for (const id of ["a", "b"]) {
+          const className = runtime.staticLayout.itemClassNames[id];
+          assert.equal(
+            typeof className,
+            "string",
+            `${label}: missing item ${id}`
+          );
+          assert.match(className, /\S/, `${label}: empty class for item ${id}`);
+          assertClasses(css, className, label);
+        }
+        assert.match(css, /column-gap:\s*16px/, label);
+        assert.match(
+          classRules(css, runtime.staticLayout.itemClassNames.a),
+          /margin-inline-end:\s*8px(?:;|\s*$)/,
+          label
+        );
+        assert.doesNotMatch(
+          classRules(css, runtime.staticLayout.itemClassNames.b),
+          /margin-inline-end:/,
+          label
+        );
+        assert.doesNotMatch(
+          code,
+          /normalizeBox|normalizeRelations|react-dom|appendCss/,
+          label
+        );
+      } else if (conditions) {
         assert.notEqual(runtime.imported, runtime.required, label);
         assertClasses(css, `${runtime.imported} ${runtime.required}`, label);
         assert.match(css, /color:\s*red/, label);

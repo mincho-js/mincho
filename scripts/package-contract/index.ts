@@ -289,6 +289,19 @@ async function main(): Promise<void> {
         `[package-contract] ${linker}: ESM/CJS imports and strict declarations passed`
       );
 
+      await runNode(
+        [
+          join(
+            installedPackageDirectory(consumerRoot, "typescript"),
+            "bin",
+            "tsc"
+          ),
+          "--project",
+          "fixture/modules/tsconfig.layout-node10.json"
+        ],
+        join(consumerRoot, "fixture", "modules")
+      );
+
       for (const minified of [false, true]) {
         const output = minified ? "dist-minified" : "dist";
         await runNode(

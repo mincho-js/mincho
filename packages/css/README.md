@@ -1600,3 +1600,8 @@ We welcome contributions! Please see our [Contributing Guide](/CONTRIBUTING.md) 
 ## License
 
 This project is licensed under the [MIT License](/LICENSE).
+
+## Layout
+
+Build-time layout patterns are available from `@mincho-js/css/layout`.
+See the [Layout components guide](https://github.com/mincho-js/mincho/blob/main/packages/react/layout/README.md).

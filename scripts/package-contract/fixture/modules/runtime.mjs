@@ -5,6 +5,24 @@ import { setImmediate } from "node:timers/promises";
 
 const require = createRequire(import.meta.url);
 
+for (const load of [
+  () => import("@mincho-js/react/layout"),
+  () => require("@mincho-js/react/layout")
+]) {
+  const layout = await load();
+  const { createElement } = await import("react");
+  const { renderToString } = await import("react-dom/server");
+  const html = renderToString(
+    createElement(
+      layout.HStack,
+      { width: 400, gap: 16 },
+      createElement(layout.Item, { width: 100 }, "A")
+    )
+  );
+  assert.match(html, /column-gap:16px/);
+  assert.doesNotMatch(html, /gap="/);
+}
+
 if (process.versions.pnp) {
   assert.throws(
     () => require.resolve("@babel/parser"),

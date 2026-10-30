@@ -530,6 +530,26 @@
     "expires": "2026-12-31"
   },
   {
+    "id": "contract-layout-node10-react-import",
+    "file": "scripts/package-contract/fixture/modules/layout-node10.ts",
+    "type": "error",
+    "message": "Undeclared dependency on @mincho-js/react",
+    "source": "import { HStack, type BoxProps, type ItemProps } from \"@mincho-js/react/layout\";",
+    "count": 1,
+    "reason": "This Node10-resolution fixture is copied into isolated npm and strict PnP consumers whose generated manifests declare the packed React package; it is not executed in the repository root workspace.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "contract-layout-node10-react-types-import",
+    "file": "scripts/package-contract/fixture/modules/layout-node10.ts",
+    "type": "error",
+    "message": "Undeclared dependency on react",
+    "source": "import type { ComponentPropsWithRef } from \"react\";",
+    "count": 1,
+    "reason": "This Node10-resolution fixture is copied into isolated npm and strict PnP consumers whose generated manifests declare React and its types; the repository root does not execute this fixture.",
+    "expires": "2026-12-31"
+  },
+  {
     "id": "contract-fixture-esbuild-dynamic-css-import-01",
     "file": "scripts/package-contract/fixture/esbuild/src/dynamic.css.ts",
     "type": "error",

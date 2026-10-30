@@ -216,3 +216,27 @@ const themeStorage: MinchoThemePersistence = {
 void themeControllerFactory;
 void ssrThemeResolver;
 void themeStorage;
+
+import {
+  hstack as layoutPattern,
+  type Padding as LayoutPadding
+} from "@mincho-js/css/layout";
+import {
+  HStack as LayoutStack,
+  Item as LayoutItem,
+  type BoxProps as LayoutBoxProps
+} from "@mincho-js/react/layout";
+import { normalizeStack as normalizeLayoutStack } from "@mincho-js/css/layout/core";
+const layoutPadding: LayoutPadding = { inline: 16, block: 8 };
+const layoutAnchor: LayoutBoxProps<"a"> = { as: "a", href: "/", width: 100 };
+// @ts-expect-error Layout padding forms are exclusive.
+const mixedLayoutPadding: LayoutPadding = { inline: 16, top: 8 };
+void [
+  layoutPattern,
+  LayoutStack,
+  LayoutItem,
+  normalizeLayoutStack,
+  layoutPadding,
+  layoutAnchor,
+  mixedLayoutPadding
+];

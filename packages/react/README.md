@@ -574,3 +574,8 @@ When `jsxCssProp: true` is enabled, unsupported css prop cases fail during the t
 Static evaluation failures use diagnostics that start with `Cannot statically evaluate css prop value`, followed by the unsupported reason. Reasons include dynamic or wrong-shape spread operands, nested function/factory/call values, optional calls, dynamic member paths, dynamic or nullish optional member paths, runtime or non-primitive template interpolation, dynamic import graphs, unsupported source kinds such as `external-no-source` or `provider-virtual-no-source`, and unsupported dynamic CommonJS.
 
 The same `jsxCssProp: true` transform flag is exposed through `@mincho-js/babel`, `@mincho-js/integration`, `@mincho-js/vite`, and `@mincho-js/esbuild`.
+
+## Layout
+
+React DOM layout components are available from `@mincho-js/react/layout`.
+See the [Layout components guide](./layout/README.md).

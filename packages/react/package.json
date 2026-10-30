@@ -110,7 +110,8 @@
   "files": [
     "dist",
     "src",
-    "**/package.json"
+    "**/package.json",
+    "layout/README.md"
   ],
   "scripts": {
     "clean": "yarn g:clean",
