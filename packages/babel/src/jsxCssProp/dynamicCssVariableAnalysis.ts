@@ -279,7 +279,14 @@ function collectDynamicCssVariableObjectExpression(options: {
       variableIdentifier: t.identifier("minchoDynamicCssVariable")
     };
 
-    nextProperty.value = leaf.variableIdentifier;
+    nextProperty.value =
+      valueFragment.kind === "important-value"
+        ? t.binaryExpression(
+            "+",
+            leaf.variableIdentifier,
+            t.stringLiteral(" !important")
+          )
+        : leaf.variableIdentifier;
     properties.push(nextProperty);
     leaves.push(leaf);
   }
@@ -326,6 +333,9 @@ export function createDynamicCssVariableDeclarationBranchExpression(options: {
   readonly expression: t.Expression;
   readonly scope: NodePath<t.JSXOpeningElement>["scope"];
 }): DynamicCssVariableDeclarationBranchExpression | null {
+  // Independent conditionals expand multiplicatively. Fail closed before
+  // cloning the tree when its finite static alternatives exceed our budget.
+  if (cssBranchCount(options.expression) > 64) return null;
   let expression =
     createDynamicCssVariableDeclarationBranchExpressionOnce(options);
 
@@ -348,6 +358,41 @@ export function createDynamicCssVariableDeclarationBranchExpression(options: {
   }
 
   return expression;
+}
+
+function cssBranchCount(expression: t.Expression, depth = 0): number {
+  if (depth > 64) return 65;
+  const node = unwrapTransparentCssRuleExpression(expression);
+  if (t.isConditionalExpression(node))
+    return Math.min(
+      65,
+      cssBranchCount(node.consequent, depth + 1) +
+        cssBranchCount(node.alternate, depth + 1)
+    );
+  if (t.isLogicalExpression(node))
+    return Math.min(
+      65,
+      cssBranchCount(node.left, depth + 1) +
+        cssBranchCount(node.right, depth + 1)
+    );
+  const children = t.isArrayExpression(node)
+    ? node.elements
+    : t.isObjectExpression(node)
+      ? node.properties.map((property) =>
+          t.isObjectProperty(property)
+            ? property.value
+            : t.isSpreadElement(property)
+              ? property.argument
+              : null
+        )
+      : [];
+  let count = 1;
+  for (const child of children) {
+    if (child && t.isExpression(child))
+      count *= cssBranchCount(child, depth + 1);
+    if (count > 64) return 65;
+  }
+  return count;
 }
 
 function createDynamicCssVariableDeclarationBranchExpressionOnce(options: {
@@ -597,6 +642,12 @@ function createDynamicCssVariableArrayDeclarationBranchExpression(options: {
   readonly expression: t.ArrayExpression;
   readonly scope: NodePath<t.JSXOpeningElement>["scope"];
 }): DynamicCssVariableDeclarationBranchExpression | null {
+  // Arrays of class values already have their own cx lowering. Only distribute
+  // arrays whose elements are visible rule shapes, preserving that boundary.
+  const canLift = options.expression.elements.every(
+    (element) =>
+      element && t.isExpression(element) && isLiteralArrayRule(element)
+  );
   for (
     let elementIndex = 0;
     elementIndex < options.expression.elements.length;
@@ -608,7 +659,19 @@ function createDynamicCssVariableArrayDeclarationBranchExpression(options: {
       return null;
     }
 
+    const directBranch = !canLift
+      ? null
+      : t.isConditionalExpression(element)
+        ? element
+        : t.isLogicalExpression(element, { operator: "&&" })
+          ? t.conditionalExpression(
+              t.cloneNode(element.left),
+              t.cloneNode(element.right),
+              t.objectExpression([])
+            )
+          : null;
     const branchExpression =
+      directBranch ??
       createDynamicCssVariableDeclarationBranchExpression({
         expression: element,
         scope: options.scope
@@ -624,6 +687,25 @@ function createDynamicCssVariableArrayDeclarationBranchExpression(options: {
   }
 
   return null;
+}
+
+function isLiteralArrayRule(expression: t.Expression): boolean {
+  const value = unwrapTransparentCssRuleExpression(expression);
+  if (t.isObjectExpression(value)) return true;
+  if (t.isArrayExpression(value))
+    return value.elements.every(
+      (element) =>
+        element && t.isExpression(element) && isLiteralArrayRule(element)
+    );
+  if (t.isConditionalExpression(value))
+    return (
+      isLiteralArrayRule(value.consequent) &&
+      isLiteralArrayRule(value.alternate)
+    );
+  return (
+    t.isLogicalExpression(value, { operator: "&&" }) &&
+    isLiteralArrayRule(value.right)
+  );
 }
 
 function createDynamicCssVariableDeclarationValueBranchExpression(options: {
@@ -828,6 +910,15 @@ export function collectDynamicCssVariableValueFragment(options: {
 }): DynamicCssVariableValueFragment | null {
   const expression = unwrapTransparentCssRuleExpression(options.expression);
 
+  const withoutPriority = stripDynamicCssPriority(expression);
+  if (withoutPriority) {
+    const value = collectDynamicCssVariableValueFragment({
+      ...options,
+      expression: withoutPriority
+    });
+    return value ? { kind: "important-value", value } : null;
+  }
+
   if (t.isConditionalExpression(expression)) {
     const consequent = collectDynamicCssVariableValueFragment({
       expression: expression.consequent,
@@ -841,6 +932,26 @@ export function collectDynamicCssVariableValueFragment(options: {
 
     if (!consequent || !alternate) {
       return null;
+    }
+
+    if (
+      consequent.kind === "important-value" ||
+      alternate.kind === "important-value"
+    ) {
+      if (
+        consequent.kind !== "important-value" ||
+        alternate.kind !== "important-value"
+      )
+        return null;
+      return {
+        kind: "important-value",
+        value: {
+          kind: "conditional-leaf",
+          test: t.cloneNode(expression.test),
+          consequent: consequent.value,
+          alternate: alternate.value
+        }
+      };
     }
 
     return {
@@ -887,7 +998,7 @@ function collectDynamicCssVariableSuffixValueFragment(options: {
     !tail ||
     !t.isExpression(valueExpression)
   ) {
-    return null;
+    return collectGeneralDynamicCssTemplate(options);
   }
 
   const prefix = head.value.cooked ?? head.value.raw;
@@ -901,7 +1012,7 @@ function collectDynamicCssVariableSuffixValueFragment(options: {
       scope: options.scope
     })
   ) {
-    return null;
+    return collectGeneralDynamicCssTemplate(options);
   }
 
   return {
@@ -909,6 +1020,53 @@ function collectDynamicCssVariableSuffixValueFragment(options: {
     expression: t.cloneNode(valueExpression),
     suffix
   };
+}
+
+function stripDynamicCssPriority(
+  expression: t.Expression
+): t.Expression | undefined {
+  const priority = /\s*!important\s*$/i;
+  if (
+    t.isBinaryExpression(expression, { operator: "+" }) &&
+    t.isStringLiteral(expression.right) &&
+    priority.test(expression.right.value)
+  ) {
+    return t.binaryExpression(
+      "+",
+      t.cloneNode(expression.left as t.Expression),
+      t.stringLiteral(expression.right.value.replace(priority, ""))
+    );
+  }
+  if (t.isTemplateLiteral(expression)) {
+    const last = expression.quasis.at(-1);
+    if (last?.value.cooked && priority.test(last.value.cooked)) {
+      const result = t.cloneNode(expression, true);
+      const tail = result.quasis.at(-1)!;
+      tail.value = {
+        raw: tail.value.raw.replace(priority, ""),
+        cooked: tail.value.cooked!.replace(priority, "")
+      };
+      return result;
+    }
+  }
+  return undefined;
+}
+
+function collectGeneralDynamicCssTemplate(options: {
+  readonly expression: t.TemplateLiteral;
+  readonly scope: NodePath<t.JSXOpeningElement>["scope"];
+}): DynamicCssVariableValueFragment | null {
+  return options.expression.expressions.length > 0 &&
+    options.expression.expressions.every(
+      (expression) =>
+        t.isExpression(expression) &&
+        isSupportedDynamicCssVariableDirectValueExpression({
+          expression,
+          scope: options.scope
+        })
+    )
+    ? { kind: "direct-value", expression: options.expression }
+    : null;
 }
 
 // CSS unit suffixes accepted by one-hole dynamic templates such as `${gap}px`.

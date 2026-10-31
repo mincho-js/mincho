@@ -97,6 +97,10 @@ export type NormalizedJsxCssPropElement = {
 
 export type DynamicCssVariableValueFragment =
   | {
+      readonly kind: "important-value";
+      readonly value: DynamicCssVariableValueFragment;
+    }
+  | {
       readonly kind: "direct-value";
       readonly expression: t.Expression;
     }

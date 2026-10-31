@@ -75,7 +75,7 @@ for (const format of ["esm", "cjs"])
       output.rule(true).props.className,
       output.rule(false).props.className
     );
-    assert.deepEqual(Object.values(output.width(0).props.style), [0]);
+    assert.deepEqual(Object.values(output.width(0).props.style), ["0px"]);
 
     const events = [];
     const mapped = output.propsDynamic({

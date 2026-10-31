@@ -530,7 +530,16 @@ function preserveArrayDynamicLeafValues(
       continue;
     }
 
-    elements.push(preserveDynamicLeafValues(rawElement, reducedElement));
+    // A proved literal rule alias is structural. Retaining its identifier here
+    // hides the shape from conditional-array lowering; dynamic leaves still
+    // retain their original evaluation sites below.
+    elements.push(
+      (t.isObjectExpression(reducedElement) ||
+        t.isArrayExpression(reducedElement)) &&
+        isStaticCssShapeExpression(reducedElement)
+        ? t.cloneNode(reducedElement)
+        : preserveDynamicLeafValues(rawElement, reducedElement)
+    );
     reducedIndex += 1;
   }
 

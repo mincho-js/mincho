@@ -374,7 +374,7 @@ describe("minchoBabelPlugin", () => {
       `,
       { jsxCssProp: true, staticCssEvalProvider: provider }
     );
-    expect(scalarExpression.code).toContain("_vx(button)");
+    expect(scalarExpression.code).toContain('_vx(button, "px", true)');
     expect(scalarExpression.result[1]).not.toContain("color: button");
   });
 
@@ -3051,7 +3051,7 @@ describe("minchoBabelPlugin", () => {
       expect(code).not.toContain(" css=");
       expect(code).not.toContain("_css(");
       expect(code).toMatch(
-        /style=\{\{\s+\[_\$mincho\$\$App\w*ColorVarKey\d*\]: _vx\(props\.color\)\s+\}\}/
+        /style=\{\{\s+\[_\$mincho\$\$App\w*ColorVarKey\d*\]: _vx\(props\.color, "px", true\)\s+\}\}/
       );
     });
 
@@ -3109,8 +3109,8 @@ describe("minchoBabelPlugin", () => {
       expect(code).not.toContain("...override");
       expect(code).not.toContain("[colorKey]");
       expect(code).not.toContain("_css(");
-      expect(code).toContain("_vx(props.color)");
-      expect(code).toContain("_vx(props.margin)");
+      expect(code).toContain('_vx(props.color, "px", true)');
+      expect(code).toContain('_vx(props.margin, "px", true)');
     });
 
     it("routes static object spreads through css prop partial evaluator dynamic-leaf mode", () => {
@@ -3131,7 +3131,7 @@ describe("minchoBabelPlugin", () => {
       expect(code).not.toContain("...base");
       expect(code).not.toContain("style={{ color: props.color }}");
       expect(code).toMatch(
-        /style=\{\{\s+\[_\$mincho\$\$App\w*ColorVarKey\d*\]: _vx\(props\.color\)\s+\}\}/
+        /style=\{\{\s+\[_\$mincho\$\$App\w*ColorVarKey\d*\]: _vx\(props\.color, "px", true\)\s+\}\}/
       );
     });
 
@@ -3155,7 +3155,7 @@ describe("minchoBabelPlugin", () => {
       expect(code).not.toContain("[keys.foreground]");
       expect(code).not.toContain("style={{ color: props.color }}");
       expect(code).toMatch(
-        /style=\{\{\s+\[_\$mincho\$\$App\w*ColorVarKey\d*\]: _vx\(props\.color\)\s+\}\}/
+        /style=\{\{\s+\[_\$mincho\$\$App\w*ColorVarKey\d*\]: _vx\(props\.color, "px", true\)\s+\}\}/
       );
     });
 
@@ -3221,7 +3221,7 @@ describe("minchoBabelPlugin", () => {
       expect(code).toContain("className={_cx(activeClass)}");
       expect(code).toContain("css: _minchoCssProp");
       expect(code).toMatch(
-        /style=\{\{\s+\[_\$mincho\$\$App\w*ColorVarKey\d*\]: _vx\(propsInput\.color\)\s+\}\}/
+        /style=\{\{\s+\[_\$mincho\$\$App\w*ColorVarKey\d*\]: _vx\(propsInput\.color, "px", true\)\s+\}\}/
       );
       expect(result[1]).toContain('color: "red"');
       expect(result[1]).toContain('_css(makeRule("blue"))');

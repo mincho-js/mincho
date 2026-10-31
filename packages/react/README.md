@@ -139,6 +139,26 @@ Dynamic declaration leaves support direct runtime values, conditional leaves, an
 
 When a dynamic leaf is `null`, `undefined`, or boolean, generated code writes the `vx` fallback value so a child declaration does not inherit an older parent CSS custom property. This matches the inheritance-safety intent used by Compiled and StyleX, but Mincho does not claim or emit StyleX-style `@property` generation for this path.
 
+Numeric runtime lengths use the same px conversion as static rules: `width: props.width`
+with `props.width = 10` produces `10px`. Strings such as `"2rem"` and `"auto"`,
+unitless properties such as `lineHeight`, and custom properties retain their values.
+The generated helper's numeric-only unit argument is internal compiler support.
+
+General untagged templates with supported scalar expressions also work, including
+`` `calc(${props.width}px + ${props.gap}rem)` ``. Their text follows JavaScript string
+interpolation; the optimized one-hole unit form additionally handles absent values
+through the fallback above. A statically visible trailing ` !important`, for example
+`props.color + " !important"`, is emitted on the CSS declaration rather than inside
+the custom property. A priority embedded only in an opaque runtime string is not
+interpreted as a declaration priority.
+
+Imported scalar leaves that cannot be proved static stay at runtime, for both ESM
+and CommonJS. This includes mutable exports, getters, enums and unsupported factory
+calls. Side-effect dependencies participate in mutation checks and invalidation.
+Unknown whole-rule shapes still require a diagnostic, and imported initializers
+cannot read a binding before its initialization. Unsupported provider formats
+such as WebAssembly retain their diagnostics rather than becoming CSS leaves.
+
 Static-shape CSS rule branches can also use branch-local dynamic declarations when each CSS branch is a literal object or array shape:
 
 ```tsx
@@ -150,6 +170,11 @@ Static-shape CSS rule branches can also use branch-local dynamic declarations wh
 
 Statically shaped conditional object fragments are also valid when each possible fragment has a visible static shape, for example `{ ...(active && { color: props.color }) }` or `{ ...(tone === "danger" ? { color: props.color } : { backgroundColor: props.background }) }`. This follows Devup UI-style branch splitting while preserving Mincho's static-shape gate.
 
+Arrays support the same conditional fragments, such as
+`css={[base, active && { width: props.width }]}`, when `base` is a proved literal
+rule. The compiler bounds branch expansion to 64 static alternatives; opaque
+runtime rule objects and unbounded combinations remain unsupported.
+
 For conditional and logical branches, the branch predicate or logical left operand is evaluated once and reused for both `className` and `style`. Inactive branch dynamic declaration values are not read.
 
 Generated branch artifacts may export separate CSS variables per branch even when declaration keys match; treat the raw keys as opaque implementation details.
@@ -158,7 +183,7 @@ Under this model, the generated `.css.ts` owns `createVar`, `getVarName`, and `c
 
 A custom component receives typed Mincho `css` only when it accepts and forwards both `className` and React-style-compatible `style`. Forward `className` to the styled element, and forward `style` to the same element so generated CSS variable values can land on the element that owns the generated class.
 
-Unsupported dynamic CSS shapes stay unsupported: dynamic keys, computed runtime CSS keys, object or array spreads as branch shapes, call-returned branch objects, function-valued css props, sequence-wrapped branch rules, broad template interpolation, and other dynamic CSS shapes. Static-shape branch rule objects and arrays are supported only when their keys, spreads, and branch shapes are statically analyzable. This is not Emotion-style runtime parity: Mincho does not add a runtime serializer, runtime CSS cache, runtime stylesheet insertion, wrapper component, or runtime CSS generation for the `css` prop.
+Unsupported dynamic CSS shapes stay unsupported: dynamic keys, computed runtime CSS keys, object or array spreads as branch shapes, call-returned branch objects, function-valued css props, sequence-wrapped branch rules, and other dynamic CSS shapes. Static-shape branch rule objects and arrays are supported only when their keys, spreads, and branch shapes are statically analyzable. This is not Emotion-style runtime parity: Mincho does not add a runtime serializer, runtime CSS cache, runtime stylesheet insertion, wrapper component, or runtime CSS generation for the `css` prop.
 
 Unsupported cases include dynamic arrays that would require runtime expansion, dynamic responsive arrays, arbitrary runtime object spreads, dynamic runtime CSS shapes, dynamic keys, whole-rule runtime returns, function-valued CSS, and runtime stylesheet engines. If you already have a plain React-compatible inline declaration object at runtime, pass it to React directly as `style={runtimeStyle}`; do not route selectors, media queries, token rules, or runtime CSS objects through `style`.
 
@@ -303,7 +328,6 @@ Unsupported examples:
 ```tsx
 const dynamicBase = props.base;
 const wrongShape = [{ display: "flex" }] as const;
-const runtimeColor = props.color;
 const runtimeKey = props.property;
 const dynamicStyles = props.styles;
 const nullStyles = null as { button: { color: "red" } } | null;
@@ -336,7 +360,6 @@ const cjsMutated = require(cjsPathBox.path);
 <div css={dynamicStyles?.button} />
 <div css={nullStyles?.button} />
 <div {...spreadOnly} />
-<div css={{ color: `${runtimeColor}` }} />
 <div css={{ color: `${styles.button}` }} />
 <div css={{ color: `${props.makeColor()}` }} />
 <div css={{ color: `${undefined}` }} />
@@ -354,7 +377,7 @@ const cjsImported = require(importedCjsPath);
 <div css={cjsImported.card} />
 ```
 
-These examples fail as CSS-rule candidates because Mincho rejects runtime or wrong-shape spread operands, runtime/unhoistable helper calls, optional calls, dynamic and call-derived keys, runtime whole-rule objects or calls, dynamic or nullish optional bases, spread-only `css` props, runtime/object/call/undefined template interpolation, dynamic import graphs, dynamic/non-const/imported/mutated/shadowed CommonJS require paths, and runtime values.
+These examples fail as CSS-rule candidates because Mincho rejects runtime or wrong-shape spread operands, runtime/unhoistable helper calls, optional calls, dynamic and call-derived keys, runtime whole-rule objects or calls, dynamic or nullish optional bases, spread-only `css` props, object/call/undefined template interpolation, dynamic import graphs, and dynamic/non-const/imported/mutated/shadowed CommonJS require paths. Runtime scalar declaration leaves follow the CSS-variable path described above.
 
 Static JSX `css` arrays stay on the `css([...])` composition path. They are static `ComplexCSSRule` composition arrays, not recursive `ClassValue` arrays, and they do not lower to `cx(...)` just because they contain string items.
 

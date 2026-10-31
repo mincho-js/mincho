@@ -5,6 +5,7 @@ import {
   transformSync
 } from "@babel/core";
 import { expect } from "vitest";
+import { vx } from "@mincho-js/transform-runtime";
 import { minchoBabelPlugin } from "../index.js";
 import { preprocessJsxCssProp } from "../jsxCssProp.js";
 import { getDynamicCssVariableRule } from "../jsxCssProp/preprocess.js";
@@ -733,13 +734,7 @@ export function runJsxCssPropRuntime(
     (_tag, props = {}) => props,
     (...values) => values.filter(Boolean).join(" "),
     () => "css-rule",
-    (value, suffix) => {
-      if (value === null || value === undefined || typeof value === "boolean") {
-        return "var(--c-, )";
-      }
-
-      return suffix ? `${value}${suffix}` : value;
-    }
+    vx
   );
 }
 

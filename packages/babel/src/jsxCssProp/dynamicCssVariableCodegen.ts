@@ -17,6 +17,7 @@ import {
   cssModuleName
 } from "./constants.js";
 import { getStyleExpression } from "./styleExpression.js";
+import { usesPixelUnits } from "./numericUnits.js";
 import type {
   DynamicCssVariableBranchRule,
   DynamicCssVariableLeaf,
@@ -141,7 +142,8 @@ export function createDynamicCssVariableLowering(options: {
         createDynamicCssVariableValueExpression(
           leaf.valueFragment,
           vxIdentifier,
-          options.preparedValues
+          options.preparedValues,
+          leaf.propertyName
         ),
         true
       )
@@ -270,9 +272,17 @@ export function createDynamicCssVariableLowering(options: {
 export function createDynamicCssVariableValueExpression(
   fragment: DynamicCssVariableValueFragment,
   vxIdentifier: t.Identifier,
-  preparedValues?: ReadonlySet<string>
+  preparedValues?: ReadonlySet<string>,
+  propertyName?: string
 ): t.Expression {
   switch (fragment.kind) {
+    case "important-value":
+      return createDynamicCssVariableValueExpression(
+        fragment.value,
+        vxIdentifier,
+        preparedValues,
+        propertyName
+      );
     case "direct-value":
       if (
         t.isIdentifier(fragment.expression) &&
@@ -281,7 +291,10 @@ export function createDynamicCssVariableValueExpression(
         return t.cloneNode(fragment.expression);
 
       return t.callExpression(t.cloneNode(vxIdentifier), [
-        t.cloneNode(fragment.expression)
+        t.cloneNode(fragment.expression),
+        ...(propertyName && usesPixelUnits(propertyName)
+          ? [t.stringLiteral("px"), t.booleanLiteral(true)]
+          : [])
       ]);
     case "suffix-value":
       return t.callExpression(t.cloneNode(vxIdentifier), [
@@ -294,12 +307,14 @@ export function createDynamicCssVariableValueExpression(
         createDynamicCssVariableValueExpression(
           fragment.consequent,
           vxIdentifier,
-          preparedValues
+          preparedValues,
+          propertyName
         ),
         createDynamicCssVariableValueExpression(
           fragment.alternate,
           vxIdentifier,
-          preparedValues
+          preparedValues,
+          propertyName
         )
       );
     default: {

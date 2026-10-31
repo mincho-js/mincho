@@ -107,7 +107,8 @@ export function createOrderedCssLowering(
   function prepare(
     node: t.Expression,
     active: t.Expression | null,
-    rule: boolean
+    rule: boolean,
+    propertyName?: string
   ): t.Expression {
     const expression = unwrapTransparentCssRuleExpression(node);
     if (isStaticCssPrimitiveExpression(expression))
@@ -125,7 +126,16 @@ export function createOrderedCssLowering(
             throw new Error("unproved CSS property");
 
           const result = t.cloneNode(property);
-          result.value = prepare(property.value, active, false);
+          result.value = prepare(
+            property.value,
+            active,
+            false,
+            t.isIdentifier(property.key)
+              ? property.key.name
+              : t.isStringLiteral(property.key)
+                ? property.key.value
+                : undefined
+          );
 
           return result;
         })
@@ -141,7 +151,7 @@ export function createOrderedCssLowering(
           if (!item || !t.isExpression(item))
             throw new Error("unproved CSS array");
 
-          return prepare(item, active, true);
+          return prepare(item, active, true, propertyName);
         })
       );
     }
@@ -151,11 +161,17 @@ export function createOrderedCssLowering(
 
       return t.conditionalExpression(
         t.cloneNode(test),
-        prepare(expression.consequent, guard(active, t.cloneNode(test)), rule),
+        prepare(
+          expression.consequent,
+          guard(active, t.cloneNode(test)),
+          rule,
+          propertyName
+        ),
         prepare(
           expression.alternate,
           guard(active, t.unaryExpression("!", t.cloneNode(test))),
-          rule
+          rule,
+          propertyName
         )
       );
     }
@@ -183,7 +199,12 @@ export function createOrderedCssLowering(
       return t.logicalExpression(
         expression.operator,
         t.cloneNode(test),
-        prepare(expression.right, guard(active, rightActive), rule)
+        prepare(
+          expression.right,
+          guard(active, rightActive),
+          rule,
+          propertyName
+        )
       );
     }
 
@@ -197,11 +218,19 @@ export function createOrderedCssLowering(
 
     vx ??= registerImportMethod(path, "vx", "@mincho-js/transform-runtime");
 
-    return capture(
-      createDynamicCssVariableValueExpression(fragment, vx),
+    const value = capture(
+      createDynamicCssVariableValueExpression(
+        fragment,
+        vx,
+        undefined,
+        propertyName
+      ),
       active,
       true
     );
+    return fragment.kind === "important-value"
+      ? t.binaryExpression("+", value, t.stringLiteral(" !important"))
+      : value;
   }
 
   let prepared: t.Expression;

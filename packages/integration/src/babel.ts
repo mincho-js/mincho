@@ -1168,7 +1168,7 @@ if (import.meta.vitest) {
         /className=\{[A-Za-z_$][\w$]*\("base", [A-Za-z_$][\w$]*\)\}/
       );
       expect(code).toMatch(
-        /style=\{\{\s*\.\.\.props\.style,\s*\[[A-Za-z_$][\w$]*\]: [A-Za-z_$][\w$]*\(props\.color\),\s*\[[A-Za-z_$][\w$]*\]: [A-Za-z_$][\w$]*\(props\.gap, "px"\)\s*\}\}/s
+        /style=\{\{\s*\.\.\.props\.style,\s*\[[A-Za-z_$][\w$]*\]: [A-Za-z_$][\w$]*\(props\.color, "px", true\),\s*\[[A-Za-z_$][\w$]*\]: [A-Za-z_$][\w$]*\(props\.gap, "px"\)\s*\}\}/s
       );
       expect(sidecarSource).toMatch(/[A-Za-z_$][\w$]*\("color"\)/);
       expect(sidecarSource).toMatch(/[A-Za-z_$][\w$]*\("marginTop"\)/);

@@ -32,7 +32,7 @@ describe("minchoBabelPlugin", () => {
     );
     expect(code).toContain("className=");
     expect(code).toMatch(
-      /style=\{\{\s+\[_\$mincho\$\$App\w*ColorVarKey\d*\]: _vx\(props\.color\)\s+\}\}/
+      /style=\{\{\s+\[_\$mincho\$\$App\w*ColorVarKey\d*\]: _vx\(props\.color, "px", true\)\s+\}\}/
     );
     expect(code).not.toContain(" css=");
     expect(code).not.toContain("_css(");
@@ -75,12 +75,12 @@ describe("minchoBabelPlugin", () => {
     expect(code).toContain(
       'import { vx as _vx } from "@mincho-js/transform-runtime";'
     );
-    expect(code).toContain("_vx(props.gap)");
+    expect(code).toContain('_vx(props.gap, "px", true)');
     expect(code).not.toContain(" css=");
     expect(code).not.toContain("_css(");
     expect(observed).toEqual({
       hasCss: false,
-      props: { className: "css-rule", style: { "css-rule": 12 } }
+      props: { className: "css-rule", style: { "css-rule": "12px" } }
     });
     expect(runtimeSpreadFailure.error.message).toMatch(
       /Mincho `css` requires statically known CSS shape|array values do not support spread elements|spread operand is not statically reducible/
@@ -162,7 +162,7 @@ describe("minchoBabelPlugin", () => {
     expect(code).toContain(
       'import { vx as _vx } from "@mincho-js/transform-runtime";'
     );
-    expect(code).toContain("_vx(size + 100)");
+    expect(code).toContain('_vx(size + 100, "px", true)');
     expect(code).toContain('_vx(gap, "px")');
     expect(code).toContain('_vx(percent, "%")');
     expect(code).toContain('_vx(root?.gap, "rem")');
@@ -179,10 +179,10 @@ describe("minchoBabelPlugin", () => {
     expect(code).toContain('_vx(resolution, "x")');
     expect(code).not.toContain('enabled ? _vx("red") : _vx("blue")');
     expect(code).toContain("_vx(value ?? fallback)");
-    expect(code).toContain("_vx(+size)");
-    expect(code).toContain("_vx(-offset)");
+    expect(code).toContain('_vx(+size, "px", true)');
+    expect(code).toContain('_vx(-offset, "px", true)');
     expect(code).toContain("_vx(getValue(size))");
-    expect(code).toContain("_vx(this.size)");
+    expect(code).toContain('_vx(this.size, "px", true)');
   });
 
   it("lowers static conditional declaration leaves to conditional class fragments", () => {
@@ -572,7 +572,7 @@ describe("minchoBabelPlugin", () => {
     expect(code).toContain(
       'import { vx as _vx } from "@mincho-js/transform-runtime";'
     );
-    expect(code).toContain("_vx(value)");
+    expect(code).toContain('_vx(value, "px", true)');
     expect(observed).toEqual([
       {
         label: "undefined",
@@ -693,30 +693,7 @@ describe("minchoBabelPlugin", () => {
             }
           `
       },
-      {
-        label: "multi-hole template",
-        source: `
-            function App(size: number, unit: string) {
-              return <div css={{ width: \`${"${size}"}${"${unit}"}\` }} />;
-            }
-          `
-      },
-      {
-        label: "unsafe template affix",
-        source: `
-            function App(size: number) {
-              return <div css={{ width: \`calc(${"${size}"}px)\` }} />;
-            }
-          `
-      },
-      {
-        label: "unicode-folded template suffix",
-        source: `
-            function App(frequency: number) {
-              return <div css={{ pitch: \`${"${frequency}"}KHz\` }} />;
-            }
-          `
-      },
+
       {
         label: "comparison",
         source: `
@@ -830,7 +807,7 @@ describe("minchoBabelPlugin", () => {
     expect(code).not.toContain("_css(");
     expect(code).not.toContain("style={{ color: props.color }}");
     expect(code).toMatch(
-      /style=\{\{\s+\[_\$mincho\$\$App\w*ColorVarKey\d*\]: _vx\(props\.color\)\s+\}\}/
+      /style=\{\{\s+\[_\$mincho\$\$App\w*ColorVarKey\d*\]: _vx\(props\.color, "px", true\)\s+\}\}/
     );
   });
 
@@ -853,7 +830,7 @@ describe("minchoBabelPlugin", () => {
       "scrollbarColor: _$mincho$$AppScrollbarColorVar"
     );
     expect(code).toContain("_vx(props.accent)");
-    expect(code).toContain("_vx(props.scrollbar)");
+    expect(code).toContain('_vx(props.scrollbar, "px", true)');
     expect(code).not.toContain(" css=");
     expect(code).not.toContain('style={{ "--brand-accent": props.accent');
   });
@@ -993,7 +970,7 @@ describe("minchoBabelPlugin", () => {
     );
 
     expect(code).toMatch(
-      /style=\{\{\s+\[_\$mincho\$\$App\w*ColorVarKey\d*\]: _vx\(props\.color\)\s+\}\}/
+      /style=\{\{\s+\[_\$mincho\$\$App\w*ColorVarKey\d*\]: _vx\(props\.color, "px", true\)\s+\}\}/
     );
     expect(code).not.toContain(" css=");
     expect(code).not.toContain('from "@mincho-js/css"');
@@ -1030,10 +1007,10 @@ describe("minchoBabelPlugin", () => {
 
     expect(objectStyle).toContain("...baseStyle");
     expect(objectStyle).toContain("opacity: props.opacity");
-    expect(objectStyle).toContain("_vx(props.color)");
-    expect(objectStyle).toContain("_vx(props.backgroundColor)");
+    expect(objectStyle).toContain('_vx(props.color, "px", true)');
+    expect(objectStyle).toContain('_vx(props.backgroundColor, "px", true)');
     expect(expressionStyle).toContain("...props.style");
-    expect(expressionStyle).toContain("_vx(props.borderColor)");
+    expect(expressionStyle).toContain('_vx(props.borderColor, "px", true)');
 
     for (const output of [objectStyle, expressionStyle])
       expect(output).toMatch(/style=\{\{[\s\S]+VarKey\d*\]: _vx\(/);
@@ -1061,7 +1038,7 @@ describe("minchoBabelPlugin", () => {
       /className=\{_\$mincho\$\$AppCx\d*\(props.className, _\$mincho\$\$App\d*\)\}/
     );
     expect(code).toMatch(
-      /style=\{\{\s+\[_\$mincho\$\$App\w*ColorVarKey\d*\]: _vx\(props.color\)\s+\}\}/
+      /style=\{\{\s+\[_\$mincho\$\$App\w*ColorVarKey\d*\]: _vx\(props.color, "px", true\)\s+\}\}/
     );
     expect(code).not.toContain(" css=");
     expect(code).not.toContain('from "@mincho-js/css"');
@@ -1909,23 +1886,21 @@ describe("minchoBabelPlugin", () => {
           function App(props) {
             return <div css={condition ? (props.touch(), { color: props.color }) : { color: "red" }} />;
           }
-        `,
-      templateLiteralFixture
+        `
     ] as const;
 
     for (const source of fixtures) {
       expect(collectDynamicCssVariableRuleSnapshot(source)).toBeNull();
     }
 
-    const templateLiteralFailure = captureJsxCssPropFailure(
-      templateLiteralFixture,
-      { jsxCssProp: true }
-    );
-
-    expect(templateLiteralFailure.error.message).toContain(
-      jsxCssPropErrorMessages.unsupportedDynamicCssRule
-    );
-    expect(templateLiteralFailure.code).not.toContain("_css(");
+    expect(
+      collectDynamicCssVariableRuleSnapshot(templateLiteralFixture)
+    ).not.toBeNull();
+    const templateResult = babelTransform(templateLiteralFixture, {
+      jsxCssProp: true
+    });
+    expect(templateResult.code).not.toContain(" css=");
+    expect(templateResult.code).toContain("_vx(");
   });
 
   it("rejects unsupported dynamic css variable shapes with exact compile-away diagnostics", () => {
@@ -2014,26 +1989,7 @@ describe("minchoBabelPlugin", () => {
         expectedFirstLine:
           "Mincho JSX css prop does not support conditional, logical, or wrapped object/array CSS rule values in compile-away mode"
       },
-      {
-        label: "template runtime property values",
-        source: `
-            function App(props) {
-              return <div css={{ color: \`${"${props.color}"}\` }} />;
-            }
-          `,
-        expectedFirstLine:
-          "Cannot statically evaluate css prop value: template interpolation references a render-scope member"
-      },
-      {
-        label: "template optional-member runtime property values",
-        source: `
-            function App(props) {
-              return <div css={{ color: \`${"${props?.color}"}\` }} />;
-            }
-          `,
-        expectedFirstLine:
-          "Cannot statically evaluate css prop value: template interpolation references a render-scope member"
-      },
+
       {
         label: "template call property values",
         source: `
@@ -2350,7 +2306,7 @@ describe("minchoBabelPlugin", () => {
       expect(code).toContain('_vx(props.size, "px")');
       expect(code).toContain('_vx(props.percent, "%")');
       expect(code).toContain('_vx(props.gap, "rem")');
-      expect(code).toContain("_vx(value)");
+      expect(code).toContain('_vx(value, "px", true)');
       expect(code).not.toContain(" css=");
       expect(code).not.toContain("_css(");
       expect(code).not.toMatch(new RegExp(`\\b${forbiddenRuntimeHelper}\\b`));
@@ -2585,16 +2541,7 @@ describe("minchoBabelPlugin", () => {
             }
           `
       },
-      {
-        reason: "unsupported-template-interpolation",
-        expected:
-          "Cannot statically evaluate css prop value: template interpolation references a render-scope member",
-        source: `
-            function App(props: { color: string }) {
-              return <div css={{ color: \`${"${props.color}"}\` }} />;
-            }
-          `
-      },
+
       {
         reason: "cycle-detected",
         expected:
