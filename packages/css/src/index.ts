@@ -16,14 +16,13 @@ export {
   composeStyles,
   createContainer,
   fallbackVar,
-  fontFace,
   generateIdentifier,
   globalFontFace,
   globalKeyframes,
   globalLayer,
   layer
 } from "@vanilla-extract/css";
-export { createVar, keyframes } from "./compilerResources.js";
+export { createVar, keyframes, fontFace } from "./compilerResources.js";
 
 export { globalCss, css, selector } from "./css/index.js";
 export type { CSSRuleWith } from "./css/types.js";

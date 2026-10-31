@@ -1,10 +1,12 @@
 import {
   createVar as vanillaCreateVar,
+  fontFace as vanillaFontFace,
   keyframes as vanillaKeyframes
 } from "@vanilla-extract/css";
 
 export interface CompilerStyleResources {
   version: 2;
+  fonts?: string[];
   keyframes: string[];
   foreignKeyframes?: string[];
   recipes: { id: string; classes: string[]; references: string[] }[];
@@ -25,6 +27,7 @@ export function beginCompilerStyleCapture(): CompilerStyleResources {
     localKeyframe: number;
   } = {
     version: 2,
+    fonts: [],
     keyframes: [],
     foreignKeyframes: [],
     recipes: [],
@@ -192,4 +195,12 @@ export const createVar: typeof vanillaCreateVar = (...args) => {
   recordCompilerVariable(value);
 
   return value;
+};
+
+/** Only generated local family names are eligible for private CSS deduplication. */
+export const fontFace: typeof vanillaFontFace = (...args) => {
+  const name = Reflect.apply(vanillaFontFace, undefined, args) as string;
+  const captures = styleState[styleKey];
+  captures?.[captures.length - 1]?.fonts?.push(name.replace(/^"|"$/g, ""));
+  return name;
 };

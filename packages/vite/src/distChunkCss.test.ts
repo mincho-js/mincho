@@ -557,6 +557,26 @@ describe("component-system production passes", () => {
 });
 
 describe("bundle-size application integrations", () => {
+  it("preserves CSS when external runtime code cannot be inspected", async () => {
+    const root = await fixture({
+      "main.js":
+        'import "external-runtime";import {rules} from "@mincho-js/css";const button=rules({variants:{size:{small:{color:"red"},large:{color:"blue"}}}});globalThis.result=button({size:"small"});'
+    });
+    const result = await compile(
+      root,
+      { appCss: { optimize: { scopedResourceAnalysis: true } } },
+      { build: { rollupOptions: { external: ["external-runtime"] } } }
+    );
+    expect(result.text).toContain("color: blue");
+    expect(
+      result.events.some(
+        (event) =>
+          event.phase === "css-observability" &&
+          (event.detail as { whole?: boolean })?.whole
+      )
+    ).toBe(true);
+  });
+
   it("still eliminates recipe helpers for literal calls when compact strategies are enabled", async () => {
     const root = await fixture({
       "main.js":
@@ -598,6 +618,85 @@ describe("bundle-size application integrations", () => {
     );
     expect(modules.some((id) => /runtime\/cache/.test(id))).toBe(false);
   });
+
+  it("analyzes a complete app graph and scopes unrelated property observations", async () => {
+    const root = await fixture({
+      "main.js":
+        'import {button} from "./button.js"; globalThis.render=()=>button({size:"small"}); globalThis.read=el=>getComputedStyle(el).getPropertyValue("--external");',
+      "button.js":
+        'import {rules} from "@mincho-js/css"; export const button=rules({base:{display:"flex"},variants:{size:{small:{color:"red"},large:{color:"blue"}}}});'
+    });
+    const baseline = await compile(root, { appCss: { optimize: false } });
+    const result = await compile(root, {
+      appCss: {
+        usage: { mode: "closed" },
+        optimize: { scopedResourceAnalysis: true, pruneRecipes: true }
+      }
+    });
+    expect(baseline.text).toContain("blue");
+    expect(result.text).toContain("red");
+    expect(result.text).not.toContain("blue");
+    const preserved = await compile(root, {
+      appCss: {
+        usage: {
+          mode: "closed",
+          preserve: [{ module: "button.js", exports: ["button"] }]
+        },
+        optimize: { scopedResourceAnalysis: true, pruneRecipes: true }
+      }
+    });
+    expect(preserved.text).toContain("blue");
+  });
+
+  it.each([
+    {
+      name: "default-exported recipes",
+      preservesUnselected: true,
+      declaration: "export default RECIPE;",
+      consumer:
+        'import button from "./button.js"; globalThis.render=()=>button({size:"large"});'
+    },
+    {
+      name: "default aliases of named recipes",
+      preservesUnselected: false,
+      declaration: "const button = RECIPE; export {button as default};",
+      consumer:
+        'import button from "./button.js"; globalThis.render=()=>button({size:"large"});'
+    },
+    {
+      name: "recipes nested in objects",
+      preservesUnselected: true,
+      declaration: "export const ui = {button: RECIPE};",
+      consumer:
+        'import {ui} from "./button.js"; globalThis.render=()=>ui.button({size:"large"});'
+    },
+    {
+      name: "namespace reexports in lazy modules",
+      preservesUnselected: true,
+      declaration: "export const button = RECIPE;",
+      consumer:
+        'globalThis.render=()=>import("./bridge.js").then(module=>module.ns.button({size:"large"}));'
+    }
+  ])(
+    "preserves CSS for $name in a closed app",
+    async ({ declaration, consumer, preservesUnselected }) => {
+      const root = await fixture({
+        "main.js": consumer,
+        "button.js": `import {rules} from "@mincho-js/css"; ${declaration.replace("RECIPE", 'rules({base:{display:"flex"},variants:{size:{small:{color:"red"},large:{color:"blue"}}}})')}`,
+        "bridge.js": 'export * as ns from "./button.js";'
+      });
+      const result = await compile(root, {
+        appCss: {
+          usage: { mode: "closed" },
+          optimize: { scopedResourceAnalysis: true, pruneRecipes: true }
+        }
+      });
+
+      expect(result.text).toContain("display: flex");
+      expect(result.text).toContain("color: blue");
+      expect(result.text.includes("color: red")).toBe(preservesUnselected);
+    }
+  );
 });
 
 describe("shared artifact provenance", () => {

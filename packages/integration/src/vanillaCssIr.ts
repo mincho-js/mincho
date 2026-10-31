@@ -28,6 +28,7 @@ export interface VanillaCssArtifact {
     opaque: boolean;
     resources?: CompilerStyleResources & {
       publicKeyframes: readonly string[];
+      publicFonts?: readonly string[];
       recipeUses?: readonly PrivateRecipeUse[];
     };
   };
@@ -95,6 +96,10 @@ export function annotateVanillaCssArtifacts(
       ? {
           resources: {
             version: 2 as const,
+            fonts: [...(resources.fonts ?? [])].sort(),
+            publicFonts: (resources.fonts ?? []).filter((name) =>
+              resourceReferences.has(name)
+            ),
             keyframes: [...resources.keyframes].sort(),
             foreignKeyframes: [...(resources.foreignKeyframes ?? [])].sort(),
             recipes: structuredClone(resources.recipes),
