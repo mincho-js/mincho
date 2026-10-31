@@ -50,6 +50,18 @@ class StaticCssEvalPrepassLimit extends Error {}
 // evaluator's per-literal node limit.
 export const STATIC_CSS_EVAL_PREPASS_MAX_TRAVERSED_NODES = 100_000;
 
+// Execution discovery does not recursively evaluate expressions. Give its
+// module graph separate bounds instead of spending the literal walk's budget.
+export const STATIC_CSS_EVAL_EXECUTION_LIMITS = {
+  modules: 1_000,
+  nodes: 1_000_000
+} as const;
+
+interface StaticCssEvalExecutionBudget {
+  loadedIds: Set<string>;
+  traversedNodes: number;
+}
+
 interface StaticCssEvalPrepassState {
   parserCache?: InternalSourceAstCache;
   loadedModules: ImportedStaticCssEvalLoadedModule[];
@@ -71,6 +83,7 @@ interface StaticCssEvalPrepassContext {
   moduleId: string;
   importDepth: number;
   objectDepth: number;
+  executionBudget?: StaticCssEvalExecutionBudget;
 }
 
 type StaticCssEvalPrepassImportBinding =
@@ -250,6 +263,9 @@ export async function createStaticCssEvalPrepass(
       ownerRecord,
       prepassContext
     );
+    if (prepassState.loadedModules.length > 1) {
+      await loadStaticCssEvalExecutionDependencies(ownerRecord, prepassContext);
+    }
   } catch (error) {
     if (!(error instanceof StaticCssEvalPrepassLimit)) {
       throw error;
@@ -293,6 +309,99 @@ export async function createStaticCssEvalPrepass(
   };
 }
 
+// Effects in sibling imports can mutate a value before its JSX owner renders.
+// Discover all executable edges: an otherwise unused import can transitively
+// reach a CSS object. The evaluator limits mutation checks to reverse-reachable
+// imports, but that proof requires the complete graph within the source policy.
+async function loadStaticCssEvalExecutionDependencies(
+  owner: ImportedStaticCssEvalModuleRecord,
+  context: StaticCssEvalPrepassContext
+): Promise<void> {
+  const executionBudget: StaticCssEvalExecutionBudget = {
+    loadedIds: new Set([owner.id]),
+    traversedNodes: 0
+  };
+  const pending: {
+    importer: string;
+    source: string;
+    mode: "import" | "require";
+  }[] = [];
+  const visited = new Set<string>();
+  const enqueue = (record: ImportedStaticCssEvalModuleRecord) => {
+    if (visited.has(record.id)) return;
+    visited.add(record.id);
+    const dependencies = new Map<
+      string,
+      { source: string; mode: "import" | "require" }
+    >();
+    const add = (source: string, mode: "import" | "require") => {
+      dependencies.set(`${mode}\0${source}`, { source, mode });
+    };
+    record.programPath.traverse({
+      enter() {
+        if (
+          ++executionBudget.traversedNodes >
+          STATIC_CSS_EVAL_EXECUTION_LIMITS.nodes
+        )
+          throw new StaticCssEvalPrepassLimit(
+            "Static CSS execution discovery exceeded max traversed node count"
+          );
+      },
+      ImportDeclaration(path) {
+        if (
+          path.node.importKind === "type" ||
+          path.node.importKind === "typeof"
+        )
+          return;
+        if (
+          path.node.specifiers.length &&
+          path.node.specifiers.every(
+            (specifier) =>
+              t.isImportSpecifier(specifier) &&
+              (specifier.importKind === "type" ||
+                specifier.importKind === "typeof")
+          )
+        )
+          return;
+        add(path.node.source.value, "import");
+      },
+      ExportNamedDeclaration(path) {
+        if (path.node.source && path.node.exportKind !== "type")
+          add(path.node.source.value, "import");
+      },
+      ExportAllDeclaration(path) {
+        if (path.node.exportKind !== "type")
+          add(path.node.source.value, "import");
+      },
+      CallExpression(path) {
+        if (
+          t.isIdentifier(path.node.callee, { name: "require" }) &&
+          !path.scope.getBinding("require") &&
+          path.node.arguments.length === 1 &&
+          t.isStringLiteral(path.node.arguments[0])
+        )
+          add(path.node.arguments[0].value, "require");
+      }
+    });
+    // Reverse a LIFO worklist to retain source-order depth-first discovery.
+    // Scan a module immediately after loading, before queuing any more loads,
+    // so broad graphs cannot retain uncounted ASTs past the node limit.
+    for (const dependency of [...dependencies.values()].reverse())
+      pending.push({ importer: record.id, ...dependency });
+  };
+  enqueue(owner);
+  while (pending.length) {
+    const { importer, source, mode } = pending.pop()!;
+    const dependency = await loadStaticCssEvalPrepassDependency(
+      importer,
+      source,
+      { ...context, moduleId: importer, executionBudget },
+      mode
+    );
+    if (dependency) enqueue(dependency);
+  }
+}
+
 async function loadStaticCssEvalPrepassDependency(
   importerId: string,
   importPath: string,
@@ -334,6 +443,17 @@ async function loadStaticCssEvalPrepassDependency(
     resolution.resolvedFile
   );
 
+  if (context.executionBudget) {
+    const { loadedIds } = context.executionBudget;
+    if (!loadedIds.has(resolution.resolvedFile)) {
+      if (loadedIds.size >= STATIC_CSS_EVAL_EXECUTION_LIMITS.modules)
+        throw new StaticCssEvalPrepassLimit(
+          "Static CSS execution discovery exceeded max modules per owner"
+        );
+      loadedIds.add(resolution.resolvedFile);
+    }
+  }
+
   const cachedRecord = state.resolvedModuleCache.get(resolution.resolvedFile);
 
   if (cachedRecord) {
@@ -344,14 +464,18 @@ async function loadStaticCssEvalPrepassDependency(
     return undefined;
   }
 
-  if (context.importDepth >= internalStaticCssEvalLimits.maxImportDepth) {
+  if (
+    !context.executionBudget &&
+    context.importDepth >= internalStaticCssEvalLimits.maxImportDepth
+  ) {
     throw new StaticCssEvalPrepassLimit(
       "Static CSS prepass exceeded max import depth"
     );
   }
   if (
+    !context.executionBudget &&
     state.loadedDependencyIds.size >
-    internalStaticCssEvalLimits.maxEvaluatedModulesPerOwner
+      internalStaticCssEvalLimits.maxEvaluatedModulesPerOwner
   ) {
     throw new StaticCssEvalPrepassLimit(
       "Static CSS prepass exceeded max evaluated modules per owner"
@@ -2420,7 +2544,7 @@ if (import.meta.vitest) {
       expect(result.resolvedModuleCache.has(stylesId)).toBe(true);
     });
 
-    it("preloads css-prop-reachable computed optional template and const require operands without unused sweep", async () => {
+    it("preloads literal operands and otherwise unused execution imports", async () => {
       const ownerId = "/project/src/App.tsx";
       const keysId = "/project/src/keys.ts";
       const toneId = "/project/src/tone.ts";
@@ -2546,7 +2670,8 @@ if (import.meta.vitest) {
         { importerId: ownerId, importPath: "./cjs-styles" },
         { importerId: ownerId, importPath: "./call-value" },
         { importerId: ownerId, importPath: "./nested-styles" },
-        { importerId: ownerId, importPath: "./shadowed-call-value" }
+        { importerId: ownerId, importPath: "./shadowed-call-value" },
+        { importerId: ownerId, importPath: "./unused" }
       ]);
       expect(calls.loaded).toEqual([
         ownerId,
@@ -2558,7 +2683,8 @@ if (import.meta.vitest) {
         cjsId,
         callValueId,
         nestedCjsId,
-        shadowedCallValueId
+        shadowedCallValueId,
+        unusedId
       ]);
       expect(result.dependencyFiles).toEqual([
         keysId,
@@ -2569,13 +2695,14 @@ if (import.meta.vitest) {
         cjsId,
         callValueId,
         nestedCjsId,
-        shadowedCallValueId
+        shadowedCallValueId,
+        unusedId
       ]);
       expect(calls.loaded).not.toContain(shadowedCjsId);
-      expect(result.resolvedModuleCache.has(unusedId)).toBe(false);
+      expect(result.resolvedModuleCache.has(unusedId)).toBe(true);
     });
 
-    it("prepass loads used helper body dependencies without unused helper sweep", async () => {
+    it("prepass loads helper dependencies and checks unused execution imports", async () => {
       const ownerId = "/project/src/App.tsx";
       const baseId = "/project/src/base.ts";
       const keysId = "/project/src/keys.ts";
@@ -2699,7 +2826,8 @@ if (import.meta.vitest) {
         { importerId: ownerId, importPath: "./throw-value" },
         { importerId: ownerId, importPath: "./finally-value" },
         { importerId: ownerId, importPath: "./switch-value" },
-        { importerId: ownerId, importPath: "./case-value" }
+        { importerId: ownerId, importPath: "./case-value" },
+        { importerId: ownerId, importPath: "./unused" }
       ]);
       expect(calls.loaded).toEqual([
         ownerId,
@@ -2712,7 +2840,8 @@ if (import.meta.vitest) {
         throwValueId,
         finallyValueId,
         switchValueId,
-        caseValueId
+        caseValueId,
+        unusedId
       ]);
       expect(result.dependencyFiles).toEqual([
         baseId,
@@ -2724,11 +2853,12 @@ if (import.meta.vitest) {
         throwValueId,
         finallyValueId,
         switchValueId,
-        caseValueId
+        caseValueId,
+        unusedId
       ]);
       expect(result.resolvedModuleCache.has(baseId)).toBe(true);
       expect(result.resolvedModuleCache.has(keysId)).toBe(true);
-      expect(result.resolvedModuleCache.has(unusedId)).toBe(false);
+      expect(result.resolvedModuleCache.has(unusedId)).toBe(true);
     });
 
     it("records negative dependency metadata for unresolved prepass dependencies and load failures", async () => {
@@ -2846,7 +2976,7 @@ if (import.meta.vitest) {
       expect(result.resolvedModuleCache.has(unrelatedId)).toBe(false);
     });
 
-    it("preloads transitive imported computed key and template operands from reachable exports", async () => {
+    it("preloads transitive literal and execution dependencies", async () => {
       const ownerId = "/project/src/App.tsx";
       const stylesId = "/project/src/styles.ts";
       const keysId = "/project/src/keys.ts";
@@ -2927,22 +3057,25 @@ if (import.meta.vitest) {
         { importerId: ownerId, importPath: "./styles" },
         { importerId: stylesId, importPath: "./keys" },
         { importerId: stylesId, importPath: "./tone" },
-        { importerId: stylesId, importPath: "./palette" }
+        { importerId: stylesId, importPath: "./palette" },
+        { importerId: stylesId, importPath: "./unused" }
       ]);
       expect(calls.loaded).toEqual([
         ownerId,
         stylesId,
         keysId,
         toneId,
-        paletteId
+        paletteId,
+        unusedId
       ]);
       expect(result.dependencyFiles).toEqual([
         stylesId,
         keysId,
         toneId,
-        paletteId
+        paletteId,
+        unusedId
       ]);
-      expect(result.resolvedModuleCache.has(unusedId)).toBe(false);
+      expect(result.resolvedModuleCache.has(unusedId)).toBe(true);
     });
 
     it("preloads CommonJS helper export-star dependencies from require candidates", async () => {

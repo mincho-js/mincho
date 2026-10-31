@@ -8,6 +8,7 @@ import { internalStaticCssEvalLimits } from "@mincho-js/babel";
 import { babelTransformSource } from "./babel.js";
 import {
   createStaticCssEvalPrepass,
+  STATIC_CSS_EVAL_EXECUTION_LIMITS,
   STATIC_CSS_EVAL_PREPASS_MAX_TRAVERSED_NODES
 } from "./staticCssEvalPrepass.js";
 
@@ -70,6 +71,122 @@ async function expectBoundedPrepass(
 }
 
 describe("static CSS prepass traversal", () => {
+  it("bounds package execution discovery before loading beyond the module limit", async () => {
+    const loaded: string[] = [];
+    const result = await createStaticCssEvalPrepass("/owner.tsx", {
+      resolve: (_importer, specifier) => ({
+        id: specifier,
+        sourceKind: specifier.startsWith("/pkg/")
+          ? "package-source"
+          : "project-source"
+      }),
+      load(id) {
+        loaded.push(id);
+        if (id === "/owner.tsx")
+          return {
+            sourceText:
+              'import { style } from "/style.ts"; import "/pkg/0.ts"; <div css={style} />;'
+          };
+        if (id === "/style.ts")
+          return { sourceText: 'export const style = { color: "red" };' };
+        const index = Number(id.slice("/pkg/".length, -3));
+        return { sourceText: `import "/pkg/${index + 1}.ts";` };
+      }
+    });
+    expect(loaded).toHaveLength(STATIC_CSS_EVAL_EXECUTION_LIMITS.modules);
+    expect(result.diagnostics[0]?.code).toBe("limit-exceeded");
+    // An uninspected package can mutate this object. Do not reuse a literal
+    // resolved before execution discovery as proof that the object is immutable.
+    expect(
+      result.provider.getResolvedCssValue({
+        importerId: "/owner.tsx",
+        expressionStart: 0,
+        expressionEnd: 1,
+        bindingName: "style"
+      })
+    ).toEqual({ kind: "not-candidate" });
+  });
+
+  it("includes package side effects that can mutate already discovered literals", async () => {
+    const modules: Record<string, string> = {
+      "/owner.tsx":
+        'import { style } from "/style.ts"; import "/pkg/entry.ts"; <div css={{ color: style.color }} />;',
+      "/style.ts": 'export const style = { color: "red" };',
+      "/pkg/entry.ts": 'import "/pkg/mutate.ts";',
+      "/pkg/mutate.ts":
+        'import { style } from "/style.ts"; style.color = "blue";'
+    };
+    const result = await createStaticCssEvalPrepass("/owner.tsx", {
+      resolve: (_importer, specifier) => ({
+        id: specifier,
+        sourceKind: specifier.startsWith("/pkg/")
+          ? "package-source"
+          : "project-source"
+      }),
+      load: (id) => ({ sourceText: modules[id]! })
+    });
+    expect(result.diagnostics).toEqual([]);
+    expect(result.result.dependencyFiles).toContain("/pkg/mutate.ts");
+    expect(
+      result.provider.getResolvedCssValue({
+        importerId: "/owner.tsx",
+        expressionStart: 0,
+        expressionEnd: 1,
+        bindingName: "style",
+        memberPath: ["color"]
+      })
+    ).toMatchObject({ kind: "error" });
+  });
+
+  it("keeps execution discovery independent of the literal node budget", async () => {
+    const names = Array.from({ length: 60 }, (_, index) => `style${index}`);
+    const result = await prepass({
+      "/owner.tsx": `import { ${names.join(",")} } from "/styles.ts"; <>${names.map((name) => `<div css={${name}} />`).join("")}</>;`,
+      "/styles.ts": names
+        .map((name) => `export const ${name} = [${"null,".repeat(1_000)}];`)
+        .join("\n")
+    });
+    expect(result.diagnostics).toEqual([]);
+    expect(result.result.resolvedModuleCache.size).toBe(2);
+  });
+
+  it("discovers broad execution graphs without spending the literal module budget", async () => {
+    const modules: Record<string, string> = {
+      "/style.ts": 'export const style = { color: "red" };'
+    };
+    const imports = Array.from(
+      { length: internalStaticCssEvalLimits.maxEvaluatedModulesPerOwner + 1 },
+      (_, index) => {
+        modules[`/${index}.ts`] = "export {};";
+        return `import "/${index}.ts";`;
+      }
+    );
+    modules["/owner.tsx"] =
+      `import { style } from "/style.ts"; ${imports.join("\n")} <div css={style} />;`;
+    const result = await prepass(modules);
+    expect(result.diagnostics).toEqual([]);
+    expect(result.result.resolvedModuleCache.size).toBe(imports.length + 2);
+  });
+
+  it("discards a partial execution graph when its independent limit is exceeded", async () => {
+    const modules: Record<string, string> = {
+      "/style.ts": 'export const style = { color: "red" };'
+    };
+    const imports = Array.from(
+      { length: STATIC_CSS_EVAL_EXECUTION_LIMITS.modules },
+      (_, index) => {
+        modules[`/${index}.ts`] = "export {};";
+        return `import "/${index}.ts";`;
+      }
+    );
+    modules["/owner.tsx"] =
+      `import { style } from "/style.ts"; ${imports.join("\n")} <div css={style} />;`;
+    await expectBoundedPrepass(
+      modules,
+      "execution discovery exceeded max modules"
+    );
+  });
+
   it("finishes cyclic import and local expression graphs in a bounded child process", async () => {
     // This source test also participates in CommonJS declaration builds.
     // eslint-disable-next-line @typescript-eslint/ban-ts-comment

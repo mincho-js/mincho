@@ -219,6 +219,7 @@ export interface StaticCssEvalCacheKey {
 }
 
 export type StaticCssEvalDiagnosticId =
+  | "STATIC_CSS_EVAL_TDZ"
   | "STATIC_CSS_EVAL_LOCAL_ALIAS_CYCLE"
   | "STATIC_CSS_EVAL_MUTABLE_BINDING"
   | "STATIC_CSS_EVAL_MUTATED_BINDING"
@@ -251,6 +252,7 @@ export type StaticCssEvalDiagnosticId =
   | "STATIC_CSS_EVAL_RESOLUTION_DEPTH_EXCEEDED";
 
 export const STATIC_CSS_EVAL_DIAGNOSTIC_IDS = [
+  "STATIC_CSS_EVAL_TDZ",
   "STATIC_CSS_EVAL_LOCAL_ALIAS_CYCLE",
   "STATIC_CSS_EVAL_MUTABLE_BINDING",
   "STATIC_CSS_EVAL_MUTATED_BINDING",
@@ -767,6 +769,7 @@ if (import.meta.vitest) {
   const { describe, expect, it } = import.meta.vitest;
 
   const staticCssEvalDiagnosticExhaustiveMap = {
+    STATIC_CSS_EVAL_TDZ: true,
     STATIC_CSS_EVAL_LOCAL_ALIAS_CYCLE: true,
     STATIC_CSS_EVAL_MUTABLE_BINDING: true,
     STATIC_CSS_EVAL_MUTATED_BINDING: true,
@@ -1320,7 +1323,7 @@ if (import.meta.vitest) {
       expect(staticCssEvalDiagnosticIds).toEqual(
         STATIC_CSS_EVAL_DIAGNOSTIC_IDS
       );
-      expect(staticCssEvalDiagnosticIds).toHaveLength(30);
+      expect(staticCssEvalDiagnosticIds).toHaveLength(31);
     });
   });
 }

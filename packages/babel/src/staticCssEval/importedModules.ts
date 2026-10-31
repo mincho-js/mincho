@@ -3322,6 +3322,41 @@ if (import.meta.vitest) {
       });
     });
 
+    it.each([
+      'export { token } from "/tokens.ts";',
+      'import { token as original } from "/tokens.ts"; export const token = original;',
+      'exports.token = require("/tokens.ts").token;'
+    ])("tracks mutations through direct module-ID reexports: %s", (barrel) => {
+      const provider = createProviderFromModules({
+        modules: [
+          {
+            id: ownerId,
+            source:
+              'import { token } from "/tokens.ts"; import { stable } from "/stable.ts"; import "/mutator.ts";'
+          },
+          {
+            id: "/tokens.ts",
+            source: 'export const token = { color: "red" };'
+          },
+          { id: "/stable.ts", source: 'export const stable = "green";' },
+          { id: "/barrel.ts", source: barrel },
+          {
+            id: "/mutator.ts",
+            source: 'import { token } from "/barrel.ts"; token.color = "blue";'
+          }
+        ],
+        importResolutions: []
+      });
+      expect(resolveFixture(provider, "stable")).toMatchObject({
+        kind: "resolved",
+        value: "green"
+      });
+      expect(resolveFixture(provider, "token", ["color"])).toMatchObject({
+        kind: "error",
+        diagnostic: { id: "STATIC_CSS_EVAL_MUTATED_BINDING" }
+      });
+    });
+
     it("rejects exported const mutations deterministically", () => {
       expect(
         resolveFixture(

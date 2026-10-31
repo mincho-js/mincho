@@ -2,6 +2,8 @@ import type { NodePath } from "@babel/core";
 import { types as t } from "@babel/core";
 import type { PluginState, ProgramScope } from "../types.js";
 import { createCssBooleanGateLowering } from "./cssBooleanGates.js";
+import { prepareRuntimeCssImports } from "./runtimeImports.js";
+import { registerStaticCssEvalResultMetadata } from "./metadata.js";
 import { isInsideExtractCallsImplementation } from "../extractionCalls/index.js";
 import {
   createClassNameAttributeValue,
@@ -322,6 +324,13 @@ function analyzeOpeningElement(
   }
 
   const rawCssExpression = getCssExpression(openingElementPath, cssAttribute);
+  prepareRuntimeCssImports(
+    rawCssExpression,
+    openingElementPath.scope,
+    getStaticCssEvalOwnerFile(state),
+    state.opts.staticCssEvalProvider,
+    (result) => registerStaticCssEvalResultMetadata(state, result)
+  );
   const partialEvalResult = evaluateCssPropPartialEvalPolicy({
     expression: rawCssExpression,
     ownerFile: getStaticCssEvalOwnerFile(state),

@@ -57,6 +57,30 @@ Mutable ASTs stay isolated by file and are cloned before transformation. Source
 keys distinguish UTF-16 code units, including lone surrogates. Negative analysis
 results use the same bounded cache and invalidate when source/options change.
 
+Imported JSX CSS values also require an execution-dependency graph to detect
+mutations from otherwise unused imports. This discovery uses a separate budget
+of 1,000 modules (including the owner) and 1,000,000 AST nodes; it visits each
+module once and does not spend the literal evaluator's depth, module or node
+budgets. Mutation checks use the imports that can reach the CSS value. Discovery
+reuses each binding's mutation result across CSS values within one resolver;
+a new resolver rechecks changed sources. Execution discovery itself remains
+owner-local and does not share resolved import graphs across owners. Discovery
+must still follow all executable import/reexport and literal `require` edges
+within the source-provider policy to establish that reachability. If either
+walk exceeds its own budget, the compiler reports `limit-exceeded`, keeps
+discovered watch dependencies, and uses the existing runtime path rather than
+evaluating a partial graph.
+
+Package-source imports use these same execution bounds, checked before loading
+the next module. A package can import and mutate project tokens, so its source
+kind alone is not evidence that it is unrelated. Large package graphs can
+therefore disable imported-value folding for an owner. Successfully discovered
+literals cannot be reused after the execution limit: a later, uninspected
+side effect could change them. External edges remain governed by the adapter's
+source policy. If a complete graph is available but a binding's bounded mutation
+analysis is inconclusive, scalar imports remain dynamic rather than aborting the
+transform; unknown rule-object shapes continue to fail closed.
+
 ## Application CSS
 
 The CSS passes default on for production `appCss.mode: "dist-chunk"` builds using

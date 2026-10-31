@@ -1648,7 +1648,7 @@ if (import.meta.vitest) {
       ).toHaveLength(1);
     });
 
-    it("dependency pruning keeps unused import out of async prepass", async () => {
+    it("tracks execution imports without emitting their unused CSS", async () => {
       const path = await import("node:path");
       const ownerSource = `
         import { button } from "./styles";
@@ -1695,25 +1695,27 @@ if (import.meta.vitest) {
       const [, sidecarSource] = result;
 
       expect(calls.resolved).toEqual([
-        { importerId: fixturePath, importPath: "./styles" }
+        { importerId: fixturePath, importPath: "./styles" },
+        { importerId: fixturePath, importPath: "./unused" }
       ]);
-      expect(calls.loaded).toEqual([stylesId]);
+      expect(calls.loaded).toEqual([stylesId, unusedId]);
       expect(sidecarSource).toContain('color: "red"');
       expect(sidecarSource).not.toContain('color: "blue"');
       expect(code).not.toContain("_cx(button)");
-      expect(staticCssEval?.dependencyFiles).toEqual([stylesId]);
+      expect(staticCssEval?.dependencyFiles).toEqual([stylesId, unusedId]);
       expect(staticCssEval?.ownerToDependencies.get(fixturePath)).toEqual([
-        stylesId
+        stylesId,
+        unusedId
       ]);
       expect(staticCssEval?.dependencyToOwners.get(stylesId)).toEqual([
         fixturePath
       ]);
       expect(staticCssEval?.resolvedModuleCache.has(fixturePath)).toBe(true);
       expect(staticCssEval?.resolvedModuleCache.has(stylesId)).toBe(true);
-      expect(staticCssEval?.resolvedModuleCache.has(unusedId)).toBe(false);
+      expect(staticCssEval?.resolvedModuleCache.has(unusedId)).toBe(true);
     });
 
-    it("prepass loads reachable spread and identifier operands without broad import sweep", async () => {
+    it("prepass tracks literal operands and execution imports for mutation checks", async () => {
       const path = await import("node:path");
       const ownerSource = `
         import { direct } from "./direct";
@@ -1788,24 +1790,30 @@ if (import.meta.vitest) {
         { importerId: fixturePath, importPath: "./tokens" },
         { importerId: fixturePath, importPath: "./styles" },
         { importerId: stylesId, importPath: "./base" },
-        { importerId: stylesId, importPath: "./palette" }
+        { importerId: stylesId, importPath: "./palette" },
+        { importerId: stylesId, importPath: "./ignored" },
+        { importerId: fixturePath, importPath: "./unused" }
       ]);
       expect(calls.loaded).toEqual([
         directId,
         tokensId,
         stylesId,
         baseId,
-        paletteId
+        paletteId,
+        ignoredId,
+        unusedId
       ]);
       expect(staticCssEval?.dependencyFiles).toEqual([
         directId,
         tokensId,
         stylesId,
         baseId,
-        paletteId
+        paletteId,
+        ignoredId,
+        unusedId
       ]);
-      expect(staticCssEval?.resolvedModuleCache.has(unusedId)).toBe(false);
-      expect(staticCssEval?.resolvedModuleCache.has(ignoredId)).toBe(false);
+      expect(staticCssEval?.resolvedModuleCache.has(unusedId)).toBe(true);
+      expect(staticCssEval?.resolvedModuleCache.has(ignoredId)).toBe(true);
     });
 
     it("prepass loads package data virtual and CommonJS static operands", async () => {
@@ -2219,7 +2227,7 @@ if (import.meta.vitest) {
       ).toBe(createTestSourceIdentity(backgroundKeySource).sourceHash);
     });
 
-    it("cache invalidation follows sidecar build-time factory spread helper source identity without unused helper", async () => {
+    it("cache invalidation tracks factory helper identity and execution imports", async () => {
       const fs = await import("node:fs/promises");
       const componentSource = `
         import { makeButton } from "./factory";
@@ -2287,16 +2295,18 @@ if (import.meta.vitest) {
       expect(firstTransform.staticCssEval?.dependencyFiles).toEqual([
         factoryId,
         baseId,
-        keysId
+        keysId,
+        unusedId
       ]);
       expect(secondTransform.staticCssEval?.dependencyFiles).toEqual([
         factoryId,
         baseId,
-        keysId
+        keysId,
+        unusedId
       ]);
       expect(
         firstTransform.staticCssEval?.resolvedModuleCache.has(unusedId)
-      ).toBe(false);
+      ).toBe(true);
       expect(
         firstTransform.staticCssEval?.resolvedDependencies.find(
           (dependency) => dependency.resolvedFile === baseId
@@ -4028,7 +4038,7 @@ if (import.meta.vitest) {
       ]);
     });
 
-    it("excludes star-only default reexports from whole namespace export-star async source-provider prepass", async () => {
+    it("watches default-only reexport execution without adding it to a star namespace", async () => {
       const path = await import("node:path");
       const ownerSource = `
         import * as styles from "./barrel";
@@ -4064,26 +4074,45 @@ if (import.meta.vitest) {
         }
       });
 
-      const { result: staticCssEval } = await createStaticCssEvalPrepass(
-        fixturePath,
-        provider
-      );
+      const { result: staticCssEval, provider: evaluator } =
+        await createStaticCssEvalPrepass(fixturePath, provider);
 
+      const namespace = evaluator.getResolvedCssValue({
+        importerId: fixturePath,
+        expressionStart: 0,
+        expressionEnd: 6,
+        bindingName: "styles",
+        memberPath: []
+      });
+      expect(namespace).toMatchObject({
+        kind: "resolved",
+        value: { button: { color: "red" } }
+      });
+      if (namespace.kind === "resolved")
+        expect(namespace.value).not.toHaveProperty("default");
       expect(calls.resolved).toEqual([
         { importerId: fixturePath, importPath: "./barrel" },
-        { importerId: barrelId, importPath: "./defaultBarrel" }
+        { importerId: barrelId, importPath: "./defaultBarrel" },
+        { importerId: defaultBarrelId, importPath: "./defaultLeaf" }
       ]);
-      expect(calls.loaded).toEqual([fixturePath, barrelId, defaultBarrelId]);
+      expect(calls.loaded).toEqual([
+        fixturePath,
+        barrelId,
+        defaultBarrelId,
+        defaultLeafId
+      ]);
       expect(staticCssEval.dependencyFiles).toEqual([
         barrelId,
-        defaultBarrelId
+        defaultBarrelId,
+        defaultLeafId
       ]);
       expect(staticCssEval.ownerToDependencies.get(fixturePath)).toEqual([
         barrelId,
-        defaultBarrelId
+        defaultBarrelId,
+        defaultLeafId
       ]);
       expect(staticCssEval.resolvedModuleCache.has(defaultBarrelId)).toBe(true);
-      expect(staticCssEval.resolvedModuleCache.has(defaultLeafId)).toBe(false);
+      expect(staticCssEval.resolvedModuleCache.has(defaultLeafId)).toBe(true);
     });
 
     it("bounds export-star cycles in namespace async source-provider prepass", async () => {
@@ -4306,7 +4335,7 @@ if (import.meta.vitest) {
       ]);
     });
 
-    it("preserves whole-expression reexport fallback but rejects reexports inside static css rules", async () => {
+    it("preserves whole-expression and scalar reexport runtime fallbacks", async () => {
       const wholeExpressionPath = await createBabelFixture(
         `
           import { button } from "./barrel";
@@ -4354,27 +4383,23 @@ if (import.meta.vitest) {
         "css-prop-reexport-static-rule"
       );
 
-      await expect(
-        babelTransform(staticRulePath, {
-          jsxCssProp: true,
-          staticCssEvalProvider: provider
-        })
-      ).rejects.toMatchObject({
-        message: expect.stringContaining(
-          'Cannot statically evaluate css prop value: export "button" uses unsupported reexport/barrel syntax'
-        ),
-        staticCssEval: expect.objectContaining({
-          diagnostics: expect.arrayContaining([
-            expect.objectContaining({
-              code: "unsupported-source",
-              reason: "reexport-or-barrel",
-              importPath: "./barrel",
-              exportName: "button",
-              dependency: { file: "/provider/barrel.ts" }
-            })
-          ])
-        })
+      const scalar = await babelTransform(staticRulePath, {
+        jsxCssProp: true,
+        staticCssEvalProvider: provider
       });
+      expect(scalar.code).toContain('import { button } from "./barrel"');
+      expect(scalar.code).toMatch(/\(button(?:,|\))/);
+      expect(scalar.result[1]).toContain("color:");
+      expect(scalar.staticCssEval?.diagnostics).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            code: "unsupported-source",
+            reason: "reexport-or-barrel",
+            importPath: "./barrel",
+            exportName: "button"
+          })
+        ])
+      );
     });
 
     it("lowers representative logical css rule branches", async () => {

@@ -64,6 +64,22 @@ const mutations = [
 ];
 
 describe("mutable object reference analysis", () => {
+  it.each([
+    'import { style } from "./tokens";',
+    'import style from "./tokens";',
+    'import * as style from "./tokens";',
+    'const { style } = require("./tokens");'
+  ])("tracks aliases of external values: %s", (declaration) => {
+    expect(
+      hasMutation(`${declaration} const alias = style; alias.color = "blue";`)
+    ).toBe(true);
+    expect(
+      hasMutation(
+        `${declaration} const alias = style; const color = alias.color;`
+      )
+    ).toBe(false);
+  });
+
   it.each(mutations)("detects an alias write or escape: %s", (mutation) => {
     expect(
       hasMutation(

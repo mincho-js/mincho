@@ -2648,12 +2648,12 @@ describe("minchoBabelPlugin", () => {
     }
   });
 
-  it("preserves provider reexport diagnostic over partial evaluator deopt", () => {
+  it("rejects unknown imported spread shapes even when scalar import fallback is allowed", () => {
     const failure = captureJsxCssPropFailure(
       `
           import { button } from "./barrel";
           function App() {
-            return <div css={{ color: button }} />;
+            return <div css={{ ...button }} />;
           }
         `,
       {
@@ -2663,7 +2663,7 @@ describe("minchoBabelPlugin", () => {
     );
 
     expect(failure.error.message).toContain(
-      'Cannot statically evaluate css prop value: export "button" uses unsupported reexport/barrel syntax'
+      "requires statically known CSS shape"
     );
     expect(failure.error.message).not.toContain(
       "imported binding must be resolved by the static css provider"

@@ -11,6 +11,7 @@ import {
   createStaticCssEvalMutatedBindingDiagnostic
 } from "../diagnostics.js";
 import { hasStaticCssEvalBindingMutation } from "../sameFile.js";
+import { StaticCssMutationAnalysisLimit } from "../sameFile/mutationAliases.js";
 import type { Binding } from "@babel/traverse";
 import type { StaticMemberReference } from "../candidates.js";
 import type { StaticCssEvalDiagnostic, StaticCssEvalQuery } from "../types.js";
@@ -38,9 +39,16 @@ export function hasImportedStaticCssBindingMutation(
 ): boolean {
   const binding = record.programPath.scope.getBinding(localName);
 
-  return binding
-    ? hasStaticCssEvalBindingMutation(record.programPath, binding)
-    : false;
+  try {
+    return binding
+      ? hasStaticCssEvalBindingMutation(record.programPath, binding)
+      : false;
+  } catch (error) {
+    // Exhaustion cannot prove immutability. Treat the binding as potentially
+    // mutated so scalar imports stay dynamic and unknown rule shapes fail closed.
+    if (error instanceof StaticCssMutationAnalysisLimit) return true;
+    throw error;
+  }
 }
 
 export function resolveSameModuleStaticLiteralReference(
@@ -81,6 +89,22 @@ export function resolveSameModuleStaticLiteralReference(
     return { kind: "not-candidate" };
   }
 
+  if (
+    (binding.path.node.end ?? Infinity) >
+    (options.expression.start ?? -Infinity)
+  ) {
+    return {
+      kind: "error",
+      diagnostic: createStaticCssEvalDiagnostic({
+        id: "STATIC_CSS_EVAL_TDZ",
+        code: "unsupported-source",
+        reason: "runtime-dynamic-value",
+        detail: `binding "${options.reference.bindingName}" is read before initialization (TDZ)`,
+        ...createImportedLiteralDiagnosticContext(options.context)
+      })
+    };
+  }
+
   const currentFrame: ImportedStaticCssEvalLocalReferenceFrame = {
     recordId: options.record.id,
     bindingName: options.reference.bindingName,
@@ -102,7 +126,12 @@ export function resolveSameModuleStaticLiteralReference(
     };
   }
 
-  if (hasStaticCssEvalBindingMutation(options.record.programPath, binding)) {
+  if (
+    hasImportedStaticCssBindingMutation(
+      options.record,
+      options.reference.bindingName
+    )
+  ) {
     return {
       kind: "error",
       diagnostic: createStaticCssEvalMutatedBindingDiagnostic(

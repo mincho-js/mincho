@@ -124,6 +124,11 @@ const SUPPORT_MATRIX = {
 } as const;
 
 const STATIC_CSS_EVAL_DIAGNOSTIC_REGISTRY = {
+  STATIC_CSS_EVAL_TDZ: registryEntry(
+    "binding-provenance",
+    "Initialize the binding before reading it in another initializer.",
+    SUPPORT_MATRIX.mutation
+  ),
   STATIC_CSS_EVAL_LOCAL_ALIAS_CYCLE: registryEntry(
     "project-cache",
     "Break the local alias cycle or inline one side of the static css binding.",

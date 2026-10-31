@@ -347,7 +347,7 @@ describe("minchoBabelPlugin", () => {
     expect(code).not.toContain("_cx(button)");
   });
 
-  it("preserves provider reexport fallback for whole css values but rejects them inside static rules", () => {
+  it("preserves unproven provider values as runtime classes or scalar variables", () => {
     const provider = createUnsupportedReexportStaticCssEvalProvider();
     const wholeExpression = babelTransform(
       `
@@ -365,20 +365,17 @@ describe("minchoBabelPlugin", () => {
     expect(wholeExpression.code).toContain("className={_cx(button)}");
     expect(wholeExpression.code).not.toContain("_css(button)");
 
-    expect(() =>
-      babelTransform(
-        `
-          import { button } from "./barrel";
-
-          function App() {
-            return <div css={{ color: button }} />;
-          }
-        `,
-        { jsxCssProp: true, staticCssEvalProvider: provider }
-      )
-    ).toThrow(
-      'Cannot statically evaluate css prop value: export "button" uses unsupported reexport/barrel syntax'
+    const scalarExpression = babelTransform(
+      `
+        import { button } from "./barrel";
+        function App() {
+          return <div css={{ color: button }} />;
+        }
+      `,
+      { jsxCssProp: true, staticCssEvalProvider: provider }
     );
+    expect(scalarExpression.code).toContain("_vx(button)");
+    expect(scalarExpression.result[1]).not.toContain("color: button");
   });
 
   it("respects Babel scope when same-file const css prop bindings shadow", () => {

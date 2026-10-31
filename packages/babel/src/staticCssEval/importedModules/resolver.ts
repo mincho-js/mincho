@@ -14,6 +14,7 @@ import {
   createStaticCssEvalProviderSourceUnsupportedDiagnostic,
   createStaticCssEvalUnresolvedExportDiagnostic,
   createStaticCssEvalUnresolvedImportDiagnostic,
+  createStaticCssEvalMutatedBindingDiagnostic,
   guardStaticCssEvalImportCycle,
   guardStaticCssEvalResolutionDepth
 } from "../diagnostics.js";
@@ -63,6 +64,7 @@ import {
 import {
   createDynamicRequireOperandDiagnostic,
   createReferenceQuery,
+  hasImportedStaticCssBindingMutation,
   resolveSameModuleStaticLiteralReference
 } from "./localReference.js";
 import {
@@ -106,6 +108,10 @@ export class ImportedStaticCssEvalResolver {
     ImportedStaticCssEvalResolvedImport
   >();
   readonly #moduleCache: StaticCssModuleCache;
+  readonly #moduleImporters = new Map<string, Set<string>>();
+  readonly #mutatedModules = new Map<string, Map<string, string>>();
+  readonly #bindingMutations = new Map<string, boolean>();
+  #indexedDirectImports = false;
 
   constructor(options: ImportedStaticCssEvalResolverOptions) {
     this.#moduleCache = options.moduleCache ?? createStaticCssModuleCache();
@@ -130,6 +136,7 @@ export class ImportedStaticCssEvalResolver {
           sourceMetadata: createStaticCssEvalProviderSourceMetadata(resolution)
         }
       );
+      this.#addModuleImporter(resolution.resolvedId, resolution.importerId);
     }
   }
 
@@ -211,6 +218,32 @@ export class ImportedStaticCssEvalResolver {
       });
     }
 
+    const dependencyFiles = [...state.dependencies.values()].map(
+      ({ file }) => file
+    );
+    const mutatedModules = this.#getMutatedModules(dependencyFiles);
+    const mutatedDependency = dependencyFiles.find((file) =>
+      mutatedModules.has(file)
+    );
+    if (mutatedDependency) {
+      return createImportedStaticCssEvalErrorResult({
+        query,
+        diagnostic: createStaticCssEvalMutatedBindingDiagnostic(
+          {
+            owner,
+            dependency: { file: mutatedModules.get(mutatedDependency)! },
+            importPath: requestResult.request.specifier,
+            exportName: requestResult.request.exportName,
+            memberPath: requestResult.request.memberPath
+          },
+          query.bindingName
+        ),
+        state,
+        provenance: result.provenance,
+        cacheKey: result.cacheKey
+      });
+    }
+
     markResolutionDependenciesContributed(state);
 
     return createImportedStaticCssEvalResolvedResult({
@@ -220,6 +253,106 @@ export class ImportedStaticCssEvalResolver {
       cacheKey: result.cacheKey,
       state
     });
+  }
+
+  #addModuleImporter(dependency: string, importer: string): void {
+    let importers = this.#moduleImporters.get(dependency);
+    if (!importers) {
+      importers = new Set();
+      this.#moduleImporters.set(dependency, importers);
+    }
+    importers.add(importer);
+  }
+
+  #indexDirectImports(): void {
+    if (this.#indexedDirectImports) return;
+    // The provider may use loaded module IDs directly without a resolution
+    // entry. Reuse parsed import/export records for those fallback edges.
+    for (const id of this.#modules.keys()) {
+      const record = this.#getModuleRecord(id);
+      if (!record) continue;
+      const addImport = (specifier: string, mode?: "import" | "require") => {
+        const resolved = this.#resolveImport(id, specifier, mode);
+        if (resolved) this.#addModuleImporter(resolved.resolvedId, id);
+      };
+      for (const binding of record.imports.values())
+        addImport(binding.importPath, "import");
+      for (const binding of record.cjsImports.values())
+        addImport(binding.importPath, "require");
+      for (const entry of record.parsedModule.exportGraph) {
+        if ("source" in entry && entry.source) addImport(entry.source);
+        if (entry.kind === "expression" || entry.kind === "local") {
+          const source = getStaticExportEntryCjsRequireSource(record, entry);
+          if (source) addImport(source.importPath, "require");
+        }
+      }
+    }
+    this.#indexedDirectImports = true;
+  }
+
+  #getMutatedModules(dependencies: readonly string[]): Map<string, string> {
+    const key = JSON.stringify([...new Set(dependencies)].sort());
+    const cached = this.#mutatedModules.get(key);
+    if (cached) return cached;
+    this.#indexDirectImports();
+    const reachable = new Set(dependencies);
+    for (const dependency of reachable)
+      for (const importer of this.#moduleImporters.get(dependency) ?? [])
+        reachable.add(importer);
+
+    const mutated = new Map<string, string>();
+    for (const id of this.#modules.keys()) {
+      const record = this.#getModuleRecord(id);
+      if (!record) continue;
+      for (const name of new Set([
+        ...record.imports.keys(),
+        ...record.cjsImports.keys()
+      ])) {
+        const query = {
+          importerId: id,
+          bindingName: name,
+          memberPath: [],
+          expressionStart: 0,
+          expressionEnd: 0
+        };
+        const binding = record.imports.get(name);
+        const request = binding
+          ? createResolutionRequest(query, binding)
+          : createCjsResolutionRequest(query, record.cjsImports.get(name)!);
+        if (request.kind === "error") continue;
+        const resolved = this.#resolveImport(
+          request.request.importer,
+          request.request.specifier,
+          request.request.resolutionMode
+        );
+        // Framework internals cannot mutate a value they cannot reach. Avoid
+        // spending the bounded mutation analysis on unrelated imported values.
+        if (!resolved || !reachable.has(resolved.resolvedId)) continue;
+        // This proof depends on the immutable module record and binding, not
+        // the dependency set selected by each CSS value in the owner.
+        const mutationKey = JSON.stringify([id, name]);
+        let hasMutation = this.#bindingMutations.get(mutationKey);
+        if (hasMutation === undefined) {
+          hasMutation = hasImportedStaticCssBindingMutation(record, name);
+          this.#bindingMutations.set(mutationKey, hasMutation);
+        }
+        if (!hasMutation) continue;
+        const state = createResolutionState({ file: id });
+        const imported = this.#resolveProviderImport(
+          request.request,
+          state.owner,
+          state
+        );
+        if (imported.kind === "resolved")
+          this.#resolveModuleExport(imported.record, request.request, state);
+        // Include reexports and local aliases resolved by the existing evaluator;
+        // never duplicate its export resolution rules in the mutation analysis.
+        for (const { file } of state.dependencies.values())
+          mutated.set(file, id);
+      }
+    }
+    this.#mutatedModules.set(key, mutated);
+    return mutated;
   }
 
   #resolveProviderImport(

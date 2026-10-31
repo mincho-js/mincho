@@ -3,6 +3,7 @@ import { types as t } from "@babel/core";
 import { isNestedCssObjectKey } from "../cssProperty.js";
 import { unwrapTransparentCssRuleExpression } from "../staticCssEval/candidates.js";
 import { invariant } from "../utils.js";
+import { isRuntimeCssImport } from "./runtimeImports.js";
 import {
   getStaticObjectPropertyKeyName,
   isStaticCssPrimitiveExpression,
@@ -1091,7 +1092,8 @@ function isSupportedDynamicCssVariableReferenceExpression(options: {
   const rootIdentifier = getDirectReferenceRootIdentifier(expression);
 
   return rootIdentifier
-    ? !isImportedBindingIdentifier(options.scope, rootIdentifier)
+    ? !isImportedBindingIdentifier(options.scope, rootIdentifier) ||
+        isRuntimeCssImport(options.scope.getBinding(rootIdentifier.name)!)
     : true;
 }
 
@@ -1105,7 +1107,9 @@ function isSidecarOwnedDynamicCssVariableReferenceExpression(options: {
     return false;
   }
 
-  const bindingPath = options.scope.getBinding(expression.name)?.path;
+  const binding = options.scope.getBinding(expression.name);
+  if (binding && isRuntimeCssImport(binding)) return false;
+  const bindingPath = binding?.path;
 
   return !!(
     bindingPath?.scope.path.isProgram() &&
@@ -1117,6 +1121,11 @@ function isSupportedDynamicCssVariableCallExpression(options: {
   readonly expression: t.CallExpression;
   readonly scope: NodePath<t.JSXOpeningElement>["scope"];
 }): boolean {
+  const root = t.isExpression(options.expression.callee)
+    ? getDirectReferenceRootIdentifier(options.expression.callee)
+    : null;
+  if (root && isImportedBindingIdentifier(options.scope, root)) return false;
+
   if (
     !t.isExpression(options.expression.callee) ||
     !isSupportedDynamicCssVariableReferenceExpression({

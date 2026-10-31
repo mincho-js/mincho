@@ -354,6 +354,25 @@ unfavorable.
 
 ## Reproducible compilation benchmark
 
+To measure the separate imported-CSS execution-discovery cost, build
+`@mincho-js/babel` and run:
+
+```sh
+yarn node --expose-gc scripts/benchmark-static-css-execution.mjs
+```
+
+This prepass-only benchmark compares one and eight owners sharing 240 source
+modules, then a 1,001-module graph that reaches the execution-discovery limit.
+It reports three rounds of per-owner time, provider loads/resolutions, parser
+cache hits and fallback status. The default parser cache is shared within each
+round; resolved graphs and owner dependency watches remain separate. Sources
+come from memory, so timings include parsing and traversal but exclude filesystem
+I/O and the rest of compilation. They are measurements, not a CI timing gate.
+The execution module/node limits are distinct from the source provider's
+`package-source` size policy. A future shared discovery cache needs its own
+resolver/source invalidation proof and must preserve each owner's budget and
+watch dependencies; this benchmark does not enable such a cache.
+
 Build each revision with `PACKAGE_PUBLISH=true` before packaging it. Keep
 baseline and candidate consumers in separate, fresh directories:
 

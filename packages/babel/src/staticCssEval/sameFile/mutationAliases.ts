@@ -4,9 +4,17 @@ import type { NodePath } from "@babel/core";
 import type { Binding } from "@babel/traverse";
 import { isBuiltInExtractionCall } from "../../extractionCalls/builtins.js";
 import { STATIC_CSS_EVAL_LIMITS } from "../types.js";
+import { isStaticCssEvalLiteralRequireCallExpression } from "../cjsBindings.js";
+import { getCjsAssignmentTarget } from "../cjsExportTargets.js";
 
 type ObjectPath = NodePath<
-  t.ObjectExpression | t.ArrayExpression | t.RestElement
+  | t.ObjectExpression
+  | t.ArrayExpression
+  | t.RestElement
+  | t.ImportSpecifier
+  | t.ImportDefaultSpecifier
+  | t.ImportNamespaceSpecifier
+  | t.CallExpression
 >;
 
 interface ObjectReference {
@@ -24,6 +32,8 @@ function child(path: NodePath<t.Node>, key: string): NodePath<t.Node> {
   return path.get(key) as NodePath<t.Node>;
 }
 
+export class StaticCssMutationAnalysisLimit extends Error {}
+
 /** Tracks allocation identity without executing initializers, getters or calls. */
 class ObjectReferences {
   private allocations = new WeakMap<t.Node, WeakMap<t.Node, object>>();
@@ -33,7 +43,7 @@ class ObjectReferences {
   private visit(): void {
     const limit = STATIC_CSS_EVAL_LIMITS.maxStaticLiteralNodeCount;
     if (++this.visits > limit) {
-      throw new Error(
+      throw new StaticCssMutationAnalysisLimit(
         `Cannot statically evaluate css prop value: mutation analysis node visit limit exceeded (${this.visits} visits > ${limit} visits)`
       );
     }
@@ -128,6 +138,11 @@ class ObjectReferences {
     }
 
     if (path.isCallExpression() || path.isOptionalCallExpression()) {
+      if (
+        path.isCallExpression() &&
+        isStaticCssEvalLiteralRequireCallExpression(path.node, path.scope)
+      )
+        return [{ path }];
       const callee = child(path, "callee");
       if (!callee.isIdentifier()) return [];
 
@@ -167,6 +182,13 @@ class ObjectReferences {
 
     const declaration = binding.path;
     const values: ObjectReference[] = [];
+
+    if (
+      declaration.isImportSpecifier() ||
+      declaration.isImportDefaultSpecifier() ||
+      declaration.isImportNamespaceSpecifier()
+    )
+      return [{ path: declaration }];
 
     if (declaration.isVariableDeclarator()) {
       const iteration = declaration.parentPath.parentPath;
@@ -313,6 +335,15 @@ class ObjectReferences {
       this.visit();
 
       const object = reference.path;
+      // Imported values have no local allocation to inspect. A nested reference
+      // may alias the same external object, so retain its opaque identity.
+      if (
+        object.isImportSpecifier() ||
+        object.isImportDefaultSpecifier() ||
+        object.isImportNamespaceSpecifier() ||
+        object.isCallExpression()
+      )
+        return [reference];
       if (seen.has(object.node)) return [];
 
       const next = new Set(seen).add(object.node);
@@ -538,9 +569,14 @@ export function hasAliasedStaticCssEvalBindingMutation(
 
   program.traverse({
     AssignmentExpression(path) {
+      const target = getCjsAssignmentTarget(path.node.left, path.scope);
+      const reexport =
+        path.node.operator === "=" &&
+        (target.kind === "property" || target.kind === "module-replacement");
       if (
         writes(path.get("left")) ||
-        (path.get("left").isMemberExpression() &&
+        (!reexport &&
+          path.get("left").isMemberExpression() &&
           touches(path.get("right"), true))
       )
         mark(path);
