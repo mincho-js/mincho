@@ -33,6 +33,6 @@
   },
   "dependencies": {
     "typescript": "^5.9.3",
-    "vite": "^7.3.3"
+    "vite": "^7.3.5"
   }
 }
