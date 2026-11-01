@@ -717,6 +717,25 @@ function applyEntry<
     return;
   }
 
+  if (
+    !hasOwn(ctx.properties ?? {}, key) &&
+    key.startsWith("_") &&
+    isPlainObject(value)
+  ) {
+    // Condition aliases and pseudo selectors contain another rules input. Expand
+    // it before declaration collection so shortcuts retain condition ownership.
+    const nested: ResolvedStyleFragment[] = [];
+    applyObject(ctx, nested, value, shortcutStack);
+    for (const fragment of nested) {
+      fragmentsOut.push({
+        ...fragment,
+        style: { [key]: fragment.style } as unknown as CSSRule
+      });
+    }
+
+    return;
+  }
+
   applyProperty(ctx, fragmentsOut, key, value, shortcutStack);
 }
 
