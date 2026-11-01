@@ -83,10 +83,12 @@ transform; unknown rule-object shapes continue to fail closed.
 
 ## Application CSS
 
-The CSS passes default on for production `appCss.mode: "dist-chunk"` builds using
-the validated Vite/vanilla-extract adapter. Native mode, development serving,
-libraries, and SSR keep their existing CSS path. Generated class names are
-preserved by all default passes.
+Adjacent rule merging, theme compaction and native sharing default on for
+production `appCss.mode: "dist-chunk"` builds using the validated adapter.
+Generated-variable pruning requires `pruneGenerated: true`; its conservative
+CSSOM guard can disable it in applications that include React DOM. Native mode,
+development serving, libraries, and SSR keep their existing CSS path. Generated
+class names are preserved by all default passes.
 
 | Option           | Applied scope                                                       | Preservation boundaries                                                                                                                           |
 | ---------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |

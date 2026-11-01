@@ -38,6 +38,7 @@ export interface MinchoAppCssOptions {
         dedupeResources?: boolean;
         compactColorThemes?: boolean;
         mergeRules?: boolean;
+        /** Opt-in generated-variable pruning, guarded against runtime CSSOM access. */
         pruneGenerated?: boolean;
         compactThemes?: boolean;
 
@@ -78,7 +79,7 @@ export function resolveAppCssOptimization(
     dedupeResources: explicit.dedupeResources ?? false,
     compactColorThemes: explicit.compactColorThemes ?? false,
     mergeRules: explicit.mergeRules ?? true,
-    pruneGenerated: explicit.pruneGenerated ?? true,
+    pruneGenerated: explicit.pruneGenerated ?? false,
     compactThemes: explicit.compactThemes ?? true,
     mergeConditionalRules: explicit.mergeConditionalRules ?? false,
     pruneKeyframes: explicit.pruneKeyframes ?? production,

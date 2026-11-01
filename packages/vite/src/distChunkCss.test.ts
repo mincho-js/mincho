@@ -1501,7 +1501,9 @@ describe("chunk-stage Mincho CSS generation", () => {
     });
 
     const baseline = await compile(root, { appCss: { optimize: false } });
-    const optimized = await compile(root);
+    const optimized = await compile(root, {
+      appCss: { optimize: { pruneGenerated: true } }
+    });
 
     expect(baseline.text.match(/@property /g)).toHaveLength(3);
     expect(optimized.text.match(/@property /g)).toHaveLength(2);
@@ -1525,7 +1527,9 @@ describe("chunk-stage Mincho CSS generation", () => {
         export const style=css((()=>{const token=createVar({syntax:"<color>",inherits:false,initialValue:"red"});return {vars:{[token]:"red"},color:"black"};})());`
     });
 
-    const observed = await compile(root);
+    const observed = await compile(root, {
+      appCss: { optimize: { pruneGenerated: true } }
+    });
 
     expect(observed.text.match(/@property /g)).toHaveLength(1);
     expect(
@@ -1541,7 +1545,9 @@ describe("chunk-stage Mincho CSS generation", () => {
       'import {style} from "./styles.js"; globalThis.classes=style;'
     );
 
-    const unobserved = await compile(root);
+    const unobserved = await compile(root, {
+      appCss: { optimize: { pruneGenerated: true } }
+    });
 
     expect(unobserved.text).not.toContain("@property");
     expect(unobserved.text).toContain("color: black");

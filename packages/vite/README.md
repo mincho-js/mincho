@@ -65,6 +65,13 @@ removal. This is not a general selector purge. Set either flag to `false` to
 disable it, or `appCss.optimize: false` to disable all IR passes. Conditional rule
 merging and theme value interning also remain opt-in.
 
+Generated custom-property pruning is opt-in with `appCss.optimize.pruneGenerated: true`.
+The default whole-program CSSOM guard also observes dependencies such as React DOM;
+their style reads/writes can disable pruning even when application code does not
+access CSSOM. `scopedResourceAnalysis: true` enables finer reference analysis, but
+unknown access and ordinary imported CSS still prevent an unsafe removal. Neither
+setting guarantees unused CSS removal for a typical React application.
+
 The private adapter supports Vite **7.3.3/7.3.7**, vanilla-extract integration
 **8.0.10/8.0.11** and CSS **1.20.1/1.21.3**. Unsupported versions, Lightning CSS
 transformation, or opaque third-party CSS transforms fail explicitly; use `native` for those
