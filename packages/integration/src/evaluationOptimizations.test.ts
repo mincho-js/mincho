@@ -1,5 +1,5 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { join, relative } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import esbuild, { type PluginBuild } from "esbuild";
 import { compile, type CompileOptions } from "./compile.js";
@@ -94,6 +94,49 @@ function diagnosticEvents(diagnostics: CompilationDiagnostics) {
 }
 
 describe("closed ESM evaluation demand", () => {
+  it("preserves identifiers and slices dependencies through a symlinked workspace", async () => {
+    const { root, options } = await fixture(
+      `import {style} from '@vanilla-extract/css'; import {palette} from './tokens'; export const box=style({color:palette.red});`,
+      {
+        "tokens.ts": `export const palette={red:'red',unused:'UNUSED_SYMLINK_MEMBER'};`
+      }
+    );
+    const alias = join(root, "workspace-link");
+    await symlink(process.cwd(), alias, "dir");
+    const file = join(alias, relative(process.cwd(), options.filePath));
+    const reference = await compile(options);
+    const linked = await compile({
+      ...options,
+      cwd: alias,
+      filePath: file,
+      originalPath: file
+    });
+    const sliced = await compile({
+      ...options,
+      cwd: alias,
+      filePath: file,
+      originalPath: file,
+      dependencyGraph: true
+    });
+    const literal = await compile({
+      ...options,
+      cwd: alias,
+      filePath: file,
+      originalPath: file,
+      contents: `import {style} from '@vanilla-extract/css'; export const box=style({color:'red'});`
+    });
+    expect(sliced.source).not.toContain("UNUSED_SYMLINK_MEMBER");
+    expect(await evaluate(linked.source, file)).toEqual(
+      await evaluate(reference.source, options.filePath)
+    );
+    expect(await evaluate(sliced.source, file)).toEqual(
+      await evaluate(reference.source, options.filePath)
+    );
+    expect(await evaluate(literal.source, file)).toEqual(
+      await evaluate(reference.source, options.filePath)
+    );
+  });
+
   it("skips AST parsing and resolution when imports are known external intrinsics only", async () => {
     const cache = new CompilationCache();
     const parse = vi.spyOn(cache.parser, "parse");

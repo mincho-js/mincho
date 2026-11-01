@@ -36,6 +36,13 @@ reusing the result. Dependency watches and native esbuild assets are replayed;
 CSS evaluation and registry publication still run for each build. Opaque plugin
 effects and unsupported configurations continue through the normal compiler.
 
+Compiler identity includes recursive compiler files and the resolved dependency
+graph's package names and versions, including transitive and peer dependencies.
+Dependencies resolve from their own package so strict PnP peer contexts are
+preserved. Checkout paths are not part of this identity. If a required compiler
+dependency cannot be identified, persistent caching is disabled instead of
+reusing an incomplete fingerprint.
+
 Writes publish through temporary files in the destination directory and an
 atomic rename. In one process, pending writes to the same path coalesce and
 stale generations cannot replace a valid successor. Identical content avoids

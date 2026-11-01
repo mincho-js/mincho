@@ -8,9 +8,10 @@ import {
 import type { NodePath } from "@babel/core";
 import type { InternalSourceAstCache } from "@mincho-js/babel";
 import type { PluginBuild } from "esbuild";
-import { dirname, isAbsolute, relative, resolve } from "node:path";
+import { dirname, isAbsolute, relative } from "node:path";
 import { recordCompilationDiagnostic } from "./diagnostics.js";
 import { configurationFiles } from "./compilationInputs.js";
+import { canonicalFilePath } from "./canonicalPath.js";
 
 type Value =
   null | string | number | boolean | Value[] | { [key: string]: Value };
@@ -540,10 +541,14 @@ export async function prepareEvaluationDependencyGraph(input: {
       }
     }
 
-    const root = inspect(input.source, input.filePath, input.parser);
+    const [cwd, filePath] = await Promise.all([
+      canonicalFilePath(input.cwd),
+      canonicalFilePath(input.filePath)
+    ]);
+    const root = inspect(input.source, filePath, input.parser);
     if (!root) return;
 
-    const modules = new Map([[resolve(input.filePath), root]]);
+    const modules = new Map([[filePath, root]]);
     let bytes = Buffer.byteLength(input.source);
     let opaque = false;
 
@@ -600,7 +605,7 @@ export async function prepareEvaluationDependencyGraph(input: {
           continue;
 
         // Package modules and custom namespaces keep their original import/effect contract.
-        const local = relative(resolve(input.cwd), resolved.path);
+        const local = relative(cwd, resolved.path);
         const loader =
           input.loaderForFile?.(resolved.path) ??
           (/\.[cm]?tsx?$/.test(resolved.path) ? "ts" : "js");

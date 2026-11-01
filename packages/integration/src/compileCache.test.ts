@@ -1,4 +1,12 @@
-import { mkdir, mkdtemp, writeFile, rm } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  writeFile,
+  rm,
+  realpath,
+  symlink,
+  unlink
+} from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it, vi } from "vitest";
@@ -8,6 +16,40 @@ import { CompilationCache } from "./compilationCache.js";
 import { CompilationDiagnostics } from "./diagnostics.js";
 
 describe("sidecar compilation cache", () => {
+  it("invalidates when a workspace symlink is retargeted", async () => {
+    const root = await mkdtemp(join(tmpdir(), "cache-retarget-"));
+    const alias = join(root, "workspace");
+    try {
+      for (const color of ["red", "blue"]) {
+        const directory = join(root, color);
+        await mkdir(directory);
+        await writeFile(
+          join(directory, "package.json"),
+          '{"name":"retarget-test"}'
+        );
+        await writeFile(
+          join(directory, "dep.ts"),
+          `export const color = "${color}";`
+        );
+      }
+      const options = {
+        cwd: alias,
+        filePath: join(alias, "owner.css.ts"),
+        originalPath: join(alias, "owner.ts"),
+        contents: 'export { color } from "./dep";',
+        cache: new CompilationCache(),
+        resolverCache: new Map<string, string>()
+      };
+      await symlink(join(root, "red"), alias, "dir");
+      expect((await compile(options)).source).toContain('"red"');
+      await unlink(alias);
+      await symlink(join(root, "blue"), alias, "dir");
+      expect((await compile(options)).source).toContain('"blue"');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("observes Babel root config creation, edits and removal outside the owner ancestry", async () => {
     // Keep sibling fixture creation out of observed workspace directory entries.
     await mkdir(join(process.cwd(), ".cache"), { recursive: true });
@@ -75,7 +117,9 @@ describe("sidecar compilation cache", () => {
 
   it("reuses sliced compilation while retaining absent Babel configuration watches and invalidation", async () => {
     // Isolate both data modules and Babel's working directory from sibling tests.
-    const root = await mkdtemp(join(tmpdir(), "cache-graph-test-"));
+    const root = await realpath(
+      await mkdtemp(join(tmpdir(), "cache-graph-test-"))
+    );
 
     const cwd = vi.spyOn(process, "cwd").mockReturnValue(root);
 
@@ -169,7 +213,9 @@ describe("sidecar compilation cache", () => {
   });
 
   it("invalidates a loaded sibling's Babel configuration before graph slicing", async () => {
-    const root = await mkdtemp(join(tmpdir(), "cache-sibling-test-"));
+    const root = await realpath(
+      await mkdtemp(join(tmpdir(), "cache-sibling-test-"))
+    );
 
     const cwd = vi.spyOn(process, "cwd").mockReturnValue(root);
 

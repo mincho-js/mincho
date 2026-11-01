@@ -17,7 +17,9 @@ afterEach(async () => {
 });
 
 async function fixture() {
-  const root = await fs.mkdtemp(join(tmpdir(), "mincho-child-plugins-"));
+  const root = await fs.realpath(
+    await fs.mkdtemp(join(tmpdir(), "mincho-child-plugins-"))
+  );
   roots.push(root);
   await fs.writeFile(join(root, "package.json"), '{"name":"child-fixture"}');
   const dependency = join(root, "dependency.custom");

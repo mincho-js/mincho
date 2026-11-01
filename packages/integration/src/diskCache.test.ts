@@ -1,10 +1,21 @@
-import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  writeFile
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { deserialize, serialize } from "node:v8";
 import { afterEach, expect, it } from "vitest";
-import { CompilationDiskCache, type PersistentEntry } from "./diskCache.js";
+import {
+  CompilationDiskCache,
+  fingerprintCompilerFiles,
+  type PersistentEntry
+} from "./diskCache.js";
 import { CompilationDiagnostics } from "./diagnostics.js";
 import { CompilationIoPool } from "./ioPool.js";
 
@@ -31,6 +42,29 @@ const entry = (value: unknown): PersistentEntry => ({
   bytes: 100,
   dependencies: ["/source.ts"],
   manifest: { fingerprints: [["/source.ts", "hash"]] }
+});
+
+it("fingerprints nested compiler code independently of the checkout directory", async () => {
+  const roots = [await directory(), await directory()];
+  for (const root of roots) {
+    await mkdir(join(root, "nested"));
+    await writeFile(
+      join(root, "index.js"),
+      'export { value } from "./nested/value.js";'
+    );
+    await writeFile(join(root, "nested/value.js"), "export const value = 1;");
+  }
+  const first = await fingerprintCompilerFiles([join(roots[0]!, "index.js")]);
+  expect(await fingerprintCompilerFiles([join(roots[1]!, "index.js")])).toBe(
+    first
+  );
+  await writeFile(
+    join(roots[1]!, "nested/value.js"),
+    "export const value = 2;"
+  );
+  expect(
+    await fingerprintCompilerFiles([join(roots[1]!, "index.js")])
+  ).not.toBe(first);
 });
 
 it.each(["resolve", "reject"] as const)(

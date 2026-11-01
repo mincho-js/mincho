@@ -1,5 +1,25 @@
 [
   {
+    "id": "integration-native-compiler-dependency-fingerprint-fixture",
+    "file": "packages/integration/src/compilerDependencies.test.ts",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": "const dependency = join(parent, \"node_modules\", \"data\");",
+    "count": 1,
+    "reason": "This isolated native Node fixture verifies fingerprinting of packages with private manifests and subpath-only exports; production resolution uses the issuer's resolver and PnP API.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "integration-disk-cache-skip-dependency-directory",
+    "file": "packages/integration/src/diskCache.ts",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": "item.name === \"node_modules\" ||",
+    "count": 1,
+    "reason": "Recursive compiler fingerprinting excludes dependency directories in non-PnP installations; this comparison does not resolve or open a package through node_modules.",
+    "expires": "2026-12-31"
+  },
+  {
     "id": "integration-compiler-execution-test-script-loader",
     "file": "packages/integration/src/compilationExecution.test.ts",
     "type": "warning",

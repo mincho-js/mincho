@@ -1,4 +1,5 @@
 import { scopedFileScopeRuntime } from "./fileScopeRuntime.js";
+import { canonicalFilePath } from "./canonicalPath.js";
 import {
   measureCompilationPhase,
   recordCompilationDiagnostic
@@ -302,6 +303,14 @@ function getWatchFiles(
 }
 
 export async function compile(options: CompileOptions) {
+  // Resolve before cache lookup so retargeted workspace symlinks cannot reuse
+  // results whose old canonical dependencies still exist unchanged.
+  const [cwd, filePath, originalPath] = await Promise.all([
+    canonicalFilePath(options.cwd ?? process.cwd()),
+    canonicalFilePath(options.filePath),
+    canonicalFilePath(options.originalPath ?? options.filePath)
+  ]);
+  options = { ...options, cwd, filePath, originalPath };
   return options.cache
     ? cachedCompile(options, compileUncached)
     : compileUncached(options);

@@ -1,12 +1,21 @@
 import { internalResolveFromModule as resolveFromModule } from "@mincho-js/babel";
 import { createHash } from "node:crypto";
-import { mkdir, readFile, readdir, rm, stat, utimes } from "node:fs/promises";
-import { dirname, extname, join } from "node:path";
+import {
+  mkdir,
+  readFile,
+  readdir,
+  realpath,
+  rm,
+  stat,
+  utimes
+} from "node:fs/promises";
+import { dirname, extname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { deserialize, serialize } from "node:v8";
 import { getCompilationIoPool, type CompilationIoPool } from "./ioPool.js";
 import { recordCompilationDiagnostic } from "./diagnostics.js";
 import { CoalescedAtomicWriter } from "./coalescedWriter.js";
+import { fingerprintCompilerDependencies } from "./compilerDependencies.js";
 
 export interface PersistentManifest {
   readonly fingerprints: readonly (readonly [string, string | null])[];
@@ -76,29 +85,58 @@ export function getCompilerIdentity(): Promise<string> {
       ])
     );
 
-    const seen = new Set<string>();
-
-    for (const entry of entries) {
-      const directory = dirname(entry);
-
-      for (const name of (await readdir(directory)).sort()) {
-        if (
-          !/\.(?:[cm]?js|ts|json)$/.test(name) ||
-          name.endsWith(".d.ts") ||
-          name.endsWith(".test.ts")
-        )
-          continue;
-
-        const file = join(directory, name);
-        if (seen.has(file)) continue;
-
-        seen.add(file);
-        hash.update(file).update(await readFile(file));
-      }
-    }
+    hash.update(await fingerprintCompilerFiles(entries));
+    hash.update(await fingerprintCompilerDependencies(entries));
 
     return hash.digest("hex");
   })());
+}
+
+/** Relative names and recursive contents cover unhashed modules without checkout paths. */
+export async function fingerprintCompilerFiles(
+  entries: readonly string[]
+): Promise<string> {
+  const hash = createHash("sha256");
+  const seen = new Set<string>();
+  for (const [index, entry] of entries.entries()) {
+    const root = dirname(entry);
+    const visit = async (directory: string): Promise<void> => {
+      const canonical = await realpath(directory);
+      if (seen.has(canonical)) return;
+      seen.add(canonical);
+      for (const item of (
+        await readdir(directory, { withFileTypes: true })
+      ).sort((a, b) => a.name.localeCompare(b.name, "en"))) {
+        if (
+          item.name.startsWith(".") ||
+          item.name === "node_modules" ||
+          item.name === "_release"
+        )
+          continue;
+        const file = join(directory, item.name);
+        const info = item.isSymbolicLink() ? await stat(file) : item;
+        if (info.isDirectory()) {
+          await visit(file);
+        } else if (
+          info.isFile() &&
+          /\.(?:[cm]?js|[cm]?ts|json)$/.test(item.name) &&
+          !/\.(?:d\.[cm]?ts|test\.[cm]?[jt]s)$/.test(item.name)
+        ) {
+          const content = await readFile(file);
+          hash.update(
+            JSON.stringify([
+              index,
+              relative(root, file).replaceAll("\\", "/"),
+              content.length
+            ])
+          );
+          hash.update(content);
+        }
+      }
+    };
+    await visit(root);
+  }
+  return hash.digest("hex");
 }
 
 export class CompilationDiskCache {
