@@ -70,6 +70,109 @@ function cssVariable(result: BuildResult, name: string): string {
   return value;
 }
 
+it.each([
+  [undefined, undefined, false, true],
+  ["production", undefined, false, false],
+  ["production", "debug", false, true],
+  ["development", "short", false, false],
+  [undefined, undefined, true, false]
+] as const)(
+  "uses coherent identifiers for profile %s override %s minify %s",
+  async (mode, identifiers, minify, debug) => {
+    const root = await fixture({
+      "entry.tsx":
+        'import { style } from "@vanilla-extract/css"; import { box } from "./box.css"; export const compiled = style({color:"red"}, "compiled"); console.log(compiled, box);',
+      "box.css.ts":
+        'import { style } from "@vanilla-extract/css"; export const box = style({color:"blue"}, "auditBox");'
+    });
+    const result = await build(
+      buildOptions(root, {
+        minify,
+        plugins: minchoEsbuildPlugins({ optimizationMode: mode, identifiers })
+      })
+    );
+    const css = outputText(result, ".css");
+    expect(css.includes("auditBox")).toBe(debug);
+    expect(css.includes("compiled")).toBe(debug);
+  },
+  20000
+);
+
+it("preserves dynamic CSS and imported mutations across build profiles", async () => {
+  const root = await fixture({
+    "package.json": JSON.stringify({ sideEffects: true }),
+    "entry.tsx": `
+      import { token } from "./tokens";
+      import "./initialize";
+      function h(_tag, props) { return props; }
+      const base = { padding: 4 };
+      export function view(p) {
+        return <div css={[base, {color: token.color}, p.on && {
+          width: p.width,
+          lineHeight: p.lineHeight,
+          backgroundColor: p.color + " !important",
+          margin: \`calc(\${p.margin}px + \${p.gap}rem)\`
+        }]} />;
+      }
+    `,
+    "tokens.ts": 'export const token = { color: "red" };',
+    "initialize.ts": 'import { token } from "./tokens"; token.color = "blue";'
+  });
+  const outputs = [];
+  for (const optimizationMode of ["development", "production"] as const) {
+    const result = await build(
+      buildOptions(root, {
+        format: "cjs",
+        jsxFactory: "h",
+        // The fixture consumes the actual generated-code helper without relying
+        // on a transitive dependency being visible through strict Yarn PnP.
+        alias: {
+          "@mincho-js/transform-runtime": resolve(
+            "../transform-runtime/dist/esm/index.mjs"
+          )
+        },
+        plugins: minchoEsbuildPlugins({
+          optimizationMode,
+          identifiers: "short",
+          jsxCssProp: true
+        })
+      })
+    );
+    const module = {
+      exports: {} as {
+        view(props: Record<string, unknown>): {
+          style: Record<string, unknown>;
+        };
+      }
+    };
+    new Function("module", "exports", outputText(result, ".js"))(
+      module,
+      module.exports
+    );
+    const props = {
+      on: true,
+      width: 10,
+      lineHeight: 1.5,
+      color: "green",
+      margin: 3,
+      gap: 2
+    };
+    const active = Object.values(module.exports.view(props).style);
+    const inactive = Object.values(
+      module.exports.view({ ...props, on: false }).style
+    );
+    const css = outputText(result, ".css");
+    expect(active).toEqual(
+      expect.arrayContaining(["blue", "10px", 1.5, "green", "calc(3px + 2rem)"])
+    );
+    expect(inactive).toEqual(["blue"]);
+    expect(css).toContain(" !important");
+    expect(css).not.toContain("color: red");
+    outputs.push({ active, inactive, css });
+  }
+  expect(outputs[0]).toEqual(outputs[1]);
+}, 20000);
+
 function observeBuilds() {
   const pending: Array<(result: BuildResult) => void> = [];
   const plugin: Plugin = {
@@ -103,7 +206,7 @@ function observeBuilds() {
 
 describe("esbuild build contracts", () => {
   it(
-    "defaults to production optimizations and allows development overrides",
+    "defaults minified builds to production optimizations and allows development overrides",
     { timeout: 30_000 },
     async () => {
       const root = await fixture({
@@ -138,7 +241,7 @@ describe("esbuild build contracts", () => {
         const result = await build(
           buildOptions(root, {
             minify: true,
-            plugins: minchoEsbuildPlugins(options)
+            plugins: minchoEsbuildPlugins({ ...options, identifiers: "short" })
           })
         );
 

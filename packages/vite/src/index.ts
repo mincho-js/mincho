@@ -21,6 +21,8 @@ import {
   InternalRuntimeOptimizations,
   type InternalSymbolicTokenArtifact,
   internalResolveOptimizationOptions,
+  internalResolveIdentifiers,
+  type MinchoIdentifiers,
   type OptimizationMode,
   type BabelTransformResult,
   type DefineRulesPackageGraph,
@@ -106,6 +108,8 @@ export interface MinchoVitePluginOptions {
 
   /** Defaults to development for serve and production for build. */
   optimizationMode?: OptimizationMode;
+  /** Defaults to short for production optimization, debug for development. */
+  identifiers?: MinchoIdentifiers;
   bundleSize?: BabelOptions["bundleSize"];
   optimize?: BabelOptions["optimize"];
   babel?: BabelOptions;
@@ -1348,7 +1352,11 @@ function createMinchoViteEnvironmentPlugin(
           let registryResult = await tracedRegistry({
             source,
             filePath: moduleInfo.filePath,
-            identOption: config.mode === "production" ? "short" : "debug",
+            identOption: internalResolveIdentifiers(
+              _options?.optimizationMode ??
+                (config.command === "serve" ? "development" : "production"),
+              _options?.identifiers
+            ),
             ...(distChunkCss.enabled
               ? {
                   cssSourceFile: moduleInfo.originalPath,
@@ -7192,47 +7200,55 @@ if (import.meta.vitest) {
       expect(entryChunk.code).toBe(entryCode);
     });
 
-    it("injects ordered library CSS sidecars into ESM and CJS entry chunks", async () => {
-      const { build } = await import("vite");
-      const manifest = await loadDefineRulesPresetSerializationManifest();
-      const fixturePath =
-        manifest.createDefineRulesPresetSerializationFixturePath(
-          manifest.DEFINE_RULES_PRESET_SERIALIZATION_PATHS.packageDiamond
-        );
+    it.each(["es", "cjs"] as const)(
+      "injects ordered library CSS sidecars into %s entry chunks",
+      async (format: "es" | "cjs") => {
+        const { build } = await import("vite");
+        const manifest = await loadDefineRulesPresetSerializationManifest();
+        const fixturePath =
+          manifest.createDefineRulesPresetSerializationFixturePath(
+            manifest.DEFINE_RULES_PRESET_SERIALIZATION_PATHS.packageDiamond
+          );
 
-      const fixtureRoot = dirname(dirname(fixturePath));
-      const entryPath = join(fixtureRoot, "library-css-sidecar-entry.ts");
-      const fixtureSource = (
-        await fs.promises.readFile(fixturePath, "utf8")
-      ).replace(
-        /"@mincho-js-proof\/([^"]+)"/g,
-        (_specifier, packageName: string) =>
-          JSON.stringify(
-            normalizePath(
-              join(
-                fixtureRoot,
-                "node_modules",
-                "@mincho-js-proof",
-                packageName,
-                "dist/index.js"
+        const fixtureRoot = dirname(dirname(fixturePath));
+        const entryPath = join(
+          fixtureRoot,
+          `library-css-sidecar-${format}-entry.ts`
+        );
+        const fixtureSource = (
+          await fs.promises.readFile(fixturePath, "utf8")
+        ).replace(
+          /"@mincho-js-proof\/([^"]+)"/g,
+          (_specifier, packageName: string) =>
+            JSON.stringify(
+              normalizePath(
+                join(
+                  fixtureRoot,
+                  "node_modules",
+                  "@mincho-js-proof",
+                  packageName,
+                  "dist/index.js"
+                )
               )
             )
-          )
-      );
-
-      const integrationModule = await import("@mincho-js/integration");
-
-      try {
-        await fs.promises.writeFile(
-          entryPath,
-          'import {css} from "@mincho-js/css"; export const entry = true;\n'
         );
-        vi.spyOn(integrationModule, "babelTransformSource").mockResolvedValue({
-          code: 'import "extracted_diamond.css.ts";\nexport const entry = true;',
-          result: ["extracted_diamond.css.ts", fixtureSource]
-        });
 
-        for (const format of ["es", "cjs"] as const) {
+        const integrationModule = await import("@mincho-js/integration");
+        const transformSpy = vi.spyOn(
+          integrationModule,
+          "babelTransformSource"
+        );
+
+        try {
+          await fs.promises.writeFile(
+            entryPath,
+            'import {css} from "@mincho-js/css"; export const entry = true;\n'
+          );
+          transformSpy.mockResolvedValue({
+            code: 'import "extracted_diamond.css.ts";\nexport const entry = true;',
+            result: ["extracted_diamond.css.ts", fixtureSource]
+          });
+
           const buildResult = await build({
             root: fixtureRoot,
             configFile: false,
@@ -7372,12 +7388,13 @@ if (import.meta.vitest) {
           expect(String(cssAsset.source)).not.toContain(
             "color: rebeccapurple;"
           );
+        } finally {
+          transformSpy.mockRestore();
+          await fs.promises.rm(entryPath, { force: true });
         }
-      } finally {
-        vi.restoreAllMocks();
-        await fs.promises.rm(entryPath, { force: true });
-      }
-    }, 20_000);
+      },
+      20_000
+    );
 
     it("injects each split library entry's own CSS and skips entries without CSS", async () => {
       const integrationModule = await import("@mincho-js/integration");

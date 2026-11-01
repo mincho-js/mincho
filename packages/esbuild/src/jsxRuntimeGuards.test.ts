@@ -49,7 +49,11 @@ describe("esbuild automatic JSX runtime specialization", () => {
         jsx: "automatic",
         jsxImportSource: "@mincho-js/react",
         external: ["@mincho-js/react/*"],
-        plugins: minchoEsbuildPlugins({ cache: false, jsxCssProp: true })
+        plugins: minchoEsbuildPlugins({
+          optimizationMode: "production",
+          cache: false,
+          jsxCssProp: true
+        })
       });
 
       expect(output(result)).toContain("@mincho-js/react/compiled-jsx-runtime");
@@ -74,7 +78,10 @@ describe("esbuild automatic JSX runtime specialization", () => {
       jsx: "automatic",
       jsxImportSource: "@mincho-js/react",
       external: ["@mincho-js/react/*"],
-      plugins: minchoEsbuildPlugins({ cache: false })
+      plugins: minchoEsbuildPlugins({
+        optimizationMode: "production",
+        cache: false
+      })
     });
 
     expect(output(result)).toContain(
@@ -130,7 +137,11 @@ describe("esbuild automatic JSX runtime specialization", () => {
       jsx: "automatic",
       jsxImportSource: "@mincho-js/react",
       external: ["@mincho-js/react/*"],
-      plugins: minchoEsbuildPlugins({ cache: false, ...options })
+      plugins: minchoEsbuildPlugins({
+        optimizationMode: "production",
+        cache: false,
+        ...options
+      })
     });
 
     expect(output(result)).toContain("@mincho-js/react/jsx-runtime");
@@ -150,7 +161,10 @@ describe("esbuild automatic JSX runtime specialization", () => {
       jsxDev: true,
       jsxImportSource: "@mincho-js/react",
       external: ["@mincho-js/react/*"],
-      plugins: minchoEsbuildPlugins({ cache: false })
+      plugins: minchoEsbuildPlugins({
+        optimizationMode: "production",
+        cache: false
+      })
     });
 
     try {

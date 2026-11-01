@@ -9,15 +9,23 @@ source files and are extracted into CSS sidecars. See the
 Additional package and local style factories can be registered with
 [`extractCalls`](../../docs/extract-calls.md).
 
-The default `optimizationMode: "production"` enables `pureFunctions`,
-`staticRecipes`, `styledComponents`, and `runtimeCodegen`. Use
-`optimizationMode: "development"` for faster watch transforms; it keeps
-`pureFunctions` enabled and disables the other three switches by default.
+The plugin defaults to development unless an explicit `process.env.NODE_ENV`
+definition or full esbuild minification selects production. This also applies
+to context/watch builds. `buildWithMincho` is a production build API and defaults
+to production explicitly. Set `optimizationMode` to override either behavior.
+Production enables `pureFunctions`, `staticRecipes`, `styledComponents`, and
+`runtimeCodegen`; development keeps `pureFunctions` enabled and disables the
+other three switches by default.
 Individual `optimize` switches override the profile. See
 [compilation performance](../../docs/compilation-performance.md) for defaults,
 cache behavior and the benchmark harness.
 The [runtime optimization guide](../../docs/runtime-optimizations.md) covers
 canonical recipe order, generated helpers and the experimental runtime options.
+
+CSS identifiers follow the optimization profile: `short` in production and
+`debug` in development. `identifiers: "short" | "debug"` overrides this for both
+extracted Mincho styles and ordinary vanilla-extract CSS files, independently
+of JavaScript minification.
 
 With `jsx: "automatic"` and `jsxImportSource: "@mincho-js/react"`, production
 builds use React's native JSX runtime for modules whose final JSX props are
@@ -106,6 +114,8 @@ with equivalent resolution and transformation behavior. Exclude publishing
 hooks and other external side effects from analysis: esbuild's `write: false`
 does not prevent a third-party plugin from writing files itself. Two native
 build passes add processing cost; this API does not promise transform reuse.
+When there are no ordered CSS imports, CSS sharing, or caller plugin factories,
+the validated analysis output is reused directly, avoiding the second build.
 
 The snapshot covers Mincho-owned source, child-compilation and asset reads,
 plugin load results and resolved identities, reported `watchFiles`, local input
@@ -133,10 +143,10 @@ fragments remain supported.
 ## Experimental CSS sharing
 
 `buildWithMincho` can emit a shared stylesheet for an identical prefix of whole
-CSS modules used by multiple entries. Production builds with an output path
-enable sharing by default, requiring at least two boundaries and 4,096 source
-bytes. Development builds disable it. Set `experimental.cssChunkSharing: false`
-to retain native output, or override the thresholds explicitly:
+CSS modules used by multiple entries. Sharing is opt-in because the consumer
+must load the stylesheet list from the manifest. Without it, native CSS output
+is retained and no sharing replay is performed. Set `experimental.cssChunkSharing: true`
+to require at least two boundaries and 4,096 source bytes, or supply thresholds:
 
 ```ts
 const result = await buildWithMincho({

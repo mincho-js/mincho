@@ -76,16 +76,13 @@ export interface BuildWithMinchoResult extends esbuild.BuildResult {
   minchoCssManifest?: MinchoCssManifest;
 }
 
-/** Native two-pass, one-shot build. Neither pass publishes unvalidated outputs. */
+/** One-shot native build with a second linking pass when ordered CSS requires it. */
 export async function buildWithMincho(
   options: BuildWithMinchoOptions
 ): Promise<BuildWithMinchoResult> {
   const { mincho, plugins, ...nativeOptions } = options;
   const explicitSharing = mincho?.experimental?.cssChunkSharing;
-  const sharingOptions =
-    explicitSharing ??
-    ((mincho?.optimizationMode ?? "production") === "production" &&
-      Boolean(nativeOptions.outdir || nativeOptions.outfile));
+  const sharingOptions = explicitSharing ?? false;
 
   if (
     nativeOptions.write !== false &&
@@ -135,9 +132,10 @@ export async function buildWithMincho(
         ...(plugins?.(phase) ?? []).map((plugin) =>
           observer.wrap(plugin, false)
         ),
-        ...minchoEsbuildPlugins(mincho).map((plugin) =>
-          observer.wrap(plugin, true)
-        ),
+        ...minchoEsbuildPlugins({
+          ...mincho,
+          optimizationMode: mincho?.optimizationMode ?? "production"
+        }).map((plugin) => observer.wrap(plugin, true)),
         observer.fallback
       ]
     });
@@ -147,7 +145,13 @@ export async function buildWithMincho(
 
   const analyzed = await run("analyze", new Map());
   const preludes = planPreludes(analyzed, analyzed.cwd);
-  const emitted = await run("emit", preludes);
+  // Without ordered imports, sharing replay, or caller-owned phase hooks, the
+  // analyzed native output is already final. Snapshot validation still runs.
+  const reuseAnalysis =
+    !plugins &&
+    !sharingOptions &&
+    [...preludes.values()].every((imports) => imports.length === 0);
+  const emitted = reuseAnalysis ? analyzed : await run("emit", preludes);
 
   assertSameGraphs(analyzed.transaction.graphs, emitted.transaction.graphs);
   assertSameNativeInputs(analyzed.result.metafile, emitted.result.metafile);
@@ -168,7 +172,7 @@ export async function buildWithMincho(
     explicitSharing !== undefined
   );
 
-  await snapshot.validate();
+  await snapshot.validate(!reuseAnalysis);
   await emitted.transaction.cssSharingDiagnostics?.flush();
 
   if (nativeOptions.write !== false) {

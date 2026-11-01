@@ -229,8 +229,10 @@ prepares asynchronous cross-module results and retains their dependency watches.
 
 Both adapters also accept `optimizationMode: "development" | "production"`.
 Vite selects development for `serve` and production for `build`, independently
-of `NODE_ENV` and Vite's named `mode`. esbuild defaults to production; opt into
-development explicitly for watch sessions. Individual defined `optimize` fields
+of `NODE_ENV` and Vite's named `mode`. The esbuild plugin follows an explicit
+`process.env.NODE_ENV` definition, otherwise full minification selects production
+and other builds use development. `buildWithMincho` defaults to production.
+Individual defined `optimize` fields
 override the selected profile. `undefined` does not erase an earlier setting.
 
 | Option                    | Development | Production |

@@ -2,6 +2,15 @@ import type { BabelOptions } from "./babel.js";
 
 export type OptimizationMode = "development" | "production";
 
+export type MinchoIdentifiers = "debug" | "short";
+
+export function resolveIdentifiers(
+  mode: OptimizationMode,
+  override?: MinchoIdentifiers
+): MinchoIdentifiers {
+  return override ?? (mode === "production" ? "short" : "debug");
+}
+
 /** Explicit switches override the profile; undefined never erases a switch. */
 export function resolveOptimizationOptions(
   mode: OptimizationMode,

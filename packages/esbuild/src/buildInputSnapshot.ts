@@ -99,7 +99,7 @@ export class BuildInputSnapshot {
     }
   }
 
-  async validate(): Promise<void> {
+  async validate(requireEmission = true): Promise<void> {
     for (const [path, pending] of this.configurations) {
       const original = await pending;
       const current = await readFile(path).catch(
@@ -131,7 +131,7 @@ export class BuildInputSnapshot {
     }
 
     for (const key of this.observations.keys()) {
-      if (!this.observedInEmit.has(key)) {
+      if (requireEmission && !this.observedInEmit.has(key)) {
         throw new Error(
           `Mincho build input disappeared between passes: ${key}`
         );

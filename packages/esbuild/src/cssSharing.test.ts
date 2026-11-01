@@ -145,7 +145,7 @@ describe("native esbuild CSS sharing", () => {
     expect(result.minchoCssManifest).toBeUndefined();
   });
 
-  it.each(["production", "development", "disabled"] as const)(
+  it.each(["production", "development", "disabled", "enabled"] as const)(
     "applies the default CSS sharing policy in %s mode",
     async (mode) => {
       const root = await fixture({
@@ -166,11 +166,13 @@ describe("native esbuild CSS sharing", () => {
             mode === "development" ? "development" : "production",
           ...(mode === "disabled"
             ? { experimental: { cssChunkSharing: false } }
-            : {})
+            : mode === "enabled"
+              ? { experimental: { cssChunkSharing: true } }
+              : {})
         }
       });
 
-      if (mode === "production") {
+      if (mode === "enabled") {
         expect(result.minchoCssManifest!.entries["a.js"]!.css).toHaveLength(2);
         expect(result.minchoCssManifest!.entries["a.js"]!.css[0]).toBe(
           result.minchoCssManifest!.entries["b.js"]!.css[0]
@@ -202,7 +204,7 @@ describe("native esbuild CSS sharing", () => {
   });
 
   it.each(["ineligible", "disabled", "development", "no-css"] as const)(
-    "retires a previous automatic manifest when the next build is %s",
+    "retires a previous opt-in manifest when the next build is %s",
     async (mode) => {
       const root = await fixture({
         "shared.css": Array.from(
@@ -215,7 +217,10 @@ describe("native esbuild CSS sharing", () => {
         entryPoints: ["a.js", "b.js"],
         outdir: "out",
         sourcemap: true,
-        mincho: { cache: false as const }
+        mincho: {
+          cache: false as const,
+          experimental: { cssChunkSharing: true as const }
+        }
       };
       const first = await buildWithMincho(options);
       expect(first.minchoCssManifest).toBeDefined();

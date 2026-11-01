@@ -13,6 +13,8 @@ import {
   InternalRuntimeOptimizations,
   internalRebindSymbolicTokenArtifact,
   internalResolveOptimizationOptions,
+  internalResolveIdentifiers,
+  type MinchoIdentifiers,
   type OptimizationMode,
   type BabelTransformResult,
   type InternalStaticCssEvalLoadedSource as StaticCssEvalLoadedSource,
@@ -37,6 +39,7 @@ import {
   type PluginBuild,
   type ResolveResult
 } from "esbuild";
+import type { BuildOptions } from "esbuild";
 import * as fs from "node:fs";
 import { dirname, join, resolve as resolvePath } from "node:path";
 import { EsbuildAssets } from "./assets.js";
@@ -63,13 +66,29 @@ const integrationHelpers = {
   runDefineRulesPresetRegistryStep
 };
 
+function optimizationModeForBuild(
+  options: BuildOptions,
+  explicit?: OptimizationMode
+): OptimizationMode {
+  if (explicit) return explicit;
+  const nodeEnv = options.define?.["process.env.NODE_ENV"];
+  const production = nodeEnv
+    ? nodeEnv === '"production"' || nodeEnv === "'production'"
+    : options.minify === true ||
+      (options.minifyIdentifiers === true &&
+        options.minifySyntax === true &&
+        options.minifyWhitespace === true);
+  return production ? "production" : "development";
+}
+
 export interface MinchoEsbuildPluginOptions {
   diagnostics?: MinchoDiagnosticsOptions;
   cache?: MinchoCacheOptions;
   execution?: MinchoExecutionOptions;
 
-  /** Defaults to production; set development explicitly for serve/watch contexts. */
+  /** Defaults to development unless NODE_ENV or full minification selects production. */
   optimizationMode?: OptimizationMode;
+  identifiers?: MinchoIdentifiers;
   bundleSize?: BabelOptions["bundleSize"];
   optimize?: BabelOptions["optimize"];
   includeNodeModulesPattern?: RegExp;
@@ -109,20 +128,24 @@ export function minchoEsbuildPlugin({
   execution: executionOptions,
   optimize: optimizationOverrides,
   bundleSize,
-  optimizationMode = "production",
+  optimizationMode,
+  identifiers,
   jsxCssProp,
   extractCalls,
   experimental
 }: MinchoEsbuildPluginOptions = {}): EsbuildPlugin {
-  const optimize = internalResolveOptimizationOptions(
-    optimizationMode,
-    optimizationOverrides
-  );
-
   return {
     name: "mincho-js-esbuild",
 
     setup(build) {
+      const mode = optimizationModeForBuild(
+        build.initialOptions,
+        optimizationMode
+      );
+      const optimize = internalResolveOptimizationOptions(
+        mode,
+        optimizationOverrides
+      );
       if (
         typeof experimental?.cssChunkSharing === "object" &&
         experimental.cssChunkSharing.cost
@@ -369,7 +392,7 @@ export function minchoEsbuildPlugin({
               source,
               filePath: path,
               outputCss: undefined,
-              identOption: build.initialOptions.minify ? "short" : "debug"
+              identOption: internalResolveIdentifiers(mode, identifiers)
             })
           );
 
@@ -662,7 +685,21 @@ export const minchoEsbuildPlugins = (
   options: MinchoEsbuildPluginOptions = {}
 ) => [
   minchoEsbuildPlugin(options),
-  vanillaExtractPlugin({ externals: ["@mincho-js/transform-to-vanilla"] })
+  {
+    name: vanillaExtractPlugin().name,
+    setup(build: PluginBuild) {
+      return vanillaExtractPlugin({
+        externals: ["@mincho-js/transform-to-vanilla"],
+        identifiers: internalResolveIdentifiers(
+          optimizationModeForBuild(
+            build.initialOptions,
+            options.optimizationMode
+          ),
+          options.identifiers
+        )
+      }).setup(build);
+    }
+  }
 ];
 
 // == Tests ====================================================================

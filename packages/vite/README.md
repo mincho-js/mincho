@@ -1,5 +1,9 @@
 # @mincho-js/vite
 
+CSS identifiers follow `optimizationMode` (production for `vite build`, development
+for the dev server), including custom modes such as `vite build --mode staging`.
+Set `identifiers: "short" | "debug"` to override naming independently of the mode.
+
 Compile Mincho styles with Vite using the plugin preset:
 
 ```ts

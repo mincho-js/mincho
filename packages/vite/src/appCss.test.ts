@@ -149,6 +149,38 @@ async function fixture() {
   return root;
 }
 
+it.each([undefined, "debug", "short"] as const)(
+  "uses build identifiers in staging with override %s",
+  async (identifiers) => {
+    const root = await fixture();
+    await writeFile(
+      join(root, "main.js"),
+      'import {style} from "@vanilla-extract/css"; export const stageLabel=style({color:"red"}, "stageLabel"); console.log(stageLabel);'
+    );
+    const result = await build({
+      root,
+      mode: "staging",
+      configFile: false,
+      logLevel: "silent",
+      plugins: [minchoVitePlugin({ cache: false, identifiers })],
+      build: { write: false, minify: false, cssMinify: false }
+    });
+    const output = (
+      Array.isArray(result) ? result[0] : result
+    ) as Rollup.RollupOutput;
+    const css = output.output
+      .filter(
+        (item): item is Rollup.OutputAsset =>
+          item.type === "asset" && item.fileName.endsWith(".css")
+      )
+      .map((item) => String(item.source))
+      .join("\n");
+    expect(css).toContain("red");
+    expect(css.includes("stageLabel")).toBe(identifiers === "debug");
+  },
+  20000
+);
+
 function routes(): NonNullable<MinchoAppCssOptions["routes"]> {
   return ["a", "b"].map((id) => ({
     id,

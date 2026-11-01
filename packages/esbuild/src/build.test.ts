@@ -1,8 +1,11 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { promises as fs } from "node:fs";
 import { join, resolve } from "node:path";
 import { buildWithMincho } from "./build.js";
-import { getBuildTransaction } from "./buildInputSnapshot.js";
+import {
+  BuildInputSnapshot,
+  getBuildTransaction
+} from "./buildInputSnapshot.js";
 import { collectDefineRulesPackageGraph } from "@mincho-js/integration";
 import { defineRules } from "@mincho-js/css";
 import {
@@ -52,6 +55,25 @@ function actualPackageGraph() {
 }
 
 const roots: string[] = [];
+
+it("reuses native analysis when no CSS ordering or phase hooks require emission", async () => {
+  const root = await fixture({ "entry.ts": "export const answer = 42;" });
+  const calls = vi.spyOn(BuildInputSnapshot.prototype, "observe");
+  try {
+    const result = await buildWithMincho({
+      absWorkingDir: root,
+      entryPoints: ["entry.ts"],
+      outdir: "out",
+      write: false,
+      mincho: { cache: false }
+    });
+    expect(result.outputFiles![0]!.text).toContain("42");
+    expect(calls).toHaveBeenCalled();
+    expect(calls.mock.calls.every(([phase]) => phase === "analyze")).toBe(true);
+  } finally {
+    calls.mockRestore();
+  }
+});
 
 async function fixture(files: Record<string, string>) {
   const parent = resolve(process.cwd(), ".test-build-api");

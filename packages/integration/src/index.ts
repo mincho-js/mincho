@@ -105,6 +105,8 @@ export type { CompileCacheBridge as InternalCompileCacheBridge } from "./compile
 export { RuntimeOptimizations as InternalRuntimeOptimizations } from "./runtimeOptimizations.js";
 export {
   resolveOptimizationOptions as internalResolveOptimizationOptions,
+  resolveIdentifiers as internalResolveIdentifiers,
+  type MinchoIdentifiers,
   type OptimizationMode
 } from "./optimizationMode.js";
 

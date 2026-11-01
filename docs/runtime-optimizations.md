@@ -88,8 +88,9 @@ reproduction instructions and comparison limits.
 The production optimization profile defaults `optimize.runtimeCodegen` and
 `optimize.jsxRuntimeGuards` to `true`; the development profile defaults them to
 `false`. Vite selects the profile from its `build` or `serve` command, independently
-of Vite's `mode`. esbuild defaults to production, including context/watch builds;
-set `optimizationMode: "development"` explicitly for that profile. Both adapters
+of Vite's `mode`. The esbuild plugin follows an explicit `NODE_ENV` definition,
+otherwise full minification selects production and other builds use development.
+The one-shot `buildWithMincho` API defaults to production. Both adapters
 accept `optimizationMode` and individual boolean overrides. The runtime factories'
 canonical order and compiled cache behavior do not depend on these transform flags.
 
@@ -148,9 +149,10 @@ Experimental options have adapter-specific defaults:
   private variables;
   it does not register user-defined properties.
 - `cssChunkSharing` accepts `true` or `{ minBoundaries, minBytes }`, defaulting to
-  2 boundaries and 4,096 source bytes when enabled. It is automatic in production
-  `buildWithMincho` builds with an output path and production Vite `dist-chunk`
-  builds. Other Vite modes and the development profile require explicit sharing.
+  2 boundaries and 4,096 source bytes when enabled. `buildWithMincho` requires
+  explicit sharing because consumers must load its manifest. Production Vite
+  `dist-chunk` builds enable it automatically; other Vite modes and the development
+  profile require explicit sharing.
   Explicit `false` disables sharing. It shares compatible whole
   leading CSS module sequences, preserving shared-before-private order and native
   asset handling. Vite retains lazy CSS loading. Missing ownership, unsupported
