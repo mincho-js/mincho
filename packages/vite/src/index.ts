@@ -1178,13 +1178,15 @@ function createMinchoViteEnvironmentPlugin(
       }
 
       if (id.startsWith(virtualCssIdPrefix)) {
-        if (!cssState.isAuthorizedVirtualCss(id)) {
-          return null;
-        }
-
         const cached = cssState.getCss(id);
         if (cached !== undefined) {
           return cached;
+        }
+
+        // Recently retired IDs must still clear CSS in already resolved HMR
+        // requests. Only an authorized live ID may fall back to the filesystem.
+        if (!cssState.isAuthorizedVirtualCss(id)) {
+          return null;
         }
 
         // Fallback for sibling-imported virtual CSS: read the physical
@@ -4919,7 +4921,8 @@ if (import.meta.vitest) {
         );
 
         expect(invalidateModule).not.toHaveBeenCalled();
-        expect(await harness.load(blueArtifact.resolvedVirtualId)).toBeNull();
+        // Already resolved HMR requests receive empty CSS to clear old rules.
+        expect(await harness.load(blueArtifact.resolvedVirtualId)).toBe("");
       } finally {
         await fs.promises.rm(fixture.root, { force: true, recursive: true });
       }
@@ -6142,13 +6145,13 @@ if (import.meta.vitest) {
         await harness.transform(fixture.stylesPath, "");
 
         expect(await harness.load(redArtifact.extractedId)).toBeNull();
-        expect(await harness.load(redArtifact.resolvedVirtualId)).toBeNull();
+        expect(await harness.load(redArtifact.resolvedVirtualId)).toBe("");
         await expect(
           harness.transform(fixture.entryPath, fixture.entrySource)
         ).rejects.toThrow('import "./styles" could not be resolved');
 
         expect(await harness.load(redArtifact.extractedId)).toBeNull();
-        expect(await harness.load(redArtifact.resolvedVirtualId)).toBeNull();
+        expect(await harness.load(redArtifact.resolvedVirtualId)).toBe("");
       } finally {
         await fs.promises.rm(fixture.root, { force: true, recursive: true });
       }

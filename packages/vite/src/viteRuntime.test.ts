@@ -112,6 +112,36 @@ async function readCssPropOutput(
 }
 
 describe("mincho with the Vite runtime", () => {
+  it("serves retired CSS to already resolved loads without authorizing filesystem reads", async () => {
+    const root = await createFixture({
+      "src/entry.tsx":
+        'export const App = () => <div css={{ color: "red" }} />;',
+      "src/private.vanilla.css": ".private { color: blue; }"
+    });
+    const server = await createFixtureServer(root, [
+      minchoVitePlugin({ jsxCssProp: true })
+    ]);
+    const client = server.environments.client!;
+    expect((await readCssPropOutput(client)).css).toContain("color: red;");
+    const owner = await client.moduleGraph.getModuleByUrl("/src/entry.tsx");
+    const sidecar = [...owner!.importedModules].find((module) =>
+      module.id?.startsWith("\0mincho-extracted-css:")
+    )!;
+    const css = [...sidecar.importedModules].find((module) =>
+      module.id?.startsWith("\0mincho-virtual-css:")
+    )!;
+    const privateId = `\0mincho-virtual-css:${join(root, "src/private.vanilla.css")}`;
+    expect(await client.pluginContainer.load(privateId)).toBeNull();
+
+    await client.pluginContainer.transform(
+      "export const App = () => <div />;",
+      owner!.id!
+    );
+
+    expect(await client.pluginContainer.load(css.id!)).toBe("");
+    expect(await client.pluginContainer.load(privateId)).toBeNull();
+  });
+
   it("keeps import and require package conditions distinct", async () => {
     const directory = join(
       process.cwd(),

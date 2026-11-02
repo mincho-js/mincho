@@ -23,6 +23,9 @@ type CssModuleData =
 export class ViteCssState {
   readonly resolverCache = new Map<string, string>();
   private readonly css = new Map<string, string>();
+  // Empty responses clear CSS already imported by an in-flight HMR update. Keep
+  // only recent retired IDs; they must not grow with the lifetime of the server.
+  private readonly retiredCss = new Set<string>();
   private readonly sidecars = new Map<string, string>();
   private readonly currentSidecars = new Map<string, string>();
   private readonly moduleData = new Map<string, CssModuleData>();
@@ -39,11 +42,19 @@ export class ViteCssState {
   ) {}
 
   getCss(id: string): string | undefined {
-    return this.css.get(id);
+    return this.css.get(id) ?? (this.retiredCss.has(id) ? "" : undefined);
   }
 
   hasCss(id: string): boolean {
-    return this.css.has(id);
+    return this.css.has(id) || this.retiredCss.has(id);
+  }
+
+  private retireCss(id: string): void {
+    this.css.delete(id);
+    this.retiredCss.delete(id);
+    this.retiredCss.add(id);
+    if (this.retiredCss.size > 256)
+      this.retiredCss.delete(this.retiredCss.values().next().value!);
   }
 
   hasSidecar(path: string): boolean {
@@ -120,6 +131,7 @@ export class ViteCssState {
     this.cssPathToVirtualCssIds.set(cssPath, ids);
     this.authorizedVirtualCssIds.add(virtualCssId);
     this.css.set(virtualCssId, source);
+    this.retiredCss.delete(virtualCssId);
   }
 
   /** Publish validated output without invalidating CSS merely because a sidecar was renamed. */
@@ -148,6 +160,7 @@ export class ViteCssState {
       }
 
       this.css.set(id, source);
+      this.retiredCss.delete(id);
       this.authorizedVirtualCssIds.add(id);
     }
 
@@ -176,7 +189,7 @@ export class ViteCssState {
         continue;
 
       removed++;
-      this.css.set(id, "");
+      this.retireCss(id);
       this.authorizedVirtualCssIds.delete(id);
       this.effects.invalidateModule(id);
     }
@@ -196,7 +209,7 @@ export class ViteCssState {
       )
         continue;
 
-      this.css.set(id, "");
+      this.retireCss(id);
       this.authorizedVirtualCssIds.delete(id);
 
       if (invalidateModules) this.effects.invalidateModule(id);

@@ -5,6 +5,26 @@ import {
   extractedSidecarModuleId
 } from "./cssState.js";
 
+it("bounds retired HMR responses while retaining active styles", () => {
+  const state = new ViteCssState({
+    invalidateModule() {},
+    deleteContract() {}
+  });
+  for (let index = 0; index < 1000; index++) {
+    const owner = `/owner-${index}.tsx`;
+    const sidecar = `/extracted-${index}.css.ts`;
+    state.registerSidecar(owner, sidecar, "");
+    state.setVirtualCssForSidecar(sidecar, `virtual:${index}`, ".live{}");
+    state.clearGeneratedCssForOwner(owner);
+  }
+  expect(state.getCss("virtual:0")).toBeUndefined();
+  expect(state.hasCss("virtual:0")).toBe(false);
+  expect(state.getCss("virtual:999")).toBe("");
+  state.registerSidecar("/new.tsx", "/new.css.ts", "");
+  state.setVirtualCssForSidecar("/new.css.ts", "virtual:999", ".new{}");
+  expect(state.getCss("virtual:999")).toBe(".new{}");
+});
+
 it("keeps identical CSS through sidecar renames and publishes only changed or removed output", () => {
   const invalidateModule = vi.fn();
   const state = new ViteCssState({ invalidateModule, deleteContract() {} });
