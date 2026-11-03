@@ -333,7 +333,7 @@ footer {
 
 .demo-tabs {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
   padding: 6px;
   margin-bottom: 20px;
@@ -372,6 +372,104 @@ footer {
 .demo-tab-panel {
   min-width: 0;
   scroll-margin-top: 24px;
+}
+
+.squircle-controls output {
+  color: #2c573e;
+  font-variant-numeric: tabular-nums;
+}
+.squircle-stage {
+  overflow: auto;
+  padding: 20px;
+  min-height: 340px;
+  display: grid;
+  place-items: center;
+  background: #f0f2ed;
+  border-radius: 12px;
+}
+.squircle-surface {
+  position: relative;
+  flex: none;
+  overflow: hidden;
+  color: white;
+  background: linear-gradient(145deg, #214535, #4a8464);
+}
+.squircle-orb {
+  position: absolute;
+  width: 220px;
+  height: 220px;
+  top: -60px;
+  right: -70px;
+  border-radius: 50%;
+  background: linear-gradient(40deg, #eacb81, #c1d6a4);
+}
+.squircle-label {
+  position: absolute;
+  bottom: 16px;
+  left: 20px;
+  font-size: 20px;
+  font-weight: 650;
+}
+.squircle-detail {
+  display: flex;
+  gap: 24px;
+  align-items: center;
+  margin: 24px 0;
+}
+.squircle-detail svg {
+  width: 150px;
+  height: 140px;
+  flex: none;
+  overflow: visible;
+  padding: 5px;
+}
+.squircle-detail path {
+  fill: none;
+  vector-effect: non-scaling-stroke;
+  stroke-width: 2;
+}
+.squircle-outline-circle {
+  stroke: #b08c59;
+  stroke-dasharray: 4 4;
+}
+.squircle-outline-smooth {
+  stroke: #2c573e;
+}
+.squircle-detail p,
+.squircle-action-row p {
+  color: #536453;
+  font-size: 14px;
+  line-height: 1.7;
+}
+.squircle-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 20px;
+  margin: 24px 0;
+}
+.squircle-action {
+  padding: 18px 28px;
+  color: white;
+  background: #2c573e;
+  border: 0;
+}
+.squircle-action:focus-visible {
+  outline: 3px solid #ebd397;
+  outline-offset: -6px;
+}
+@media (max-width: 600px) {
+  .squircle-detail {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .demo-tabs span {
+    display: none;
+  }
+  .demo-tabs button {
+    padding: 12px 8px;
+  }
 }
 .page-nav {
   display: flex;

@@ -5,6 +5,32 @@ import { setImmediate } from "node:timers/promises";
 
 const require = createRequire(import.meta.url);
 
+for (const mode of ["import", "require"]) {
+  const load = (name) => (mode === "import" ? import(name) : require(name));
+  const { SquircleMask } = await load("@mincho-js/react/squircle");
+  const core = await load("@mincho-js/css/squircle/core");
+  const { createElement } = await import("react");
+  const { renderToString } = await import("react-dom/server");
+  const options = { width: 200, height: 100, radius: 20 };
+  const html = renderToString(
+    createElement(SquircleMask, { as: "button", ...options }, "Save")
+  );
+  assert.match(html, /<button/);
+  assert.match(html, /data:image\/svg\+xml/);
+  assert.equal(
+    core.getSquircleMask(options).path,
+    core.getSquirclePath(options)
+  );
+  assert.equal(
+    core.getSquircleStyle(options).maskImage,
+    core.getSquircleMask(options).image
+  );
+  assert.equal(
+    typeof (await load("@mincho-js/css/squircle")).squircle,
+    "function"
+  );
+}
+
 for (const load of [
   () => import("@mincho-js/react/layout"),
   () => require("@mincho-js/react/layout")

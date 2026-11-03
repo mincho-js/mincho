@@ -5,6 +5,7 @@ import { DesignIntent } from "./design-intent.js";
 import { DesignNotes } from "./design-notes.js";
 import { LayoutInspector } from "./inspector.js";
 import { Playground } from "./playground.js";
+import { SquircleDemo } from "./squircle.js";
 import "./styles.css";
 
 const tabs = [
@@ -19,11 +20,17 @@ const tabs = [
     description: import.meta.env.DEV
       ? "사례 비교 · Inspector · Axis Explorer"
       : "사례 비교 · Axis Explorer"
+  },
+  {
+    id: "squircle",
+    label: "스쿼클",
+    description: "모서리 비교 · 크기와 곡률"
   }
 ] as const;
 type DemoTab = (typeof tabs)[number]["id"];
 
 function tabForHash(hash: string): DemoTab | undefined {
+  if (hash === "#squircle-panel") return "squircle";
   if (
     [
       "#layout-cases",
@@ -222,6 +229,15 @@ function App() {
               : undefined
           }
         />
+      </div>
+      <div
+        id="squircle-panel"
+        className="demo-tab-panel"
+        role="tabpanel"
+        aria-labelledby="tab-squircle"
+        hidden={activeTab !== "squircle"}
+      >
+        <SquircleDemo />
       </div>
       <footer>
         모든 숫자는 CSS px입니다. Inspector는 개발 모드에서 브라우저 geometry와

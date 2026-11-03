@@ -2,6 +2,27 @@ import { hstack } from "@mincho-js/css/layout";
 import { normalizeStack } from "@mincho-js/css/layout/core";
 import type { ComponentPropsWithRef } from "react";
 import { HStack, type BoxProps, type ItemProps } from "@mincho-js/react/layout";
+import { squircle } from "@mincho-js/css/squircle";
+import { getSquirclePath } from "@mincho-js/css/squircle/core";
+import * as squircleReact from "@mincho-js/react/squircle";
+
+const squircleAnchor: squircleReact.SquircleMaskProps<"a"> = {
+  as: "a",
+  href: "/",
+  radius: 16
+};
+const invalidSquircle: squircleReact.SquircleMaskProps<"button"> = {
+  as: "button",
+  // @ts-expect-error the selected target determines the allowed attributes
+  href: "/"
+};
+void [
+  squircle,
+  getSquirclePath,
+  squircleReact.SquircleMask,
+  squircleAnchor,
+  invalidSquircle
+];
 
 const anchor: BoxProps<"a"> = { as: "a", href: "/", width: 100 };
 void [hstack, normalizeStack, HStack, anchor];

@@ -1,5 +1,15 @@
 [
   {
+    "id": "contract-squircle-node10-react-import",
+    "file": "scripts/package-contract/fixture/modules/layout-node10.ts",
+    "type": "error",
+    "message": "Undeclared dependency on @mincho-js/react",
+    "source": "import * as squircleReact from \"@mincho-js/react/squircle\";",
+    "count": 1,
+    "reason": "This Node10-resolution fixture runs only after being copied into isolated npm and strict PnP consumers that declare the packed React package; it is not executed in the root workspace.",
+    "expires": "2026-12-31"
+  },
+  {
     "id": "integration-native-compiler-dependency-fingerprint-fixture",
     "file": "packages/integration/src/compilerDependencies.test.ts",
     "type": "warning",

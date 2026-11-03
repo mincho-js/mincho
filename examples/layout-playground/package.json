@@ -9,7 +9,7 @@
     "check": "yarn run -T tsc --project tsconfig.app.json",
     "lint": "yarn g:lint",
     "test": "yarn g:test",
-    "test:browser": "MINCHO_LAYOUT_BROWSER=1 yarn g:test tests/browser.test.ts"
+    "test:browser": "MINCHO_LAYOUT_BROWSER=1 yarn g:test tests/browser.test.ts tests/squircle.browser.test.ts"
   },
   "prettier": "prettier-config-custom",
   "dependencies": {
