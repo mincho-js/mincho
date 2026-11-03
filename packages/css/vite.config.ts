@@ -16,6 +16,8 @@ export default (viteConfigEnv: ConfigEnv) => {
           compat: join(packageDir, "src", "compat.ts"),
           "layout/index": join(packageDir, "src/layout/index.ts"),
           "layout/core": join(packageDir, "src/layout/core.ts"),
+          "squircle/index": join(packageDir, "src/squircle/index.ts"),
+          "squircle/core": join(packageDir, "src/squircle/core.ts"),
           "runtime/classname": join(packageDir, "src", "classname", "index.ts"),
           "defineRules/createDefineRulesCssRuntime": join(
             packageDir,
@@ -102,6 +104,11 @@ function pureRuntimeBoundaries(): Plugin {
     name: "mincho-pure-runtime-boundaries",
 
     generateBundle(output) {
+      this.emitFile({
+        type: "asset",
+        fileName: `${output.format === "es" ? "esm" : "cjs"}/squircle/package.json`,
+        source: JSON.stringify({ sideEffects: false }) + "\n"
+      });
       this.emitFile({
         type: "asset",
         fileName: `${output.format === "es" ? "esm" : "cjs"}/layout/package.json`,

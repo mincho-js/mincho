@@ -172,7 +172,27 @@
         "default": "./dist/cjs/layout/core.cjs"
       }
     },
-    "./layout.css": "./dist/esm/layout.css"
+    "./layout.css": "./dist/esm/layout.css",
+    "./squircle": {
+      "import": {
+        "types": "./dist/esm/squircle/index.d.ts",
+        "default": "./dist/esm/squircle/index.mjs"
+      },
+      "require": {
+        "types": "./dist/cjs/squircle/index.d.cts",
+        "default": "./dist/cjs/squircle/index.cjs"
+      }
+    },
+    "./squircle/core": {
+      "import": {
+        "types": "./dist/esm/squircle/core.d.ts",
+        "default": "./dist/esm/squircle/core.mjs"
+      },
+      "require": {
+        "types": "./dist/cjs/squircle/core.d.cts",
+        "default": "./dist/cjs/squircle/core.cjs"
+      }
+    }
   },
   "publishConfig": {
     "directory": "_release/package"
