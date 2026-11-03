@@ -65,6 +65,13 @@ document.write(`
 
 ## API
 
+### Squircle masks
+
+`@mincho-js/css/squircle` exports a fixed-size `squircle()` class pattern for
+`.css.ts` files. `@mincho-js/css/squircle/core` provides pure geometry, SVG mask,
+and style helpers without React or CSS registration. See the
+[Squircle guide](../react/squircle/README.md) for sizing and clipping behavior.
+
 ### Runtime class names
 
 Use the runtime-only entry when joining classes in application code:

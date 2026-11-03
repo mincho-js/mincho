@@ -11,6 +11,7 @@ export default (viteConfigEnv: ConfigEnv) => {
         entry: {
           stylesheets: resolve(process.cwd(), "src/stylesheets.ts"),
           "layout/index": resolve(process.cwd(), "src/layout/index.ts"),
+          "squircle/index": resolve(process.cwd(), "src/squircle/index.ts"),
           index: resolve(process.cwd(), "src/index.ts"),
           runtime: resolve(process.cwd(), "src/runtime.ts"),
           "jsx-runtime": resolve(process.cwd(), "src/jsx-runtime.ts"),
@@ -32,7 +33,9 @@ export default (viteConfigEnv: ConfigEnv) => {
     format: format as "es" | "cjs",
     ...(format === "cjs" ? { interop: "compat" as const } : {}),
     banner: (chunk: { name: string }) =>
-      chunk.name === "layout/index" ? '"use client";' : ""
+      ["layout/index", "squircle/index"].includes(chunk.name)
+        ? '"use client";'
+        : ""
   }));
   return config;
 };

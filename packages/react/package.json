@@ -105,13 +105,24 @@
         "types": "./dist/cjs/layout/index.d.cts",
         "default": "./dist/cjs/layout/index.cjs"
       }
+    },
+    "./squircle": {
+      "import": {
+        "types": "./dist/esm/squircle/index.d.ts",
+        "default": "./dist/esm/squircle/index.mjs"
+      },
+      "require": {
+        "types": "./dist/cjs/squircle/index.d.cts",
+        "default": "./dist/cjs/squircle/index.cjs"
+      }
     }
   },
   "files": [
     "dist",
     "src",
     "**/package.json",
-    "layout/README.md"
+    "layout/README.md",
+    "squircle/README.md"
   ],
   "scripts": {
     "clean": "yarn g:clean",

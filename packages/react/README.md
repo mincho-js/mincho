@@ -602,3 +602,9 @@ The same `jsxCssProp: true` transform flag is exposed through `@mincho-js/babel`
 
 React DOM layout components are available from `@mincho-js/react/layout`.
 See the [Layout components guide](./layout/README.md).
+
+## Squircle masks
+
+`@mincho-js/react/squircle` exports `SquircleMask`, with fixed and responsive
+smoothed corners, typed `as` targets, and ref forwarding. See the
+[Squircle guide](./squircle/README.md).
