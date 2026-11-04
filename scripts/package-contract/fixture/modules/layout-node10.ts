@@ -1,4 +1,6 @@
 import { hstack } from "@mincho-js/css/layout";
+import { selectors } from "@mincho-js/css/selectors";
+import { selectors as rootSelectors } from "@mincho-js/css";
 import { normalizeStack } from "@mincho-js/css/layout/core";
 import type { ComponentPropsWithRef } from "react";
 import { HStack, type BoxProps, type ItemProps } from "@mincho-js/react/layout";
@@ -36,3 +38,7 @@ const missing: ItemProps<typeof Link> = { as: Link };
 // @ts-expect-error asChild is not part of the Layout API
 const removed: ItemProps = { asChild: true };
 void [custom, missing, removed];
+
+const condition: selectors.Condition = rootSelectors.first();
+const selector: string = selectors.children(".list", ".item", condition);
+void selector;

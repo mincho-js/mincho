@@ -121,6 +121,9 @@ jobs:
       - name: Verify layout geometry in Chromium
         run: yarn workspace @examples/layout-playground test:browser
 
+      - name: Verify selector matching in the browser
+        run: yarn workspace @mincho-js/css test:selectors:browser
+
   production-contract:
     needs: pre_job
     if: ${{ needs.pre_job.outputs.should_skip != 'true' }}

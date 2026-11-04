@@ -6,6 +6,7 @@ import type { preset as packedPreset } from "@mincho-js-proof/real-d/preset" wit
   "resolution-mode": "import"
 };
 import { defineRules } from "@mincho-js/css";
+import { selectors } from "@mincho-js/css/selectors";
 import { cx, type ClassValue } from "@mincho-js/css/classname";
 import type { JSX as CompiledJSX } from "@mincho-js/react/compiled-jsx-runtime";
 import type { JSX as CompiledDevJSX } from "@mincho-js/react/compiled-jsx-dev-runtime";
@@ -193,3 +194,11 @@ void [
   layoutAnchor,
   mixedLayoutPadding
 ];
+
+const selectorCondition: selectors.Condition = selectors.countBetween(2, 4);
+const selectedChildren: string = selectors.children(
+  ".list",
+  ".item",
+  selectorCondition
+);
+void selectedChildren;
