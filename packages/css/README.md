@@ -22,6 +22,118 @@ The @mincho-js/css package provides framework-agnostic APIs for CSS-in-JS stylin
 
 ---
 
+## Selectors
+
+`selectors` is a flat ESM namespace for position/quantity conditions and CSS
+selector composition. It is exported by `@mincho-js/css`; the lightweight
+`@mincho-js/css/selectors` entry exports the same namespace without loading CSS
+authoring APIs. No React or DOM access is required.
+
+```ts
+// styles.css.ts — evaluated during the CSS build
+import { globalCss, selectors } from "@mincho-js/css";
+
+globalCss(
+  selectors.children(
+    ".list",
+    ".item",
+    selectors.all(selectors.countAtLeast(5), selectors.between(2, 4)),
+  ),
+  { color: "tomato" },
+);
+```
+
+This selects the second through fourth direct `.item` children when there are
+at least five. Other siblings and nested descendants are not counted. An item
+matching multiple members of a selector list is counted once. Hidden elements
+still count if they match: use an item selector such as `.item:not([hidden])`
+when that is the intended group.
+
+Position and quantity functions return an immutable `selectors.Condition`,
+not a selector string. `children(parent, item, condition)` applies it and returns
+a string. Positions are 1-based; ranges include both endpoints. Numeric inputs
+must be safe integers. Positions and intervals must be positive, while quantity
+thresholds may be zero. `count(0)` cannot select an item in an empty group; use
+an explicit parent selector when the parent itself should be styled.
+
+| Group       | Functions                                                                                                                                                     |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Position    | `first(n = 1)`, `last(n = 1)`, `nth(n)`, `nthLast(n)`, `from(n)`, `before(n)`, `after(n)`, `between(a, b, options?)`, `every(n, options?)`, `odd()`, `even()` |
+| Quantity    | `count(n)`, `countAtLeast(n)`, `countAtMost(n)`, `countOver(n)`, `countUnder(n)`, `countBetween(a, b)`, `countMultipleOf(n)`, `countOdd()`, `countEven()`     |
+| Conditions  | `all(...conditions)`, `any(...conditions)`, `none(...conditions)`                                                                                             |
+| Selectors   | `nest(...selectors)`, `child(parent, child)`, `append(...selectors)`, `unify(a, b)`, `replace(selector, target, replacement)`                                 |
+| Pseudos     | `is(base, ...selectors)`, `where(base, ...selectors)`, `has(base, ...selectors)`, `exclude(base, ...selectors)`                                               |
+| Application | `children(parent, item, condition)`                                                                                                                           |
+
+`before`/`after` exclude the named position. `between` and `every` accept
+`{ from: "end" }`; `every` also accepts `startAt`, defaulting to its interval.
+`every(3, { startAt: 1 })` selects 1, 4, 7, …, while `startAt: 4` begins at 4.
+An empty `all()` or `none()` matches every group member; an empty `any()` matches
+none. Conditions can be nested freely.
+
+```ts
+import { selectors } from "@mincho-js/css/selectors";
+
+selectors.nest(".card", ".title"); // .card .title
+selectors.child(".card", ".title"); // .card > .title
+selectors.append(".button", ".active"); // .button.active
+selectors.unify("button", ".primary"); // button.primary
+selectors.replace(".button:hover", ".button", ".link"); // .link:hover
+selectors.is(".button", ":hover", ":focus"); // .button:is(:hover, :focus)
+selectors.where(".button", ":hover", ":focus"); // .button:where(:hover, :focus)
+selectors.has(".card", "> img"); // .card:has(> img)
+selectors.exclude(".button", ".disabled"); // .button:not(.disabled)
+selectors.nest("&", "&:hover"); // &:hover (CSS-in-TS)
+```
+
+Composition recognizes selector lists, escapes, attribute strings and nested
+pseudos. `append` joins adjoining compounds, not identifier text. `unify` is a
+matching intersection; complex inputs become `:is(a):is(b)`, without Sass
+ancestor weaving. `replace` replaces complete tokens of a compound target with
+compound replacements; it does not implement Sass `@extend`. Pseudo-elements
+are rejected in functional element selector lists. `nest` substitutes actual
+`&` tokens, not ampersands inside strings. Multiple `&` references with a parent
+list use `:is()` to preserve all combinations. Functional pseudo specificity
+follows CSS; this is not a specificity-neutral Sass compatibility layer.
+`nest` preserves pseudo-element subjects and chains such as
+`nest("x-foo::part(label)", "&::before")`, but rejects using a pseudo-element as
+an ancestor or an argument of a functional selector.
+
+Generated group conditions require [Selectors Level 4](https://www.w3.org/TR/selectors-4/),
+including `:nth-child(… of selector)` and `:nth-last-child(… of selector)`.
+`:has()` additionally requires browser support for that pseudo. These utilities
+do not provide browser polyfills or selector parsing as a public API.
+
+### Build and tree shaking
+
+Use these helpers in `.css.ts` files processed by the existing Mincho build
+integration. Evaluation then leaves standard CSS and no selector utility code
+in the application bundle. Calling them directly in application JavaScript
+executes them at runtime; importing alone does not request compile-time evaluation.
+
+The dedicated entry preserves native ESM namespace/re-export boundaries and
+marks its modules as side-effect-free. Vite/Rollup can remove unused functions
+and the selector parser when only position/quantity helpers are used. Static
+access such as `selectors.first()` enables this; passing the whole namespace or
+accessing it with an unknown key can retain all functions. Native esbuild
+currently retains members of a named exported namespace, so per-function tree
+shaking is **not guaranteed there**. The root CSS authoring entry keeps its
+existing side effects; prefer the dedicated entry for standalone selector work.
+
+All 33 functions are available in ESM and CommonJS. Declarations support
+TypeScript 5 with Node10 and NodeNext module resolution. Browser matching tests
+can be run with `yarn workspace @mincho-js/css test:selectors:browser` after
+installing Playwright Chromium (or setting `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH`).
+
+CommonJS exposes `selectors` as an object with the same functions; it does not
+promise per-function tree shaking:
+
+```js
+const { selectors } = require("@mincho-js/css");
+// Also available from require("@mincho-js/css/selectors").
+selectors.child(".card", ".title"); // .card > .title
+```
+
 ## Install
 
 This package has [vanilla extract](https://vanilla-extract.style/) as a peer dependency, so we install them together.  

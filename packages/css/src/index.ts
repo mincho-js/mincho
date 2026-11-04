@@ -69,6 +69,7 @@ export type {
   ResolveTheme
 } from "./theme/types.js";
 export { cx } from "./classname/index.js";
+export { selectors } from "./selectors/index.js";
 export type { ClassPrimitive, ClassValue, Cx } from "./classname/index.js";
 export { defineRules } from "./defineRules/index.js";
 export type { DefineRulesExtendsConfig } from "./defineRules/extension.js";

@@ -192,6 +192,16 @@
         "types": "./dist/cjs/squircle/core.d.cts",
         "default": "./dist/cjs/squircle/core.cjs"
       }
+    },
+    "./selectors": {
+      "import": {
+        "types": "./dist/esm/selectors/index.d.ts",
+        "default": "./dist/esm/selectors/index.mjs"
+      },
+      "require": {
+        "types": "./dist/cjs/selectors/index.d.cts",
+        "default": "./dist/cjs/selectors/index.cjs"
+      }
     }
   },
   "publishConfig": {
@@ -211,20 +221,23 @@
     "test:watch": "yarn g:test-watch",
     "lint": "yarn g:lint",
     "fix": "yarn g:fix",
-    "check": "yarn g:check"
+    "check": "yarn g:check",
+    "test:selectors:browser": "MINCHO_SELECTORS_BROWSER=1 yarn g:test src/selectors/browser.test.ts"
   },
   "prettier": "prettier-config-custom",
   "dependencies": {
     "@emotion/hash": "catalog:",
     "@fastify/deepmerge": "catalog:",
     "@mincho-js/transform-to-vanilla": "workspace:^",
-    "clsx": "catalog:"
+    "clsx": "catalog:",
+    "postcss-selector-parser": "catalog:"
   },
   "devDependencies": {
     "@mincho-js/debug-log": "workspace:^",
     "@types/node": "catalog:",
     "@vanilla-extract/css": "catalog:",
     "eslint-config-custom": "workspace:^",
+    "playwright": "catalog:",
     "prettier-config-custom": "workspace:^",
     "tsconfig-custom": "workspace:^",
     "tslib": "catalog:",

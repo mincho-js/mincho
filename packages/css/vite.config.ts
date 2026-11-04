@@ -1,4 +1,6 @@
 import { join } from "node:path";
+import { readFile } from "node:fs/promises";
+import { normalizePath, transformWithEsbuild } from "vite";
 import type { ConfigEnv, Plugin } from "vite";
 import { NodeConfig } from "vite-config-custom";
 import { layoutCss } from "./src/layout/stylesheet.js";
@@ -8,7 +10,7 @@ import { layoutCss } from "./src/layout/stylesheet.js";
 export default (viteConfigEnv: ConfigEnv) => {
   const packageDir = process.cwd();
   const config = NodeConfig(viteConfigEnv, {
-    plugins: [pureRuntimeBoundaries()],
+    plugins: [pureRuntimeBoundaries(), selectorNamespace(packageDir)],
     build: {
       lib: {
         entry: {
@@ -18,6 +20,19 @@ export default (viteConfigEnv: ConfigEnv) => {
           "layout/core": join(packageDir, "src/layout/core.ts"),
           "squircle/index": join(packageDir, "src/squircle/index.ts"),
           "squircle/core": join(packageDir, "src/squircle/core.ts"),
+          ...Object.fromEntries(
+            [
+              "position",
+              "quantity",
+              "logical",
+              "compose",
+              "pseudo",
+              "children"
+            ].map((name) => [
+              `selectors/${name}`,
+              join(packageDir, `src/selectors/${name}.ts`)
+            ])
+          ),
           "runtime/classname": join(packageDir, "src", "classname", "index.ts"),
           "defineRules/createDefineRulesCssRuntime": join(
             packageDir,
@@ -79,6 +94,9 @@ export default (viteConfigEnv: ConfigEnv) => {
     onlyExplicitManualChunks: true,
 
     manualChunks(id: string) {
+      if (/\/src\/selectors\/condition\.ts$/.test(id))
+        return "selectors/condition";
+      if (/\/src\/selectors\/syntax\.ts$/.test(id)) return "selectors/syntax";
       if (/\/src\/rules\/(?:createClassRuntimeFn)\.ts$/.test(id))
         return "runtime/recipes";
       if (/\/src\/rules\/(?:utils|runtimeProperties)\.ts$/.test(id))
@@ -90,7 +108,7 @@ export default (viteConfigEnv: ConfigEnv) => {
     },
 
     chunkFileNames: (chunk: { name: string }) =>
-      chunk.name.startsWith("runtime/")
+      /^(runtime|selectors)\//.test(chunk.name)
         ? `${format === "es" ? "esm" : "cjs"}/[name]-[hash].${format === "es" ? "mjs" : "cjs"}`
         : `[name]-[hash].${format === "es" ? "js" : "cjs"}`
   }));
@@ -98,12 +116,60 @@ export default (viteConfigEnv: ConfigEnv) => {
   return config;
 };
 
+/** Rollup materializes re-exported namespaces as objects, retaining every method.
+ * Transpile the two facades independently so consumers receive native ESM
+ * namespace/re-export declarations and can discard unused pure modules.
+ */
+function selectorNamespace(packageDir: string): Plugin {
+  return {
+    name: "mincho-selector-namespace",
+    apply: "build",
+    enforce: "pre",
+    buildStart() {
+      for (const name of ["api", "index"])
+        this.addWatchFile(join(packageDir, `src/selectors/${name}.ts`));
+    },
+    resolveId(source, importer) {
+      if (
+        importer === normalizePath(join(packageDir, "src/index.ts")) &&
+        source === "./selectors/index.js"
+      )
+        return { id: "@mincho-js/css/selectors", external: true };
+    },
+    async generateBundle(output) {
+      const esm = output.format === "es";
+      for (const name of ["api", "index"]) {
+        const filename = join(packageDir, `src/selectors/${name}.ts`);
+        const source = (await readFile(filename, "utf8")).replace(
+          /(from\s+["']\.[^"']*)\.js(["'])/g,
+          `$1.${esm ? "mjs" : "cjs"}$2`
+        );
+        const result = await transformWithEsbuild(source, filename, {
+          format: esm ? "esm" : "cjs",
+          target: "es2020",
+          sourcemap: false
+        });
+        this.emitFile({
+          type: "asset",
+          fileName: `${esm ? "esm" : "cjs"}/selectors/${name}.${esm ? "mjs" : "cjs"}`,
+          source: result.code
+        });
+      }
+    }
+  };
+}
+
 /** Keep authoring and registry effects while allowing unused runtime code to disappear. */
 function pureRuntimeBoundaries(): Plugin {
   return {
     name: "mincho-pure-runtime-boundaries",
 
     generateBundle(output) {
+      this.emitFile({
+        type: "asset",
+        fileName: `${output.format === "es" ? "esm" : "cjs"}/selectors/package.json`,
+        source: JSON.stringify({ sideEffects: false }) + "\n"
+      });
       this.emitFile({
         type: "asset",
         fileName: `${output.format === "es" ? "esm" : "cjs"}/squircle/package.json`,
