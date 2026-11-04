@@ -14,6 +14,7 @@ import type {
   ReactNode
 } from "react";
 import {
+  clipPathFromPath,
   createSquircleMask,
   finiteNonnegative,
   fixedSquircleSize,
@@ -24,11 +25,8 @@ import {
 } from "@mincho-js/css/squircle/core";
 import type { WithAsProp } from "../index.js";
 import { mergeRefs } from "../layout/refs.js";
-import {
-  createMaskController,
-  imageProperty,
-  radiusProperty
-} from "./controller.js";
+import { createMaskController } from "./controller.js";
+import { baseClass, squircleClass } from "./rules.js";
 
 export interface SquircleMaskOptions {
   /** Fixed border-box CSS pixels. Omit to follow CSS/content sizing. */
@@ -38,7 +36,7 @@ export interface SquircleMaskOptions {
   radius?: number;
   /** 0 is a circular corner, 1 is fully smoothed. Defaults to 0.6. */
   smoothing?: number;
-  /** Reuse the bounded, shared SVG cache. Defaults to true. */
+  /** Reuse the bounded, shared path cache. Defaults to true. */
   cacheMask?: boolean;
 }
 
@@ -49,6 +47,7 @@ export type SquircleMaskProps<T extends ElementType = "div"> =
 
 type RenderProps = SquircleMaskOptions & {
   as?: ElementType;
+  className?: string;
   children?: ReactNode;
   style?: CSSProperties;
 };
@@ -64,6 +63,7 @@ const SquircleMaskImpl = forwardRef<HTMLElement, RenderProps>(
       radius,
       smoothing,
       cacheMask = true,
+      className,
       style,
       children,
       ...props
@@ -80,26 +80,32 @@ const SquircleMaskImpl = forwardRef<HTMLElement, RenderProps>(
     const cannotSmooth =
       (w !== undefined && w <= 2 * r) || (h !== undefined && h <= 2 * r);
     const observe = !fixed && !cannotSmooth && r > 0 && s > 0;
-    // Keep the hydration fallback stable. After commit, the controller's live
-    // fragment owns painting; slider updates need neither encoding nor rewriting
-    // the long CSS image declaration.
-    const [initialImage] = useState(() =>
-      fixed
-        ? ((cacheMask ? getSquircleMask : createSquircleMask)({
-            width: w,
-            height: h,
-            radius: r,
-            smoothing: s
-          })?.image ?? "none")
-        : "none"
-    );
+    // Fixed sizes resolve the exact path during render, so server output and
+    // hydration agree, and no controller work or observation is needed.
+    const fixedClip = useMemo(() => {
+      if (!fixed) return undefined;
+      const asset = (cacheMask ? getSquircleMask : createSquircleMask)({
+        width: w,
+        height: h,
+        radius: r,
+        smoothing: s
+      });
+      return asset ? clipPathFromPath(asset.path) : "none";
+    }, [fixed, w, h, r, s, cacheMask]);
+    // Responsive boxes paint a size-independent shape() from a shared class
+    // rule; only boxes too small for the full smoothing budget need a measured
+    // path. Unobserved boxes keep their declarations inline.
+    const clip = observe ? undefined : (fixedClip ?? "none");
+    const borderRadius =
+      fixedClip === undefined || fixedClip === "none" ? r : 0;
     const [controller] = useState(() =>
       createMaskController({
         radius: r,
         smoothing: s,
         cacheMask,
         observe,
-        fixedSize: fixed ? { width: w, height: h } : undefined
+        clip,
+        borderRadius
       })
     );
     const ref = useMemo(
@@ -113,24 +119,33 @@ const SquircleMaskImpl = forwardRef<HTMLElement, RenderProps>(
         smoothing: s,
         cacheMask,
         observe,
-        fixedSize: fixed ? { width: w, height: h } : undefined
+        clip,
+        borderRadius
       });
-    }, [controller, r, s, cacheMask, observe, fixed, w, h]);
+    }, [controller, r, s, cacheMask, observe, clip, borderRadius]);
     useClientLayoutEffect(() => () => controller.dispose(), [controller]);
 
-    const fallbackImage = fixed ? initialImage : "none";
-    const image = `var(${imageProperty}, ${fallbackImage})`;
+    // Sizing and the rounded fallback must work before hydration and even if
+    // CSP blocks the shared stylesheet. The controller only changes clipping.
     const hostStyle = {
-      ...style,
       ...squircleMaskBase,
       ...fixedSquircleSize(w, h),
-      [imageProperty]: "initial",
-      [radiusProperty]: "initial",
-      borderRadius: `var(${radiusProperty}, ${fallbackImage === "none" ? r : 0}px)`,
-      maskImage: image,
-      WebkitMaskImage: image
+      borderRadius,
+      clipPath: clip
     };
-    return createElement(as, { ...props, ref, style: hostStyle }, children);
+    const hostClass = observe
+      ? [baseClass, squircleClass(r, s), className].filter(Boolean).join(" ")
+      : className;
+    return createElement(
+      as,
+      {
+        ...props,
+        className: hostClass,
+        ref,
+        style: { ...style, ...hostStyle }
+      },
+      children
+    );
   }
 );
 

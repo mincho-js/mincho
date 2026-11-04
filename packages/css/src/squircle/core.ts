@@ -1,6 +1,7 @@
 /** Pure geometry and CSS declarations: no React, DOM or stylesheet registration. */
 export {
   getSquirclePath,
+  getSquircleShape,
   resolveGeometry as getSquircleGeometry,
   finiteNonnegative,
   normalizeRadius,
@@ -17,6 +18,7 @@ export {
 export type { MaskAsset as SquircleMaskAsset } from "./mask-cache.js";
 export {
   getSquircleStyle,
+  clipPathFromPath,
   squircleMaskBase,
   fixedSquircleSize
 } from "./styles.js";

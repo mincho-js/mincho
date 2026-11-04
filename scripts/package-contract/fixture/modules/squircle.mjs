@@ -30,8 +30,8 @@ for (const bundle of Array.isArray(result) ? result : [result]) {
     .filter((file) => file.type === "chunk")
     .map((file) => file.code)
     .join("\n");
-  assert.match(css, /mask-image:\s*url\(/);
-  assert.match(css, /data:image\/svg\+xml/);
+  assert.match(css, /clip-path:\s*path\("M/);
+  assert.doesNotMatch(css, /mask-image|data:image/);
   assert.match(css, /width:\s*80px/);
   assert.doesNotMatch(js, /data:image|ResizeObserver|getSquircleMask/);
 }

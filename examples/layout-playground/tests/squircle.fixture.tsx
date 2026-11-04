@@ -68,6 +68,17 @@ export function observation(enabled: boolean) {
   });
 }
 
+const nativeSupports = CSS.supports.bind(CSS) as (
+  ...args: [string, string?]
+) => boolean;
+/** Simulate engines without CSS shape(); other feature queries stay native. */
+export function shapeSupport(enabled: boolean) {
+  CSS.supports = ((...args: [string, string?]) =>
+    !enabled && args[1]?.startsWith("shape(")
+      ? false
+      : nativeSupports(...args)) as typeof CSS.supports;
+}
+
 const Child = memo(function Child() {
   renders++;
   const [value, setValue] = useState("keep");
@@ -191,7 +202,7 @@ export function mountFrame() {
     )
   );
 }
-export function mountShadow() {
+export function mountShadow(responsive = false) {
   reset();
   const host = document.createElement("div");
   host.id = "shadow-host";
@@ -200,13 +211,21 @@ export function mountShadow() {
   roots.push(root);
   flushSync(() =>
     root.render(
-      <SquircleMask
-        id="mask"
-        width={240}
-        height={140}
-        radius={40}
-        style={{ background: "rgb(0, 170, 119)" }}
-      />
+      responsive ? (
+        <SquircleMask
+          id="mask"
+          radius={40}
+          style={{ width: 240, height: 140, background: "rgb(0, 170, 119)" }}
+        />
+      ) : (
+        <SquircleMask
+          id="mask"
+          width={240}
+          height={140}
+          radius={40}
+          style={{ background: "rgb(0, 170, 119)" }}
+        />
+      )
     )
   );
 }
@@ -225,5 +244,35 @@ export function nested() {
       </SquircleMask>
     )
   );
-  return getComputedStyle(document.getElementById("mask")!).maskImage;
+  return getComputedStyle(document.getElementById("mask")!).clipPath;
+}
+const ruleClass = "mincho-squircle-r18-s0_7";
+/** Rules in the document's squircle sheet that style the shared test class. */
+export function ruleCount() {
+  const style = document.querySelector<HTMLStyleElement>(
+    "style[data-mincho-squircle]"
+  );
+  return Array.from(style?.sheet?.cssRules ?? []).filter((rule) =>
+    rule.cssText.includes(ruleClass)
+  ).length;
+}
+export function mountMany(count: number, options: Options) {
+  reset();
+  const root = createRoot(container());
+  roots.push(root);
+  flushSync(() =>
+    root.render(
+      <div className="many">
+        {Array.from({ length: count }, (_, i) => (
+          <SquircleMask key={i} {...options} />
+        ))}
+      </div>
+    )
+  );
+  const items = Array.from(document.querySelectorAll(".many > *"));
+  return {
+    styles: [...new Set(items.map((item) => item.getAttribute("style")))],
+    classes: [...new Set(items.map((item) => item.className))],
+    rules: ruleCount()
+  };
 }

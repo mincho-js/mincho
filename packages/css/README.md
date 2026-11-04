@@ -65,11 +65,12 @@ document.write(`
 
 ## API
 
-### Squircle masks
+### Squircle clips
 
 `@mincho-js/css/squircle` exports a fixed-size `squircle()` class pattern for
-`.css.ts` files. `@mincho-js/css/squircle/core` provides pure geometry, SVG mask,
-and style helpers without React or CSS registration. See the
+`.css.ts` files. `@mincho-js/css/squircle/core` provides pure geometry,
+`clip-path` (`path()` and responsive `shape()`), and style helpers without React
+or CSS registration. See the
 [Squircle guide](../react/squircle/README.md) for sizing and clipping behavior.
 
 ### Runtime class names

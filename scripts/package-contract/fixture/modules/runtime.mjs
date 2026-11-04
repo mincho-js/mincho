@@ -16,15 +16,22 @@ for (const mode of ["import", "require"]) {
     createElement(SquircleMask, { as: "button", ...options }, "Save")
   );
   assert.match(html, /<button/);
-  assert.match(html, /data:image\/svg\+xml/);
+  assert.match(html, /clip-path:path\(&quot;M/);
+  assert.doesNotMatch(html, /data:image/);
+  const responsive = renderToString(createElement(SquircleMask, { radius: 20 }));
+  assert.match(responsive, /class="mincho-squircle mincho-squircle-r20-s0_6"/);
+  assert.match(responsive, /box-sizing:border-box/);
+  assert.match(responsive, /overflow:hidden/);
+  assert.match(responsive, /border-radius:20px/);
   assert.equal(
     core.getSquircleMask(options).path,
     core.getSquirclePath(options)
   );
   assert.equal(
-    core.getSquircleStyle(options).maskImage,
-    core.getSquircleMask(options).image
+    core.getSquircleStyle(options).clipPath,
+    `path("${core.getSquirclePath(options)}")`
   );
+  assert.match(core.getSquircleShape(options), /^shape\(from /);
   assert.equal(
     typeof (await load("@mincho-js/css/squircle")).squircle,
     "function"

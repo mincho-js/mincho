@@ -19,7 +19,7 @@ afterEach(() => {
   removeAdapter();
 });
 
-it("extracts the fixed mask and dimensions into a class", () => {
+it("extracts the fixed clip and dimensions into a class", () => {
   const options = { width: 80, height: 80, radius: 20 };
   const className = squircle(options);
   expect(className).toEqual(expect.any(String));
@@ -29,6 +29,7 @@ it("extracts the fixed mask and dimensions into a class", () => {
       rule: getSquircleStyle(options)
     })
   ]);
+  expect(getSquircleStyle(options).clipPath).toMatch(/^path\("M/);
 });
 
 it("rejects invalid inputs before registering CSS", () => {

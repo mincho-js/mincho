@@ -3,7 +3,7 @@ import { getSquircleStyle } from "./styles.js";
 import { getMaskAsset } from "./mask-cache.js";
 
 describe("fixed squircle declarations", () => {
-  it("uses the same effective geometry for CSS and SVG", () => {
+  it("uses the same effective geometry for CSS and the path", () => {
     const options = { width: 200, height: 100, radius: 20, smoothing: 0.6 };
     const result = getSquircleStyle(options);
     expect(result).toMatchObject({
@@ -16,22 +16,22 @@ describe("fixed squircle declarations", () => {
       boxSizing: "border-box",
       overflow: "hidden",
       borderRadius: 0,
-      maskImage: getMaskAsset(options)!.image,
-      WebkitMaskImage: getMaskAsset(options)!.image
+      clipPath: `path("${getMaskAsset(options)!.path}")`
     });
+    expect(result).not.toHaveProperty("maskImage");
   });
 
   it("uses native rounded clipping when no smoothed region fits", () => {
     expect(
       getSquircleStyle({ width: 30, height: 20, radius: 24 })
     ).toMatchObject({
-      maskImage: "none",
+      clipPath: "none",
       borderRadius: 10
     });
     expect(getSquircleStyle({ width: -1, height: 20 })).toMatchObject({
       width: 0,
       minWidth: 0,
-      maskImage: "none",
+      clipPath: "none",
       borderRadius: 0
     });
   });

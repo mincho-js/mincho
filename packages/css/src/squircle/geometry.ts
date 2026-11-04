@@ -97,33 +97,143 @@ export function pathFromGeometry(g: Geometry): string {
     );
   }
 
+  // Corners are relative and size-independent; absolute edges reset rounding
+  // drift at every corner. A new size formats only four numbers.
+  const k = getCorners(r, s);
+  return (
+    `M${number(w - p)} 0${k.corners[0]}` +
+    `L${number(w)} ${number(h - p)}${k.corners[1]}` +
+    `L${k.p} ${number(h)}${k.corners[2]}` +
+    `L0 ${k.p}${k.corners[3]}Z`
+  );
+}
+
+interface Corners {
+  readonly p: string;
+  readonly corners: readonly [string, string, string, string];
+}
+
+// Resizes reuse one entry; clamped boxes and slider sweeps create new keys.
+const MAX_CORNERS = 64;
+const cornerCache = new Map<string, Corners>();
+
+function getCorners(r: number, s: number): Corners {
+  const key = `${r}/${s}`;
+  let k = cornerCache.get(key);
+  if (k === undefined) {
+    if (cornerCache.size >= MAX_CORNERS)
+      cornerCache.delete(cornerCache.keys().next().value!);
+    k = relativeCorners(r, s);
+    cornerCache.set(key, k);
+  }
+  return k;
+}
+
+function relativeCorners(r: number, s: number): Corners {
+  const p = (1 + s) * r;
   // One set of trigonometric evaluations for all four corners.
   const { a, b, c, d } = getCorner(r, s);
   const ab = a + b;
   const abc = ab + c;
-  const arc = `A${number(r)} ${number(r)} 0 0 1 `;
-  const parts: string[] = [`M${number(w - p)} 0`];
-
-  for (let corner = 0; corner < 4; corner++) {
-    // Map a canonical top-right corner to each actual corner.
-    const point = (x: number, y: number): string => {
-      switch (corner) {
+  // The second cubic starts where the arc ends. At s=1 the arc disappears, so
+  // it starts where the first cubic ends; do not emit a degenerate SVG arc.
+  const [x, y] = s < 1 ? [p - d, p - abc] : [abc, d];
+  const corner = (rotation: number): string => {
+    // Rotate a canonical top-right delta clockwise by 90° per corner.
+    const delta = (dx: number, dy: number): string => {
+      switch (rotation) {
         case 0:
-          return `${number(w - p + x)} ${number(y)}`;
+          return `${number(dx)} ${number(dy)}`;
         case 1:
-          return `${number(w - y)} ${number(h - p + x)}`;
+          return `${number(-dy)} ${number(dx)}`;
         case 2:
-          return `${number(p - x)} ${number(h - y)}`;
+          return `${number(-dx)} ${number(-dy)}`;
         default:
-          return `${number(y)} ${number(p - x)}`;
+          return `${number(dy)} ${number(-dx)}`;
       }
     };
-    if (corner !== 0) parts.push(`L${point(0, 0)}`);
-    parts.push(`C${point(a, 0)} ${point(ab, 0)} ${point(abc, d)}`);
-    // At s=1 the arc disappears. Do not emit a degenerate SVG arc.
-    if (s < 1) parts.push(`${arc}${point(p - d, p - abc)}`);
-    parts.push(`C${point(p, p - ab)} ${point(p, p - a)} ${point(p, p)}`);
+    const arc =
+      s < 1 ? `a${number(r)} ${number(r)} 0 0 1 ${delta(x - abc, y - d)}` : "";
+    return (
+      `c${delta(a, 0)} ${delta(ab, 0)} ${delta(abc, d)}${arc}` +
+      `c${delta(p - x, p - ab - y)} ${delta(p - x, p - a - y)} ${delta(p - x, p - y)}`
+    );
+  };
+  return {
+    p: number(p),
+    corners: [corner(0), corner(1), corner(2), corner(3)]
+  };
+}
+
+// Offsets from the start (left/top) or end (right/bottom) edge. Clamping to
+// half the axis keeps boxes below the smoothing budget from self-intersecting
+// before an exact measured path replaces them.
+const fromStart = (v: number): string =>
+  v === 0 ? "0" : `min(${number(v)}px, 50%)`;
+const fromEnd = (v: number): string =>
+  v === 0 ? "100%" : `calc(100% - min(${number(v)}px, 50%))`;
+
+function shapeFromCorner(r: number, s: number): string {
+  const p = (1 + s) * r;
+  const { a, b, c, d } = getCorner(r, s);
+  const ab = a + b;
+  const abc = ab + c;
+  // Same canonical top-right corner as pathFromGeometry, in edge offsets.
+  const point = (corner: number, x: number, y: number): string => {
+    switch (corner) {
+      case 0:
+        return `${fromEnd(p - x)} ${fromStart(y)}`;
+      case 1:
+        return `${fromEnd(y)} ${fromEnd(p - x)}`;
+      case 2:
+        return `${fromStart(p - x)} ${fromEnd(y)}`;
+      default:
+        return `${fromStart(y)} ${fromStart(p - x)}`;
+    }
+  };
+  const parts: string[] = [`from ${point(0, 0, 0)}`];
+  for (let corner = 0; corner < 4; corner++) {
+    if (corner !== 0) parts.push(`line to ${point(corner, 0, 0)}`);
+    parts.push(
+      `curve to ${point(corner, abc, d)} with ${point(corner, a, 0)} / ${point(corner, ab, 0)}`
+    );
+    if (s < 1)
+      parts.push(
+        `arc to ${point(corner, p - d, p - abc)} of ${number(r)}px cw`
+      );
+    parts.push(
+      `curve to ${point(corner, p, p)} with ${point(corner, p, p - ab)} / ${point(corner, p, p - a)}`
+    );
   }
-  parts.push("Z");
-  return parts.join("");
+  parts.push("close");
+  return `shape(${parts.join(", ")})`;
+}
+
+// Every responsive element with the same corner shares one string. Slider
+// sweeps create new keys, so keep the cache small and bounded.
+const MAX_SHAPES = 32;
+const shapes = new Map<string, string>();
+
+/**
+ * Size-independent CSS `shape()` for `clip-path`, exact when both axes are at
+ * least `2p`. Null means a native border-radius is sufficient.
+ *
+ * Browsers without CSS `shape()` drop this declaration. Direct callers must
+ * provide a `border-radius` fallback and use `@supports` or `CSS.supports` to
+ * enable the clip and reset `border-radius` to 0 when supported.
+ */
+export function getSquircleShape(
+  options: Pick<SquircleOptions, "radius" | "smoothing"> = {}
+): string | null {
+  const r = normalizeRadius(options.radius);
+  const s = normalizeSmoothing(options.smoothing);
+  if (r === 0 || s === 0) return null;
+  const key = `${r}/${s}`;
+  let shape = shapes.get(key);
+  if (shape === undefined) {
+    if (shapes.size >= MAX_SHAPES) shapes.delete(shapes.keys().next().value!);
+    shape = shapeFromCorner(r, s);
+    shapes.set(key, shape);
+  }
+  return shape;
 }

@@ -17,7 +17,7 @@ test("zero radius uses a rectangular path and no SVG asset", () => {
 });
 test("zero smoothing uses circular corners and no mask asset", () => {
   const options = { width: 100, height: 80, radius: 20, smoothing: 0 };
-  assert.equal((getSquirclePath(options).match(/A/g) ?? []).length, 4);
+  assert.equal((getSquirclePath(options).match(/A/gi) ?? []).length, 4);
   assert.equal(getMaskAsset(options), null);
 });
 test("smoothing is reduced before radius", () => {
@@ -45,8 +45,8 @@ test("full smoothing eliminates all four arcs, retaining eight cubics", () => {
     radius: 20,
     smoothing: 1
   });
-  assert.equal((path.match(/A/g) ?? []).length, 0);
-  assert.equal((path.match(/C/g) ?? []).length, 8);
+  assert.equal((path.match(/A/gi) ?? []).length, 0);
+  assert.equal((path.match(/C/gi) ?? []).length, 8);
 });
 test("ordinary smoothing has eight cubics and four arcs", () => {
   const path = getSquirclePath({
@@ -55,8 +55,61 @@ test("ordinary smoothing has eight cubics and four arcs", () => {
     radius: 20,
     smoothing: 0.6
   });
-  assert.equal((path.match(/A/g) ?? []).length, 4);
-  assert.equal((path.match(/C/g) ?? []).length, 8);
+  assert.equal((path.match(/A/gi) ?? []).length, 4);
+  assert.equal((path.match(/C/gi) ?? []).length, 8);
+});
+test("relative corners trace the absolute construction", () => {
+  // Independent absolute reference: [x, y] after each command, in order.
+  const reference = (w: number, h: number, r: number, s: number) => {
+    const g = resolveGeometry({ width: w, height: h, radius: r, smoothing: s });
+    const { a, b, c, d } = getCorner(g.radius, g.smoothing);
+    const { p } = g;
+    const points: [number, number][] = [];
+    for (let corner = 0; corner < 4; corner++) {
+      const point = (x: number, y: number): [number, number] =>
+        [
+          [w - p + x, y],
+          [w - y, h - p + x],
+          [p - x, h - y],
+          [y, p - x]
+        ][corner] as [number, number];
+      points.push(point(0, 0), point(a, 0), point(a + b, 0));
+      points.push(point(a + b + c, d));
+      if (g.smoothing < 1) points.push(point(p - d, p - a - b - c));
+      points.push(point(p, p - a - b), point(p, p - a), point(p, p));
+    }
+    return points;
+  };
+  const traced = (path: string) => {
+    const points: [number, number][] = [];
+    let [x, y] = [0, 0];
+    for (const [, command, args] of path.matchAll(/([MLCAZ])([^MLCAZ]*)/gi)) {
+      const n = args.trim().split(" ").filter(Boolean).map(Number);
+      const xy = command.toUpperCase() === "A" ? n.slice(5) : n;
+      const [ox, oy] = command === command.toLowerCase() ? [x, y] : [0, 0];
+      for (let i = 0; i < xy.length; i += 2)
+        points.push([ox + xy[i], oy + xy[i + 1]]);
+      if (xy.length) [x, y] = points.at(-1)!;
+    }
+    return points;
+  };
+  for (const [w, h, r, s] of [
+    [300, 200, 20, 0.6],
+    [250.375, 160.125, 24, 1],
+    [100, 60, 20, 0.9],
+    [80, 400, 36, 0.8],
+    [1200.5, 33.3, 12, 0.25]
+  ]) {
+    const actual = traced(
+      getSquirclePath({ width: w, height: h, radius: r, smoothing: s })
+    );
+    const expected = reference(w, h, r, s);
+    assert.equal(actual.length, expected.length);
+    actual.forEach(([x, y], i) => {
+      close(x, expected[i][0], 1e-3);
+      close(y, expected[i][1], 1e-3);
+    });
+  }
 });
 test("corner endpoints lie on the fixed-radius circle and meet it tangentially", () => {
   for (const r of [0.2, 1, 20, 100])
