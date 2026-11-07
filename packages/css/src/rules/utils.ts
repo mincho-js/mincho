@@ -1,7 +1,5 @@
 import type {
   VariantGroups,
-  VariantDefinitions,
-  ToggleVariantMap,
   VariantSelection,
   VariantObjectSelection
 } from "./types.js";
@@ -13,6 +11,11 @@ export function mapValues<Input extends Record<string, unknown>, OutputValue>(
   const result = {} as Record<keyof Input, OutputValue>;
 
   for (const key in input) {
+    if (
+      key === "__proto__" ||
+      !Object.prototype.hasOwnProperty.call(input, key)
+    )
+      continue;
     result[key] = fn(input[key], key);
   }
 
@@ -20,60 +23,24 @@ export function mapValues<Input extends Record<string, unknown>, OutputValue>(
 }
 
 export function transformVariantSelection<Variants extends VariantGroups>(
-  variants?: VariantSelection<Variants> | undefined
-): VariantObjectSelection<Variants>;
-export function transformVariantSelection<
-  Variants extends VariantGroups,
-  ToggleVariants extends VariantDefinitions
->(
-  variants?:
-    VariantSelection<Variants & ToggleVariantMap<ToggleVariants>> | undefined
-): VariantObjectSelection<Variants & ToggleVariantMap<ToggleVariants>>;
-export function transformVariantSelection<
-  Variants extends VariantGroups,
-  ToggleVariants extends VariantDefinitions
->(
-  variants?:
-    VariantSelection<Variants & ToggleVariantMap<ToggleVariants>> | undefined
-): VariantObjectSelection<Variants & ToggleVariantMap<ToggleVariants>> {
-  if (Array.isArray(variants)) {
-    return variants.reduce<
-      VariantObjectSelection<Variants & ToggleVariantMap<ToggleVariants>> & {
-        [key: string]: boolean | string;
-      }
-    >((acc, variant) => {
-      if (typeof variant === "string") {
-        // @ts-expect-error - https://github.com/mincho-js/mincho/pull/110#discussion_r1780050654
-        acc[variant] = true;
-      } else {
-        Object.assign(
-          acc,
-          variant as VariantObjectSelection<
-            Variants & ToggleVariantMap<ToggleVariants>
-          >
-        );
-      }
+  variants?: VariantSelection<Variants>
+): VariantObjectSelection<Variants> {
+  if (!Array.isArray(variants)) return variants ?? {};
 
-      return acc;
-    }, {});
-  }
+  const selection = variants.reduce<Record<string, unknown>>((acc, variant) => {
+    if (typeof variant === "string") {
+      acc[variant] = true;
+    } else {
+      Object.assign(acc, variant);
+    }
 
-  return variants ?? {};
-}
+    return acc;
+  }, Object.create(null));
 
-export function transformToggleVariants<
-  ToggleVariants extends VariantDefinitions
->(toggleVariants: ToggleVariants): ToggleVariantMap<ToggleVariants> {
-  const variants: Partial<ToggleVariantMap<ToggleVariants>> = {};
+  // Definitions ignore this key; keep it out of serialized selections too.
+  delete selection.__proto__;
 
-  for (const variantsName in toggleVariants) {
-    const variantsStyle = toggleVariants[variantsName];
-    variants[variantsName] = {
-      true: variantsStyle
-    };
-  }
-
-  return variants as ToggleVariantMap<ToggleVariants>;
+  return selection as VariantObjectSelection<Variants>;
 }
 
 // == Tests ====================================================================
@@ -199,22 +166,36 @@ if (import.meta.vitest) {
         rounded: true
       });
     });
-  });
 
-  describe("transformToggleVariants", () => {
-    it("should handle toggle variants", () => {
-      const input = {
-        disabled: { opacity: 0.5 },
-        rounded: { borderRadius: "4px" }
-      };
-      expect(transformToggleVariants(input)).toEqual({
-        disabled: {
-          true: { opacity: 0.5 }
-        },
-        rounded: {
-          true: { borderRadius: "4px" }
+    it("isolates array selections while preserving own keys and getter reads", () => {
+      const selection = JSON.parse(
+        '{"__proto__":{"outlined":true},"constructor":"safe","prototype":false,"size":"small"}'
+      );
+      const extra = Symbol("extra");
+      let reads = 0;
+      Object.defineProperty(selection, extra, {
+        enumerable: true,
+        get: () => {
+          reads += 1;
+          return "preserved";
         }
       });
+
+      const result = transformVariantSelection<ExampleVariant>([
+        selection,
+        { size: "large" },
+        "disabled"
+      ]);
+
+      expect(Object.getPrototypeOf(result)).toBeNull();
+      expect(result).toEqual({
+        constructor: "safe",
+        prototype: false,
+        size: "large",
+        disabled: true,
+        [extra]: "preserved"
+      });
+      expect(reads).toBe(1);
     });
   });
 }

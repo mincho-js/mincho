@@ -281,7 +281,7 @@ The `rules()` function is used to define both static and dynamic styles for reus
 
 Recipe class strings have a canonical order: base classes, selected variants in
 `recipe.variants()` order, then matching compound classes in declaration order.
-The variant order is `Object.keys()` of the merged variant and toggle definition;
+The variant order is `Object.keys()` of the variant definitions;
 argument key order and array selection order do not reorder the output. Array
 inputs still use the last selection for each variant, nullish selections fall
 back to defaults, and compounds compare values strictly (`true` differs from
@@ -309,11 +309,8 @@ export const button = rules({
 
   props: ["margin"],
 
-  toggles: {
-    rounded: { borderRadius: 999 }
-  },
-
   variants: {
+    rounded: { true: { borderRadius: 999 } },
     color: {
       brand: { color: "#FFFFA0" },
       accent: { color: "#FFE4B5" }
@@ -1567,42 +1564,39 @@ button({
 });
 ```
 
-### 23. Toggle Variants :cupcake: / :icecream:
+### 23. Boolean Variants :cupcake: / :icecream:
 
-[Stitches's `boolean variants`](https://stitches.dev/docs/variants#boolean-variants) are a special case, but the syntax for defining them is awkward.
-
-Therefore, we introduce a specialized syntax.
-
-**Code Before:**
+Boolean states use the same `variants` field as string and numeric choices.
+Declare `true`, `false`, or both branches; callers pass ordinary boolean values.
+A missing branch contributes no class.
 
 ```typescript
 const button = rules({
-  // base styles
-
   variants: {
-    // common variants
+    size: {
+      small: { padding: 8 },
+      large: { padding: 16 },
+    },
     rounded: {
       true: { borderRadius: 999 },
+      false: { borderRadius: 0 },
     },
   },
+  defaultVariants: { rounded: true },
 });
+
+button({ size: "small", rounded: false });
 ```
 
-**Code After:**
+When migrating an existing `toggles` definition, move each style to the
+corresponding `variants` group's `true` branch. Place the migrated groups after
+the original variant groups to preserve class ordering. Boolean selections,
+default values, and compound conditions such as `rounded.true` keep the same
+meaning. The same structure works with `styled` and the compatibility `recipe` API.
 
-```typescript
-const button = rules({
-  // base styles
-
-  toggles: {
-    rounded: { borderRadius: 999 }
-  }
-
-  variants: {
-    // common variants
-  }
-});
-```
+Explicit generic arguments now use `PatternOptions<Variants, Props>` and
+`StyledComponent<ComponentProps, Component, Variants, Props>`. The separate toggle
+type parameter and `ConditionalVariants` merge type have been removed.
 
 ### 24. Compound Variants :icecream:
 

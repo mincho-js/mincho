@@ -1,6 +1,6 @@
 # Rules
 
-The `rules()` function provides dynamic styling capabilities through variants, toggles, and props. It combines the pattern-matching power of [Stitches variants](https://stitches.dev/docs/variants) with the static extraction of Vanilla Extract.
+The `rules()` function provides dynamic styling capabilities through variants and props. It combines the pattern-matching power of [Stitches variants](https://stitches.dev/docs/variants) with the static extraction of Vanilla Extract.
 
 ## Overview
 
@@ -120,7 +120,7 @@ unchanged. With equal CSS precedence, child declarations win because parent CSS
 is loaded first through the module dependency chain; this also applies to child
 base styles overlapping parent variants.
 
-- Variant groups and toggles are inherited, and new values can be added.
+- Variant groups are inherited, and new values can be added.
 - Defaults are merged by variant name. Compound conditions from both rules apply;
   child compound callbacks can reference inherited and new variants.
 - Inherited props keep their CSS variables. Redefining a prop adds declarations
@@ -221,41 +221,37 @@ button({ outlined: true })
 button({ outlined: false })
 ```
 
-## Toggle Variants
+## Boolean Selections
 
-Toggle variants simplify boolean-only variants. Use the `toggles` field for cleaner syntax:
+Boolean states are ordinary variant groups. Define a `true` branch for styles
+that apply only when enabled, and add `false` when the disabled state has its own
+styles. A missing branch contributes no class.
 
 ```ts
-// Instead of this:
 const button = rules({
   variants: {
-    rounded: {
-      true: { borderRadius: 999 }
-    }
+    rounded: { true: { borderRadius: 999 } },
+    disabled: {
+      true: { opacity: 0.5, pointerEvents: 'none' },
+      false: { opacity: 1 }
+    },
+    size: { large: { padding: 16 } }
   }
 })
 
-// Use this:
-const button = rules({
-  toggles: {
-    rounded: { borderRadius: 999 },
-    disabled: { opacity: 0.5, pointerEvents: 'none' }
-  }
-})
-```
-
-Toggle variants can be activated using an array syntax:
-
-```ts
-// Object syntax
-button({ rounded: true, disabled: true })
-
-// Array syntax (cleaner for toggles)
-button(['rounded', 'disabled'])
-
-// Mixed syntax
+button({ rounded: true, disabled: false })
 button(['rounded', { size: 'large' }])
 ```
+
+Array entries such as `'rounded'` select the corresponding boolean variant's
+`true` branch. Object syntax also supports `false` explicitly.
+
+To migrate an existing `toggles` definition, move each style into a `true` branch
+under `variants`, placing the migrated boolean groups after the original variant
+groups to preserve class ordering. Default selections and compound conditions
+keep their meaning.
+Explicit `PatternOptions` types now take `<Variants, Props>`; there is no separate
+toggle type parameter or `ConditionalVariants` merge type.
 
 ## Default Variants
 
@@ -284,15 +280,15 @@ button()  // Applies brand color and medium size
 button({ size: 'large' })  // Applies brand color (default) and large size
 ```
 
-For toggle variants, use an array:
+Boolean variants can also have defaults:
 
 ```ts
 const button = rules({
-  toggles: {
-    rounded: { borderRadius: 999 },
-    disabled: { opacity: 0.5 }
+  variants: {
+    rounded: { true: { borderRadius: 999 } },
+    disabled: { true: { opacity: 0.5 } }
   },
-  defaultVariants: ['rounded']  // rounded is true by default
+  defaultVariants: { rounded: true }
 })
 ```
 
@@ -546,8 +542,8 @@ const baseStyle = css({ color: 'red' })
 
 const myRule = rules({
   backgroundColor: 'blue',
-  toggles: {
-    rounded: { borderRadius: 999 }
+  variants: {
+    rounded: { true: { borderRadius: 999 } }
   }
 })
 

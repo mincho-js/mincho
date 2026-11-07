@@ -38,7 +38,6 @@ export type {
   ComplexPropDefinitions,
   PropTarget,
   VariantDefinitions,
-  ConditionalVariants,
   VariantObjectSelection,
   ResolveComplex,
   PropDefinitionOutput

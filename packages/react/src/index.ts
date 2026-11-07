@@ -1,9 +1,7 @@
 import type {
   ComplexPropDefinitions,
-  ConditionalVariants,
   PatternOptions,
   PropTarget,
-  VariantDefinitions,
   VariantGroups,
   VariantObjectSelection,
   PropDefinitionOutput,
@@ -29,66 +27,43 @@ function styledImpl<
   Props,
   Component extends ForwardRefExoticComponent<Props>,
   RulesVariants extends VariantGroups | undefined = undefined,
-  RulesToggleVariants extends VariantDefinitions | undefined = undefined,
   RulesProps extends ComplexPropDefinitions<PropTarget> | undefined = undefined
 >(
   component: Component,
-  options: PatternOptions<RulesVariants, RulesToggleVariants, RulesProps>
-): StyledComponent<
-  Props,
-  Component,
-  RulesVariants,
-  RulesToggleVariants,
-  RulesProps
->;
+  options: PatternOptions<RulesVariants, RulesProps>
+): StyledComponent<Props, Component, RulesVariants, RulesProps>;
 
 function styledImpl<
   Props,
   Component extends ComponentType<Props>,
   RulesVariants extends VariantGroups | undefined = undefined,
-  RulesToggleVariants extends VariantDefinitions | undefined = undefined,
   RulesProps extends ComplexPropDefinitions<PropTarget> | undefined = undefined
 >(
   component: Component,
-  options: PatternOptions<RulesVariants, RulesToggleVariants, RulesProps>
-): StyledComponent<
-  Props,
-  Component,
-  RulesVariants,
-  RulesToggleVariants,
-  RulesProps
->;
+  options: PatternOptions<RulesVariants, RulesProps>
+): StyledComponent<Props, Component, RulesVariants, RulesProps>;
 
 function styledImpl<
   Props extends object,
   Component extends ElementType,
   RulesVariants extends VariantGroups | undefined = undefined,
-  RulesToggleVariants extends VariantDefinitions | undefined = undefined,
   RulesProps extends ComplexPropDefinitions<PropTarget> | undefined = undefined
 >(
   component: ComponentWithAs<Props, Component>,
-  options: PatternOptions<RulesVariants, RulesToggleVariants, RulesProps>
-): StyledComponent<
-  Props,
-  Component,
-  RulesVariants,
-  RulesToggleVariants,
-  RulesProps
->;
+  options: PatternOptions<RulesVariants, RulesProps>
+): StyledComponent<Props, Component, RulesVariants, RulesProps>;
 
 function styledImpl<
   Component extends SupportedElements,
   RulesVariants extends VariantGroups | undefined = undefined,
-  RulesToggleVariants extends VariantDefinitions | undefined = undefined,
   RulesProps extends ComplexPropDefinitions<PropTarget> | undefined = undefined
 >(
   component: Component,
-  options: PatternOptions<RulesVariants, RulesToggleVariants, RulesProps>
+  options: PatternOptions<RulesVariants, RulesProps>
 ): StyledComponent<
   IntrinsicProps<Component>,
   Component,
   RulesVariants,
-  RulesToggleVariants,
   RulesProps
 >;
 
@@ -99,16 +74,14 @@ function styledImpl<
     | SupportedElements
     | ComponentWithAs<object, ElementType>,
   RulesVariants extends VariantGroups | undefined = undefined,
-  RulesToggleVariants extends VariantDefinitions | undefined = undefined,
   RulesProps extends ComplexPropDefinitions<PropTarget> | undefined = undefined
 >(
   _component: Component,
-  _options: PatternOptions<RulesVariants, RulesToggleVariants, RulesProps>
+  _options: PatternOptions<RulesVariants, RulesProps>
 ): StyledComponent<
   InferStyledComponentProps<Component>,
   InferStyledComponentElement<Component>,
   RulesVariants,
-  RulesToggleVariants,
   RulesProps
 > {
   throw new Error(
@@ -119,18 +92,11 @@ function styledImpl<
 type TaggedStyled = {
   [Tag in SupportedElements]: <
     RulesVariants extends VariantGroups | undefined = undefined,
-    RulesToggleVariants extends VariantDefinitions | undefined = undefined,
     RulesProps extends ComplexPropDefinitions<PropTarget> | undefined =
       undefined
   >(
-    options: PatternOptions<RulesVariants, RulesToggleVariants, RulesProps>
-  ) => StyledComponent<
-    IntrinsicProps<Tag>,
-    Tag,
-    RulesVariants,
-    RulesToggleVariants,
-    RulesProps
-  >;
+    options: PatternOptions<RulesVariants, RulesProps>
+  ) => StyledComponent<IntrinsicProps<Tag>, Tag, RulesVariants, RulesProps>;
 };
 
 /** NOTE: Make simple type for avoid too complex error
@@ -171,23 +137,17 @@ export type StyledComponent<
   TProps = Record<string, unknown>,
   Component extends ElementType = ElementType,
   Variants extends VariantGroups | undefined = undefined,
-  ToggleVariants extends VariantDefinitions | undefined = undefined,
   Props extends ComplexPropDefinitions<PropTarget> | undefined = undefined
 > = ComponentWithAs<
-  TProps &
-    RefAttributes<unknown> &
-    PatternOptionsToProps<Variants, ToggleVariants, Props>,
+  TProps & RefAttributes<unknown> & PatternOptionsToProps<Variants, Props>,
   Component
 >;
 
 export type PatternOptionsToProps<
   Variants extends VariantGroups | undefined = undefined,
-  ToggleVariants extends VariantDefinitions | undefined = undefined,
   Props extends ComplexPropDefinitions<PropTarget> | undefined = undefined
 > = ResolveComplex<
-  NonNever<
-    VariantObjectSelection<ConditionalVariants<Variants, ToggleVariants>>
-  > &
+  NonNever<VariantObjectSelection<Exclude<Variants, undefined>>> &
     NonNever<PropDefinitionOutput<Exclude<Props, undefined>>>
 >;
 type NonNever<T> = [T] extends [never] ? unknown : T;

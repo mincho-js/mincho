@@ -10,7 +10,7 @@ Recipe classes now use this order regardless of the argument object's key order:
 
 1. Base classes.
 2. Selected variants in `Object.keys(mergedVariantClassNames)` order, including
-   toggles. This is also the order returned by `.variants()`.
+   boolean variants. This is also the order returned by `.variants()`.
 3. Matching compounds in their declaration order.
 
 Defaults, nullish fallback, array last-write-wins selection and strict compound

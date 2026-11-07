@@ -140,9 +140,9 @@ const Button = styled('button', {
 .Button__size_large__mno345 { padding: 15px 30px; font-size: 18px; }
 ```
 
-## Toggle Variants
+## Boolean Variants
 
-Boolean variants for on/off states:
+Use ordinary variant groups with `true` and optional `false` branches for on/off states:
 
 ```tsx
 const Card = styled("div", {
@@ -150,9 +150,9 @@ const Card = styled("div", {
     padding: "20px",
     backgroundColor: "white",
   },
-  toggles: {
-    elevated: { boxShadow: "0 4px 6px rgba(0,0,0,0.1)" },
-    bordered: { border: "1px solid #ccc" },
+  variants: {
+    elevated: { true: { boxShadow: "0 4px 6px rgba(0,0,0,0.1)" } },
+    bordered: { true: { border: "1px solid #ccc" } },
   }
 });
 

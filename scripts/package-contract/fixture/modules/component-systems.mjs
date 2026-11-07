@@ -76,7 +76,7 @@ const recipeSource = (
   count = 16
 ) => `import {rules,keyframes} from '@mincho-js/css';
  const live=keyframes({from:{opacity:0},to:{opacity:1}}); const dead=keyframes({from:{opacity:0.123},to:{opacity:0.456}});
- const recipe=rules({base:{display:'block'},variants:{size:${JSON.stringify(Object.fromEntries(Array.from({ length: count }, (_, i) => ["v" + i, { fontSize: 12 + i }])))}},toggles:{active:{opacity:0.9}},defaultVariants:{size:'v0'},compoundVariants:({size,active})=>[{condition:[size.v0,active.true],style:{color:'red'}},{condition:[size.v1],style:{color:'blue'}}]});
+ const recipe=rules({base:{display:'block'},variants:{size:${JSON.stringify(Object.fromEntries(Array.from({ length: count }, (_, i) => ["v" + i, { fontSize: 12 + i }])))},active:{true:{opacity:0.9}}},defaultVariants:{size:'v0'},compoundVariants:({size,active})=>[{condition:[size.v0,active.true],style:{color:'red'}},{condition:[size.v1],style:{color:'blue'}}]});
  const animated=rules({variants:{state:{on:{animationName:live,animationDuration:'1s'},off:{animationName:dead}}}});
  export const selected=recipe({size:'v0',active:true}); export const animation=animated({state:'on'});`;
 

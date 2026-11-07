@@ -17,11 +17,10 @@ import {
 } from "../compilerResources.js";
 import type {
   ComplexPropDefinitions,
-  ConditionalVariants,
   PatternResult,
   RuntimeFn,
   VariantGroups,
-  VariantDefinitions,
+  Present,
   VariantSelection,
   VariantObjectSelection,
   PropDefinition,
@@ -32,11 +31,7 @@ import type {
   VariantStyle,
   RecipeStyleRule
 } from "./types.js";
-import {
-  mapValues,
-  transformToggleVariants,
-  transformVariantSelection
-} from "./utils.js";
+import { mapValues, transformVariantSelection } from "./utils.js";
 
 // == Compat-specific Types ====================================================
 /**
@@ -54,18 +49,14 @@ export interface CompatCompoundVariant<Variants extends VariantGroups> {
  */
 export interface CompatPatternOptions<
   Variants extends VariantGroups | undefined,
-  ToggleVariants extends VariantDefinitions | undefined,
   Props extends ComplexPropDefinitions<PropTarget> | undefined
 > extends CSSRule {
   base?: RecipeStyleRule;
   props?: Props;
-  toggles?: ToggleVariants;
   variants?: Variants;
-  defaultVariants?: VariantSelection<
-    ConditionalVariants<Variants, ToggleVariants>
-  >;
+  defaultVariants?: VariantSelection<Present<Exclude<Variants, undefined>>>;
   compoundVariants?: Array<
-    CompatCompoundVariant<ConditionalVariants<Variants, ToggleVariants>>
+    CompatCompoundVariant<Present<Exclude<Variants, undefined>>>
   >;
 }
 
@@ -74,17 +65,12 @@ const mergeObject = deepmerge();
 
 export function recipe<
   Variants extends VariantGroups | undefined = undefined,
-  ToggleVariants extends VariantDefinitions | undefined = undefined,
   Props extends ComplexPropDefinitions<PropTarget> | undefined = undefined
 >(
-  options: CompatPatternOptions<Variants, ToggleVariants, Props>,
+  options: CompatPatternOptions<Variants, Props>,
   debugId?: string
-): RuntimeFn<
-  ConditionalVariants<Variants, ToggleVariants>,
-  Exclude<Props, undefined>
-> {
+): RuntimeFn<Present<Exclude<Variants, undefined>>, Exclude<Props, undefined>> {
   const {
-    toggles = {},
     variants = {},
     defaultVariants = {},
     compoundVariants = [],
@@ -131,22 +117,14 @@ export function recipe<
 
   type PureVariants = Exclude<Variants, undefined>;
 
-  type PureToggleVariants = Exclude<ToggleVariants, undefined>;
-
-  type CombinedVariants = ConditionalVariants<PureVariants, PureToggleVariants>;
-
-  const mergedVariants = mergeObject(
-    variants,
-    transformToggleVariants(toggles)
-  ) as CombinedVariants;
-
-  // @ts-expect-error - Temporarily ignoring the error as the PatternResult type is not fully defined
-  const variantClassNames: PatternResult<CombinedVariants>["variantClassNames"] =
-    mapValues(mergedVariants, (variantGroup, variantGroupName) => {
+  const variantClassNames = mapValues(
+    variants as PureVariants,
+    (variantGroup, variantGroupName) => {
       // Transform variant values before passing to css.multiple
       const transformedVariants: Record<string | number, ComplexCSSRule> = {};
 
-      for (const key in variantGroup) {
+      for (const key of Object.keys(variantGroup)) {
+        if (key === "__proto__") continue;
         const styleRule = variantGroup[key];
         transformedVariants[key] =
           typeof styleRule === "string"
@@ -158,22 +136,22 @@ export function recipe<
         transformedVariants,
         getDebugName(debugId, String(variantGroupName))
       );
-    });
+    }
+  ) as PatternResult<PureVariants, PureProps>["variantClassNames"];
 
-  const compounds: Array<[VariantObjectSelection<CombinedVariants>, string]> =
-    [];
+  const compounds: Array<[VariantObjectSelection<PureVariants>, string]> = [];
 
   // Only process array-based compoundVariants (variants-style)
   for (const { style: theStyle, variants } of compoundVariants) {
     compounds.push([
-      transformVariantSelection<CombinedVariants>(
-        variants as VariantSelection<CombinedVariants>
+      transformVariantSelection<PureVariants>(
+        variants as VariantSelection<PureVariants>
       ),
       processCompoundStyle(theStyle, debugId, compounds.length)
     ]);
   }
 
-  const config: Omit<PatternResult<CombinedVariants, PureProps>, "propVars"> = {
+  const config: Omit<PatternResult<PureVariants, PureProps>, "propVars"> = {
     defaultClassName,
     variantClassNames,
     defaultVariants: transformVariantSelection(defaultVariants),
@@ -183,10 +161,10 @@ export function recipe<
   recordCompilerRecipe(config, resourceStart);
 
   return addFunctionSerializer<
-    RuntimeFn<ConditionalVariants<Variants, ToggleVariants>, PureProps>
+    RuntimeFn<Present<Exclude<Variants, undefined>>, PureProps>
   >(
     createRuntimeFn({ ...config, propVars }) as RuntimeFn<
-      ConditionalVariants<Variants, ToggleVariants>,
+      Present<Exclude<Variants, undefined>>,
       PureProps
     >,
     {
@@ -304,12 +282,9 @@ if (import.meta.vitest) {
   describe.concurrent("Types related to Recipe", () => {
     function assertValidOptions<
       Variants extends VariantGroups | undefined = undefined,
-      ToggleVariants extends VariantDefinitions | undefined = undefined,
       Props extends ComplexPropDefinitions<PropTarget> | undefined = undefined
-    >(options: CompatPatternOptions<Variants, ToggleVariants, Props>) {
-      assertType<CompatPatternOptions<Variants, ToggleVariants, Props>>(
-        options
-      );
+    >(options: CompatPatternOptions<Variants, Props>) {
+      assertType<CompatPatternOptions<Variants, Props>>(options);
 
       return options;
     }
@@ -339,11 +314,11 @@ if (import.meta.vitest) {
     });
 
     it("Variant Style PatternOptions", () => {
-      // Toggle style
+      // Boolean variants
       assertValidOptions({
-        toggles: {
-          disabled: { textDecoration: "line-through" },
-          rounded: { borderRadius: 999 }
+        variants: {
+          disabled: { true: { textDecoration: "line-through" } },
+          rounded: { true: { borderRadius: 999 } }
         }
       });
 
@@ -368,10 +343,6 @@ if (import.meta.vitest) {
 
       // Both
       assertValidOptions({
-        toggles: {
-          disabled: { textDecoration: "line-through" },
-          rounded: { borderRadius: 999 }
-        },
         variants: {
           color: {
             brand: { color: "#FFFFA0" },
@@ -385,14 +356,16 @@ if (import.meta.vitest) {
           outlined: {
             true: { border: "1px solid black" },
             false: { border: "1px solid transparent" }
-          }
+          },
+          disabled: { true: { textDecoration: "line-through" } },
+          rounded: { true: { borderRadius: 999 } }
         }
       });
     });
 
-    const toggleVariants = {
-      disabled: { textDecoration: "line-through" },
-      rounded: { borderRadius: 999 }
+    const booleanVariants = {
+      disabled: { true: { textDecoration: "line-through" } },
+      rounded: { true: { borderRadius: 999 } }
     } as const;
 
     const variants = {
@@ -412,14 +385,14 @@ if (import.meta.vitest) {
     } as const;
 
     it("Default Style PatternOptions", () => {
-      // Toggle style
+      // Boolean variants
       assertValidOptions({
         defaultVariants: { disabled: true },
-        toggles: toggleVariants
+        variants: booleanVariants
       });
       assertValidOptions({
         defaultVariants: ["disabled", { rounded: true }],
-        toggles: toggleVariants
+        variants: booleanVariants
       });
 
       // Variant style
@@ -440,8 +413,8 @@ if (import.meta.vitest) {
           size: "medium",
           outlined: true
         },
-        toggles: toggleVariants,
-        variants
+
+        variants: { ...variants, ...booleanVariants }
       });
       assertValidOptions({
         defaultVariants: [
@@ -452,13 +425,13 @@ if (import.meta.vitest) {
             size: "medium"
           }
         ],
-        toggles: toggleVariants,
-        variants
+
+        variants: { ...variants, ...booleanVariants }
       });
     });
 
     it("Compound Style PatternOptions", () => {
-      // Toggle style
+      // Boolean variants
       assertValidOptions({
         compoundVariants: [
           {
@@ -471,7 +444,7 @@ if (import.meta.vitest) {
             }
           }
         ],
-        toggles: toggleVariants
+        variants: booleanVariants
       });
       assertValidOptions({
         compoundVariants: [
@@ -482,7 +455,7 @@ if (import.meta.vitest) {
             }
           }
         ],
-        toggles: toggleVariants
+        variants: booleanVariants
       });
 
       // Variant style
@@ -527,8 +500,8 @@ if (import.meta.vitest) {
             }
           }
         ],
-        toggles: toggleVariants,
-        variants
+
+        variants: { ...variants, ...booleanVariants }
       });
 
       // Array compoundVariants
@@ -548,8 +521,8 @@ if (import.meta.vitest) {
             }
           }
         ],
-        toggles: toggleVariants,
-        variants
+
+        variants: { ...variants, ...booleanVariants }
       });
     });
 
@@ -586,8 +559,7 @@ if (import.meta.vitest) {
         backgroundColor: "gray",
         base: { color: "red", fontSize: 16 },
 
-        toggles: toggleVariants,
-        variants,
+        variants: { ...variants, ...booleanVariants },
 
         defaultVariants: {
           size: "small"
@@ -762,12 +734,12 @@ if (import.meta.vitest) {
       );
     });
 
-    it("toggle variants", () => {
+    it("boolean variants", () => {
       const result = recipe(
         {
-          toggles: {
-            disabled: { textDecoration: "line-through" },
-            rounded: { borderRadius: 999 }
+          variants: {
+            disabled: { true: { textDecoration: "line-through" } },
+            rounded: { true: { borderRadius: 999 } }
           }
         },
         debugId
@@ -827,9 +799,9 @@ if (import.meta.vitest) {
       const result = recipe(
         {
           defaultVariants: ["disabled"],
-          toggles: {
-            disabled: { textDecoration: "line-through" },
-            rounded: { borderRadius: 999 }
+          variants: {
+            disabled: { true: { textDecoration: "line-through" } },
+            rounded: { true: { borderRadius: 999 } }
           }
         },
         debugId
@@ -842,6 +814,10 @@ if (import.meta.vitest) {
       expect(result()).toMatch(
         identifierName(debugId, `${debugId}_disabled_true`)
       );
+      // An explicit false must override the default true, even without a false branch.
+      expect(result({ disabled: false })).toBe(result.classNames.base);
+      expect(result([{ disabled: false }, "disabled"])).toBe(result());
+
       expect(result.classNames.base).toMatch(identifierName(debugId));
       assert.hasAllKeys(result.classNames.variants, ["disabled", "rounded"]);
       expect(result.variants()).toEqual(["disabled", "rounded"]);
@@ -1053,14 +1029,12 @@ if (import.meta.vitest) {
     it("compoundVariants - variants style (array)", () => {
       const result = recipe(
         {
-          toggles: {
-            outlined: { border: "1px solid" }
-          },
           variants: {
             color: {
               brand: { color: "#FFFFA0" },
               accent: { color: "#FFE4B5" }
-            }
+            },
+            outlined: { true: { border: "1px solid" } }
           },
           compoundVariants: [
             {

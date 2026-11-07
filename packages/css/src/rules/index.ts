@@ -20,12 +20,11 @@ import { getRulesConfig } from "./metadata.js";
 import { registerRulesStyleDependencies } from "../defineRules/registry.js";
 import type {
   ComplexPropDefinitions,
-  ConditionalVariants,
   PatternOptions,
   PatternResult,
   RuntimeFn,
   VariantGroups,
-  VariantDefinitions,
+  Present,
   VariantObjectSelection,
   PropDefinition,
   PropDefinitionOutput,
@@ -41,11 +40,7 @@ import type {
   ExtendedVariants,
   RulesExtendsOptions
 } from "./types.js";
-import {
-  mapValues,
-  transformToggleVariants,
-  transformVariantSelection
-} from "./utils.js";
+import { mapValues, transformVariantSelection } from "./utils.js";
 
 // == Rules ====================================================================
 export const rules = Object.assign(rulesImpl, {
@@ -57,28 +52,22 @@ export const rules = Object.assign(rulesImpl, {
 
 function rulesRaw<
   Variants extends VariantGroups | undefined = undefined,
-  ToggleVariants extends VariantDefinitions | undefined = undefined,
   Props extends ComplexPropDefinitions<PropTarget> | undefined = undefined
->(options: PatternOptions<Variants, ToggleVariants, Props>) {
+>(options: PatternOptions<Variants, Props>) {
   return options;
 }
 
 function rulesWith<
   const T extends CSSRule,
   Variants extends VariantGroups | undefined = undefined,
-  ToggleVariants extends VariantDefinitions | undefined = undefined,
   Props extends ComplexPropDefinitions<PropTarget> | undefined = undefined
->(
-  callback: (
-    style: CSSRuleWith<T>
-  ) => PatternOptions<Variants, ToggleVariants, Props>
-) {
+>(callback: (style: CSSRuleWith<T>) => PatternOptions<Variants, Props>) {
   type RestrictedCSSRule = CSSRuleWith<T>;
 
-  type RulePattern = PatternOptions<Variants, ToggleVariants, Props>;
+  type RulePattern = PatternOptions<Variants, Props>;
 
   type RuntimeFnType = RuntimeFn<
-    ConditionalVariants<Variants, ToggleVariants>,
+    Present<Exclude<Variants, undefined>>,
     Exclude<Props, undefined>
   >;
 
@@ -103,18 +92,11 @@ function rulesWith<
     style: RestrictedCSSRule,
     debugId?: string
   ) {
-    return rulesExtends<
-      ParentVariants,
-      ParentProps,
-      Variants,
-      ToggleVariants,
-      Props
-    >(
+    return rulesExtends<ParentVariants, ParentProps, Variants, Props>(
       parent,
       callback(style) as unknown as RulesExtendsOptions<
         ParentVariants,
         Variants,
-        ToggleVariants,
         Props
       >,
       debugId
@@ -147,14 +129,13 @@ function rulesExtends<
   ParentVariants extends VariantGroups,
   ParentProps extends ComplexPropDefinitions<PropTarget | undefined>,
   Variants extends VariantGroups | undefined = undefined,
-  ToggleVariants extends VariantDefinitions | undefined = undefined,
   Props extends ComplexPropDefinitions<PropTarget> | undefined = undefined
 >(
   parent: RuntimeFn<ParentVariants, ParentProps>,
-  options: RulesExtendsOptions<ParentVariants, Variants, ToggleVariants, Props>,
+  options: RulesExtendsOptions<ParentVariants, Variants, Props>,
   debugId?: string
 ): RuntimeFn<
-  ExtendedVariants<ParentVariants, Variants, ToggleVariants>,
+  ExtendedVariants<ParentVariants, Variants>,
   ExtendedProps<ParentProps, Props>
 > {
   const inherited = getRulesConfig(parent);
@@ -169,11 +150,11 @@ function rulesExtends<
     throw new Error("rules.extends() debugId must be a string.");
   }
   return compileRules(
-    options as unknown as PatternOptions<Variants, ToggleVariants, Props>,
+    options as unknown as PatternOptions<Variants, Props>,
     debugId,
     inherited as InheritedRulesConfig
   ) as unknown as RuntimeFn<
-    ExtendedVariants<ParentVariants, Variants, ToggleVariants>,
+    ExtendedVariants<ParentVariants, Variants>,
     ExtendedProps<ParentProps, Props>
   >;
 }
@@ -185,33 +166,24 @@ type InheritedRulesConfig = PatternResult<
 
 export function rulesImpl<
   Variants extends VariantGroups | undefined = undefined,
-  ToggleVariants extends VariantDefinitions | undefined = undefined,
   Props extends ComplexPropDefinitions<PropTarget> | undefined = undefined
 >(
-  options: PatternOptions<Variants, ToggleVariants, Props>,
+  options: PatternOptions<Variants, Props>,
   debugId?: string
-): RuntimeFn<
-  ConditionalVariants<Variants, ToggleVariants>,
-  Exclude<Props, undefined>
-> {
+): RuntimeFn<Present<Exclude<Variants, undefined>>, Exclude<Props, undefined>> {
   return compileRules(options, debugId);
 }
 
 function compileRules<
   Variants extends VariantGroups | undefined = undefined,
-  ToggleVariants extends VariantDefinitions | undefined = undefined,
   Props extends ComplexPropDefinitions<PropTarget> | undefined = undefined
 >(
-  options: PatternOptions<Variants, ToggleVariants, Props>,
+  options: PatternOptions<Variants, Props>,
   debugId?: string,
   inherited?: InheritedRulesConfig
-): RuntimeFn<
-  ConditionalVariants<Variants, ToggleVariants>,
-  Exclude<Props, undefined>
-> {
+): RuntimeFn<Present<Exclude<Variants, undefined>>, Exclude<Props, undefined>> {
   const resourceStart = compilerRecipeStart();
   const {
-    toggles = {},
     variants = {},
     defaultVariants = {},
     compoundVariants = [],
@@ -278,22 +250,15 @@ function compileRules<
 
   type PureVariants = Exclude<Variants, undefined>;
 
-  type PureToggleVariants = Exclude<ToggleVariants, undefined>;
-
-  type CombinedVariants = ConditionalVariants<PureVariants, PureToggleVariants>;
-
-  const mergedVariants = mergeObject(
-    variants,
-    transformToggleVariants(toggles)
-  ) as CombinedVariants;
   const ownVariantClassNames = mapValues(
-    mergedVariants,
+    variants as PureVariants,
     (variantGroup, variantGroupName) => {
       // TODO: Use css.with supported data mapping when available
       // Transform variant values before passing to css.multiple
       const transformedVariants: Record<string | number, ComplexCSSRule> = {};
 
-      for (const key in variantGroup) {
+      for (const key of Object.keys(variantGroup)) {
+        if (key === "__proto__") continue;
         const styleRule = variantGroup[key];
         transformedVariants[key] =
           typeof styleRule === "string"
@@ -323,7 +288,7 @@ function compileRules<
       }
     }
   const compounds = [...(inherited?.compoundVariants ?? [])] as Array<
-    [VariantObjectSelection<CombinedVariants>, string]
+    [VariantObjectSelection<PureVariants>, string]
   >;
 
   // Only support condition-based compoundVariants (function style)
@@ -339,7 +304,7 @@ function compileRules<
                 ? false
                 : optionKey
         }))
-    ) as VariantStringMap<CombinedVariants>;
+    ) as VariantStringMap<PureVariants>;
 
     const compoundRules = compoundVariants(variantConditions);
     compoundRules.forEach((rule, index) => {
@@ -351,7 +316,7 @@ function compileRules<
       }, {});
 
       compounds.push([
-        transformVariantSelection<CombinedVariants>(variants),
+        transformVariantSelection<PureVariants>(variants),
         processCompoundStyle(rule.style, debugId, index)
       ]);
     });
@@ -370,12 +335,12 @@ function compileRules<
             mapValues(group, (className) => className.split(" ")[0])
           )
         });
-  const config: Omit<PatternResult<CombinedVariants, PureProps>, "propVars"> = {
+  const config: Omit<PatternResult<PureVariants, PureProps>, "propVars"> = {
     defaultClassName: inherited
       ? joinClasses(inherited.defaultClassName, defaultClassName)
       : defaultClassName,
     variantClassNames: variantClassNames as PatternResult<
-      CombinedVariants,
+      PureVariants,
       PureProps
     >["variantClassNames"],
     defaultVariants: {
@@ -393,7 +358,7 @@ function compileRules<
               mapValues(ownVariantClassNames, (group) =>
                 mapValues(group, (className) => className.split(" ")[0])
               )
-            ) as PatternResult<CombinedVariants, PureProps>["variantClassNames"]
+            ) as PatternResult<PureVariants, PureProps>["variantClassNames"]
           }
         }
       : {}),
@@ -411,10 +376,10 @@ function compileRules<
   recordCompilerRecipe(config, resourceStart);
 
   return addFunctionSerializer<
-    RuntimeFn<ConditionalVariants<Variants, ToggleVariants>, PureProps>
+    RuntimeFn<Present<Exclude<Variants, undefined>>, PureProps>
   >(
     createRuntimeFn({ ...config, propVars }) as RuntimeFn<
-      ConditionalVariants<Variants, ToggleVariants>,
+      Present<Exclude<Variants, undefined>>,
       PureProps
     >,
     {
@@ -507,11 +472,10 @@ function processCompoundStyle(
 type RuntimeFnFromPatternOptions<Options> =
   Options extends PatternOptions<
     infer Variants extends VariantGroups | undefined,
-    infer ToggleVariants extends VariantDefinitions | undefined,
     infer Props extends ComplexPropDefinitions<PropTarget> | undefined
   >
     ? RuntimeFn<
-        ConditionalVariants<Variants, ToggleVariants>,
+        Present<Exclude<Variants, undefined>>,
         Exclude<Props, undefined>
       >
     : never;
@@ -521,7 +485,6 @@ type TransformPatternMap<
     string | number,
     PatternOptions<
       VariantGroups | undefined,
-      VariantDefinitions | undefined,
       ComplexPropDefinitions<PropTarget> | undefined
     >
   >
@@ -534,7 +497,6 @@ export function rulesMultiple<
     string | number,
     PatternOptions<
       VariantGroups | undefined,
-      VariantDefinitions | undefined,
       ComplexPropDefinitions<PropTarget> | undefined
     >
   >
@@ -549,28 +511,21 @@ export function rulesMultiple<
 function processMultipleRules<
   T,
   Variants extends VariantGroups | undefined = undefined,
-  ToggleVariants extends VariantDefinitions | undefined = undefined,
   Props extends ComplexPropDefinitions<PropTarget> | undefined = undefined
 >(
   items: Record<string | number, T>,
   transformItem: (
     value: T,
     key: string | number
-  ) => PatternOptions<Variants, ToggleVariants, Props>,
+  ) => PatternOptions<Variants, Props>,
   debugId?: string
 ): Record<
   string | number,
-  RuntimeFn<
-    ConditionalVariants<Variants, ToggleVariants>,
-    Exclude<Props, undefined>
-  >
+  RuntimeFn<Present<Exclude<Variants, undefined>>, Exclude<Props, undefined>>
 > {
   const patternsMap: Record<
     string | number,
-    RuntimeFn<
-      ConditionalVariants<Variants, ToggleVariants>,
-      Exclude<Props, undefined>
-    >
+    RuntimeFn<Present<Exclude<Variants, undefined>>, Exclude<Props, undefined>>
   > = {};
 
   for (const key in items) {
@@ -754,12 +709,12 @@ if (import.meta.vitest) {
       );
     });
 
-    it("toggle variants", () => {
+    it("boolean variants", () => {
       const result = rules(
         {
-          toggles: {
-            disabled: { textDecoration: "line-through" },
-            rounded: { borderRadius: 999 }
+          variants: {
+            disabled: { true: { textDecoration: "line-through" } },
+            rounded: { true: { borderRadius: 999 } }
           }
         },
         debugId
@@ -819,9 +774,9 @@ if (import.meta.vitest) {
       const result = rules(
         {
           defaultVariants: ["disabled"],
-          toggles: {
-            disabled: { textDecoration: "line-through" },
-            rounded: { borderRadius: 999 }
+          variants: {
+            disabled: { true: { textDecoration: "line-through" } },
+            rounded: { true: { borderRadius: 999 } }
           }
         },
         debugId
@@ -834,6 +789,10 @@ if (import.meta.vitest) {
       expect(result()).toMatch(
         identifierName(debugId, `${debugId}_disabled_true`)
       );
+      // An explicit false must override the default true, even without a false branch.
+      expect(result({ disabled: false })).toBe(result.classNames.base);
+      expect(result([{ disabled: false }, "disabled"])).toBe(result());
+
       expect(result.classNames.base).toMatch(identifierName(debugId));
       assert.hasAllKeys(result.classNames.variants, ["disabled", "rounded"]);
       expect(result.variants()).toEqual(["disabled", "rounded"]);
@@ -1275,7 +1234,7 @@ if (import.meta.vitest) {
         base: { color: "red" }
       });
 
-      assertType<PatternOptions<undefined, undefined, undefined>>(ruleObj1);
+      assertType<PatternOptions<undefined, undefined>>(ruleObj1);
 
       expect(ruleObj1).toStrictEqual({
         base: { color: "red" }
@@ -1318,7 +1277,6 @@ if (import.meta.vitest) {
               false: { border: "1px solid transparent" };
             };
           },
-          undefined,
           undefined
         >
       >(ruleObj2);
@@ -1344,27 +1302,26 @@ if (import.meta.vitest) {
       rules(ruleObj2); // Ensure it can be used with rules()
 
       const ruleObj3 = rules.raw({
-        toggles: {
-          disabled: { textDecoration: "line-through" },
-          rounded: { borderRadius: 999 }
+        variants: {
+          disabled: { true: { textDecoration: "line-through" } },
+          rounded: { true: { borderRadius: 999 } }
         }
       });
 
       assertType<
         PatternOptions<
-          undefined,
           {
-            disabled: { textDecoration: "line-through" };
-            rounded: { borderRadius: number };
+            disabled: { true: { textDecoration: "line-through" } };
+            rounded: { true: { borderRadius: number } };
           },
           undefined
         >
       >(ruleObj3);
 
       expect(ruleObj3).toStrictEqual({
-        toggles: {
-          disabled: { textDecoration: "line-through" },
-          rounded: { borderRadius: 999 }
+        variants: {
+          disabled: { true: { textDecoration: "line-through" } },
+          rounded: { true: { borderRadius: 999 } }
         }
       });
 
@@ -1383,7 +1340,6 @@ if (import.meta.vitest) {
 
       assertType<
         PatternOptions<
-          undefined,
           undefined,
           Array<
             | "color"
@@ -1531,14 +1487,10 @@ if (import.meta.vitest) {
       ]);
 
       // Test usage
-      // TODO: Fix `rules.with` type inference
-      // @ts-expect-error Broken inference for variants
       expect(result.light({ emphasis: "strong" })).toMatch(
         identifierName(`${debugId}_light`, `${debugId}_light_emphasis_strong`)
       );
 
-      // TODO: Fix `rules.with` type inference
-      // @ts-expect-error Broken inference for variants
       expect(result.dark({ emphasis: "subtle" })).toMatch(
         identifierName(`${debugId}_dark`, `${debugId}_dark_emphasis_subtle`)
       );
@@ -1568,8 +1520,6 @@ if (import.meta.vitest) {
       assert.isFunction(result.sm);
 
       // Test usage
-      // TODO: Fix `rules.with` type inference
-      // @ts-expect-error Broken inference for variants
       expect(result.md({ direction: "horizontal" })).toMatch(
         identifierName(`${debugId}_md`, `${debugId}_md_direction_horizontal`)
       );

@@ -6,6 +6,7 @@ import type { preset as packedPreset } from "@mincho-js-proof/real-d/preset" wit
   "resolution-mode": "import"
 };
 import { defineRules } from "@mincho-js/css";
+import { styled, type PatternOptionsToProps } from "@mincho-js/react";
 import { selectors } from "@mincho-js/css/selectors";
 import { cx, type ClassValue } from "@mincho-js/css/classname";
 import type { JSX as CompiledJSX } from "@mincho-js/react/compiled-jsx-runtime";
@@ -249,3 +250,32 @@ const selectedChildren: string = selectors.children(
   selectorCondition
 );
 void selectedChildren;
+
+// These declarations must preserve the same boolean inference in ESM and CJS.
+function checkBooleanVariantProps() {
+  const Button = styled.button({
+    props: ["width"],
+    variants: {
+      size: { small: { padding: 4 }, large: { padding: 12 } },
+      active: { true: { opacity: 1 }, false: { opacity: 0.5 } }
+    },
+    defaultVariants: { active: true },
+    compoundVariants: ({ size, active }) => [
+      { condition: [size.small, active.false], style: { color: "gray" } }
+    ]
+  });
+
+  Button({ active: false, size: "small", width: 120 });
+  Button({ as: "a", href: "/", active: true });
+  // @ts-expect-error Boolean variant selections are booleans, not key strings.
+  Button({ active: "true" });
+  // @ts-expect-error Only declared size values are accepted.
+  Button({ size: "medium" });
+
+  const props: PatternOptionsToProps<
+    { active: { true: { opacity: 1 } } },
+    ["width"]
+  > = { active: false, width: 120 };
+  Button(props);
+}
+void checkBooleanVariantProps;

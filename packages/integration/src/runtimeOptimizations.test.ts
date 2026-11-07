@@ -172,7 +172,7 @@ describe("private recipe resource proofs", () => {
     );
   }
 
-  it("retains all literal branches, defaults, toggles and compound results before JS folding", async () => {
+  it("retains all literal branches, defaults, boolean variants and compound results before JS folding", async () => {
     const output = await proof(
       'const alias=button; export function render(flag){return alias({size:flag?"small":"large",active:true})}; const first=button();'
     );

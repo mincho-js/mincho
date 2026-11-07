@@ -66,12 +66,15 @@ describe("rules.extends", () => {
     }
   });
 
-  it("inherits base, variants, toggles and compounds while emitting child classes", () => {
+  it("inherits base, variants and compounds while emitting child classes", () => {
     const parent = rules(
       {
         color: "red",
-        variants: { size: { small: { padding: 4 }, large: { padding: 16 } } },
-        toggles: { rounded: { borderRadius: 8 } },
+        variants: {
+          size: { small: { padding: 4 }, large: { padding: 16 } },
+          rounded: { true: { borderRadius: 8 } }
+        },
+
         defaultVariants: { size: "small" },
         compoundVariants: ({ size, rounded }) => [
           {
@@ -89,9 +92,10 @@ describe("rules.extends", () => {
         color: "blue",
         variants: {
           size: { large: { padding: 24 }, huge: { padding: 32 } },
-          tone: { accent: { color: "purple" } }
+          tone: { accent: { color: "purple" } },
+          disabled: { true: { opacity: 0.5 } }
         },
-        toggles: { disabled: { opacity: 0.5 } },
+
         defaultVariants: { size: "large", rounded: true },
         compoundVariants: ({ size, rounded, tone }) => [
           {

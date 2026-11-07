@@ -47,12 +47,6 @@ export type VariantDefinitions = Record<string, RecipeStyleRule>;
 
 type BooleanMap<T> = T extends "true" | "false" ? boolean : T;
 
-export type ToggleVariantMap<ToggleVariants extends VariantDefinitions> = {
-  [VariantGroup in keyof ToggleVariants]: {
-    true: ToggleVariants[VariantGroup];
-  };
-};
-
 export type VariantGroups = Record<string, VariantDefinitions>;
 
 export type VariantObjectSelection<Variants extends VariantGroups> = {
@@ -60,7 +54,7 @@ export type VariantObjectSelection<Variants extends VariantGroups> = {
     BooleanMap<keyof Variants[VariantGroup]> | undefined;
 };
 
-export type VariantToggleSelection<Variants extends VariantGroups> = {
+export type BooleanVariantNames<Variants extends VariantGroups> = {
   [VariantGroup in keyof Variants]: keyof Variants[VariantGroup] extends
     "true" | "false"
     ? VariantGroup
@@ -69,7 +63,7 @@ export type VariantToggleSelection<Variants extends VariantGroups> = {
 
 export type VariantSelection<Variants extends VariantGroups> =
   | VariantObjectSelection<Variants>
-  | Array<VariantToggleSelection<Variants> | VariantObjectSelection<Variants>>;
+  | Array<BooleanVariantNames<Variants> | VariantObjectSelection<Variants>>;
 
 export type VariantsClassNames<Variants extends VariantGroups> = {
   [P in keyof Variants]: {
@@ -174,35 +168,18 @@ export type CompoundVariant<Variants extends VariantGroups> = (
   style: RecipeStyleRule;
 }>;
 
-export type ConditionalVariants<
-  Variants extends VariantGroups | undefined,
-  ToggleVariants extends VariantDefinitions | undefined
-> = Variants extends undefined
-  ? ToggleVariants extends undefined
-    ? never
-    : ToggleVariantMap<Exclude<ToggleVariants, undefined>>
-  : ToggleVariants extends undefined
-    ? Variants
-    : Resolve<Variants & ToggleVariantMap<Exclude<ToggleVariants, undefined>>>;
-
 export interface PatternOptions<
   Variants extends VariantGroups | undefined,
-  ToggleVariants extends VariantDefinitions | undefined,
   Props extends ComplexPropDefinitions<PropTarget> | undefined
 > extends CSSRule {
   base?: RecipeStyleRule;
   props?: Props;
-  toggles?: ToggleVariants;
   variants?: Variants;
-  defaultVariants?: VariantSelection<
-    ConditionalVariants<Variants, ToggleVariants>
-  >;
-  compoundVariants?: CompoundVariant<
-    ConditionalVariants<Variants, ToggleVariants>
-  >;
+  defaultVariants?: VariantSelection<Present<Exclude<Variants, undefined>>>;
+  compoundVariants?: CompoundVariant<Present<Exclude<Variants, undefined>>>;
 }
 
-type Present<Value> = [Value] extends [undefined]
+export type Present<Value> = [Value] extends [undefined]
   ? Record<never, never>
   : Value;
 
@@ -221,13 +198,9 @@ type MergeVariantGroups<
 
 export type ExtendedVariants<
   Parent extends VariantGroups,
-  Variants extends VariantGroups | undefined,
-  Toggles extends VariantDefinitions | undefined
+  Variants extends VariantGroups | undefined
 > = Extract<
-  MergeVariantGroups<
-    Present<Parent>,
-    Present<ConditionalVariants<Variants, Toggles>>
-  >,
+  MergeVariantGroups<Present<Parent>, Present<Exclude<Variants, undefined>>>,
   VariantGroups
 >;
 
@@ -245,18 +218,13 @@ export type ExtendedProps<
 export type RulesExtendsOptions<
   Parent extends VariantGroups,
   Variants extends VariantGroups | undefined,
-  Toggles extends VariantDefinitions | undefined,
   Props extends ComplexPropDefinitions<PropTarget> | undefined
 > = Omit<
-  PatternOptions<Variants, Toggles, Props>,
+  PatternOptions<Variants, Props>,
   "defaultVariants" | "compoundVariants"
 > & {
-  defaultVariants?: VariantSelection<
-    ExtendedVariants<Parent, Variants, Toggles>
-  >;
-  compoundVariants?: CompoundVariant<
-    ExtendedVariants<Parent, Variants, Toggles>
-  >;
+  defaultVariants?: VariantSelection<ExtendedVariants<Parent, Variants>>;
+  compoundVariants?: CompoundVariant<ExtendedVariants<Parent, Variants>>;
 };
 
 export type RecipeClassNames<Variants extends VariantGroups> = {
@@ -292,28 +260,6 @@ if (import.meta.vitest) {
   // eslint-disable-next-line @typescript-eslint/ban-ts-comment
   // @ts-ignore error TS1343: The 'import.meta' meta-property is only allowed when the '--module' option is 'es2020', 'es2022', 'esnext', 'system', 'node16', or 'nodenext'.
   const { describe, it, assertType, expectTypeOf } = import.meta.vitest;
-
-  describe.concurrent("ConditionVariants Type Test", () => {
-    it("Conditional Type", () => {
-      assertType<
-        ConditionalVariants<{ color: { primary: string } }, undefined>
-      >({ color: { primary: "className" } });
-
-      assertType<ConditionalVariants<undefined, { disabled: string }>>({
-        disabled: { true: "className" }
-      });
-
-      assertType<
-        ConditionalVariants<
-          { color: { primary: string } },
-          { disabled: string }
-        >
-      >({
-        color: { primary: "className1" },
-        disabled: { true: "className" }
-      });
-    });
-  });
 
   describe.concurrent("VariantSelection Type Test", () => {
     type ExampleVariants = {
@@ -447,10 +393,9 @@ if (import.meta.vitest) {
   describe.concurrent("Types related to Rules", () => {
     function assertValidOptions<
       Variants extends VariantGroups | undefined = undefined,
-      ToggleVariants extends VariantDefinitions | undefined = undefined,
       Props extends ComplexPropDefinitions<PropTarget> | undefined = undefined
-    >(options: PatternOptions<Variants, ToggleVariants, Props>) {
-      assertType<PatternOptions<Variants, ToggleVariants, Props>>(options);
+    >(options: PatternOptions<Variants, Props>) {
+      assertType<PatternOptions<Variants, Props>>(options);
 
       return options;
     }
@@ -480,11 +425,11 @@ if (import.meta.vitest) {
     });
 
     it("Variant Style PatternOptions", () => {
-      // Toggle style
+      // Boolean variants
       assertValidOptions({
-        toggles: {
-          disabled: { textDecoration: "line-through" },
-          rounded: { borderRadius: 999 }
+        variants: {
+          disabled: { true: { textDecoration: "line-through" } },
+          rounded: { true: { borderRadius: 999 } }
         }
       });
 
@@ -509,10 +454,6 @@ if (import.meta.vitest) {
 
       // Both
       assertValidOptions({
-        toggles: {
-          disabled: { textDecoration: "line-through" },
-          rounded: { borderRadius: 999 }
-        },
         variants: {
           color: {
             brand: { color: "#FFFFA0" },
@@ -526,14 +467,16 @@ if (import.meta.vitest) {
           outlined: {
             true: { border: "1px solid black" },
             false: { border: "1px solid transparent" }
-          }
+          },
+          disabled: { true: { textDecoration: "line-through" } },
+          rounded: { true: { borderRadius: 999 } }
         }
       });
     });
 
-    const toggleVariants = {
-      disabled: { textDecoration: "line-through" },
-      rounded: { borderRadius: 999 }
+    const booleanVariants = {
+      disabled: { true: { textDecoration: "line-through" } },
+      rounded: { true: { borderRadius: 999 } }
     } as const;
 
     const variants = {
@@ -553,14 +496,14 @@ if (import.meta.vitest) {
     } as const;
 
     it("Default Style PatternOptions", () => {
-      // Toggle style
+      // Boolean variants
       assertValidOptions({
         defaultVariants: { disabled: true },
-        toggles: toggleVariants
+        variants: booleanVariants
       });
       assertValidOptions({
         defaultVariants: ["disabled", { rounded: true }],
-        toggles: toggleVariants
+        variants: booleanVariants
       });
 
       // Variant style
@@ -581,8 +524,8 @@ if (import.meta.vitest) {
           size: "medium",
           outlined: true
         },
-        toggles: toggleVariants,
-        variants
+
+        variants: { ...variants, ...booleanVariants }
       });
       assertValidOptions({
         defaultVariants: [
@@ -593,13 +536,13 @@ if (import.meta.vitest) {
             size: "medium"
           }
         ],
-        toggles: toggleVariants,
-        variants
+
+        variants: { ...variants, ...booleanVariants }
       });
     });
 
     it("Compound Style PatternOptions", () => {
-      // Toggle style
+      // Boolean variants
       assertValidOptions({
         compoundVariants: ({ disabled, rounded }) => [
           {
@@ -610,7 +553,7 @@ if (import.meta.vitest) {
           }
         ],
 
-        toggles: toggleVariants
+        variants: booleanVariants
       });
 
       // Variant style
@@ -650,8 +593,7 @@ if (import.meta.vitest) {
           }
         ],
 
-        toggles: toggleVariants,
-        variants
+        variants: { ...variants, ...booleanVariants }
       });
     });
 
@@ -688,8 +630,7 @@ if (import.meta.vitest) {
         backgroundColor: "gray",
         base: { color: "red", fontSize: 16 },
 
-        toggles: toggleVariants,
-        variants,
+        variants: { ...variants, ...booleanVariants },
 
         defaultVariants: {
           size: "small"
