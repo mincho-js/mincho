@@ -142,6 +142,19 @@ We work in an [RFC](https://en.wikipedia.org/wiki/Request_for_Comments) - [TDD](
 This is to ensure reliability while sharing as much context as possible.  
 We also offer a range of handy tools to help you focus on design/implementation.
 
+**Test value and removal criteria**
+
+Each test should protect an observable behavior, a supported type contract, or a concrete regression. Before removing a test, identify the guarantee it provides and any remaining coverage for that guarantee.
+
+- Remove assertions that only freeze an extensible API's export count or list, or check that a retired or unintroduced API name is absent. Exercise supported APIs instead; keep checks that enforce an intentional public/private boundary.
+- Remove assertions about literals or fixtures constructed entirely by the test, such as the length of an array of type-error examples. Keep the `@ts-expect-error` and type assertions that validate supported API contracts, and run the type checker.
+- Remove weaker assertions already implied by a subsequent call or assertion. Remove a whole test only when another test covers the same input behavior and execution path.
+- Keep negative assertions that protect behavior: rejecting invalid inputs, avoiding input mutation or prototype pollution, clearing stale cache entries, omitting unused bundle code, and preventing internal props from reaching the DOM.
+- Keep separate coverage for different failure modes, including source code, installed packages, ESM/CJS, browser behavior, and optimization profiles. Similar expected output alone does not make these tests redundant.
+- Exclude generated copies in `dist/` and `_release/` from unit-test discovery. Validate packaged output through the installed-consumer contract tests instead of rerunning copied source tests.
+
+After removal, run the affected suites and type checks. Do not remove tests merely to reduce their count, and do not claim a speed improvement without measuring it.
+
 #### Adding a new feature
 
 If possible, it's a good idea to write an RFC first.

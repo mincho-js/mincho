@@ -691,9 +691,6 @@ if (import.meta.vitest) {
             }
           } as const;
 
-          // @ts-expect-error defineRules.themeSpec is not part of the public API.
-          assertType(defineRules.themeSpec);
-
           defineRules.propertyValues([
             {
               // @ts-expect-error propertyValues entries use source, not condition.

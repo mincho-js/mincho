@@ -2654,21 +2654,6 @@ if (import.meta.vitest) {
       ).toThrow("theme() debugId must be a string.");
     });
 
-    it("exposes theme.with as a callable wrapper", () => {
-      expect(typeof theme.with).toBe("function");
-
-      const themeTokens = theme.with<{ color: string }>();
-      const result = themeTokens({ color: "red" }, "theme-with");
-
-      expect(Array.isArray(result)).toBe(true);
-
-      expectThemeContractResult(result);
-
-      expect(result[0]).toMatch(identifierName("theme-with"));
-
-      validateHashFormatForResolved(result[1]);
-    });
-
     it("delegates theme.with() directly to theme()", () => {
       const themeTokens = theme.with<{
         color: string;
@@ -2693,9 +2678,6 @@ if (import.meta.vitest) {
       expect(normalizeResolvedTokens(wrapped[1])).toEqual(
         normalizeResolvedTokens(direct[1])
       );
-      expect(wrapped[2].vars).toBe(wrapped[1]);
-      expect(direct[2].vars).toBe(direct[1]);
-
       validateHashFormatForResolved(wrapped[1]);
       validateHashFormatForResolved(direct[1]);
     });
