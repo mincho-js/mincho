@@ -49,7 +49,6 @@ describe("static-style package versions", () => {
       manifestVersion.value = version;
       const source = staticSource();
 
-      expect(source).toBeDefined();
       expect(readStaticStyleProgram(source!)?.modules).toEqual([
         "@mincho-js/css"
       ]);

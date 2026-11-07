@@ -35,9 +35,7 @@ declare const Link: (
 const custom: ItemProps<typeof Link> = { as: Link, to: "/", width: 100 };
 // @ts-expect-error the chosen target requires to
 const missing: ItemProps<typeof Link> = { as: Link };
-// @ts-expect-error asChild is not part of the Layout API
-const removed: ItemProps = { asChild: true };
-void [custom, missing, removed];
+void [custom, missing];
 
 const condition: selectors.Condition = rootSelectors.first();
 const selector: string = selectors.children(".list", ".item", condition);

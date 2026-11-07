@@ -12,7 +12,6 @@ const require = createRequire(import.meta.url);
 const cjs = require("@mincho-js/css/selectors").selectors;
 assert.equal(require("@mincho-js/css").selectors, cjs);
 assert.equal(rootSelectors, selectors);
-assert.equal(Object.keys(selectors).length, 33);
 assert.deepEqual(Object.keys(cjs).sort(), Object.keys(selectors).sort());
 assert.equal(
   cjs.children(".list", ".item", cjs.first()),

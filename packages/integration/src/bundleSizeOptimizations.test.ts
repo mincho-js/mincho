@@ -1052,7 +1052,6 @@ describe("bundle-size safety and costs", () => {
           path.stop();
         }
       });
-      expect(pathPrototype).toBeDefined();
       const evaluate = vi.spyOn(pathPrototype!, "evaluate");
       try {
         const result = analyzeClosedAppUsage(

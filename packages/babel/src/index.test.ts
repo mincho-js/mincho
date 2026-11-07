@@ -182,22 +182,6 @@ describe("minchoBabelPlugin", () => {
     expect(code).toMatchSnapshot();
   });
 
-  // it("array pattern hoisting", () => {
-  //   const { result, code } = babelTransform(`
-  //   import { createTheme } from '@mincho-js/css';
-
-  //   const [themeClass, vars] = createTheme({
-  //     colors: {
-  //       brand: 'red'
-  //     }
-  //   });
-  //   console.log(themeClass, vars);
-  // `);
-
-  //   expect(result).toMatchSnapshot();
-  //   expect(code).toMatchSnapshot();
-  // });
-
   it("same binding in multiple declarations", () => {
     const { result, code } = babelTransform(`
       import { style } from '@mincho-js/css';
@@ -242,25 +226,6 @@ describe("minchoBabelPlugin", () => {
     expect(result).toMatchSnapshot();
     expect(code).toMatchSnapshot();
   });
-
-  // it("css variables", () => {
-  //   const { result, code } = babelTransform(`
-  //   import { style, createVar } from '@mincho-js/css';
-
-  //   const colorVar = createVar();
-
-  //   const red = style({
-  //     color: 'red',
-  //     vars: {
-  //       [colorVar]: 'red'
-  //     }
-  //   });
-  //   console.log(red)
-  // `);
-
-  //   expect(result).toMatchSnapshot();
-  //   expect(code).toMatchSnapshot();
-  // });
 
   it("global styles", () => {
     const { result, code } = babelTransform(`

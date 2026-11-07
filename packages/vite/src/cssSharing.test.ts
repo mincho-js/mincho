@@ -373,7 +373,6 @@ describe("Vite native CSS sharing", () => {
           item.fileName.endsWith(".css")
       );
 
-      expect(shared).toBeDefined();
       sharedFiles.push(shared!.fileName);
     }
 
@@ -408,8 +407,6 @@ describe("Vite native CSS sharing", () => {
         item.fileName.includes("mincho-shared-") &&
         item.fileName.endsWith(".css")
     );
-
-    expect(shared).toBeDefined();
 
     const manifestAsset = result.output.find(
       (item) => item.type === "asset" && item.fileName.endsWith("manifest.json")
@@ -480,8 +477,6 @@ describe("Vite native CSS sharing", () => {
 
     const image = result.output.find((item) => item.fileName.endsWith(".svg"))!;
 
-    expect(shared).toBeDefined();
-    expect(image).toBeDefined();
     expect(String(shared.source)).toContain(`/${image.fileName}`);
   });
 
@@ -506,7 +501,6 @@ describe("Vite native CSS sharing", () => {
         item.fileName.endsWith(".css")
     ) as Rollup.OutputAsset;
 
-    expect(shared).toBeDefined();
     expect(String(shared.source)).toContain("color: red");
   });
 

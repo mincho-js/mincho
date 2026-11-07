@@ -779,8 +779,7 @@ if (import.meta.vitest) {
         }
       } satisfies ConditionAliasMap;
 
-      expect(nonUnderscoreAlias).toBeTypeOf("object");
-      expect(normalizedAlias).toBeTypeOf("object");
+      void [nonUnderscoreAlias, normalizedAlias];
     });
   });
 }

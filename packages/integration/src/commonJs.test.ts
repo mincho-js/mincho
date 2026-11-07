@@ -112,7 +112,6 @@ describe("CommonJS browser normalization", () => {
       sourceMaps: false
     });
 
-    expect(result?.code).toBeDefined();
     const output = await execute(result!.code!);
     expect(output.answer ?? output.default).toBe(42);
   });

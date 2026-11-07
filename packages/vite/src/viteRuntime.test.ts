@@ -407,8 +407,6 @@ describe("mincho with the Vite runtime", () => {
             module.id?.includes("/.vite/deps/")
           );
 
-          expect(runtime).toBeDefined();
-
           const optimized = await environment.transformRequest(runtime!.url);
 
           expect(optimized?.code).toMatch(/export\s+(default|\{)/);

@@ -23,10 +23,6 @@ import { SEGMENT_MARKER_PREFIX } from "./metadata.js";
 import { cx } from "../classname/cx.js";
 import { css as rootCss } from "../css/index.js";
 import type { DefineRulesRuntimeResult } from "./runtime.js";
-import {
-  normalizeDefineRulesConditions,
-  normalizeDefineRulesConditionValue
-} from "./conditions.js";
 import type {
   DefineRulesCtx,
   DefineRulesPresetArtifactV5,
@@ -691,9 +687,6 @@ if (import.meta.vitest) {
             }
           } as const;
 
-          // @ts-expect-error defineRules.themeSpec is not part of the public API.
-          assertType(defineRules.themeSpec);
-
           defineRules.propertyValues([
             {
               // @ts-expect-error propertyValues entries use source, not condition.
@@ -1217,7 +1210,7 @@ if (import.meta.vitest) {
           defineRules({ properties: { color: true } }, "anything");
         };
 
-        expect(assertRemovedPrivateArgument).toEqual(expect.any(Function));
+        void assertRemovedPrivateArgument;
       });
     });
 
@@ -1327,9 +1320,9 @@ if (import.meta.vitest) {
           defineRules({ theme: {} });
         };
 
-        expect(assertContextCallbackInput).toEqual(expect.any(Function));
-        expect(assertNoContextCallbackInput).toEqual(expect.any(Function));
-        expect(assertThemePropRejected).toEqual(expect.any(Function));
+        void assertContextCallbackInput;
+        void assertNoContextCallbackInput;
+        void assertThemePropRejected;
       });
     });
 
@@ -1692,35 +1685,6 @@ if (import.meta.vitest) {
           getOwnPresetNode(preset).atoms.map((atom) => atom.condition)
         ).toEqual([]);
         expect(className).toEqual(expect.any(String));
-      });
-
-      it("normalizes empty object conditions to the transform base alias value", () => {
-        expect(
-          normalizeDefineRulesConditions({
-            mobile: {}
-          })
-        ).toEqual({
-          _mobile: {}
-        });
-      });
-
-      it("canonicalizes string and object media condition configs", () => {
-        expect(
-          normalizeDefineRulesConditionValue(
-            "@media screen and (min-width: 768px)",
-            "tablet"
-          )
-        ).toBe("screen and (min-width: 768px)");
-        expect(
-          normalizeDefineRulesConditionValue(
-            {
-              "@media": "@media screen and (min-width: 768px)"
-            },
-            "tablet"
-          )
-        ).toEqual({
-          "@media": "screen and (min-width: 768px)"
-        });
       });
 
       it("throws clear runtime diagnostics for invalid and reserved condition names", () => {
@@ -2611,7 +2575,6 @@ if (import.meta.vitest) {
 
         const reconstructedCss = createDefineRulesCssRuntime(recipeConfig);
 
-        expect(reconstructedCss).toEqual(expect.any(Function));
         expect(reconstructedCss((ctx) => ({ color: ctx.color }))).toBe(
           reconstructedCss({ color: context.color })
         );

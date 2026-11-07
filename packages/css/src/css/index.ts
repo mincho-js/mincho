@@ -615,7 +615,6 @@ if (import.meta.vitest) {
       // myCSS__[HASH]
       const result = css({ color: "red" }, debugId);
 
-      assert.isString(result);
       expect(result).toMatch(identifierName(debugId));
     });
 
@@ -623,7 +622,6 @@ if (import.meta.vitest) {
       const base = css({ padding: 12 }, "base");
       const result = css([base, { color: "red" }], debugId);
 
-      assert.isString(result);
       expect(result).toMatch(identifierName(debugId, "base"));
     });
   });
@@ -805,7 +803,6 @@ if (import.meta.vitest) {
 
       const result = withRedBackground({ color: "blue" }, debugId);
 
-      assert.isString(result);
       expect(result).toMatch(identifierName(debugId));
     });
 
@@ -1073,16 +1070,6 @@ if (import.meta.vitest) {
       expect(result.primary).toMatch(identifierName(`${debugId}_primary`));
       expect(result.secondary).toMatch(identifierName(`${debugId}_secondary`));
       expect(result.accent).toMatch(identifierName(`${debugId}_accent`));
-
-      // Verify that each result is a valid CSS class name string
-      expect(typeof result.primary).toBe("string");
-      expect(typeof result.secondary).toBe("string");
-      expect(typeof result.accent).toBe("string");
-
-      // Verify that class names are not empty
-      expect(result.primary.length).toBeGreaterThan(0);
-      expect(result.secondary.length).toBeGreaterThan(0);
-      expect(result.accent.length).toBeGreaterThan(0);
 
       // Verify that different class names are generated for each case (no duplicates)
       expect(result.primary).not.toBe(result.secondary);

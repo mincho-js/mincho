@@ -115,7 +115,6 @@ if (import.meta.vitest) {
     it("is available from the root barrel", async () => {
       const { getVarName } = await import("./index.js");
 
-      expect(typeof getVarName).toBe("function");
       expect(getVarName("var(--my-var-name, 1px)")).toBe("--my-var-name");
       expect(getVarName("--my-var-name")).toBe("--my-var-name");
 

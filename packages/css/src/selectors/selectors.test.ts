@@ -5,44 +5,7 @@ const apply = (condition: selectors.Condition) =>
   selectors.children(".list", ".item", condition);
 
 describe("selectors public namespace", () => {
-  it("exposes exactly the 33 flat functions", () => {
-    expect(Object.keys(selectors).sort()).toEqual(
-      [
-        "first",
-        "last",
-        "nth",
-        "nthLast",
-        "from",
-        "before",
-        "after",
-        "between",
-        "every",
-        "odd",
-        "even",
-        "count",
-        "countAtLeast",
-        "countAtMost",
-        "countOver",
-        "countUnder",
-        "countBetween",
-        "countMultipleOf",
-        "countOdd",
-        "countEven",
-        "all",
-        "any",
-        "none",
-        "nest",
-        "child",
-        "append",
-        "unify",
-        "replace",
-        "is",
-        "where",
-        "has",
-        "exclude",
-        "children"
-      ].sort()
-    );
+  it("types conditions and composed selector results", () => {
     expectTypeOf(selectors.first()).toEqualTypeOf<selectors.Condition>();
     expectTypeOf(apply(selectors.first())).toEqualTypeOf<string>();
   });

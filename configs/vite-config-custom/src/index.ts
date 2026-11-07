@@ -6,6 +6,7 @@ import { initConfigBuilder, ViteEnv, PluginBuilder } from "vite-config-builder";
 import type { ConfigBuilder } from "vite-config-builder";
 import { mergeConfig } from "vite";
 import type { ConfigEnv } from "vite";
+import { configDefaults } from "vitest/config";
 import type { defineConfig, ViteUserConfig } from "vitest/config";
 
 import { externalizeDeps } from "vite-plugin-externalize-deps";
@@ -171,6 +172,7 @@ function initCommonBuilder(viteConfigEnv: ConfigEnv) {
     configs.add({
       test: {
         includeSource: ["src/**/*.ts", "src/**/*.tsx"],
+        exclude: [...configDefaults.exclude, "**/{dist,_release}/**"],
         globals: true
       }
     });

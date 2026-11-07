@@ -78,7 +78,6 @@ describe("Vite runtime optimization dependencies", () => {
       const first = await server.transformRequest("/entry.ts");
       expect(first?.code).not.toContain("button()");
       const extracted = states.find((state) => state.generatedArtifacts.length);
-      expect(extracted).toBeDefined();
       expect(extracted?.dependencyFiles).not.toContain(producer);
       const merged = getFileResult(owner);
       expect(merged?.dependencyFiles).toEqual(
