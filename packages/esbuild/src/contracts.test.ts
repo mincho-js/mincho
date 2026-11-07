@@ -778,7 +778,6 @@ describe("native esbuild assets", () => {
     const css = await fs.readFile(join(root, "out/nested/bundle.css"), "utf8");
     const assetName = /--asset-url:\s*\.\/([^;?]+)\?url;/.exec(css)?.[1];
 
-    expect(assetName).toBeDefined();
     expect(
       await fs.readFile(join(root, "out/nested", assetName!), "utf8")
     ).toBe("asset-bytes");
@@ -809,8 +808,6 @@ describe("native esbuild assets", () => {
     // The native JS export and static evaluation use the same encoded string.
     const css = outputText(result, ".css");
     const url = /--asset-url:\s*(.*);/.exec(css)?.[1];
-
-    expect(url).toBeDefined();
 
     const constants = parse(outputText(result, ".js"), { sourceType: "module" })
       .program.body.filter((node) => node.type === "VariableDeclaration")
@@ -928,7 +925,6 @@ describe("native esbuild assets", () => {
       file.path.endsWith(".png")
     );
 
-    expect(asset).toBeDefined();
     expect(outputText(result, ".css")).toContain(
       `../assets/${asset!.path.split("/").at(-1)}?url`
     );

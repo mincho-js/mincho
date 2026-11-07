@@ -145,8 +145,6 @@ describe("library CSS native-finalization release gate (U1)", () => {
       (item) => item.type === "asset" && item.fileName.endsWith(".css")
     )!;
 
-    expect(lazy).toBeDefined();
-    expect(css).toBeDefined();
     expect(lazy.code).toContain(css.fileName);
   });
 });

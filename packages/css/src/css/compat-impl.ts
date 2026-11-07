@@ -303,16 +303,6 @@ if (import.meta.vitest) {
       expect(result.secondary).toMatch(identifierName(`${debugId}_secondary`));
       expect(result.accent).toMatch(identifierName(`${debugId}_accent`));
 
-      // Verify that each result is a valid CSS class name string
-      expect(typeof result.primary).toBe("string");
-      expect(typeof result.secondary).toBe("string");
-      expect(typeof result.accent).toBe("string");
-
-      // Verify that class names are not empty
-      expect(result.primary.length).toBeGreaterThan(0);
-      expect(result.secondary.length).toBeGreaterThan(0);
-      expect(result.accent.length).toBeGreaterThan(0);
-
       // Verify that different class names are generated for each case (no duplicates)
       expect(result.primary).not.toBe(result.secondary);
       expect(result.secondary).not.toBe(result.accent);

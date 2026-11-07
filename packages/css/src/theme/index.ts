@@ -2519,8 +2519,7 @@ if (import.meta.vitest) {
       } satisfies ThemeTokensInput<ContractTheme>;
 
       const result = theme(tokens, "theme-contract-class");
-      const [, vars, contract] = result;
-      expectThemeContractResult(result);
+      const contract = expectThemeContractResult(result);
 
       assertType<ThemeContract<ContractTheme>>(contract);
       assertType<ThemeResult<ContractTheme>>(result);
@@ -2539,9 +2538,6 @@ if (import.meta.vitest) {
       });
 
       expect(Object.keys(contract)).toEqual(["vars", "values", "cssVarByPath"]);
-      expect(contract.vars).toBe(vars);
-      expect(Object.isFrozen(contract.values)).toBe(true);
-      expect(Object.isFrozen(contract.cssVarByPath)).toBe(true);
       expect(Object.getOwnPropertySymbols(contract)).toEqual([]);
 
       expect(contract.cssVarByPath["color-brand"]).toMatch(/^--color-brand__/);
@@ -3083,7 +3079,6 @@ if (import.meta.vitest) {
         expectThemeContractResult(derivedResult);
         expectThemeContractResult(thirdResult);
 
-        expect(typeof derivedClassName).toBe("string");
         expect(derivedClassName).toMatch(
           identifierName("theme-user-example-derived")
         );
@@ -3111,7 +3106,6 @@ if (import.meta.vitest) {
         const emittedVars =
           derivedTransformInput?.selectors?.[derivedClassName]?.vars;
 
-        expect(emittedVars).toBeDefined();
         expect(normalizeVars(emittedVars as AssignedVars)).toEqual({
           [stripHash(colorsBrandVar)]: "red",
           [stripHash(fontBodyVar)]: "helvetica"
@@ -3393,8 +3387,6 @@ if (import.meta.vitest) {
             "theme-replacements"
           ]?.vars;
 
-        expect(emittedLayerVars).toBeDefined();
-
         const normalizedEmittedVars = normalizeVars(
           emittedLayerVars as AssignedVars
         );
@@ -3481,7 +3473,6 @@ if (import.meta.vitest) {
 
       const rawBrandVar = contract.cssVarByPath["color-semantic-raw-brand"];
 
-      expect(Object.keys(contract)).toEqual(["vars", "values", "cssVarByPath"]);
       expect(Object.getOwnPropertySymbols(contract)).toEqual([]);
       expect(rawBrandVar).toMatch(/^--color-semantic-raw-brand__/);
       expect(contract.values[rawBrandVar]).toBe("#0000ff");

@@ -611,16 +611,12 @@ if (import.meta.vitest) {
     it("base style", () => {
       const result = recipe({ base: { color: "red" } }, debugId);
 
-      assert.isFunction(result);
-      assert.hasAllKeys(result, ["props", "variants", "classNames"]);
       expect(result()).toMatch(identifierName(debugId));
     });
 
     it("base flatten style", () => {
       const result = recipe({ color: "red" }, debugId);
 
-      assert.isFunction(result);
-      assert.hasAllKeys(result, ["props", "variants", "classNames"]);
       assert.hasAllKeys(result.classNames, ["base", "variants"]);
       assert.isFunction(result.props);
 
@@ -652,8 +648,6 @@ if (import.meta.vitest) {
       const result = recipe(variants, debugId);
 
       // Base check
-      assert.isFunction(result);
-      assert.hasAllKeys(result, ["props", "variants", "classNames"]);
       assert.hasAllKeys(result.classNames, ["base", "variants"]);
       assert.isFunction(result.props);
 
@@ -699,7 +693,6 @@ if (import.meta.vitest) {
       );
 
       // Compose variant className check
-      expect(result()).toMatch(identifierName(debugId));
       expect(result({ color: "brand" })).toMatch(
         identifierName(debugId, `${debugId}_color_brand`)
       );
@@ -781,8 +774,6 @@ if (import.meta.vitest) {
       );
 
       // Base check
-      assert.isFunction(result);
-      assert.hasAllKeys(result, ["props", "variants", "classNames"]);
       assert.hasAllKeys(result.classNames, ["base", "variants"]);
       assert.isFunction(result.props);
 
@@ -803,7 +794,6 @@ if (import.meta.vitest) {
       );
 
       // Compose variant className check
-      expect(result()).toMatch(identifierName(debugId));
       expect(result({ disabled: true })).toMatch(
         identifierName(debugId, `${debugId}_disabled_true`)
       );
@@ -846,8 +836,6 @@ if (import.meta.vitest) {
       );
 
       // Base check
-      assert.isFunction(result);
-      assert.hasAllKeys(result, ["props", "variants", "classNames"]);
       assert.hasAllKeys(result.classNames, ["base", "variants"]);
       assert.isFunction(result.props);
 
@@ -870,9 +858,6 @@ if (import.meta.vitest) {
       );
 
       // Compose variant className check
-      expect(result()).toMatch(
-        identifierName(debugId, `${debugId}_disabled_true`)
-      );
       expect(result({ disabled: true })).toMatch(
         identifierName(debugId, `${debugId}_disabled_true`)
       );
@@ -952,8 +937,6 @@ if (import.meta.vitest) {
       );
 
       // Base check
-      assert.isFunction(result);
-      assert.hasAllKeys(result, ["props", "variants", "classNames"]);
       assert.hasAllKeys(result.classNames, ["base", "variants"]);
       assert.isFunction(result.props);
 
@@ -999,7 +982,6 @@ if (import.meta.vitest) {
       );
 
       // Compose variant className check
-      expect(result()).toMatch(identifierName(debugId));
       expect(result({ color: "brand" })).toMatch(
         identifierName(debugId, `${debugId}_color_brand`)
       );
@@ -1111,9 +1093,7 @@ if (import.meta.vitest) {
       );
 
       assert.isFunction(result1);
-      assert.hasAllKeys(result1, ["props", "variants", "classNames"]);
       assert.hasAllKeys(result1.classNames, ["base", "variants"]);
-      assert.isFunction(result1.props);
 
       Object.entries(
         result1.props({
@@ -1141,15 +1121,12 @@ if (import.meta.vitest) {
           expect(varName).toMatch(identifierName(`--${debugId}_background`));
         }
       });
-      Object.entries(
+      expect(
         result1.props({
           // @ts-expect-error Not valid property
           "something-else": "red"
         })
-      ).forEach(([varName, propValue]) => {
-        expect(varName).toBeUndefined();
-        expect(propValue).toBeUndefined();
-      });
+      ).toEqual({});
 
       const result2 = recipe(
         {

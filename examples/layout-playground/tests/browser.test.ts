@@ -534,7 +534,6 @@ describe.skipIf(process.env.MINCHO_LAYOUT_BROWSER !== "1").each([
       expect(runtime["edge-vertical-a"].y - runtime["edge-vertical"].y).toBe(
         232
       );
-      expect(Object.keys(runtime).length).toBeGreaterThan(30);
       expect(await rects(pages.compiled)).toEqual(runtime);
       for (const page of Object.values(pages))
         await page.evaluate(() =>

@@ -147,11 +147,7 @@ export function jsonExpect<T, K = T>(
 if (import.meta.vitest) {
   // eslint-disable-next-line @typescript-eslint/ban-ts-comment
   // @ts-ignore error TS1343: The 'import.meta' meta-property is only allowed when the '--module' option is 'es2020', 'es2022', 'esnext', 'system', 'node16', or 'nodenext'.
-  const { it, expect } = import.meta.vitest;
-
-  const TEST_PASS = () => {
-    expect(1).toBeLessThan(100);
-  };
+  const { it } = import.meta.vitest;
 
   it("debugLog", () => {
     debugLog();
@@ -167,7 +163,6 @@ if (import.meta.vitest) {
       ℹ DEBUG-0001: with title debugLog
       test2
      */
-    TEST_PASS();
   });
 
   it("jsonLog", () => {
@@ -194,7 +189,6 @@ if (import.meta.vitest) {
       │        │
       ╰────────╯
     */
-    TEST_PASS();
   });
 
   it("jsonExpect", () => {
@@ -240,6 +234,5 @@ if (import.meta.vitest) {
       ❌ Deleted:
       ❌ Deleted: b
     */
-    TEST_PASS();
   });
 }

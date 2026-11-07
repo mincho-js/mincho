@@ -228,12 +228,6 @@ if (import.meta.vitest) {
       expect(cx("foo", 42, "bar")).toBe("foo 42 bar");
     });
 
-    it.skip("handles bigint inputs", () => {
-      // NOTE: CLSX currently does not support BigInt, so these tests are skipped
-      expect(cx(BigInt(123))).toBe("123");
-      expect(cx("foo", BigInt(42), "bar")).toBe("foo 42 bar");
-    });
-
     it("filters falsy values correctly", () => {
       expect(cx(null)).toBe("");
       expect(cx(undefined)).toBe("");
