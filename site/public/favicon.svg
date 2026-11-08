@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <title>Mincho</title>
+  <rect width="64" height="64" rx="14" fill="#f5f3e9" />
+  <!-- The mascot's face remains legible at browser-tab sizes. -->
+  <g transform="translate(-22 -7) scale(.135)">
+    <g
+      stroke="#121713"
+      stroke-width="12"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+    >
+      <path
+        fill="#c9fbe4"
+        d="M275 356c-25-81 17-155 81-172 29-12 61-11 88 1 70 29 108 96 81 177 33-1 57 28 52 57-5 31-30 50-60 46-24 44-78 47-108 5-16 31-53 32-70-4-36 36-85 29-107-7-27-43 2-91 43-103Z"
+      />
+      <path d="M398 142c-6-32 7-58 27-68" />
+      <path fill="#c9fbe4" d="M399 109c-27 12-45-7-52-35 31-11 55 2 52 35Z" />
+      <path
+        fill="#ff9a36"
+        d="M397 142c-29-10-44 8-43 35 1 28 18 44 43 43 27 0 43-18 45-45 2-25-14-41-45-33Z"
+      />
+      <path d="M381 374c11 12 25 12 38 0" />
+    </g>
+    <g fill="#121713">
+      <circle cx="374" cy="327" r="13" />
+      <circle cx="425" cy="327" r="13" />
+    </g>
+    <g fill="#d35ba1">
+      <circle cx="342" cy="367" r="16" />
+      <circle cx="460" cy="367" r="16" />
+    </g>
+  </g>
+</svg>

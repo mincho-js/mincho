@@ -13,14 +13,22 @@
         "src/**/*.ts",
         "src/**/*.tsx",
         "src/**/*.po",
-        "tsconfig.json"
+        "src/**/*.css",
+        "!src/generated/workflow.css",
+        "!src/generated/workflow.mjs",
+        "examples/**",
+        "scripts/**",
+        "public/**",
+        "tsconfig*.json"
       ],
       "outputs": [
         ".next/**",
         "!.next/cache/**",
         "!.next/dev/**",
         "out/**",
-        "src/locales/*/messages.mjs"
+        "src/locales/*/messages.mjs",
+        "src/generated/workflow.mjs",
+        "src/generated/workflow.css"
       ]
     },
     "test": {

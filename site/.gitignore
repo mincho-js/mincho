@@ -1,1 +1,3 @@
 /src/locales/*/messages.mjs
+/src/generated/workflow.mjs
+/src/generated/workflow.css

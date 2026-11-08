@@ -1,0 +1,350 @@
+.mincho-workflow {
+  max-width: 1280px;
+  margin: auto;
+  padding: 80px 32px 0;
+  scroll-margin-top: 100px;
+}
+.mincho-section-description {
+  max-width: 620px;
+  margin-top: 20px;
+  color: var(--mincho-muted);
+  font-size: 16px;
+  line-height: 1.8;
+}
+.mincho-workflow-tabs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border: 1px solid var(--mincho-line);
+}
+.mincho-workflow-tabs button {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 98px;
+  padding: 20px;
+  color: var(--mincho-ink);
+  text-align: left;
+  cursor: pointer;
+}
+.mincho-workflow-tabs button + button {
+  border-left: 1px solid var(--mincho-line);
+}
+.mincho-workflow-tabs button[aria-selected="true"] {
+  background: var(--mincho-citron);
+  background: color-mix(in srgb, var(--mincho-citron) 80%, #f5f3e9);
+  color: #17231a;
+  box-shadow: inset 0 -3px #17231a;
+}
+.mincho-workflow-tabs button[aria-selected="false"]:hover {
+  background: color-mix(in srgb, var(--mincho-citron) 16%, var(--mincho-paper));
+}
+.mincho-workflow-tabs button:focus-visible {
+  outline: 2px solid var(--mincho-ink);
+  outline-offset: -5px;
+}
+.mincho-workflow-tabs button[aria-selected="true"]:focus-visible {
+  outline-color: #17231a;
+}
+.mincho-step-number {
+  align-self: flex-start;
+  font-size: 11px;
+  font-weight: 600;
+}
+.mincho-workflow-tabs strong {
+  display: block;
+  font: 600 15px/1.5 var(--mincho-mono);
+  letter-spacing: -0.5px;
+}
+.mincho-step-label {
+  display: block;
+  margin-top: 5px;
+  font-size: 12px;
+}
+.mincho-workflow-tabs svg {
+  margin-left: auto;
+  flex: none;
+  width: 16px;
+}
+.mincho-workflow-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+  grid-template-areas: "code live";
+  gap: 32px;
+  align-items: start;
+  margin-top: 32px;
+}
+.mincho-workflow-live {
+  grid-area: live;
+  padding: 28px;
+  border: 1px solid var(--mincho-line);
+}
+.mincho-preview-heading {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.mincho-preview-heading h3 {
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+}
+.mincho-live-dot {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--mincho-green);
+}
+.mincho-preview-description {
+  margin: 12px 0 22px;
+  color: var(--mincho-muted);
+  font-size: 13px;
+  line-height: 1.8;
+}
+.mincho-workflow-stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 180px;
+  padding: 24px 12px;
+  background: radial-gradient(var(--mincho-line) 1px, transparent 1px) 0 0 /
+    16px 16px;
+  border: 1px solid var(--mincho-line);
+  font-size: 16px;
+}
+.mincho-workflow-stage p {
+  margin-top: 18px;
+  font-size: 11px;
+  color: var(--mincho-muted);
+}
+.mincho-workflow-controls {
+  margin-top: 24px;
+}
+.mincho-theme-options legend,
+.mincho-variant-options label {
+  font-size: 12px;
+  font-weight: 600;
+}
+.mincho-theme-options > div {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+.mincho-theme-options button {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  border: 1px solid var(--mincho-line);
+  border-radius: 3px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.mincho-theme-options button[aria-pressed="true"] {
+  border-color: var(--mincho-ink);
+  box-shadow: inset 0 0 0 1px var(--mincho-ink);
+}
+.mincho-palette-dot {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  border: 1px solid #75816e;
+}
+.mincho-palette-dot.mint {
+  background: #d8efde;
+}
+.mincho-palette-dot.peach {
+  background: #eea080;
+}
+.mincho-variant-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 20px;
+}
+.mincho-variant-options select {
+  display: block;
+  width: 100%;
+  min-height: 44px;
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--mincho-line);
+  border-radius: 3px;
+  background: var(--mincho-paper);
+  color: var(--mincho-ink);
+  font-size: 14px;
+  font-weight: 400;
+}
+.mincho-workflow-output {
+  margin-top: 24px;
+  padding: 14px 0;
+  border-top: 1px solid var(--mincho-line);
+  border-bottom: 1px solid var(--mincho-line);
+  font: 11px/1.8 var(--mincho-mono);
+  overflow-wrap: anywhere;
+}
+.mincho-workflow-note {
+  margin-top: 14px;
+  color: var(--mincho-muted);
+  font-size: 12px;
+  line-height: 1.8;
+}
+.mincho-workflow-panels {
+  grid-area: code;
+  min-width: 0;
+}
+.mincho-step-intro {
+  min-height: 168px;
+}
+.mincho-step-intro h3 {
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.7px;
+}
+.mincho-step-intro p {
+  margin-top: 12px;
+  color: var(--mincho-muted);
+  font-size: 14px;
+  line-height: 1.8;
+}
+.mincho-step-intro .mincho-text-link {
+  margin-top: 16px;
+}
+.mincho-workflow-file {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 20px;
+  border: 1px solid var(--mincho-line);
+  font: 12px/1.5 var(--mincho-mono);
+}
+.mincho-workflow-file > span:last-child {
+  color: var(--mincho-muted);
+}
+.mincho-workflow-source {
+  max-height: 550px;
+  overflow: auto;
+  overscroll-behavior-x: contain;
+  padding: 24px;
+  border: 1px solid var(--mincho-line);
+  border-top: 0;
+  background: #fcfbf6;
+  color: #17231a;
+  font: 13px/1.85 var(--mincho-mono);
+  tab-size: 2;
+}
+.mincho-workflow-source .token-keyword {
+  color: #734b78;
+}
+.mincho-workflow-source .token-string {
+  color: #825324;
+}
+.mincho-workflow-source .token-number {
+  color: #a64729;
+}
+.mincho-workflow-source .token-comment {
+  color: #5f685d;
+}
+.mincho-site.dark .mincho-workflow-source {
+  background: #1d281f;
+  color: #e7eedf;
+}
+.mincho-site.dark .mincho-workflow-source .token-keyword {
+  color: #c9a8dd;
+}
+.mincho-site.dark .mincho-workflow-source .token-string {
+  color: #c5d993;
+}
+.mincho-site.dark .mincho-workflow-source .token-number {
+  color: #f0b092;
+}
+.mincho-site.dark .mincho-workflow-source .token-comment {
+  color: #a4b19f;
+}
+@media (max-width: 1050px) {
+  .mincho-workflow-tabs button {
+    gap: 10px;
+    padding: 16px 12px;
+  }
+  .mincho-workflow-tabs svg {
+    display: none;
+  }
+  .mincho-workflow-grid {
+    gap: 24px;
+    grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+  }
+  .mincho-workflow-live {
+    padding: 20px;
+  }
+  .mincho-step-intro {
+    min-height: 190px;
+  }
+  .mincho-workflow-source {
+    font-size: 12px;
+  }
+}
+@media (max-width: 760px) {
+  .mincho-workflow-demo {
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+  }
+  .mincho-workflow {
+    padding: 54px 24px 0;
+  }
+  .mincho-section-description {
+    font-size: 14px;
+    margin-top: 16px;
+  }
+  .mincho-workflow-tabs {
+    order: 1;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .mincho-workflow-tabs button {
+    min-height: 90px;
+    padding: 14px 10px;
+    gap: 8px;
+  }
+  .mincho-workflow-tabs button:nth-child(3) {
+    border-left: 0;
+  }
+  .mincho-workflow-tabs button:nth-child(n + 3) {
+    border-top: 1px solid var(--mincho-line);
+  }
+  .mincho-workflow-tabs strong {
+    font-size: 12px;
+  }
+  .mincho-step-label {
+    font-size: 11px;
+    line-height: 1.5;
+  }
+  .mincho-workflow-grid {
+    display: contents;
+  }
+  .mincho-workflow-live {
+    padding: 20px;
+  }
+  .mincho-workflow-panels {
+    order: 2;
+  }
+  .mincho-variant-options select {
+    font-size: 16px;
+  }
+  .mincho-step-intro {
+    min-height: 0;
+    margin-bottom: 24px;
+  }
+  .mincho-step-intro h3 {
+    font-size: 22px;
+  }
+  .mincho-workflow-source {
+    max-height: 420px;
+    padding: 18px 14px;
+  }
+  .mincho-workflow-file {
+    padding: 12px 14px;
+  }
+}

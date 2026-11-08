@@ -8466,6 +8466,15 @@ __metadata:
   languageName: node
   linkType: hard
 
+"geist@npm:1.9.0":
+  version: 1.9.0
+  resolution: "geist@npm:1.9.0"
+  peerDependencies:
+    next: ">=13.2.0"
+  checksum: 10/9475a531bb4b94b8df0b0c07e7a6ac3beab85c85e7dccc52444ab614d84b294f1e312f6e6039fabbbb92b165a77e16bb54a2d26878f698046fddbee6b3081639
+  languageName: node
+  linkType: hard
+
 "gensync@npm:^1.0.0-beta.2":
   version: 1.0.0-beta.2
   resolution: "gensync@npm:1.0.0-beta.2"
@@ -10930,14 +10939,21 @@ __metadata:
     "@lingui/conf": "catalog:"
     "@lingui/core": "catalog:"
     "@lingui/react": "catalog:"
+    "@mincho-js/css": "workspace:^"
+    "@mincho-js/esbuild": "workspace:^"
+    "@mincho-js/transform-to-vanilla": "workspace:^"
     "@types/mdx": "catalog:"
     "@types/node": "catalog:"
     "@types/react": "catalog:"
+    "@vanilla-extract/css": "catalog:"
+    esbuild: "catalog:"
+    geist: "catalog:"
     next: "catalog:"
     next-rspack: "catalog:"
     nextra: "catalog:"
     nextra-theme-docs: "patch:nextra-theme-docs@npm%3A4.6.1#~/.yarn/patches/nextra-theme-docs-npm-4.6.1-0b59bd8bbb.patch"
     pagefind: "catalog:"
+    pretendard: "catalog:"
     react: "catalog:"
     react-dom: "catalog:"
     typescript: "catalog:"
@@ -11972,6 +11988,13 @@ __metadata:
   version: 1.2.1
   resolution: "prelude-ls@npm:1.2.1"
   checksum: 10/0b9d2c76801ca652a7f64892dd37b7e3fab149a37d2424920099bf894acccc62abb4424af2155ab36dea8744843060a2d8ddc983518d0b1e22265a22324b72ed
+  languageName: node
+  linkType: hard
+
+"pretendard@npm:1.3.9":
+  version: 1.3.9
+  resolution: "pretendard@npm:1.3.9"
+  checksum: 10/e8cd1d70548b3b9c9a4abfeb9ee6190d19943e8f91978db77671779b09abd77e09172a431eebdb3a2be50ed811e278c5e6bb49e14d233eefd7ca5913a99afdd7
   languageName: node
   linkType: hard
 

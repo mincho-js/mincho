@@ -20,11 +20,42 @@ mise exec -- yarn workspace mincho-docs check
 mise exec -- yarn workspace mincho-docs test
 ```
 
-`build` compiles Lingui catalogs, exports both languages, and generates Pagefind
+`build` compiles the landing-page demo and Lingui catalogs, exports both languages, and generates Pagefind
 search indexes in `out/_pagefind`. `test` checks the exported HTML, locale-specific
 links, shared anchors, unchanged code examples, and both search indexes. Run it
 after `build`. To preview production, serve `out` at `/mincho/` on a static HTTP
 server; Next.js `start` does not serve static exports.
+
+## Landing page
+
+The typography uses the Pretendard variable dynamic subset from the pinned npm
+package. Rspack emits its font files as local static assets, and browsers request
+only the Unicode ranges they need. No font CDN is needed at runtime.
+Code blocks, inline code, and terminal examples use Geist Mono, bundled locally
+through `geist/font/mono` and `next/font/local`.
+`public/logo.svg` is a vector adaptation of the official mascot in
+[`assets/logo.png`](../assets/logo.png).
+The favicon uses the mascot's face to remain recognizable at small sizes. SVG,
+multi-resolution ICO, and Apple touch icons share the `/mincho/` asset paths
+across both languages.
+
+The example files in `examples/workflow/` are both the code shown on the
+landing page and the source of its interactive button. They connect `theme()`
+tokens to `defineRules()`, create variants with its scoped `rules()`, and compose
+the resulting classes with its `cx()` in a React component.
+The definition and recipe steps show consecutive parts of `button.css.ts`.
+Keep authoring factories local to that file and export only the recipe and `cx`,
+so the demo bundle contains the compiled runtime helpers rather than the style compiler.
+
+`demo:build` builds the local Mincho compiler dependencies and uses the esbuild
+integration to emit `src/generated/workflow.mjs` and `workflow.css`. Both are
+ignored build outputs; the declaration file stays in source control. The
+explicit `@mincho-js/transform-to-vanilla` development dependency allows the
+compiler's external style evaluator to resolve that package under Yarn PnP.
+Development and production commands build the demo automatically. After editing
+an example during development, run `yarn workspace mincho-docs demo:build` again
+so the preview matches the displayed source. `test` validates the generated
+themes, variants, class composition, and absence of runtime CSS injection.
 
 ## UI translations
 

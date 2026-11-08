@@ -1,4 +1,6 @@
 import type { ReactNode } from "react";
+import Link from "next/link";
+import { GeistMono } from "geist/font/mono";
 import type { PageMapItem } from "nextra";
 import { Footer, LastUpdated, Layout, Navbar } from "nextra-theme-docs";
 import { Head, Search } from "nextra/components";
@@ -11,7 +13,11 @@ import {
 } from "../i18n/routing";
 import { LanguageSwitcher } from "./language-switcher";
 import { LinguiProvider } from "./lingui-provider";
+import { Brand } from "./brand";
+import { basePath } from "../../site.config.mjs";
+import "pretendard/dist/web/variable/pretendardvariable-dynamic-subset.css";
 import "nextra-theme-docs/style.css";
+import "../styles/site.css";
 
 export function siteMetadata(locale: Locale) {
   const i18n = getI18n(locale);
@@ -22,7 +28,14 @@ export function siteMetadata(locale: Locale) {
       message:
         "Natural CSS in TypeScript - A CSS-in-JS framework built on Vanilla Extract"
     }),
-    alternates: languageAlternates("/")
+    alternates: languageAlternates("/"),
+    icons: {
+      icon: [
+        { url: `${basePath}/favicon.ico`, sizes: "16x16 32x32 48x48" },
+        { url: `${basePath}/favicon.svg`, type: "image/svg+xml", sizes: "any" }
+      ],
+      apple: { url: `${basePath}/apple-touch-icon.png`, sizes: "180x180" }
+    }
   };
 }
 
@@ -53,17 +66,36 @@ export async function SiteLayout({
         );
 
   return (
-    <html lang={locale} suppressHydrationWarning>
-      <Head />
+    <html
+      lang={locale}
+      className={`mincho-site ${GeistMono.variable}`}
+      suppressHydrationWarning
+    >
+      <Head
+        color={{
+          hue: 148,
+          saturation: 62,
+          lightness: { light: 32, dark: 65 }
+        }}
+        backgroundColor={{ light: "#f5f3e9", dark: "#151d17" }}
+      />
       <body suppressHydrationWarning>
         <LinguiProvider locale={locale} messages={i18n.messages}>
           <Layout
+            nextThemes={{ defaultTheme: "light" }}
             navbar={
               <Navbar
-                logo={<span style={{ fontWeight: 700 }}>Mincho.js</span>}
+                className="mincho-navbar"
+                logo={<Brand />}
                 logoLink={localizedPath("/", locale)}
                 projectLink="https://github.com/mincho-js/mincho"
               >
+                <Link
+                  className="mincho-nav-docs"
+                  href={localizedPath("/docs", locale)}
+                >
+                  {i18n._({ id: "nav.docs", message: "Documentation" })}
+                </Link>
                 <LanguageSwitcher />
               </Navbar>
             }
@@ -115,7 +147,26 @@ export async function SiteLayout({
                 loading={i18n._({ id: "search.loading", message: "Loading…" })}
               />
             }
-            footer={<Footer>MIT {new Date().getFullYear()} © Mincho.js</Footer>}
+            footer={
+              <Footer className="mincho-footer">
+                <div className="mincho-footer-brand">
+                  <Brand />
+                  <p>
+                    {i18n._({
+                      id: "footer.tagline",
+                      message: "A natural way to make the web."
+                    })}
+                  </p>
+                </div>
+                <div className="mincho-footer-links">
+                  <Link href={localizedPath("/docs", locale)}>
+                    {i18n._({ id: "nav.docs", message: "Documentation" })}
+                  </Link>
+                  <a href="https://github.com/mincho-js/mincho">GitHub ↗</a>
+                  <span>© {new Date().getFullYear()} Mincho.js · MIT</span>
+                </div>
+              </Footer>
+            }
           >
             {children}
           </Layout>

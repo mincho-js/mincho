@@ -11,6 +11,9 @@ const nextConfig = withNextra({
   output: "export",
   basePath,
   trailingSlash: true,
+  typescript: {
+    tsconfigPath: "tsconfig.app.json"
+  },
   images: {
     unoptimized: true
   }
