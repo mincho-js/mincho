@@ -5,14 +5,27 @@
       "inputs": [
         "$TURBO_DEFAULT$",
         "mdx-components.tsx",
+        "lingui.config.ts",
         "next.config.mjs",
+        "site.config.mjs",
         "package.json",
         "src/**/*.mdx",
         "src/**/*.ts",
         "src/**/*.tsx",
+        "src/**/*.po",
         "tsconfig.json"
       ],
-      "outputs": [".next/**", "!.next/cache/**", "!.next/dev/**", "out/**"]
+      "outputs": [
+        ".next/**",
+        "!.next/cache/**",
+        "!.next/dev/**",
+        "out/**",
+        "src/locales/*/messages.mjs"
+      ]
+    },
+    "test": {
+      "dependsOn": ["build"],
+      "inputs": ["$TURBO_DEFAULT$", "tests/**"]
     }
   }
 }

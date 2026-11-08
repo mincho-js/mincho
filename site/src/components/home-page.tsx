@@ -1,16 +1,19 @@
 import Link from "next/link";
+import { getI18n } from "../i18n/server";
+import { localizedPath, type Locale } from "../i18n/routing";
 
-export default function IndexPage() {
+export function HomePage({ locale }: { locale: Locale }) {
+  const i18n = getI18n(locale);
   return (
     <div style={{ textAlign: "center", padding: "100px 20px" }}>
       <h1 style={{ fontSize: 48, fontWeight: "bold", marginBottom: 16 }}>
         Mincho.js
       </h1>
       <p style={{ fontSize: 20, color: "#666", marginBottom: 32 }}>
-        Natural CSS in TypeScript
+        {i18n._({ id: "home.tagline", message: "Natural CSS in TypeScript" })}
       </p>
       <Link
-        href="/docs"
+        href={localizedPath("/docs", locale)}
         style={{
           display: "inline-block",
           padding: "12px 24px",
@@ -21,7 +24,7 @@ export default function IndexPage() {
           fontWeight: 500
         }}
       >
-        Get Started
+        {i18n._({ id: "home.getStarted", message: "Get Started" })}
       </Link>
     </div>
   );

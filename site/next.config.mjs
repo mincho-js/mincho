@@ -1,5 +1,6 @@
 import nextra from "nextra";
 import withRspack from "next-rspack";
+import { basePath } from "./site.config.mjs";
 
 const withNextra = nextra({
   contentDirBasePath: "/docs"
@@ -8,7 +9,7 @@ const withNextra = nextra({
 const nextConfig = withNextra({
   reactStrictMode: true,
   output: "export",
-  basePath: "/mincho",
+  basePath,
   trailingSlash: true,
   images: {
     unoptimized: true

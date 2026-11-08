@@ -1,0 +1,708 @@
+# 스타일 규칙 정의
+
+`defineRules()`는 속성 제약과 단축 속성을 통해 사용 범위가 제한된 스타일 함수를 만드는 고차 정의 API입니다.
+
+## 개요 [#overview]
+
+이 API로 다음 기능을 구현할 수 있습니다.
+
+- **속성 제약**: 사용할 수 있는 CSS 속성과 값을 제한
+- **단축 속성**: Tailwind와 같은 축약 유틸리티 생성
+- **타입 안전성**: 제한된 값에 대한 완전한 TypeScript 추론
+- **범위가 지정된 레시피**: 같은 토큰, 단축 속성, 조건을 사용하는 `rules` 생성
+
+```typescript
+import { defineRules } from "@mincho-js/css";
+
+const { css } = defineRules({
+  properties: {
+    display: ["none", "inline", "flex"],
+    paddingLeft: [0, 4, 8, 16, 32],
+    paddingRight: [0, 4, 8, 16, 32],
+  },
+  shortcuts: {
+    pl: "paddingLeft",
+    pr: "paddingRight",
+    px: ["pl", "pr"],
+    inline: { display: "inline" },
+  },
+});
+
+css.raw({ px: 8, display: "flex" });
+// => { paddingLeft: 8, paddingRight: 8, display: 'flex' }
+
+css.raw("inline");
+// => { display: 'inline' }
+```
+
+---
+
+## 범위가 지정된 레시피 [#scoped-recipes]
+
+정의에서 `rules`를 구조 분해하면 `css`와 같은 속성과 토큰을 사용해 타입이 지정된 변형을 작성할 수 있습니다.
+
+```typescript
+// button.css.ts
+import { defineRules } from "@mincho-js/css";
+
+const { rules } = defineRules({
+  properties: {
+    color: { brand: "navy", muted: "gray" },
+    paddingLeft: { small: 4, large: 16 },
+    paddingRight: { small: 4, large: 16 },
+  },
+  shortcuts: { px: ["paddingLeft", "paddingRight"] },
+  conditions: { hov: { selector: "&:hover" } },
+});
+
+export const button = rules({
+  base: { px: "small" },
+  variants: {
+    active: {
+      true: { color: "brand" },
+      false: { color: "muted" },
+    },
+  },
+  defaultVariants: { active: true },
+  compoundVariants: ({ active }) => [
+    {
+      condition: [active.true],
+      style: { _hov: { px: "large" } },
+    },
+  ],
+});
+
+button({ active: false });
+```
+
+범위가 지정된 스타일은 최상위 선언, `base`, 변형, 복합 스타일에서 동작합니다. 스타일 콜백은 정의의 `context`를 받습니다. `rules.raw()`는 이러한 스타일을 독립적인 `rules` 내보내기나 `styled()`에 전달할 수 있는 일반 레시피 옵션으로 변환합니다. 이미 토큰을 해석한 범위 지정 `rules` 대신 독립적인 팩터리에 전달합니다.
+
+```typescript
+import { rules as standaloneRules } from "@mincho-js/css";
+
+// Continue using the scoped rules from button.css.ts above.
+const resolvedOptions = rules.raw({ base: { px: "small" } });
+const paddedButton = standaloneRules(resolvedOptions);
+```
+
+`rules.multiple()`, `rules.with()`, `rules.extends()`는 같은 해석기를 사용합니다.
+
+모든 범위 지정 레시피 헬퍼에서 타입 추론을 사용하려면 TypeScript 5.7 이상을 사용하세요. 이 헬퍼들은 토큰, 컨텍스트 콜백, 기본값, 복합 선택에 대한 추론과 편집기 자동 완성을 유지합니다. `rules.multiple()`은 각 레시피를 독립적으로 추론합니다. `rules.with()`는 입력 스타일과 반환된 레시피의 변형을 보존하고, `rules.extends()`는 부모와 자식의 변형을 결합합니다. TypeScript 5.4~5.6에서는 일부 `rules.multiple()` 복합 콜백을 추론할 수 없습니다. 범위 지정 레시피 타입이 내장 `NoInfer` 타입을 사용하므로 루트 `@mincho-js/css` 선언을 불러오려면 TypeScript 5.4 이상이 필요합니다. `css` 또는 독립적인 `rules`만 사용하는 경우와 이 선언을 불러오는 `@mincho-js/react` 등의 패키지에도 같은 요구 사항이 적용됩니다.
+
+```typescript
+const padded = rules.with((style) => ({
+  base: style,
+  variants: { density: { compact: { px: "small" }, roomy: { px: "large" } } },
+}));
+const panel = padded({ color: "brand" });
+panel({ density: "compact" });
+
+const sizedButton = rules.extends(button, {
+  variants: { size: { small: { px: "small" }, large: { px: "large" } } },
+});
+sizedButton({ active: true, size: "large" });
+```
+
+문자열 스타일은 기존 클래스를 조합합니다. 불리언 단축 속성에는 `{ shortcutName: true }`를 사용합니다. 동적 `props`는 일반 CSS 대상과 값을 사용합니다. 생성된 레시피의 런타임 동작과 변형 추론은 독립적인 `rules`와 같습니다. 묶인 클래스의 내부 정보는 범위 지정 `cx`에 노출되지 않으며 원자적 `preset`에도 등록되지 않습니다.
+
+레시피는 `.css.ts` 파일에 작성하거나, 일반 모듈에서 사용하려면 공유 팩터리를 `extractCalls`에 등록합니다. 정의는 작성용 진입점에서 내보내고 `defineRules.extends()`로 확장할 수 있습니다.
+
+## 속성 제약 [#property-constraints]
+
+사용할 수 있는 CSS 속성과 값을 제한합니다.
+
+### 배열 값 [#array-values]
+
+속성을 특정 값으로 제한합니다.
+
+```typescript
+const { css } = defineRules({
+  properties: {
+    display: ["none", "inline", "block"],
+    paddingLeft: [0, 2, 4, 8, 16, 32, 64],
+  },
+});
+
+css.raw({
+  display: "inline", // ✅ Allowed
+  paddingLeft: 4, // ✅ Allowed
+});
+
+css.raw({
+  display: "flex", // ❌ Type error: not in allowed values
+  paddingLeft: 5, // ❌ Type error: not in allowed values
+});
+```
+
+### 객체 값 [#object-values]
+
+토큰 이름을 CSS 값에 매핑합니다.
+
+```typescript
+const { css } = defineRules({
+  properties: {
+    color: {
+      "indigo-800": "rgb(55, 48, 163)",
+      "red-500": "rgb(239, 68, 68)",
+    },
+  },
+});
+
+css.raw({ color: "indigo-800" });
+// => { color: 'rgb(55, 48, 163)' }
+```
+
+객체 값은 CSS 변수가 포함된 복잡한 스타일 객체에도 매핑할 수 있습니다.
+
+```typescript
+const alpha = "--alpha";
+const { css } = defineRules({
+  properties: {
+    background: {
+      red: {
+        vars: { [alpha]: "1" },
+        background: `rgba(255, 0, 0, var(${alpha}))`,
+      },
+    },
+  },
+});
+
+css.raw({ background: "red" });
+// => { vars: { '--alpha': '1' }, background: 'rgba(255, 0, 0, var(--alpha))' }
+```
+
+### 불리언 값 [#boolean-values]
+
+속성 전체를 활성화하거나 비활성화합니다.
+
+```typescript
+const { css } = defineRules({
+  properties: {
+    margin: true, // All CSS margin values allowed
+    border: false, // Property disabled entirely
+  },
+});
+
+css.raw({ margin: 8 }); // ✅ Any value works
+css.raw({ border: "1px" }); // ❌ Type error: property is disabled
+```
+
+### 함수 값 [#function-values]
+
+함수로 속성을 동적으로 해석합니다.
+
+```typescript
+const { css } = defineRules({
+  properties: {
+    color(arg: "primary" | "secondary") {
+      if (arg === "primary") return "blue";
+      return "gray";
+    },
+  },
+});
+
+css.raw({ color: "primary" });
+// => { color: 'blue' }
+```
+
+함수는 여러 속성을 설정하는 스타일 객체를 반환할 수도 있습니다.
+
+```typescript
+const { css } = defineRules({
+  properties: {
+    otherColor(arg: "primary" | "secondary") {
+      if (arg === "primary") return { color: "red" } as const;
+      return { color: "green" } as const;
+    },
+  },
+});
+
+css.raw({ otherColor: "secondary" });
+// => { color: 'green' }
+```
+
+### 사용자 정의 속성 [#custom-properties]
+
+스타일 객체에 매핑되는 비표준 속성을 정의합니다.
+
+```typescript
+const alpha = "--alpha";
+const { css } = defineRules({
+  properties: {
+    backgroundOpacity: {
+      full: { vars: { [alpha]: "1" } },
+      half: { vars: { [alpha]: "0.5" } },
+    },
+  },
+});
+
+css.raw({ backgroundOpacity: "half" });
+// => { vars: { '--alpha': '0.5' } }
+```
+
+---
+
+## 단축 속성 [#shortcuts]
+
+Tailwind나 UnoCSS와 같은 축약 유틸리티를 만듭니다.
+
+### 단일 속성 단축 [#single-property-shortcut]
+
+하나의 속성에 다른 이름을 부여합니다.
+
+```typescript
+const { css } = defineRules({
+  properties: {
+    paddingLeft: [0, 4, 8],
+    paddingRight: [0, 4, 8],
+  },
+  shortcuts: {
+    pl: "paddingLeft",
+    pr: "paddingRight",
+  },
+});
+
+css.raw({ pl: 4, pr: 8 });
+// => { paddingLeft: 4, paddingRight: 8 }
+```
+
+### 여러 속성 단축 [#multi-property-shortcut]
+
+하나의 단축 속성을 여러 속성에 매핑합니다.
+
+```typescript
+const { css } = defineRules({
+  properties: {
+    paddingLeft: [0, 4, 8],
+    paddingRight: [0, 4, 8],
+  },
+  shortcuts: {
+    px: ["paddingLeft", "paddingRight"],
+  },
+});
+
+css.raw({ px: 4 });
+// => { paddingLeft: 4, paddingRight: 4 }
+```
+
+### 중첩 단축 속성 참조 [#nested-shortcut-references]
+
+단축 속성은 다른 단축 속성을 참조할 수 있어 여러 단계로 추상화할 수 있습니다.
+
+```typescript
+const { css } = defineRules({
+  properties: {
+    paddingTop: [0, 4, 8],
+    paddingBottom: [0, 4, 8],
+    paddingLeft: [0, 4, 8],
+    paddingRight: [0, 4, 8],
+  },
+  shortcuts: {
+    pt: "paddingTop",
+    pb: "paddingBottom",
+    pl: "paddingLeft",
+    pr: "paddingRight",
+    py: ["pt", "pb"],
+    px: ["pl", "pr"],
+    p: ["py", "px"], // References px and py
+  },
+});
+
+css.raw({ p: 4 });
+// => { paddingTop: 4, paddingBottom: 4, paddingLeft: 4, paddingRight: 4 }
+
+// More specific shortcuts override less specific ones (last wins)
+css.raw({ p: 4, px: 8, pl: 0 });
+// => { paddingTop: 4, paddingBottom: 4, paddingLeft: 0, paddingRight: 8 }
+```
+
+### 고정 객체 단축 속성 [#fixed-object-shortcut]
+
+단축 속성을 고정된 스타일 객체로 정의합니다. 문자열 토큰, 불리언 플래그, 배열 항목으로 사용할 수 있습니다.
+
+```typescript
+const { css } = defineRules({
+  properties: {
+    display: ["none", "inline", "block"],
+  },
+  shortcuts: {
+    inline: { display: "inline" },
+  },
+});
+
+// All equivalent:
+css.raw("inline");
+css.raw({ inline: true });
+css.raw(["inline"]);
+// => { display: 'inline' }
+
+// Composable with other styles
+css.raw(["inline", { display: "none" }]);
+// => { display: 'none' }  (last wins)
+```
+
+### 함수 단축 속성 [#function-shortcut]
+
+복잡한 단축 로직에는 함수를 사용합니다. 함수 단축 속성은 다른 단축 속성과 속성을 참조할 수 있습니다.
+
+```typescript
+const { css } = defineRules({
+  properties: {
+    display: ["none", "inline", "block"],
+    paddingLeft: [0, 4, 8],
+    paddingRight: [0, 4, 8],
+  },
+  shortcuts: {
+    px: ["paddingLeft", "paddingRight"],
+    center(arg: "none" | "inline" | "block") {
+      return {
+        display: arg,
+        px: 4, // Can reference other shortcuts
+      } as const;
+    },
+  },
+});
+
+css.raw({ center: "inline" });
+// => { display: 'inline', paddingLeft: 4, paddingRight: 4 }
+```
+
+### 순환 참조 감지 [#circular-reference-detection]
+
+단축 속성의 순환 참조는 런타임에 감지되며 오류가 발생합니다.
+
+```typescript
+const { css } = defineRules({
+  properties: { paddingLeft: [0, 4, 8] },
+  shortcuts: {
+    a: "b", // a -> b -> a: circular!
+    b: "a",
+  },
+});
+
+css.raw({ a: 4 });
+// Error: Circular shortcut reference: a -> b -> a
+```
+
+---
+
+## 입력 형식 [#input-formats]
+
+`css.raw()`는 여러 입력 형식을 지원합니다.
+
+```typescript
+const { css } = defineRules({
+  properties: {
+    display: ["none", "inline", "flex"],
+    paddingLeft: [0, 4, 8],
+  },
+  shortcuts: {
+    pl: "paddingLeft",
+    inline: { display: "inline" },
+  },
+});
+
+// Object input
+css.raw({ display: "flex", pl: 4 });
+
+// String input (fixed shortcuts only)
+css.raw("inline");
+
+// Array input (compose multiple styles)
+css.raw(["inline", { pl: 8 }]);
+
+// Nested arrays
+css.raw([{ display: "flex" }, [{ pl: 4 }]]);
+```
+
+---
+
+## 조건 (예정) [#conditions-coming-soon]
+
+반응형 및 상태 기반 스타일 조건을 정의합니다.
+
+```typescript
+// Future API
+const { css } = defineRules({
+  conditions: {
+    mobile: {},
+    tablet: "@media screen and (min-width: 768px)",
+    desktop: "@media screen and (min-width: 1024px)",
+  },
+  defaultCondition: "mobile",
+});
+
+// Usage
+css({
+  _mobile: { fontSize: 12 },
+  _tablet: { fontSize: 16 },
+  _desktop: { fontSize: 20 },
+
+  // Or property-level conditions
+  fontSize: {
+    _mobile: 12,
+    _tablet: 16,
+    _desktop: 20,
+  },
+});
+```
+
+**컴파일된 CSS:**
+
+```css
+.fontSize-12_mobile__[HASH] {
+  font-size: 12px;
+}
+
+@media screen and (min-width: 768px) {
+  .fontSize-16_tablet__[HASH] {
+    font-size: 16px;
+  }
+}
+
+@media screen and (min-width: 1024px) {
+  .fontSize-20_desktop__[HASH] {
+    font-size: 20px;
+  }
+}
+```
+
+## 선택자 조건 (예정) [#selector-conditions-coming-soon]
+
+의사 상태에 대한 선택자를 재정의합니다.
+
+```typescript
+// Future API
+const { css } = defineRules({
+  conditions: {
+    hover: { selector: '&:is(:hover, [data-hover])': {} },
+    focus: { selector: '&:is(:focus, [data-focus])': {} },
+    checked: { selector: '&:is(:checked, [data-checked], [aria-checked=true])': {} }
+  }
+});
+```
+
+## 복합 조건 (예정) [#compound-conditions-coming-soon]
+
+여러 기존 조건을 조합해 새로운 조건을 만듭니다.
+
+```typescript
+// Future API
+const { css } = defineRules({
+  conditions: {
+    mobile: { "@media": "(pointer: coarse)" },
+    desktop: { "@media": "(pointer: fine)" },
+    hover: { selector: "&:hover" },
+    reducedMotion: { "@media": "(prefers-reduced-motion: reduce)" },
+  },
+  compoundConditions: [
+    {
+      when: ["desktop", "hover", "reducedMotion"],
+      condition: { selector: "&:not([data-hover-disable])" },
+    },
+  ],
+});
+```
+
+## 범위가 지정된 클래스 이름 병합 [#scoped-class-name-merge]
+
+`defineRules().cx`는 등록된 클래스 메타데이터를 사용합니다. 정규화된 조건 튜플과 확장된 속성이 같으면 마지막 입력의 선언이 우선합니다.
+
+```typescript
+const rules = defineRules({ properties: { margin: [0, 8] } });
+const wide = rules.css({ margin: 8 });
+const narrow = rules.css({ margin: 0 });
+const className = rules.cx(wide, narrow, "external");
+```
+
+등록된 `margin: 0` 선언과 외부 클래스는 유지됩니다. `wide`와 `narrow`의 순서를 바꾸면 선택되는 선언도 달라집니다. 알 수 없는 클래스 이름은 보존됩니다. 토큰을 `"margin-8"`로 적는 것만으로는 등록되지 않습니다.
+
+조건은 layer, supports, media, container, selector를 정규화한 후 정확히 일치해야 합니다. 범위 지정 병합은 겹치는 쿼리, 축약 속성과 개별 속성의 충돌, `!important` 우선순위를 추론하지 않습니다. 루트 `cx`는 clsx와 호환되는 입력을 결합하고, 문자열 연결은 단순히 문자열을 이어 붙입니다. 두 방식 모두 프리셋 충돌 메타데이터를 적용하지 않습니다.
+
+## 테마 명세 (예정) [#theme-specification-coming-soon]
+
+`theme()`의 디자인 토큰을 연결합니다.
+
+```typescript
+// Future API
+const [themeClass, themeVars, themeContract] = theme({
+  colors: {
+    text: { default: "#0f172a", muted: "#475569" },
+    surface: { canvas: "#ffffff", brand: "#2563eb" },
+  },
+  space: [0, 4, 8, 12, 16, 20],
+});
+
+// themeContract is a structural ThemeContract object for theme.extends(themeContract, nextTokens).
+const tokens = defineRules.themeSpec([
+  {
+    condition: [themeVars.colors],
+    properties: ["color", "backgroundColor", "borderColor"],
+  },
+  {
+    condition: [themeVars.space],
+    properties: ["gap", "paddingInlineStart", "paddingInlineEnd"],
+  },
+]);
+
+const { css } = defineRules({
+  properties: {
+    display: ["inline-flex", "flex"],
+    ...tokens,
+  },
+});
+```
+
+## 테마 컨텍스트 (예정) [#theme-context-coming-soon]
+
+모든 헬퍼에 테마 변수를 전달합니다.
+
+```typescript
+// Future API
+const { css, rules, cx } = defineRules({
+  theme: themeVars,
+  conditions: {
+    /* ... */
+  },
+  properties: {
+    /* ... */
+  },
+});
+
+const card = css((theme) => ({
+  color: theme.colors.text.base,
+  backgroundColor: theme.colors.surface.canvas,
+  borderRadius: theme.radii.sm,
+}));
+
+const button = rules((theme) => ({
+  base: {
+    borderRadius: theme.radii.sm,
+  },
+  variants: {
+    intent: {
+      primary: {
+        color: theme.colors.text.inverse,
+        backgroundColor: theme.colors.surface.brand,
+      },
+    },
+  },
+}));
+```
+
+## 단축 속성 명세 (예정) [#shortcuts-spec-coming-soon]
+
+프로젝트 간에 재사용할 수 있도록 단축 속성을 패키지로 만듭니다.
+
+```typescript
+// Future API
+const spacingShortcuts = defineRules.shortcutSpec<SpacingProps>({
+  pl: "paddingInlineStart",
+  pr: "paddingInlineEnd",
+  px: ["pl", "pr"],
+  gutter(value: number) {
+    return {
+      gap: value,
+      paddingInlineStart: value,
+      paddingInlineEnd: value,
+    };
+  },
+});
+
+const { css } = defineRules({
+  properties: {
+    /* ... */
+  },
+  shortcuts: {
+    ...spacingShortcuts,
+    inline: { display: "inline-flex", alignItems: "center" },
+  },
+});
+```
+
+## V5 프리셋 조합 [#v5-preset-composition]
+
+다른 작성자가 사용할 스냅샷을 만들기 전에 공유 스타일을 생성합니다.
+
+```typescript
+// shared.css.ts
+const shared = defineRules({ properties: { color: true } });
+export const red = shared.css({ color: "red" });
+export const preset = shared.preset;
+
+// component.css.ts
+import { preset } from "./shared.css";
+const component = defineRules({
+  properties: { color: true },
+  presets: preset,
+});
+export const componentRed = component.css({ color: "red" });
+```
+
+캡처한 프리셋은 불변입니다. 부모에 스타일을 추가로 등록해도 기존 자식은 갱신되지 않습니다. 변경 사항을 사용하려면 새 스냅샷을 읽고 새 자식을 생성해야 합니다. 같은 출처의 서로 다른 리비전을 혼합하면 오류가 발생합니다. `preset`을 구조 분해하는 순간에도 스냅샷이 캡처됩니다.
+
+그래프는 로컬 노드보다 부모를 먼저 방문하고 공유 노드는 한 번만 적용합니다. 동등한 Atom은 나중에 방문한 노드의 클래스를 선택하며, 로컬 Atom은 부모 다음에 적용됩니다. `[B, C, B]`는 B를 다시 적용하지 않으므로 C가 선택된 상태를 유지합니다. `artifact.nodes`의 저장 순서는 이 탐색에 영향을 주지 않습니다. 기존 B와 C의 클래스는 계속 유효하며 두 생산자의 CSS도 모두 불러와야 합니다. 이 부모 선택 순서는 범위 지정 `cx`에 전달하는 입력 순서와 별개입니다.
+
+저장소 계약을 따르는 배포용 컴포넌트 패키지는 런타임 내보내기(`.`), 작성용 데이터(`./preset`), 스타일(`./style.css`)을 분리합니다. 작성자는 이 내보내기와 CSS 부수 효과 선언을 제공해야 합니다. 공통 조상에는 실제로 공유하는 스타일만 생성하세요. 독립적으로 생성한 두 클래스는 프리셋을 조합하는 것만으로 제거되지 않습니다. 최종 애플리케이션 최소화 과정에서는 번들러의 순서 및 청크 제약 내에서 한 출력 파일의 호환되는 규칙을 병합할 수 있습니다.
+
+직렬화된 프리셋은 V5만 지원합니다. 로컬에서 함수로 작성할 수 있다고 해서 직렬화도 가능한 것은 아닙니다. 레지스트리 추출은 함수 값 설정과 지원하지 않는 컨텍스트 값을 거부합니다. 스냅샷, 직렬화, 범위 지정 병합, CSS 소유권에 대한 자세한 내용은 [CSS 패키지 계약](https://github.com/mincho-js/mincho/blob/main/packages/css/README.md#preset-snapshots-and-registration-order)을 참조하세요.
+
+## 정의 확장 [#extending-definitions]
+
+`defineRules.extends(parent, config)`로 기존 결과를 상속합니다.
+
+```ts
+const baseRules = defineRules({
+  properties: {
+    color: { brand: 'blue', muted: 'gray' },
+    display: ['flex']
+  },
+  shortcuts: { text: 'color' },
+  conditions: { desktop: '(min-width: 1024px)' }
+})
+
+const componentRules = defineRules.extends(baseRules, {
+  properties: {
+    color: { brand: 'purple', accent: 'orange' },
+    display: ['grid']
+  },
+  shortcuts: { ink: 'text' }
+})
+
+componentRules.css({ text: 'muted', display: 'grid' })
+componentRules.css({ ink: 'accent' })
+// componentRules.css({ display: 'flex' }) // Type error: the array was replaced.
+```
+
+부모는 변경되지 않으며 자식도 다시 확장할 수 있습니다. 상속된 정의와 새 정의 모두 단축 속성 참조를 포함한 타입 추론에 참여합니다.
+
+| 설정 | 확장 동작 |
+| --- | --- |
+| `properties` | 속성 이름을 상속하고 이름별 값 맵을 키 기준으로 병합합니다. 같은 이름의 값은 자식이 대체합니다. |
+| 배열, 함수, 불리언 | 속성 정의 전체를 대체합니다. 허용 값 배열은 이어 붙이지 않습니다. |
+| `conditions`, `shortcuts` | 이름을 상속합니다. 같은 이름이 반복되면 정의 전체를 대체합니다. |
+| `context` | 생략하면 원래 객체를 상속합니다. 명시적 `undefined`를 포함해 값을 전달하면 대체합니다. |
+| `presets` | 확장 시점의 부모 스냅샷을 자식의 프리셋과 함께 재사용합니다. |
+| `debugId` | 자식의 설정을 사용합니다. |
+
+반환값은 여전히 `css`, `css.raw`, `cx`, `preset`을 제공합니다. 이미 출력된 부모 Atom은 기존 V5 프리셋 그래프를 통해 재사용됩니다. 이후 부모가 출력하는 스타일이 바뀌어도 자식이 상속한 스냅샷은 변경되지 않습니다.
+
+빌드된 패키지에서 가져온 정의도 확장할 수 있습니다. 해당 CSS 함수는 상속 복원에 필요한 설정을 포함하며 빌드 통합은 부모 CSS를 자식 CSS보다 먼저 가져오는 순서를 유지합니다. 확장 메타데이터가 없는 이전 생산자는 다시 빌드해야 합니다. 패키지는 기존 `style.css` 내보내기를 제공해야 합니다. `.css.ts` 파일에서 vanilla-extract를 직접 사용할 때는 자식 스타일보다 먼저 부모 패키지의 `style.css`를 명시적으로 가져오세요. 함수 값 정의와 직렬화할 수 없는 컨텍스트에 대한 기존 직렬화 제약은 확장에도 적용됩니다.
+
+---
+
+## 향후 가능성 [#future-possibilities]
+
+### 프리셋 [#presets]
+
+주요 프레임워크용 프리셋을 개발할 예정입니다.
+
+- Tailwind CSS 프리셋
+- DaisyUI 프리셋
+- 사용자 정의 디자인 시스템 프리셋
+
+### 고급 기능 [#advanced-features]
+
+- Elm UI 방식의 레이아웃 오류 방지
+- AdorableCSS 방식의 Figma 사고 모델 대응
+- UnoCSS 아이콘 프리셋 통합

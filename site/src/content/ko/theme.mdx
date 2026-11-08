@@ -1,0 +1,713 @@
+# 테마
+
+Mincho.js는 디자인 토큰을 관리하는 테마 시스템을 제공합니다. `theme()`와 `globalTheme()` 함수는 토큰 정의에서 CSS 사용자 정의 속성을 자동으로 생성합니다.
+
+## 개요 [#overview]
+
+테마 계층은 다음 기능을 제공합니다.
+
+- 디자인 토큰의 중앙 관리
+- 타입 안전한 토큰 참조
+- CSS 변수 자동 생성
+- 의미를 부여하는 토큰 별칭
+- 여러 테마 지원
+
+```ts
+import { theme } from "@mincho-js/css";
+
+const [themeClass, vars, contract] = theme({
+  color: {
+    primary: "#007bff",
+    secondary: "#6c757d",
+  },
+  spacing: [4, 8, 16, 24, 32],
+});
+```
+
+## 기본 사용법 [#basic-usage]
+
+### theme() [#theme]
+
+`theme()` 함수는 className, 해석된 토큰 참조, 계약을 기반으로 대체 테마를 만드는 데 사용하는 구조적 `ThemeContract`가 담긴 튜플을 반환합니다.
+
+```ts
+import { theme } from "@mincho-js/css";
+
+const [themeClass, vars, contract] = theme({
+  color: {
+    primary: "#007bff",
+    background: "#ffffff",
+  },
+});
+
+// themeClass: Generated className to apply the theme
+// vars.color.primary: "var(--color-primary)"
+// vars.color.background: "var(--color-background)"
+// contract: ThemeContract object for theme.extends(contract, nextTokens)
+```
+
+컨테이너 요소에 className을 추가해 테마를 적용합니다.
+
+```tsx
+<div className={themeClass}>{/* Themed content */}</div>
+```
+
+같은 CSS 사용자 정의 속성을 재사용하는 두 번째 클래스가 필요하면 반환된 계약으로 대체 테마를 만듭니다.
+
+```ts
+const tokens = {
+  color: {
+    primary: "#007bff",
+    background: "#ffffff",
+  },
+};
+const nextTokens = {
+  color: {
+    primary: "#4dabff",
+    background: "#1a1a1a",
+  },
+};
+
+const [className, vars, contract] = theme(tokens);
+const [nextClassName, nextVars, nextContract] = theme.extends(
+  contract,
+  nextTokens,
+);
+```
+
+`theme()`과 호출 가능한 `theme.with<T>()` 핸들은 세 필드가 모두 일반 객체인 최상위 `{ vars: {...}, values: {...}, cssVarByPath: {...} }` 형태를 구조적 테마 계약용으로 예약합니다. 이 조합은 TypeScript와 런타임에서 직접적인 토큰 입력으로 사용할 수 없습니다. 계약에는 `theme.extends()`를 사용하세요. 해당 이름의 토큰 그룹이 필요하면 다른 키 아래에 중첩하거나 그룹 이름을 바꾸세요. 개별 이름은 계속 사용할 수 있으며, 세 필드 중 하나라도 원시값이나 배열이면 예약된 형태에 해당하지 않습니다.
+
+### globalTheme() [#globaltheme]
+
+`globalTheme()`로 특정 선택자에 토큰을 전역으로 적용합니다.
+
+```ts
+import { globalTheme } from "@mincho-js/css";
+
+const vars = globalTheme(":root", {
+  color: {
+    primary: "#007bff",
+    background: "#ffffff",
+  },
+});
+
+// vars.color.primary: "var(--color-primary)"
+```
+
+다음 CSS가 생성됩니다.
+
+```css
+:root {
+  --color-primary: #007bff;
+  --color-background: #ffffff;
+}
+```
+
+## 토큰 타입 [#token-types]
+
+### 원시값 [#primitive-values]
+
+문자열, 숫자, 불리언은 CSS 변수로 직접 변환됩니다.
+
+```ts
+const [, vars, contract] = theme({
+  color: "red",
+  size: 16,
+  enabled: true,
+});
+
+// Generated:
+// --color: red;
+// --size: 16;
+// --enabled: true;
+```
+
+### 배열 [#arrays]
+
+배열은 인덱스가 있는 CSS 변수를 만듭니다.
+
+```ts
+const [, vars, contract] = theme({
+  spacing: [4, 8, 16, 24, 32],
+  colors: ["#ff0000", "#00ff00", "#0000ff"],
+});
+
+// Generated:
+// --spacing-0: 4;
+// --spacing-1: 8;
+// --spacing-2: 16;
+// --spacing-3: 24;
+// --spacing-4: 32;
+
+// vars.spacing[0]: "var(--spacing-0)"
+// vars.spacing[2]: "var(--spacing-2)"
+```
+
+### 중첩 객체 [#nested-objects]
+
+객체는 계층적인 이름 공간을 가진 CSS 변수를 만듭니다.
+
+```ts
+const [, vars, contract] = theme({
+  color: {
+    base: {
+      red: "#ff0000",
+      green: "#00ff00",
+      blue: "#0000ff",
+    },
+    brand: {
+      primary: "#007bff",
+      secondary: "#6c757d",
+    },
+  },
+});
+
+// Generated:
+// --color-base-red: #ff0000;
+// --color-base-green: #00ff00;
+// --color-base-blue: #0000ff;
+// --color-brand-primary: #007bff;
+// --color-brand-secondary: #6c757d;
+
+// vars.color.base.red: "var(--color-base-red)"
+```
+
+### 단위 값 [#unit-values]
+
+`value`와 `unit`이 있는 객체는 CSS 값 형식으로 변환됩니다.
+
+```ts
+const [, vars, contract] = theme({
+  spacing: { value: 1.5, unit: "rem" },
+  borderWidth: { value: 2, unit: "px" },
+});
+
+// Generated:
+// --spacing: 1.5rem;
+// --border-width: 2px;
+```
+
+## 토큰 정의 [#token-definitions]
+
+토큰 타입을 더 명확하게 지정하려면 `$type`과 `$value`를 사용하는 DTCG(Design Tokens Community Group) 형식을 사용합니다.
+
+### 색상 [#color]
+
+```ts
+const [, vars, contract] = theme({
+  brandColor: {
+    $type: "color",
+    $value: "#ff5500",
+    $description: "Primary brand color",
+  },
+});
+
+// Generated:
+// --brand-color: #ff5500;
+```
+
+### 글꼴 모음 [#font-family]
+
+```ts
+const [, vars, contract] = theme({
+  fontPrimary: {
+    $type: "fontFamily",
+    $value: ["Inter", "system-ui", "sans-serif"],
+  },
+  fontSecondary: {
+    $type: "fontFamily",
+    $value: "Georgia, serif",
+  },
+});
+
+// Generated:
+// --font-primary: Inter, system-ui, sans-serif;
+// --font-secondary: Georgia, serif;
+```
+
+### 지속 시간 [#duration]
+
+```ts
+const [, vars, contract] = theme({
+  transitionFast: {
+    $type: "duration",
+    $value: { value: 200, unit: "ms" },
+  },
+  transitionSlow: {
+    $type: "duration",
+    $value: { value: 1, unit: "s" },
+  },
+});
+
+// Generated:
+// --transition-fast: 200ms;
+// --transition-slow: 1s;
+```
+
+### 3차 베지어 곡선 [#cubic-bezier]
+
+```ts
+const [, vars, contract] = theme({
+  easingDefault: {
+    $type: "cubicBezier",
+    $value: [0.4, 0, 0.2, 1],
+  },
+  easingBounce: {
+    $type: "cubicBezier",
+    $value: [0.68, -0.55, 0.265, 1.55],
+  },
+});
+
+// Generated:
+// --easing-default: cubic-bezier(0.4, 0, 0.2, 1);
+// --easing-bounce: cubic-bezier(0.68, -0.55, 0.265, 1.55);
+```
+
+### 글꼴 굵기 [#font-weight]
+
+글꼴 굵기 키워드는 숫자 값으로 자동 변환됩니다.
+
+```ts
+const [, vars, contract] = theme({
+  weightNormal: {
+    $type: "fontWeight",
+    $value: "normal", // → 400
+  },
+  weightBold: {
+    $type: "fontWeight",
+    $value: "bold", // → 700
+  },
+  weightSemiBold: {
+    $type: "fontWeight",
+    $value: "semi-bold", // → 600
+  },
+  weightNumeric: {
+    $type: "fontWeight",
+    $value: 300,
+  },
+});
+
+// Generated:
+// --weight-normal: 400;
+// --weight-bold: 700;
+// --weight-semi-bold: 600;
+// --weight-numeric: 300;
+```
+
+### 숫자 [#number]
+
+```ts
+const [, vars, contract] = theme({
+  lineHeightBase: {
+    $type: "number",
+    $value: 1.5,
+  },
+  zIndexModal: {
+    $type: "number",
+    $value: 1000,
+  },
+});
+
+// Generated:
+// --line-height-base: 1.5;
+// --z-index-modal: 1000;
+```
+
+### 크기 [#dimension]
+
+```ts
+const [, vars, contract] = theme({
+  fontSize: {
+    $type: "dimension",
+    $value: { value: 16, unit: "px" },
+  },
+});
+
+// Generated:
+// --font-size: 16px;
+```
+
+## 의미 기반 토큰 [#semantic-tokens]
+
+JavaScript getter로 다른 토큰을 참조하는 의미 기반 토큰을 만듭니다.
+
+### 기본 참조 [#basic-reference]
+
+```ts
+const [, vars, contract] = theme({
+  color: {
+    base: {
+      blue: "#0000ff",
+      red: "#ff0000",
+    },
+    semantic: {
+      get primary() {
+        return this.color.base.blue;
+      },
+      get danger() {
+        return this.color.base.red;
+      },
+    },
+  },
+});
+
+// Generated:
+// --color-base-blue: #0000ff;
+// --color-base-red: #ff0000;
+// --color-semantic-primary: var(--color-base-blue);
+// --color-semantic-danger: var(--color-base-red);
+```
+
+의미 기반 토큰은 `var()`로 기본 토큰을 참조하므로 런타임에 테마를 재정의할 수 있습니다.
+
+### 대체값 [#fallback-values]
+
+`this.fallbackVar()`로 CSS 변수의 대체값을 지정합니다.
+
+```ts
+const [, vars, contract] = theme({
+  color: {
+    base: {
+      blue: "#0000ff",
+    },
+    semantic: {
+      get primary() {
+        return this.fallbackVar(this.color.base.blue, "#007bff");
+      },
+    },
+  },
+});
+
+// Generated:
+// --color-semantic-primary: var(--color-base-blue, #007bff);
+```
+
+### 별칭 (CSS 변수 없음) [#alias-no-css-variable]
+
+새로운 CSS 변수를 만들지 않고 다른 토큰을 참조하려면 `this.alias()`를 사용합니다.
+
+```ts
+const [, vars, contract] = theme({
+  color: {
+    base: {
+      blue: "#0000ff",
+      red: "#ff0000",
+    },
+    semantic: {
+      // Creates CSS variable (--color-semantic-secondary)
+      get secondary() {
+        return this.color.base.blue;
+      },
+      // Does NOT create CSS variable, just references
+      get primary() {
+        return this.alias(this.color.base.blue);
+      },
+      get danger() {
+        return this.alias(this.color.base.red);
+      },
+    },
+  },
+});
+
+// Generated (note: no --color-semantic-primary or --color-semantic-danger):
+// --color-base-blue: #0000ff;
+// --color-base-red: #ff0000;
+// --color-semantic-secondary: var(--color-base-blue);
+
+// vars.color.semantic.primary: "var(--color-base-blue)"
+// vars.color.semantic.danger: "var(--color-base-red)"
+```
+
+코드에서 의미 있는 이름을 사용하되 추가 CSS 변수는 필요하지 않을 때 유용합니다.
+
+### 원본 값 [#raw-values]
+
+CSS 변수 참조 대신 실제 값을 가져오려면 `this.raw()`를 사용합니다.
+
+```ts
+const [, vars, contract] = theme({
+  color: {
+    base: {
+      blue: "#0000ff",
+      red: "#ff0000",
+    },
+    semantic: {
+      get primary() {
+        return this.raw(this.color.base.blue);
+      },
+      get danger() {
+        return this.raw(this.color.base.red);
+      },
+    },
+  },
+});
+
+// Generated:
+// --color-base-blue: #0000ff;
+// --color-base-red: #ff0000;
+// --color-semantic-primary: #0000ff;  // Actual value, not var()
+// --color-semantic-danger: #ff0000;   // Actual value, not var()
+```
+
+변수 참조 대신 고정된 값이 필요할 때 유용합니다.
+
+## 복합 값 [#composite-values]
+
+여러 속성을 결합하는 `resolved` getter로 복합 토큰을 만듭니다.
+
+```ts
+const [, vars, contract] = theme({
+  shadow: {
+    light: {
+      get resolved() {
+        return `${this.shadow.light.color} ${this.shadow.light.offsetX} ${this.shadow.light.offsetY} ${this.shadow.light.blur}`;
+      },
+      color: "#00000080",
+      offsetX: { value: 0.5, unit: "rem" },
+      offsetY: { value: 0.5, unit: "rem" },
+      blur: { value: 1.5, unit: "rem" },
+    },
+  },
+});
+
+// Generated:
+// --shadow-light: var(--shadow-light-color) var(--shadow-light-offset-x) var(--shadow-light-offset-y) var(--shadow-light-blur);
+// --shadow-light-color: #00000080;
+// --shadow-light-offset-x: 0.5rem;
+// --shadow-light-offset-y: 0.5rem;
+// --shadow-light-blur: 1.5rem;
+
+// vars.shadow.light.resolved: "var(--shadow-light)"
+// vars.shadow.light.color: "var(--shadow-light-color)"
+```
+
+## CSS 레이어 [#css-layers]
+
+`@layer`로 테마 변수를 CSS 레이어에 배치합니다.
+
+```ts
+const [themeClass, vars, contract] = theme({
+  "@layer": "tokens",
+  color: {
+    primary: "#007bff",
+    secondary: "#6c757d",
+  },
+});
+```
+
+다음 CSS가 생성됩니다.
+
+```css
+@layer tokens {
+  .themeClass {
+    --color-primary: #007bff;
+    --color-secondary: #6c757d;
+  }
+}
+```
+
+## 디버그 식별자 [#debug-identifier]
+
+디버깅을 쉽게 할 수 있도록 두 번째 인수에 디버그 식별자를 추가합니다.
+
+```ts
+const [themeClass, vars, contract] = theme(
+  {
+    color: { primary: "#007bff" },
+  },
+  "myTheme",
+);
+
+// themeClass will include "myTheme" in development
+```
+
+## 여러 테마 [#multiple-themes]
+
+서로 다른 토큰 값을 정의해 여러 테마를 만듭니다.
+
+```ts
+const [lightTheme, lightVars, lightContract] = theme(
+  {
+    color: {
+      background: "#ffffff",
+      text: "#000000",
+      primary: "#007bff",
+    },
+  },
+  "light",
+);
+
+const [darkTheme, darkVars, darkContract] = theme(
+  {
+    color: {
+      background: "#1a1a1a",
+      text: "#ffffff",
+      primary: "#4dabff",
+    },
+  },
+  "dark",
+);
+
+// Use lightVars or darkVars in your styles
+// Apply lightTheme or darkTheme className to switch themes
+// Use lightContract or darkContract for contract-first replacement themes
+```
+
+컴포넌트에서 다음과 같이 사용합니다.
+
+```tsx
+import { css } from '@mincho-js/css'
+
+// Use one vars object - values will change based on applied theme
+const button = css({
+  backgroundColor: lightVars.color.primary,
+  color: lightVars.color.text
+})
+
+// Toggle themes
+<div className={isDark ? darkTheme : lightTheme}>
+  <button className={button}>Click me</button>
+</div>
+```
+
+## css()와 함께 사용 [#using-with-css]
+
+`css()` 호출에서 테마 변수를 사용합니다.
+
+```ts
+import { css, theme } from "@mincho-js/css";
+
+const [, vars, contract] = theme({
+  color: {
+    primary: "#007bff",
+    text: "#333333",
+  },
+  spacing: [4, 8, 16, 24, 32],
+});
+
+const button = css({
+  backgroundColor: vars.color.primary,
+  color: vars.color.text,
+  padding: vars.spacing[2], // 16px
+  _hover: {
+    opacity: 0.9,
+  },
+});
+```
+
+## 전체 예제 [#complete-example]
+
+```ts
+import { css, theme, globalTheme } from "@mincho-js/css";
+
+// Define global theme on :root
+const tokens = globalTheme(":root", {
+  color: {
+    base: {
+      gray: {
+        50: "#f9fafb",
+        100: "#f3f4f6",
+        900: "#111827",
+      },
+      blue: {
+        500: "#3b82f6",
+        600: "#2563eb",
+      },
+    },
+    semantic: {
+      get background() {
+        return this.color.base.gray[50];
+      },
+      get text() {
+        return this.color.base.gray[900];
+      },
+      get primary() {
+        return this.color.base.blue[500];
+      },
+      get primaryHover() {
+        return this.color.base.blue[600];
+      },
+    },
+  },
+  spacing: [0, 4, 8, 12, 16, 24, 32, 48, 64],
+  typography: {
+    fontFamily: {
+      $type: "fontFamily",
+      $value: ["Inter", "system-ui", "sans-serif"],
+    },
+    fontSize: {
+      sm: { value: 14, unit: "px" },
+      base: { value: 16, unit: "px" },
+      lg: { value: 18, unit: "px" },
+    },
+  },
+  animation: {
+    duration: {
+      $type: "duration",
+      $value: { value: 200, unit: "ms" },
+    },
+    easing: {
+      $type: "cubicBezier",
+      $value: [0.4, 0, 0.2, 1],
+    },
+  },
+});
+
+// Use tokens in styles
+const button = css({
+  fontFamily: tokens.typography.fontFamily,
+  fontSize: tokens.typography.fontSize.base,
+  backgroundColor: tokens.color.semantic.primary,
+  color: tokens.color.base.gray[50],
+  padding: `${tokens.spacing[2]} ${tokens.spacing[4]}`,
+  transition: `background-color ${tokens.animation.duration} ${tokens.animation.easing}`,
+  _hover: {
+    backgroundColor: tokens.color.semantic.primaryHover,
+  },
+});
+```
+
+## camelCase에서 kebab-case로 변환 [#camelcase-to-kebab-case]
+
+토큰 이름은 CSS 변수 이름을 만들 때 camelCase에서 kebab-case로 자동 변환됩니다.
+
+```ts
+const [, vars, contract] = theme({
+  backgroundColor: "white",
+  fontSize: "16px",
+  lineHeight: 1.5,
+});
+
+// Generated:
+// --background-color: white;
+// --font-size: 16px;
+// --line-height: 1.5;
+```
+
+## 테마 헬퍼 [#theme-helpers]
+
+`theme.with<T>()`는 타입이 지정된 테마 팩터리를 만들고 `theme()`과 같은 `[className, vars, contract]` 튜플을 반환합니다. 호출 가능한 핸들은 `T`를 반복하지 않고 계약을 확장할 수도 있습니다.
+
+```ts
+type MyTheme = { color: { primary: string } };
+
+const handle = theme.with<MyTheme>();
+const tokens = {
+  color: { primary: "#007bff" },
+};
+const [themeClass, vars, contract] = handle(tokens);
+
+const replacementTokens = {
+  color: { primary: "#4dabff" },
+};
+const optionalDebugId = "replacementTheme";
+const [replacementThemeClass, replacementVars, replacementContract] =
+  handle.extends(contract, replacementTokens, optionalDebugId);
+```
+
+`theme.raw()`, `theme.multiple()` 등의 추가 헬퍼는 향후 릴리스에 제공할 예정입니다. 다른 API에서 헬퍼 메서드가 동작하는 예제는 [리터럴 CSS](/ko/docs/literal#css-methods)와 [스타일 규칙](/ko/docs/rules#multiple-rules)을 참조하세요.
+
+## 다음 단계 [#next-steps]
+
+- 컴포넌트 변형을 위한 [스타일 규칙](/ko/docs/rules)을 알아보세요.
+- 스타일링의 기초인 [리터럴 CSS](/ko/docs/literal)를 살펴보세요.

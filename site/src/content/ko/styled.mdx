@@ -1,0 +1,660 @@
+# 스타일 컴포넌트
+
+`@mincho-js/react`의 `styled` API는 빌드 시점 CSS 추출을 통해 타입 안전한 변형 기반 React 컴포넌트를 만드는 컴포넌트 기반 스타일링 방식입니다.
+
+## 설치 [#installation]
+
+```bash
+npm install @mincho-js/react @mincho-js/css
+```
+
+빌드 시점 변환을 위한 Babel 플러그인도 설정해야 합니다.
+
+```bash
+npm install -D @mincho-js/babel
+```
+
+## 개요 [#overview]
+
+`styled` 함수는 연결된 스타일을 빌드 시점에 추출하는 React 컴포넌트를 만듭니다. 다음과 같은 장점이 있습니다.
+
+- **런타임 스타일 생성 비용 없음**: 런타임에 삽입하는 대신 빌드 중에 CSS를 추출
+- **타입 안전한 변형**: 변형 props에 대한 완전한 TypeScript 추론
+- **익숙한 API**: styled-components와 비슷한 사용법에 빌드 시점 추출을 결합
+
+```tsx
+import { styled } from '@mincho-js/react';
+
+const Button = styled('button', {
+  base: {
+    padding: '10px 20px',
+    borderRadius: '4px',
+    fontWeight: 'bold',
+  },
+});
+
+// Usage
+<Button>Click me</Button>
+```
+
+## 기본 사용법 [#basic-usage]
+
+`styled` 함수는 요소 태그 또는 컴포넌트와 스타일 설정 객체를 받습니다.
+
+```tsx
+import { styled } from '@mincho-js/react';
+
+const Button = styled('button', {
+  base: {
+    padding: '10px 20px',
+    borderRadius: '4px',
+    fontWeight: 'bold',
+    border: 'none',
+    cursor: 'pointer',
+  },
+});
+```
+
+**컴파일된 CSS:**
+
+```css
+.Button__base__abc123 {
+  padding: 10px 20px;
+  border-radius: 4px;
+  font-weight: bold;
+  border: none;
+  cursor: pointer;
+}
+```
+
+## 대체 문법: styled.tagname [#alternative-syntax-styledtagname]
+
+Mincho는 스타일 컴포넌트를 만들 때 함수 호출 문법과 속성 접근자 문법을 모두 지원합니다.
+
+```tsx
+import { styled } from '@mincho-js/react';
+
+// Function call syntax (primary approach)
+const Button = styled('button', {
+  base: {
+    padding: '10px 20px',
+    borderRadius: '4px',
+  },
+});
+
+// Property accessor syntax (styled-components-like)
+const Button = styled.button({
+  base: {
+    padding: '10px 20px',
+    borderRadius: '4px',
+  },
+});
+```
+
+두 문법은 **기능적으로 동일**하며 같은 결과로 컴파일됩니다.
+
+**각 문법의 사용 시점:**
+
+- **함수 호출** (`styled("button", ...)`): 더 명시적이며 동적인 태그 이름에 적합
+- **속성 접근자** (`styled.button(...)`): 더 간결하며 styled-components 사용자에게 익숙함
+
+## 변형 시스템 [#variants-system]
+
+변형은 컴포넌트 스타일링에 의미 있는 선택지를 제공합니다.
+
+```tsx
+const Button = styled('button', {
+  base: {
+    padding: '10px 20px',
+    borderRadius: '4px',
+  },
+  variants: {
+    color: {
+      primary: { backgroundColor: 'blue', color: 'white' },
+      secondary: { backgroundColor: 'gray', color: 'black' },
+    },
+    size: {
+      small: { padding: '5px 10px', fontSize: '12px' },
+      large: { padding: '15px 30px', fontSize: '18px' },
+    },
+  },
+  defaultVariants: {
+    color: 'primary',
+    size: 'small',
+  },
+});
+
+// Usage with full TypeScript support
+<Button color="primary" size="large">
+  Submit
+</Button>
+```
+
+**컴파일된 CSS:**
+
+```css
+.Button__base__abc123 { /* base styles */ }
+.Button__color_primary__def456 { background-color: blue; color: white; }
+.Button__color_secondary__ghi789 { background-color: gray; color: black; }
+.Button__size_small__jkl012 { padding: 5px 10px; font-size: 12px; }
+.Button__size_large__mno345 { padding: 15px 30px; font-size: 18px; }
+```
+
+## 불리언 변형 [#boolean-variants]
+
+켜짐/꺼짐 상태에는 `true`와 선택적인 `false` 분기가 있는 일반 변형 그룹을 사용합니다.
+
+```tsx
+const Card = styled("div", {
+  base: {
+    padding: "20px",
+    backgroundColor: "white",
+  },
+  variants: {
+    elevated: { true: { boxShadow: "0 4px 6px rgba(0,0,0,0.1)" } },
+    bordered: { true: { border: "1px solid #ccc" } },
+  }
+});
+
+// Usage
+<Card elevated bordered>Content</Card>
+
+// Or with explicit boolean
+<Card elevated={true} bordered={false}>Content</Card>
+```
+
+## 복합 변형 [#compound-variants]
+
+여러 변형이 일치할 때 적용할 스타일입니다.
+
+```tsx
+const Button = styled('button', {
+  base: { /* ... */ },
+  variants: {
+    color: {
+      primary: { backgroundColor: 'blue' },
+      danger: { backgroundColor: 'red' },
+    },
+    size: {
+      small: { padding: '5px 10px' },
+      large: { padding: '15px 30px' },
+    },
+  },
+  compoundVariants: [
+    {
+      variants: { color: 'danger', size: 'large' },
+      style: {
+        fontSize: '20px',
+        fontWeight: 'bold',
+        textTransform: 'uppercase',
+      },
+    },
+  ],
+});
+
+// The large danger button gets special styling
+<Button color="danger" size="large">
+  Delete All
+</Button>
+```
+
+## 컴포넌트 조합 [#component-composition]
+
+기존 스타일 컴포넌트를 확장합니다.
+
+```tsx
+const BaseComponent = styled('div', {
+  base: {
+    fontWeight: 'bold',
+  },
+});
+
+const Container = styled(BaseComponent, {
+  base: {
+    backgroundColor: 'red',
+    padding: '20px',
+  },
+  variants: {
+    rounded: {
+      true: { borderRadius: '8px' },
+    },
+  },
+});
+
+// Container inherits BaseComponent's bold font weight
+<Container rounded>Styled Container</Container>
+```
+
+## 다형성 컴포넌트 [#polymorphic-components]
+
+`as` prop으로 실제 렌더링하는 요소를 변경합니다.
+
+```tsx
+const Text = styled("span", {
+  base: {
+    fontFamily: "sans-serif",
+  },
+  variants: {
+    size: {
+      small: { fontSize: "12px" },
+      large: { fontSize: "18px" },
+    }
+  }
+});
+
+// Render as different elements
+<Text size="large">Default span</Text>
+<Text as="p" size="large">As paragraph</Text>
+<Text as="h1" size="large">As heading</Text>
+```
+
+TypeScript는 `as` prop에 따라 요소 타입을 올바르게 추론합니다.
+
+```tsx
+<Text
+  as="a"
+  href="https://example.com"  // TypeScript knows this is valid for <a>
+  size="large"
+>
+  Link
+</Text>
+```
+
+## 동적 Props [#dynamic-props]
+
+런타임 값을 사용하도록 React props를 CSS 사용자 정의 속성에 매핑합니다.
+
+```tsx
+const Box = styled('div', {
+  base: {
+    padding: '20px',
+  },
+  props: ['backgroundColor', 'color'],
+});
+
+// Runtime color customization
+<Box backgroundColor="purple" color="white">
+  Custom Colors
+</Box>
+```
+
+**CSS 사용자 정의 속성이 포함된 컴파일 결과:**
+
+```css
+.Box__base__abc123 {
+  padding: 20px;
+  background-color: var(--backgroundColor__xyz);
+  color: var(--color__xyz);
+}
+```
+
+## 빌드 시점 변환 [#build-time-transformation]
+
+Babel 플러그인은 빌드 중에 `styled` 호출을 변환합니다.
+
+```tsx
+// Input
+import { styled } from '@mincho-js/react';
+
+const Button = styled('button', {
+  base: { color: 'red' },
+});
+
+// Output (after Babel transformation)
+import { $$styled } from '@mincho-js/react/runtime';
+import { rules } from '@mincho-js/css';
+
+const Button = /* @__PURE__ */ $$styled(
+  'button',
+  rules({
+    base: { color: 'red' },
+  })
+);
+```
+
+`@__PURE__` 주석은 사용하지 않는 컴포넌트의 트리 셰이킹을 가능하게 합니다.
+
+## 레시피 패턴 [#recipe-patterns]
+
+레시피는 독립적으로 사용하거나 스타일 컴포넌트에 조합할 수 있는 재사용 가능한 스타일 객체입니다.
+
+```tsx
+import { styled } from '@mincho-js/react';
+import { rules } from '@mincho-js/css';
+
+// Define a reusable recipe
+const buttonRecipe = rules({
+  base: {
+    padding: '10px 20px',
+    borderRadius: '4px',
+    fontWeight: 'bold',
+  },
+  variants: {
+    color: {
+      primary: { backgroundColor: 'blue', color: 'white' },
+      secondary: { backgroundColor: 'gray', color: 'black' },
+    },
+  },
+  defaultVariants: {
+    color: 'primary',
+  },
+});
+
+// Use in styled components
+const Button = styled('button', buttonRecipe);
+
+// Or use directly as className
+function DirectUsage() {
+  return (
+    <button className={buttonRecipe({ color: 'primary' })}>
+      Click me
+    </button>
+  );
+}
+```
+
+## CSS 중첩 [#css-nesting]
+
+스타일 컴포넌트는 의사 선택자와 자식 요소에 대한 CSS 중첩을 지원합니다.
+
+```tsx
+const Button = styled('button', {
+  base: {
+    padding: '10px',
+    '&:hover': {
+      backgroundColor: 'blue',
+    },
+    '& > span': {
+      fontWeight: 'bold',
+    },
+  },
+});
+```
+
+## 미디어 쿼리 [#media-queries]
+
+미디어 쿼리로 반응형 스타일을 작성합니다.
+
+```tsx
+const Box = styled('div', {
+  base: {
+    padding: '10px',
+    '@media': {
+      'screen and (min-width: 768px)': {
+        padding: '20px',
+      },
+    },
+  },
+});
+```
+
+---
+
+## CSS Prop [#css-prop]
+
+TypeScript가 범위 지정 JSX 런타임을 사용하고 Mincho 변환이 `jsxCssProp: true`로 실행될 때 `css` prop을 사용할 수 있습니다. 지원되는 값은 React가 JSX를 처리하기 전에 컴파일되어 제거됩니다.
+
+```tsx
+/** @jsxImportSource @mincho-js/react */
+
+function MyComponent() {
+  return (
+    <div css={{ padding: '20px', color: 'blue' }}>
+      Styled content
+    </div>
+  );
+}
+```
+
+명시적인 `css` prop 앞이나 뒤에 펼침 구문이 있는 경우 직접적인 JSX 위치와 중첩된 위치 모두 지원합니다. 직접 반환하거나 표현식 문으로 사용하는 경우에는 IIFE 없이 문을 끌어올리는 변환을 유지합니다. 표현식 본문 화살표 함수, 조건식, 논리/nullish 피연산자, 호출 인수, 프래그먼트나 요소의 자식, JSX 속성 표현식, 중괄호 없는 제어 흐름 본문처럼 중첩된 위치에서는 인수가 없는 로컬 화살표 IIFE를 사용합니다. 이를 통해 JavaScript 평가 순서를 유지하면서 React가 JSX를 처리하기 전에 CSS를 컴파일하여 제거합니다.
+
+다음 제약은 의도된 동작입니다. `<div {...{ css: styleA }} />`처럼 펼침 구문에만 있는 `css`는 요소에 명시적인 `css` prop이 없으므로 변환하거나 제거하지 않습니다. 펼침 구문과 css prop이 함께 있는 요소의 명시적 `key`/`ref`는 거부합니다. 프래그먼트 대상과 지원하지 않는 JSX 대상도 오류가 발생합니다. 로컬 IIFE로 옮겨지는 표현식에 중첩된 `await`나 `yield`는 허용하지 않습니다. 또한 Mincho는 Emotion 방식의 런타임 직렬화기, 캐시, 스타일 삽입, 헬퍼 라이브러리 동작이나 런타임 펼침 구문의 모든 동작을 제공하지 않습니다.
+
+정적 평가는 직접적인 객체/배열 값, 같은 파일에서 변경되지 않는 `const` 값, 정적 계산 객체 키, 정적 객체/배열 펼침, CSS 규칙 리터럴로 확인된 값 내부의 정적 식별자/멤버 피연산자, nullish가 아닌 정적 객체나 배열의 옵셔널 멤버 접근, `undefined`를 제외한 지원되는 원시값의 템플릿 보간, 공급자가 제공하는 ESM 소스를 지원합니다. 지원 소스에는 프로젝트 파일, `@pkg/styles` 같은 패키지 파일, 패키지 배럴, 정적 데이터 모듈, 번들러가 결정적인 소스 텍스트 또는 리터럴 데이터와 식별 메타데이터를 제공하는 가상 모듈이 포함됩니다. 이름 있는 가져오기, 별칭 가져오기, 기본 가져오기/내보내기, `styles.button`, `styles["button"]`, `styles[variantKey]` 같은 선택한 이름 공간 멤버, `css={styles}` 같은 전체 이름 공간 객체, 직접적인 이름 있는 재내보내기, `export *` 배럴에는 모든 지원 소스에서 같은 ESM 규칙이 적용됩니다. 객체 펼침은 왼쪽에서 오른쪽으로 병합하며 뒤의 키가 우선합니다. 배열 펼침은 각 정적 배열 피연산자를 펼침 위치에 삽입합니다.
+
+```tsx
+const color = 'blue' as const;
+const colorKey = 'color' as const;
+const variantKey = 'button' as const;
+const columns = 2 as const;
+const spacing = { gap: 8 } as const;
+const buttonBase = { display: 'flex', color: 'green' } as const;
+const buttonOverride = { color: 'blue' } as const;
+const stackParts = [{ alignItems: 'center' }] as const;
+const optionalStyles = { card: { padding: 16 } } as const;
+const styles = {
+  button: { color: 'green' },
+} as const;
+const makeRule = (tone: 'red') => ({ color: tone });
+
+<div css={{ ...buttonBase, ...buttonOverride, [colorKey]: color, gap: spacing.gap }} />
+<div css={{ ...buttonBase, color }} />
+<div css={[...stackParts, { gap: spacing.gap }]} />
+<div css={makeRule("red")} />
+<div css={styles.button} />
+<div css={styles[variantKey]} />
+<div css={optionalStyles?.card} />
+<div css={{ [colorKey]: `${color}`, gridTemplateColumns: `repeat(${columns}, 1fr)` }} />
+```
+
+최상위 원시값 식별자는 클래스 값으로 유지됩니다. 따라서 `css={activeClass}`가 정적 CSS 규칙으로 확인되지 않으면 기존처럼 `cx(...)`를 통해 변환됩니다. 원시값 식별자와 멤버 값은 CSS 규칙 후보로 확인된 객체/배열 리터럴 내부에서만 해석됩니다. `css={makeRule("red")}` 같은 최상위 규칙 호출은 기존 컴파일 시점 `css(...)` 추출 경로로 전달됩니다. 임의의 JavaScript로 정적 평가하지 않으며, 반환된 스타일을 확인하기 위해 팩터리를 실행하지 않습니다.
+
+```tsx
+// styles.ts
+export const tone = 'green' as const;
+export const cardBase = { padding: 16 } as const;
+export const stackParts = [{ display: 'flex' }] as const;
+
+const panel = { color: 'green' } as const;
+export { cardBase as surface };
+export default panel;
+
+// App.tsx
+import panel, { cardBase, stackParts, surface as surfaceStyle, tone } from './styles';
+import * as styles from './styles';
+
+const card = { ...cardBase, color: tone } as const;
+const stack = [...stackParts, { gap: 8 }] as const;
+
+<div css={card} />
+<div css={stack} />
+<div css={surfaceStyle} />
+<div css={panel} />
+<div css={styles.cardBase} />
+```
+
+내보낸 모든 값이 정적인 리터럴 CSS 속성 객체나 조각이면 전체 이름 공간 객체를 지원합니다.
+
+```tsx
+// styles.ts
+export const button = { color: 'red' } as const;
+export const card = { padding: 16 } as const;
+
+// App.tsx
+import * as styles from './styles';
+
+<div css={styles} />
+```
+
+공급자가 제공하는 재내보내기 체인도 정적으로 처리합니다. 직접적인 이름 있는 재내보내기와 별표 배럴은 프로젝트 파일이나 패키지 배럴의 값을 이름 있는 가져오기와 이름 공간 멤버로 노출할 수 있습니다.
+
+```tsx
+// primitives.ts
+export const button = { color: 'red' } as const;
+export const card = { padding: 16 } as const;
+
+// styles.ts
+export { button as primaryButton } from './primitives';
+export * from './primitives';
+
+// App.tsx
+import { primaryButton } from './styles';
+import * as styles from './styles';
+
+<div css={primaryButton} />
+<div css={styles.button} />
+```
+
+패키지, 데이터, 가상 소스는 소스 공급자를 통해서만 지원합니다. Mincho는 패키지 내보내기를 자체적으로 해석하지 않습니다. 해당 피연산자를 정적 값이나 펼침에 사용하려면 Vite, esbuild 또는 다른 통합 도구가 소스/리터럴 데이터와 안정적인 식별 메타데이터를 제공해야 합니다.
+
+```tsx
+// App.tsx
+import pkgStyles, { palette, reset as packageReset, stackParts as packageStackParts } from '@pkg/styles';
+import { button as packageButton } from '@pkg/styles/barrel';
+import tokens, { brandColor } from '@pkg/styles/tokens.json';
+import rawColor from '@pkg/styles/color.txt?raw';
+import wasmUrl from '@pkg/styles/icon.wasm?url';
+import virtualStyles from 'virtual:mincho-styles';
+
+<div css={{ ...packageReset, color: palette.primary }} />
+<div css={[...packageStackParts, { color: rawColor }]} />
+<div css={pkgStyles.root} />
+<div css={packageButton} />
+<div css={tokens.card} />
+<div css={{ color: brandColor }} />
+<div css={{ color: rawColor }} />
+<div css={{ backgroundImage: wasmUrl }} />
+<div css={virtualStyles.button} />
+```
+
+공급자가 결정적인 소스 텍스트와 안정적인 식별 메타데이터를 제공하면 CommonJS 소스를 지원합니다. Mincho는 CommonJS AST를 파싱한 후 정적 형태만 추적합니다. 리터럴 `require("./styles")` 바인딩, 얕은 구조 분해, 직접적인 `module.exports` 또는 `exports.name` 내보내기 맵, 정적 `Object.defineProperty` 값/getter 서술자, tsc/Babel/SWC/Rollup/Vite의 정적 출력, 인식 가능한 esbuild 헬퍼 패턴이 이에 해당합니다. 헬퍼 본문은 알려진 부수 효과 없는 형태와 일치해야 하며 헬퍼 이름만으로는 신뢰하지 않습니다.
+
+```tsx
+// styles.cjs
+const button = { color: 'red' };
+const card = { padding: 16 };
+const stack = [{ display: 'flex' }];
+const color = 'blue';
+
+module.exports = { button, card, stack, color };
+
+// App.tsx
+const styles = require('./styles.cjs');
+const { card: cardStyle } = require('./styles.cjs');
+const path = './styles.cjs';
+const stylesByPath = require(path);
+const templatePath = `./styles.cjs`;
+const stylesByTemplatePath = require(templatePath);
+
+<div css={styles.button} />
+<div css={{ ...styles.button, color: styles.color }} />
+<div css={cardStyle} />
+<div css={[...styles.stack, cardStyle]} />
+<div css={styles} />
+<div css={stylesByPath.card} />
+<div css={stylesByTemplatePath.card} />
+```
+
+지원하지 않는 CommonJS는 허용하지 않고 오류로 처리합니다. 동적 `require(expr)`, 표현식 템플릿이나 조건부 require 경로, const가 아니거나 가져오거나 변경된 경로 바인딩, 가려진 `require`, 런타임 패키지 해석, 헬퍼 이름만의 일치, Node `require()` 실행, VM 또는 자식 프로세스를 통한 로딩, Webpack/Turbopack/Parcel 번들 런타임 전체 에뮬레이션은 지원하지 않습니다.
+
+`export *`는 ESM 의미를 따르며 `default`를 전달하지 않습니다. 배럴에서 기본값을 노출하려면 명시적으로 기본값을 재내보내세요.
+
+```tsx
+// root.ts
+export default { minHeight: '100vh' } as const;
+
+// styles.ts
+export { default } from './root';
+export { default as root } from './root';
+
+// App.tsx
+import rootDefault, { root } from './styles';
+
+<div css={rootDefault} />
+<div css={root} />
+```
+
+실제로 지원하는 리터럴 문법은 제한적입니다. 문자열, 숫자, 불리언, `null`, 단항 숫자 값, `` `grid` `` 같은 표현식 없는 템플릿 리터럴, `undefined`를 제외한 지원되는 원시값 템플릿 보간, 중첩 객체/배열 리터럴, 정적 계산 객체 키, 정적 객체/배열 펼침, CSS 규칙 리터럴로 확인된 값 내부의 정적 식별자/멤버 피연산자를 지원합니다.
+
+번들러는 소스 해석과 로딩만 제공합니다. Vite와 esbuild는 소스 공급자를 통해 프로젝트/패키지/데이터/가상/정적 CommonJS 소스 텍스트, 리터럴 데이터, 식별 메타데이터, 의존 관계를 Mincho에 전달합니다. 이후 Mincho는 소스를 파싱하고 AST 내보내기 정보를 읽어 지원하는 리터럴 부분집합만 정적으로 평가합니다. 모듈 실행은 사용하지 않습니다. Mincho는 `css` prop 값을 얻기 위해 사용자 모듈을 실행하지 않으며, 정적 평가를 위해 Node `require()` 호출, VM이나 `eval` 사용, 동적 import 평가, 번들러 런타임 코드 실행도 하지 않습니다.
+
+다음 항목은 명시적으로 지원 범위에서 제외됩니다. 원격/http 모듈, 동적 `require(expr)`, 표현식 템플릿이나 조건부 require 경로, Webpack/Turbopack/Parcel 번들 런타임 그래프 전체 파싱, `.wasm?init` 같은 런타임 wasm 초기화/함수 내보내기, 공급자가 소스를 제공하지 않는 임의의 가상 모듈, 동적 import 그래프, 리터럴이 아닌 로더 출력, `export * as ns from './styles'` 같은 이름 공간 재내보내기, 정적 CSS 규칙 값 내부의 함수/팩터리/믹스인/호출 값, 옵셔널 호출, 동적이거나 형태가 맞지 않는 객체/배열 펼침 피연산자, 계산된 동적 키, 동적이거나 nullish인 옵셔널 접근 대상, 객체/호출/undefined 템플릿 보간, 런타임 동적 값, SWC 네이티브 통합입니다. 정적 wasm 지원은 공급자가 리터럴로 전달하는 raw/url 문자열 형태로 제한되며 런타임 wasm 초기화는 평가하지 않습니다.
+
+함수, 팩터리, 믹스인, 중첩 호출의 평가는 계속 보류된 지원 범위 밖의 기능입니다. Mincho는 반환 스타일을 알아내기 위해 팩터리를 실행하지 않으며 모듈 실행도 사용하지 않습니다. `css` prop의 직접적인 최상위 호출은 별도로 처리합니다. 이 호출은 컴파일 시점 `css(...)` 추출 경로를 유지하며 JavaScript로 정적 평가하지 않습니다.
+
+기존 동적 클래스 값 식별자는 정적임을 확인할 수 없으면 클래스 값 동작을 유지합니다. CSS 규칙 후보로 확인되었지만 내부에 지원하지 않는 값이 있으면 `Cannot statically evaluate css prop value` 진단과 함께 실패합니다.
+
+```tsx
+const dynamicBase = getBase();
+const wrongShape = [{ display: 'flex' }] as const;
+const runtimeColor = props.color;
+const runtimeKey = props.property;
+const dynamicStyles = props.styles;
+const nullStyles = null as { button: { color: 'red' } } | null;
+const makeRule = () => ({ color: 'red' });
+const makeColor = () => 'red';
+const makeKey = () => 'button';
+const styles = { button: { color: 'red' } } as const;
+const variant = props.variant;
+const dynamicModule = import('./styles');
+import { cjsPath as importedCjsPath } from './paths';
+const dynamicCjsPath = props.path;
+let nonConstCjsPath = './styles.cjs';
+nonConstCjsPath = './other.cjs';
+const cjsPathBox = { path: './styles.cjs' };
+cjsPathBox.path = './other.cjs';
+const cjsDynamic = require(dynamicCjsPath);
+const cjsNonConst = require(nonConstCjsPath);
+const cjsMutated = require(cjsPathBox.path);
+
+<div css={{ ...dynamicBase, color: 'red' }} />
+<div css={{ ...wrongShape, color: 'red' }} />
+<div css={{ color: makeColor() }} />
+<div css={makeRule?.()} />
+<div css={{ ...makeRule() }} />
+<div css={{ [runtimeKey]: 'red' }} />
+<div css={styles[makeKey()]} />
+<div css={styles[variant]} />
+<div css={dynamicStyles?.button} />
+<div css={nullStyles?.button} />
+<div css={{ color: `${runtimeColor}` }} />
+<div css={{ color: `${styles.button}` }} />
+<div css={{ color: `${makeColor()}` }} />
+<div css={{ color: `${undefined}` }} />
+<div css={dynamicModule} />
+<div css={cjsDynamic.card} />
+<div css={cjsNonConst.card} />
+<div css={cjsMutated.card} />
+
+function loadShadowed(require: (path: string) => unknown) {
+  const path = './styles.cjs';
+  return <div css={require(path)} />;
+}
+
+const cjsImported = require(importedCjsPath);
+<div css={cjsImported.card} />
+```
+
+이 예제들은 정적 CSS 규칙 후보로 처리할 수 없습니다. 정적 평가는 동적이거나 형태가 맞지 않는 펼침 피연산자, 중첩 함수/팩터리/호출 값, 옵셔널 호출, 동적 키와 호출에서 나온 키, 동적이거나 nullish인 옵셔널 접근 대상, 런타임/객체/호출/undefined 템플릿 보간, 동적 import 그래프, 동적이거나 const가 아니거나 가져오거나 변경되거나 가려진 CommonJS require 경로, 런타임 값을 거부합니다.
+
+모호한 별표 배럴은 임의의 값을 선택하지 않고 오류가 발생합니다.
+
+```tsx
+// red.ts
+export const button = { color: 'red' } as const;
+
+// blue.ts
+export const button = { color: 'blue' } as const;
+
+// styles.ts
+export * from './red';
+export * from './blue';
+
+// App.tsx
+import { button } from './styles';
+
+<div css={button} />
+```
+
+전체 이름 공간 모드도 내보낸 이름 공간 값이 정적이지 않으면 오류가 발생합니다. 잘못된 내보내기를 건너뛰지 않습니다.
+
+```tsx
+// styles.ts
+export const button = { color: 'red' } as const;
+export const dynamic = getStyle();
+
+// App.tsx
+import * as styles from './styles';
+
+<div css={styles} />
+```

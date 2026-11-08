@@ -4,11 +4,18 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start"
+    "dev": "yarn i18n:compile && next dev",
+    "build": "yarn i18n:check && next build && pagefind --site out --output-path out/_pagefind",
+    "start": "next start",
+    "i18n:extract": "lingui extract --clean",
+    "i18n:compile": "lingui compile --strict",
+    "i18n:check": "yarn i18n:extract && yarn i18n:compile",
+    "check": "yarn i18n:compile && tsc --noEmit",
+    "test": "node --test tests/*.test.mjs"
   },
   "dependencies": {
+    "@lingui/core": "catalog:",
+    "@lingui/react": "catalog:",
     "next": "catalog:",
     "nextra": "catalog:",
     "nextra-theme-docs": "patch:nextra-theme-docs@npm%3A4.6.1#~/.yarn/patches/nextra-theme-docs-npm-4.6.1-0b59bd8bbb.patch",
@@ -16,10 +23,13 @@
     "react-dom": "catalog:"
   },
   "devDependencies": {
+    "@lingui/cli": "catalog:",
+    "@lingui/conf": "catalog:",
     "@types/mdx": "catalog:",
     "@types/node": "catalog:",
     "@types/react": "catalog:",
     "next-rspack": "catalog:",
+    "pagefind": "catalog:",
     "typescript": "catalog:"
   }
 }

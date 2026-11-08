@@ -1,0 +1,137 @@
+# 시작하기
+
+## 설치 [#installation]
+
+핵심 패키지와 번들러 통합 패키지를 설치합니다.
+
+```bash
+npm install @mincho-js/css @mincho-js/vite @vanilla-extract/css
+```
+
+## 번들러 설정 [#bundler-integration]
+
+Mincho.js는 정적 CSS 추출을 위한 빌드 도구 플러그인이 필요합니다. 번들러를 다음과 같이 설정합니다.
+
+### Vite [#vite]
+
+```ts
+// vite.config.ts
+import { defineConfig } from 'vite'
+import { minchoVitePlugin } from '@mincho-js/vite'
+
+export default defineConfig({
+  plugins: [minchoVitePlugin()]
+})
+```
+
+## 스타일 만들기 [#create-a-style]
+
+`.css.ts` 파일을 만들고 `css()` 함수로 스타일을 정의합니다.
+
+```ts
+// button.css.ts
+import { css } from '@mincho-js/css'
+
+export const button = css({
+  padding: 16,
+  backgroundColor: 'blue',
+  color: 'white',
+  borderRadius: 8,
+  border: 'none',
+  cursor: 'pointer'
+})
+```
+
+`css()` 함수는 모든 요소에 적용할 수 있는 고유한 클래스 이름을 반환합니다.
+
+```css
+/* Generated CSS */
+.button_button__abc123 {
+  padding: 16px;
+  background-color: blue;
+  color: white;
+  border-radius: 8px;
+  border: none;
+  cursor: pointer;
+}
+```
+
+## 스타일 적용하기 [#apply-the-style]
+
+생성된 클래스 이름을 컴포넌트에서 가져와 사용합니다.
+
+```tsx
+// Button.tsx
+import { button } from './button.css'
+
+export function Button() {
+  return <button className={button}>Click me</button>
+}
+```
+
+## 핵심 기능 [#key-features]
+
+Mincho.js는 일반적인 CSS-in-JS보다 편리한 문법을 제공합니다.
+
+### 단위 없는 속성 [#unitless-properties]
+
+숫자는 자동으로 `px`로 변환됩니다. 단위가 필요 없는 CSS 속성은 제외됩니다.
+
+```ts
+css({
+  padding: 16,        // → 16px
+  marginTop: 24,      // → 24px
+  opacity: 0.5,       // → 0.5 (unitless)
+  flexGrow: 1         // → 1 (unitless)
+})
+```
+
+### 의사 선택자 [#pseudo-selectors]
+
+의사 클래스에는 `_` 접두사를, 의사 요소에는 `__` 접두사를 사용합니다.
+
+```ts
+css({
+  color: 'black',
+  _hover: {
+    color: 'blue'
+  },
+  _firstOfType: {
+    fontWeight: 'bold'
+  },
+  __before: {
+    content: '""'
+  }
+})
+```
+
+### CSS 변수 [#css-variables]
+
+`$` 접두사로 CSS 변수를 정의하고 참조합니다.
+
+```ts
+css({
+  $primaryColor: 'blue',
+  color: '$primaryColor',
+  backgroundColor: '$secondaryColor(white)' // with fallback
+})
+```
+
+### 중첩 속성 [#nested-properties]
+
+대문자로 시작하는 키를 사용해 관련 속성을 묶습니다.
+
+```ts
+css({
+  padding: {
+    Block: 16,
+    Inline: 24
+  }
+  // → padding-block: 16px; padding-inline: 24px;
+})
+```
+
+## 다음 단계 [#next-steps]
+
+- 컴포넌트 변형과 동적 스타일링을 위한 [스타일 규칙](/ko/docs/rules)을 알아보세요.
+- 디자인 토큰을 관리하는 [테마](/ko/docs/theme)를 살펴보세요.

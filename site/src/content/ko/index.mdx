@@ -1,0 +1,26 @@
+# 소개
+
+**Mincho.js** 문서에 오신 것을 환영합니다.
+
+Mincho.js는 TypeScript에서 자연스럽게 CSS를 작성할 수 있는 CSS-in-JS 프레임워크입니다. Vanilla Extract를 기반으로 하며, Tailwind와 같은 시각적 계층과 Stitches와 같은 의미적 계층을 5단계 디자인 시스템으로 통합하는 것을 목표로 합니다.
+
+## 주요 기능 [#features]
+
+- **타입 안전한 CSS** - 자동 완성을 포함한 완전한 TypeScript 지원
+- **런타임 스타일 생성 없음** - 모든 스타일을 빌드 시점에 추출
+- **직관적인 문법** - 자연스러운 CSS 작성 경험
+
+## 간단한 예제 [#quick-example]
+
+```tsx
+import { css } from '@mincho-js/css'
+
+const button = css({
+  padding: 16,
+  backgroundColor: 'blue',
+  color: 'white',
+  _hover: {
+    backgroundColor: 'darkblue'
+  }
+})
+```
