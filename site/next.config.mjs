@@ -19,4 +19,7 @@ const nextConfig = withNextra({
   }
 });
 
-export default withRspack(nextConfig);
+// Webpack keeps documentation compilation stable in the Yarn PnP dev server.
+export default process.env.NODE_ENV === "development"
+  ? nextConfig
+  : withRspack(nextConfig);

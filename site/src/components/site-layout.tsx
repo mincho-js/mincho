@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import { GeistMono } from "geist/font/mono";
 import type { PageMapItem } from "nextra";
-import { Footer, LastUpdated, Layout, Navbar } from "nextra-theme-docs";
+import { LastUpdated, Layout, Navbar } from "nextra-theme-docs";
 import { Head, Search } from "nextra/components";
 import { getPageMap } from "nextra/page-map";
 import { getI18n } from "../i18n/server";
@@ -14,6 +14,7 @@ import {
 import { LanguageSwitcher } from "./language-switcher";
 import { LinguiProvider } from "./lingui-provider";
 import { Brand } from "./brand";
+import { SiteFooter } from "./site-footer";
 import { basePath } from "../../site.config.mjs";
 import "pretendard/dist/web/variable/pretendardvariable-dynamic-subset.css";
 import "nextra-theme-docs/style.css";
@@ -79,7 +80,7 @@ export async function SiteLayout({
         }}
         backgroundColor={{ light: "#f5f3e9", dark: "#151d17" }}
       />
-      <body suppressHydrationWarning>
+      <body id="top" suppressHydrationWarning>
         <LinguiProvider locale={locale} messages={i18n.messages}>
           <Layout
             nextThemes={{ defaultTheme: "light" }}
@@ -147,26 +148,7 @@ export async function SiteLayout({
                 loading={i18n._({ id: "search.loading", message: "Loading…" })}
               />
             }
-            footer={
-              <Footer className="mincho-footer">
-                <div className="mincho-footer-brand">
-                  <Brand />
-                  <p>
-                    {i18n._({
-                      id: "footer.tagline",
-                      message: "A natural way to make the web."
-                    })}
-                  </p>
-                </div>
-                <div className="mincho-footer-links">
-                  <Link href={localizedPath("/docs", locale)}>
-                    {i18n._({ id: "nav.docs", message: "Documentation" })}
-                  </Link>
-                  <a href="https://github.com/mincho-js/mincho">GitHub ↗</a>
-                  <span>© {new Date().getFullYear()} Mincho.js · MIT</span>
-                </div>
-              </Footer>
-            }
+            footer={<SiteFooter locale={locale} />}
           >
             {children}
           </Layout>

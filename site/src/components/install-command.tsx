@@ -34,7 +34,7 @@ export function InstallCommand() {
         <span>npm</span>
         <button type="button" onClick={copy}>
           {status === "copied"
-            ? i18n._({ id: "install.copied", message: "Copied!" })
+            ? i18n._({ id: "install.copied", message: "Copied" })
             : i18n._({ id: "install.copy", message: "Copy command" })}
           <svg
             width="16"

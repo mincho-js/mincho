@@ -64,30 +64,34 @@
   align-items: center;
   gap: 10px;
   color: var(--mincho-ink);
-  font: 800 28px/1 var(--mincho-display);
-  letter-spacing: -1px;
+  font: 700 26px/1 var(--mincho-display);
+  letter-spacing: -0.02em;
 }
 .mincho-wordmark img {
   flex: none;
   width: 29px;
   height: 53px;
 }
+/* Same size as the name, lighter and muted, so ".js" reads as a suffix
+   instead of a smaller tag hanging off the baseline. */
 .mincho-wordmark-js {
-  font-size: 20px;
-  font-weight: 650;
+  margin-left: 1px;
+  color: var(--mincho-muted);
+  font-weight: 500;
+  letter-spacing: -0.01em;
 }
 .mincho-nav-docs {
-  font-size: 13px;
-  font-weight: 600;
+  font-size: 14px;
+  font-weight: 500;
 }
 .mincho-nav-docs:hover {
   text-decoration: underline;
   text-underline-offset: 5px;
 }
 .mincho-language-switcher {
-  max-width: 105px;
-  min-height: 44px;
-  padding: 5px 7px;
+  max-width: 104px;
+  min-height: 40px;
+  padding: 4px 8px;
   font-size: 13px;
   border: 1px solid var(--mincho-line);
   border-radius: 3px;
@@ -108,8 +112,19 @@
 }
 .mincho-hero {
   overflow: clip;
-  background: var(--mincho-green);
-  color: #17231a;
+  /* A soft wash of warm light over the copy side keeps the ink above APCA
+     Lc 45 on the headline without pulling the eye away from the brand green. */
+  background-color: var(--mincho-green);
+  background-image: linear-gradient(
+    in oklab 104deg,
+    rgb(95 208 132 / 0.7) 0%,
+    rgb(95 208 132 / 0.57) 20%,
+    rgb(95 208 132 / 0.41) 40%,
+    rgb(95 208 132 / 0.22) 60%,
+    rgb(95 208 132 / 0.08) 78%,
+    transparent 92%
+  );
+  color: #030b06;
   border-bottom: 2px solid #17231a;
 }
 .mincho-hero :is(a, button):focus-visible {
@@ -119,91 +134,94 @@
   display: grid;
   grid-template-columns: 1.05fr 1fr;
   max-width: 1280px;
-  min-height: 610px;
+  min-height: 608px;
   margin: auto;
   padding: 0 32px;
 }
 .mincho-hero-copy {
   z-index: 1;
-  padding: 68px 0 52px;
+  padding: 72px 0 56px;
 }
 .mincho-eyebrow {
   display: flex;
   align-items: center;
-  gap: 9px;
-  font-size: 11px;
-  font-weight: 600;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 500;
   line-height: 1.6;
-  letter-spacing: 1.8px;
-  text-transform: uppercase;
+}
+.mincho-hero .mincho-eyebrow {
+  font-size: 14px;
 }
 .mincho-small-star {
-  font-size: 23px;
+  font-size: 24px;
   line-height: 1;
 }
 .mincho-hero h1 {
-  margin: 30px 0 25px;
+  margin: 32px 0 24px;
   font-family: var(--mincho-display);
-  font-size: clamp(62px, 6.3vw, 88px);
+  font-size: clamp(60px, 6.2vw, 84px);
   font-weight: 800;
-  letter-spacing: -0.065em;
-  line-height: 1.08;
+  letter-spacing: -0.05em;
+  line-height: 1.04;
 }
 .mincho-hero h1 span,
 .mincho-hero h1 em {
   display: block;
 }
 .mincho-hero h1 em {
-  font-weight: 800;
   font-style: normal;
 }
 .mincho-hero-description {
-  max-width: 350px;
-  font-size: 17px;
-  line-height: 1.7;
+  max-width: 440px;
+  font-size: 20px;
+  font-weight: 500;
+  line-height: 1.6;
 }
 .mincho-hero-actions {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 28px;
-  margin-top: 30px;
+  margin-top: 32px;
 }
 .mincho-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 28px;
-  min-height: 50px;
-  padding: 13px 20px;
+  gap: 10px;
+  min-height: 48px;
+  padding: 12px 16px 12px 20px;
   border: 1.5px solid #17231a;
   border-radius: 3px;
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 600;
   transition:
-    transform 0.18s,
-    box-shadow 0.18s;
+    background-color 0.16s cubic-bezier(0.22, 1, 0.36, 1),
+    transform 0.16s cubic-bezier(0.22, 1, 0.36, 1);
 }
 .mincho-button-citron {
   background: var(--mincho-citron);
   color: #17231a;
   box-shadow: 3px 3px 0 #17231a;
 }
-.mincho-button:hover {
-  transform: translate(-1px, -2px);
-  box-shadow: 5px 5px 0 #17231a;
+.mincho-button-citron:hover {
+  background: #d6db3c;
+}
+.mincho-button:active {
+  transform: scale(0.98);
 }
 .mincho-text-link {
   display: inline-flex;
   align-items: center;
-  gap: 12px;
-  font-size: 13px;
+  gap: 8px;
+  font-size: 14px;
   font-weight: 600;
   line-height: 1.6;
 }
 .mincho-text-link svg {
   flex: none;
-  transition: transform 0.18s;
+  transition: transform 0.16s cubic-bezier(0.22, 1, 0.36, 1);
 }
 .mincho-text-link:hover {
   text-decoration: underline;
@@ -214,8 +232,8 @@
 }
 .mincho-hero-note {
   margin-top: 24px;
-  font-size: 11px;
-  letter-spacing: 0.3px;
+  font-size: 14px;
+  font-weight: 500;
 }
 .mincho-hero-visual {
   position: relative;
@@ -228,7 +246,7 @@
   top: 0;
   width: calc(100% + 20px);
   height: 100%;
-  overflow: visible;
+  overflow: hidden;
 }
 .mincho-code-example {
   position: absolute;
@@ -241,7 +259,7 @@
   background: #f7f5eb;
   box-shadow: 8px 9px 0 #17231a;
   transform: rotate(-3deg);
-  transition: transform 0.25s;
+  transition: transform 0.3s cubic-bezier(0.22, 1, 0.36, 1);
 }
 .mincho-code-example:focus-within {
   transform: rotate(0);
@@ -250,10 +268,10 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  min-height: 47px;
-  padding: 0 22px;
+  min-height: 48px;
+  padding: 0 20px;
   border-bottom: 1px solid #d6d9cd;
-  font: 11px/1.5 var(--mincho-mono);
+  font: 12px/1.5 var(--mincho-mono);
 }
 .mincho-code-title > span:first-child {
   display: flex;
@@ -262,16 +280,16 @@
 }
 .mincho-code-title > span:last-child {
   color: #56634c;
-  font-weight: 700;
+  font-weight: 500;
 }
 .mincho-file-dot {
-  width: 7px;
-  height: 7px;
-  background: #079b59;
+  width: 8px;
+  height: 8px;
+  background: var(--mincho-green);
   border-radius: 50%;
 }
 .mincho-example-source {
-  padding: 24px 22px;
+  padding: 24px 20px;
   overflow-x: auto;
   font: 13px/1.85 var(--mincho-mono);
 }
@@ -299,14 +317,14 @@
 .mincho-swatches {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   border: 0;
   padding: 0;
   min-width: 0;
 }
 .mincho-swatches legend {
-  margin-bottom: 7px;
-  font-size: 11px;
+  margin-bottom: 8px;
+  font-size: 12px;
   line-height: 1;
   color: #56634c;
 }
@@ -315,7 +333,7 @@
   place-items: center;
   width: 44px;
   height: 44px;
-  border: 7px solid #f7f5eb;
+  border: 8px solid #f7f5eb;
   border-radius: 50%;
   color: #17231a;
   cursor: pointer;
@@ -333,13 +351,13 @@
   display: inline-flex;
   align-items: center;
   justify-content: space-between;
-  gap: 14px;
-  padding: 12px;
+  gap: 6px;
+  padding: 12px 10px 12px 12px;
   border: 1px solid #17231a;
-  border-radius: 4px;
-  font-size: 11px;
+  border-radius: 3px;
+  font-size: 12px;
   font-weight: 600;
-  transition: background-color 0.2s;
+  transition: background-color 0.16s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .mincho-foundations {
@@ -349,40 +367,49 @@
   gap: 24px;
   max-width: 1280px;
   margin: auto;
-  padding: 26px 32px;
+  padding: 24px 32px;
   border-bottom: 1px solid var(--mincho-line);
 }
 .mincho-foundations p {
   color: var(--mincho-muted);
-  font-size: 12px;
+  font-size: 13px;
 }
 .mincho-foundations > div {
   display: flex;
   align-items: center;
-  gap: 24px;
-  font-size: 13px;
-  font-weight: 600;
+  gap: 32px;
+  font-size: 14px;
+  font-weight: 500;
 }
-.mincho-foundations [aria-hidden] {
-  color: #71815e;
-  font-size: 18px;
+.mincho-compare {
+  max-width: 1280px;
+  margin: auto;
+  padding: 80px 32px 0;
+}
+.mincho-compare-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px;
+}
+.mincho-compare-grid figure {
+  min-width: 0;
+  margin: 0;
 }
 .mincho-features {
   max-width: 1280px;
   margin: auto;
-  padding: 76px 32px 84px;
+  padding: 80px 32px;
 }
 .mincho-section-heading {
-  margin-bottom: 42px;
+  margin-bottom: 40px;
 }
 .mincho-section-heading .mincho-eyebrow {
   color: var(--mincho-muted);
-  font-size: 10px;
 }
 .mincho-section-heading h2 {
   margin-top: 12px;
-  font: 750 clamp(28px, 3.2vw, 42px)/1.25 var(--mincho-display);
-  letter-spacing: -1.5px;
+  font: 800 clamp(28px, 3.2vw, 40px)/1.2 var(--mincho-display);
+  letter-spacing: -0.03em;
   text-wrap: balance;
 }
 .mincho-feature-grid {
@@ -394,41 +421,26 @@
   display: flex;
   flex-direction: column;
   border-top: 2px solid var(--mincho-ink);
-  padding-top: 22px;
+  padding-top: 20px;
 }
-.mincho-feature-top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-.mincho-feature-top > span {
-  font: 11px/1 var(--mincho-mono);
+.mincho-feature-number {
+  font: 12px/1 var(--mincho-mono);
   color: var(--mincho-muted);
-}
-.mincho-feature-top > svg {
-  width: 33px;
-  height: 33px;
-  color: #54804a;
-}
-.mincho-feature:nth-child(2) .mincho-feature-top > svg {
-  transform: rotate(-30deg);
-}
-.mincho-feature:nth-child(3) .mincho-feature-top > svg {
-  transform: rotate(20deg);
+  font-variant-numeric: tabular-nums;
 }
 .mincho-feature h3 {
-  margin: 20px 0 13px;
+  margin: 20px 0 12px;
   font-size: 20px;
   font-weight: 600;
   line-height: 1.35;
-  letter-spacing: -0.6px;
+  letter-spacing: -0.01em;
 }
 .mincho-feature p {
-  margin-bottom: 28px;
-  max-width: 330px;
+  margin-bottom: 24px;
+  max-width: 340px;
   color: var(--mincho-muted);
-  font-size: 14px;
-  line-height: 1.8;
+  font-size: 15px;
+  line-height: 1.7;
 }
 .mincho-feature .mincho-text-link {
   margin-top: auto;
@@ -439,11 +451,14 @@
   align-items: center;
   gap: 80px;
   max-width: 1216px;
-  margin: 0 auto 72px;
+  margin: 0 auto 80px;
   padding: 48px;
   border: 1px solid #17231a;
   background: #17231a;
   color: #f5f3e9;
+}
+.mincho-start > div {
+  min-width: 0;
 }
 .mincho-start-copy > svg {
   width: 36px;
@@ -451,21 +466,20 @@
   color: var(--mincho-citron);
 }
 .mincho-start h2 {
-  max-width: 400px;
-  margin: 16px 0;
-  font: 750 36px/1.2 var(--mincho-display);
-  letter-spacing: -1.1px;
+  max-width: 440px;
+  margin: 16px 0 12px;
+  font: 800 32px/1.25 var(--mincho-display);
+  letter-spacing: -0.02em;
   text-wrap: balance;
 }
 .mincho-start p {
-  font-size: 13px;
+  font-size: 15px;
   color: #b9c3b4;
-  line-height: 1.8;
+  line-height: 1.7;
 }
 .mincho-start .mincho-text-link {
   color: var(--mincho-citron);
   margin-top: 16px;
-  font-size: 12px;
 }
 .mincho-install-command {
   border: 1px solid #59614f;
@@ -476,8 +490,8 @@
   align-items: center;
   justify-content: space-between;
   border-bottom: 1px solid #45503f;
-  padding: 10px 16px;
-  font: 11px/1.5 var(--mincho-mono);
+  padding: 0 16px;
+  font: 12px/1.5 var(--mincho-mono);
 }
 .mincho-terminal-title > span {
   color: #c4ceb7;
@@ -485,7 +499,7 @@
 .mincho-terminal-title button {
   display: inline-flex;
   align-items: center;
-  gap: 9px;
+  gap: 8px;
   min-height: 44px;
   color: #e7edcc;
   cursor: pointer;
@@ -494,53 +508,132 @@
   color: var(--mincho-citron);
 }
 .mincho-install-command pre {
-  padding: 19px 20px 6px;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
+  padding: 20px 20px 8px;
+  overflow-x: auto;
+  white-space: pre;
   font: 13px/1.9 var(--mincho-mono);
 }
 .mincho-install-command pre span {
   color: var(--mincho-citron);
 }
 .mincho-install-command .mincho-copy-status {
-  min-height: 25px;
+  min-height: 28px;
   margin: 0;
-  padding: 0 20px 6px;
+  padding: 0 20px 8px;
   color: var(--mincho-citron);
-  font-size: 10px;
+  font-size: 12px;
 }
 
-.mincho-site div:has(> .mincho-footer) {
-  background: var(--mincho-paper);
-}
 .mincho-footer {
-  justify-content: space-between;
-  gap: 40px;
-  padding: 42px 32px;
-}
-.mincho-footer-brand p {
-  margin-top: 12px;
-  color: var(--mincho-muted);
-  font-size: 12px;
-}
-.mincho-footer-links {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  align-items: center;
-  gap: 14px 24px;
-  font-size: 12px;
+  border-top: 1px solid var(--mincho-line);
+  background: var(--mincho-paper);
   color: var(--mincho-ink);
 }
-.mincho-footer-links > span {
-  flex-basis: 100%;
-  text-align: right;
-  color: var(--mincho-muted);
-  font-size: 11px;
+.mincho-footer-inner {
+  max-width: 1280px;
+  margin: auto;
+  padding: 72px 32px 40px;
 }
-.mincho-footer-links a:hover {
+.mincho-footer-top {
+  display: grid;
+  grid-template-columns: 1.2fr 2fr;
+  gap: 64px;
+  padding-bottom: 64px;
+}
+.mincho-footer-brand > a {
+  display: inline-block;
+}
+.mincho-footer-brand p {
+  max-width: 240px;
+  margin-top: 16px;
+  color: var(--mincho-muted);
+  font-size: 14px;
+  line-height: 1.7;
+}
+.mincho-footer-nav {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 32px;
+}
+.mincho-footer-group h2 {
+  margin-bottom: 16px;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.6;
+}
+.mincho-footer-group ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.mincho-footer-group a {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: fit-content;
+  min-height: 36px;
+  color: var(--mincho-ink);
+  font-size: 14px;
+  line-height: 1.6;
+}
+.mincho-footer-group svg {
+  width: 14px;
+  height: 14px;
+  color: var(--mincho-muted);
+}
+.mincho-footer-bottom {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 24px;
+  border-top: 1px solid var(--mincho-line);
+  padding-top: 20px;
+}
+.mincho-footer-copyright {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 24px;
+  color: var(--mincho-muted);
+  font-size: 13px;
+}
+.mincho-footer-actions {
+  display: flex;
+  align-items: center;
+  gap: 32px;
+}
+.mincho-footer .mincho-footer-theme {
+  min-height: 44px;
+  padding: 8px;
+  color: var(--mincho-muted);
+  font-size: 13px;
+}
+.mincho-footer .mincho-footer-theme:hover {
+  background: color-mix(in srgb, var(--mincho-ink) 6%, var(--mincho-paper));
+  color: var(--mincho-ink);
+}
+.mincho-footer-back-top {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  font-size: 13px;
+}
+.mincho-footer-back-top svg {
+  width: 16px;
+  height: 16px;
+  transform: rotate(-90deg);
+}
+.mincho-footer a:hover {
   text-decoration: underline;
   text-underline-offset: 4px;
+}
+.mincho-footer-stripes {
+  display: block;
+  width: 100%;
+  height: clamp(128px, 16vw, 200px);
+  background: var(--mincho-paper);
+  color: var(--mincho-ink);
 }
 
 .mincho-site article {
@@ -548,14 +641,14 @@
 }
 .mincho-site article h1 {
   font-family: var(--mincho-display);
-  font-weight: 750;
+  font-weight: 700;
   font-size: 44px;
   line-height: 1.15;
-  letter-spacing: -1.8px;
+  letter-spacing: -0.03em;
 }
 .mincho-site article h2 {
   font-weight: 600;
-  letter-spacing: -0.6px;
+  letter-spacing: -0.01em;
   border-color: var(--mincho-line);
 }
 .mincho-site article p,
@@ -580,7 +673,7 @@
   font-weight: 600;
 }
 .mincho-site .nextra-toc {
-  font-size: 12px;
+  font-size: 13px;
 }
 .mincho-site[lang="ko"] :is(.mincho-home, article) {
   word-break: keep-all;
@@ -588,14 +681,18 @@
 }
 .mincho-site[lang="ko"] .mincho-hero h1 {
   font-size: clamp(50px, 5.5vw, 76px);
-  line-height: 1.2;
-  letter-spacing: -4.5px;
+  line-height: 1.16;
+  letter-spacing: -0.05em;
 }
 .mincho-site[lang="ko"] .mincho-hero h1 em {
   font-style: normal;
 }
 .mincho-site[lang="ko"] :is(.mincho-section-heading h2, .mincho-start h2) {
   line-height: 1.4;
+}
+.mincho-site.dark .mincho-start {
+  border-color: var(--mincho-line);
+  background: #0f1611;
 }
 
 @media (min-width: 1600px) {
@@ -613,18 +710,17 @@
     min-height: 570px;
   }
   .mincho-hero-copy {
-    padding-top: 60px;
+    padding-top: 64px;
   }
   .mincho-hero h1 {
     font-size: clamp(52px, 6.1vw, 64px);
-    letter-spacing: -0.065em;
   }
   .mincho-hero-description {
-    max-width: 315px;
-    font-size: 15px;
+    max-width: 360px;
+    font-size: 18px;
   }
   .mincho-hero-actions {
-    gap: 18px;
+    gap: 20px;
   }
   .mincho-code-example {
     left: 0;
@@ -632,25 +728,25 @@
     top: 158px;
   }
   .mincho-example-source {
-    font-size: 11px;
+    font-size: 12px;
     padding: 20px 16px;
   }
   .mincho-example-controls {
-    padding: 14px;
+    padding: 16px;
   }
   .mincho-preview-button {
-    font-size: 10px;
-    padding: 9px;
-    gap: 6px;
+    font-size: 12px;
+    padding: 8px 6px 8px 8px;
+    gap: 4px;
   }
   .mincho-foundations {
-    gap: 14px;
+    gap: 16px;
   }
   .mincho-foundations > div {
-    gap: 14px;
+    gap: 16px;
   }
   .mincho-feature-grid {
-    gap: 26px;
+    gap: 24px;
   }
   .mincho-start {
     margin-right: 32px;
@@ -675,9 +771,6 @@
     width: 24px;
     height: 44px;
   }
-  .mincho-wordmark-js {
-    font-size: 18px;
-  }
   .mincho-navbar {
     gap: 8px;
     padding-left: 16px;
@@ -695,56 +788,97 @@
     font-size: 12px;
     min-height: 44px;
   }
+  .mincho-hero {
+    background-image: linear-gradient(
+      in oklab 172deg,
+      rgb(95 208 132 / 0.7) 0%,
+      rgb(95 208 132 / 0.57) 15%,
+      rgb(95 208 132 / 0.41) 30%,
+      rgb(95 208 132 / 0.22) 45%,
+      rgb(95 208 132 / 0.08) 58%,
+      transparent 69%
+    );
+  }
   .mincho-hero-inner {
     grid-template-columns: 1fr;
     padding: 0 24px;
   }
   .mincho-hero-copy {
-    padding: 42px 0 24px;
+    padding: 40px 0;
   }
   .mincho-eyebrow {
-    font-size: 10px;
-    letter-spacing: 1.2px;
+    font-size: 12px;
   }
   .mincho-hero h1 {
-    font-size: clamp(46px, 10.5vw, 72px);
-    letter-spacing: -0.065em;
+    font-size: clamp(44px, 11vw, 64px);
     margin-top: 24px;
-    margin-bottom: 22px;
+    margin-bottom: 20px;
   }
   .mincho-hero-description {
-    max-width: 390px;
-    font-size: 15px;
+    max-width: 400px;
+    font-size: 18px;
   }
   .mincho-hero-actions {
     margin-top: 24px;
     gap: 24px;
   }
   .mincho-button {
-    font-size: 13px;
-    min-height: 47px;
-    padding: 11px 17px;
-    gap: 22px;
+    font-size: 14px;
+    min-height: 48px;
+    padding: 12px 12px 12px 16px;
+    gap: 8px;
   }
   .mincho-hero-note {
     margin-top: 20px;
   }
   .mincho-hero-visual {
+    --mincho-hero-fade-size: 20px;
     min-height: 430px;
     max-width: 520px;
     width: 100%;
     margin: 0 auto;
   }
+  /* Soften only the top edge; keep the leaves and branches fully visible. */
+  .mincho-hero-visual::before {
+    content: "";
+    position: absolute;
+    z-index: 1;
+    inset: -2px -24px auto;
+    height: calc(var(--mincho-hero-fade-size) + 4px);
+    pointer-events: none;
+    user-select: none;
+    -webkit-backdrop-filter: blur(1px);
+    backdrop-filter: blur(1px);
+    -webkit-mask-image: linear-gradient(transparent, #000 2px, transparent);
+    mask-image: linear-gradient(transparent, #000 2px, transparent);
+  }
   .mincho-botanical-art {
     width: 100%;
     right: -12px;
+    -webkit-mask-image: linear-gradient(
+      rgb(0 0 0 / 0.6),
+      rgb(0 0 0 / 0.86) calc(var(--mincho-hero-fade-size) * 0.4),
+      rgb(0 0 0 / 0.98) calc(var(--mincho-hero-fade-size) * 0.8),
+      #000 var(--mincho-hero-fade-size)
+    );
+    mask-image: linear-gradient(
+      rgb(0 0 0 / 0.6),
+      rgb(0 0 0 / 0.86) calc(var(--mincho-hero-fade-size) * 0.4),
+      rgb(0 0 0 / 0.98) calc(var(--mincho-hero-fade-size) * 0.8),
+      #000 var(--mincho-hero-fade-size)
+    );
+  }
+  .mincho-botanical-art > g {
+    /* Reveal the leaf tips above the original crop instead of fading them out. */
+    transform: translateY(36px);
   }
   .mincho-code-example {
     position: relative;
+    z-index: 2;
     top: auto;
     left: auto;
     right: auto;
-    margin: 40px 8px 40px 3px;
+    margin: 40px 8px 40px 4px;
   }
   .mincho-example-source {
     font-size: 12px;
@@ -752,11 +886,11 @@
   }
   .mincho-example-controls {
     flex-wrap: wrap;
-    padding: 14px;
+    padding: 16px;
   }
   .mincho-preview-button {
-    font-size: 11px;
-    padding: 11px;
+    font-size: 12px;
+    padding: 12px 10px 12px 12px;
   }
   .mincho-foundations {
     flex-direction: column;
@@ -768,63 +902,92 @@
     justify-content: space-between;
     width: 100%;
     gap: 8px;
-    font-size: 12px;
+    font-size: 13px;
+  }
+  .mincho-compare {
+    padding: 56px 24px 0;
+  }
+  .mincho-compare-grid {
+    grid-template-columns: 1fr;
   }
   .mincho-features {
-    padding: 50px 24px;
+    padding: 56px 24px;
   }
   .mincho-section-heading {
     margin-bottom: 32px;
   }
   .mincho-section-heading h2 {
     max-width: 400px;
-    font-size: 34px;
+    font-size: 32px;
   }
   .mincho-feature-grid {
     grid-template-columns: 1fr;
     gap: 32px;
   }
   .mincho-feature h3 {
-    margin-top: 14px;
+    margin-top: 16px;
   }
   .mincho-feature p {
     max-width: 500px;
-    margin-bottom: 18px;
+    margin-bottom: 20px;
   }
   .mincho-start {
     grid-template-columns: 1fr;
     margin: 0 24px 48px;
     padding: 28px;
-    gap: 30px;
+    gap: 32px;
   }
   .mincho-start h2 {
-    font-size: 35px;
+    font-size: 28px;
   }
   .mincho-start p {
     max-width: 350px;
   }
   .mincho-install-command pre {
     font-size: 12px;
-    padding: 16px 14px 6px;
+    padding: 16px 16px 8px;
   }
-  .mincho-footer {
+  .mincho-footer-inner {
+    padding: 48px 24px 32px;
+  }
+  .mincho-footer-top {
+    grid-template-columns: 1fr;
+    gap: 40px;
+    padding-bottom: 40px;
+  }
+  .mincho-footer-nav {
+    gap: 24px;
+  }
+  .mincho-footer-group h2 {
+    margin-bottom: 8px;
+  }
+  .mincho-footer-group a {
+    min-height: 44px;
+  }
+  .mincho-footer-bottom {
     flex-direction: column;
-    padding: 32px 24px;
-    gap: 28px;
+    align-items: flex-start;
+    gap: 16px;
   }
-  .mincho-footer-links {
-    justify-content: flex-start;
+  .mincho-footer-actions {
+    justify-content: space-between;
+    width: 100%;
   }
-  .mincho-footer-links > span {
-    text-align: left;
+  .mincho-footer .mincho-footer-theme {
+    margin-left: -8px;
   }
   .mincho-site article h1 {
     font-size: 38px;
-    letter-spacing: -1px;
   }
   .mincho-site[lang="ko"] .mincho-hero h1 {
-    font-size: clamp(46px, 10.5vw, 72px);
-    letter-spacing: -0.055em;
+    font-size: clamp(44px, 10.5vw, 64px);
+    letter-spacing: -0.04em;
+  }
+}
+
+@media (max-width: 480px) {
+  .mincho-footer-nav {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 

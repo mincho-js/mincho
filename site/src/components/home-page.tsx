@@ -3,6 +3,7 @@ import { getI18n } from "../i18n/server";
 import { localizedPath, type Locale } from "../i18n/routing";
 import { ArrowIcon, BotanicalArt, SproutMark } from "./botanical-art";
 import { CodeExample } from "./code-example";
+import { CompareSection } from "./compare-section";
 import { InstallCommand } from "./install-command";
 import { WorkflowSection } from "./workflow-section";
 
@@ -13,7 +14,7 @@ export function HomePage({ locale }: { locale: Locale }) {
       number: "01",
       title: i18n._({
         id: "home.typed.title",
-        message: "A little more confidence."
+        message: "Typed from the first line"
       }),
       description: i18n._({
         id: "home.typed.body",
@@ -27,7 +28,7 @@ export function HomePage({ locale }: { locale: Locale }) {
       number: "02",
       title: i18n._({
         id: "home.static.title",
-        message: "Less work for the browser."
+        message: "Static CSS at build time"
       }),
       description: i18n._({
         id: "home.static.body",
@@ -41,7 +42,7 @@ export function HomePage({ locale }: { locale: Locale }) {
       number: "03",
       title: i18n._({
         id: "home.system.title",
-        message: "Space to make it yours."
+        message: "From one style to a design system"
       }),
       description: i18n._({
         id: "home.system.body",
@@ -71,15 +72,13 @@ export function HomePage({ locale }: { locale: Locale }) {
               <span>
                 {i18n._({ id: "home.titleStart", message: "Let your" })}
               </span>
-              <em>
-                {i18n._({ id: "home.titleEnd", message: "styles grow." })}
-              </em>
+              <em>{i18n._({ id: "home.titleEnd", message: "styles grow" })}</em>
             </h1>
             <p className="mincho-hero-description">
               {i18n._({
                 id: "home.description",
                 message:
-                  "Expressive styles. Strong roots. A CSS-in-TypeScript framework that gives your ideas room to grow."
+                  "A CSS-in-TypeScript framework built on Vanilla Extract. Write typed styles and ship static CSS."
               })}
             </p>
             <div className="mincho-hero-actions">
@@ -101,7 +100,7 @@ export function HomePage({ locale }: { locale: Locale }) {
             <p className="mincho-hero-note">
               {i18n._({
                 id: "home.note",
-                message: "Open source. Thoughtfully grown."
+                message: "Open source under the MIT license"
               })}
             </p>
           </div>
@@ -116,42 +115,39 @@ export function HomePage({ locale }: { locale: Locale }) {
         <p>
           {i18n._({
             id: "home.foundation",
-            message: "Good things grow from good foundations."
+            message: "Built on"
           })}
         </p>
         <div>
           <span>TypeScript</span>
-          <span aria-hidden="true">✳</span>
           <span>Vanilla Extract</span>
-          <span aria-hidden="true">✳</span>
           <span>{i18n._({ id: "home.staticCss", message: "Static CSS" })}</span>
         </div>
       </div>
 
       <WorkflowSection locale={locale} />
 
+      <CompareSection locale={locale} />
+
       <section className="mincho-features" aria-labelledby="features-title">
         <div className="mincho-section-heading">
           <p className="mincho-eyebrow">
             {i18n._({
               id: "home.featuresLabel",
-              message: "ROOTED IN SIMPLICITY"
+              message: "Rooted in simplicity"
             })}
           </p>
           <h2 id="features-title">
             {i18n._({
               id: "home.featuresTitle",
-              message: "Feels like CSS. Grows with you."
+              message: "Feels like CSS, grows with you"
             })}
           </h2>
         </div>
         <div className="mincho-feature-grid">
           {features.map((feature) => (
             <article className="mincho-feature" key={feature.number}>
-              <div className="mincho-feature-top">
-                <span>{feature.number} /</span>
-                <SproutMark />
-              </div>
+              <span className="mincho-feature-number">{feature.number}</span>
               <h3>{feature.title}</h3>
               <p>{feature.description}</p>
               <Link
@@ -172,14 +168,13 @@ export function HomePage({ locale }: { locale: Locale }) {
           <h2 id="start-title">
             {i18n._({
               id: "home.startTitle",
-              message: "Something good starts here."
+              message: "Install Mincho and write your first style"
             })}
           </h2>
           <p>
             {i18n._({
               id: "home.startBody",
-              message:
-                "Plant the first line. Make something that feels like you."
+              message: "One command installs the packages for a Vite project."
             })}
           </p>
         </div>

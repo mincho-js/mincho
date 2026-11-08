@@ -45,6 +45,7 @@ export function BotanicalArt() {
     <svg
       className="mincho-botanical-art"
       viewBox="0 0 560 600"
+      preserveAspectRatio="xMidYMin slice"
       fill="none"
       aria-hidden="true"
     >
@@ -60,6 +61,7 @@ export function BotanicalArt() {
         <path id="leaf-shape" d="M0 0C-66-7-74-56-49-79-17-72 14-43 0 0Z" />
       </defs>
       <g stroke="#17231a" strokeWidth="19" strokeLinecap="square">
+        <path d="M88-34 89-80M343-30 344-80M493-24 493-80M181-16 140-60" />
         <path d="m79 621 9-655M331 627 343-30m155 674-5-668" />
         <path d="m-5 187 596-118M74 489l449-140M181-16l163 178m-5 143L514 191M340 473 473 600" />
       </g>

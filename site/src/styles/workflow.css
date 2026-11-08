@@ -20,7 +20,7 @@
   display: flex;
   align-items: center;
   gap: 14px;
-  min-height: 98px;
+  min-height: 96px;
   padding: 20px;
   color: var(--mincho-ink);
   text-align: left;
@@ -47,18 +47,17 @@
 }
 .mincho-step-number {
   align-self: flex-start;
-  font-size: 11px;
-  font-weight: 600;
+  font: 12px/1.5 var(--mincho-mono);
+  font-variant-numeric: tabular-nums;
 }
 .mincho-workflow-tabs strong {
   display: block;
-  font: 600 15px/1.5 var(--mincho-mono);
-  letter-spacing: -0.5px;
+  font: 500 15px/1.5 var(--mincho-mono);
 }
 .mincho-step-label {
   display: block;
-  margin-top: 5px;
-  font-size: 12px;
+  margin-top: 4px;
+  font-size: 13px;
 }
 .mincho-workflow-tabs svg {
   margin-left: auto;
@@ -81,25 +80,24 @@
 .mincho-preview-heading {
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 8px;
 }
 .mincho-preview-heading h3 {
   font-size: 17px;
-  font-weight: 700;
-  letter-spacing: -0.3px;
+  font-weight: 600;
 }
 .mincho-live-dot {
-  width: 7px;
-  height: 7px;
+  width: 8px;
+  height: 8px;
   flex: none;
   border-radius: 50%;
   background: var(--mincho-green);
 }
 .mincho-preview-description {
-  margin: 12px 0 22px;
+  margin: 12px 0 24px;
   color: var(--mincho-muted);
-  font-size: 13px;
-  line-height: 1.8;
+  font-size: 14px;
+  line-height: 1.7;
 }
 .mincho-workflow-stage {
   display: flex;
@@ -114,8 +112,9 @@
   font-size: 16px;
 }
 .mincho-workflow-stage p {
-  margin-top: 18px;
-  font-size: 11px;
+  margin-top: 16px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
   color: var(--mincho-muted);
 }
 .mincho-workflow-controls {
@@ -123,7 +122,7 @@
 }
 .mincho-theme-options legend,
 .mincho-variant-options label {
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
 }
 .mincho-theme-options > div {
@@ -148,8 +147,8 @@
   box-shadow: inset 0 0 0 1px var(--mincho-ink);
 }
 .mincho-palette-dot {
-  width: 11px;
-  height: 11px;
+  width: 12px;
+  height: 12px;
   border-radius: 50%;
   border: 1px solid #75816e;
 }
@@ -180,17 +179,17 @@
 }
 .mincho-workflow-output {
   margin-top: 24px;
-  padding: 14px 0;
+  padding: 16px 0;
   border-top: 1px solid var(--mincho-line);
   border-bottom: 1px solid var(--mincho-line);
-  font: 11px/1.8 var(--mincho-mono);
+  font: 12px/1.8 var(--mincho-mono);
   overflow-wrap: anywhere;
 }
 .mincho-workflow-note {
-  margin-top: 14px;
+  margin-top: 16px;
   color: var(--mincho-muted);
-  font-size: 12px;
-  line-height: 1.8;
+  font-size: 13px;
+  line-height: 1.7;
 }
 .mincho-workflow-panels {
   grid-area: code;
@@ -201,14 +200,14 @@
 }
 .mincho-step-intro h3 {
   font-size: 24px;
-  font-weight: 700;
-  letter-spacing: -0.7px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
 }
 .mincho-step-intro p {
   margin-top: 12px;
   color: var(--mincho-muted);
-  font-size: 14px;
-  line-height: 1.8;
+  font-size: 15px;
+  line-height: 1.7;
 }
 .mincho-step-intro .mincho-text-link {
   margin-top: 16px;
@@ -225,8 +224,10 @@
   color: var(--mincho-muted);
 }
 .mincho-workflow-source {
-  max-height: 550px;
-  overflow: auto;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: 20px;
+  overflow-x: auto;
   overscroll-behavior-x: contain;
   padding: 24px;
   border: 1px solid var(--mincho-line);
@@ -235,6 +236,12 @@
   color: #17231a;
   font: 13px/1.85 var(--mincho-mono);
   tab-size: 2;
+}
+.mincho-code-gutter {
+  color: #8a9285;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  user-select: none;
 }
 .mincho-workflow-source .token-keyword {
   color: #734b78;
@@ -251,6 +258,9 @@
 .mincho-site.dark .mincho-workflow-source {
   background: #1d281f;
   color: #e7eedf;
+}
+.mincho-site.dark .mincho-code-gutter {
+  color: #6f7b6c;
 }
 .mincho-site.dark .mincho-workflow-source .token-keyword {
   color: #c9a8dd;
@@ -293,7 +303,7 @@
     gap: 24px;
   }
   .mincho-workflow {
-    padding: 54px 24px 0;
+    padding: 56px 24px 0;
   }
   .mincho-section-description {
     font-size: 14px;
@@ -304,8 +314,8 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .mincho-workflow-tabs button {
-    min-height: 90px;
-    padding: 14px 10px;
+    min-height: 88px;
+    padding: 16px 12px;
     gap: 8px;
   }
   .mincho-workflow-tabs button:nth-child(3) {
@@ -318,7 +328,7 @@
     font-size: 12px;
   }
   .mincho-step-label {
-    font-size: 11px;
+    font-size: 12px;
     line-height: 1.5;
   }
   .mincho-workflow-grid {
@@ -341,10 +351,10 @@
     font-size: 22px;
   }
   .mincho-workflow-source {
-    max-height: 420px;
-    padding: 18px 14px;
+    column-gap: 16px;
+    padding: 20px 16px;
   }
   .mincho-workflow-file {
-    padding: 12px 14px;
+    padding: 12px 16px;
   }
 }

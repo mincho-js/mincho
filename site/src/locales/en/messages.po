@@ -14,12 +14,12 @@ msgstr ""
 "Plural-Forms: \n"
 
 #. js-lingui-explicit-id
-#: src/components/home-page.tsx:14
-msgid "home.typed.title"
-msgstr "A little more confidence."
+#: src/components/home-page.tsx:78
+msgid "home.description"
+msgstr "A CSS-in-TypeScript framework built on Vanilla Extract. Write typed styles and ship static CSS."
 
 #. js-lingui-explicit-id
-#: src/components/site-layout.tsx:155
+#: src/components/site-footer.tsx:62
 msgid "footer.tagline"
 msgstr "A natural way to make the web."
 
@@ -27,6 +27,26 @@ msgstr "A natural way to make the web."
 #: src/components/workflow-showcase.tsx:198
 msgid "workflow.accent"
 msgstr "Accent"
+
+#. js-lingui-explicit-id
+#: src/components/site-footer.tsx:106
+msgid "footer.backToTop"
+msgstr "Back to top"
+
+#. js-lingui-explicit-id
+#: src/components/site-footer.tsx:29
+msgid "footer.build"
+msgstr "Build with Mincho"
+
+#. js-lingui-explicit-id
+#: src/components/home-page.tsx:116
+msgid "home.foundation"
+msgstr "Built on"
+
+#. js-lingui-explicit-id
+#: src/components/site-footer.tsx:46
+msgid "footer.changelog"
+msgstr "Changelog"
 
 #. js-lingui-explicit-id
 #: src/components/code-example.tsx:13
@@ -54,6 +74,11 @@ msgid "install.copySuccess"
 msgstr "Command copied to clipboard."
 
 #. js-lingui-explicit-id
+#: src/components/compare-section.tsx:47
+msgid "compare.eyebrow"
+msgstr "Compared with Vanilla Extract"
+
+#. js-lingui-explicit-id
 #: src/components/workflow-showcase.tsx:46
 msgid "workflow.define.body"
 msgstr "Connect theme tokens to CSS properties. Add shortcuts like px and py, with autocomplete for every allowed value."
@@ -61,7 +86,7 @@ msgstr "Connect theme tokens to CSS properties. Add shortcuts like px and py, wi
 #. js-lingui-explicit-id
 #: src/components/install-command.tsx:37
 msgid "install.copied"
-msgstr "Copied!"
+msgstr "Copied"
 
 #. js-lingui-explicit-id
 #: src/components/install-command.tsx:38
@@ -69,7 +94,7 @@ msgid "install.copy"
 msgstr "Copy command"
 
 #. js-lingui-explicit-id
-#: src/components/site-layout.tsx:119
+#: src/components/site-layout.tsx:120
 msgid "theme.dark"
 msgstr "Dark"
 
@@ -84,18 +109,17 @@ msgid "workflow.steps"
 msgstr "Design system steps"
 
 #. js-lingui-explicit-id
-#: src/components/site-layout.tsx:97
-#: src/components/site-layout.tsx:163
+#: src/components/site-layout.tsx:98
 msgid "nav.docs"
 msgstr "Documentation"
 
 #. js-lingui-explicit-id
-#: src/components/site-layout.tsx:104
+#: src/components/site-layout.tsx:105
 msgid "docs.edit"
 msgstr "Edit this page"
 
 #. js-lingui-explicit-id
-#: src/components/home-page.tsx:52
+#: src/components/home-page.tsx:53
 msgid "home.system.link"
 msgstr "Explore design rules"
 
@@ -105,44 +129,49 @@ msgid "workflow.apiLink"
 msgstr "Explore the API"
 
 #. js-lingui-explicit-id
-#: src/components/home-page.tsx:94
+#: src/components/home-page.tsx:93
 msgid "home.exploreFlow"
 msgstr "Explore the workflow"
 
 #. js-lingui-explicit-id
-#: src/components/home-page.tsx:79
-msgid "home.description"
-msgstr "Expressive styles. Strong roots. A CSS-in-TypeScript framework that gives your ideas room to grow."
-
-#. js-lingui-explicit-id
-#: src/components/site-layout.tsx:143
+#: src/components/site-layout.tsx:144
 msgid "search.error"
 msgstr "Failed to load search index."
 
 #. js-lingui-explicit-id
-#: src/components/home-page.tsx:142
+#: src/components/home-page.tsx:141
 msgid "home.featuresTitle"
-msgstr "Feels like CSS. Grows with you."
+msgstr "Feels like CSS, grows with you"
 
 #. js-lingui-explicit-id
-#: src/components/home-page.tsx:192
+#: src/components/home-page.tsx:187
 msgid "home.setupGuide"
 msgstr "Follow the setup guide"
 
 #. js-lingui-explicit-id
-#: src/components/workflow-section.tsx:36
-msgid "workflow.eyebrow"
-msgstr "FROM A TOKEN TO A COMPONENT"
+#: src/components/site-footer.tsx:70
+msgid "footer.navigation"
+msgstr "Footer navigation"
 
 #. js-lingui-explicit-id
-#: src/components/home-page.tsx:90
+#: src/components/workflow-section.tsx:36
+msgid "workflow.eyebrow"
+msgstr "From a token to a component"
+
+#. js-lingui-explicit-id
+#: src/components/home-page.tsx:43
+msgid "home.system.title"
+msgstr "From one style to a design system"
+
+#. js-lingui-explicit-id
+#: src/components/home-page.tsx:89
 msgid "home.getStarted"
 msgstr "Get Started"
 
 #. js-lingui-explicit-id
-#: src/components/home-page.tsx:117
-msgid "home.foundation"
-msgstr "Good things grow from good foundations."
+#: src/components/site-footer.tsx:19
+msgid "footer.getStarted"
+msgstr "Getting started"
 
 #. js-lingui-explicit-id
 #: src/components/workflow-showcase.tsx:154
@@ -155,37 +184,47 @@ msgid "workflow.rules.title"
 msgstr "Grow your variants"
 
 #. js-lingui-explicit-id
+#: src/components/home-page.tsx:169
+msgid "home.startTitle"
+msgstr "Install Mincho and write your first style"
+
+#. js-lingui-explicit-id
+#: src/components/site-footer.tsx:15
+msgid "footer.introduction"
+msgstr "Introduction"
+
+#. js-lingui-explicit-id
+#: src/components/compare-section.tsx:53
+msgid "compare.title"
+msgstr "Keep each state next to the selector it changes"
+
+#. js-lingui-explicit-id
 #: src/components/workflow-showcase.tsx:217
 msgid "workflow.large"
 msgstr "Large"
 
 #. js-lingui-explicit-id
-#: src/components/site-layout.tsx:125
+#: src/components/site-layout.tsx:126
 msgid "docs.lastUpdated"
 msgstr "Last updated on"
 
 #. js-lingui-explicit-id
-#: src/components/home-page.tsx:28
-msgid "home.static.title"
-msgstr "Less work for the browser."
-
-#. js-lingui-explicit-id
-#: src/components/home-page.tsx:18
+#: src/components/home-page.tsx:19
 msgid "home.typed.body"
 msgstr "Let TypeScript guide your styles. Get autocomplete, useful errors, and familiar CSS properties, right in your editor."
 
 #. js-lingui-explicit-id
-#: src/components/home-page.tsx:72
+#: src/components/home-page.tsx:73
 msgid "home.titleStart"
 msgstr "Let your"
 
 #. js-lingui-explicit-id
-#: src/components/site-layout.tsx:120
+#: src/components/site-layout.tsx:121
 msgid "theme.light"
 msgstr "Light"
 
 #. js-lingui-explicit-id
-#: src/components/site-layout.tsx:147
+#: src/components/site-layout.tsx:148
 msgid "search.loading"
 msgstr "Loading…"
 
@@ -200,9 +239,14 @@ msgid "workflow.component.title"
 msgstr "Make it a component"
 
 #. js-lingui-explicit-id
-#: src/components/home-page.tsx:24
+#: src/components/home-page.tsx:25
 msgid "home.typed.link"
 msgstr "Meet Literal CSS"
+
+#. js-lingui-explicit-id
+#: src/components/compare-section.tsx:59
+msgid "compare.description"
+msgstr "Mincho compiles to Vanilla Extract, so both files produce the same style. In Mincho, a hover inside a selector stays nested instead of repeating the selector."
 
 #. js-lingui-explicit-id
 #: src/components/workflow-showcase.tsx:176
@@ -210,34 +254,44 @@ msgid "workflow.mint"
 msgstr "Mint"
 
 #. js-lingui-explicit-id
-#: src/components/home-page.tsx:65
+#: src/components/site-footer.tsx:100
+msgid "footer.license"
+msgstr "MIT license"
+
+#. js-lingui-explicit-id
+#: src/components/home-page.tsx:66
 msgid "home.tagline"
 msgstr "Natural CSS in TypeScript"
 
 #. js-lingui-explicit-id
-#: src/components/site-layout.tsx:26
+#: src/components/site-layout.tsx:27
 msgid "site.description"
 msgstr "Natural CSS in TypeScript - A CSS-in-JS framework built on Vanilla Extract"
 
 #. js-lingui-explicit-id
-#: src/components/site-layout.tsx:139
+#: src/components/site-layout.tsx:140
 msgid "search.empty"
 msgstr "No results found."
 
 #. js-lingui-explicit-id
-#: src/components/site-layout.tsx:112
+#: src/components/site-layout.tsx:113
 msgid "docs.onThisPage"
 msgstr "On This Page"
 
 #. js-lingui-explicit-id
-#: src/components/workflow-section.tsx:42
-msgid "workflow.title"
-msgstr "One system. Every style connected."
+#: src/components/home-page.tsx:175
+msgid "home.startBody"
+msgstr "One command installs the packages for a Vite project."
 
 #. js-lingui-explicit-id
-#: src/components/home-page.tsx:102
+#: src/components/workflow-section.tsx:42
+msgid "workflow.title"
+msgstr "One system, every style connected"
+
+#. js-lingui-explicit-id
+#: src/components/home-page.tsx:101
 msgid "home.note"
-msgstr "Open source. Thoughtfully grown."
+msgstr "Open source under the MIT license"
 
 #. js-lingui-explicit-id
 #: src/components/workflow-showcase.tsx:184
@@ -250,24 +304,24 @@ msgid "demo.accent"
 msgstr "Pick a color"
 
 #. js-lingui-explicit-id
-#: src/components/home-page.tsx:179
-msgid "home.startBody"
-msgstr "Plant the first line. Make something that feels like you."
-
-#. js-lingui-explicit-id
 #: src/components/workflow-showcase.tsx:29
 msgid "workflow.theme.title"
 msgstr "Plant your tokens"
 
 #. js-lingui-explicit-id
-#: src/components/site-layout.tsx:106
+#: src/components/site-footer.tsx:41
+msgid "footer.project"
+msgstr "Project"
+
+#. js-lingui-explicit-id
+#: src/components/site-layout.tsx:107
 msgid "docs.feedback"
 msgstr "Question? Give us feedback"
 
 #. js-lingui-explicit-id
-#: src/components/home-page.tsx:136
+#: src/components/home-page.tsx:135
 msgid "home.featuresLabel"
-msgstr "ROOTED IN SIMPLICITY"
+msgstr "Rooted in simplicity"
 
 #. js-lingui-explicit-id
 #: src/components/code-example.tsx:14
@@ -275,22 +329,22 @@ msgid "demo.sage"
 msgstr "Sage"
 
 #. js-lingui-explicit-id
-#: src/components/site-layout.tsx:113
+#: src/components/site-layout.tsx:114
 msgid "docs.backToTop"
 msgstr "Scroll to top"
 
 #. js-lingui-explicit-id
-#: src/components/site-layout.tsx:135
+#: src/components/site-layout.tsx:136
 msgid "search.label"
 msgstr "Search documentation"
 
 #. js-lingui-explicit-id
-#: src/components/site-layout.tsx:131
+#: src/components/site-layout.tsx:132
 msgid "search.placeholder"
 msgstr "Search documentation…"
 
 #. js-lingui-explicit-id
-#: src/components/home-page.tsx:38
+#: src/components/home-page.tsx:39
 msgid "home.static.link"
 msgstr "See how it works"
 
@@ -325,17 +379,12 @@ msgid "workflow.soft"
 msgstr "Soft"
 
 #. js-lingui-explicit-id
-#: src/components/home-page.tsx:173
-msgid "home.startTitle"
-msgstr "Something good starts here."
+#: src/components/site-footer.tsx:12
+msgid "footer.learn"
+msgstr "Start here"
 
 #. js-lingui-explicit-id
-#: src/components/home-page.tsx:42
-msgid "home.system.title"
-msgstr "Space to make it yours."
-
-#. js-lingui-explicit-id
-#: src/components/home-page.tsx:46
+#: src/components/home-page.tsx:47
 msgid "home.system.body"
 msgstr "Start with a single style. Grow into reusable rules, themes, and components that speak your design language."
 
@@ -345,9 +394,14 @@ msgid "workflow.description"
 msgstr "Start with your theme. Give it a typed vocabulary. Build variants, then bring them into your components."
 
 #. js-lingui-explicit-id
-#: src/components/home-page.tsx:127
+#: src/components/home-page.tsx:124
 msgid "home.staticCss"
 msgstr "Static CSS"
+
+#. js-lingui-explicit-id
+#: src/components/home-page.tsx:29
+msgid "home.static.title"
+msgstr "Static CSS at build time"
 
 #. js-lingui-explicit-id
 #: src/components/workflow-showcase.tsx:227
@@ -357,10 +411,10 @@ msgstr "Styles are compiled to static CSS. Interactions select the generated cla
 #. js-lingui-explicit-id
 #: src/components/home-page.tsx:75
 msgid "home.titleEnd"
-msgstr "styles grow."
+msgstr "styles grow"
 
 #. js-lingui-explicit-id
-#: src/components/site-layout.tsx:121
+#: src/components/site-layout.tsx:122
 msgid "theme.system"
 msgstr "System"
 
@@ -385,6 +439,11 @@ msgid "workflow.preview"
 msgstr "Try the component"
 
 #. js-lingui-explicit-id
+#: src/components/home-page.tsx:15
+msgid "home.typed.title"
+msgstr "Typed from the first line"
+
+#. js-lingui-explicit-id
 #: src/components/code-example.tsx:28
 msgid "demo.code"
 msgstr "TypeScript styling example"
@@ -395,6 +454,6 @@ msgid "workflow.rules.body"
 msgstr "Use rules from your definition to build a button with typed tones and sizes. Every variant shares the same tokens."
 
 #. js-lingui-explicit-id
-#: src/components/home-page.tsx:32
+#: src/components/home-page.tsx:33
 msgid "home.static.body"
 msgstr "Write styles in TypeScript. Ship static CSS. Built on Vanilla Extract, Mincho does the styling work at build time."

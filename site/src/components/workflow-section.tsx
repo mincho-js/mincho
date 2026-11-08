@@ -35,13 +35,13 @@ export async function WorkflowSection({ locale }: { locale: Locale }) {
         <p className="mincho-eyebrow">
           {i18n._({
             id: "workflow.eyebrow",
-            message: "FROM A TOKEN TO A COMPONENT"
+            message: "From a token to a component"
           })}
         </p>
         <h2 id="workflow-title">
           {i18n._({
             id: "workflow.title",
-            message: "One system. Every style connected."
+            message: "One system, every style connected"
           })}
         </h2>
         <p className="mincho-section-description">

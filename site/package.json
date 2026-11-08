@@ -4,7 +4,7 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "dev": "yarn demo:build && yarn i18n:compile && next dev",
+    "dev": "yarn demo:build && yarn i18n:compile && next dev --webpack",
     "build": "yarn demo:build && yarn i18n:check && next build && pagefind --site out --output-path out/_pagefind",
     "demo:build": "yarn run -T task build --filter=@mincho-js/css --filter=@mincho-js/esbuild && node scripts/build-demo.mjs",
     "start": "next start",

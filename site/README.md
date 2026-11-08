@@ -26,6 +26,14 @@ links, shared anchors, unchanged code examples, and both search indexes. Run it
 after `build`. To preview production, serve `out` at `/mincho/` on a static HTTP
 server; Next.js `start` does not serve static exports.
 
+For live updates at `http://127.0.0.1:34805/mincho/`, run
+`mise exec -- yarn workspace mincho-docs dev --hostname 127.0.0.1 --port 34805`.
+A static server serving `out` only reflects changes after another build.
+Development uses Webpack to avoid Rspack's heap exhaustion when compiling
+documentation routes in this Yarn PnP workspace. Production exports use Rspack.
+Documentation commit dates are shown in production exports; development omits
+Nextra's temporary compilation timestamps.
+
 ## Landing page
 
 The typography uses the Pretendard variable dynamic subset from the pinned npm
