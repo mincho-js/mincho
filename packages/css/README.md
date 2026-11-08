@@ -348,7 +348,7 @@ export function MyButton() {
 
 ### defineRules()
 
-The `defineRules()` function creates a scoped authoring API and returns `css`, `cx`, and `preset` together. Use it when you want a typed styling surface for a shared package, preset, or design-system layer.
+The `defineRules()` function creates a scoped authoring API and returns `css`, `rules`, `cx`, and `preset` together. Use it when you want a typed styling surface for a shared package, preset, or design-system layer.
 
 `conditions` lets you name condition aliases once in the config. Config keys are bare names, and style input uses the same names with an underscore prefix. An empty object means the base condition. A string is treated as a media query, with a leading `@media` stripped if present. Object form supports `"@layer"`, `"@supports"`, `"@media"`, `"@container"`, and `selector`.
 
@@ -430,6 +430,92 @@ export const cardClassName = cx(card, "external");
 // Read the snapshot after registering the styles to share.
 export const cardPreset = cardRules.preset;
 ```
+
+#### Scoped rules
+
+The returned `rules` function accepts the same properties, token values, shortcuts,
+and conditions as the scoped `css` function. Use these in top-level styles, `base`,
+variant styles, and compound styles:
+
+```typescript
+// button.css.ts
+import { defineRules } from "@mincho-js/css";
+
+const { rules } = defineRules({
+  properties: {
+    color: { brand: "navy", muted: "gray" },
+    paddingLeft: { small: 4, large: 16 },
+    paddingRight: { small: 4, large: 16 },
+  },
+  shortcuts: { px: ["paddingLeft", "paddingRight"] },
+  conditions: { hov: { selector: "&:hover" } },
+});
+
+export const button = rules({
+  base: { px: "small" },
+  variants: {
+    active: {
+      true: { color: "brand" },
+      false: { color: "muted" },
+    },
+  },
+  defaultVariants: { active: true },
+  compoundVariants: ({ active }) => [
+    {
+      condition: [active.true],
+      style: { _hov: { px: "large" } },
+    },
+  ],
+});
+
+button({ active: false }); // A className, with boolean variant inference.
+```
+
+`rules.raw()` resolves scoped styles into ordinary recipe options for standalone
+`rules()` or `styled()`. `rules.multiple()`, `rules.with()`, and `rules.extends()`
+also use this resolver. Extending the definition with `defineRules.extends()`
+binds its returned `rules` to the merged definitions. A style callback in `base`,
+a variant, or a compound receives the configured authoring `context`.
+
+Use TypeScript 5.7 or newer for inference across all scoped recipe helpers.
+It infers token values, context callback parameters, and variant names.
+Editors using the project's TypeScript language service offer completions for
+scoped styles, defaults, compound selections, and recipe
+calls. `rules.multiple()` keeps each recipe's variants and dynamic props separate.
+TypeScript 5.4–5.6 cannot infer some `rules.multiple()` compound callbacks.
+Loading the root `@mincho-js/css` declarations requires at least TypeScript 5.4
+because the scoped recipe types use its built-in `NoInfer` intrinsic. This requirement
+also applies when only `css` or standalone `rules` is used, and to packages such
+as `@mincho-js/react` that load these declarations.
+
+```typescript
+const padded = rules.with((style) => ({
+  base: style,
+  variants: { density: { compact: { px: "small" }, roomy: { px: "large" } } },
+}));
+const panel = padded({ color: "brand" }); // Scoped token completion.
+panel({ density: "compact" }); // "compact" | "roomy".
+
+const sizedButton = rules.extends(button, {
+  variants: { size: { small: { px: "small" }, large: { px: "large" } } },
+});
+sizedButton({ active: true, size: "large" }); // Inherited and new variants.
+```
+
+Like standalone `rules`, a string style composes an existing class; use an object
+such as `{ inline: true }` for a boolean shortcut. Dynamic `props` still target
+ordinary CSS properties and accept CSS values, rather than scoped token names.
+
+These are build-time authoring factories. Define recipes in `.css.ts` files, or
+register a shared factory with `extractCalls` when using it in ordinary modules.
+Generated recipes use the existing compact rules runtime and its optimizations.
+Their grouped classes are opaque to scoped `cx`; they do not add atomic entries
+to `preset`. Export a definition only from an authoring entry when consumers
+need to create more recipes. Exporting a definition from a compiled authoring
+entry requires serializable configuration and context: function-valued properties
+or shortcuts and non-serializable context are rejected. Locally generated recipes
+can still use function-valued definitions. See [Local authoring and V5
+serialization](#local-authoring-and-v5-serialization) for the serialization limits.
 
 #### defineRules.propertyValues()
 

@@ -72,6 +72,16 @@
         "default": "./dist/cjs/defineRules/createDefineRulesCssRuntime.cjs"
       }
     },
+    "./defineRules/createDefineRulesRulesRuntime": {
+      "import": {
+        "types": "./dist/esm/defineRules/createDefineRulesRulesRuntime.d.ts",
+        "default": "./dist/esm/defineRules/createDefineRulesRulesRuntime.mjs"
+      },
+      "require": {
+        "types": "./dist/cjs/defineRules/createDefineRulesRulesRuntime.d.cts",
+        "default": "./dist/cjs/defineRules/createDefineRulesRulesRuntime.cjs"
+      }
+    },
     "./defineRules/createDefineRulesCxRuntime": {
       "import": {
         "types": "./dist/esm/defineRules/createDefineRulesCxRuntime.d.ts",

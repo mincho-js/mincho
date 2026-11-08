@@ -232,3 +232,36 @@ function checkBooleanVariantProps() {
   Button(props);
 }
 void checkBooleanVariantProps;
+
+// Scoped recipes retain their token vocabulary and boolean selections in both module formats.
+function checkScopedRecipes() {
+  const { rules } = defineRules({
+    properties: {
+      color: { brand: "navy", muted: "gray" },
+      paddingLeft: { small: 4 },
+      paddingRight: { small: 4 }
+    },
+    shortcuts: { px: ["paddingLeft", "paddingRight"] },
+    conditions: { hov: { selector: "&:hover" } }
+  });
+  const button = rules({
+    base: { px: "small" },
+    variants: {
+      active: { true: { color: "brand" }, false: { color: "muted" } }
+    },
+    defaultVariants: { active: true },
+    compoundVariants: ({ active }) => [
+      {
+        condition: [active.true],
+        style: { _hov: { px: "small" } }
+      }
+    ]
+  });
+  const className: string = button({ active: false });
+  // @ts-expect-error Unknown tokens must not become ordinary CSS values.
+  rules({ base: { color: "missing" } });
+  // @ts-expect-error Boolean selection is inferred from the variant branches.
+  button({ active: "true" });
+  const Button = styled.button(rules.raw({ base: { px: "small" } }));
+  return { className, Button };
+}

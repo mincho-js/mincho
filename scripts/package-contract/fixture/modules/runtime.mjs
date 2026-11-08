@@ -18,7 +18,9 @@ for (const mode of ["import", "require"]) {
   assert.match(html, /<button/);
   assert.match(html, /clip-path:path\(&quot;M/);
   assert.doesNotMatch(html, /data:image/);
-  const responsive = renderToString(createElement(SquircleMask, { radius: 20 }));
+  const responsive = renderToString(
+    createElement(SquircleMask, { radius: 20 })
+  );
   assert.match(responsive, /class="mincho-squircle mincho-squircle-r20-s0_6"/);
   assert.match(responsive, /box-sizing:border-box/);
   assert.match(responsive, /overflow:hidden/);
@@ -36,6 +38,46 @@ for (const mode of ["import", "require"]) {
     typeof (await load("@mincho-js/css/squircle")).squircle,
     "function"
   );
+
+  const { defineRules } = await load("@mincho-js/css");
+  const { createDefineRulesRulesRuntime } = await load(
+    "@mincho-js/css/defineRules/createDefineRulesRulesRuntime"
+  );
+  const { createCompiledRuntimeFn } = await load(
+    "@mincho-js/css/rules/createRuntimeFn"
+  );
+  const { setFileScope, endFileScope } = await load(
+    "@vanilla-extract/css/fileScope"
+  );
+  setFileScope(`scoped-rules-${mode}.css.ts`, "@test/installed-rules");
+  try {
+    const owner = defineRules({
+      properties: { color: { brand: "navy", muted: "gray" } },
+      shortcuts: { ink: "color" }
+    });
+    const recipe = owner.rules({
+      variants: {
+        active: { true: { ink: "brand" }, false: { ink: "muted" } }
+      },
+      defaultVariants: { active: true }
+    });
+    const hydrated = createDefineRulesRulesRuntime(
+      JSON.parse(JSON.stringify(owner.rules.__recipe__.args[0]))
+    );
+    assert.deepEqual(hydrated.raw({ base: { ink: "brand" } }).base, {
+      color: "navy"
+    });
+    const runtime = createCompiledRuntimeFn(...recipe.__recipe__.args);
+    assert.equal(runtime(), recipe());
+    assert.equal(runtime({ active: false }), recipe({ active: false }));
+    assert.ok(
+      runtime({ active: false })
+        .split(" ")
+        .includes(recipe.classNames.variants.active.false)
+    );
+  } finally {
+    endFileScope();
+  }
 }
 
 for (const load of [

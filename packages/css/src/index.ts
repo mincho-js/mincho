@@ -71,6 +71,11 @@ export { cx } from "./classname/index.js";
 export { selectors } from "./selectors/index.js";
 export type { ClassPrimitive, ClassValue, Cx } from "./classname/index.js";
 export { defineRules } from "./defineRules/index.js";
+export type { DefineRulesResult } from "./defineRules/index.js";
+export type {
+  DefineRulesRules,
+  DefineRulesPatternOptions
+} from "./defineRules/rules.js";
 export type { DefineRulesExtendsConfig } from "./defineRules/extension.js";
 export type { DefineRulesRuntimeResult } from "./defineRules/runtime.js";
 export type {

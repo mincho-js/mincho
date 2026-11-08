@@ -9,6 +9,7 @@ This API enables:
 - **Property constraints**: Limit which CSS properties and values can be used
 - **Shortcuts**: Create Tailwind-like shorthand utilities
 - **Type safety**: Full TypeScript inference for constrained values
+- **Scoped recipes**: Create `rules` with the same tokens, shortcuts, and conditions
 
 ```typescript
 import { defineRules } from "@mincho-js/css";
@@ -35,6 +36,96 @@ css.raw("inline");
 ```
 
 ---
+
+## Scoped Recipes
+
+Destructure `rules` from the definition to author typed variants with the same
+vocabulary as `css`:
+
+```typescript
+// button.css.ts
+import { defineRules } from "@mincho-js/css";
+
+const { rules } = defineRules({
+  properties: {
+    color: { brand: "navy", muted: "gray" },
+    paddingLeft: { small: 4, large: 16 },
+    paddingRight: { small: 4, large: 16 },
+  },
+  shortcuts: { px: ["paddingLeft", "paddingRight"] },
+  conditions: { hov: { selector: "&:hover" } },
+});
+
+export const button = rules({
+  base: { px: "small" },
+  variants: {
+    active: {
+      true: { color: "brand" },
+      false: { color: "muted" },
+    },
+  },
+  defaultVariants: { active: true },
+  compoundVariants: ({ active }) => [
+    {
+      condition: [active.true],
+      style: { _hov: { px: "large" } },
+    },
+  ],
+});
+
+button({ active: false });
+```
+
+Scoped styles work in top-level declarations, `base`, variants, and compound
+styles. Style callbacks receive the definition's `context`. `rules.raw()` resolves
+these styles into ordinary recipe options for the standalone `rules` export or
+`styled()`. Pass them to the standalone factory, rather than the scoped `rules`
+that already resolved the tokens:
+
+```typescript
+import { rules as standaloneRules } from "@mincho-js/css";
+
+// Continue using the scoped rules from button.css.ts above.
+const resolvedOptions = rules.raw({ base: { px: "small" } });
+const paddedButton = standaloneRules(resolvedOptions);
+```
+
+`rules.multiple()`, `rules.with()`, and `rules.extends()` share the same resolver.
+
+Use TypeScript 5.7 or newer for inference across all scoped recipe helpers.
+These helpers preserve inference and editor completions for tokens,
+context callbacks, defaults, and compound selections. `rules.multiple()` infers
+each recipe independently. `rules.with()` preserves its input style and returned
+recipe's variants, while `rules.extends()` combines parent and child variants.
+TypeScript 5.4–5.6 cannot infer some `rules.multiple()` compound callbacks.
+Loading the root `@mincho-js/css` declarations requires at least TypeScript 5.4
+because the scoped recipe types use its built-in `NoInfer` intrinsic. This requirement
+also applies when only `css` or standalone `rules` is used, and to packages such
+as `@mincho-js/react` that load these declarations.
+
+```typescript
+const padded = rules.with((style) => ({
+  base: style,
+  variants: { density: { compact: { px: "small" }, roomy: { px: "large" } } },
+}));
+const panel = padded({ color: "brand" });
+panel({ density: "compact" });
+
+const sizedButton = rules.extends(button, {
+  variants: { size: { small: { px: "small" }, large: { px: "large" } } },
+});
+sizedButton({ active: true, size: "large" });
+```
+
+String styles compose existing classes. Use `{ shortcutName: true }` for boolean
+shortcuts. Dynamic `props` use ordinary CSS targets and values. The resulting
+recipe has the same runtime and variant inference as standalone `rules`; its
+grouped classes remain opaque to scoped `cx` and do not populate the atomic
+`preset`.
+
+Author recipes in `.css.ts` files, or register your shared factory with
+`extractCalls` for use in ordinary modules. Definitions can be exported from an
+authoring entry and extended with `defineRules.extends()`.
 
 ## Property Constraints
 

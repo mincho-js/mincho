@@ -23,7 +23,10 @@ import { SEGMENT_MARKER_PREFIX } from "./metadata.js";
 import { cx } from "../classname/cx.js";
 import { css as rootCss } from "../css/index.js";
 import type { DefineRulesRuntimeResult } from "./runtime.js";
+import { createDefineRulesRules } from "./rules.js";
+import type { DefineRulesRules } from "./rules.js";
 import type {
+  DefineRulesCssInput,
   DefineRulesCtx,
   DefineRulesPresetArtifactV5,
   DefineRulesConditions,
@@ -54,6 +57,18 @@ const DEFINE_RULES_CX_RUNTIME_IMPORT_NAME =
   "createCompiledDefineRulesCxRuntime";
 
 // == Define Rules =============================================================
+export interface DefineRulesResult<
+  Properties extends DefineRulesProperties,
+  Shortcuts extends object,
+  Conditions extends DefineRulesConditions = DefineRulesEmptyConditions,
+  Context = undefined
+> extends DefineRulesRuntimeResult<Properties, Shortcuts, Conditions, Context> {
+  rules: DefineRulesRules<
+    DefineRulesCssInput<Properties, Shortcuts, Conditions>,
+    Context
+  >;
+}
+
 function defineRulesImpl<
   const Properties extends DefineRulesProperties = Record<never, never>,
   const Shortcuts extends DefineRulesShortcuts<
@@ -65,7 +80,7 @@ function defineRulesImpl<
   const Context = undefined
 >(
   config: DefineRulesCtx<Properties, Shortcuts, Conditions, Context>
-): DefineRulesRuntimeResult<Properties, Shortcuts, Conditions, Context> {
+): DefineRulesResult<Properties, Shortcuts, Conditions, Context> {
   const functionValuedRegistryBlockerPath =
     getFunctionValuedDefineRulesConfigPath(config);
 
@@ -88,6 +103,22 @@ function defineRulesImpl<
     );
 
   return {
+    rules: addFunctionSerializer(
+      createDefineRulesRules<
+        DefineRulesCssInput<Properties, Shortcuts, Conditions>,
+        Context
+      >(result.css),
+      {
+        importPath: "@mincho-js/css/defineRules/createDefineRulesRulesRuntime",
+        importName: "createDefineRulesRulesRuntime",
+        get args(): ReadonlyArray<Serializable> {
+          return getDefineRulesSerializerRecipeArgs(
+            getSerializedConfig(),
+            getSerializerDiagnostic
+          );
+        }
+      }
+    ),
     cx: addDefineRulesCxSerializer(
       result.cx,
       createDefineRulesCxSerializerRecipe(result.getCxRuntimeArtifact)
@@ -141,7 +172,7 @@ function defineRulesExtends<
     Conditions,
     Context
   >
-): DefineRulesRuntimeResult<
+): DefineRulesResult<
   ExtendedProperties<ParentProperties, Properties>,
   MergeDefinitions<ParentShortcuts, Shortcuts>,
   MergeDefinitions<ParentConditions, Conditions>,
@@ -167,7 +198,7 @@ function defineRulesExtends<
         ? parent.preset
         : [parent.preset, config.presets]
   };
-  return defineRulesImpl(merged) as unknown as DefineRulesRuntimeResult<
+  return defineRulesImpl(merged) as unknown as DefineRulesResult<
     ExtendedProperties<ParentProperties, Properties>,
     MergeDefinitions<ParentShortcuts, Shortcuts>,
     MergeDefinitions<ParentConditions, Conditions>,

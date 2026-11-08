@@ -56,7 +56,11 @@ describe("extension serialization", () => {
           color: "crimson", props: ["width"],
           variants: { size: { small: { padding: 4 } } }
         }, "parent");
-        export const definitions = defineRules({ properties: { color: { brand: "navy" }, background: true } });
+        export const definitions = defineRules({
+          properties: { color: { brand: "navy" }, background: true, paddingLeft: true, paddingRight: true },
+          shortcuts: { px: ["paddingLeft", "paddingRight"] },
+          conditions: { hov: { selector: "&:hover" } }
+        });
         export const atomic = definitions.css({ color: "brand" });
       `
       );
@@ -66,6 +70,11 @@ describe("extension serialization", () => {
         import { rules, defineRules } from "@mincho-js/css";
         import { rule as parent, definitions as parentDefinitions } from "../parent/index.mjs";
         export const hydratedAtomic = parentDefinitions.css({ background: "lightcyan" });
+        export const scopedRecipe = parentDefinitions.rules({
+          base: { px: 4 },
+          variants: { active: { true: { _hov: { color: "brand" } }, false: { color: "brand" } } },
+          defaultVariants: { active: true }
+        }, "scoped");
         export const rule = rules.extends(parent, {
           color: "royalblue", props: ["width"],
           variants: { size: { small: { margin: 8 }, large: { padding: 16 } } }
@@ -79,10 +88,14 @@ describe("extension serialization", () => {
         `
         import { rules, defineRules } from "@mincho-js/css";
         import { rule as parent, definitions as parentDefinitions } from "../child/index.mjs";
+        import { scopedRecipe as parentScoped } from "../child/index.mjs";
         export const rule = rules.extends(parent, { backgroundColor: "goldenrod" }, "grandchild");
         export const definitions = defineRules.extends(parentDefinitions, { properties: { color: { accent: "indigo" } } });
         export const atomic = definitions.css({ color: "brand" });
         export const raw = definitions.css.raw({ color: "accent", display: "grid" });
+        export const scopedRecipe = definitions.rules.extends(parentScoped, {
+          variants: { active: { true: { color: "accent" } } }
+        }, "extendedScoped");
       `
       );
 
@@ -94,6 +107,10 @@ describe("extension serialization", () => {
         };
         atomic: string;
         raw?: object;
+        scopedRecipe: {
+          (selection?: { active?: boolean }): string;
+          classNames: { variants: { active: { true: string; false: string } } };
+        };
       };
       const importedParent = (await import(
         pathToFileURL(parent.outputPath).href
@@ -126,9 +143,18 @@ describe("extension serialization", () => {
       });
       expect(child.css).toContain("royalblue");
       expect(child.css).toContain("lightcyan");
+      expect(child.css).toContain("padding-left: 4px");
+      expect(child.css).toContain(":hover");
+      expect(child.css).toContain("color: navy");
       expect(child.css).not.toContain("crimson");
-      expect(child.css).not.toContain("navy");
+      expect(
+        importedChild.scopedRecipe({ active: false }).split(" ")
+      ).toContain(importedChild.scopedRecipe.classNames.variants.active.false);
+      expect(importedGrandchild.scopedRecipe().split(" ")).toEqual(
+        expect.arrayContaining(importedChild.scopedRecipe().split(" "))
+      );
       expect(grandchild.css).toContain("goldenrod");
+      expect(grandchild.css).toContain("indigo");
       expect(grandchild.css).not.toMatch(/crimson|royalblue|navy/);
       expect(child.ancestorStyleSpecifiers).toEqual([
         "@test/extends-parent/style.css"
