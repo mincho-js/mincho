@@ -5,11 +5,12 @@ on:
 jobs:
   fast-forward:
     # Only run if the comment contains the /fast-forward command.
-    if: ${{ github.event.issue.pull_request && contains(github.event.comment.body, '/fast-forward') }}
+    if: ${{ github.event.issue.pull_request && github.event.comment.user.type != 'Bot' && contains(github.event.comment.body, '/fast-forward') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     concurrency:
       group: fast-forward-${{ github.event.issue.number }}
-      cancel-in-progress: true
+      cancel-in-progress: false
 
     # https://docs.github.com/ko/actions/writing-workflows/workflow-syntax-for-github-actions#permissions
     permissions:
@@ -29,9 +30,17 @@ jobs:
             echo "MATCH=false" >> $GITHUB_OUTPUT
           fi
 
+      - name: Checkout action from the default branch
+        if: ${{ steps.check_comment.outputs.MATCH == 'true' }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+          sparse-checkout: .github/actions/fast-forward
+
       - name: Fast forwarding
         if: ${{ steps.check_comment.outputs.MATCH == 'true' }}
-        uses: sequoia-pgp/fast-forward@ea7628bedcb0b0b96e94383ada458d812fca4979 # v1.0.0
+        uses: ./.github/actions/fast-forward
         with:
           merge: true
           # To reduce the workflow's verbosity, use 'on-error'

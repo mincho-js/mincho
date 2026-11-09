@@ -1,10 +1,16 @@
 name: pull-request
 on:
-  pull_request:
-    types: [opened, reopened, synchronize]
+  # Execute only default-branch action code with GITHUB_TOKEN in this context.
+  # PR-head objects are fetched for ancestry, never checked out or executed.
+  pull_request_target:
+    types: [opened, reopened, synchronize, edited]
 jobs:
   check-fast-forward:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    concurrency:
+      group: fast-forward-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
 
     permissions:
       contents: read
@@ -14,8 +20,16 @@ jobs:
       issues: write
 
     steps:
+      # Only trusted action code is executed; PR commits are fetched as Git data.
+      - name: Checkout action from the default branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+          sparse-checkout: .github/actions/fast-forward
+
       - name: Checking if fast forwarding is possible
-        uses: sequoia-pgp/fast-forward@ea7628bedcb0b0b96e94383ada458d812fca4979 # v1.0.0
+        uses: ./.github/actions/fast-forward
         with:
           merge: false
           # To reduce the workflow's verbosity, use 'on-error'

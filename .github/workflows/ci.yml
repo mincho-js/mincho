@@ -46,6 +46,9 @@ jobs:
           yarn test:doctor
           yarn doctor
 
+      - name: Test the repository fast-forward action
+        run: node --test .github/actions/fast-forward/*.test.js
+
       - name: Check package consistency
         run: yarn constraints
 

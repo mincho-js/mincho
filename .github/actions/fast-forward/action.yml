@@ -1,0 +1,21 @@
+name: Fast Forward Merge
+description: Check or merge a PR by fast-forwarding its target branch
+author: Mincho contributors, based on Sequoia PGP
+inputs:
+  github_token:
+    description: Token with permission to read the repository and comment on PRs
+    default: ${{ github.token }}
+  merge:
+    description: Actually fast-forward the target branch after checking permissions
+    default: "false"
+  comment:
+    description: Comment policy (always, on-error, or never)
+    default: on-error
+outputs:
+  comment:
+    description: JSON object containing the report's body
+  merged:
+    description: Whether this execution pushed the PR head to the target branch
+runs:
+  using: node24
+  main: index.js
