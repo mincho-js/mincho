@@ -1,5 +1,13 @@
 # react-swc
 
+## 0.1.1
+
+### Patch Changes
+
+- Updated dependencies [[`089a50c`](https://github.com/mincho-js/mincho/commit/089a50c45d6807f6705acdf1165700fbb0dd7b14), [`06d761b`](https://github.com/mincho-js/mincho/commit/06d761b260f6fc5610cef26e76b11de661e41d64), [`81d8ce2`](https://github.com/mincho-js/mincho/commit/81d8ce2bc8b789f1b0744e44d7c70d9a539aaa01), [`60ef013`](https://github.com/mincho-js/mincho/commit/60ef0135bab512e5439d5f9cd9c8c6af336df50d), [`4be9b2f`](https://github.com/mincho-js/mincho/commit/4be9b2f357c03add5b99b4cb943bc55b9de270e5), [`4504956`](https://github.com/mincho-js/mincho/commit/4504956736658a23a6f0a5d9510bf066a43e614c), [`9699f0d`](https://github.com/mincho-js/mincho/commit/9699f0d9628ec431f49dda9ef329d58516794189)]:
+  - @mincho-js/react@1.0.0
+  - @examples/shared-component@0.0.1
+
 ## 0.1.0
 
 ### Minor Changes
