@@ -24,6 +24,9 @@
       "path": "packages/integration"
     },
     {
+      "path": "packages/preset-theme-ui"
+    },
+    {
       "path": "packages/react"
     },
     {
