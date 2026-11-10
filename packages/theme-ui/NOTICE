@@ -1,0 +1,15 @@
+Theme UI's theme/style data format, configuration, scale associations, shortcuts, defaults,
+and style resolution semantics are ported from system-ui/theme-ui v0.17.4.
+Commit: 7e17eb6d6350ee04ae37b2b54ac0f9aa1d6e7b0b
+https://github.com/system-ui/theme-ui/tree/v0.17.4
+
+Upstream copyright and MIT permission notice are retained in LICENSE.
+The public schema is implemented with @mincho-js/csstype, preserving Theme UI's
+data structure rather than copying its CSS declarations. @theme-ui/css and
+Emotion are development-only compatibility references; published declarations
+do not reference them.
+
+This package accepts the Theme UI theme data format and compiles styles through
+Mincho. It does not implement ThemeProvider, sx, hooks, or provider color-mode
+configuration. Preset values and compiled CSS are published separately in
+@mincho-js/preset-theme-ui.

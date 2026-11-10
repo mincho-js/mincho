@@ -125,6 +125,70 @@ describe("React defineRules adapter", () => {
     ).toContain('href="/docs"');
   });
 
+  it("validates scalar recipe inputs while preserving object resolver values", () => {
+    const core = defineCssRules({
+      properties: {
+        padding: (value: number) => Number(value.toFixed(0)),
+        margin: (value: { amount?: number }) => value.amount ?? 0,
+        color: { accent: "red", neutral: "gray" }
+      },
+      shortcuts: { p: ["padding"] },
+      context: { defaultPadding: 2 as const }
+    });
+    const { styled } = defineRules(core);
+    const options = {
+      base: { padding: 2, margin: {} },
+      variants: {
+        active: { true: { p: 3 }, false: { color: "neutral" } }
+      },
+      defaultVariants: { active: true }
+    } as const;
+    const Dotted = materialize(styled.div(options));
+    const Callable = materialize(styled("div", options));
+    const Callback = materialize(
+      styled.div({
+        base: (context) => ({ padding: context.defaultPadding, margin: {} })
+      })
+    );
+    const optionalOptions: { variants?: typeof options.variants } = options;
+    const Optional = materialize(styled.div(optionalOptions));
+    const OptionalCallable = materialize(styled("div", optionalOptions));
+
+    for (const Component of [Dotted, Callable, Optional, OptionalCallable]) {
+      const active = renderToStaticMarkup(<Component active />);
+      const inactive = renderToStaticMarkup(<Component active={false} />);
+
+      expect(active).not.toBe(inactive);
+      expect(active).not.toContain("active=");
+    }
+    expect(renderToStaticMarkup(<Callback />)).toContain("class=");
+
+    const typeCases = () => {
+      // @ts-expect-error A scalar resolver requires a scalar or a nonempty condition map.
+      styled.div({ base: { padding: {} } });
+      // @ts-expect-error Callable factories share the scalar input contract.
+      styled("div", { base: { padding: {} } });
+      // @ts-expect-error Nested conditional leaves preserve the resolver input contract.
+      styled.div({ base: { padding: { _hover: {} } } });
+      // @ts-expect-error Context callbacks cannot return an empty scalar input.
+      styled.div({ base: () => ({ padding: {} }) });
+      // @ts-expect-error Variants share the scalar input contract.
+      styled.div({ variants: { tone: { accent: { padding: {} } } } });
+      // @ts-expect-error Callable variants share the scalar input contract.
+      styled("div", { variants: { tone: { accent: { padding: {} } } } });
+      // @ts-expect-error Scalar resolver types remain numeric.
+      styled.div({ base: { padding: "bad" } });
+      // @ts-expect-error Existing property keys still reject excess entries.
+      styled.div({ base: { padding: 2, typo: 1 } });
+      // @ts-expect-error Boolean variant selections keep their public type.
+      <Dotted active="true" />;
+      // @ts-expect-error Optional callable options preserve known variants.
+      <OptionalCallable active="true" />;
+    };
+
+    void typeCases;
+  });
+
   it("lets variants replace native props with the same name", () => {
     const { styled } = defineRules(definition());
     const options = {
@@ -220,6 +284,84 @@ describe("React defineRules adapter", () => {
     expect(markup).toContain('title="dynamic"');
     expect(markup).not.toContain('color="red"');
     expect(markup).not.toContain('space="12px"');
+  });
+
+  it.each(["as", "className", "key", "ref"])(
+    "rejects reserved dynamic prop %s before compiling its recipe",
+    (name) => {
+      const core = definition();
+      const createRecipe = vi.spyOn(core, "rules");
+      const { styled } = defineRules(core);
+      const declaration = {
+        [name]: { targets: ["color"] }
+      } satisfies ComplexPropDefinitions<PropTarget>;
+      const definitions: ComplexPropDefinitions<PropTarget>[] = [
+        declaration,
+        ["color", declaration]
+      ];
+
+      for (const props of definitions) {
+        const options = { base: { color: "accent" }, props } as const;
+        const error = `Dynamic CSS prop "${name}" is reserved by React defineRules().styled`;
+
+        expect(() => styled.div(options)).toThrow(error);
+        expect(() => styled("div", options)).toThrow(error);
+      }
+
+      expect(createRecipe).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each(["as", "className", "key", "ref"])(
+    "rejects reserved variant group %s before compiling its recipe",
+    (name) => {
+      const core = definition();
+      const createRecipe = vi.spyOn(core, "rules");
+      const { styled } = defineRules(core);
+      const options = {
+        base: { color: "neutral" },
+        variants: { [name]: { active: { color: "accent" } } },
+        defaultVariants: { [name]: "active" }
+      } as const;
+      const error = `Variant group "${name}" is reserved by React defineRules().styled`;
+
+      expect(() => styled.div(options)).toThrow(error);
+      expect(() => styled("div", options)).toThrow(error);
+      expect(createRecipe).not.toHaveBeenCalled();
+    }
+  );
+
+  it("keeps reserved words as values in ordinary variant groups", () => {
+    const { styled } = defineRules(definition());
+    const options = {
+      variants: {
+        tone: {
+          as: { color: "accent" },
+          className: { color: "neutral" },
+          key: { px: "compact" },
+          ref: { px: "comfortable" }
+        }
+      }
+    } as const;
+
+    for (const compiled of [styled.div(options), styled("div", options)]) {
+      const serializer = Object.getOwnPropertyDescriptor(
+        compiled,
+        "__recipe__"
+      )!.value;
+      const recipe = serializer.args[1];
+      const Box = materialize(compiled);
+
+      for (const tone of ["as", "className", "key", "ref"] as const) {
+        const markup = renderToStaticMarkup(
+          <Box tone={tone} as="span" className="consumer" key={tone} />
+        );
+
+        expect(markup).toContain("<span");
+        expect(markup).toContain(`class="${recipe({ tone })} consumer"`);
+        expect(markup).not.toContain("tone=");
+      }
+    }
   });
 
   it("serializes numeric length props with units and leaves unitless values unchanged", () => {

@@ -29,6 +29,7 @@ import { createDefineRulesCxRuntimeArtifact } from "./cxRuntimeArtifact.js";
 import type { DefineRulesCxRuntimeArtifact } from "./cxRuntimeArtifact.js";
 import type {
   DefineRulesCss,
+  DefineRulesNeedsEmptyInputValidation,
   DefineRulesComplexCssInput,
   DefineRulesCtx,
   DefineRulesConditions,
@@ -48,6 +49,106 @@ const CONDITION_AT_RULES = [
   string
 ])[];
 
+// CSSRule's pseudo aliases only exist as types. Require the same complete key
+// set here so arbitrary underscore-prefixed resolver arguments stay intact.
+const SIMPLE_PSEUDO_ALIASES = {
+  _MozAnyLink: true,
+  _MozFullScreen: true,
+  _MozPlaceholder: true,
+  _MozReadOnly: true,
+  _MozReadWrite: true,
+  _MsFullscreen: true,
+  _MsInputPlaceholder: true,
+  _WebkitAnyLink: true,
+  _WebkitFullScreen: true,
+  __MozPlaceholder: true,
+  __MozProgressBar: true,
+  __MozRangeProgress: true,
+  __MozRangeThumb: true,
+  __MozRangeTrack: true,
+  __MozSelection: true,
+  __MsBackdrop: true,
+  __MsBrowse: true,
+  __MsCheck: true,
+  __MsClear: true,
+  __MsFill: true,
+  __MsFillLower: true,
+  __MsFillUpper: true,
+  __MsReveal: true,
+  __MsThumb: true,
+  __MsTicksAfter: true,
+  __MsTicksBefore: true,
+  __MsTooltip: true,
+  __MsTrack: true,
+  __MsValue: true,
+  __WebkitBackdrop: true,
+  __WebkitInputPlaceholder: true,
+  __WebkitProgressBar: true,
+  __WebkitProgressInnerValue: true,
+  __WebkitProgressValue: true,
+  __WebkitResizer: true,
+  __WebkitScrollbarButton: true,
+  __WebkitScrollbarCorner: true,
+  __WebkitScrollbarThumb: true,
+  __WebkitScrollbarTrackPiece: true,
+  __WebkitScrollbarTrack: true,
+  __WebkitScrollbar: true,
+  __WebkitSliderRunnableTrack: true,
+  __WebkitSliderThumb: true,
+  __after: true,
+  __backdrop: true,
+  __before: true,
+  __cue: true,
+  __firstLetter: true,
+  __firstLine: true,
+  __grammarError: true,
+  __placeholder: true,
+  __selection: true,
+  __spellingError: true,
+  _active: true,
+  _after: true,
+  _anyLink: true,
+  _before: true,
+  _blank: true,
+  _checked: true,
+  _default: true,
+  _defined: true,
+  _disabled: true,
+  _empty: true,
+  _enabled: true,
+  _first: true,
+  _firstChild: true,
+  _firstLetter: true,
+  _firstLine: true,
+  _firstOfType: true,
+  _focus: true,
+  _focusVisible: true,
+  _focusWithin: true,
+  _fullscreen: true,
+  _hover: true,
+  _inRange: true,
+  _indeterminate: true,
+  _invalid: true,
+  _lastChild: true,
+  _lastOfType: true,
+  _left: true,
+  _link: true,
+  _onlyChild: true,
+  _onlyOfType: true,
+  _optional: true,
+  _outOfRange: true,
+  _placeholderShown: true,
+  _readOnly: true,
+  _readWrite: true,
+  _required: true,
+  _right: true,
+  _root: true,
+  _scope: true,
+  _target: true,
+  _valid: true,
+  _visited: true
+} satisfies Record<Extract<keyof CSSRule, `_${string}`>, true>;
+
 // == Define Rules Runtime =====================================================
 type DefineRulesRuntimeCx = Cx;
 
@@ -59,7 +160,8 @@ export interface DefineRulesRuntimeResult<
 > {
   css: DefineRulesCss<
     DefineRulesComplexCssInput<Properties, Shortcuts, Conditions>,
-    Context
+    Context,
+    DefineRulesNeedsEmptyInputValidation<Properties, Shortcuts>
   > &
     DefineRulesDefinitionMetadata<Properties, Shortcuts, Conditions, Context>;
   cx: DefineRulesRuntimeCx;
@@ -711,6 +813,85 @@ function applyEntry<
     return;
   }
 
+  if (
+    !hasOwn(ctx.properties, key) &&
+    !hasOwn(ctx.shortcuts, key) &&
+    isDisabledCondition(ctx.conditions, key)
+  ) {
+    return;
+  }
+
+  // Resolve tokens and functional shortcuts at each conditional leaf, before
+  // the declaration collector lowers selectors and at-rule conditions to CSS.
+  if (
+    (hasOwn(ctx.properties, key) || hasOwn(ctx.shortcuts, key)) &&
+    isPlainObject(value) &&
+    Object.keys(value).length > 0 &&
+    Object.keys(value).every(
+      (condition) =>
+        condition === "base" ||
+        condition === "selectors" ||
+        CONDITION_AT_RULES.some(
+          ([, atRule]) =>
+            condition === atRule || condition.startsWith(`${atRule} `)
+        ) ||
+        hasOwn(SIMPLE_PSEUDO_ALIASES, condition) ||
+        (condition.startsWith("_") &&
+          hasOwn(ctx.conditions ?? {}, condition.slice(1))) ||
+        condition.startsWith(":") ||
+        condition.startsWith("[") ||
+        condition.includes("&")
+    )
+  ) {
+    for (const [condition, entry] of Object.entries(value)) {
+      if (isDisabledCondition(ctx.conditions, condition)) continue;
+
+      if (condition === "base") {
+        if (entry != null) {
+          // Unlike nested conditions, base contains the final resolver value.
+          applyShortcutReference(ctx, fragmentsOut, key, entry, shortcutStack);
+        }
+
+        continue;
+      }
+
+      if (
+        condition === "selectors" ||
+        (condition.startsWith("@") && !condition.includes(" "))
+      ) {
+        if (!isPlainObject(entry)) continue;
+
+        for (const [query, conditionalEntry] of Object.entries(entry)) {
+          const nested: ResolvedStyleFragment[] = [];
+          applyEntry(ctx, nested, key, conditionalEntry, shortcutStack);
+
+          for (const fragment of nested) {
+            fragmentsOut.push({
+              ...fragment,
+              style: {
+                [condition]: { [query]: fragment.style }
+              } as unknown as CSSRule
+            });
+          }
+        }
+
+        continue;
+      }
+
+      const nested: ResolvedStyleFragment[] = [];
+      applyEntry(ctx, nested, key, entry, shortcutStack);
+
+      for (const fragment of nested) {
+        fragmentsOut.push({
+          ...fragment,
+          style: { [condition]: fragment.style } as unknown as CSSRule
+        });
+      }
+    }
+
+    return;
+  }
+
   if (hasOwn(ctx.shortcuts, key)) {
     applyShortcut(ctx, fragmentsOut, key, value, shortcutStack);
 
@@ -737,6 +918,20 @@ function applyEntry<
   }
 
   applyProperty(ctx, fragmentsOut, key, value, shortcutStack);
+}
+
+function isDisabledCondition(
+  conditions: DefineRulesConditions | undefined,
+  key: string
+): boolean {
+  const name = key.slice(1);
+
+  return (
+    key.startsWith("_") &&
+    !hasOwn(SIMPLE_PSEUDO_ALIASES, key) &&
+    hasOwn(conditions ?? {}, name) &&
+    conditions?.[name] === undefined
+  );
 }
 
 function applyProperty<
@@ -908,7 +1103,9 @@ function applyShortcut<
       return;
     }
 
-    if (!value) return;
+    if (!value || (isPlainObject(value) && Object.keys(value).length === 0)) {
+      return;
+    }
 
     applyInput(ctx, fragmentsOut, shortcutDefinition, nextShortcutStack);
 

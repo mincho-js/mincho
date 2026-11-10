@@ -114,6 +114,10 @@ describe("defineRules().rules", () => {
       recipe({ active: "true" });
       // @ts-expect-error Properties outside this authoring definition are rejected.
       rules({ margin: 4 });
+      // @ts-expect-error Extra properties are rejected even beside a known key.
+      rules({ color: "brand", typo: 1 });
+      // @ts-expect-error Nested base styles keep excess-property checking.
+      rules({ base: { color: "brand", typo: 1 } });
     };
     void invalidInputs;
   });
@@ -196,6 +200,11 @@ describe("defineRules().rules", () => {
     expect(
       padded.multiple({ compact: { px: "small" } }).compact({ active: true })
     ).toBeTypeOf("string");
+    const invalidInputs = () => {
+      // @ts-expect-error Reusable factories preserve fresh-object checks.
+      padded({ px: "small", typo: 1 });
+    };
+    void invalidInputs;
     const child = padded.extends(recipes.action, { px: "large" });
     expect(child({ active: true }).split(" ")).toEqual(
       expect.arrayContaining(recipes.action({ active: true }).split(" "))
@@ -221,6 +230,38 @@ describe("defineRules().rules", () => {
     );
   });
 
+  it("preserves factory-only arguments without forwarding them to CSS", () => {
+    const { rules } = defineRules({
+      properties: { color: (value: string) => value.toUpperCase() }
+    });
+    const factory = rules.with(
+      (style: { color: string; getColor: () => string }) => ({
+        base: { color: style.getColor() },
+        variants: { active: { true: { color: style.color } } }
+      })
+    );
+    const args = { color: "red", getColor: () => "blue" };
+
+    expect(factory(args)({ active: true })).toBeTypeOf("string");
+    expect(factory.raw(args).base).toEqual({ color: "BLUE" });
+    expect(
+      factory.multiple({ first: args }).first({ active: true })
+    ).toBeTypeOf("string");
+
+    const parent = rules({ base: { color: "green" } });
+    expect(factory.extends(parent, args)({ active: true }).split(" ")).toEqual(
+      expect.arrayContaining(parent().split(" "))
+    );
+
+    const invalidInputs = () => {
+      // @ts-expect-error Factory-only arguments retain their declared types.
+      factory({ color: "red", getColor: () => 1 });
+      // @ts-expect-error Fresh factory arguments still reject unknown fields.
+      factory({ color: "red", getColor: () => "blue", typo: true });
+    };
+    void invalidInputs;
+  });
+
   it("evaluates local function definitions before serializing recipes", () => {
     const { rules } = defineRules({
       properties: { padding: (value: number) => value * 4 }
@@ -235,5 +276,150 @@ describe("defineRules().rules", () => {
       args: unknown;
     };
     expect(() => serializedFactory.args).toThrow("function-valued");
+  });
+
+  it("requires scalar resolver values throughout recipe styles", () => {
+    const { rules } = defineRules({
+      properties: { color: (value: string) => value.toUpperCase() },
+      shortcuts: {
+        text: "color",
+        paint: (value: string) => ({ color: value.toUpperCase() })
+      }
+    });
+    expect(rules.raw({ base: { color: { _hover: "red" } } }).base).toEqual({
+      selectors: { "&:hover": { color: "RED" } }
+    });
+    expect(() => rules.raw({ base: { color: {} } } as never)).toThrow(
+      TypeError
+    );
+    const parent = rules({ variants: { active: { true: { color: "red" } } } });
+    type Input = Parameters<Parameters<typeof rules.with>[0]>[0];
+    const reusable = rules.with((style: Input) => ({ base: style }));
+    expect(reusable.raw({ color: { _hover: "red" } }).base).toEqual({
+      selectors: { "&:hover": { color: "RED" } }
+    });
+
+    const validInputs = () => {
+      const named = { color: "red", extra: 1 };
+      const optional: { color?: string } = {};
+      rules(named);
+      rules({ base: named });
+      reusable(named);
+      reusable(optional);
+      rules<undefined>({ base: { color: "red" } });
+      rules.raw<undefined>({ base: { color: "red" } });
+      rules.with<Input, undefined>((style) => ({ base: style }));
+      rules.multiple<{ first: undefined }, Record<never, never>>({
+        first: { base: { color: "red" } }
+      });
+      rules.extends<typeof parent.classNames.variants, never>(parent, {
+        base: { color: "red" }
+      });
+      reusable.extends<typeof parent.classNames.variants, never>(parent, {
+        color: "red"
+      });
+    };
+    void validInputs;
+
+    const invalidInputs = () => {
+      // @ts-expect-error Scalar definitions preserve fresh-object checks.
+      rules({ color: "red", typo: 1 });
+      // @ts-expect-error Scalar base styles preserve fresh-object checks.
+      rules({ base: { color: "red", typo: 1 } });
+      // @ts-expect-error Scalar reusable factories preserve fresh-object checks.
+      reusable({ color: "red", typo: 1 });
+      // @ts-expect-error Multiple patterns preserve nested fresh-object checks.
+      rules.multiple({ bad: { base: { color: "red", typo: 1 } } });
+      // @ts-expect-error Recipe top-level styles cannot pass {} to a scalar resolver.
+      rules({ color: {} });
+      // @ts-expect-error Recipe base styles retain the scalar resolver input.
+      rules({ base: { color: {} } });
+      // @ts-expect-error Raw recipe styles use the same scalar input requirement.
+      rules.raw({ base: { text: {} } });
+      // @ts-expect-error Variant styles cannot pass {} to functional shortcuts.
+      rules({ variants: { tone: { normal: { paint: {} } } } });
+      // @ts-expect-error Style arrays retain scalar resolver requirements.
+      rules({ base: ["external", { text: {} }] });
+      // @ts-expect-error Context callback return values retain scalar requirements.
+      rules({ base: () => ({ color: {} }) });
+      // @ts-expect-error Nested conditions retain scalar resolver requirements.
+      rules({ base: { color: { _hover: {} } } });
+      // @ts-expect-error Compound styles cannot pass {} to scalar resolvers.
+      rules({
+        variants: { active: { true: {} } },
+        compoundVariants: ({ active }) => [
+          { condition: [active.true], style: { color: {} } }
+        ]
+      });
+      // @ts-expect-error Multiple recipes validate each pattern independently.
+      rules.multiple({ good: { color: "red" }, bad: { base: { color: {} } } });
+      // @ts-expect-error Extended recipes use the child's input contract.
+      rules.extends(parent, { base: { color: {} } });
+      // @ts-expect-error Reusable factories cannot return an invalid scalar style.
+      rules.with((style: { color: string }) => ({
+        base: [style, { paint: {} }]
+      }));
+      // @ts-expect-error Reusable factory arguments retain the input contract.
+      reusable({ color: {} });
+      // @ts-expect-error Raw reusable factory arguments retain the contract.
+      reusable.raw({ color: {} });
+      // @ts-expect-error Multiple reusable factory arguments retain the contract.
+      reusable.multiple({ bad: { color: {} } });
+      // @ts-expect-error Extended reusable factory arguments retain the contract.
+      reusable.extends(parent, { color: {} });
+      const optional: {
+        variants?: { active: { true: { color: Record<never, never> } } };
+      } = {};
+      // @ts-expect-error Optional variant groups are checked when present.
+      rules(optional);
+    };
+    void invalidInputs;
+  });
+
+  it("preserves object resolver arguments and contextual recipe inference", () => {
+    const { rules } = defineRules({
+      properties: {
+        color: (value: string) => value.toUpperCase(),
+        opacity: ({ value = 1 }: { value?: number }) => value
+      },
+      shortcuts: { alpha: "opacity" },
+      context: { color: "red" }
+    });
+    const activeStyle = (context: { readonly color: "red" }) => ({
+      color: context.color,
+      alpha: {}
+    });
+    const recipe = rules({
+      base: (context) => {
+        expectTypeOf(context).toEqualTypeOf<{ readonly color: "red" }>();
+        return [{ color: context.color }, { opacity: {} }];
+      },
+      variants: {
+        active: {
+          true: activeStyle,
+          false: { opacity: { _hover: {} } }
+        }
+      },
+      defaultVariants: { active: true },
+      compoundVariants: ({ active }) => [
+        { condition: [active.true], style: { opacity: {} } }
+      ]
+    });
+    expect(recipe({ active: true })).toBeTypeOf("string");
+    expect(rules.raw({ base: { opacity: {}, alpha: {} } }).base).toEqual({
+      opacity: 1
+    });
+    const options: {
+      variants?: { size: { small: { color: string } } };
+      props?: ["width"];
+    } = {
+      variants: { size: { small: { color: "red" } } },
+      props: ["width"]
+    };
+    const multiple = rules.multiple({ empty: {}, sized: options });
+    expect(multiple.sized({ size: "small" })).toBeTypeOf("string");
+    expect(multiple.sized.props({ width: 12 })).toEqual({
+      [getRulesConfig(multiple.sized).propVars.width]: 12
+    });
   });
 });

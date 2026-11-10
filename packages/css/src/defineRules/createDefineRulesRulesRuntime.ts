@@ -3,6 +3,7 @@ import { createDefineRulesRules } from "./rules.js";
 import type {
   DefineRulesConditions,
   DefineRulesCssInput,
+  DefineRulesNeedsEmptyInputValidation,
   DefineRulesCtx,
   DefineRulesEmptyConditions,
   DefineRulesProperties,
@@ -24,6 +25,7 @@ export function createDefineRulesRulesRuntime<
 >(config: DefineRulesCtx<Properties, Shortcuts, Conditions, Context>) {
   return createDefineRulesRules<
     DefineRulesCssInput<Properties, Shortcuts, Conditions>,
-    Context
+    Context,
+    DefineRulesNeedsEmptyInputValidation<Properties, Shortcuts>
   >(createDefineRulesCssRuntime(config));
 }

@@ -74,6 +74,7 @@ export { defineRules } from "./defineRules/index.js";
 export type { DefineRulesResult } from "./defineRules/index.js";
 export type {
   DefineRulesRules,
+  DefineRulesPatternInput,
   DefineRulesPatternOptions
 } from "./defineRules/rules.js";
 export type { DefineRulesExtendsConfig } from "./defineRules/extension.js";

@@ -2,7 +2,9 @@ import type {
   NonNullableString,
   CSSProperties,
   CSSRule,
-  CSSPropertiesWithVars
+  CSSPropertiesWithVars,
+  AtRulesKeywords,
+  ToplevelSelectors
 } from "@mincho-js/transform-to-vanilla";
 import type {
   DefineRulesConditionAliasKey,
@@ -198,35 +200,123 @@ export type DefineRulesPresetInput =
 
 type DefineRulesNestedCallback = (...args: never[]) => unknown;
 
-type DefineRulesDirectCssInput<Args> = Args extends DefineRulesNestedCallback
+// Function parameter types are erased at runtime. Keep their input type on
+// condition maps so an empty map cannot be passed to a scalar resolver, while
+// resolvers whose object argument accepts {} keep that valid input.
+declare const defineRulesResolverInput: unique symbol;
+
+type ResolverConditionMetadata<Expected> = Expected extends unknown
+  ? typeof defineRulesResolverInput extends keyof Expected
+    ? Exclude<Expected[typeof defineRulesResolverInput], undefined>
+    : never
+  : never;
+
+type ExpectedProperty<
+  Expected,
+  Key extends PropertyKey
+> = Expected extends unknown
+  ? Key extends keyof Expected
+    ? Expected[Key]
+    : never
+  : never;
+
+// Style lists reuse the object contract; resolver arrays use their item contract.
+type ExpectedArrayItem<Expected> = [
+  Extract<Expected, readonly unknown[]>
+] extends [never]
+  ? Expected
+  : Extract<Expected, readonly unknown[]>[number];
+
+type DefineRulesAllowsEmptyInput<Args, Expected> =
+  typeof defineRulesResolverInput extends keyof Args
+    ? true
+    : Record<never, never> extends Args
+      ? [ResolverConditionMetadata<Expected>] extends [never]
+        ? true
+        : ResolverConditionMetadata<Expected> extends { input: infer Input }
+          ? Record<never, never> extends Input
+            ? true
+            : false
+          : true
+      : true;
+
+export type DefineRulesDirectCssInput<
+  Args,
+  Expected = Args
+> = Args extends DefineRulesNestedCallback
   ? never
   : Args extends readonly [infer Head, ...infer Tail]
     ? readonly [
-        DefineRulesDirectCssInput<Head>,
-        ...DefineRulesDirectCssInput<Tail>
+        DefineRulesDirectCssInput<Head, ExpectedArrayItem<Expected>>,
+        ...DefineRulesDirectCssInput<Tail, Expected>
       ]
     : Args extends ReadonlyArray<infer Item>
-      ? DefineRulesDirectCssInput<Item>[]
+      ? DefineRulesDirectCssInput<Item, ExpectedArrayItem<Expected>>[]
       : Args extends object
-        ? {
-            [Key in keyof Args]: DefineRulesDirectCssInput<Args[Key]>;
-          }
+        ? DefineRulesAllowsEmptyInput<Args, Expected> extends false
+          ? never
+          : {
+              [Key in keyof Args]: DefineRulesDirectCssInput<
+                Args[Key],
+                ExpectedProperty<Expected, Key>
+              >;
+            }
         : Args;
 
-type DefineRulesContextualCssInput<Args, Context> = (
+type DefineRulesContextualCssInput<Args, Context, Expected = Args> = (
   context: Context
-) => DefineRulesDirectCssInput<Args>;
+) => DefineRulesDirectCssInput<Args, Expected>;
 
-export interface DefineRulesCss<CssInput, Context = undefined> {
+type NeedsEmptyInputValidation<Definition> = Definition extends (
+  arg: infer Input
+) => unknown
+  ? Record<never, never> extends Input
+    ? false
+    : true
+  : false;
+
+// Only resolvers that reject {} need the extra expected-input traversal.
+// Token maps and object payloads retain the ordinary CSS inference path.
+export type DefineRulesNeedsEmptyInputValidation<
+  Properties extends DefineRulesProperties,
+  Shortcuts extends object
+> =
+  true extends NeedsEmptyInputValidation<
+    Properties[keyof Properties] | Shortcuts[keyof Shortcuts]
+  >
+    ? true
+    : false;
+
+export interface DefineRulesCss<
+  CssInput,
+  Context = undefined,
+  ValidateEmptyInputs extends boolean = true
+> {
   <const Args extends CssInput>(
-    args: DefineRulesContextualCssInput<Args, Context>
+    args: DefineRulesContextualCssInput<
+      Args,
+      Context,
+      ValidateEmptyInputs extends true ? CssInput : never
+    >
   ): string;
-  <const Args extends CssInput>(args: DefineRulesDirectCssInput<Args>): string;
+  <const Args extends CssInput>(
+    args: DefineRulesDirectCssInput<
+      Args,
+      ValidateEmptyInputs extends true ? CssInput : never
+    >
+  ): string;
   raw<const Args extends CssInput>(
-    args: DefineRulesContextualCssInput<Args, Context>
+    args: DefineRulesContextualCssInput<
+      Args,
+      Context,
+      ValidateEmptyInputs extends true ? CssInput : never
+    >
   ): CSSRule;
   raw<const Args extends CssInput>(
-    args: DefineRulesDirectCssInput<Args>
+    args: DefineRulesDirectCssInput<
+      Args,
+      ValidateEmptyInputs extends true ? CssInput : never
+    >
   ): CSSRule;
 }
 
@@ -250,25 +340,41 @@ type PropertiesInput<
 > = {
   [Key in keyof Properties]?: ResolveConditionableValue<
     ResolvePropertiesValue<Key, Properties[Key]>,
-    Conditions
+    Conditions,
+    Properties[Key] extends (arg: infer Arg) => unknown ? { input: Arg } : never
   >;
 };
 
 type ResolveConditionableValue<
   Value,
-  Conditions extends DefineRulesConditions
-> = Value | DefineRulesPropertyConditionInput<Value, Conditions>;
+  Conditions extends DefineRulesConditions,
+  ResolverInput = never
+> = Value | DefineRulesPropertyConditionInput<Value, Conditions, ResolverInput>;
 
 type DefineRulesPropertyConditionInput<
   Value,
-  Conditions extends DefineRulesConditions
-> = keyof Conditions extends never
-  ? never
-  : { base?: Value } & {
-      [
-        Alias in DefineRulesConditionAliasKey<Conditions>
-      ]?: ResolveConditionableValue<Value, Conditions>;
+  Conditions extends DefineRulesConditions,
+  ResolverInput
+> = {
+  base?: Value;
+  [defineRulesResolverInput]?: ResolverInput;
+} & ToplevelSelectors<
+  ResolveConditionableValue<Value, Conditions, ResolverInput>
+> & {
+    [
+      Condition in
+        | DefineRulesConditionAliasKey<Conditions>
+        | `@${AtRulesKeywords} ${string}`
+    ]?: ResolveConditionableValue<Value, Conditions, ResolverInput>;
+  } & {
+    [Group in `@${AtRulesKeywords}` | "selectors"]?: {
+      [query: string]: ResolveConditionableValue<
+        Value,
+        Conditions,
+        ResolverInput
+      >;
     };
+  };
 
 type ResolvePropertiesValue<Key, Value> =
   Value extends ReadonlyArray<infer Item>
@@ -292,7 +398,8 @@ type ShortcutsInput<
 > = {
   [Key in keyof Shortcuts]?: ResolveConditionableValue<
     ResolveShortcutValue<Properties, Shortcuts, Conditions, Shortcuts[Key]>,
-    Conditions
+    Conditions,
+    Shortcuts[Key] extends (arg: infer Arg) => unknown ? { input: Arg } : never
   >;
 };
 

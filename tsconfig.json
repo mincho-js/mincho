@@ -27,6 +27,9 @@
       "path": "packages/react"
     },
     {
+      "path": "packages/theme-ui"
+    },
+    {
       "path": "packages/transform-runtime"
     },
     {
