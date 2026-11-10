@@ -181,6 +181,11 @@ async function main(): Promise<void> {
         join(consumerRoot, "fixture", "modules")
       );
       await runNode(
+        ["fixture/modules/theme-ui.mjs"],
+        join(consumerRoot, "fixture", "theme-ui"),
+        true
+      );
+      await runNode(
         ["fixture/modules/define-rules-language-service.mjs"],
         join(consumerRoot, "fixture", "modules"),
         true
