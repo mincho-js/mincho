@@ -11245,6 +11245,7 @@ __metadata:
     c8: "catalog:"
     eslint: "catalog:"
     eslint-config-custom: "workspace:^"
+    playwright: "catalog:"
     prettier: "catalog:"
     prettier-config-custom: "workspace:^"
     rimraf: "catalog:"

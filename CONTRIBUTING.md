@@ -156,6 +156,15 @@ Each test should protect an observable behavior, a supported type contract, or a
 
 After removal, run the affected suites and type checks. Do not remove tests merely to reduce their count, and do not claim a speed improvement without measuring it.
 
+**Browser tests**
+
+Run `yarn test:browser:install` once to install Chromium and its system dependencies,
+then `yarn test:browser` to run all workspace browser suites. A workspace opts in
+by providing a `test:browser` script; CI uses this shared command, so adding a
+suite does not require another workflow step. Build the workspace packages first
+with `yarn build` when running locally; CI already builds them through `yarn test`.
+Only workspaces with a browser script run, with at most two suites in parallel.
+
 #### Adding a new feature
 
 If possible, it's a good idea to write an RFC first.
