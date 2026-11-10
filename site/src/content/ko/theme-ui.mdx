@@ -1,0 +1,139 @@
+# Theme UI 프리셋
+
+프리셋 패키지는 Theme UI v0.17.4의 토큰 값, 컴파일된 테마와 Mincho 스타일 정의를 제공합니다. 별도 `@mincho-js/theme-ui` 패키지는 토큰 타입, Theme Spec의 속성 매핑과 선택적인 정규화를 제공합니다.
+
+## 설치와 설정 [#install-and-configure]
+
+React 앱에서 컴포넌트와 함께 작성한 스타일을 컴파일하려면 Mincho 플러그인을 React 플러그인 앞에 두세요. 공유하는 `.css.ts` 테마를 위해 Vanilla Extract 플러그인도 유지합니다. 프리셋 스타일시트를 한 번 불러오면 테마 변수가 적용됩니다.
+
+```sh
+npm install @mincho-js/css @mincho-js/theme-ui @mincho-js/preset-theme-ui @vanilla-extract/css
+npm install -D @mincho-js/vite @vanilla-extract/vite-plugin @vitejs/plugin-react
+```
+
+```ts
+// vite.config.ts
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+import { minchoVitePlugin } from "@mincho-js/vite";
+import { extractCalls } from "@mincho-js/preset-theme-ui/config";
+import { vanillaExtractPlugin } from "@vanilla-extract/vite-plugin";
+
+export default defineConfig({
+  plugins: [
+    minchoVitePlugin({ extractCalls }),
+    vanillaExtractPlugin(),
+    react(),
+  ],
+});
+```
+
+## 공유된 스타일 정의 사용하기 [#use-the-shared-definition]
+
+`base`, `system`, `dark`는 Mincho의 `defineRules()` 결과입니다. 프리셋의 `extractCalls`가 각 정의의 `css`, `rules`, `cx`를 등록하므로 컴포넌트와 같은 `.tsx` 파일의 모듈 범위에서 바로 호출할 수 있습니다. 플러그인이 호출을 추출하고 컴포넌트에는 클래스 문자열과 recipe 선택 함수를 남깁니다. `/config`는 일반 데이터이므로 Node 설정에서 가져와도 테마 CSS나 스타일 작성 API를 불러오지 않습니다.
+
+스타일 정의에는 빌드 시점에 알 수 있는 값을 사용하고 recipe 변형은 렌더링할 때 선택하세요. 여러 정적 연산을 묶을 때는 `mincho$()` 블록을 사용할 수 있으며, 같은 스타일을 별도 `.css.ts` 파일에 작성해도 됩니다.
+
+```tsx
+// Card.tsx
+import { system, systemClass } from "@mincho-js/preset-theme-ui";
+import "@mincho-js/preset-theme-ui/styles.css";
+
+const card = system.cx(
+  systemClass,
+  system.css({
+    color: "text",
+    bg: "background",
+    p: 3,
+    _md: { p: 4 },
+  }),
+);
+const button = system.rules({
+  base: { color: "background", bg: "primary", px: 2, py: 2 },
+  variants: { size: { large: { px: 4, py: 3 } } },
+});
+
+export function Card() {
+  return (
+    <section className={card}>
+      <button className={button({ size: "large" })}>Create project</button>
+    </section>
+  );
+}
+```
+
+## 패키지의 역할 [#package-responsibilities]
+
+`styles.css`에는 테마 변수와 system의 색상 모드만 들어 있습니다. 문서 선택자, 컨테이너, 제목이나 애플리케이션 recipe를 자동 생성하지 않습니다. 소비자가 공개된 정의로 필요한 스타일을 컴파일합니다. React 런타임에서는 그 결과인 클래스 문자열과 recipe 선택 함수를 사용합니다.
+
+루트는 `baseClass`, `systemClass`, `darkClass`, 각각의 `*Vars`, `*Contract`와 `systemModeClasses`도 제공합니다. JavaScript import만으로 CSS를 불러오지 않습니다. 컴파일된 테마 데이터를 Node/SSR에서 읽는 데 플러그인은 필요하지 않으며, `css()`와 `rules()` 호출은 스타일 빌드에서 수행합니다.
+
+`system.preset`은 테마 값 객체가 아니라 Mincho의 컴파일된 스타일 정보입니다. 스타일 작성 규칙은 `defineRules.extends(system, ...)`로 확장하세요:
+
+```ts
+import { defineRules } from "@mincho-js/css";
+import { system } from "@mincho-js/preset-theme-ui";
+
+const { css } = defineRules.extends(system, {
+  properties: { display: ["grid", "flex"] },
+});
+export const layout = css({ display: "grid", gap: 3, color: "primary" });
+```
+
+## 토큰과 조건 변경하기 [#customize-tokens-and-conditions]
+
+`/presets`는 정규화된 `baseTokens`, `systemTokens`, `darkTokens`, `systemModes`를 일반 데이터로 내보냅니다. Mincho의 원래 `theme()` 함수로 독립된 테마를 만들고 `themeSpec()`에 변수를 연결하세요. 이 스타일에는 기본 프리셋 스타일시트가 필요하지 않습니다.
+
+타입 계약은 원본의 차이를 유지합니다. base에는 `fontWeights.bold`, system과 dark에는 `fontWeights.display`, system에는 `colors.accent`, dark에는 `colors.purple`이 있습니다.
+
+```ts
+// custom.css.ts
+import { theme, defineRules } from "@mincho-js/css";
+import { themeSpec } from "@mincho-js/theme-ui";
+import { systemTokens, systemModes } from "@mincho-js/preset-theme-ui/presets";
+
+const tokens = {
+  ...systemTokens,
+  colors: { ...systemTokens.colors, primary: "rebeccapurple" },
+};
+export const [themeClass, vars, contract] = theme(tokens);
+export const [darkClass] = theme.extends(contract, {
+  ...systemModes.dark,
+  colors: { ...systemModes.dark.colors, primary: tokens.colors.primary },
+});
+const { css, rules, cx } = defineRules(themeSpec(vars, { tablet: "48em" }));
+
+export const panel = cx(
+  themeClass,
+  css({ bg: "background", _tablet: { p: 4 } }),
+);
+export const action = rules({ base: { bg: "primary", color: "background" } });
+```
+
+## 스케일과 색상 모드 [#scales-and-color-modes]
+
+Theme Specification의 16개 스케일을 CSS 속성에 연결합니다. `p: 2`는 `space[2]`인 `8px`을, `mx: -2`는 그 음수 값을 사용합니다. 인덱스 스케일은 범위를 유지하고 중첩 토큰은 점으로 연결합니다. 길이 토큰에는 단위가 있으며 굵기와 줄 높이는 단위 없는 값을 유지합니다. 제공된 스케일은 토큰 이름으로 값을 제한하고 없는 스케일은 일반 CSS 값을 허용합니다.
+
+`p`는 `px`, `py`를 거쳐 네 방향의 물리적 padding 속성으로 분해됩니다. margin 단축 속성도 같은 방식입니다. 예를 들어 `cx(css({ p: 2 }), css({ px: 3 }))`는 좌우 padding을 바꾸고 위아래 padding은 `space[2]`로 유지합니다. 서로 다른 조건의 스타일은 각자의 값을 유지합니다.
+
+기본 조건은 `_sm: 40em`, `_md: 52em`, `_lg: 64em`입니다. 사용자 조건을 전달하면 기본값을 대체합니다. 컴포넌트 변형은 소비자가 Mincho의 `rules()`, `rules.extends()`로 정의합니다.
+
+`systemModeClasses`에는 `default`, `dark`, `deep`, `swiss` 클래스 이름이 있습니다. 활성 클래스를 교체해 모드를 바꾸세요. `/presets`의 `systemModes`는 해당 토큰 값입니다. 컴파일된 system 변수를 공유하는 모드는 `theme.extends(systemContract, values)`로 만듭니다. OS 설정과 저장 방식은 애플리케이션에서 관리합니다.
+
+## 원본 토큰 정규화하기 [#normalize-original-tokens]
+
+배포된 토큰은 이미 정규화되어 있습니다. 원본 Theme UI 데이터를 가져올 때 `normalizeTheme()`는 CSS를 생성하지 않고 길이 단위를 변환하고 색상 모드를 완성해 `{ tokens, modes }`를 반환합니다. `sx`, 원본 `styles`, `variant` 참조를 해석하지는 않습니다. 컴포넌트에 필요한 스타일은 Mincho의 `css()`, `rules()`로 작성하세요.
+
+공개 타입에는 Mincho의 `@mincho-js/csstype`을 사용하며 원본 타입은 개발 단계 호환 검증에만 사용합니다. Theme UI와 Emotion 스타일 패키지는 소비자 의존성이 아닙니다. TypeScript 5.9.3으로 검증하며, `yarn workspace @examples/theme-ui dev`로 React 예제를 실행할 수 있습니다.
+
+```ts
+import { theme } from "@mincho-js/css";
+import { normalizeTheme } from "@mincho-js/theme-ui";
+
+const normalized = normalizeTheme({
+  space: [0, 4, 8],
+  colors: { text: "#111", modes: { dark: { text: "#fff" } } },
+});
+export const [light, vars, contract] = theme(normalized.tokens);
+export const [dark] = theme.extends(contract, normalized.modes.dark);
+```

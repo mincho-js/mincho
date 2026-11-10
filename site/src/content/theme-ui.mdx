@@ -1,0 +1,139 @@
+# Theme UI Presets
+
+The preset package supplies Theme UI v0.17.4 token values, compiled themes, and native Mincho authoring definitions. The separate `@mincho-js/theme-ui` package supplies token types, the Theme Spec mappings, and optional normalization.
+
+## Install and configure [#install-and-configure]
+
+In a React app, put the Mincho plugin before the React plugin to compile co-located styles. Keep the Vanilla Extract plugin for shared `.css.ts` themes. Import the preset stylesheet once to load the theme variables.
+
+```sh
+npm install @mincho-js/css @mincho-js/theme-ui @mincho-js/preset-theme-ui @vanilla-extract/css
+npm install -D @mincho-js/vite @vanilla-extract/vite-plugin @vitejs/plugin-react
+```
+
+```ts
+// vite.config.ts
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+import { minchoVitePlugin } from "@mincho-js/vite";
+import { extractCalls } from "@mincho-js/preset-theme-ui/config";
+import { vanillaExtractPlugin } from "@vanilla-extract/vite-plugin";
+
+export default defineConfig({
+  plugins: [
+    minchoVitePlugin({ extractCalls }),
+    vanillaExtractPlugin(),
+    react(),
+  ],
+});
+```
+
+## Use the shared definition [#use-the-shared-definition]
+
+`base`, `system`, and `dark` are native `defineRules()` results. The preset's `extractCalls` registers their `css`, `rules`, and `cx` methods, so you can call them at module scope in the component's `.tsx` file. The plugin extracts these calls, leaving class strings and recipe selectors for the component. `/config` is plain data that can be imported in Node without loading theme CSS or authoring APIs.
+
+Style definitions must use values available at build time; select recipe variants when rendering. Use a `mincho$()` block for a larger static computation, or author the same styles in a separate `.css.ts` file.
+
+```tsx
+// Card.tsx
+import { system, systemClass } from "@mincho-js/preset-theme-ui";
+import "@mincho-js/preset-theme-ui/styles.css";
+
+const card = system.cx(
+  systemClass,
+  system.css({
+    color: "text",
+    bg: "background",
+    p: 3,
+    _md: { p: 4 },
+  }),
+);
+const button = system.rules({
+  base: { color: "background", bg: "primary", px: 2, py: 2 },
+  variants: { size: { large: { px: 4, py: 3 } } },
+});
+
+export function Card() {
+  return (
+    <section className={card}>
+      <button className={button({ size: "large" })}>Create project</button>
+    </section>
+  );
+}
+```
+
+## Package responsibilities [#package-responsibilities]
+
+`styles.css` contains only the theme variables and system color modes. It does not generate document selectors, containers, headings, or application recipes. The consumer compiles those styles through the exported definition. Only the resulting class strings and recipe selectors are needed by React at runtime.
+
+The root also exports `baseClass`, `systemClass`, `darkClass`, their `*Vars` and `*Contract` values, and `systemModeClasses`. JavaScript imports do not load CSS. Reading compiled theme data in Node/SSR needs no build plugin; calling `css()` or `rules()` belongs in a style build.
+
+`system.preset` is Mincho's native compiled-style artifact, not a theme value object. Use `defineRules.extends(system, ...)` to extend the authoring vocabulary:
+
+```ts
+import { defineRules } from "@mincho-js/css";
+import { system } from "@mincho-js/preset-theme-ui";
+
+const { css } = defineRules.extends(system, {
+  properties: { display: ["grid", "flex"] },
+});
+export const layout = css({ display: "grid", gap: 3, color: "primary" });
+```
+
+## Customize tokens and conditions [#customize-tokens-and-conditions]
+
+`/presets` exports normalized `baseTokens`, `systemTokens`, `darkTokens`, and `systemModes` as plain data. Create an independent theme using the original Mincho `theme()` function, then bind its variables with `themeSpec()`. These styles do not require the shipped stylesheet.
+
+The type contracts preserve upstream differences: base has `fontWeights.bold`, system and dark have `fontWeights.display`, system has `colors.accent`, and dark has `colors.purple`.
+
+```ts
+// custom.css.ts
+import { theme, defineRules } from "@mincho-js/css";
+import { themeSpec } from "@mincho-js/theme-ui";
+import { systemTokens, systemModes } from "@mincho-js/preset-theme-ui/presets";
+
+const tokens = {
+  ...systemTokens,
+  colors: { ...systemTokens.colors, primary: "rebeccapurple" },
+};
+export const [themeClass, vars, contract] = theme(tokens);
+export const [darkClass] = theme.extends(contract, {
+  ...systemModes.dark,
+  colors: { ...systemModes.dark.colors, primary: tokens.colors.primary },
+});
+const { css, rules, cx } = defineRules(themeSpec(vars, { tablet: "48em" }));
+
+export const panel = cx(
+  themeClass,
+  css({ bg: "background", _tablet: { p: 4 } }),
+);
+export const action = rules({ base: { bg: "primary", color: "background" } });
+```
+
+## Scales and color modes [#scales-and-color-modes]
+
+The 16 Theme Specification scales map to CSS properties. `p: 2` selects `space[2]` (`8px`), while `mx: -2` uses its negative value. Indexed scales retain their bounds; dotted paths select nested tokens. Length tokens include units; weights and line heights remain unitless. Provided scales restrict values to their token names; absent scales accept ordinary CSS.
+
+`p` expands through `px` and `py` to the four physical padding properties. Margin shortcuts follow the same pattern. For example, `cx(css({ p: 2 }), css({ px: 3 }))` replaces left and right padding while keeping top and bottom padding at `space[2]`. Styles in separate conditions retain their own values.
+
+Default conditions are `_sm: 40em`, `_md: 52em`, and `_lg: 64em`. Custom breakpoints replace them. Native `rules()` and `rules.extends()` define the consumer's component variants.
+
+`systemModeClasses` has `default`, `dark`, `deep`, and `swiss` class names. Replace the active class to switch modes. `systemModes` from `/presets` holds the corresponding token values. Use `theme.extends(systemContract, values)` for a mode that shares the compiled system variables. OS preference and storage belong to the application.
+
+## Normalize original tokens [#normalize-original-tokens]
+
+Shipped tokens are already normalized. For original Theme UI data, `normalizeTheme()` converts length units and completes color modes without generating CSS. It returns `{ tokens, modes }`. It does not interpret `sx`, source `styles`, or `variant` references; write those component choices using native `css()` and `rules()`.
+
+Public types use Mincho's `@mincho-js/csstype`; upstream types are development-only compatibility references. Theme UI and Emotion styling packages are not consumer dependencies. Validation uses TypeScript 5.9.3. Try the React example with `yarn workspace @examples/theme-ui dev`.
+
+```ts
+import { theme } from "@mincho-js/css";
+import { normalizeTheme } from "@mincho-js/theme-ui";
+
+const normalized = normalizeTheme({
+  space: [0, 4, 8],
+  colors: { text: "#111", modes: { dark: { text: "#fff" } } },
+});
+export const [light, vars, contract] = theme(normalized.tokens);
+export const [dark] = theme.extends(contract, normalized.modes.dark);
+```

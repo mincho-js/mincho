@@ -1606,6 +1606,31 @@ __metadata:
   languageName: unknown
   linkType: soft
 
+"@examples/theme-ui@workspace:examples/theme-ui":
+  version: 0.0.0-use.local
+  resolution: "@examples/theme-ui@workspace:examples/theme-ui"
+  dependencies:
+    "@mincho-js/css": "workspace:^"
+    "@mincho-js/preset-theme-ui": "workspace:^"
+    "@mincho-js/theme-ui": "workspace:^"
+    "@mincho-js/vite": "workspace:^"
+    "@types/node": "catalog:"
+    "@types/react": "catalog:"
+    "@types/react-dom": "catalog:"
+    "@vanilla-extract/css": "catalog:"
+    "@vanilla-extract/vite-plugin": "catalog:"
+    "@vitejs/plugin-react": "catalog:"
+    eslint-config-custom: "workspace:^"
+    playwright: "catalog:"
+    prettier-config-custom: "workspace:^"
+    react: "catalog:"
+    react-dom: "catalog:"
+    tsconfig-custom: "workspace:^"
+    vite: "catalog:"
+    vitest: "catalog:"
+  languageName: unknown
+  linkType: soft
+
 "@fastify/deepmerge@npm:^2.0.2":
   version: 2.0.2
   resolution: "@fastify/deepmerge@npm:2.0.2"
@@ -2538,7 +2563,7 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@mincho-js/preset-theme-ui@workspace:packages/preset-theme-ui":
+"@mincho-js/preset-theme-ui@workspace:^, @mincho-js/preset-theme-ui@workspace:packages/preset-theme-ui":
   version: 0.0.0-use.local
   resolution: "@mincho-js/preset-theme-ui@workspace:packages/preset-theme-ui"
   dependencies:
