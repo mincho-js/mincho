@@ -13,6 +13,7 @@ const seeds = [
   "@examples/shared-component",
   "@mincho-js/vite",
   "@mincho-js/react",
+  "@mincho-js/preset-theme-ui",
   "@mincho-js/esbuild"
 ] as const;
 
