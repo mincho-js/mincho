@@ -15,6 +15,7 @@ import {
   mergeProperties
 } from "./extension.js";
 import type {
+  DefineRulesDefinitionMetadata,
   DefineRulesExtendsConfig,
   ExtendedProperties,
   MergeDefinitions
@@ -27,6 +28,7 @@ import { createDefineRulesRules } from "./rules.js";
 import type { DefineRulesRules } from "./rules.js";
 import type {
   DefineRulesCssInput,
+  DefineRulesNeedsEmptyInputValidation,
   DefineRulesCtx,
   DefineRulesPresetArtifactV5,
   DefineRulesConditions,
@@ -65,7 +67,8 @@ export interface DefineRulesResult<
 > extends DefineRulesRuntimeResult<Properties, Shortcuts, Conditions, Context> {
   rules: DefineRulesRules<
     DefineRulesCssInput<Properties, Shortcuts, Conditions>,
-    Context
+    Context,
+    DefineRulesNeedsEmptyInputValidation<Properties, Shortcuts>
   >;
 }
 
@@ -106,7 +109,8 @@ function defineRulesImpl<
     rules: addFunctionSerializer(
       createDefineRulesRules<
         DefineRulesCssInput<Properties, Shortcuts, Conditions>,
-        Context
+        Context,
+        DefineRulesNeedsEmptyInputValidation<Properties, Shortcuts>
       >(result.css),
       {
         importPath: "@mincho-js/css/defineRules/createDefineRulesRulesRuntime",
@@ -157,12 +161,23 @@ function defineRulesExtends<
   const Conditions extends DefineRulesConditions = DefineRulesEmptyConditions,
   const Context = ParentContext
 >(
-  parent: DefineRulesRuntimeResult<
-    ParentProperties,
-    ParentShortcuts,
-    ParentConditions,
-    ParentContext
-  >,
+  parent: Pick<
+    DefineRulesRuntimeResult<
+      ParentProperties,
+      ParentShortcuts,
+      ParentConditions,
+      ParentContext
+    >,
+    "cx" | "preset"
+  > & {
+    css: ((...args: never[]) => string) &
+      DefineRulesDefinitionMetadata<
+        ParentProperties,
+        ParentShortcuts,
+        ParentConditions,
+        ParentContext
+      >;
+  },
   config: DefineRulesExtendsConfig<
     ParentProperties,
     ParentShortcuts,

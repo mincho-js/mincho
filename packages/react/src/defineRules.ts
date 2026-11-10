@@ -1,6 +1,7 @@
 import type {
   ComplexPropDefinitions,
   DefineRulesPatternOptions,
+  DefineRulesPatternInput,
   DefineRulesRules,
   PropDefinitionOutput,
   PropTarget,
@@ -37,8 +38,12 @@ interface Definition {
 }
 
 type DefinitionStyled<Value extends Definition> =
-  Value["rules"] extends DefineRulesRules<infer Input, infer Context>
-    ? ScopedStyled<Input, Context>
+  Value["rules"] extends DefineRulesRules<
+    infer Input,
+    infer Context,
+    infer ValidateEmptyInputs
+  >
+    ? ScopedStyled<Input, Context, ValidateEmptyInputs>
     : never;
 type ResolvedVariants<Groups> = {
   [Group in keyof Exclude<Groups, undefined>]: {
@@ -48,16 +53,26 @@ type ResolvedVariants<Groups> = {
   };
 };
 
-type ScopedStyled<Input, Context> = {
+type ScopedStyled<
+  Input,
+  Context,
+  ValidateEmptyInputs extends boolean = false
+> = {
   <
     Tag extends SupportedElements,
     Groups extends Exclude<Variants, undefined>,
-    Definitions extends Props = undefined
+    Definitions extends Props = undefined,
+    const Options extends DefineRulesPatternOptions<
+      Input,
+      Context,
+      Groups,
+      Definitions
+    > = DefineRulesPatternOptions<Input, Context, Groups, Definitions>
   >(
     tag: Tag,
     options: DefineRulesPatternOptions<Input, Context, Groups, Definitions> & {
       variants: Groups;
-    }
+    } & DefineRulesPatternInput<Options, Input, ValidateEmptyInputs>
   ): StyledComponent<
     NativeProps<Tag, Groups, Definitions>,
     Tag,
@@ -67,10 +82,17 @@ type ScopedStyled<Input, Context> = {
   <
     Tag extends SupportedElements,
     Groups extends Variants = undefined,
-    Definitions extends Props = undefined
+    Definitions extends Props = undefined,
+    const Options extends DefineRulesPatternOptions<
+      Input,
+      Context,
+      Groups,
+      Definitions
+    > = DefineRulesPatternOptions<Input, Context, Groups, Definitions>
   >(
     tag: Tag,
-    options: DefineRulesPatternOptions<Input, Context, Groups, Definitions>
+    options: DefineRulesPatternOptions<Input, Context, Groups, Definitions> &
+      DefineRulesPatternInput<Options, Input, ValidateEmptyInputs>
   ): StyledComponent<
     NativeProps<Tag, Groups, Definitions>,
     Tag,
@@ -78,25 +100,51 @@ type ScopedStyled<Input, Context> = {
     Definitions
   >;
 } & {
-  [Tag in SupportedElements]: ScopedStyledTag<Tag, Input, Context>;
+  [Tag in SupportedElements]: ScopedStyledTag<
+    Tag,
+    Input,
+    Context,
+    ValidateEmptyInputs
+  >;
 };
 
-interface ScopedStyledTag<Tag extends SupportedElements, Input, Context> {
+interface ScopedStyledTag<
+  Tag extends SupportedElements,
+  Input,
+  Context,
+  ValidateEmptyInputs extends boolean
+> {
   <
     Groups extends Exclude<Variants, undefined>,
-    Definitions extends Props = undefined
+    Definitions extends Props = undefined,
+    const Options extends DefineRulesPatternOptions<
+      Input,
+      Context,
+      Groups,
+      Definitions
+    > = DefineRulesPatternOptions<Input, Context, Groups, Definitions>
   >(
     options: DefineRulesPatternOptions<Input, Context, Groups, Definitions> & {
       variants: Groups;
-    }
+    } & DefineRulesPatternInput<Options, Input, ValidateEmptyInputs>
   ): StyledComponent<
     NativeProps<Tag, Groups, Definitions>,
     Tag,
     ResolvedVariants<Groups>,
     Definitions
   >;
-  <Groups extends Variants = undefined, Definitions extends Props = undefined>(
-    options: DefineRulesPatternOptions<Input, Context, Groups, Definitions>
+  <
+    Groups extends Variants = undefined,
+    Definitions extends Props = undefined,
+    const Options extends DefineRulesPatternOptions<
+      Input,
+      Context,
+      Groups,
+      Definitions
+    > = DefineRulesPatternOptions<Input, Context, Groups, Definitions>
+  >(
+    options: DefineRulesPatternOptions<Input, Context, Groups, Definitions> &
+      DefineRulesPatternInput<Options, Input, ValidateEmptyInputs>
   ): StyledComponent<
     NativeProps<Tag, Groups, Definitions>,
     Tag,
@@ -124,6 +172,28 @@ export function defineRules<Value extends Definition>(definition: Value) {
           typeof prop === "string" ? [prop] : Object.keys(prop)
         )
       : Object.keys(props ?? {});
+
+    // The runtime consumes as/className, while React handles key/ref separately.
+    const isReservedName = (name: string) =>
+      name === "as" || name === "className" || name === "key" || name === "ref";
+    const reservedProp = propNames.find(isReservedName);
+
+    if (reservedProp) {
+      throw new Error(
+        `Dynamic CSS prop "${reservedProp}" is reserved by React defineRules().styled`
+      );
+    }
+
+    const reservedVariant = Object.keys(
+      (options as { variants?: Variants }).variants ?? {}
+    ).find(isReservedName);
+
+    if (reservedVariant) {
+      throw new Error(
+        `Variant group "${reservedVariant}" is reserved by React defineRules().styled`
+      );
+    }
+
     const numericUnits: Record<string, "px" | "mixed"> = {};
 
     const normalizeProp = (prop: PropTarget | PropDefinitions) => {
