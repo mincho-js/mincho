@@ -2652,6 +2652,25 @@ __metadata:
   languageName: unknown
   linkType: soft
 
+"@mincho-js/tailwind@workspace:packages/tailwind":
+  version: 0.0.0-use.local
+  resolution: "@mincho-js/tailwind@workspace:packages/tailwind"
+  dependencies:
+    "@mincho-js/css": "workspace:^"
+    "@mincho-js/debug-log": "workspace:^"
+    "@types/node": "catalog:"
+    "@vanilla-extract/css": "catalog:"
+    eslint-config-custom: "workspace:^"
+    prettier-config-custom: "workspace:^"
+    tsconfig-custom: "workspace:^"
+    vite: "catalog:"
+    vite-config-custom: "workspace:^"
+    vitest: "catalog:"
+  peerDependencies:
+    "@vanilla-extract/css": "*"
+  languageName: unknown
+  linkType: soft
+
 "@mincho-js/theme-ui@workspace:^, @mincho-js/theme-ui@workspace:packages/theme-ui":
   version: 0.0.0-use.local
   resolution: "@mincho-js/theme-ui@workspace:packages/theme-ui"

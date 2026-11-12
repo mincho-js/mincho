@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "@mincho-js/tailwind",
+  "version": "0.1.0",
+  "description": "Tailwind design token contracts and native Mincho style mappings",
+  "type": "module",
+  "sideEffects": false,
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mincho-js/mincho.git",
+    "directory": "packages/tailwind"
+  },
+  "typings": "./dist/esm/index.d.ts",
+  "main": "./dist/cjs/index.cjs",
+  "module": "./dist/esm/index.mjs",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/esm/index.d.ts",
+        "default": "./dist/esm/index.mjs"
+      },
+      "require": {
+        "types": "./dist/cjs/index.d.cts",
+        "default": "./dist/cjs/index.cjs"
+      }
+    }
+  },
+  "files": [
+    "README.md",
+    "LICENSE",
+    "NOTICE",
+    "dist/"
+  ],
+  "publishConfig": {
+    "directory": "_release/package"
+  },
+  "scripts": {
+    "clean": "yarn g:clean",
+    "build": "yarn g:build",
+    "build:watch": "yarn g:build-watch",
+    "test": "yarn g:test",
+    "test:watch": "yarn g:test-watch",
+    "lint": "yarn g:lint",
+    "fix": "yarn g:fix",
+    "check": "yarn g:check"
+  },
+  "prettier": "prettier-config-custom",
+  "dependencies": {
+    "@mincho-js/css": "workspace:^"
+  },
+  "peerDependencies": {
+    "@vanilla-extract/css": "*"
+  },
+  "devDependencies": {
+    "@mincho-js/debug-log": "workspace:^",
+    "@types/node": "catalog:",
+    "@vanilla-extract/css": "catalog:",
+    "eslint-config-custom": "workspace:^",
+    "prettier-config-custom": "workspace:^",
+    "tsconfig-custom": "workspace:^",
+    "vite": "catalog:",
+    "vite-config-custom": "workspace:^",
+    "vitest": "catalog:"
+  }
+}

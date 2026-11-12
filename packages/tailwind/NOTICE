@@ -1,0 +1,8 @@
+Tailwind CSS style and token port for Mincho.
+
+Derived from Tailwind CSS 4.3.5, commit b08bf83a327271dfb7e3cd485fd793da15013f7c.
+https://github.com/tailwindlabs/tailwindcss
+
+Original styles are copyright Tailwind Labs, Inc. and distributed under MIT.
+Mincho contracts and integration are copyright mincho-js, also under MIT.
+The scanner, class parser, plugin system, and compiler are not included.
