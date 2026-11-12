@@ -338,11 +338,14 @@ describe("closed ESM evaluation demand", () => {
       `import {style} from '@vanilla-extract/css'; import {palette} from './tokens'; export const box=style({color:palette.red});`,
       {
         "tokens.ts": `export const palette={red:'red',unused:'EXTERNAL_PLUGIN'};`,
-        ".babelrc.json": JSON.stringify({ plugins: ["./replace.cjs"] }),
         "replace.cjs": `module.exports=()=>({visitor:{StringLiteral(path){if(path.node.value==='red')path.node.value='blue'}}});`
       }
     );
 
+    await writeFile(
+      join(root, ".babelrc.json"),
+      JSON.stringify({ plugins: [join(root, "replace.cjs")] })
+    );
     await rm(join(root, "package.json"));
 
     const baseline = await compile(options);

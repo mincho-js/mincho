@@ -31,6 +31,57 @@ async function fixture() {
 }
 
 describe("caller loaders in child compilation", () => {
+  it("loads generated dependencies outside a named package", async () => {
+    const { root } = await fixture();
+    const generated = await fs.mkdtemp(join(tmpdir(), "mincho-generated-"));
+    roots.push(generated);
+    const dependency = join(generated, "tokens.ts");
+    await fs.writeFile(
+      join(root, "color.ts"),
+      'export const color = "royalblue";'
+    );
+
+    const compiled = await compile({
+      cwd: root,
+      filePath: join(root, "entry.ts"),
+      originalPath: join(root, "entry.ts"),
+      contents: 'export { value } from "virtual:tokens";',
+      resolverCache: new Map(),
+      plugins: [
+        {
+          name: "generated-tokens",
+          setup(build) {
+            build.onResolve({ filter: /^virtual:tokens$/ }, () => ({
+              path: dependency,
+              namespace: "file"
+            }));
+            build.onLoad({ filter: /tokens\.ts$/ }, () => ({
+              contents:
+                'import { color } from "./color.ts"; export const value: string = color;',
+              loader: "ts",
+              resolveDir: root
+            }));
+          }
+        }
+      ]
+    });
+    const module = { exports: {} as { value: string } };
+    runInNewContext(compiled.source, {
+      module,
+      exports: module.exports,
+      require(id: string) {
+        if (id === "@vanilla-extract/css/fileScope") return vanillaFileScope;
+        throw new Error(`Unexpected dependency: ${id}`);
+      }
+    });
+
+    expect(module.exports.value).toBe("royalblue");
+    expect(compiled.source).toContain(
+      JSON.stringify(relative(root, dependency))
+    );
+    expect(vanillaFileScope.hasFileScope()).toBe(false);
+  });
+
   it.each(["tsx", undefined] as const)(
     "scopes and transforms caller contents with loader %s",
     async (loader) => {
@@ -84,7 +135,7 @@ describe("caller loaders in child compilation", () => {
       });
 
       expect(compiled.source).toContain(
-        JSON.stringify(relative(process.cwd(), dependency))
+        JSON.stringify(relative(root, dependency))
       );
       expect(compiled.source).toContain("$$styled");
       expect(compiled.source).toContain('var color = "red"');
@@ -136,7 +187,7 @@ describe("caller loaders in child compilation", () => {
         namespace === "file" ? contents : "virtual contents"
       );
       expect(compiled.source).not.toContain(
-        JSON.stringify(relative(process.cwd(), dependency))
+        JSON.stringify(relative(root, dependency))
       );
     }
   );

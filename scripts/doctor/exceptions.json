@@ -120,6 +120,16 @@
     "expires": "2026-12-31"
   },
   {
+    "id": "integration-compile-plugins-generated-tokens-loader",
+    "file": "packages/integration/src/compilePlugins.test.ts",
+    "type": "warning",
+    "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
+    "source": "loader: \"ts\",",
+    "count": 1,
+    "reason": "This generated-token fixture supplies TypeScript source through esbuild's built-in ts loader in an onLoad result. It does not reference a Webpack loader package.",
+    "expires": "2026-12-31"
+  },
+  {
     "id": "configs-eslint-config-custom-eslint-config-base-node-modules-01",
     "file": "configs/eslint-config-custom/eslint.config.base.js",
     "type": "warning",
@@ -1447,6 +1457,16 @@
     "source": "setFileScope(\"../node_modules/parent/rules.js\", \"@consumer/app\");",
     "count": 1,
     "reason": "This synthetic producer file scope tests deferred consumer registration. It does not locate a package or access the filesystem.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "integration-colocated-preset-esbuild-loader",
+    "file": "packages/integration/src/coLocatedPreset.test.ts",
+    "type": "warning",
+    "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
+    "source": "loader: \"js\"",
+    "count": 1,
+    "reason": "This esbuild onLoad fixture returns the built-in JavaScript loader enum. It is not a Webpack loader module and must not be resolved as a package.",
     "expires": "2026-12-31"
   }
 ]

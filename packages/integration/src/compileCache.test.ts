@@ -98,7 +98,7 @@ describe("sidecar compilation cache", () => {
       for (const color of ["blue", "green"]) {
         await writeFile(
           config,
-          JSON.stringify({ plugins: [`./${color}.cjs`] })
+          JSON.stringify({ plugins: [join(babelRoot, `${color}.cjs`)] })
         );
 
         expect((await compile(options)).source).toContain(color);

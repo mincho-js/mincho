@@ -24,7 +24,7 @@ export {
 } from "@vanilla-extract/css";
 export { createVar, keyframes, fontFace } from "./compilerResources.js";
 
-export { globalCss, css, selector } from "./css/index.js";
+export { globalCss, css, mincho$, selector } from "./css/index.js";
 export type { CSSRuleWith } from "./css/types.js";
 export { getVarName } from "./utils.js";
 export { rules } from "./rules/index.js";
