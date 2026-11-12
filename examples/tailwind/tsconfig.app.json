@@ -1,0 +1,11 @@
+{
+  "extends": "tsconfig-custom/tsconfig.node.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "jsxImportSource": "@mincho-js/react",
+    "rootDir": ".",
+    "tsBuildInfoFile": "./.cache/tsbuildinfo",
+    "types": ["node", "vite/client"]
+  },
+  "include": ["*.ts", "*.tsx", "tests/**/*.ts", "tests/**/*.tsx"]
+}

@@ -1,0 +1,73 @@
+body {
+  background: #f4f4f1;
+  color: #17231a;
+}
+.page {
+  max-width: 1120px;
+  margin: auto;
+  padding: 48px 24px;
+}
+header {
+  margin-bottom: 32px;
+}
+.eyebrow {
+  color: #5f685d;
+  font-size: 14px;
+  margin-bottom: 12px;
+}
+h1 {
+  font-size: clamp(28px, 4vw, 44px);
+  font-weight: 700;
+  line-height: 1.2;
+  margin-bottom: 16px;
+}
+h2 + p {
+  margin-top: 12px;
+}
+h3 {
+  font-weight: 600;
+  margin-bottom: 16px;
+}
+button[aria-pressed] {
+  border: 1px solid currentColor;
+  border-radius: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+button[aria-pressed="true"] {
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+.demonstrations {
+  margin-top: 32px;
+}
+.demonstrations > article {
+  min-width: 0;
+}
+.caption {
+  margin-top: 16px;
+  font-size: 14px;
+}
+#spacing {
+  color: #17231a;
+}
+#effects {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+#animation {
+  flex: none;
+}
+#preset {
+  margin: 32px auto 0;
+}
+#preset h2 {
+  font-size: 20px;
+  font-weight: 600;
+}
+@media (prefers-reduced-motion: reduce) {
+  #animation {
+    animation: none;
+  }
+}
