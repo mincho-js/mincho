@@ -940,23 +940,28 @@ function createMinchoViteEnvironmentPlugin(
           // graph before another entry can serialize a shared preset.
           const loadedIds = new Set<string>();
 
-          const preload = async (id: string): Promise<void> => {
+          const preload = async (
+            resolution: Parameters<PluginContext["load"]>[0]
+          ): Promise<void> => {
+            const { id } = resolution;
+
             if (loadedIds.has(id)) return;
 
             loadedIds.add(id);
 
+            // Keep resolver metadata, including package sideEffects, when loading.
             const moduleInfo = await this.load?.({
-              id,
+              ...resolution,
               resolveDependencies: true
             });
 
             for (const dependency of moduleInfo?.importedIdResolutions ?? []) {
-              if (!dependency.external) await preload(dependency.id);
+              if (!dependency.external) await preload(dependency);
             }
           };
 
           for (const id of entryIds) {
-            await preload(normalizePath(resolve(config.root, id)));
+            await preload({ id: normalizePath(resolve(config.root, id)) });
           }
         }
       }
