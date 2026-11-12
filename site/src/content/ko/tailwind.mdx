@@ -1,0 +1,320 @@
+# Tailwind 스타일
+
+Tailwind CSS 4.3.5의 기본 디자인 토큰과 복합 스타일을 Mincho의 기본 API로
+사용합니다. `@mincho-js/tailwind`는 계약과 속성 매핑을 제공하고,
+`@mincho-js/preset-tailwind`는 값과 컴파일된 CSS를 제공합니다.
+
+원본의 OKLCH 팔레트, 간격 단위, 글자 크기와 행간 쌍, 그림자, 모서리, 중단점,
+애니메이션 4종을 유지합니다. 스크린 리더 전용 스타일, 말줄임, 줄 수 제한,
+컨테이너 스타일도 포함합니다. 단일 속성 스타일은 기본 CSS 속성으로 작성합니다.
+Tailwind 클래스 문자열을 해석하지 않으며 스캐너, 컴파일러, 플러그인 API,
+변수 기반 효과 조합 엔진은 포함하지 않습니다.
+
+## 익숙한 유틸리티 문법 [#utility-vocabulary]
+
+```tsx
+// primary-button.tsx
+import type { ReactNode } from "react";
+import { themeClass } from "@mincho-js/preset-tailwind";
+import "@mincho-js/preset-tailwind/styles.css";
+
+export function PrimaryButton({ children }: { children: ReactNode }) {
+  return (
+    <button
+      className={themeClass}
+      css={[
+        {
+          bg: { base: "blue-500", _hover: "blue-700" },
+          text: "white",
+          font: "bold",
+          py: 2,
+          px: 3,
+        },
+        "rounded",
+      ]}
+    >
+      {children}
+    </button>
+  );
+}
+```
+
+아래 설정에서 프리셋을 `css` prop의 소스로 지정하세요.
+`css={{ bg: "blue-500", px: 3 }}`처럼 JSX에서 스타일 객체를 직접 작성하거나
+배열로 복합 유틸리티 이름과 조합할 수 있습니다. 이 prop은 정적 클래스로
+컴파일되고 React 렌더링 전에 제거됩니다.
+
+`text`는 색상·글자 크기·정렬, `font`는 서체·굵기 토큰을 선택합니다.
+`"rounded"`는 기본 반경이며 `rounded: "lg"`처럼 크기를 지정할 수도 있습니다.
+속성별 `base`, `_hover`, `_md` 조건을 Mincho에서 그대로 사용합니다.
+
+간격은 방향별 아토믹 속성으로 분해됩니다. `p`는 `px`와 `py`, `px`는
+`paddingLeft`와 `paddingRight`, `py`는 `paddingTop`과 `paddingBottom`으로
+연결됩니다. `m`도 같은 방식으로 분해됩니다. 따라서 `p: 4` 뒤의 `px: 3`,
+`pl: 1`은 좌우만 덮어쓰며 상하는 유지합니다. `cx()`도 같은 규칙을 적용하고
+hover·반응형 조건은 서로 독립적으로 유지합니다.
+
+## 설치와 설정 [#install-and-configure]
+
+```sh
+npm install @mincho-js/css @mincho-js/react @mincho-js/tailwind @mincho-js/preset-tailwind @vanilla-extract/css
+npm install -D @mincho-js/vite @vanilla-extract/vite-plugin @vitejs/plugin-react
+```
+
+[Mincho와 Vanilla Extract 빌드 플러그인](/ko/docs/getting-started)을 React
+플러그인보다 앞에 설정하세요. `jsxCssProp.importSource`는 인라인 스타일 객체에
+사용할 프리셋을 선택합니다. `extractCalls`에 등록하면 `.tsx`의 컴포넌트 옆에서
+`css`, `rules`, `cx`도 직접 호출할 수 있습니다. 재사용하는 `.css.ts` 테마 파일도
+그대로 컴파일됩니다.
+
+프리셋의 `extractCalls` 매핑은 `/config`에서 가져오세요. 이 경로에는 설정 데이터만
+있으므로 Node에서 스타일을 평가하지 않고 불러올 수 있습니다.
+
+```ts
+// vite.config.ts
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+import { minchoVitePlugin } from "@mincho-js/vite";
+import { extractCalls } from "@mincho-js/preset-tailwind/config";
+import { vanillaExtractPlugin } from "@vanilla-extract/vite-plugin";
+
+export default defineConfig({
+  plugins: [
+    minchoVitePlugin({
+      jsxCssProp: { importSource: "@mincho-js/preset-tailwind" },
+      extractCalls,
+    }),
+    vanillaExtractPlugin(),
+    react({ jsxImportSource: "@mincho-js/react" }),
+  ],
+});
+```
+
+Mincho JSX 타입을 사용하고, TypeScript 프로젝트가 포함하는 선언 파일에
+같은 프리셋의 CSS 시그니처를 등록하세요.
+
+```jsonc
+// tsconfig.json
+{
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "jsxImportSource": "@mincho-js/react",
+  },
+}
+```
+
+```ts
+// mincho.d.ts
+import type { css } from "@mincho-js/preset-tailwind";
+import "@mincho-js/react";
+
+declare module "@mincho-js/react" {
+  interface CssPropConfig {
+    css: typeof css;
+  }
+}
+```
+
+[React 예제](https://github.com/mincho-js/mincho/tree/main/examples/tailwind)도
+이 설정을 사용합니다. `app.tsx`에서 인라인 `css` prop과 recipe를 작성하고,
+`theme.css.ts`에는 재사용하는 사용자 정의 테마 예제를 둡니다. 스타일 생성은
+빌드할 때 추출되며 recipe variant는 실행 중에 선택합니다. 요소나 상위 요소에
+`themeClass`를 적용하고 `styles.css`를 가져와 테마 변수를 불러오세요.
+
+## 테마 → 정의 → 컴포넌트 [#theme-definition-component]
+
+```ts
+// button.css.ts
+import { theme, defineRules } from "@mincho-js/css";
+import { themeSpec } from "@mincho-js/tailwind";
+import { tailwindTokens } from "@mincho-js/preset-tailwind/tokens";
+
+const tokens = {
+  ...tailwindTokens,
+  colors: { ...tailwindTokens.colors, brand: "rebeccapurple" },
+};
+export const [themeClass, vars, contract] = theme(tokens);
+const { css, rules, cx } = defineRules(themeSpec(vars));
+
+export const panel = cx(themeClass, css({ p: 6, _md: { p: 8 } }));
+export const button = rules({
+  base: { px: 4, py: 2, rounded: "lg", fontWeight: "semibold" },
+  variants: {
+    tone: {
+      solid: { bg: "brand", color: "white" },
+      soft: { bg: "violet-100", color: "violet-900" },
+    },
+  },
+});
+```
+
+```tsx
+import { panel, button } from "./button.css";
+
+export function Card() {
+  return (
+    <section className={panel}>
+      <button className={button({ tone: "solid" })}>Create project</button>
+    </section>
+  );
+}
+```
+
+`theme()`는 `@mincho-js/css`의 함수입니다. 클래스, 변수, 재사용할 계약을 만들며
+`theme.extends(contract, tokens)`로 같은 변수에 다른 값을 적용합니다.
+`themeSpec()`는 기본 `defineRules()` 설정을 만들고 직접 클래스를 생성하지 않습니다.
+정의는 `.css.ts` 안에 두고 생성된 클래스와 레시피를 내보내세요.
+
+## 값과 매핑 [#values-and-mappings]
+
+| 스타일      | Mincho 작성법                                                       |
+| ----------- | ------------------------------------------------------------------- |
+| 팔레트      | `color: "sky-600"`, `bg: "olive-50"`, `fill: "current"`             |
+| 간격        | `p: 4`, `gap: 1.5`, `mx: -2`, `p: "12px"`                           |
+| 크기        | `w: "1/2"`, `h: "dvh"`, `maxWidth: "prose"`                         |
+| 글꼴        | `fontFamily: "sans"`, `fontSize: "lg"`, `fontWeight: "bold"`        |
+| 효과        | `rounded: "xl"`, `shadow: "sm"`, `blur: "xs"`, `animate: "pulse"`   |
+| 복합 스타일 | `srOnly: true`, `notSrOnly: true`, `truncate: true`, `lineClamp: 2` |
+| 컨테이너    | `container: true`                                                   |
+
+숫자 간격은 기본 `0.25rem` 토큰의 배수이며 유한한 0.25 간격 값을 지원합니다.
+음수는 margin, inset, textIndent, scrollMargin에 적용할 수 있습니다.
+CSS 길이 문자열은 그대로 사용합니다. 축 단축 속성은 개별 방향 속성으로 분해되어
+각 방향을 독립적으로 덮어쓸 수 있습니다.
+
+이름으로 선택한 글자 크기는 원본 행간을 함께 적용합니다. 덮어쓰려면 `fontSize`
+뒤에 `lineHeight`를 두세요. 숫자 행간은 간격 단위의 배수이고, `"1.5"` 같은
+문자열은 단위 없는 값 그대로 사용합니다.
+
+`TailwindTokens`는 전체 기본 계약을 표현합니다. `TailwindScales`는 완전한 테마에서
+사용자 정의 이름을 허용합니다. 기본 값을 펼쳐 필요한 그룹을 유지하며 토큰을
+추가하거나 변경하세요. 미디어 쿼리에는 CSS 변수를 사용할 수 없으므로 중단점은
+변수 계약과 별도로 둡니다.
+
+## 반응형 스타일 [#responsive-styles]
+
+기본 조건은 `_sm` 40rem, `_md` 48rem, `_lg` 64rem, `_xl` 80rem,
+`_screen2xl` 96rem입니다. 기본 조건 이름은 문자로 시작하므로 원본의 `2xl`은
+`screen2xl`이라는 별칭을 사용합니다.
+
+```ts
+const { css } = defineRules(
+  themeSpec(vars, { tablet: "48rem", wide: "80rem" }),
+);
+export const layout = css({ display: "grid", _tablet: { gap: 6 } });
+```
+
+사용자 정의 중단점은 기본 중단점을 대체합니다. 컨테이너는 `width: 100%`와
+반응형 최대 너비를 적용하며, 가운데 정렬과 안쪽 간격은 별도로 작성합니다.
+
+## 효과 조합과 애니메이션 [#compose-effects-and-use-animations]
+
+`blur`, `dropShadow`, `insetShadow`, `shadow` 매핑은 각각 CSS 속성 전체를
+지정합니다. 여러 효과를 합치려면 변수를 기본 리터럴 `css()`에 전달하세요.
+
+```ts
+import { css as literalCss } from "@mincho-js/css";
+
+export const effects = literalCss({
+  filter_: [
+    "blur(0px)",
+    ...vars.dropShadows.DEFAULT.map((s) => `drop-shadow(${s})`),
+  ],
+  boxShadow$: [vars.shadows.sm, vars.insetShadows.xs],
+});
+```
+
+`filter_`는 공백으로, `boxShadow$`는 쉼표로 연결합니다. Tailwind 유틸리티 상태
+엔진 없이 Mincho의 기본 조합 기능을 사용합니다. 기본 애니메이션 값은 범위가
+지정된 키프레임을 참조하므로 사용할 때 `@mincho-js/preset-tailwind/styles.css`를
+가져오세요. 동작 줄이기 설정은 기본 미디어 조건이나 앱 CSS로 처리합니다.
+
+## React recipe [#react-recipes]
+
+프리셋 정의를 `@mincho-js/react`의 `defineRules`에 전달하면 기존 `css`, `rules`,
+`cx` API를 유지하면서 `styled`를 추가할 수 있습니다. `styled.span()`은 같은
+recipe 옵션으로 타입이 있는 HTML 요소의 React 컴포넌트를 만듭니다. 생성 코드를
+`mincho$` 블록이나 `.css.ts`에 두면 recipe가 빌드할 때 컴파일됩니다.
+
+```tsx
+import { mincho$ } from "@mincho-js/css";
+import { defineRules as defineReactRules } from "@mincho-js/react";
+import * as tailwindDefinition from "@mincho-js/preset-tailwind";
+import "@mincho-js/preset-tailwind/styles.css";
+
+const Badge = mincho$(() =>
+  defineReactRules(tailwindDefinition).styled.span({
+    base: { px: 2.5, py: 1, rounded: "full", fontSize: "sm" },
+    variants: {
+      tone: {
+        info: { color: "sky-900", bg: "sky-100" },
+        success: { color: "emerald-900", bg: "emerald-100" },
+      },
+    },
+    defaultVariants: { tone: "info" },
+  }),
+);
+
+export function Status() {
+  return (
+    <Badge className={tailwindDefinition.themeClass} tone="success">
+      Ready
+    </Badge>
+  );
+}
+```
+
+## 컴파일된 스타일과 선택적 초기화 [#compiled-styles-and-optional-reset]
+
+```ts
+// panel.css.ts
+import { css, rules, cx, themeClass } from "@mincho-js/preset-tailwind";
+
+export const panel = cx(themeClass, css({ container: true, px: 6 }));
+export const label = css({ truncate: true });
+export const button = rules({
+  base: { px: 4, py: 2, rounded: "lg" },
+  variants: {
+    tone: {
+      solid: { color: "white", bg: "sky-700" },
+      soft: { color: "sky-900", bg: "sky-100" },
+    },
+  },
+});
+```
+
+```tsx
+import { panel, label, button } from "./panel.css";
+import "@mincho-js/preset-tailwind/styles.css";
+// Optional, global browser reset:
+import "@mincho-js/preset-tailwind/preflight.css";
+
+<main className={panel}>
+  <p className={label}>A long description</p>
+  <button className={button({ tone: "soft" })}>Create project</button>
+</main>;
+```
+
+루트는 `themeClass`, `vars`, `contract`와 함께 Mincho의 `css`, `rules`,
+`cx`, `preset`을 내보냅니다. 컴포넌트에 필요한 스타일과 recipe를 `.css.ts`에
+정의하거나, 위 설정으로 컴포넌트 옆의 함수 호출과 JSX `css` prop을 사용하세요.
+사용한 스타일만 컴포넌트 CSS를 생성합니다. 패키지는 고정된 container나 utility
+클래스를 배포하지 않습니다.
+
+`styles.css`에는 테마 변수와 애니메이션 keyframes가 있습니다. `/tokens`는
+일반 데이터인 `tailwindTokens`를 제공합니다. JavaScript import만으로 CSS를
+생성하지 않으며 Node/SSR에서도 읽을 수 있습니다. 두 CSS 진입점은 명시적으로
+불러오는 파일입니다. 스타일 작성 API에는 빌드 플러그인이 필요하며 컴파일된
+테마 데이터를 읽는 데에는 필요하지 않습니다.
+
+Preflight는 `mincho-tailwind-preflight` 캐스케이드 레이어에 원본 브라우저 보정과
+기본 글꼴을 유지합니다. 레이어 밖의 앱 규칙이 일반 초기화 선언보다 우선하지만
+원본 `[hidden]` 규칙의 important는 유지됩니다. 다른 레이어와 함께 쓸 때는 순서를
+명시하세요. 초기화 글꼴은 앱의 `html`과 `code, kbd, samp, pre`에서 덮어쓰세요.
+지역 테마를 바꾸어도 전역 초기화는 바뀌지 않습니다. 원본 `--theme()`는 모두 CSS
+값으로 변환되며 사용자가 Tailwind를 설치할 필요가 없습니다.
+
+`yarn workspace @examples/tailwind dev`로 React 예제를 실행하세요. 테마 모드,
+변형, 반응형 스타일, 효과 조합과 명시적인 Preflight 사용을 확인할 수 있습니다.
+원본 MIT 고지와 고정된 소스 리비전은 패키지의 `NOTICE`, `LICENSE`에 있습니다.
+타입 검증에는 TypeScript 5.9.3을 사용합니다.

@@ -63,6 +63,9 @@
       "path": "examples/shared-component"
     },
     {
+      "path": "examples/tailwind"
+    },
+    {
       "path": "examples/theme-ui"
     },
     {
