@@ -16,6 +16,8 @@
     "theme-ui-types.mts",
     "theme-ui-types.cts",
     "theme-ui-react-types.tsx",
-    "theme-ui-react-types.cts"
+    "theme-ui-react-types.cts",
+    "tailwind-types.mts",
+    "tailwind-types.cts"
   ]
 }
