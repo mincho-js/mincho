@@ -2565,6 +2565,27 @@ __metadata:
   languageName: unknown
   linkType: soft
 
+"@mincho-js/preset-tailwind@workspace:packages/preset-tailwind":
+  version: 0.0.0-use.local
+  resolution: "@mincho-js/preset-tailwind@workspace:packages/preset-tailwind"
+  dependencies:
+    "@mincho-js/css": "workspace:^"
+    "@mincho-js/debug-log": "workspace:^"
+    "@mincho-js/tailwind": "workspace:^"
+    "@types/node": "catalog:"
+    "@vanilla-extract/css": "catalog:"
+    "@vanilla-extract/vite-plugin": "catalog:"
+    eslint-config-custom: "workspace:^"
+    prettier-config-custom: "workspace:^"
+    tsconfig-custom: "workspace:^"
+    vite: "catalog:"
+    vite-config-custom: "workspace:^"
+    vitest: "catalog:"
+  peerDependencies:
+    "@vanilla-extract/css": "*"
+  languageName: unknown
+  linkType: soft
+
 "@mincho-js/preset-theme-ui-react@workspace:^, @mincho-js/preset-theme-ui-react@workspace:packages/preset-theme-ui-react":
   version: 0.0.0-use.local
   resolution: "@mincho-js/preset-theme-ui-react@workspace:packages/preset-theme-ui-react"
@@ -2652,7 +2673,7 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@mincho-js/tailwind@workspace:packages/tailwind":
+"@mincho-js/tailwind@workspace:^, @mincho-js/tailwind@workspace:packages/tailwind":
   version: 0.0.0-use.local
   resolution: "@mincho-js/tailwind@workspace:packages/tailwind"
   dependencies:
