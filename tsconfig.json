@@ -33,6 +33,9 @@
       "path": "packages/react"
     },
     {
+      "path": "packages/tailwind"
+    },
+    {
       "path": "packages/theme-ui"
     },
     {
