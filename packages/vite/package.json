@@ -90,12 +90,14 @@
     "@mincho-js/transform-to-vanilla": "workspace:^",
     "@rollup/pluginutils": "catalog:",
     "@vanilla-extract/integration": "catalog:",
+    "css-tree": "catalog:",
     "magic-string": "catalog:"
   },
   "devDependencies": {
     "@jridgewell/trace-mapping": "catalog:",
     "@mincho-js/debug-log": "workspace:^",
     "@types/babel__core": "catalog:",
+    "@types/css-tree": "catalog:",
     "@types/node": "catalog:",
     "@vanilla-extract/css": "catalog:",
     "@vanilla-extract/dynamic": "catalog:",

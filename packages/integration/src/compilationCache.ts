@@ -215,6 +215,12 @@ export class CompilationCache {
     );
   }
 
+  async readOptionalFile(file: string): Promise<Uint8Array | undefined> {
+    return (
+      this.inputs ?? new CompilationInputs(undefined, this.io)
+    ).readOptionalFile(file);
+  }
+
   async readFile(file: string): Promise<Uint8Array> {
     return (this.inputs ?? new CompilationInputs(undefined, this.io)).readFile(
       file
@@ -333,17 +339,11 @@ export class CompilationCache {
     if (pending) {
       recordCompilationDiagnostic("cache-pending", { key });
 
-      const value = await (pending as Promise<T>);
+      await pending;
 
-      if (generation !== this.generation) {
-        try {
-          if (!validate || (await validate(value))) return value;
-        } catch {
-          /* Retry through the caller's provider without publishing stale work. */
-        }
-
-        return (await create()).value;
-      }
+      // A pending value carries no independently verified producer snapshot.
+      // A value-level validator is not proof of the producer's dependencies.
+      if (generation !== this.generation) return (await create()).value;
 
       // A concurrent caller owns its input snapshot and resolver environment.
       // Reuse the completed entry only after both normal validators pass.

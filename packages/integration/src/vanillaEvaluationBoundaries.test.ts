@@ -7,6 +7,7 @@ import { CompilationExecution } from "./compilationExecution.js";
 import { CompilationDiagnostics } from "./diagnostics.js";
 import { proveReusableEvaluation } from "./evaluationProof.js";
 import { processVanillaWithExecution } from "./vanillaEvaluation.js";
+import { issueCssScopeRuntimeOrigins } from "./fileScopeRuntime.js";
 
 const filePath = join(process.cwd(), "src/__fixtures__/vm-boundaries.css.ts");
 const executions: CompilationExecution[] = [];
@@ -26,7 +27,7 @@ function execution(cache = true) {
 }
 
 async function options() {
-  const { source } = await compile({
+  const { source, cssScopeOrigins } = await compile({
     filePath,
     originalPath: filePath,
     contents:
@@ -34,7 +35,7 @@ async function options() {
     resolverCache: new Map()
   });
 
-  return { source, filePath };
+  return { source, filePath, cssScopeOrigins };
 }
 
 describe("guarded evaluation boundaries", () => {
@@ -45,17 +46,25 @@ describe("guarded evaluation boundaries", () => {
     const diagnostics = new CompilationDiagnostics({ console: true });
 
     expect(runtime.evaluation).toBe("fresh");
+    const expected = await processVanillaFile(input);
     for (let index = 0; index < 2; index++)
-      await diagnostics.run(filePath, "test", () =>
-        runtime.run(() => processVanillaWithExecution(input))
-      );
+      expect(
+        await diagnostics.run(filePath, "test", () =>
+          runtime.run(() => processVanillaWithExecution(input))
+        )
+      ).toBe(expected);
 
-    expect(
-      diagnostics
-        .snapshot()
-        .builds.flatMap((build) => build.events)
-        .some((event) => event.phase.startsWith("vm-"))
-    ).toBe(false);
+    // Runtime scope provenance uses the owned evaluator even in fresh mode.
+    // Its execution is observed; no proof, compiled script, cached data, or
+    // pooled context may be retained or reused by this path.
+    const vmEvents = diagnostics
+      .snapshot()
+      .builds.flatMap((build) => build.events)
+      .filter((event) => event.phase.startsWith("vm-"));
+    expect(vmEvents.map((event) => event.phase)).toEqual([
+      "vm-evaluate",
+      "vm-evaluate"
+    ]);
   });
 
   it.each(["invalid", 1, false, {}])(
@@ -78,11 +87,20 @@ describe("guarded evaluation boundaries", () => {
       .replace("\nendFileScope();", "\ncloseScope();");
 
     expect(source).toContain("\nopenScope(");
-    expect(proveReusableEvaluation(source)).toBeDefined();
-    expect(
-      await execution().run(() =>
-        processVanillaWithExecution({ ...input, source })
+    // A transformed source must not inherit the old source-bound seal. This
+    // fixture acts as the compiler boundary after the exact binding rename.
+    expect(proveReusableEvaluation(source, undefined, input)).toBeUndefined();
+    const renamed = {
+      ...input,
+      source,
+      cssScopeOrigins: issueCssScopeRuntimeOrigins(
+        source,
+        input.cssScopeOrigins
       )
+    };
+    expect(proveReusableEvaluation(source, undefined, renamed)).toBeDefined();
+    expect(
+      await execution().run(() => processVanillaWithExecution(renamed))
     ).toBe(await processVanillaFile(input));
   });
 
@@ -100,8 +118,16 @@ describe("guarded evaluation boundaries", () => {
   ])("rejects a forged wrapper or binding: %s", async (from, to) => {
     const input = await options();
     expect(input.source).toContain(from);
+    const source = input.source.replace(from, to);
+    // Issue matching test evidence so this checks wrapper/binding validation,
+    // not merely the earlier stale-source-seal rejection.
     expect(
-      proveReusableEvaluation(input.source.replace(from, to))
+      proveReusableEvaluation(source, undefined, {
+        cssScopeOrigins: issueCssScopeRuntimeOrigins(
+          source,
+          input.cssScopeOrigins
+        )
+      })
     ).toBeUndefined();
   });
 
@@ -147,7 +173,15 @@ describe("guarded evaluation boundaries", () => {
 
   it("uses fresh evaluation while a consumer holds the shared context", async () => {
     const runtime = execution();
-    const input = await options();
+    const input = {
+      filePath,
+      source: `const scope=require('@vanilla-extract/css/fileScope');
+        const css=require('@vanilla-extract/css');
+        scope.setFileScope('legacy.css.ts','legacy');
+        module.exports={box:css.style({color:'blue'})};
+        scope.endFileScope();`
+    };
+    expect(proveReusableEvaluation(input.source)).toBeDefined();
     const diagnostics = new CompilationDiagnostics({ console: true });
     let signal!: () => void;
     let release!: () => void;
@@ -239,20 +273,28 @@ describe("guarded evaluation boundaries", () => {
     const runtime = execution(false);
     const diagnostics = new CompilationDiagnostics({ console: true });
 
+    const expected = await processVanillaFile(input);
     for (let index = 0; index < 2; index++)
-      await diagnostics.run(filePath, "test", () =>
-        runtime.run(() => processVanillaWithExecution(input))
-      );
+      expect(
+        await diagnostics.run(filePath, "test", () =>
+          runtime.run(() => processVanillaWithExecution(input))
+        )
+      ).toBe(expected);
 
-    expect(
-      diagnostics
-        .snapshot()
-        .builds.flatMap((build) => build.events)
-        .some((event) => event.phase.startsWith("vm-"))
-    ).toBe(false);
+    // Runtime scope provenance uses the owned evaluator even in fresh mode.
+    // Its execution is observed; no proof, compiled script, cached data, or
+    // pooled context may be retained or reused by this path.
+    const vmEvents = diagnostics
+      .snapshot()
+      .builds.flatMap((build) => build.events)
+      .filter((event) => event.phase.startsWith("vm-"));
+    expect(vmEvents.map((event) => event.phase)).toEqual([
+      "vm-evaluate",
+      "vm-evaluate"
+    ]);
   });
 
-  it("keeps separately owned contexts independent when an owner closes", async () => {
+  it("keeps separately owned script caches independent when an owner closes", async () => {
     const input = await options();
     const first = execution();
     const second = execution();
@@ -272,9 +314,12 @@ describe("guarded evaluation boundaries", () => {
       .builds.flatMap((build) => build.events);
     expect(
       events.filter((event) => event.phase === "vm-context-new")
-    ).toHaveLength(2);
+    ).toHaveLength(3);
     expect(
       events.filter((event) => event.phase === "vm-context-reuse")
+    ).toHaveLength(0);
+    expect(
+      events.filter((event) => event.phase === "vm-script-hit")
     ).toHaveLength(1);
   });
 });

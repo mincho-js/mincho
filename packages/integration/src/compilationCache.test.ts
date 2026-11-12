@@ -65,10 +65,12 @@ describe("compilation cache", () => {
         })
     );
 
+    const createWaitingSnapshot = vi.fn(async () => entry(3));
     const a = cache.run("a", create);
-    const b = cache.run("a", create);
+    const b = cache.run("a", createWaitingSnapshot);
 
     expect(create).toHaveBeenCalledTimes(1);
+    expect(createWaitingSnapshot).not.toHaveBeenCalled();
 
     cache.begin();
 
@@ -76,7 +78,8 @@ describe("compilation cache", () => {
 
     finish(entry(1));
 
-    expect(await Promise.all([a, b])).toEqual([1, 1]);
+    expect(await Promise.all([a, b])).toEqual([1, 3]);
+    expect(createWaitingSnapshot).toHaveBeenCalledTimes(1);
     expect(await cache.run("a", create)).toBe(2);
     await expect(
       cache.run("failure", async () => {

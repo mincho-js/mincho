@@ -3,7 +3,7 @@ import {
   type StaticCssEvalSourceProvider,
   type BabelTransformError
 } from "./babel.js";
-import { transformScopedDependencySource } from "./compile.js";
+import { transformScopedDependency } from "./compile.js";
 import { CompilationCache } from "./compilationCache.js";
 import {
   restoreWorkerError,
@@ -162,7 +162,7 @@ export async function runCompilerJob(
     if (job.kind === "scoped")
       return {
         ok: true,
-        value: transformScopedDependencySource(job.input),
+        value: transformScopedDependency(job.input),
         duration: performance.now() - start,
         transport
       };

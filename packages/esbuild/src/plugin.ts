@@ -358,7 +358,11 @@ export function minchoEsbuildPlugin({
         const resolverContents = resolvers.get(pluginData.path)!;
         const assetWatchFiles = new Set<string>();
         const assetBridge = assets.createCompileBridge(assetWatchFiles);
-        const { source, watchFiles = [] } = await traced.compile({
+        const {
+          source,
+          watchFiles = [],
+          cssScopeOrigins
+        } = await traced.compile({
           esbuild: build.esbuild,
           filePath: path,
           originalPath: pluginData.mainFilePath!,
@@ -390,6 +394,7 @@ export function minchoEsbuildPlugin({
           } = await integrationHelpers.runDefineRulesPresetRegistryStep(() =>
             traced.processDefineRulesPresetRegistryFile({
               source,
+              cssScopeOrigins,
               filePath: path,
               outputCss: undefined,
               identOption: internalResolveIdentifiers(mode, identifiers)
@@ -720,6 +725,26 @@ if (import.meta.vitest) {
   // eslint-disable-next-line @typescript-eslint/ban-ts-comment
   // @ts-ignore error TS1343: The 'import.meta' meta-property is only allowed when the '--module' option is 'es2020', 'es2022', 'esnext', 'system', 'node16', or 'nodenext'.
   const { afterEach, beforeAll, describe, expect, it, vi } = import.meta.vitest;
+
+  // Test the emitted capability/source relationship, not merely an added field.
+  async function expectedScopeRuntime(source: string, origin: string) {
+    const { createHash } = await import("node:crypto");
+    const digest = (value: string) =>
+      createHash("sha256").update(value).digest("hex");
+    const factories = [
+      ...new Set(source.match(/__mincho_css_scope_factory_[a-f0-9]{48}\b/g))
+    ];
+    expect(factories).toHaveLength(1);
+    const factoryName = factories[0]!;
+    const id = `mincho:css-scope-runtime:${digest(origin)}`;
+    expect(source).toContain(`typeof ${factoryName} === "function"`);
+    expect(source).toContain(`${factoryName}(${JSON.stringify(id)})`);
+    return {
+      factoryName,
+      id,
+      sourceHash: createHash("sha256").update(source, "utf16le").digest("hex")
+    };
+  }
 
   const DEFINE_RULES_PRESET_SCHEMA = "mincho.defineRulesPreset";
 
@@ -1441,9 +1466,11 @@ if (import.meta.vitest) {
   ): Promise<{ scriptSource: string; sidecarSource: string }> {
     const compileSpy = vi
       .spyOn(integrationHelpers, "compile")
-      .mockResolvedValue({ source: "compiled static css" } as Awaited<
-        ReturnType<typeof compile>
-      >);
+      .mockResolvedValue({
+        cssScopeOrigins: [],
+        watchFiles: [],
+        source: "compiled static css"
+      } as Awaited<ReturnType<typeof compile>>);
 
     vi.spyOn(
       integrationHelpers,
@@ -2037,6 +2064,8 @@ if (import.meta.vitest) {
       const compileSpy = vi
         .spyOn(integrationHelpers, "compile")
         .mockResolvedValue({
+          cssScopeOrigins: [],
+          watchFiles: [],
           source: "compiled source"
         } as Awaited<ReturnType<typeof compile>>);
 
@@ -3801,8 +3830,19 @@ if (import.meta.vitest) {
         "fillBlue"
       );
 
+      const registeredSource = registrySpy.mock.calls[0]![0].source;
       expect(registrySpy).toHaveBeenCalledWith({
-        source: expect.any(String),
+        cssScopeOrigins: [
+          {
+            fileScope: {
+              filePath: "packages/esbuild/src/live-preset-entry.ts",
+              packageName: "@mincho-js/esbuild"
+            },
+            origin: entryPath,
+            runtime: await expectedScopeRuntime(registeredSource, entryPath)
+          }
+        ],
+        source: registeredSource,
         filePath: resolveResult.path,
         outputCss: undefined,
         identOption: "debug",
@@ -3896,6 +3936,8 @@ if (import.meta.vitest) {
         const compileSpy = vi
           .spyOn(integrationHelpers, "compile")
           .mockResolvedValue({
+            cssScopeOrigins: [],
+            watchFiles: [],
             source: "compiled source"
           } as Awaited<ReturnType<typeof compile>>);
 
@@ -3940,6 +3982,7 @@ if (import.meta.vitest) {
         expect(registryStepSpy).toHaveBeenCalledWith(expect.any(Function));
         expect(registryStepSpy).toHaveBeenCalledTimes(1);
         expect(registrySpy).toHaveBeenCalledWith({
+          cssScopeOrigins: [],
           source: "compiled source",
           filePath: "/workspace/src/extracted_rules.css.ts",
           outputCss: undefined,
@@ -3965,6 +4008,8 @@ if (import.meta.vitest) {
         result: ["extracted_rules.css.ts", "resolver contents"]
       });
       vi.spyOn(integrationHelpers, "compile").mockResolvedValue({
+        cssScopeOrigins: [],
+        watchFiles: [],
         source: "compiled source"
       } as Awaited<ReturnType<typeof compile>>);
 
@@ -3977,6 +4022,7 @@ if (import.meta.vitest) {
       await loadExtractedCssFromEntry(harness);
 
       expect(registrySpy).toHaveBeenCalledWith({
+        cssScopeOrigins: [],
         source: "compiled source",
         filePath: "/workspace/src/extracted_rules.css.ts",
         outputCss: undefined,
@@ -4029,8 +4075,22 @@ if (import.meta.vitest) {
           join(process.cwd(), "packages/esbuild/src/app.ts")
         );
 
+        const registeredSource = registrySpy.mock.calls[0]![0].source;
         expect(registrySpy).toHaveBeenCalledWith({
-          source: expect.any(String),
+          cssScopeOrigins: [
+            {
+              fileScope: {
+                filePath: "packages/esbuild/src/app.ts",
+                packageName: "@mincho-js/esbuild"
+              },
+              origin: join(process.cwd(), "packages/esbuild/src/app.ts"),
+              runtime: await expectedScopeRuntime(
+                registeredSource,
+                join(process.cwd(), "packages/esbuild/src/app.ts")
+              )
+            }
+          ],
+          source: registeredSource,
           filePath: resolveResult.path,
           outputCss: undefined,
           identOption: "debug",
@@ -4165,6 +4225,8 @@ if (import.meta.vitest) {
         result: ["extracted_rules.css.ts", "resolver contents"]
       });
       vi.spyOn(integrationHelpers, "compile").mockResolvedValue({
+        cssScopeOrigins: [],
+        watchFiles: [],
         source: "compiled source"
       } as Awaited<ReturnType<typeof compile>>);
 
@@ -4194,6 +4256,7 @@ if (import.meta.vitest) {
       };
 
       expect(registrySpy).toHaveBeenCalledWith({
+        cssScopeOrigins: [],
         source: "compiled source",
         filePath: "/workspace/src/extracted_rules.css.ts",
         outputCss: undefined,
@@ -4264,6 +4327,8 @@ if (import.meta.vitest) {
       vi.spyOn(integrationHelpers, "compile").mockImplementation(
         async (options: Parameters<typeof compile>[0]) =>
           ({
+            cssScopeOrigins: [],
+            watchFiles: [],
             source: `compiled source:${options.filePath}`
           }) as Awaited<ReturnType<typeof compile>>
       );
@@ -4358,6 +4423,7 @@ if (import.meta.vitest) {
         "end:/workspace/src/extracted_b.css.ts"
       ]);
       expect(registrySpy).toHaveBeenNthCalledWith(1, {
+        cssScopeOrigins: [],
         source: "compiled source:/workspace/src/extracted_a.css.ts",
         filePath: "/workspace/src/extracted_a.css.ts",
         outputCss: undefined,
@@ -4365,6 +4431,7 @@ if (import.meta.vitest) {
         staticStyles: false
       });
       expect(registrySpy).toHaveBeenNthCalledWith(2, {
+        cssScopeOrigins: [],
         source: "compiled source:/workspace/src/extracted_b.css.ts",
         filePath: "/workspace/src/extracted_b.css.ts",
         outputCss: undefined,

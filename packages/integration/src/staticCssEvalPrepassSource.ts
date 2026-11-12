@@ -1,4 +1,5 @@
 import {
+  internalHasStaticCssEvalSyntaxFilename,
   internalStaticCssEvalLimits,
   type InternalImportedStaticCssEvalImportResolution as BabelImportedStaticCssEvalImportResolution,
   type InternalImportedStaticCssEvalLoadedModule as BabelImportedStaticCssEvalLoadedModule
@@ -115,10 +116,23 @@ export function createLoadedModule(
     options.resolution
   );
 
+  // A backing filename is syntax evidence only if it describes source code.
+  // Keep the provider's physical path regardless of the parser's choice.
+  const syntaxSourceId =
+    loadedSource.realpath !== undefined &&
+    internalHasStaticCssEvalSyntaxFilename(loadedSource.realpath, true)
+      ? undefined
+      : [loadedSource.resolvedFile, id].find(
+          (candidate) =>
+            candidate !== undefined &&
+            internalHasStaticCssEvalSyntaxFilename(candidate)
+        );
+
   return {
     id,
     source: sourceText,
     realpath: loadedSource.realpath ?? options.resolution?.realpath,
+    ...(syntaxSourceId !== undefined ? { syntaxSourceId } : {}),
     sourceHash: sourceIdentity.sourceHash,
     version: sourceIdentity.version,
     ...createLoadedModuleSourceMetadata(loadedSource, options.resolution)

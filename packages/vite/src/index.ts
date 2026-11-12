@@ -1,3 +1,9 @@
+import { parseSync } from "@babel/core";
+import {
+  parse as parseCss,
+  walk as walkCss,
+  lexer as cssLexer
+} from "css-tree";
 import { measureOutputBundle } from "./bundleMetrics.js";
 import {
   internalOptimizeCompiledRecipeSource,
@@ -45,10 +51,18 @@ import {
 } from "@mincho-js/integration";
 import { normalizePath } from "@rollup/pluginutils";
 import { AsyncLocalStorage } from "node:async_hooks";
+import { createHash, randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import { dirname, join, posix, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import type { Plugin, ResolvedConfig, Rollup, ViteDevServer } from "vite";
+import type {
+  DevEnvironment,
+  EnvironmentModuleNode,
+  Plugin,
+  ResolvedConfig,
+  Rollup,
+  ViteDevServer
+} from "vite";
 import {
   ViteCssState,
   customNormalize,
@@ -161,6 +175,242 @@ export function minchoVitePlugins(
   return [evidence, minchoVitePlugin(options), guard];
 }
 
+const literalGradientFunctions = new Set([
+  "linear-gradient",
+  "radial-gradient",
+  "conic-gradient",
+  "repeating-linear-gradient",
+  "repeating-radial-gradient",
+  "repeating-conic-gradient"
+]);
+
+// No physical-origin authority is created by this CSS-text-only check.
+// Unknown syntax and resource-capable functions stay on the attributed path.
+function isOriginIndependentCss(source: string): boolean {
+  let valid = true;
+  const scopedFunctions = new WeakSet<object>();
+  const functions = new Set([
+    "calc",
+    "min",
+    "max",
+    "clamp",
+    "rgb",
+    "rgba",
+    "hsl",
+    "hsla",
+    "hwb",
+    "lab",
+    "lch",
+    "oklab",
+    "oklch",
+    "color",
+    "color-mix"
+  ]);
+  const atRules = new Set([
+    "media",
+    "supports",
+    "layer",
+    "container",
+    "keyframes",
+    "-webkit-keyframes",
+    "starting-style"
+  ]);
+  try {
+    const ast = parseCss(source, {
+      parseValue: true,
+      parseCustomProperty: true,
+      onParseError() {
+        valid = false;
+      }
+    });
+    walkCss(ast, (node) => {
+      if (node.type === "Raw" || node.type === "Url") valid = false;
+      if (
+        node.type === "Function" &&
+        !functions.has(node.name.toLowerCase()) &&
+        !scopedFunctions.has(node)
+      )
+        valid = false;
+      if (node.type === "Atrule" && !atRules.has(node.name.toLowerCase()))
+        valid = false;
+      if (node.type === "Declaration") {
+        const property = node.property.toLowerCase();
+        // Permit only standard gradient roots in the background-image grammar.
+        // Its declaration still needs to match the lexer below, and every
+        // child is still visited to reject substitutions and resource syntax.
+        if (property === "background-image" && node.value.type === "Value") {
+          node.value.children.forEach((value) => {
+            if (
+              value.type === "Function" &&
+              literalGradientFunctions.has(value.name.toLowerCase())
+            )
+              scopedFunctions.add(value);
+          });
+        }
+        // The lexer cannot validate a variable substitution. Only grant the
+        // exception at a property whose computed value cannot load a resource.
+        // Do not propagate it to custom properties, shorthands or SVG paint.
+        let hasColorVariable = false;
+        if (property === "color") {
+          walkCss(node.value, (value) => {
+            if (value.type !== "Function" || value.name.toLowerCase() !== "var")
+              return;
+            const name = value.children.first;
+            if (name?.type !== "Identifier" || !name.name.startsWith("--"))
+              return;
+            scopedFunctions.add(value);
+            hasColorVariable = true;
+          });
+        }
+        // This exact scalar property grammar only admits transform values,
+        // not an arbitrary function or a value that can load a resource.
+        if (
+          property === "transform" &&
+          !cssLexer.matchProperty("transform", node.value).error
+        ) {
+          walkCss(node.value, (value) => {
+            if (value.type === "Function") scopedFunctions.add(value);
+          });
+        }
+        const token =
+          node.value.type === "Value" && node.value.children.size === 1
+            ? node.value.children.first
+            : undefined;
+        const literalThemeColor =
+          node.property.startsWith("--") &&
+          (token?.type === "Identifier" || token?.type === "Hash") &&
+          !cssLexer.matchType("color", node.value).error;
+        if (
+          !hasColorVariable &&
+          !literalThemeColor &&
+          cssLexer.matchProperty(node.property, node.value).error
+        )
+          valid = false;
+      }
+    });
+    return valid;
+  } catch {
+    return false;
+  }
+}
+
+// CSS in a data URL has no physical base. Vite resolves and embeds what
+// it can; never silently publish a remaining base-dependent resource.
+function hasSelfContainedCssResources(
+  source: string,
+  httpStylesheet = false
+): boolean {
+  let valid = true;
+  const absolute = (value: string) => {
+    if (/^(?:https?:\/\/|data:)/i.test(value)) return true;
+    if (!httpStylesheet || !value.startsWith("/")) return false;
+    if (value.startsWith("//")) {
+      // An HTTP response supplies a scheme; data CSS does not. Require an
+      // explicit authority instead of accepting malformed slash spellings.
+      return (
+        /^\/\/[^/\\#?\s][^\\\s]*$/.test(value) &&
+        new URL(`https:${value}`).hostname !== ""
+      );
+    }
+    return !value.startsWith("/\\");
+  };
+  try {
+    const ast = parseCss(source, {
+      parseValue: true,
+      parseCustomProperty: true,
+      onParseError() {
+        valid = false;
+      }
+    });
+    walkCss(ast, function (node) {
+      if (node.type === "Raw") valid = false;
+      // CSS identifiers can contain escapes. Do not miss an equivalent
+      // spelling of a name with URL-bearing string arguments.
+      if (
+        (node.type === "Atrule" || node.type === "Function") &&
+        node.name.includes("\\")
+      )
+        valid = false;
+      if (node.type === "Url" && !absolute(node.value)) {
+        const localFilter =
+          httpStylesheet &&
+          this.declaration?.property.toLowerCase() === "filter" &&
+          /^#[^\s]+$/.test(node.value);
+        if (!localFilter) valid = false;
+      }
+      if (node.type === "Atrule" && node.name.toLowerCase() === "import") {
+        const first =
+          node.prelude?.type === "AtrulePrelude"
+            ? node.prelude.children.first
+            : undefined;
+        if (!first || !["String", "Url"].includes(first.type)) valid = false;
+        if (first?.type === "String" && !absolute(first.value)) valid = false;
+      }
+      if (
+        node.type === "Function" &&
+        /^(?:-webkit-)?(?:image-set|image|src)$/i.test(node.name)
+      ) {
+        node.children.forEach((child) => {
+          if (child.type === "String" && !absolute(child.value)) valid = false;
+        });
+      }
+    });
+    return valid;
+  } catch {
+    return false;
+  }
+}
+
+// Vite also treats an inline query with a value as a flag.
+function isViteInlineRequest(id: string): boolean {
+  return /[?&]inline\b/.test(id);
+}
+
+function viteInlineCssResult(code: string): string | undefined {
+  try {
+    const body = parseSync(code, {
+      babelrc: false,
+      configFile: false,
+      sourceType: "module"
+    })?.program.body;
+    const statement = body?.length === 1 ? body[0] : undefined;
+    return statement?.type === "ExportDefaultDeclaration" &&
+      statement.declaration.type === "StringLiteral"
+      ? statement.declaration.value
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function cssCaptureIndex(plugins: readonly Rollup.Plugin[]): number {
+  const processors = plugins.filter((item) => item.name === "vite:css");
+  const captures = plugins.filter((item) => item.name === "vite:css-post");
+  if (
+    processors.length !== 1 ||
+    captures.length !== 1 ||
+    !processors[0]!.transform ||
+    !captures[0]!.transform
+  )
+    return -1;
+  const process = plugins.indexOf(processors[0]!);
+  const capture = plugins.indexOf(captures[0]!);
+  return process < capture ? capture : -1;
+}
+
+function actualTransformOrder(
+  plugins: readonly Rollup.Plugin[]
+): Rollup.Plugin[] {
+  const rank = (item: Rollup.Plugin) => {
+    const order =
+      typeof item.transform === "object" ? item.transform.order : undefined;
+    return order === "pre" ? 0 : order === "post" ? 2 : 1;
+  };
+  return plugins
+    .filter((item) => item.transform)
+    .sort((left, right) => rank(left) - rank(right));
+}
+
 export function minchoVitePlugin(_options?: MinchoVitePluginOptions) {
   validateAppCssOptions(_options?.appCss);
 
@@ -180,7 +430,7 @@ export function minchoVitePlugin(_options?: MinchoVitePluginOptions) {
     "client"
   );
 
-  const plugin = createMinchoViteEnvironmentPlugin(
+  const { plugin } = createMinchoViteEnvironmentPlugin(
     _options,
     diagnostics,
     "client",
@@ -188,8 +438,19 @@ export function minchoVitePlugin(_options?: MinchoVitePluginOptions) {
   );
 
   const pendingServerPlugins = new Set<
-    ReturnType<typeof createMinchoViteEnvironmentPlugin>
+    ReturnType<typeof createMinchoViteEnvironmentPlugin>["plugin"]
   >();
+
+  const devCssGuards = new Map<
+    string,
+    ReturnType<typeof createMinchoViteEnvironmentPlugin>["processedCssGuard"]
+  >();
+  const devCssGuard = {
+    name: "mincho-dev-origin-free-css",
+    applyToEnvironment(environment) {
+      return devCssGuards.get(environment.name) ?? false;
+    }
+  } satisfies Plugin;
 
   let config: ResolvedConfig;
   let server: ViteDevServer | undefined;
@@ -234,6 +495,22 @@ export function minchoVitePlugin(_options?: MinchoVitePluginOptions) {
       config = resolvedConfig;
       server = undefined;
       pendingServerPlugins.clear();
+      devCssGuards.clear();
+      // Vite 7 creates each environment's plugin list after configResolved.
+      // Insert only our own adapter; never change another plugin's hooks or
+      // reorder its callbacks. Each actual environment verifies the position.
+      if (config.command === "serve") {
+        const hostPlugins = config.plugins;
+        const capture = Array.isArray(hostPlugins)
+          ? cssCaptureIndex(hostPlugins)
+          : -1;
+        if (
+          capture >= 0 &&
+          Object.isExtensible(hostPlugins) &&
+          !hostPlugins.includes(devCssGuard)
+        )
+          (hostPlugins as Plugin[]).splice(capture, 0, devCssGuard);
+      }
       await plugin.configResolved(resolvedConfig);
     },
 
@@ -251,13 +528,14 @@ export function minchoVitePlugin(_options?: MinchoVitePluginOptions) {
     async applyToEnvironment(environment) {
       // Providers may resolve different CSS in client and SSR environments.
       // Extraction, dependency, and virtual CSS state belong to one environment.
-      const environmentPlugin = createMinchoViteEnvironmentPlugin(
-        _options,
-        diagnostics.fork(environment.name),
-        environment.name,
-        sharedAnalysis,
-        environment.config.consumer
-      );
+      const { plugin: environmentPlugin, processedCssGuard } =
+        createMinchoViteEnvironmentPlugin(
+          _options,
+          diagnostics.fork(environment.name),
+          environment.name,
+          sharedAnalysis,
+          environment.config.consumer
+        );
 
       await environmentPlugin.configResolved({
         ...config,
@@ -266,6 +544,9 @@ export function minchoVitePlugin(_options?: MinchoVitePluginOptions) {
 
       if (server) environmentPlugin.configureServer(server);
       else pendingServerPlugins.add(environmentPlugin);
+
+      if (config.command === "serve")
+        devCssGuards.set(environment.name, processedCssGuard);
 
       return environmentPlugin;
     }
@@ -443,7 +724,37 @@ function createMinchoViteEnvironmentPlugin(
 
   const { resolverCache } = cssState;
 
-  const clearGeneratedCssForOwner = (owner: string) => {
+  // Configuration watches are not executable imports, including absent files.
+  const packageScopeWatches = new Map<
+    string,
+    { owner: string; files: Set<string> }
+  >();
+
+  // An uncommitted replacement must not hide the last successful watches.
+  const failedPackageScopeWatches = new Map<
+    string,
+    {
+      owner: string;
+      sidecar: string;
+      files: Set<string>;
+    }
+  >();
+
+  const pendingPackageScopeWatches = new Set<{
+    owner: string;
+    sidecar: string;
+    files: Set<string>;
+  }>();
+
+  const clearGeneratedCssForOwner = (
+    owner: string,
+    preservePackageWatches = false
+  ) => {
+    if (!preservePackageWatches) {
+      for (const [sidecar, entry] of packageScopeWatches)
+        if (entry.owner === owner) packageScopeWatches.delete(sidecar);
+      failedPackageScopeWatches.delete(owner);
+    }
     distChunkCss.clearOwner(owner);
     cssState.clearGeneratedCssForOwner(owner);
   };
@@ -549,20 +860,197 @@ function createMinchoViteEnvironmentPlugin(
   const virtualExt = ".vanilla.css";
   const virtualCssImportPrefix = "mincho-virtual-css:";
   const virtualCssIdPrefix = "\0mincho-virtual-css:";
+  const unattributedCssPrefix = "mincho-unattributed/";
+  // Only this server environment can publish to this route. Never consult
+  // another environment's transforms or let a virtual ID become a file path.
+  const ssrCssRoute =
+    consumer === "server" ? `@mincho/css/${randomUUID()}/` : undefined;
+  const ssrCssRoutePrefix = () => `${config.base ?? "/"}${ssrCssRoute}`;
+  const attributedCssRoutes = new Map<string, string>();
+  const attributedCssRouteKey = (id: string) =>
+    `a-${createHash("sha256").update(id).digest("hex")}${virtualExt}`;
   let rootRealpath = "";
 
+  function virtualCssCacheId(id: string): string | undefined {
+    const fileId = normalizeStaticCssEvalFileId(id);
+    if (fileId.startsWith(virtualCssIdPrefix)) return fileId;
+    if (fileId.endsWith(virtualExt)) return `${virtualCssIdPrefix}${fileId}`;
+  }
+
+  function virtualCssRequest(id: string) {
+    const request = id.startsWith(virtualCssImportPrefix)
+      ? id.slice(virtualCssImportPrefix.length)
+      : id;
+    const cacheId = virtualCssCacheId(request);
+    if (cacheId === undefined) return;
+    return {
+      cacheId,
+      physicalPath: cacheId.slice(virtualCssIdPrefix.length),
+      suffix: request.match(/[?#].*$/)?.[0] ?? "",
+      // Match Vite's asset request flags while keeping them out of cache keys.
+      representation: /(\?|&)raw(?:&|$)/.test(request)
+        ? "raw"
+        : /(\?|&)url(?:&|$)/.test(request)
+          ? "url"
+          : "css"
+    };
+  }
+
+  function publishedCss(id: string): string | undefined {
+    return cssState.isAuthorizedVirtualCss(id)
+      ? cssState.getCss(id)
+      : undefined;
+  }
+
+  async function preparePublishedDevCss(
+    publisher: DevEnvironment,
+    id: string,
+    representation: "direct" | "inline"
+  ): Promise<string | undefined> {
+    const source = publishedCss(id);
+    if (source === undefined) return undefined;
+    const cssRequest = virtualCssRequest(id);
+    if (!cssRequest) return undefined;
+    const cacheOnly = cssRequest.physicalPath.startsWith(unattributedCssPrefix);
+    if (cacheOnly && !isOriginIndependentCss(source))
+      throw new Error(
+        "[mincho] Cannot process a cached stylesheet without a physical origin."
+      );
+    const request = `${cacheOnly ? id : cssRequest.physicalPath}?${representation}`;
+    // Only run the publishing environment's Vite CSS/PostCSS transform on
+    // already published bytes. Never use file loading or SSR's JS wrapper.
+    await publisher.moduleGraph.ensureEntryFromUrl(request);
+    const { code } = await publisher.pluginContainer.transform(source, request);
+    if (cacheOnly)
+      return validatePreparedCacheOnlyCss(id, source, code, representation);
+    if (publishedCss(id) !== source) return undefined;
+    // The opaque HTTP path has a different directory. Vite must already
+    // have rebased local resources using the original physical stylesheet ID.
+    if (
+      representation !== "direct" ||
+      !hasSelfContainedCssResources(code, true)
+    )
+      throw new Error(
+        "[mincho] Vite left a stylesheet resource relative to its physical directory; cannot serve it from an SSR URL."
+      );
+    return code;
+  }
+
+  function validatePreparedCacheOnlyCss(
+    id: string,
+    source: string,
+    code: string | undefined,
+    representation: "direct" | "inline"
+  ): string | undefined {
+    if (publishedCss(id) !== source) return undefined;
+    const css =
+      representation === "inline" && code !== undefined
+        ? viteInlineCssResult(code)
+        : code;
+    return requireOriginIndependentProcessedCss(css);
+  }
+
+  function requireOriginIndependentProcessedCss(
+    css: string | undefined
+  ): string {
+    if (css === undefined || !isOriginIndependentCss(css))
+      throw new Error(
+        "[mincho] Vite processed an origin-free stylesheet into CSS that requires a physical origin."
+      );
+    return css;
+  }
+
   function invalidateViteModule(id: string): void {
-    if (!server) {
-      return;
+    if (!server) return;
+    const request = virtualCssRequest(id);
+    const cacheOnly = request?.physicalPath.startsWith(unattributedCssPrefix);
+    if (
+      ssrCssRoute &&
+      request &&
+      !cacheOnly &&
+      publishedCss(request.cacheId) === undefined
+    )
+      attributedCssRoutes.delete(attributedCssRouteKey(request.cacheId));
+    const fileId = cacheOnly
+      ? request!.cacheId
+      : (request?.physicalPath ?? normalizeStaticCssEvalFileId(id));
+
+    function invalidateInGraph<
+      Node extends {
+        lastHMRTimestamp: number;
+        lastInvalidationTimestamp: number;
+      }
+    >(graph: {
+      getModuleById(id: string): Node | undefined;
+      getModulesByFile?(file: string): ReadonlySet<Node> | undefined;
+      idToModuleMap?: ReadonlyMap<string, Node>;
+      invalidateModule(module: Node): void;
+    }) {
+      const modules = new Set<Node>();
+      if (cacheOnly) {
+        // A cache-only file has no physical file index.
+        for (const [moduleId, module] of graph.idToModuleMap ?? []) {
+          if (virtualCssRequest(moduleId)?.cacheId === fileId)
+            modules.add(module);
+        }
+      } else {
+        for (const module of graph.getModulesByFile?.(fileId) ?? [])
+          modules.add(module);
+      }
+      if (cacheOnly || modules.size === 0) {
+        const direct = graph.getModuleById(fileId);
+        if (direct) modules.add(direct);
+      }
+      for (const module of modules) {
+        graph.invalidateModule(module);
+        module.lastHMRTimestamp =
+          module.lastInvalidationTimestamp || Date.now();
+      }
     }
 
-    const module = server.moduleGraph.getModuleById(id);
-    if (!module) {
-      return;
-    }
+    const ownerGraph = request
+      ? server.environments?.[environment]?.moduleGraph
+      : undefined;
+    if (ownerGraph) invalidateInGraph(ownerGraph);
+    else if (!request || !server.environments)
+      invalidateInGraph(server.moduleGraph);
+  }
 
-    server.moduleGraph.invalidateModule(module);
-    module.lastHMRTimestamp = module.lastInvalidationTimestamp || Date.now();
+  function invalidatePackageScopes(
+    file: string,
+    graph?: {
+      getModuleById(id: string): EnvironmentModuleNode | undefined;
+      invalidateModule(module: EnvironmentModuleNode): void;
+    }
+  ): EnvironmentModuleNode[] {
+    const affected = new Set<EnvironmentModuleNode>();
+    const normalized = normalizePath(file);
+    const scopes = [
+      ...packageScopeWatches,
+      ...Array.from(
+        failedPackageScopeWatches.values(),
+        (entry) => [entry.sidecar, entry] as const
+      ),
+      ...Array.from(
+        pendingPackageScopeWatches,
+        (entry) => [entry.sidecar, entry] as const
+      )
+    ];
+    const invalidatedOwners = new Set<string>();
+    for (const [sidecar, entry] of scopes) {
+      if (!entry.files.has(normalized)) continue;
+      if (!invalidatedOwners.has(entry.owner)) {
+        invalidatedOwners.add(entry.owner);
+        invalidateStaticCssEvalDependency(entry.owner);
+      }
+      for (const id of [entry.owner, sidecar]) {
+        const module = graph?.getModuleById(id);
+        if (!module) continue;
+        graph!.invalidateModule(module);
+        affected.add(module);
+      }
+    }
+    return [...affected];
   }
 
   function addStaticCssEvalWatchFilesForOwner(
@@ -629,10 +1117,15 @@ function createMinchoViteEnvironmentPlugin(
   const observedTransformInputs = new Map<string, string>();
   const ownerVersions = new Map<string, number>();
   const ownerRequests = new Map<string, symbol>();
-  const cssPublication = new AsyncLocalStorage<{
+  type CssPublication = {
     current?: () => boolean;
     publish?: () => void;
-  }>();
+    releaseManifestWatches?: () => void;
+    retainFailedManifestWatches?: () => void;
+    rolledBack?: boolean;
+    buildEpoch?: symbol;
+  };
+  const cssPublication = new AsyncLocalStorage<CssPublication>();
 
   function observeStaticCssEvalSource(
     id: string,
@@ -731,7 +1224,11 @@ function createMinchoViteEnvironmentPlugin(
         moduleChunks.set(moduleId, output.fileName);
 
         if (moduleId.endsWith(virtualExt)) {
-          virtualCssOwnerIds.add(moduleId.slice(0, -virtualExt.length));
+          virtualCssOwnerIds.add(
+            moduleId
+              .slice(0, -virtualExt.length)
+              .replace(/\.mincho-scope-[a-f0-9]{64}$/, "")
+          );
         }
       }
     }
@@ -860,15 +1357,73 @@ function createMinchoViteEnvironmentPlugin(
     };
   }
 
+  let buildProcessedCssGuardReady = false;
+  const processedCssGuard = {
+    name: "mincho-validate-origin-free-css",
+    transform(code: string, id: string) {
+      const request = virtualCssRequest(id);
+      if (
+        request?.representation === "css" &&
+        request.physicalPath.startsWith(unattributedCssPrefix) &&
+        publishedCss(request.cacheId) !== undefined
+      )
+        requireOriginIndependentProcessedCss(code);
+    }
+  } satisfies Plugin;
+
+  function verifiesProcessedCssGuard(
+    plugins: readonly Rollup.Plugin[]
+  ): boolean {
+    const order = actualTransformOrder(plugins);
+    const capture = cssCaptureIndex(order);
+    return capture > 0 && order[capture - 1] === processedCssGuard;
+  }
+
   const plugin = {
     name: "mincho-css-vite",
     enforce: "pre",
+    // Package scope watches belong to this environment, even without HMR.
+    perEnvironmentWatchChangeDuringDev: true,
+    options: {
+      order: "post",
+      handler(input) {
+        if (config.command !== "build" || !Array.isArray(input.plugins)) return;
+        // Vite 7 passes a flat Rollup plugin list. Work on a copy, without
+        // mutating another plugin or configuring global transform ordering.
+        if (
+          !input.plugins.every(
+            (item) => item && typeof item === "object" && "name" in item
+          )
+        )
+          return;
+        const effective = input.plugins as Rollup.Plugin[];
+        if (effective.includes(processedCssGuard)) return;
+        const capture = cssCaptureIndex(effective);
+        if (capture < 0) return;
+        return {
+          ...input,
+          plugins: [
+            ...effective.slice(0, capture),
+            processedCssGuard,
+            ...effective.slice(capture)
+          ]
+        };
+      }
+    },
     buildStart: {
       // Entry preloading must wait for async CSS compiler initialization.
       order: "post",
       sequential: true,
 
-      async handler(this: PluginContext) {
+      async handler(
+        this: PluginContext,
+        input?: Rollup.NormalizedInputOptions
+      ) {
+        // Verify the final effective order after all Rollup options hooks.
+        if (config.command === "build")
+          buildProcessedCssGuardReady = verifiesProcessedCssGuard(
+            input?.plugins ?? []
+          );
         // Drain scheduled and queued writes before begin replaces the report.
         if (diagnosticsFlushTimer !== undefined) {
           cancelDiagnosticsFlush();
@@ -969,6 +1524,38 @@ function createMinchoViteEnvironmentPlugin(
 
     configureServer(this: void, serverInstance: ViteDevServer) {
       server = serverInstance;
+      if (!ssrCssRoute) return;
+      const publisher = server.environments[environment];
+      server.middlewares.use(async (request, response, next) => {
+        const path = request.url?.split("?", 1)[0];
+        const prefix = ssrCssRoutePrefix();
+        if (!path?.startsWith(prefix)) return next();
+        const file = path.slice(prefix.length);
+        const id = /^[a-f0-9]{64}\.vanilla\.css$/.test(file)
+          ? `${virtualCssIdPrefix}${unattributedCssPrefix}${file}`
+          : attributedCssRoutes.get(file);
+        try {
+          for (const [name, value] of Object.entries(
+            server.config.server.headers ?? {}
+          )) {
+            if (value !== undefined) response.setHeader(name, value);
+          }
+          response.setHeader("Cache-Control", "no-store");
+          const css =
+            id !== undefined && /^(?:GET|HEAD)$/.test(request.method ?? "")
+              ? await preparePublishedDevCss(publisher, id, "direct")
+              : undefined;
+          if (css === undefined) {
+            response.statusCode = 404;
+            response.end();
+            return;
+          }
+          response.setHeader("Content-Type", "text/css; charset=utf-8");
+          response.end(request.method === "HEAD" ? undefined : css);
+        } catch (error) {
+          next(error);
+        }
+      });
     },
 
     moduleParsed(info) {
@@ -1076,8 +1663,9 @@ function createMinchoViteEnvironmentPlugin(
       }
 
       if (id.startsWith(virtualCssImportPrefix)) {
-        const physicalPath = id.slice(virtualCssImportPrefix.length);
-        const virtualCssId = `${virtualCssIdPrefix}${physicalPath}`;
+        const request = virtualCssRequest(id);
+        if (!request) return;
+        const { physicalPath, cacheId: virtualCssId } = request;
         const importerData =
           importer === undefined
             ? undefined
@@ -1100,7 +1688,12 @@ function createMinchoViteEnvironmentPlugin(
 
         cssState.authorizeVirtualCss(virtualCssId);
 
-        return virtualCssId;
+        // Origin-free CSS is a cache-only virtual module, never a filesystem
+        // path or a base directory for relative resources.
+        if (physicalPath.startsWith(unattributedCssPrefix))
+          return virtualCssId + request.suffix;
+        // Preserve the asset base while serving CSS from the authorized cache.
+        return physicalPath + request.suffix;
       }
 
       if (id.startsWith("\0")) return;
@@ -1129,17 +1722,22 @@ function createMinchoViteEnvironmentPlugin(
         return extractedSidecarModuleId(resolvedPath);
       }
 
-      if (id.endsWith(virtualExt)) {
-        const exactId = normalizePath(id);
-        if (cssState.hasCss(exactId)) {
-          return exactId;
-        }
+      const cssRequest = virtualCssRequest(id);
+      if (cssRequest !== undefined) {
+        const exactId = cssRequest.physicalPath;
+        const rootId = normalizePath(
+          resolve(config.root, customNormalize(exactId))
+        );
 
-        const normalizedId = id.startsWith("/") ? id.slice(1) : id;
-
-        const key = normalizePath(resolve(config.root, normalizedId));
-        if (cssState.hasCss(key)) {
-          return key;
+        for (const fileId of [exactId, rootId]) {
+          const cacheId = `${virtualCssIdPrefix}${fileId}`;
+          if (
+            cssState.hasCss(cacheId) ||
+            cssState.isAuthorizedVirtualCss(cacheId)
+          ) {
+            // Preserve Vite's CSS request flags while sharing the source cache.
+            return fileId + cssRequest.suffix;
+          }
         }
       }
 
@@ -1182,35 +1780,143 @@ function createMinchoViteEnvironmentPlugin(
         ].join("\n");
       }
 
-      if (id.startsWith(virtualCssIdPrefix)) {
-        const cached = cssState.getCss(id);
+      const cssRequest = virtualCssRequest(id);
+
+      if (cssRequest !== undefined) {
+        const {
+          cacheId: virtualCssId,
+          physicalPath,
+          representation
+        } = cssRequest;
+        // Vite owns URL modules. Its build CSS loader imports transform-only
+        // CSS, which returns through this same physical identity and cache.
+        if (representation === "url") {
+          const cacheOnly = physicalPath.startsWith(unattributedCssPrefix);
+          const inline = isViteInlineRequest(id);
+          const attributedSsrUrl =
+            !inline &&
+            !cacheOnly &&
+            !!ssrCssRoute &&
+            config.command === "serve" &&
+            this.environment?.mode === "dev";
+          if (attributedSsrUrl) {
+            if (publishedCss(virtualCssId) === undefined) return null;
+            const key = attributedCssRouteKey(virtualCssId);
+            attributedCssRoutes.set(key, virtualCssId);
+            const url = `${config.server?.origin ?? ""}${ssrCssRoutePrefix()}${key}`;
+            return `export default ${JSON.stringify(url)};`;
+          }
+          if (!inline && (!cacheOnly || config.command !== "serve"))
+            return null;
+          const css = cssState.getCss(virtualCssId);
+          if (css === undefined) return null;
+          if (cacheOnly) {
+            // Keep ordinary URL imports HTTP-addressable through Vite's
+            // wrapped virtual ID. Only the explicit inline variant is data.
+            const publicPath = ssrCssRoute
+              ? ssrCssRoutePrefix() +
+                physicalPath.slice(unattributedCssPrefix.length)
+              : `${config.base ?? "/"}@id/${virtualCssId.replace("\0", "__x00__")}?direct`;
+            let inlineCss = css;
+            if (inline && publishedCss(virtualCssId) !== undefined) {
+              let processed: string | undefined;
+              if (this.environment?.mode === "dev") {
+                processed = await preparePublishedDevCss(
+                  this.environment,
+                  virtualCssId,
+                  "inline"
+                );
+              } else if (config.command === "build") {
+                if (!isOriginIndependentCss(css))
+                  throw new Error(
+                    "[mincho] Cannot process a cached stylesheet without a physical origin."
+                  );
+                const loaded = await this.load({
+                  id: `${virtualCssId}?inline`
+                });
+                processed = validatePreparedCacheOnlyCss(
+                  virtualCssId,
+                  css,
+                  loaded.code ?? undefined,
+                  "inline"
+                );
+              }
+              if (processed === undefined) return null;
+              inlineCss = processed;
+            }
+            const url = inline
+              ? `data:text/css;charset=utf-8;base64,${Buffer.from(inlineCss, "utf8").toString("base64")}`
+              : `${config.server?.origin ?? ""}${publicPath}`;
+            return `export default ${JSON.stringify(url)};`;
+          }
+          const environment = this.environment;
+          const inlineId = `${physicalPath}?inline`;
+          let inlineCode: string | undefined;
+          if (environment?.mode === "dev") {
+            await environment.moduleGraph.ensureEntryFromUrl(inlineId);
+            const loaded = await environment.pluginContainer.load(inlineId);
+            const inlineSource =
+              typeof loaded === "string" ? loaded : loaded?.code;
+            if (inlineSource !== undefined) {
+              const transformed = await environment.pluginContainer.transform(
+                inlineSource,
+                inlineId
+              );
+              inlineCode = transformed?.code ?? inlineSource;
+            }
+          } else if (config.command === "build") {
+            // Avoid Vite's combined URL/inline loader: it emits a marker for
+            // a transform-only child whose inline CSS is never recorded.
+            const loaded = await this.load({ id: inlineId });
+            inlineCode = loaded.code ?? undefined;
+          }
+          const dataCss =
+            inlineCode === undefined
+              ? undefined
+              : viteInlineCssResult(inlineCode);
+          if (dataCss === undefined || !hasSelfContainedCssResources(dataCss))
+            throw new Error(
+              "[mincho] Cannot inline generated stylesheet URL: Vite left a base-dependent CSS resource or unsupported syntax. Use ?url to keep the stylesheet's physical URL base."
+            );
+          const url = `data:text/css;charset=utf-8,${encodeURIComponent(dataCss)}`;
+          // Link the actual inline view as a dependency for asset/HMR changes.
+          // A changed view must be revalidated, never encoded with stale proof.
+          const request = `${virtualCssImportPrefix}${inlineId}`;
+          return `import css from ${JSON.stringify(request)}; if (css !== ${JSON.stringify(dataCss)}) throw new Error("[mincho] Generated inline CSS changed before validation; reload or use ?url."); export default ${JSON.stringify(url)};`;
+        }
+        // The cache holds CSS text, while Vite's raw requests load a JS string
+        // module and skip the CSS transforms that handle other request flags.
+        const cssResponse = (css: string) =>
+          representation === "raw"
+            ? `export default ${JSON.stringify(css)};`
+            : css;
+        const cached = cssState.getCss(virtualCssId);
         if (cached !== undefined) {
-          return cached;
+          return cssResponse(cached);
         }
 
         // Recently retired IDs must still clear CSS in already resolved HMR
         // requests. Only an authorized live ID may fall back to the filesystem.
-        if (!cssState.isAuthorizedVirtualCss(id)) {
+        if (!cssState.isAuthorizedVirtualCss(virtualCssId)) {
           return null;
         }
 
-        // Fallback for sibling-imported virtual CSS: read the physical
-        // .vanilla.css sidecar directly so vite:load-fallback never tries
-        // to resolve the `\0`-prefixed id.
-        const physicalPath = id.slice(virtualCssIdPrefix.length);
+        // Unattributed text must never gain filesystem fallback authority.
+        if (physicalPath.startsWith(unattributedCssPrefix)) return null;
+        // Sibling-imported virtual CSS may already have a physical sidecar.
         if (!physicalPath.endsWith(virtualExt)) {
           return null;
         }
 
         try {
-          return await fs.promises.readFile(physicalPath, "utf-8");
+          return cssResponse(await fs.promises.readFile(physicalPath, "utf-8"));
         } catch (error) {
           if (
             error instanceof Error &&
             "code" in error &&
             error.code === "ENOENT"
           ) {
-            return "";
+            return cssResponse("");
           }
 
           throw error;
@@ -1246,7 +1952,41 @@ function createMinchoViteEnvironmentPlugin(
       code: string,
       id: string
     ) {
-      cssSharing.record(id, code, cssState.hasCss(id));
+      const generatedCss = cssState.hasCss(virtualCssCacheId(id) ?? id);
+      cssSharing.record(id, code, generatedCss);
+      if (generatedCss) {
+        const request = virtualCssRequest(id);
+        if (
+          this.environment?.mode === "dev" &&
+          request &&
+          publishedCss(request.cacheId) !== undefined &&
+          isViteInlineRequest(id)
+        ) {
+          const wrapper = request.representation === "url";
+          const cacheOnly = request.physicalPath.startsWith(
+            unattributedCssPrefix
+          );
+          const canonicalId = `${cacheOnly ? request.cacheId : request.physicalPath}?inline`;
+          if (wrapper || id === canonicalId) {
+            const view =
+              this.environment.moduleGraph.getModuleById(canonicalId);
+            // Vite has already discovered these file-only dependencies while
+            // preparing the inline bytes. URL wrappers need hard invalidation
+            // to refresh the embedded snapshot, not just updated import URLs.
+            // Register in transform: the client node may not exist at load.
+            for (const dependency of view?.importedModules ?? []) {
+              if (dependency.type !== "asset" || !dependency.file) continue;
+              const file = dependency.file.split(/[?#]/, 1)[0];
+              // Vite reports the physical file change (no ?inline suffix).
+              // Add that edge to the view too, so an attributed wrapper's
+              // runtime verification observes the updated canonical result.
+              if (file && (wrapper || file !== dependency.file))
+                this.addWatchFile(file);
+            }
+          }
+        }
+        return;
+      }
 
       const sidecarPath = ownedExtractedSidecarPath(id);
       if (id.startsWith("\0") && sidecarPath === undefined) return;
@@ -1289,7 +2029,10 @@ function createMinchoViteEnvironmentPlugin(
 
       const publication = cssPublication.getStore();
 
-      if (publication) publication.current = current;
+      if (publication) {
+        publication.current = current;
+        if (config.command === "build") publication.buildEpoch = epoch;
+      }
 
       // A dependency can change before its first transform. Compare fresh disk
       // contents with the provider baseline, not with a preceding plugin's code.
@@ -1326,13 +2069,42 @@ function createMinchoViteEnvironmentPlugin(
         )
           return null;
 
+        let pendingPackageScope:
+          { owner: string; sidecar: string; files: Set<string> } | undefined;
+        const lastSuccessfulPackageScope = packageScopeWatches.get(id);
+        const retainFailedManifestWatches = () => {
+          if (
+            config.command !== "serve" ||
+            !pendingPackageScope ||
+            epoch !== transformEpoch ||
+            ownerRequests.get(requestOwner) !== request ||
+            packageScopeWatches.get(id) !== lastSuccessfulPackageScope ||
+            !cssState.isCurrentSidecar(
+              moduleInfo.originalPath,
+              moduleInfo.filePath
+            )
+          )
+            return;
+          const files = new Set(pendingPackageScope.files);
+          for (const entry of packageScopeWatches.values())
+            if (entry.owner === requestOwner)
+              for (const file of entry.files) files.delete(file);
+          if (files.size)
+            failedPackageScopeWatches.set(requestOwner, {
+              ...pendingPackageScope,
+              files
+            });
+          else failedPackageScopeWatches.delete(requestOwner);
+        };
+        if (publication)
+          publication.retainFailedManifestWatches = retainFailedManifestWatches;
         try {
           resolverCache.delete(moduleInfo.originalPath);
 
           const nextCss = new Map<string, string>();
           const nextArtifacts = distChunkCss.transaction();
 
-          const { source, watchFiles } = await tracedCompile({
+          const { source, watchFiles, cssScopeOrigins } = await tracedCompile({
             filePath: moduleInfo.filePath,
             cwd: config.root,
             originalPath: moduleInfo.originalPath,
@@ -1343,8 +2115,26 @@ function createMinchoViteEnvironmentPlugin(
 
           if (!current()) return null;
 
+          const packageFiles = new Set<string>();
+          pendingPackageScope = {
+            owner: requestOwner,
+            sidecar: id,
+            files: packageFiles
+          };
+          pendingPackageScopeWatches.add(pendingPackageScope);
           for (const file of watchFiles) {
             if (extractedCssFileFilter(file)) {
+              continue;
+            }
+
+            if (
+              config.command === "serve" &&
+              normalizePath(file).endsWith("/package.json")
+            ) {
+              // Vite promotes transform addWatchFile entries into imports. A
+              // missing package boundary must be watched, never resolved as JS.
+              server.watcher.add(file);
+              packageFiles.add(normalizePath(file));
               continue;
             }
 
@@ -1358,6 +2148,7 @@ function createMinchoViteEnvironmentPlugin(
           let hasGeneratedVirtualCss = false;
           let registryResult = await tracedRegistry({
             source,
+            cssScopeOrigins,
             filePath: moduleInfo.filePath,
             identOption: internalResolveIdentifiers(
               _options?.optimizationMode ??
@@ -1380,9 +2171,11 @@ function createMinchoViteEnvironmentPlugin(
 
             serializeVirtualCssPath: async ({
               fileScope,
+              origin: observedOrigin,
               source
             }: {
-              fileScope: { filePath: string };
+              fileScope: { filePath: string; packageName?: string };
+              origin?: string;
               source: string;
             }) => {
               if (!current()) return "";
@@ -1393,13 +2186,64 @@ function createMinchoViteEnvironmentPlugin(
 
               hasGeneratedVirtualCss = true;
 
-              const id: string = `${fileScope.filePath}${virtualExt}`;
-              const cssFileId = normalizePath(resolve(config.root, id));
+              if (observedOrigin === undefined) {
+                if (
+                  this.environment &&
+                  !(this.environment.mode === "dev"
+                    ? verifiesProcessedCssGuard(this.environment.plugins)
+                    : buildProcessedCssGuardReady)
+                )
+                  throw new Error(
+                    "[mincho] Cannot validate origin-free native CSS: unsupported Vite CSS capture ordering."
+                  );
+                if (!isOriginIndependentCss(source))
+                  throw new Error(
+                    "[mincho] Missing CSS scope provenance: native CSS contains relative-resource-capable or unsupported syntax."
+                  );
+                const identity = createHash("sha256")
+                  .update(
+                    JSON.stringify([
+                      normalizePath(moduleInfo.originalPath),
+                      fileScope.packageName || undefined,
+                      fileScope.filePath
+                    ])
+                  )
+                  .digest("hex");
+                const cssFileId = `${unattributedCssPrefix}${identity}${virtualExt}`;
+                nextCss.set(`${virtualCssIdPrefix}${cssFileId}`, source);
+                return `import ${JSON.stringify(virtualCssImportPrefix + cssFileId)};`;
+              }
+
+              const origin = normalizePath(observedOrigin);
+              // One published producer may contain several preserved scopes.
+              // Keep its directory for URL resolution, but key each stylesheet
+              // independently of content and of the current number of scopes.
+              const scopeIdentity = createHash("sha256")
+                .update(
+                  JSON.stringify([
+                    fileScope.packageName || undefined,
+                    normalizePath(fileScope.filePath),
+                    origin
+                  ])
+                )
+                .digest("hex");
+              // A literal delimiter in a basename is not a module query.
+              // Encode only the generated name; Vite still resolves assets
+              // from the real publisher directory.
+              const directory = normalizePath(dirname(origin));
+              if (/[?#]/.test(directory))
+                throw new Error(
+                  "[mincho] Native CSS cannot represent a physical producer directory containing '?' or '#'."
+                );
+              const idOrigin = /[%?#]/.test(posix.basename(origin))
+                ? `${directory}/mincho-producer-${createHash("sha256").update(origin).digest("hex")}`
+                : origin;
+              const cssFileId = `${idOrigin}.mincho-scope-${scopeIdentity}${virtualExt}`;
               const virtualCssId = `${virtualCssIdPrefix}${cssFileId}`;
 
               nextCss.set(virtualCssId, source);
 
-              return `import "${virtualCssImportPrefix}${cssFileId}";`;
+              return `import ${JSON.stringify(virtualCssImportPrefix + cssFileId)};`;
             }
           });
           registryResult = {
@@ -1442,6 +2286,18 @@ function createMinchoViteEnvironmentPlugin(
                 nextCss
               )
             );
+
+            // CSS publication retires every previous sidecar for this owner.
+            // Retire its configuration subscriptions at the same successful
+            // boundary; failed replacements must preserve the old watches.
+            for (const [sidecar, entry] of packageScopeWatches)
+              if (entry.owner === moduleInfo.originalPath)
+                packageScopeWatches.delete(sidecar);
+            failedPackageScopeWatches.delete(requestOwner);
+            packageScopeWatches.set(id, {
+              owner: moduleInfo.originalPath,
+              files: packageFiles
+            });
 
             if (
               config.command === "build" &&
@@ -1494,7 +2350,13 @@ function createMinchoViteEnvironmentPlugin(
 
           return runtimeSource;
         } catch (error) {
-          if (current()) clearGeneratedCssForOwner(moduleInfo.originalPath);
+          if (current()) {
+            // A genuine evaluation failure can make current() false by
+            // retiring its own sidecar; do not relabel it as a watch race.
+            if (publication) publication.rolledBack = true;
+            retainFailedManifestWatches();
+            clearGeneratedCssForOwner(moduleInfo.originalPath, true);
+          }
 
           if (config.command === "build") {
             throw error;
@@ -1502,6 +2364,12 @@ function createMinchoViteEnvironmentPlugin(
 
           console.error(error);
         } finally {
+          if (pendingPackageScope) {
+            const pending = pendingPackageScope;
+            const release = () => pendingPackageScopeWatches.delete(pending);
+            if (publication) publication.releaseManifestWatches = release;
+            else release();
+          }
           scheduleDiagnosticsFlush();
         }
       }
@@ -2032,8 +2900,23 @@ function createMinchoViteEnvironmentPlugin(
       abortOutputLinkers(error ?? new Error("Vite rendering failed"));
     },
 
+    hotUpdate(context) {
+      return [
+        ...new Set([
+          ...context.modules,
+          ...invalidatePackageScopes(context.file, this.environment.moduleGraph)
+        ])
+      ];
+    },
+
     watchChange(id, change?: { event: "create" | "update" | "delete" }) {
       const fileId = normalizeStaticCssEvalFileId(id, rootRealpath);
+      invalidatePackageScopes(
+        id,
+        this.environment?.mode === "dev"
+          ? this.environment.moduleGraph
+          : undefined
+      );
 
       // The watcher already invalidates this revision. Its first provider read
       // and transform must not invalidate owners that now use the fresh input.
@@ -2048,6 +2931,10 @@ function createMinchoViteEnvironmentPlugin(
       cancelDiagnosticsFlush();
       diagnosticsClosed = true;
       transformEpoch = Symbol("closed");
+      packageScopeWatches.clear();
+      pendingPackageScopeWatches.clear();
+      failedPackageScopeWatches.clear();
+      attributedCssRoutes.clear();
 
       try {
         await diagnostics.flush(config.root);
@@ -2075,6 +2962,10 @@ function createMinchoViteEnvironmentPlugin(
       cancelDiagnosticsFlush();
       diagnosticsClosed = true;
       transformEpoch = Symbol("closed");
+      packageScopeWatches.clear();
+      pendingPackageScopeWatches.clear();
+      failedPackageScopeWatches.clear();
+      attributedCssRoutes.clear();
       distChunkCss.clear();
       await execution.close();
       compilationCache?.clear();
@@ -2118,20 +3009,36 @@ function createMinchoViteEnvironmentPlugin(
     code: string,
     id: string
   ) {
+    const moduleData = cssState.getModuleData(id);
     const owner =
-      cssState.getModuleData(id)?.mainFilePath ??
+      moduleData?.mainFilePath ??
       normalizeStaticCssEvalFileId(id, rootRealpath);
 
-    const publication: {
-      current?: () => boolean;
-      publish?: () => void;
-    } = {};
+    const publication: CssPublication = {};
 
     return runRequest(id, "transform-request", () =>
       cssPublication.run(publication, () => transform.call(this, code, id))
     )
       .then((result) => {
-        if (publication.current && !publication.current()) return result;
+        if (publication.current && !publication.current()) {
+          if (
+            !publication.rolledBack &&
+            (publication.publish || moduleData?.kind === "loaded-sidecar")
+          ) {
+            // An obsolete build has no caller to retry. Discard its output;
+            // a live request in the same generation must never fall through
+            // to the original sidecar or an uncommitted stylesheet import.
+            if (
+              publication.buildEpoch !== undefined &&
+              publication.buildEpoch !== transformEpoch
+            )
+              return null;
+            throw new Error(
+              "[mincho] CSS publication inputs changed before commit; retry the request."
+            );
+          }
+          return result;
+        }
 
         publication.publish?.();
 
@@ -2140,10 +3047,14 @@ function createMinchoViteEnvironmentPlugin(
         return result;
       })
       .catch((error) => {
-        if (publication.current?.()) clearGeneratedCssForOwner(owner);
+        // Input validation can fail before Vite delivers a watch event.
+        // Retain this request's new manifests before clearing or releasing it.
+        publication.retainFailedManifestWatches?.();
+        if (publication.current?.()) clearGeneratedCssForOwner(owner, true);
 
         throw error;
-      });
+      })
+      .finally(() => publication.releaseManifestWatches?.());
   };
 
   const load = plugin.load;
@@ -2151,7 +3062,7 @@ function createMinchoViteEnvironmentPlugin(
     return runRequest(id, "load-request", () => load.call(this, id));
   };
 
-  return plugin;
+  return { plugin, processedCssGuard };
 }
 
 let collectDefineRulesPresetViteRegistrySource:
@@ -2186,6 +3097,7 @@ if (import.meta.vitest) {
 
   // Lightweight test fixtures; production hooks use Vite and Rollup types.
   interface Module {
+    id?: string;
     lastHMRTimestamp?: number;
     lastInvalidationTimestamp?: number;
   }
@@ -2196,6 +3108,8 @@ if (import.meta.vitest) {
       getModuleById(id: string): Module | undefined;
 
       getModulesByFile?(file: string): Set<Module> | undefined;
+
+      idToModuleMap?: Map<string, Module>;
 
       invalidateModule(module: Module): void;
     };
@@ -2283,6 +3197,10 @@ if (import.meta.vitest) {
   // Simplified Plugin interface with only what we need
   interface Plugin {
     name: string;
+    hotUpdate?: (
+      this: { environment: { moduleGraph: ViteDevServer["moduleGraph"] } },
+      context: { file: string; modules: Module[] }
+    ) => Module[];
     enforce?: "pre" | "post";
     buildStart?: {
       order: "post";
@@ -2328,6 +3246,33 @@ if (import.meta.vitest) {
   // eslint-disable-next-line @typescript-eslint/ban-ts-comment
   // @ts-ignore error TS1343: The 'import.meta' meta-property is only allowed when the '--module' option is 'es2020', 'es2022', 'esnext', 'system', 'node16', or 'nodenext'.
   const { afterEach, beforeAll, describe, expect, it, vi } = import.meta.vitest;
+
+  it.each([
+    ".a { color: red; padding: 4px; display: flex; }",
+    ".a { background-image: linear-gradient(red, blue); }",
+    ".a { background-image: repeating-radial-gradient(red 0px, blue 5px), none; }",
+    "@media (min-width: 1px) { .a { width: calc(100% - 2px); color: rgb(1 2 3); } }"
+  ])("accepts origin-independent native CSS text: %s", (source: string) => {
+    expect(isOriginIndependentCss(source)).toBe(true);
+  });
+  it.each([
+    '.a { background: url("./image.svg"); }',
+    String.raw`.a { background: u\72l("./image.svg"); }`,
+    '@import "./theme.css";',
+    '.a { background-image: image-set("./image.svg" 1x); }',
+    '.a { background-image: -webkit-image-set("./image.svg" 1x); }',
+    '.a { background-image: image("./image.svg"); }',
+    '.a { background-image: linear-gradient(red, blue), url("./image.svg"); }',
+    ".a { background-image: linear-gradient(red, var(--stop)); }",
+    ".a { background-image: linear-gradient(to zebra, red, blue); }",
+    ".a { color: linear-gradient(red, blue); }",
+    ".a { color: unknown-function(red); }",
+    '.a { --asset: url("./image.svg"); background: var(--asset); }',
+    ".a { unknown-property: red; }",
+    ".a { color: red; broken }"
+  ])("rejects unproved origin-independent CSS text: %s", (source: string) => {
+    expect(isOriginIndependentCss(source)).toBe(false);
+  });
 
   const DEFINE_RULES_PRESET_SCHEMA = "mincho.defineRulesPreset";
   const explicitProviderSidecarImport =
@@ -3038,6 +3983,13 @@ if (import.meta.vitest) {
     }
 
     return {
+      hotUpdate(file: string) {
+        if (!server) throw new Error("Expected a server graph");
+        return plugin.hotUpdate?.call(
+          { environment: { moduleGraph: server.moduleGraph } },
+          { file, modules: [] }
+        );
+      },
       async buildStart() {
         await plugin.buildStart?.handler.call({
           addWatchFile(file: string) {
@@ -3753,6 +4705,7 @@ if (import.meta.vitest) {
           result: ["extracted_diagnostics.css.ts", "resolver contents"]
         });
         vi.spyOn(integrationModule, "compile").mockResolvedValue({
+          cssScopeOrigins: [],
           source: "compiled source",
           watchFiles: []
         } as Awaited<ReturnType<typeof compile>>);
@@ -4181,6 +5134,7 @@ if (import.meta.vitest) {
       const compileSpy = vi
         .spyOn(integrationModule, "compile")
         .mockResolvedValue({
+          cssScopeOrigins: [],
           source: "compiled source",
           watchFiles: []
         } as unknown as Awaited<ReturnType<typeof compile>>);
@@ -4255,7 +5209,11 @@ if (import.meta.vitest) {
 
         const compileSpy = vi
           .spyOn(integrationModule, "compile")
-          .mockResolvedValue({ source: "compiled source", watchFiles: [] });
+          .mockResolvedValue({
+            cssScopeOrigins: [],
+            source: "compiled source",
+            watchFiles: []
+          });
 
         const registrySpy = vi
           .spyOn(integrationModule, "processDefineRulesPresetRegistryFile")
@@ -4304,6 +5262,7 @@ if (import.meta.vitest) {
         });
 
       vi.spyOn(integrationModule, "compile").mockResolvedValue({
+        cssScopeOrigins: [],
         source: "compiled source",
         watchFiles: []
       } as unknown as Awaited<ReturnType<typeof compile>>);
@@ -6394,6 +7353,7 @@ if (import.meta.vitest) {
       vi.spyOn(integrationModule, "compile").mockImplementation(
         async (options: Parameters<typeof compile>[0]) =>
           ({
+            cssScopeOrigins: [],
             source: `compiled source:${options.filePath}`,
             watchFiles: []
           }) as Awaited<ReturnType<typeof compile>>
@@ -6510,6 +7470,7 @@ if (import.meta.vitest) {
       });
 
       const compileResult: Awaited<ReturnType<typeof compile>> = {
+        cssScopeOrigins: [],
         source: "compiled source",
         watchFiles: []
       };
@@ -6650,7 +7611,7 @@ if (import.meta.vitest) {
         fixture.extractedId
       );
 
-      expect(resolvedVirtualId).toBe(`\0mincho-virtual-css:${physicalPath}`);
+      expect(resolvedVirtualId).toBe(physicalPath);
 
       if (typeof resolvedVirtualId !== "string") {
         throw new Error("Expected the trusted virtual CSS ID to resolve");
@@ -6683,6 +7644,10 @@ if (import.meta.vitest) {
       ).toBeUndefined();
       expect(harness.resolveId(importId, fixture.extractedId)).toBeUndefined();
       await expect(harness.load(virtualId)).resolves.toBeNull();
+      await expect(harness.load("/etc/passwd.vanilla.css")).resolves.toBeNull();
+      await expect(
+        harness.load("/etc/passwd.vanilla.css?raw")
+      ).resolves.toBeNull();
 
       expect(readFileSpy).not.toHaveBeenCalled();
     });
@@ -6839,10 +7804,18 @@ if (import.meta.vitest) {
         }
       );
 
-      vi.spyOn(integrationModule, "compile").mockResolvedValue({
-        source: "compiled source",
-        watchFiles: []
-      });
+      vi.spyOn(integrationModule, "compile").mockImplementation(
+        async ({ filePath }: Parameters<typeof compile>[0]) => ({
+          ...{
+            cssScopeOrigins: [],
+            source: "compiled source",
+            watchFiles: []
+          },
+          cssScopeOrigins: [
+            { fileScope: { filePath, packageName: "local" }, origin: filePath }
+          ]
+        })
+      );
       vi.spyOn(
         integrationModule,
         "processDefineRulesPresetRegistryFile"
@@ -7166,6 +8139,7 @@ if (import.meta.vitest) {
           result: ["", ""]
         });
       vi.spyOn(integrationModule, "compile").mockResolvedValue({
+        cssScopeOrigins: [],
         source: "compiled source",
         watchFiles: []
       });
@@ -7412,11 +8386,17 @@ if (import.meta.vitest) {
       });
 
       const compileResult: Awaited<ReturnType<typeof compile>> = {
+        cssScopeOrigins: [],
         source: "compiled source",
         watchFiles: []
       };
 
-      vi.spyOn(integrationModule, "compile").mockResolvedValue(compileResult);
+      vi.spyOn(integrationModule, "compile").mockImplementation(
+        async ({ filePath }: Parameters<typeof compile>[0]) => ({
+          ...compileResult,
+          cssScopeOrigins: [{ fileScope: { filePath }, origin: filePath }]
+        })
+      );
       vi.spyOn(
         integrationModule,
         "processDefineRulesPresetRegistryFile"
@@ -7525,6 +8505,12 @@ if (import.meta.vitest) {
             }
 
             return {
+              cssScopeOrigins: [
+                {
+                  fileScope: { filePath: options.filePath },
+                  origin: options.filePath
+                }
+              ],
               source: `compiled source:${options.filePath}`,
               watchFiles: []
             } as Awaited<ReturnType<typeof compile>>;
@@ -7592,6 +8578,12 @@ if (import.meta.vitest) {
         secondFixture.extractedSource
       );
       firstCompile.resolve({
+        cssScopeOrigins: [
+          {
+            fileScope: { filePath: firstFixture.physicalPath },
+            origin: firstFixture.physicalPath
+          }
+        ],
         source: `compiled source:${firstFixture.physicalPath}`,
         watchFiles: []
       } as Awaited<ReturnType<typeof compile>>);
@@ -7654,11 +8646,17 @@ if (import.meta.vitest) {
         });
 
       const compileResult: Awaited<ReturnType<typeof compile>> = {
+        cssScopeOrigins: [],
         source: "compiled source",
         watchFiles: []
       };
 
-      vi.spyOn(integrationModule, "compile").mockResolvedValue(compileResult);
+      vi.spyOn(integrationModule, "compile").mockImplementation(
+        async ({ filePath }: Parameters<typeof compile>[0]) => ({
+          ...compileResult,
+          cssScopeOrigins: [{ fileScope: { filePath }, origin: filePath }]
+        })
+      );
 
       const ancestorStyleSpecifiersByFilePath = new Map<string, string[]>();
       vi.spyOn(
@@ -7796,10 +8794,16 @@ if (import.meta.vitest) {
           code: 'import "extracted_watch-second.css.ts";\nexport const entry = true;',
           result: ["extracted_watch-second.css.ts", "second resolver contents"]
         });
-      vi.spyOn(integrationModule, "compile").mockResolvedValue({
-        source: "compiled source",
-        watchFiles: []
-      } as Awaited<ReturnType<typeof compile>>);
+      vi.spyOn(integrationModule, "compile").mockImplementation(
+        async ({ filePath }: Parameters<typeof compile>[0]) => ({
+          ...({
+            cssScopeOrigins: [],
+            source: "compiled source",
+            watchFiles: []
+          } as Awaited<ReturnType<typeof compile>>),
+          cssScopeOrigins: [{ fileScope: { filePath }, origin: filePath }]
+        })
+      );
       vi.spyOn(integrationModule, "processDefineRulesPresetRegistryFile")
         .mockImplementationOnce(
           async (
@@ -7896,10 +8900,16 @@ if (import.meta.vitest) {
           code: 'import "extracted_stale.css.ts"; export const entry = true;',
           result: ["extracted_stale.css.ts", "resolver contents"]
         });
-        vi.spyOn(integrationModule, "compile").mockResolvedValue({
-          source: "compiled source",
-          watchFiles: []
-        } as Awaited<ReturnType<typeof compile>>);
+        vi.spyOn(integrationModule, "compile").mockImplementation(
+          async ({ filePath }: Parameters<typeof compile>[0]) => ({
+            ...({
+              cssScopeOrigins: [],
+              source: "compiled source",
+              watchFiles: []
+            } as Awaited<ReturnType<typeof compile>>),
+            cssScopeOrigins: [{ fileScope: { filePath }, origin: filePath }]
+          })
+        );
 
         let release = () => {};
 
@@ -7983,10 +8993,16 @@ if (import.meta.vitest) {
         code: 'import "extracted_unsplit.css.ts";\nexport const entry = true;',
         result: ["extracted_unsplit.css.ts", "resolver contents"]
       });
-      vi.spyOn(integrationModule, "compile").mockResolvedValue({
-        source: "compiled source",
-        watchFiles: []
-      } as Awaited<ReturnType<typeof compile>>);
+      vi.spyOn(integrationModule, "compile").mockImplementation(
+        async ({ filePath }: Parameters<typeof compile>[0]) => ({
+          ...({
+            cssScopeOrigins: [],
+            source: "compiled source",
+            watchFiles: []
+          } as Awaited<ReturnType<typeof compile>>),
+          cssScopeOrigins: [{ fileScope: { filePath }, origin: filePath }]
+        })
+      );
       vi.spyOn(
         integrationModule,
         "processDefineRulesPresetRegistryFile"
@@ -8071,10 +9087,19 @@ if (import.meta.vitest) {
         code: 'import "extracted_failure.css.ts";\nexport const entry = true;',
         result: ["extracted_failure.css.ts", "resolver contents"]
       });
-      vi.spyOn(integrationModule, "compile").mockResolvedValue({
-        source: "compiled source",
-        watchFiles: []
-      });
+      vi.spyOn(integrationModule, "compile").mockImplementation(async () => ({
+        ...{
+          cssScopeOrigins: [],
+          source: "compiled source",
+          watchFiles: []
+        },
+        cssScopeOrigins: [
+          {
+            fileScope: { filePath: "local.css.ts", packageName: "local" },
+            origin: join(viteConsumerRootPath, "local.css.ts")
+          }
+        ]
+      }));
       vi.spyOn(
         integrationModule,
         "processDefineRulesPresetRegistryFile"
@@ -8378,6 +9403,7 @@ if (import.meta.vitest) {
         result: ["extracted_rules.css.ts", "resolver contents"]
       });
       vi.spyOn(integrationModule, "compile").mockResolvedValue({
+        cssScopeOrigins: [],
         source: "compiled source",
         watchFiles: []
       } as Awaited<ReturnType<typeof compile>>);
@@ -9050,9 +10076,19 @@ if (import.meta.vitest) {
         ""
       );
 
-      const expectedProviderVirtualModuleId = normalizePath(
-        join(viteConsumerRootPath, providerVirtualCssId)
+      const providerOrigin = normalizePath(
+        join(viteConsumerRootPath, providerVirtualFilePath)
       );
+      const providerScopeIdentity = createHash("sha256")
+        .update(
+          JSON.stringify([
+            undefined,
+            normalizePath(providerVirtualFilePath),
+            providerOrigin
+          ])
+        )
+        .digest("hex");
+      const expectedProviderVirtualModuleId = `${providerOrigin}.mincho-scope-${providerScopeIdentity}.vanilla.css`;
 
       const providerVersions = [
         {
@@ -9088,6 +10124,12 @@ if (import.meta.vitest) {
       vi.spyOn(integrationModule, "compile").mockImplementation(
         async () =>
           ({
+            cssScopeOrigins: [
+              {
+                fileScope: { filePath: providerVirtualFilePath },
+                origin: join(viteConsumerRootPath, providerVirtualFilePath)
+              }
+            ],
             source: `export const shared = ${JSON.stringify(providerVersions[providerVersionIndex]?.className)};`,
             watchFiles: []
           }) as Awaited<ReturnType<typeof compile>>
@@ -9114,6 +10156,8 @@ if (import.meta.vitest) {
               fileScope: {
                 filePath: providerVirtualFilePath
               },
+              // This mock stands in for an evaluator that observed the producer.
+              origin: providerOrigin,
               source: createProviderCssSource(
                 providerVersion.className,
                 providerVersion.color
@@ -9162,16 +10206,14 @@ if (import.meta.vitest) {
 
       const resolvedVirtualId = harness.resolveId(virtualImportMatch[1]);
 
-      expect(resolvedVirtualId).toBe(
-        `\0mincho-virtual-css:${expectedProviderVirtualModuleId}`
-      );
+      expect(resolvedVirtualId).toBe(expectedProviderVirtualModuleId);
       expect(transformedProviderV1).toContain(staleProviderClassName);
       expect(transformedProviderV1).not.toContain(updatedProviderClassName);
       expect(await harness.load(resolvedVirtualId!)).toBe(
         createProviderCssSource(staleProviderClassName, "rebeccapurple")
       );
       expect(getModuleById).toHaveBeenCalledWith(
-        `\0mincho-virtual-css:${expectedProviderVirtualModuleId}`
+        expectedProviderVirtualModuleId
       );
       expect(invalidateModule).toHaveBeenCalledWith(hmrModule);
       expect(invalidateModule).toHaveBeenCalledTimes(1);
@@ -9254,107 +10296,605 @@ if (import.meta.vitest) {
       fileScopeModule.endFileScope();
     });
 
-    it("emits resolved virtual css imports while keeping dev HMR bookkeeping", async () => {
+    it("retires replaced sidecar package watches but preserves them after failure", async () => {
       const integrationModule = await import("@mincho-js/integration");
-      const cssSource = ".shared { color: rebeccapurple; }";
-      const virtualCssId = "src/extracted_rules.css.ts.vanilla.css";
-      const expectedModuleId = normalizePath(
-        join(viteConsumerRootPath, virtualCssId)
+      const manifest = join(viteConsumerRootPath, "package.json");
+      let revision = 0;
+      let failedAttempt = false;
+      const newManifest = normalizePath(
+        join(viteConsumerRootPath, "src/package.json")
+      );
+      vi.spyOn(integrationModule, "babelTransformSource").mockImplementation(
+        async () => ({
+          code: `import "extracted_revision${revision}.css.ts";export const value=true;`,
+          result: [`extracted_revision${revision}.css.ts`, "resolver contents"]
+        })
+      );
+      vi.spyOn(integrationModule, "compile").mockImplementation(
+        async () =>
+          ({
+            source: "compiled source",
+            watchFiles: failedAttempt ? [manifest, newManifest] : [manifest],
+            cssScopeOrigins: []
+          }) as Awaited<ReturnType<typeof compile>>
+      );
+      const registry = vi
+        .spyOn(integrationModule, "processDefineRulesPresetRegistryFile")
+        .mockResolvedValue(createRegistryResult("export const value=true;"));
+      const getModuleById = vi.fn((_id: string) => ({}));
+      const invalidateModule = vi.fn();
+      const harness = await createViteHarness({
+        configOverrides: { command: "serve", mode: "development" },
+        pluginOptions: { cache: false },
+        server: { moduleGraph: { getModuleById, invalidateModule } }
+      });
+      const started = createDeferred<void>();
+      const complete =
+        createDeferred<ReturnType<typeof createRegistryResult>>();
+      registry.mockImplementationOnce(async () => {
+        started.resolve();
+        return complete.promise;
+      });
+      const first = await createExtractedCssFixture(harness);
+      const pending = harness.transform(
+        first.extractedId,
+        first.extractedSource
+      );
+      await started.promise;
+      harness.hotUpdate(manifest);
+      complete.resolve(createRegistryResult("export const stale=true;"));
+      await expect(pending).rejects.toThrow(
+        /publication inputs changed.*retry/i
       );
 
-      const fileScopePath = expectedModuleId.slice(0, -".vanilla.css".length);
-      const hmrModule: Module = {
-        lastInvalidationTimestamp: 123
-      };
+      let latest!: Awaited<ReturnType<typeof createExtractedCssFixture>>;
+      for (; revision < 3; revision++) {
+        latest = await createExtractedCssFixture(harness);
+        await harness.transform(latest.extractedId, latest.extractedSource);
+      }
+      getModuleById.mockClear();
+      invalidateModule.mockClear();
+      harness.hotUpdate(manifest);
+      expect(getModuleById.mock.calls.map(([id]: [string]) => id)).toEqual([
+        viteConsumerEntryPath,
+        latest.extractedId
+      ]);
+      expect(invalidateModule).toHaveBeenCalledTimes(2);
 
-      const getModuleById = vi.fn(() => hmrModule);
-      const invalidateModule = vi.fn();
+      failedAttempt = true;
+      registry.mockRejectedValueOnce(new Error("failed replacement"));
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      const failed = await createExtractedCssFixture(harness);
+      await harness.transform(failed.extractedId, failed.extractedSource);
+      getModuleById.mockClear();
+      invalidateModule.mockClear();
+      harness.hotUpdate(manifest);
+      expect(getModuleById.mock.calls.map(([id]: [string]) => id)).toEqual([
+        viteConsumerEntryPath,
+        latest.extractedId
+      ]);
+      expect(invalidateModule).toHaveBeenCalledTimes(2);
+      getModuleById.mockClear();
+      harness.hotUpdate(newManifest);
+      expect(getModuleById.mock.calls.map(([id]: [string]) => id)).toEqual([
+        viteConsumerEntryPath,
+        failed.extractedId
+      ]);
 
-      vi.spyOn(integrationModule, "babelTransformSource").mockResolvedValue({
-        code: 'import "extracted_rules.css.ts";\nexport { css, shared };',
-        result: ["extracted_rules.css.ts", "resolver contents"]
-      });
-      vi.spyOn(integrationModule, "compile").mockResolvedValue({
-        source: "compiled source",
-        watchFiles: []
-      } as Awaited<ReturnType<typeof compile>>);
+      failedAttempt = false;
+      const recovered = await createExtractedCssFixture(harness);
+      await harness.transform(recovered.extractedId, recovered.extractedSource);
+      getModuleById.mockClear();
+      harness.hotUpdate(newManifest);
+      expect(getModuleById).not.toHaveBeenCalled();
+    });
 
-      const registrySpy = vi
-        .spyOn(integrationModule, "processDefineRulesPresetRegistryFile")
-        .mockImplementation(
+    it.each(["watch event first", "input validation first"] as const)(
+      "keeps pending manifest watches through outer input validation (%s)",
+      async (ordering: "watch event first" | "input validation first") => {
+        const { onTestFinished } = await import("vitest");
+        const { tmpdir } = await import("node:os");
+        const watchRoot = await fs.promises.mkdtemp(
+          join(tmpdir(), "mincho-manifest-watch-")
+        );
+        onTestFinished(() =>
+          fs.promises.rm(watchRoot, { recursive: true, force: true })
+        );
+        const integration = await import("@mincho-js/integration");
+        const manifest = normalizePath(
+          join(viteConsumerRootPath, "package.json")
+        );
+        const newManifest = normalizePath(join(watchRoot, "package.json"));
+        const before = '{"name":"before-change"}';
+        await fs.promises.writeFile(newManifest, before);
+        const marker = "export const stalePackageCss = true;";
+        vi.spyOn(integration, "babelTransformSource").mockResolvedValue({
+          code: 'import "extracted_rules.css.ts";',
+          result: ["extracted_rules.css.ts", "resolver contents"]
+        });
+        vi.spyOn(integration, "compile").mockResolvedValue({
+          source: "compiled source",
+          watchFiles: [manifest, newManifest],
+          cssScopeOrigins: []
+        } as Awaited<ReturnType<typeof compile>>);
+        let cssImport: string | undefined;
+        vi.spyOn(
+          integration,
+          "processDefineRulesPresetRegistryFile"
+        ).mockImplementation(
           async ({
             serializeVirtualCssPath
           }: Parameters<typeof processDefineRulesPresetRegistryFile>[0]) => {
-            return createRegistryResult(
-              (await serializeVirtualCssPath?.({
-                fileName: "src/extracted_rules.css.ts",
-                fileScope: {
-                  filePath: fileScopePath
-                },
-                source: cssSource
-              })) ?? ""
-            );
+            cssImport = await serializeVirtualCssPath!({
+              fileName: "pending.css.ts",
+              fileScope: { filePath: "pending.css.ts" },
+              source: ".pending { color: red; }"
+            });
+            return createRegistryResult(`${cssImport}\n${marker}`);
           }
         );
+        const getModuleById = vi.fn((_id: string) => ({}));
+        const harness = await createViteHarness({
+          pluginOptions: { cache: { type: "memory" } },
+          configOverrides: { command: "serve", mode: "development" },
+          server: {
+            moduleGraph: {
+              getModuleById,
+              invalidateModule: vi.fn()
+            }
+          }
+        });
+        const fixture = await createExtractedCssFixture(harness);
+        const cache = integration.InternalCompilationCache.prototype;
+        const withInputs = cache.withInputs;
+        let invalidated = false;
+        vi.spyOn(cache, "withInputs").mockImplementation(async function (
+          this: InstanceType<typeof integration.InternalCompilationCache>,
+          operation: () => Promise<unknown>
+        ) {
+          const holdsPublication = (value: unknown) =>
+            !invalidated && typeof value === "string" && value.includes(marker);
+          const result = await withInputs.call(this, async () => {
+            const value = await operation();
+            if (
+              ordering === "input validation first" &&
+              holdsPublication(value)
+            ) {
+              invalidated = true;
+              expect(
+                Buffer.from(
+                  (await this.readOptionalFile(newManifest))!
+                ).toString()
+              ).toBe(before);
+              await fs.promises.writeFile(
+                newManifest,
+                '{"name":"after-change"}'
+              );
+            }
+            return value;
+          });
+          if (ordering === "watch event first" && holdsPublication(result)) {
+            invalidated = true;
+            harness.hotUpdate(manifest);
+          }
+          return result;
+        });
+        await expect(
+          harness.transform(fixture.extractedId, fixture.extractedSource)
+        ).rejects.toThrow(
+          ordering === "watch event first"
+            ? /publication.*changed.*retry/i
+            : /Mincho inputs changed during compilation: .*package\.json/i
+        );
+        expect(invalidated).toBe(true);
+        expect(cssImport).toBeDefined();
+        const specifier = cssImport!.match(/import "([^"]+)";/)?.[1];
+        expect(specifier).toBeDefined();
+        expect(harness.resolveId(specifier!)).toBeUndefined();
+        getModuleById.mockClear();
+        harness.hotUpdate(newManifest);
+        expect(getModuleById.mock.calls.map(([id]: [string]) => id)).toEqual([
+          viteConsumerEntryPath,
+          fixture.extractedId
+        ]);
+      }
+    );
 
+    it("permits only self-contained URLs in Vite-processed inline CSS", () => {
+      expect(
+        hasSelfContainedCssResources(
+          '.a{background:url("data:image/svg+xml,%3Csvg%3E")}'
+        )
+      ).toBe(true);
+      expect(
+        hasSelfContainedCssResources(
+          '.a{background:image-set("https://example.test/image.png" 1x)}'
+        )
+      ).toBe(true);
+      expect(
+        hasSelfContainedCssResources(
+          '.a{background:url("/image.svg?no-inline#mark")}',
+          true
+        )
+      ).toBe(true);
+      expect(
+        hasSelfContainedCssResources('.a{background:url("./image.svg")}', true)
+      ).toBe(false);
+      expect(
+        hasSelfContainedCssResources('@import "./relative.css";', true)
+      ).toBe(false);
+      expect(
+        hasSelfContainedCssResources(
+          '.a{background:image-set("relative.svg" 1x)}',
+          true
+        )
+      ).toBe(false);
+      const networkPath = '.a{background:url("//localhost:43210/image.svg")}';
+      expect(hasSelfContainedCssResources(networkPath, true)).toBe(true);
+      expect(hasSelfContainedCssResources(networkPath)).toBe(false);
+      expect(
+        hasSelfContainedCssResources('.a{background:url("///image.svg")}', true)
+      ).toBe(false);
+      for (const css of [
+        '.a{background:url("/image.png")}',
+        '.a{background:url("#local")}',
+        '@import "/theme.css";',
+        '@import url("./theme.css");',
+        '.a{background:image-set("/image.png" 1x)}',
+        '.a{background:-webkit-image-set("/image.png" 1x)}'
+      ])
+        expect(hasSelfContainedCssResources(css)).toBe(false);
+    });
+
+    it("publishes origin-free native text only as an asset-free cache-only module", async () => {
+      const integrationModule = await import("@mincho-js/integration");
+      let css = ".plain { color: red; padding: 4px; }";
+      const babel = vi
+        .spyOn(integrationModule, "babelTransformSource")
+        .mockResolvedValue({
+          code: 'import "extracted_rules.css.ts";export const value=true;',
+          result: ["extracted_rules.css.ts", "resolver contents"]
+        });
+      vi.spyOn(integrationModule, "compile").mockImplementation(
+        async () =>
+          ({
+            source: "compiled source",
+            watchFiles: [],
+            cssScopeOrigins: []
+          }) as Awaited<ReturnType<typeof compile>>
+      );
+      vi.spyOn(
+        integrationModule,
+        "processDefineRulesPresetRegistryFile"
+      ).mockImplementation(
+        async ({
+          serializeVirtualCssPath
+        }: Parameters<typeof processDefineRulesPresetRegistryFile>[0]) =>
+          createRegistryResult(
+            await serializeVirtualCssPath!({
+              fileName: "logical.css.ts",
+              fileScope: { filePath: "logical.css.ts", packageName: "dynamic" },
+              source: css
+            })
+          )
+      );
+      const idToModuleMap = new Map<string, Module>();
+      const invalidateModule = vi.fn();
       const harness = await createViteHarness({
-        configOverrides: {
-          command: "serve",
-          mode: "development"
-        },
+        configOverrides: { command: "serve", mode: "development" },
         server: {
           moduleGraph: {
-            getModuleById,
+            idToModuleMap,
+            getModuleById: (id) => idToModuleMap.get(id),
             invalidateModule
           }
         }
       });
-
-      const { extractedId, extractedSource, physicalPath } =
-        await createExtractedCssFixture(harness);
-
-      const transformedExtractedCss = await harness.transform(
-        extractedId,
-        extractedSource
+      const fixture = await createExtractedCssFixture(harness);
+      const source = await harness.transform(
+        fixture.extractedId,
+        fixture.extractedSource
       );
-
-      assertString(
-        transformedExtractedCss,
-        "Expected extracted css transform to return source text"
+      assertString(source, "Expected native text publication");
+      const request = source.match(/import\s+"([^"\n]+\.vanilla\.css)";/)![1];
+      const id = harness.resolveId(request)!;
+      expect(id).toMatch(
+        /^\0mincho-virtual-css:mincho-unattributed\/[a-f0-9]{64}\.vanilla\.css$/
       );
-
-      const virtualImportMatch = transformedExtractedCss.match(
-        /import\s+"([^"]+\.vanilla\.css)";/
+      expect(id).not.toContain("logical.css.ts");
+      expect(await harness.load(id)).toBe(css);
+      expect(await harness.load(id + "?raw")).toBe(
+        `export default ${JSON.stringify(css)};`
       );
-      if (virtualImportMatch == null) {
-        throw new Error("Expected a virtual css import in dev mode");
+      const publicUrl = `/@id/${id.replace("\0", "__x00__")}?direct`;
+      expect(await harness.load(id + "?url")).toBe(
+        `export default ${JSON.stringify(publicUrl)};`
+      );
+      const read = vi.spyOn(fs.promises, "readFile");
+      read.mockClear();
+      expect(
+        await harness.load(id.replace(/[a-f0-9]{64}/, "0".repeat(64)))
+      ).toBeNull();
+      expect(read).not.toHaveBeenCalled();
+      const variants = [
+        id,
+        id + "?raw",
+        id + "?url",
+        id + "?url&inline",
+        id + "?direct&t=123#fragment"
+      ];
+      for (const variant of variants)
+        idToModuleMap.set(variant, { id: variant });
+      const unrelated = { id: "unrelated" };
+      idToModuleMap.set(
+        id.replace(".vanilla.css", "-other.vanilla.css"),
+        unrelated
+      );
+      invalidateModule.mockClear();
+      css = ".plain {color: blue}";
+      await harness.transform(fixture.extractedId, fixture.extractedSource);
+      expect(await harness.load(id)).toBe(css);
+      for (const variant of variants)
+        expect(invalidateModule).toHaveBeenCalledWith(
+          idToModuleMap.get(variant)
+        );
+      expect(invalidateModule).not.toHaveBeenCalledWith(unrelated);
+      invalidateModule.mockClear();
+      babel.mockResolvedValue({ code: "export {};", result: ["", ""] });
+      await harness.transform(viteConsumerEntryPath, "export {};");
+      for (const variant of variants) {
+        expect(invalidateModule).toHaveBeenCalledWith(
+          idToModuleMap.get(variant)
+        );
+        expect(await harness.load(variant)).toBe(
+          variant.includes("?url&inline")
+            ? 'export default "data:text/css;charset=utf-8;base64,";'
+            : variant.includes("?url")
+              ? `export default ${JSON.stringify(publicUrl)};`
+              : variant.includes("?raw")
+                ? 'export default "";'
+                : ""
+        );
       }
+      expect(invalidateModule).not.toHaveBeenCalledWith(unrelated);
+    });
 
-      expect(transformedExtractedCss).toContain(
-        `import "mincho-virtual-css:${expectedModuleId}";`
-      );
-      expect(transformedExtractedCss).not.toContain("presets");
+    it.each([0, 1, 2])(
+      "does not borrow resource provenance from matching static scopes (static producers: %s)",
+      async (producerCount: number) => {
+        const integrationModule = await import("@mincho-js/integration");
+        const fileScope = {
+          filePath: "logical.css.ts",
+          packageName: "dynamic"
+        };
+        vi.spyOn(integrationModule, "babelTransformSource").mockResolvedValue({
+          code: 'import "extracted_rules.css.ts";',
+          result: ["extracted_rules.css.ts", "resolver contents"]
+        });
+        vi.spyOn(integrationModule, "compile").mockImplementation(
+          async () =>
+            ({
+              source: "compiled source",
+              watchFiles: [],
+              cssScopeOrigins: ["/first.js", "/second.js"]
+                .slice(0, producerCount)
+                .map((origin) => ({ origin, fileScope }))
+            }) as Awaited<ReturnType<typeof compile>>
+        );
+        vi.spyOn(
+          integrationModule,
+          "processDefineRulesPresetRegistryFile"
+        ).mockImplementation(
+          async ({
+            serializeVirtualCssPath
+          }: Parameters<typeof processDefineRulesPresetRegistryFile>[0]) =>
+            createRegistryResult(
+              await serializeVirtualCssPath!({
+                fileName: "logical.css.ts",
+                fileScope,
+                source: '.a {background:url("./image.svg")}'
+              })
+            )
+        );
+        const harness = await createViteHarness();
+        const fixture = await createExtractedCssFixture(harness);
+        await expect(
+          harness.transform(fixture.extractedId, fixture.extractedSource)
+        ).rejects.toThrow("Missing CSS scope provenance");
+      }
+    );
 
-      const resolvedVirtualId = harness.resolveId(virtualImportMatch[1]);
+    it.each([false, true])(
+      "emits resolved virtual css imports while keeping dev HMR bookkeeping (file index: %s)",
+      async (fileIndex: boolean) => {
+        const integrationModule = await import("@mincho-js/integration");
+        const cssSource = ".shared { color: rebeccapurple; }";
+        const virtualCssId = "src/extracted_rules.css.ts.vanilla.css";
+        const fileScopePath = normalizePath(
+          join(viteConsumerRootPath, virtualCssId)
+        ).slice(0, -".vanilla.css".length);
+        const scopeIdentity = createHash("sha256")
+          .update(JSON.stringify([undefined, fileScopePath, fileScopePath]))
+          .digest("hex");
+        const expectedModuleId = `${fileScopePath}.mincho-scope-${scopeIdentity}.vanilla.css`;
+        const hmrModule: Module = {
+          lastInvalidationTimestamp: 123
+        };
 
-      expect(resolvedVirtualId).toBe(
-        `\0mincho-virtual-css:${expectedModuleId}`
+        const getModuleById = vi.fn(() => hmrModule);
+        const rawModule: Module = { id: expectedModuleId + "?raw" };
+        const urlModule: Module = { id: expectedModuleId + "?url&t=123" };
+        const getModulesByFile = vi.fn((id: string) =>
+          id === expectedModuleId
+            ? new Set([hmrModule, rawModule, urlModule])
+            : undefined
+        );
+        const invalidateModule = vi.fn();
+
+        vi.spyOn(integrationModule, "babelTransformSource").mockResolvedValue({
+          code: 'import "extracted_rules.css.ts";\nexport { css, shared };',
+          result: ["extracted_rules.css.ts", "resolver contents"]
+        });
+        vi.spyOn(integrationModule, "compile").mockImplementation(async () => ({
+          ...({
+            cssScopeOrigins: [],
+            source: "compiled source",
+            watchFiles: []
+          } as Awaited<ReturnType<typeof compile>>),
+          cssScopeOrigins: [
+            { fileScope: { filePath: fileScopePath }, origin: fileScopePath }
+          ]
+        }));
+
+        const registrySpy = vi
+          .spyOn(integrationModule, "processDefineRulesPresetRegistryFile")
+          .mockImplementation(
+            async ({
+              serializeVirtualCssPath
+            }: Parameters<typeof processDefineRulesPresetRegistryFile>[0]) => {
+              return createRegistryResult(
+                (await serializeVirtualCssPath?.({
+                  fileName: "src/extracted_rules.css.ts",
+                  fileScope: {
+                    filePath: fileScopePath
+                  },
+                  origin: fileScopePath,
+                  source: cssSource
+                })) ?? ""
+              );
+            }
+          );
+
+        const harness = await createViteHarness({
+          configOverrides: {
+            command: "serve",
+            mode: "development"
+          },
+          server: {
+            moduleGraph: {
+              getModuleById,
+              ...(fileIndex ? { getModulesByFile } : {}),
+              invalidateModule
+            }
+          }
+        });
+
+        const { extractedId, extractedSource, physicalPath } =
+          await createExtractedCssFixture(harness);
+
+        const transformedExtractedCss = await harness.transform(
+          extractedId,
+          extractedSource
+        );
+
+        assertString(
+          transformedExtractedCss,
+          "Expected extracted css transform to return source text"
+        );
+
+        const virtualImportMatch = transformedExtractedCss.match(
+          /import\s+"([^"]+\.vanilla\.css)";/
+        );
+        if (virtualImportMatch == null) {
+          throw new Error("Expected a virtual css import in dev mode");
+        }
+
+        expect(transformedExtractedCss).toContain(
+          `import "mincho-virtual-css:${expectedModuleId}";`
+        );
+        expect(transformedExtractedCss).not.toContain("presets");
+
+        const resolvedVirtualId = harness.resolveId(virtualImportMatch[1]);
+
+        expect(resolvedVirtualId).toBe(expectedModuleId);
+        expect(await harness.load(resolvedVirtualId!)).toBe(cssSource);
+        if (fileIndex) {
+          expect(getModulesByFile).toHaveBeenCalledWith(expectedModuleId);
+          expect(invalidateModule).toHaveBeenCalledWith(rawModule);
+          expect(invalidateModule).toHaveBeenCalledWith(urlModule);
+        } else expect(getModuleById).toHaveBeenCalledWith(expectedModuleId);
+        expect(invalidateModule).toHaveBeenCalledWith(hmrModule);
+        expect(hmrModule.lastHMRTimestamp).toBe(123);
+        expect(registrySpy).toHaveBeenCalledWith(
+          expect.objectContaining({
+            filePath: physicalPath,
+            identOption: "debug",
+            source: "compiled source",
+            serializeVirtualCssPath: expect.any(Function)
+          })
+        );
+        expect(registrySpy).toHaveBeenCalledTimes(1);
+      }
+    );
+
+    it("keys native CSS by scope identity without moving its physical directory", async () => {
+      const integrationModule = await import("@mincho-js/integration");
+      const origin = normalizePath(
+        join(viteConsumerRootPath, "published/index.mjs")
       );
-      expect(await harness.load(resolvedVirtualId!)).toBe(cssSource);
-      expect(getModuleById).toHaveBeenCalledWith(
-        `\0mincho-virtual-css:${expectedModuleId}`
+      const scopes = [
+        { filePath: "original/first.css.ts", packageName: "published" },
+        { filePath: "original/second.css.ts", packageName: "published" }
+      ];
+      let sources = [".first { color: red; }", ".second { color: blue; }"];
+      vi.spyOn(integrationModule, "babelTransformSource").mockResolvedValue({
+        code: 'import "extracted_rules.css.ts";export const value = true;',
+        result: ["extracted_rules.css.ts", "resolver contents"]
+      });
+      vi.spyOn(integrationModule, "compile").mockImplementation(
+        async () =>
+          ({
+            source: "compiled source",
+            watchFiles: [],
+            cssScopeOrigins: scopes.map((fileScope) => ({ fileScope, origin }))
+          }) as Awaited<ReturnType<typeof compile>>
       );
-      expect(invalidateModule).toHaveBeenCalledWith(hmrModule);
-      expect(hmrModule.lastHMRTimestamp).toBe(123);
-      expect(registrySpy).toHaveBeenCalledWith(
-        expect.objectContaining({
-          filePath: physicalPath,
-          identOption: "debug",
-          source: "compiled source",
-          serializeVirtualCssPath: expect.any(Function)
-        })
+      vi.spyOn(
+        integrationModule,
+        "processDefineRulesPresetRegistryFile"
+      ).mockImplementation(
+        async ({
+          serializeVirtualCssPath
+        }: Parameters<typeof processDefineRulesPresetRegistryFile>[0]) =>
+          createRegistryResult(
+            (
+              await Promise.all(
+                sources.map((source, index) =>
+                  serializeVirtualCssPath!({
+                    fileName: scopes[index].filePath,
+                    fileScope: scopes[index],
+                    // The evaluator reports the physical producer for each scope.
+                    origin,
+                    source
+                  })
+                )
+              )
+            ).join("\n")
+          )
       );
-      expect(registrySpy).toHaveBeenCalledTimes(1);
+      const harness = await createViteHarness({
+        configOverrides: { command: "serve", mode: "development" }
+      });
+      const { extractedId, extractedSource } =
+        await createExtractedCssFixture(harness);
+      const emit = async () => {
+        const source = await harness.transform(extractedId, extractedSource);
+        assertString(source, "Expected CSS imports");
+        return [...source.matchAll(/import\s+"([^"\n]+\.vanilla\.css)";/g)].map(
+          (match) => harness.resolveId(match[1])!
+        );
+      };
+      const ids = await emit();
+      expect(ids).toHaveLength(2);
+      expect(new Set(ids).size).toBe(2);
+      for (const id of ids) expect(dirname(id)).toBe(dirname(origin));
+      expect(await harness.load(ids[0])).toBe(sources[0]);
+      expect(await harness.load(ids[1])).toBe(sources[1]);
+      sources = [".first { color: green; }"];
+      const replacement = await emit();
+      expect(replacement).toEqual([ids[0]]);
+      expect(await harness.load(ids[0])).toBe(sources[0]);
+      expect(await harness.load(ids[1])).not.toBe(".second { color: blue; }");
     });
 
     it("emits virtual css imports for Windows file scopes", async () => {
@@ -9368,10 +10908,19 @@ if (import.meta.vitest) {
         code: 'import "extracted_rules.css.ts";\nexport { css, shared };',
         result: ["extracted_rules.css.ts", "resolver contents"]
       });
-      vi.spyOn(integrationModule, "compile").mockResolvedValue({
-        source: "compiled source",
-        watchFiles: []
-      } as Awaited<ReturnType<typeof compile>>);
+      vi.spyOn(integrationModule, "compile").mockImplementation(async () => ({
+        ...({
+          cssScopeOrigins: [],
+          source: "compiled source",
+          watchFiles: []
+        } as Awaited<ReturnType<typeof compile>>),
+        cssScopeOrigins: [
+          {
+            fileScope: { filePath: windowsFileScopePath },
+            origin: windowsFileScopePath
+          }
+        ]
+      }));
       vi.spyOn(
         integrationModule,
         "processDefineRulesPresetRegistryFile"

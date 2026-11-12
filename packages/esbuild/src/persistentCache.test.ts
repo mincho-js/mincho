@@ -102,7 +102,7 @@ it.each(
       expect(warm.hits, "validated transform and sidecar hits").toEqual(
         expect.arrayContaining([
           expect.stringMatching(/^transform:/),
-          expect.stringMatching(/^compile-v2:/)
+          expect.stringMatching(/^compile-v11-css-origins:/)
         ])
       );
     } else {

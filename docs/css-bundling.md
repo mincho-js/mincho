@@ -299,3 +299,121 @@ The design uses the render-time metadata approach from
 (reference checkout `6421eba`) and whole-module/distribution boundaries explored
 in [UnoCSS](https://github.com/unocss/unocss) (`93b642097`). Mincho keeps Vite/esbuild
 responsible for native asset generation and loading behavior.
+
+## Low-level CSS evaluation: physical scope origins
+
+Application code and the Vite/esbuild plugin options do not change. This section
+is for custom integrations that call `compile` and then evaluate its bundled
+source. A file scope is identified by its package name and logical `filePath`;
+it is not an absolute asset path. Compiler-generated dependency scopes with
+the entry's package name share its package root; other names use build-relative
+producer paths. Separate installations stay distinct before class generation.
+Special path segments are encoded reversibly (for example, `..` becomes
+`%2E%2E` and a literal `%` becomes `%25`); these logical identifiers must never
+be decoded to locate files. Explicit scope arguments retain their values when
+Vanilla Extract's file-scope transform leaves the call untouched. Its first
+matching `setFileScope` call may instead receive the generated scope. Relative
+assets such as `url("./image.svg")` resolve from the recorded physical producer
+directory in either case.
+
+Keep `cssScopeOrigins` with the source returned by `compile`, and pass both to
+`processDefineRulesPresetRegistryFile`:
+
+```ts
+import {
+  compile,
+  processDefineRulesPresetRegistryFile,
+} from "@mincho-js/integration";
+
+const compiled = await compile({
+  cwd: projectRoot,
+  filePath: sidecarPath,
+  originalPath: componentPath,
+  contents: sidecarSource,
+  resolverCache: new Map(),
+});
+
+const result = await processDefineRulesPresetRegistryFile({
+  source: compiled.source,
+  cssScopeOrigins: compiled.cssScopeOrigins,
+  filePath: sidecarPath,
+  cssSourceFile: componentPath,
+  cssSourceRoot: projectRoot,
+  serializeCssArtifact(artifact) {
+    // artifact.origin is the producer path used to resolve relative assets.
+    // The custom integration publishes CSS and returns its import specifier.
+    const cssSpecifier = publishCssArtifact(artifact);
+    return `import ${JSON.stringify(cssSpecifier)};`;
+  },
+});
+```
+
+The internal `processVanillaWithExecution` evaluator accepts the same
+`cssScopeOrigins` option; it is not an additional public package entry point.
+Mincho's Vite and esbuild adapters forward the metadata automatically. Compile
+caches preserve it, and CSS-artifact evaluation cache identities include it.
+Keep the source and metadata from the same compilation; do not infer metadata
+from source-map contents, filenames, or unrelated watched files.
+
+Each metadata entry includes `{ fileScope: { filePath, packageName }, origin }`.
+Compiler-produced entries may also carry an internal runtime registration. Keep
+that registration intact and pass the original metadata to the evaluator.
+Do not JSON-reconstruct it, modify its source or origin, or transfer it between
+separate integration-module instances. These cases fail explicitly; verified
+compiler cache and worker results are restored at the compiler boundary.
+The registration binds a physical producer to the compiled source; the actual
+file-scope calls during evaluation supply the scope arguments. Static scope
+hints alone do not authorize an artifact from such a producer.
+
+Registered CSS evaluation exposes CommonJS parent identity as metadata only,
+not the parent module's dependency loader. Load authoring dependencies with
+normal imports or the stylesheet's own `require`, not `module.parent.require`.
+
+Legacy explicitly supplied entries without a runtime registration remain
+valid for matching legacy compiled source. Direct execution with a custom
+`require` and metadata-free CSS-text evaluation retain the original file-scope
+API behavior, but cannot grant runtime artifact-origin evidence.
+
+Native mode can publish unattributed CSS text in a cache-only virtual module
+when CSS AST validation proves it has no resource-dependent or unsupported
+syntax, such as a supported plain color or layout declaration. This does not
+infer a physical producer or issue a provenance receipt. Relative URLs,
+imports, `image-set`, raw/unrecognized syntax, and unsupported values still
+require an attributed source; ambiguous known origins are never bypassed.
+IR/dist-chunk output continues to require verified physical provenance.
+With an unvalidated Vanilla Extract adapter, native evaluation can attach an
+origin only when it can independently verify the producer for that scope.
+If dynamic authoring prevents verification, CSS text may still be emitted,
+but publishing a relative asset requires verified provenance; the host reports
+a missing-origin diagnostic rather than resolving it from the wrong directory.
+
+If low-level code mixes compiler-attributed and unattributed emissions in the
+same logical file scope, CSS-text output retains their original cascade order
+but has no shared physical origin. Native mode therefore accepts only the
+resource-independent subset above for that combined scope. A relative asset
+in such a mixed scope requires attributable emissions throughout; it cannot
+borrow another rule's producer. Ordinary compiler-managed styles keep their
+physical origins and asset resolution unchanged.
+
+`origin` is an absolute producer/asset-base path. It is CSS output metadata,
+not permission to evaluate a module, proof of purity, or a runtime-source
+receipt. For host-generated virtual source, the host must explicitly identify
+the matching scope and its intended producer path. The path need not itself be
+a readable generated module, but relative assets must have an unambiguous
+host-owned base. With compiler-issued runtime origin metadata, if two physical
+producers actually emit CSS under the same explicit package/file scope, evaluation
+rejects the collision instead of combining their class names, selectors, or
+assets. Metadata-free legacy CSS-text evaluation cannot distinguish physical
+producers for the same tuple. When the owned evaluator uses legacy CSS-text
+metadata, unmatched scopes have no origin and ambiguous metadata is rejected. Merely
+opening an empty scope does not claim another producer's CSS. Repeated output
+from the same scope and origin remains replaceable.
+
+When `serializeCssArtifact` emits an artifact, matching `cssScopeOrigins` metadata
+is required, including owner-only scopes. File existence, package-name equality,
+and matching owner-relative paths cannot distinguish two physical instances of
+the same package. Missing metadata produces `Missing CSS scope provenance` and
+asks the caller to forward `compile().cssScopeOrigins`; no filesystem path is
+guessed. Modules that emit no CSS artifacts do not require an origin entry.
+CSS-text evaluation without `serializeCssArtifact` retains its existing behavior; custom
+CSS-text serializers remain responsible for distinct scope IDs.

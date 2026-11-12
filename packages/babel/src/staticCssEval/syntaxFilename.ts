@@ -1,0 +1,51 @@
+const sourceExtension = /\.[cm]?[jt]sx?$/;
+const typedVirtualSyntax = /^(?:\0?virtual:|pkg:|data:)/;
+
+/** Match the earliest extension delimiter on the final line. Each extension
+ * check examines at most the five characters of a supported extension. */
+function findSyntaxSuffix(id: string, start: number): number {
+  let suffix = -1;
+  for (let i = id.length - 1; i >= start; i--) {
+    const char = id[i];
+    if (
+      char === "\n" ||
+      char === "\r" ||
+      char === "\u2028" ||
+      char === "\u2029"
+    )
+      break;
+    if (
+      (char === "?" || char === "#") &&
+      sourceExtension.test(id.slice(Math.max(start, i - 5), i))
+    )
+      suffix = i;
+  }
+  return suffix;
+}
+
+/** Metadata-free IDs retain physical directory components. A query containing
+ * slashes and ending in a source extension is ambiguous and needs syntaxFilename.
+ */
+export function inferSyntaxFilename(id: string): string {
+  const basenameStart = Math.max(id.lastIndexOf("/"), id.lastIndexOf("\\")) + 1;
+  const basenameSuffix = findSyntaxSuffix(id, basenameStart);
+  if (basenameSuffix !== -1) return id.slice(0, basenameSuffix);
+  if (sourceExtension.test(id.slice(Math.max(basenameStart, id.length - 5))))
+    return id;
+  // A slash in a query value must not hide its preceding source extension.
+  const suffix = findSyntaxSuffix(id, 0);
+  return suffix === -1 ? id : id.slice(0, suffix);
+}
+
+/** Syntax recognition for provider metadata, without changing its graph identity. */
+export function hasStaticCssEvalSyntaxFilename(
+  id: string,
+  physical = false
+): boolean {
+  const filename = physical ? id : inferSyntaxFilename(id);
+  return sourceExtension.test(filename) || typedVirtualSyntax.test(filename);
+}
+
+export function hasVirtualTypeScriptSyntax(filename: string): boolean {
+  return typedVirtualSyntax.test(filename);
+}
