@@ -16,6 +16,7 @@ const seeds = [
   "@mincho-js/preset-theme-ui",
   "@mincho-js/preset-theme-ui-react",
   "@mincho-js/preset-tailwind",
+  "@mincho-js/preset-tailwind-react",
   "@mincho-js/esbuild"
 ] as const;
 

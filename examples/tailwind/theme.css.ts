@@ -18,30 +18,8 @@ export const [dark] = theme.extends(contract, {
   colors: { ...tokens.colors, ink: "#fff", paper: "#17231a" }
 });
 
-const { css, rules, cx } = defineRules(themeSpec(vars));
+const { css, rules } = defineRules(themeSpec(vars));
 
-export const surface = css({
-  color: "ink",
-  bg: "paper",
-  fontFamily: "sans",
-  fontSize: "base",
-  p: 6,
-  rounded: "2xl",
-  shadow: "sm",
-  _md: { p: 8 }
-});
-export const heading = css({
-  fontSize: "3xl",
-  fontWeight: "bold",
-  tracking: "tight",
-  _md: { fontSize: "4xl" }
-});
-export const grid = css({
-  display: "grid",
-  gridTemplateColumns: "1fr",
-  gap: 6,
-  _md: { gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }
-});
 export const button = rules({
   base: css({
     px: 4,
@@ -67,30 +45,6 @@ export const button = rules({
   },
   defaultVariants: { tone: "solid", size: "regular" }
 });
-export const actions = css({
-  display: "flex",
-  flexWrap: "wrap",
-  gap: 3,
-  mt: 6
-});
-export const spacing = css({
-  p: 1.25,
-  mx: -2,
-  fontSize: "lg",
-  w: "1/2",
-  bg: "olive-100"
-});
-export const clamped = css({
-  lineClamp: 2,
-  maxWidth: "prose",
-  fontSize: "base"
-});
-export const status = css({
-  size: 3,
-  rounded: "full",
-  bg: "brand",
-  animate: "pulse"
-});
 
 // Effects compose through native literal CSS, using the same theme variables.
 export const effects = literalCss({
@@ -100,7 +54,3 @@ export const effects = literalCss({
   ],
   boxShadow$: [vars.shadows.sm, vars.insetShadows.xs]
 });
-export const effectCard = cx(
-  css({ p: 4, rounded: "lg", bg: "paper", color: "ink" }),
-  effects
-);

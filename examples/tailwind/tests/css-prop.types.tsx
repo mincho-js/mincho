@@ -1,5 +1,4 @@
-import { defineRules as defineReactRules } from "@mincho-js/react";
-import * as tailwindDefinition from "@mincho-js/preset-tailwind";
+import { css, cx, rules, styled } from "@mincho-js/preset-tailwind-react";
 
 export const button = (
   <button
@@ -18,9 +17,13 @@ export const composed = (
   <div css={[{ p: 4 }, { px: 3, py: 2 }, { pl: 1 }, "rounded"]} />
 );
 
-const selectedRecipeClass: string = "selected-recipe-class";
+const readonlyStyles = [{ p: 4 }, { px: 3, py: 2 }, "rounded"] as const;
 
-export const recipe = <span css={selectedRecipeClass} />;
+export const readonlyComposed = <div css={readonlyStyles} />;
+
+const label = rules({ base: { font: "bold", text: "sky-900" } });
+
+export const recipe = <span className={cx(css({ px: 3 }), label())} />;
 
 // @ts-expect-error The preset's font alias accepts declared family or weight tokens.
 export const invalidToken = <button css={{ font: "missing-font-token" }} />;
@@ -28,7 +31,6 @@ export const invalidToken = <button css={{ font: "missing-font-token" }} />;
 // @ts-expect-error Unknown utility aliases are not valid CSS properties.
 export const invalidAlias = <button css={{ paddingXTypo: 3 }} />;
 
-const { styled } = defineReactRules(tailwindDefinition);
 const Badge = styled.span({
   base: { px: 2, rounded: "full" },
   variants: {

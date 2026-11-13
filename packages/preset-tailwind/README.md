@@ -50,21 +50,19 @@ The `/config` entry exports the preset's extraction map for your build plugin:
 import { minchoVitePlugin } from "@mincho-js/vite";
 import { extractCalls } from "@mincho-js/preset-tailwind/config";
 
-minchoVitePlugin({
-  extractCalls,
-  jsxCssProp: { importSource: "@mincho-js/preset-tailwind" },
-});
+minchoVitePlugin({ extractCalls });
 ```
 
 This entry contains configuration data only, so Node can load it without
 evaluating themes or the style compiler.
 
-For inline React styles, configure `jsxCssProp.importSource` as
-`"@mincho-js/preset-tailwind"` and register the preset's CSS type with
-`@mincho-js/react`, following the setup above. Then write objects directly:
+For React, use [@mincho-js/preset-tailwind-react](../preset-tailwind-react/README.md).
+Set both `jsxCssProp.importSource` and `jsxImportSource` to that package, and use
+its `/config` extraction map. The package supplies the preset's JSX types and
+runtime. Write style objects directly:
 
 ```tsx
-import { themeClass } from "@mincho-js/preset-tailwind";
+import { themeClass } from "@mincho-js/preset-tailwind-react";
 import "@mincho-js/preset-tailwind/styles.css";
 
 <button
@@ -83,12 +81,13 @@ import "@mincho-js/preset-tailwind/styles.css";
 ```
 
 The `css` prop compiles to static classes and is removed before rendering.
+Pass generated classes and recipe results to `className`.
 
-To create a React component from a recipe, pass the preset definition to
-`defineRules` from `@mincho-js/react` and use its `styled.span()` or
-`styled.button()` builder inside `mincho$` or a `.css.ts` file. The
+Import `styled` directly from `@mincho-js/preset-tailwind-react` to create a
+component with `styled.span()` or `styled.button()` inside `mincho$` or a
+`.css.ts` file. The
 [React recipe guide](https://mincho-js.github.io/mincho/docs/tailwind#react-recipes)
-shows how the adapter preserves preset tokens and typed variants.
+shows how the preset preserves token names and typed variants.
 
 To customize the tokens, create a theme and bind its values in a `.css.ts` file:
 

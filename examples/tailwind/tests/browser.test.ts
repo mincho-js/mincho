@@ -12,7 +12,7 @@ import react from "@vitejs/plugin-react";
 import { chromium } from "playwright";
 import type { Browser, Page } from "playwright";
 import { minchoVitePlugin } from "@mincho-js/vite";
-import { extractCalls } from "@mincho-js/preset-tailwind/config";
+import { extractCalls } from "@mincho-js/preset-tailwind-react/config";
 import { vanillaExtractPlugin } from "@vanilla-extract/vite-plugin";
 import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -35,11 +35,11 @@ describe
       directory = await mkdtemp(join(tmpdir(), "mincho-tailwind-browser-"));
       const plugins = [
         minchoVitePlugin({
-          jsxCssProp: { importSource: "@mincho-js/preset-tailwind" },
+          jsxCssProp: { importSource: "@mincho-js/preset-tailwind-react" },
           extractCalls
         }),
         vanillaExtractPlugin(),
-        react({ jsxImportSource: "@mincho-js/react" })
+        react({ jsxImportSource: "@mincho-js/preset-tailwind-react" })
       ];
 
       if (mode === "production") {
@@ -142,7 +142,7 @@ describe
       expect(await css("#custom h2", "font-size")).toBe("36px");
       expect(await css("#preset", "max-width")).toBe("1280px");
       expect(
-        (await css(".demonstrations", "grid-template-columns")).split(" ")
+        (await css("#demonstrations", "grid-template-columns")).split(" ")
       ).toHaveLength(2);
 
       await page.setViewportSize({ width: 375, height: 812 });
@@ -150,7 +150,7 @@ describe
       expect(await css("#custom h2", "font-size")).toBe("30px");
       expect(await css("#preset", "max-width")).toBe("none");
       expect(
-        (await css(".demonstrations", "grid-template-columns")).split(" ")
+        (await css("#demonstrations", "grid-template-columns")).split(" ")
       ).toHaveLength(1);
       expect(
         await page.evaluate(
@@ -159,7 +159,7 @@ describe
       ).toBe(true);
     });
 
-    it("selects co-located recipes and switches values on a shared contract", async () => {
+    it("selects preset styled variants and switches values on a shared contract", async () => {
       const initialBadgeColor = await css("#preset-badge", "background-color");
 
       expect(await css("#recipe", "background-color")).toBe(

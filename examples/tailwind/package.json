@@ -15,6 +15,7 @@
   "dependencies": {
     "@mincho-js/css": "workspace:^",
     "@mincho-js/preset-tailwind": "workspace:^",
+    "@mincho-js/preset-tailwind-react": "workspace:^",
     "@mincho-js/react": "workspace:^",
     "@mincho-js/tailwind": "workspace:^",
     "@vanilla-extract/css": "catalog:",
