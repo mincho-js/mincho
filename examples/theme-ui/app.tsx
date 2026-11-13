@@ -1,15 +1,16 @@
 import { useState, useSyncExternalStore } from "react";
 import type { ReactNode } from "react";
-import { defineRules, mincho$ } from "@mincho-js/css";
+import { defineRules } from "@mincho-js/css";
 import {
   base,
   system,
   dark,
+  createComponents,
   baseClass,
   systemClass,
   darkClass,
   systemModeClasses as systemModes
-} from "@mincho-js/preset-theme-ui";
+} from "@mincho-js/preset-theme-ui-react";
 import { themeSpec } from "@mincho-js/theme-ui";
 
 import { customThemeClass, customDarkClass, customVars } from "./custom.css.js";
@@ -30,57 +31,35 @@ function prefersDarkMode() {
   return window.matchMedia(colorSchemeQuery).matches;
 }
 
-// mincho$ extracts this static block into CSS while the component stays here.
-const panels = mincho$(() => ({
-  base: {
-    themeClass: baseClass,
-    root: base.css({
+const panelGroups = {
+  layout: {
+    panel: {
       color: "text",
       bg: "background",
       fontFamily: "body",
       lineHeight: "body"
-    }),
-    heading: base.css({
-      color: "text",
-      fontFamily: "heading",
-      fontWeight: "heading",
-      fontSize: 5
-    }),
-    link: base.css({ color: "primary" })
-  },
-  system: {
-    themeClass: systemClass,
-    root: system.css({
-      color: "text",
-      bg: "background",
-      fontFamily: "body",
-      lineHeight: "body"
-    }),
-    heading: system.css({
-      fontFamily: "heading",
-      fontWeight: "display",
-      fontSize: 5,
-      _sm: { fontSize: 6 }
-    }),
-    link: system.css({ color: "primary", _hover: { color: "secondary" } })
-  },
-  dark: {
-    themeClass: darkClass,
-    root: dark.css({
-      color: "text",
-      bg: "background",
-      fontFamily: "body",
-      lineHeight: "body"
-    }),
-    heading: dark.css({
-      fontFamily: "heading",
-      fontWeight: "display",
-      fontSize: 5,
-      _sm: { fontSize: 6 }
-    }),
-    link: dark.css({ color: "primary", _hover: { color: "secondary" } })
+    }
   }
-}));
+} as const;
+
+const panels = {
+  base: base.components(panelGroups),
+  system: system.components({
+    ...panelGroups,
+    buttons: {
+      primary: {
+        color: "background",
+        bg: "primary",
+        fontFamily: "body",
+        fontWeight: "heading"
+      },
+      secondary: { variant: "buttons.primary", bg: "secondary" }
+    }
+  }),
+  dark: dark.components(panelGroups)
+};
+
+const themeClasses = { base: baseClass, system: systemClass, dark: darkClass };
 
 function PresetPanel({
   name,
@@ -91,92 +70,125 @@ function PresetPanel({
   themeClass?: string;
   children?: ReactNode;
 }) {
-  const preset = panels[name];
+  const { Box, Heading, Link } = panels[name];
 
   return (
-    <section
+    <Box
+      as="section"
       id={name}
-      className={`${themeClass ?? preset.themeClass} ${preset.root}`}
+      className={themeClass ?? themeClasses[name]}
+      variant="layout.panel"
     >
-      <p className="label">{name}</p>
-      <h1 className={preset.heading}>Make it yours</h1>
-      <h2>A shared vocabulary</h2>
       <p>
-        Write typed styles with <code>theme()</code> and{" "}
-        <code>defineRules()</code>.
+        <small>{name}</small>
+      </p>
+      <Heading as="h1" variant="styles.h1">
+        Make it yours
+      </Heading>
+      <Heading variant="styles.h2">A shared vocabulary</Heading>
+      <p>
+        Keep semantic tokens in the theme and choose component variants in JSX.
       </p>
       <p>
-        <a className={preset.link} href="https://theme-ui.com/theme-spec">
+        <Link href="https://theme-ui.com/theme-spec">
           Explore the theme specification
-        </a>
+        </Link>
       </p>
       {children}
-    </section>
+    </Box>
   );
 }
 
-const spacing = system.css({ p: 2, mx: -1 });
-
-const { heading, nested } = mincho$(() => ({
-  heading: system.rules({
-    base: { fontFamily: "heading", fontWeight: "heading" },
-    variants: {
-      size: {
-        regular: { fontSize: 4 },
-        display: { fontSize: 5, _sm: { fontSize: 6 } }
-      }
-    }
-  }),
-  nested: system.cx(systemClass, panels.system.root)
-}));
-
 function SystemExamples() {
+  const { Box, Heading, Button } = panels.system;
+  const [variant, setVariant] = useState<"primary" | "secondary">("primary");
+
   return (
     <>
-      <div id="spacing" className={spacing}>
+      <Box id="spacing" css={{ p: 2, mx: -1 }}>
         Indexed spacing, including negative margins
-      </div>
-      <div id="recipe" className={heading({ size: "display" })}>
-        A native rules() recipe
-      </div>
-      <aside id="nested" className={nested}>
+      </Box>
+      <Heading as="div" id="recipe" variant="display">
+        A reusable display variant
+      </Heading>
+      <Button
+        id="variant-button"
+        type="button"
+        variant={variant}
+        onClick={() =>
+          setVariant(variant === "primary" ? "secondary" : "primary")
+        }
+      >
+        Switch from {variant}
+      </Button>
+      <Box css={{ mt: 3 }}>
+        <Button
+          id="inline-button"
+          type="button"
+          css={{
+            px: { base: 4, _sm: 5 },
+            bg: { base: "secondary", _hover: "accent" }
+          }}
+        >
+          Local styles
+        </Button>
+      </Box>
+      <Box
+        as="aside"
+        id="nested"
+        className={systemClass}
+        variant="layout.panel"
+      >
         <p>This nested theme stays in the default mode.</p>
-      </aside>
+      </Box>
     </>
   );
 }
 
-const { customClass, customButton } = mincho$(() => {
-  const { css, rules, cx } = defineRules(themeSpec(customVars, { sm: "48em" }));
-
-  return {
-    customClass: cx(
-      customThemeClass,
-      css({ color: "text", bg: "background", fontFamily: "body" })
-    ),
-    customButton: rules({
-      base: { color: "background", bg: "primary", px: 2, py: 2, _sm: { px: 4 } }
-    })
-  };
-});
+const { Box: CustomBox, Button: CustomButton } = createComponents(
+  defineRules(themeSpec(customVars, { sm: "48em" })),
+  {
+    ...panelGroups,
+    buttons: {
+      primary: {
+        px: { base: 2, _sm: 4 },
+        py: 2,
+        color: "background",
+        bg: "primary"
+      },
+      secondary: { variant: "buttons.primary", bg: "secondary" }
+    }
+  }
+);
 
 function CustomPreset() {
   return (
-    <section id="custom" className={customClass}>
-      <p className="label">Native Mincho styles</p>
+    <CustomBox
+      as="section"
+      id="custom"
+      className={customThemeClass}
+      variant="layout.panel"
+    >
       <p>
-        Apply preset tokens with theme(), then write responsive styles and
-        variants with defineRules().
+        <small>A custom theme</small>
       </p>
-      <button id="custom-button" type="button" className={customButton()}>
+      <p>
+        Change the primary token once. The same button variant uses it in both
+        color modes.
+      </p>
+      <CustomButton id="custom-button" type="button" variant="primary">
         Custom primary
-      </button>
-      <div id="custom-dark" className={customDarkClass}>
-        <button type="button" className={customButton()}>
+      </CustomButton>
+      <CustomBox
+        id="custom-dark"
+        className={customDarkClass}
+        variant="layout.panel"
+      >
+        <CustomButton type="button" variant="primary">
           Inherited primary in dark mode
-        </button>
-      </div>
-    </section>
+        </CustomButton>
+      </CustomBox>
+    </CustomBox>
   );
 }
 

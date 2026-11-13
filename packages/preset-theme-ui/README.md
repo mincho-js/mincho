@@ -4,85 +4,92 @@ The preset package supplies Theme UI v0.17.4 token values, compiled themes, and 
 
 ## Install and configure
 
-Configure the Mincho and Vanilla Extract plugins to compile application styles. Import the preset stylesheet once to load the theme variables.
+In a React app, put the Mincho plugin before the React plugin to compile co-located styles. Keep the Vanilla Extract plugin for shared `.css.ts` themes. Import the preset stylesheet once to load the theme variables.
 
 ```sh
-npm install @mincho-js/css @mincho-js/theme-ui @mincho-js/preset-theme-ui @vanilla-extract/css
-npm install -D @mincho-js/vite @vanilla-extract/vite-plugin
+npm install @mincho-js/css @mincho-js/react @mincho-js/theme-ui @mincho-js/preset-theme-ui @vanilla-extract/css
+npm install -D @mincho-js/vite @vanilla-extract/vite-plugin @vitejs/plugin-react
 ```
 
 ```ts
 // vite.config.ts
 import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
 import { minchoVitePlugin } from "@mincho-js/vite";
 import { extractCalls } from "@mincho-js/preset-theme-ui/config";
 import { vanillaExtractPlugin } from "@vanilla-extract/vite-plugin";
 
 export default defineConfig({
-  plugins: [minchoVitePlugin({ extractCalls }), vanillaExtractPlugin()],
+  plugins: [
+    minchoVitePlugin({ extractCalls }),
+    vanillaExtractPlugin(),
+    react(),
+  ],
 });
-```
-
-`/config` contains only extraction metadata, so it can be loaded in a Node build
-configuration without loading theme CSS or authoring APIs. It registers the
-`css`, `rules`, and `cx` methods of all three exported definitions for
-co-location. In React apps, put the Mincho plugin before the React plugin.
-
-```tsx
-// Card.tsx
-import { system, systemClass } from "@mincho-js/preset-theme-ui";
-import "@mincho-js/preset-theme-ui/styles.css";
-
-const card = system.css({ color: "text", bg: "background", p: 3 });
-
-export function Card() {
-  return (
-    <section className={`${systemClass} ${card}`}>Theme UI tokens</section>
-  );
-}
 ```
 
 ## Use the shared definition
 
-`base`, `system`, and `dark` are native `defineRules()` results. Destructure `css`, `rules`, `cx`, or `preset` from the definition you choose. Author component styles in your own `.css.ts` file.
+`base`, `system`, and `dark` are native `defineRules()` results. The preset's `extractCalls` registers their `css`, `rules`, and `cx` methods, so you can call them at module scope in the component's `.tsx` file. The plugin extracts these calls, leaving class strings and recipe selectors for the component. `/config` is plain data that can be imported in Node without loading theme CSS or authoring APIs.
 
-```ts
-// card.css.ts
-import { system, systemClass } from "@mincho-js/preset-theme-ui";
+For React components, pass the chosen definition to `defineRules()` from `@mincho-js/react`. This preserves its native `css`, `rules`, and `cx` methods and adds intrinsic `styled` factories. Define the components in a `mincho$()` block so their styles compile at build time; select variants through props when rendering. The same definitions can also live in a separate `.css.ts` file.
 
-const { css, rules, cx } = system;
-
-export const card = cx(
-  systemClass,
-  css({
-    color: "text",
-    bg: "background",
-    p: 3,
-    _md: { p: 4 },
-  }),
-);
-export const button = rules({
-  base: { color: "background", bg: "primary", px: 2, py: 2 },
-  variants: { size: { large: { px: 4, py: 3 } } },
-});
-```
+[Theme UI's variant groups](https://theme-ui.com/theme-spec) organize reusable choices under names such as `text.heading` and `buttons.primary`. In this example, local `text` and `buttons` groups become Mincho recipe variants. They are application components, not extra exports from the preset. This uses Mincho's native `styled` API without implementing Theme UI's `sx` prop or resolving `variant` paths.
 
 ```tsx
-import { card, button } from "./card.css";
+// Card.tsx
+import { mincho$ } from "@mincho-js/css";
+import { defineRules as defineReactRules } from "@mincho-js/react";
+import { system, systemClass } from "@mincho-js/preset-theme-ui";
 import "@mincho-js/preset-theme-ui/styles.css";
+
+const { Box, Heading, Button } = mincho$(() => {
+  const { styled } = defineReactRules(system);
+  const text = {
+    heading: {
+      fontFamily: "heading",
+      fontWeight: "heading",
+      lineHeight: "heading",
+    },
+    display: { fontSize: { base: 5, _sm: 6 } },
+  } as const;
+  const buttons = {
+    primary: { color: "background", bg: "primary" },
+    secondary: { color: "background", bg: "secondary" },
+  } as const;
+
+  return {
+    Box: styled.section({
+      base: { color: "text", bg: "background", p: { base: 3, _md: 4 } },
+    }),
+    Heading: styled.h2({
+      base: text.heading,
+      variants: {
+        variant: { heading: { fontSize: 4 }, display: text.display },
+      },
+      defaultVariants: { variant: "heading" },
+    }),
+    Button: styled.button({
+      base: { px: 3, py: 2 },
+      variants: { variant: buttons },
+      defaultVariants: { variant: "primary" },
+    }),
+  };
+});
 
 export function Card() {
   return (
-    <section className={card}>
-      <button className={button({ size: "large" })}>Create project</button>
-    </section>
+    <Box className={systemClass}>
+      <Heading variant="display">A shared vocabulary</Heading>
+      <Button variant="primary">Create project</Button>
+    </Box>
   );
 }
 ```
 
 ## Package responsibilities
 
-`styles.css` contains only the theme variables and system color modes. It does not generate document selectors, containers, headings, or application recipes. The consumer compiles those styles through the exported definition. Only the resulting class strings and recipe selectors are needed by React at runtime.
+`styles.css` contains only the theme variables and system color modes. It does not generate document selectors, containers, headings, or application recipes. The consumer compiles those styles through the exported definition. React components use the resulting classes and recipe selectors.
 
 The root also exports `baseClass`, `systemClass`, `darkClass`, their `*Vars` and `*Contract` values, and `systemModeClasses`. JavaScript imports do not load CSS. Reading compiled theme data in Node/SSR needs no build plugin; calling `css()` or `rules()` belongs in a style build.
 
@@ -134,13 +141,15 @@ The 16 Theme Specification scales map to CSS properties. `p: 2` selects `space[2
 
 `p` expands through `px` and `py` to the four physical padding properties. Margin shortcuts follow the same pattern. For example, `cx(css({ p: 2 }), css({ px: 3 }))` replaces left and right padding while keeping top and bottom padding at `space[2]`. Styles in separate conditions retain their own values.
 
-Default conditions are `_sm: 40em`, `_md: 52em`, and `_lg: 64em`. Custom breakpoints replace them. Native `rules()` and `rules.extends()` define the consumer's component variants.
+Default conditions are `_sm: 40em`, `_md: 52em`, and `_lg: 64em`. Custom breakpoints replace them. Write responsive values as Mincho condition objects, for example `fontSize: { base: 3, _sm: 4 }`. Native `rules()`, `rules.extends()`, and the React adapter's `styled` factories define the consumer's component variants.
 
-`systemModeClasses` has `default`, `dark`, `deep`, and `swiss` class names. Replace the active class to switch modes. For token values, `/presets` exports `systemTokens` for the default mode and `systemModes.dark`, `systemModes.deep`, and `systemModes.swiss` for named modes. Use `theme.extends(systemContract, values)` for a mode that shares the compiled system variables. OS preference and storage belong to the application.
+`systemModeClasses` has `default`, `dark`, `deep`, and `swiss` class names. Replace the active class to switch modes. Components keep semantic values such as `color: "text"` and `bg: "primary"`; the class changes the values behind those tokens, following [Theme UI's color-mode model](https://theme-ui.com/color-modes).
+
+For token values, `/presets` exports `systemTokens` for the default mode and `systemModes.dark`, `systemModes.deep`, and `systemModes.swiss` for named modes. Use `theme.extends(systemContract, values)` for a mode that shares the compiled system variables. OS preference and storage belong to the application.
 
 ## Normalize original tokens
 
-Shipped tokens are already normalized. For original Theme UI data, `normalizeTheme()` converts length units and completes color modes without generating CSS. It returns `{ tokens, modes }`. It does not interpret `sx`, source `styles`, or `variant` references; write those component choices using native `css()` and `rules()`.
+Shipped tokens are already normalized. For original Theme UI data, `normalizeTheme()` converts length units and completes color modes without generating CSS. It returns `{ tokens, modes }`. It does not interpret `sx`, source `styles`, or `variant` references; write those component choices using native `css()`, `rules()`, or the React adapter's `styled` factories.
 
 Public types use Mincho's `@mincho-js/csstype`; upstream types are development-only compatibility references. Theme UI and Emotion styling packages are not consumer dependencies. Validation uses TypeScript 5.9.3. Try the React example with `yarn workspace @examples/theme-ui dev`.
 

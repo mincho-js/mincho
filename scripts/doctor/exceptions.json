@@ -1608,5 +1608,65 @@
     "count": 1,
     "reason": "This esbuild onLoad fixture returns the built-in JavaScript loader enum. It is not a Webpack loader module and must not be resolved as a package.",
     "expires": "2026-12-31"
+  },
+  {
+    "id": "contract-theme-ui-react-types-preset",
+    "file": "scripts/package-contract/fixture/modules/theme-ui-react-types.tsx",
+    "type": "error",
+    "message": "Undeclared dependency on @mincho-js/preset-theme-ui-react",
+    "source": "import {",
+    "count": 1,
+    "reason": "This fixture runs after copying into isolated npm and strict PnP consumer projects. scripts/package-contract/index.ts declares and installs the packed Theme UI React preset, native preset, and React there; the repository root does not execute this fixture.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "contract-theme-ui-react-types-config",
+    "file": "scripts/package-contract/fixture/modules/theme-ui-react-types.tsx",
+    "type": "error",
+    "message": "Undeclared dependency on @mincho-js/preset-theme-ui-react",
+    "source": "import { extractCalls } from \"@mincho-js/preset-theme-ui-react/config\";",
+    "count": 1,
+    "reason": "This fixture runs after copying into isolated npm and strict PnP consumer projects. scripts/package-contract/index.ts declares and installs the packed Theme UI React preset, native preset, and React there; the repository root does not execute this fixture.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "contract-theme-ui-react-types-react",
+    "file": "scripts/package-contract/fixture/modules/theme-ui-react-types.tsx",
+    "type": "error",
+    "message": "Undeclared dependency on react",
+    "source": "import type { CSSProperties } from \"react\";",
+    "count": 1,
+    "reason": "This fixture runs after copying into isolated npm and strict PnP consumer projects. scripts/package-contract/index.ts declares and installs the packed Theme UI React preset, native preset, and React there; the repository root does not execute this fixture.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "contract-theme-ui-react-entry-preset",
+    "file": "scripts/package-contract/fixture/theme-ui-react/entry.tsx",
+    "type": "error",
+    "message": "Undeclared dependency on @mincho-js/preset-theme-ui-react",
+    "source": "import {",
+    "count": 1,
+    "reason": "This fixture runs after copying into isolated npm and strict PnP consumer projects. scripts/package-contract/index.ts declares and installs the packed Theme UI React preset, native preset, and React there; the repository root does not execute this fixture.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "contract-theme-ui-react-entry-themeclass",
+    "file": "scripts/package-contract/fixture/theme-ui-react/entry.tsx",
+    "type": "error",
+    "message": "Undeclared dependency on @mincho-js/preset-theme-ui",
+    "source": "import { systemClass } from \"@mincho-js/preset-theme-ui\";",
+    "count": 1,
+    "reason": "This fixture runs after copying into isolated npm and strict PnP consumer projects. scripts/package-contract/index.ts declares and installs the packed Theme UI React preset, native preset, and React there; the repository root does not execute this fixture.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "contract-theme-ui-react-entry-vars",
+    "file": "scripts/package-contract/fixture/theme-ui-react/entry.tsx",
+    "type": "error",
+    "message": "Undeclared dependency on @mincho-js/preset-theme-ui",
+    "source": "export { systemVars as vars } from \"@mincho-js/preset-theme-ui\";",
+    "count": 1,
+    "reason": "This fixture runs after copying into isolated npm and strict PnP consumer projects. scripts/package-contract/index.ts declares and installs the packed Theme UI React preset, native preset, and React there; the repository root does not execute this fixture.",
+    "expires": "2026-12-31"
   }
 ]

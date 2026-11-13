@@ -12,7 +12,7 @@ import react from "@vitejs/plugin-react";
 import { chromium } from "playwright";
 import type { Browser, Page } from "playwright";
 import { minchoVitePlugin } from "@mincho-js/vite";
-import { extractCalls } from "@mincho-js/preset-theme-ui/config";
+import { extractCalls } from "@mincho-js/preset-theme-ui-react/config";
 import { vanillaExtractPlugin } from "@vanilla-extract/vite-plugin";
 import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -34,9 +34,12 @@ describe
       const root = process.cwd();
       directory = await mkdtemp(join(tmpdir(), "mincho-theme-ui-browser-"));
       const plugins = [
-        minchoVitePlugin({ extractCalls }),
+        minchoVitePlugin({
+          jsxCssProp: { importSource: "@mincho-js/preset-theme-ui-react" },
+          extractCalls
+        }),
         vanillaExtractPlugin(),
-        react()
+        react({ jsxImportSource: "@mincho-js/preset-theme-ui-react" })
       ];
 
       if (mode === "production") {
@@ -58,7 +61,7 @@ describe
         ).join("\n");
 
         expect(code).not.toMatch(
-          /createPresetStyles|normalizeTheme|themeSpec|registerClassName|appendCss|@theme-ui|@emotion/
+          /createPresetStyles|normalizeTheme|themeSpec|createComponents|defineVariants|registerClassName|appendCss|@theme-ui|@emotion/
         );
 
         const server = await preview({
@@ -134,6 +137,8 @@ describe
       expect(await css("#base", "background-color")).toBe("rgb(255, 255, 255)");
       expect(await css("#dark", "background-color")).toBe("rgb(6, 6, 6)");
       expect(await css("#system h1", "font-size")).toBe("48px");
+      expect(await css("#system h1", "font-weight")).toBe("900");
+      expect(await css("#system h1", "line-height")).toBe("60px");
       expect(await css("#base h1", "font-size")).toBe("32px");
       expect(await css("#recipe", "font-size")).toBe("48px");
       expect(await css("#spacing", "padding-left")).toBe("8px");
@@ -197,6 +202,65 @@ describe
       expect(await css("#custom-button", "padding-left")).toBe("8px");
     });
 
+    it("selects semantic component variants without forwarding variant props", async () => {
+      const button = page.locator("#variant-button");
+
+      expect(await css("#variant-button", "background-color")).toBe(
+        "rgb(51, 51, 238)"
+      );
+      await button.click();
+      expect(await css("#variant-button", "background-color")).toBe(
+        "rgb(17, 17, 153)"
+      );
+
+      await page.selectOption("#mode", "dark");
+      expect(await css("#variant-button", "background-color")).toBe(
+        "rgb(238, 0, 255)"
+      );
+      expect(await css("#variant-button", "color")).toBe("rgb(6, 6, 6)");
+      expect(await button.getAttribute("variant")).toBeNull();
+      expect(
+        await page.locator("#system h1").getAttribute("variant")
+      ).toBeNull();
+    });
+
+    it("lets inline CSS override component defaults and variants across conditions", async () => {
+      const button = page.locator("#inline-button");
+
+      expect(await css("#variant-button", "padding-left")).toBe("16px");
+      expect(await css("#variant-button", "background-color")).toBe(
+        "rgb(51, 51, 238)"
+      );
+      expect(await css("#inline-button", "padding-left")).toBe("64px");
+      expect(await css("#inline-button", "padding-right")).toBe("64px");
+      expect(await css("#inline-button", "background-color")).toBe(
+        "rgb(17, 17, 153)"
+      );
+      expect(await css("#inline-button", "color")).toBe("rgb(255, 255, 255)");
+
+      await page.setViewportSize({ width: 375, height: 812 });
+      expect(await css("#inline-button", "padding-left")).toBe("32px");
+      expect(await css("#inline-button", "padding-right")).toBe("32px");
+
+      await button.hover();
+      expect(await css("#inline-button", "background-color")).toBe(
+        "rgb(102, 0, 153)"
+      );
+
+      await page.selectOption("#mode", "dark");
+      await button.hover();
+      expect(await css("#inline-button", "background-color")).toBe(
+        "rgb(204, 0, 255)"
+      );
+      await page.mouse.move(0, 0);
+      expect(await css("#inline-button", "background-color")).toBe(
+        "rgb(238, 0, 255)"
+      );
+      expect(await css("#inline-button", "color")).toBe("rgb(6, 6, 6)");
+      expect(await button.getAttribute("css")).toBeNull();
+      expect(await button.getAttribute("variant")).toBeNull();
+    });
+
     it("follows OS changes until the application selects an explicit mode", async () => {
       await page.emulateMedia({ colorScheme: "dark" });
       await expect
@@ -209,7 +273,7 @@ describe
       );
     });
 
-    it("compiles a consumer's pseudo states through the published preset", async () => {
+    it("compiles the preset link variant's pseudo states", async () => {
       expect(await css("#system a", "color")).toBe("rgb(51, 51, 238)");
       await page.locator("#system a").hover();
       expect(await css("#system a", "color")).toBe("rgb(17, 17, 153)");

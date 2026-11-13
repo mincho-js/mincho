@@ -14,6 +14,7 @@ const seeds = [
   "@mincho-js/vite",
   "@mincho-js/react",
   "@mincho-js/preset-theme-ui",
+  "@mincho-js/preset-theme-ui-react",
   "@mincho-js/esbuild"
 ] as const;
 

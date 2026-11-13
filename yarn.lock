@@ -1612,6 +1612,8 @@ __metadata:
   dependencies:
     "@mincho-js/css": "workspace:^"
     "@mincho-js/preset-theme-ui": "workspace:^"
+    "@mincho-js/preset-theme-ui-react": "workspace:^"
+    "@mincho-js/react": "workspace:^"
     "@mincho-js/theme-ui": "workspace:^"
     "@mincho-js/vite": "workspace:^"
     "@types/node": "catalog:"
@@ -2560,6 +2562,34 @@ __metadata:
     vitest: "catalog:"
   peerDependencies:
     "@vanilla-extract/css": "*"
+  languageName: unknown
+  linkType: soft
+
+"@mincho-js/preset-theme-ui-react@workspace:^, @mincho-js/preset-theme-ui-react@workspace:packages/preset-theme-ui-react":
+  version: 0.0.0-use.local
+  resolution: "@mincho-js/preset-theme-ui-react@workspace:packages/preset-theme-ui-react"
+  dependencies:
+    "@mincho-js/css": "workspace:^"
+    "@mincho-js/debug-log": "workspace:^"
+    "@mincho-js/preset-theme-ui": "workspace:^"
+    "@mincho-js/react": "workspace:^"
+    "@types/node": "catalog:"
+    "@types/react": "catalog:"
+    "@types/react-dom": "catalog:"
+    "@vanilla-extract/css": "catalog:"
+    eslint-config-custom: "workspace:^"
+    prettier-config-custom: "workspace:^"
+    react: "catalog:"
+    react-dom: "catalog:"
+    tsconfig-custom: "workspace:^"
+    vite: "catalog:"
+    vite-config-custom: "workspace:^"
+    vitest: "catalog:"
+  peerDependencies:
+    "@mincho-js/react": "workspace:^"
+    "@vanilla-extract/css": "*"
+    react: ">=16.8.0"
+    react-dom: ">=16.8.0"
   languageName: unknown
   linkType: soft
 

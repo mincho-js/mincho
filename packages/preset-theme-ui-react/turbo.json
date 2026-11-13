@@ -1,0 +1,7 @@
+{
+  "extends": ["//"],
+  "tasks": {
+    "build": { "inputs": ["$TURBO_DEFAULT$"] },
+    "test": { "inputs": ["$TURBO_DEFAULT$"] }
+  }
+}

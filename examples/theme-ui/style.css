@@ -34,7 +34,7 @@ main > section {
   min-width: 0;
   overflow-wrap: anywhere;
 }
-main .label {
+main small {
   text-transform: uppercase;
   letter-spacing: 0.1em;
   font-size: 12px;
