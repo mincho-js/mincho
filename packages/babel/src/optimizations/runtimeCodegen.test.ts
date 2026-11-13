@@ -56,6 +56,224 @@ function analyze(source: string, modules: Record<string, string> = {}) {
 }
 
 describe("runtime code generation", () => {
+  it.each([
+    ["@mincho-js/css", "css"],
+    ["@vanilla-extract/css", "style"]
+  ])(
+    "removes extracted CommonJS authoring bindings from %s",
+    (source, name) => {
+      const { code, result } = babelTransform(`
+      const { ${name}: makeStyle } = require(${JSON.stringify(source)});
+      exports.className = makeStyle({ color: "tomato" });
+    `);
+
+      expect(result[1]).toContain(source);
+      expect(code).not.toContain(source);
+      expect(code).not.toContain("makeStyle");
+    }
+  );
+
+  it.each([
+    'const api = require("@vanilla-extract/css"); exports.className = api.style({ color: "tomato" });',
+    'const makeStyle = require("@vanilla-extract/css").style; exports.className = makeStyle({ color: "tomato" });',
+    'const api = require("@vanilla-extract/css"); const alias = api; const makeStyle = alias.style; exports.className = makeStyle({ color: "tomato" });',
+    'const api = require("@vanilla-extract/css"), alias = api; const { style: makeStyle } = alias; exports.className = makeStyle({ color: "tomato" });'
+  ])(
+    "removes extracted CommonJS namespace and member bindings: %s",
+    (source) => {
+      const { code, result } = babelTransform(source);
+
+      expect(result[1]).toContain("@vanilla-extract/css");
+      expect(code).not.toContain("@vanilla-extract/css");
+    }
+  );
+
+  it.each([
+    'const api = require("@mincho-js/css"); const style = api.css({ color: "tomato" }); exports.render = () => api.cx(style);',
+    'const api = require("@mincho-js/css"); exports.style = api.css({ color: "tomato" }); observe(); require("@mincho-js/css");'
+  ])(
+    "retains live CommonJS namespaces and their explicit effects: %s",
+    (source) => {
+      const { code } = babelTransform(source);
+
+      expect(code).toContain('const api = require("@mincho-js/css")');
+      if (source.includes("observe()"))
+        expect(code.indexOf('require("@mincho-js/css")')).toBeLessThan(
+          code.indexOf("observe()")
+        );
+      else expect(code).toContain("api.cx(style)");
+    }
+  );
+
+  it("keeps CommonJS runtime imports and explicit effects when pruning authoring bindings", () => {
+    const { code } = babelTransform(`
+      require("@mincho-js/css");
+      const { css, cx } = require("@mincho-js/css");
+      const style = css({ color: "tomato" });
+      exports.render = () => cx(style);
+    `);
+
+    expect(code).toContain('require("@mincho-js/css");');
+    expect(code).toMatch(/\{\s*cx\s*\}\s*=\s*require/);
+    expect(code).toContain("cx(style)");
+    expect(code).not.toMatch(/\{\s*css\b/);
+  });
+
+  it("does not change rest exclusions or unused imports without extraction ownership", () => {
+    const { code } = babelTransform(`
+      const { css, ...runtime } = require("@mincho-js/css");
+      const { css: untouched } = require("@mincho-js/css");
+      exports.style = css({ color: "tomato" });
+      exports.runtime = runtime;
+    `);
+
+    expect(code).toContain("...runtime");
+    expect(code).toMatch(/\{\s*css,/);
+    expect(code).toContain("css: untouched");
+  });
+
+  it("preserves the first CommonJS initialization when a later require requests effects", () => {
+    const { code } = babelTransform(`
+      const { css } = require("@mincho-js/css");
+      exports.style = css({ color: "tomato" });
+      observe();
+      require("@mincho-js/css");
+    `);
+
+    expect(code.indexOf('require("@mincho-js/css")')).toBeLessThan(
+      code.indexOf("observe()")
+    );
+    expect(code).not.toMatch(/\{\s*css\s*\}/);
+  });
+
+  it.each([
+    'const { css } = require("@mincho-js/css");',
+    'const api = require("@mincho-js/css"); const alias = api; const css = alias.css;',
+    'const css = require("@mincho-js/css").css;',
+    'const api = require("@mincho-js/css"), alias = api; const { css } = alias;'
+  ])(
+    "preserves initial require before a later live import: %s",
+    (initialization) => {
+      const { code, result } = babelTransform(
+        `
+      ${initialization}
+      exports.style = css({ color: "tomato" });
+      observe();
+      const { cx } = require("@mincho-js/css");
+      exports.cx = cx;
+    `,
+        {},
+        { sourceType: "script" }
+      );
+      const events: string[] = [];
+      let initialized = false;
+      new Function("require", "exports", "observe", code)(
+        (source: string) => {
+          if (source === result[0]) return { _v0: "compiled" };
+          if (source !== "@mincho-js/css") throw new Error(source);
+          if (!initialized) events.push("initialize");
+          initialized = true;
+          return { cx: () => "runtime" };
+        },
+        {},
+        () => events.push("observe")
+      );
+
+      expect(events).toEqual(["initialize", "observe"]);
+      expect(code).not.toContain("alias");
+    }
+  );
+
+  it("retains actual require initialization without dead namespace aliases", () => {
+    const { code } = babelTransform(`
+      const api = require("@mincho-js/css");
+      const alias = api;
+      const { css } = alias;
+      exports.style = css({ color: "tomato" });
+      observe();
+      require("@mincho-js/css");
+    `);
+
+    expect(code.indexOf('require("@mincho-js/css")')).toBeLessThan(
+      code.indexOf("observe()")
+    );
+    expect(code).toContain('const api = require("@mincho-js/css")');
+    expect(code).not.toContain("alias");
+    expect(code).not.toMatch(/\{\s*css\s*\}/);
+  });
+
+  it.each([
+    'const load = require; observe(); const { cx } = load("@mincho-js/css"); exports.cx = cx;',
+    "observe(); const { cx } = require(packageName); exports.cx = cx;"
+  ])(
+    "preserves initialization with an opaque runtime loader: %s",
+    (runtime) => {
+      const { code, result } = babelTransform(
+        `const api = require("@mincho-js/css");
+       const alias = api;
+       const css = alias.css;
+       exports.style = css({ color: "tomato" });
+       ${runtime}`,
+        {},
+        { sourceType: "script" }
+      );
+      const events: string[] = [];
+      let initialized = false;
+      new Function("require", "exports", "observe", "packageName", code)(
+        (source: string) => {
+          if (source === result[0]) return { _v0: "compiled" };
+          if (source !== "@mincho-js/css") throw new Error(source);
+          if (!initialized) events.push("initialize");
+          initialized = true;
+          return { cx: () => "runtime" };
+        },
+        {},
+        () => events.push("observe"),
+        "@mincho-js/css"
+      );
+
+      expect(events).toEqual(["initialize", "observe"]);
+      expect(code).not.toContain("alias");
+    }
+  );
+
+  it.each([
+    'const load = require; return load("@mincho-js/css");',
+    "return require(packageName);"
+  ])(
+    "ignores shadowed runtime loaders when pruning authoring imports: %s",
+    (runtime) => {
+      const { code } = babelTransform(`
+      const api = require("@mincho-js/css");
+      const alias = api;
+      const css = alias.css;
+      exports.style = css({ color: "tomato" });
+      exports.load = function (require, packageName) { ${runtime} };
+    `);
+
+      expect(code).not.toContain('const api = require("@mincho-js/css")');
+      expect(code).not.toContain("alias");
+      expect(code).toContain(
+        runtime.includes("const load")
+          ? "const load = require"
+          : "return require(packageName)"
+      );
+    }
+  );
+
+  it.each([
+    'const { style: makeStyle } = api; exports.className = makeStyle({ color: "tomato" });',
+    'exports.className = api.style({ color: "tomato" });'
+  ])("prunes authoring bindings after namespace lowering: %s", (use) => {
+    const { code, result } = babelTransform(
+      'import * as api from "@vanilla-extract/css";' + use
+    );
+
+    expect(result[1]).toContain("@vanilla-extract/css");
+    expect(code).not.toContain("@vanilla-extract/css");
+    expect(code).not.toContain("makeStyle");
+  });
+
   it("prunes only unobservable literal extension metadata and preserves exported recipes", () => {
     const factory =
       'import {createCompiledRuntimeFn as make} from "@mincho-js/css/rules/createRuntimeFn";';

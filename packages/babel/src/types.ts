@@ -33,7 +33,7 @@ export interface PluginOptions {
 
   /** @internal Prepared pure helper results; values are fresh literal ASTs. */
   preparedPureFunctions?: import("./optimizations/pureFunctions.js").PreparedPureFunctions;
-  jsxCssProp?: boolean;
+  jsxCssProp?: import("./jsxCssProp/options.js").JsxCssPropOptions;
   jsxCssPropTransformed?: boolean;
   bundleSize?: import("./bundleSize.js").BundleSizeOptions;
   optimize?: {
@@ -102,6 +102,7 @@ export interface ProgramScope extends Scope {
     nodes: Array<t.Node>;
     cssFile: string;
     extractCalls?: PreparedExtractCalls;
+    jsxCssPropImportSource?: string;
   };
 }
 

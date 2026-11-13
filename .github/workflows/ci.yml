@@ -116,7 +116,7 @@ jobs:
           key: build-and-test
 
       - name: Test
-        run: yarn test
+        run: yarn test --concurrency=2
 
       - name: Install layout test browser
         run: yarn workspace @examples/layout-playground playwright install --with-deps chromium

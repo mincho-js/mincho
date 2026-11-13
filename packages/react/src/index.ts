@@ -23,10 +23,9 @@ import { tags, type SupportedElements } from "./tags.js";
 export { $$styled } from "./runtime.js";
 
 /**
- * Selects CSS types for the scoped JSX namespace.
- * Augment this interface with `css: typeof css`. This foundation change only
- * selects types; it does not activate a different CSS helper in the build.
- * Host support for `jsxCssProp: { importSource }` is planned in #479.
+ * Selects the CSS function used by the scoped JSX namespace.
+ * Augment this interface with `css: typeof css` and configure the same module
+ * with `jsxCssProp: { importSource }` in the Mincho build plugin.
  *
  * Expose the chosen single-argument signature for overloaded helpers, for
  * example `css: (rule: Rule) => string`. TypeScript infers from the last

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { transformSync as transformJsx } from "esbuild";
 import { supportedJsxCssPropTags } from "./jsxCssPropTags.js";
 import {
   babelTransform,
@@ -12,6 +13,56 @@ import {
 } from "./testUtils/plugin.js";
 
 describe("minchoBabelPlugin", () => {
+  it("normalizes quoted className and css when merging attributes", () => {
+    const props = runJsxCssPropRuntime(
+      `function App() {
+        return <div className="base
+  active" css="style-a
+  other" />;
+      }`,
+      "return App();"
+    ) as Record<string, unknown>;
+
+    expect(props.className).toBe("base active style-a other");
+  });
+
+  it.each(['"a\\b"', '{"a\\\\b"}'])(
+    "preserves escaping of a standalone css string: %s",
+    (attribute) => {
+      const { code } = babelTransform(
+        `function App() { return <div css=${attribute} />; }`,
+        { jsxCssProp: true }
+      );
+      const compiled = transformJsx(code, {
+        loader: "tsx",
+        jsxFactory: "jsx"
+      }).code;
+      const props = new Function("jsx", `${compiled}\nreturn App();`)(
+        (_tag: unknown, props: unknown) => props
+      );
+
+      expect(props.className).toBe("a\\b");
+    }
+  );
+
+  it.each(["", "{...{ id: 'spread' }}"])(
+    "normalizes quoted JSX attributes when staging props with %s",
+    (spread) => {
+      const props = runJsxCssPropRuntime(
+        `const styleA = "style-a";
+        function App() {
+          return <div css={styleA} ${spread} className="base" title="first
+  second &amp; third" data-path="a\\b" />;
+        }`,
+        "return App();"
+      ) as Record<string, unknown>;
+
+      expect(props.className).toBe(spread ? "style-a base" : "base style-a");
+      expect(props.title).toBe("first second & third");
+      expect(props["data-path"]).toBe("a\\b");
+    }
+  );
+
   it("css before a spread lowers explicit css before post-spread className", () => {
     const source = `
         const styleA = "style-a";
@@ -39,7 +90,10 @@ describe("minchoBabelPlugin", () => {
     expect(code).not.toContain("(() =>");
     expect(code).toContain("className: _minchoClassName");
     expect(code).toContain("..._minchoRest");
-    expect(code).toContain("className={_cx(styleA, _minchoClassName)}");
+    expect(code).toContain("const _minchoCssClassName = _cx(styleA)");
+    expect(code).toContain(
+      "className={_cx(_minchoCssClassName, _minchoClassName)}"
+    );
     expect(output).not.toContain("className={_cx(_minchoClassName, styleA)}");
     expect(observed).toMatchObject({
       className: "style-a base",
@@ -324,6 +378,21 @@ describe("minchoBabelPlugin", () => {
       id: "root"
     });
     expect("css" in observed.props).toBe(false);
+  });
+
+  it("reads a CSS identifier before a later spread can observe its TDZ", () => {
+    const observed = runJsxCssPropRuntime(
+      `
+      const events = [];
+      const props = { get title() { events.push("spread"); return "title"; } };
+      try { App(); } catch (error) { events.push(error.name); }
+      const styleA = "style-a";
+      function App() { return <div css={styleA} {...props} />; }
+    `,
+      "return events;"
+    );
+
+    expect(observed).toEqual(["ReferenceError"]);
   });
 
   it("reads post-spread className getter once through aggregate props", () => {
@@ -845,6 +914,26 @@ describe("minchoBabelPlugin", () => {
     });
   }
 
+  it.each([
+    "function App(active) { return active && <div css={style()} {...post()} />; }",
+    "const App = false ? () => <div css={style()} {...post()} /> : () => null;"
+  ])(
+    "does not transfer unreachable-branch evidence across unknown conditions or functions: %s",
+    (body) => {
+      expect(() =>
+        babelTransform(
+          `
+      const events = [];
+      const style = () => { events.push("style"); return "style-a"; };
+      const post = () => ({className: "post"});
+      ${body}
+    `,
+          { jsxCssProp: true }
+        )
+      ).toThrow(/Cannot statically evaluate css prop value/);
+    }
+  );
+
   it("preserves lexical this and arguments in nested moved expressions", () => {
     const source = `
         function App() {
@@ -1015,7 +1104,10 @@ describe("minchoBabelPlugin", () => {
     expect(code).not.toContain(" css=");
     expect(code).toContain("css: _minchoCssProp");
     expect(code).toContain("..._minchoRest");
-    expect(code).toContain("className={_cx(styleA, _minchoClassName)}");
+    expect(code).toContain("const _minchoCssClassName = _cx(styleA)");
+    expect(code).toContain(
+      "className={_cx(_minchoCssClassName, _minchoClassName)}"
+    );
     expect(code).not.toContain("(() =>");
   });
 

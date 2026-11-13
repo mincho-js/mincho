@@ -42,6 +42,21 @@ for (const format of ["esm", "cjs"]) {
       })
     ).outputFiles[0].text;
 
+  const authoringImport = await bundle(`
+    import "@mincho-js/css";
+    export const alive = "retained";
+  `);
+
+  assert.doesNotMatch(
+    authoringImport,
+    /compiler-style-resources|compiler-token-references|theme\.extends\(\)|defineRules serialized css/,
+    "Unused authoring API initialization retained the compiler"
+  );
+  assert.equal(
+    (await executeBundle(authoringImport, format)).alive,
+    "retained"
+  );
+
   const unused = await bundle(`${imports}
     const recipe = /*#__PURE__*/ createRuntimeFn(${recipe});
     const cx = /*#__PURE__*/ createDefineRulesCxRuntime({ classWrites: [] });

@@ -363,6 +363,10 @@ function createObserver(
   let resolvedOptions = options;
   const injectedImports = new Set<string>();
   const nativeResolution = Symbol("mincho-native-resolution");
+  const precedingLoads: {
+    namespace?: string;
+    callback: Parameters<esbuild.PluginBuild["onLoad"]>[1];
+  }[] = [];
 
   const load = async (
     args: esbuild.OnLoadArgs,
@@ -631,9 +635,18 @@ function createObserver(
         ...build,
 
         onLoad(filter, callback) {
-          build.onLoad(filter, async (args) =>
-            load(args, await callback(args), replayable)
-          );
+          const hostLoad: Parameters<esbuild.PluginBuild["onLoad"]>[1] = async (
+            args
+          ) => load(args, await callback(args), replayable);
+          (transaction.loaders ??= new Map()).set(callback, {
+            preceding: [...precedingLoads],
+            load: hostLoad,
+            // Only the controlled Mincho plugin pair has this tail. Caller
+            // plugins can be followed by other, opaque onLoad handlers.
+            ...(replayable ? { nativeFileFallback: true as const } : {})
+          });
+          precedingLoads.push({ namespace: filter.namespace, callback });
+          build.onLoad(filter, hostLoad);
         },
 
         onResolve(filter, callback) {

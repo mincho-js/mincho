@@ -1,5 +1,6 @@
 import { types as t } from "@babel/core";
 import type { NodePath } from "@babel/core";
+import type { Binding } from "@babel/traverse";
 import type { StaticCssEvalExportName } from "./types.js";
 
 type StaticCssEvalBabelScope = NodePath<t.Node>["scope"];
@@ -22,9 +23,14 @@ export type StaticCssEvalCjsAssignmentTarget =
 
 export function getCjsAssignmentTarget(
   left: t.LVal | t.OptionalMemberExpression,
-  scope: StaticCssEvalBabelScope
+  scope: StaticCssEvalBabelScope,
+  exportsBinding?: Binding
 ): StaticCssEvalCjsAssignmentTarget {
-  const directTarget = getDirectCjsAssignmentTarget(left, scope);
+  const directTarget = getDirectCjsAssignmentTarget(
+    left,
+    scope,
+    exportsBinding
+  );
 
   if (directTarget.kind !== "not-cjs" || !t.isMemberExpression(left)) {
     return directTarget;
@@ -34,7 +40,11 @@ export function getCjsAssignmentTarget(
     return directTarget;
   }
 
-  const outerTarget = getCjsAssignmentTarget(left.object, scope);
+  const outerTarget = getCjsAssignmentTarget(
+    left.object,
+    scope,
+    exportsBinding
+  );
 
   if (outerTarget.kind === "unsupported") {
     return outerTarget;
@@ -51,21 +61,26 @@ export function getCjsAssignmentTarget(
 
 function getDirectCjsAssignmentTarget(
   left: t.LVal | t.OptionalMemberExpression,
-  scope: StaticCssEvalBabelScope
+  scope: StaticCssEvalBabelScope,
+  exportsBinding?: Binding
 ): StaticCssEvalCjsAssignmentTarget {
   if (!t.isMemberExpression(left)) {
     return { kind: "not-cjs" };
   }
 
-  if (isModuleExportsExpression(left, scope)) {
+  if (!exportsBinding && isModuleExportsExpression(left, scope)) {
     return { kind: "module-replacement" };
   }
 
-  if (t.isIdentifier(left.object) && isExportsIdentifier(left.object, scope)) {
+  if (
+    t.isIdentifier(left.object) &&
+    isExportsIdentifier(left.object, scope, exportsBinding)
+  ) {
     return getPropertyAssignmentTarget("exports", left);
   }
 
-  return t.isExpression(left.object) &&
+  return !exportsBinding &&
+    t.isExpression(left.object) &&
     isModuleExportsExpression(left.object, scope)
     ? getPropertyAssignmentTarget("module.exports", left)
     : { kind: "not-cjs" };
@@ -149,11 +164,14 @@ function getPropertyAssignmentTarget(
       };
 }
 
-function isExportsIdentifier(
+export function isExportsIdentifier(
   expression: t.Identifier,
-  scope: StaticCssEvalBabelScope
+  scope: StaticCssEvalBabelScope,
+  exportsBinding?: Binding
 ): boolean {
-  return expression.name === "exports" && !scope.getBinding("exports");
+  return exportsBinding
+    ? scope.getBinding(expression.name) === exportsBinding
+    : expression.name === "exports" && !scope.getBinding("exports");
 }
 
 function isModuleExportsExpression(

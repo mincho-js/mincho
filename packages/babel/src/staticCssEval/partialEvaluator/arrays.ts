@@ -1,5 +1,7 @@
+import { hasObservableArrayMapMutation } from "../../optimizations/arrayMapIntrinsic.js";
 import { types as t } from "@babel/core";
 import type { PartialEvalResult } from "./result.js";
+import { isCanonicalArrayIndex } from "../propertySelection.js";
 import type {
   PartialEvalReducerNodeOptions,
   PendingPartialEvalDeopt
@@ -19,6 +21,18 @@ export function reduceArrayExpression(
     }
 
     if (t.isSpreadElement(element)) {
+      const program = options.reductionContext.programPath;
+      if (
+        options.runtime.context.nativeArrayIteration === false ||
+        (program && hasObservableArrayMapMutation(program, "iteration"))
+      ) {
+        pendingDeopt ??= {
+          reason: "unsupported-spread",
+          details: { deoptPath: [{ kind: "spread" }] }
+        };
+        elements.push(t.cloneNode(element));
+        continue;
+      }
       const spreadResult = options.runtime.reduceExpression({
         expression: element.argument,
         depth: options.depth + 1,
@@ -95,11 +109,18 @@ export function getStaticArrayMemberValue(
   expression: t.ArrayExpression,
   memberName: string
 ): t.Expression | null {
-  if (!/^\d+$/.test(memberName)) {
+  if (!isCanonicalArrayIndex(memberName)) {
     return null;
   }
 
-  const element = expression.elements[Number(memberName)];
+  const index = Number(memberName);
+  if (
+    expression.elements
+      .slice(0, index + 1)
+      .some((element) => t.isSpreadElement(element))
+  )
+    return null;
+  const element = expression.elements[index];
 
   return element && t.isExpression(element) ? element : null;
 }

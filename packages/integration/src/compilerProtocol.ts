@@ -1,5 +1,6 @@
 import type { MessagePort } from "node:worker_threads";
 import type {
+  BabelOptions,
   BabelTransformSourceOptions,
   StaticCssEvalSourceProvider
 } from "./babel.js";
@@ -22,7 +23,12 @@ export type CompilerJob = {
   sourcePayload?: CompilerSourcePayload;
   batchProviderRequests?: boolean;
 } & (
-  | { kind: "transform"; input: BabelTransformSourceOptions; provider: boolean }
+  | {
+      kind: "transform";
+      input: BabelTransformSourceOptions;
+      provider: boolean;
+      consumerRuntime?: boolean;
+    }
   | { kind: "scoped"; input: ScopedDependencyOptions }
 );
 
@@ -32,6 +38,10 @@ export type ProviderRequestMessage =
       args: Parameters<StaticCssEvalSourceProvider["resolve"]>;
     }
   | { kind: "load"; args: Parameters<StaticCssEvalSourceProvider["load"]> }
+  | {
+      kind: "consumer-runtime";
+      args: Parameters<NonNullable<BabelOptions["consumerRuntimeSource"]>>;
+    }
   | { kind: "payload"; reference: CompilerPayloadReference };
 
 export type ProviderRequest = { id: number } & ProviderRequestMessage;

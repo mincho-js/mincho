@@ -147,3 +147,15 @@ Plugin names alone do not establish that proof. React's production plugin
 without a transform hook does not disable sharing. Native Vite splitting remains
 the default: an extra shared chunk can increase compressed JavaScript without
 reducing CSS.
+
+### Development runtime observation
+
+For the official Vite 7.3.3 and 7.3.7 client artifact (identical bytes), Mincho can
+validate a narrowly scoped pattern-intrinsic effect summary. It applies only when
+Mincho supplies the verified physical artifact after other loaders decline it and
+the final transformed source differs solely by supported configuration literals
+and the verified environment import. Custom loaders, modified runtime code, and
+other artifact digests use ordinary conservative analysis. This fallback preserves
+safety but may reject otherwise valid JSX extraction; it is not a compatibility
+guarantee for every version in the peer range. The summary does not authorize
+runtime execution, export evaluation, or general function purity.

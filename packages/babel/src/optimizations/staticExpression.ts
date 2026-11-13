@@ -524,13 +524,22 @@ export function* evaluateStaticExpression(
   } else return deopt();
 
   // The existing literal reducer defines operator, member and spread semantics.
-  t.traverseFast(expression, () => {
+  let consumesIteration = false;
+  t.traverseFast(expression, (node) => {
     if (++budget.nodes > 10000) deopt();
+    if (
+      t.isArrayExpression(node) &&
+      node.elements.some((item) => t.isSpreadElement(item))
+    )
+      consumesIteration = true;
   });
 
   const result = reducePartialEvalExpression({
     expression,
     context: createPartialEvalContext({
+      nativeArrayIteration: consumesIteration
+        ? graph.nativeArrayIterationIsIntact()
+        : undefined,
       owner: { file: module.id },
       limits: { maxDepth: 50 - depth, maxNodeCount: 10000 - budget.nodes }
     })

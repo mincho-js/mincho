@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { promises as fs } from "node:fs";
 import { join, resolve } from "node:path";
 import { buildWithMincho } from "./build.js";
+import { minchoEsbuildPlugins } from "./plugin.js";
 import {
   BuildInputSnapshot,
   getBuildTransaction
@@ -98,6 +99,107 @@ afterEach(async () => {
 });
 
 describe("buildWithMincho transaction", () => {
+  it.each(["raw-plugin", "raw-transaction", "later-loader"])(
+    "preserves the actual host source for a declined script (%s)",
+    async (mode) => {
+      const root = await fixture({
+        "entry.ts": `import { system } from "./factory";
+          import { alias } from "./node_modules/owned-helper/index.js";
+          alias.css = () => "blue";
+          export const color = system.css();`,
+        "factory.ts": 'export const system = { css: () => "red" };',
+        "node_modules/owned-helper/index.js":
+          'export const alias = { css: () => "independent" };'
+      });
+      const mincho = {
+        cache: false as const,
+        execution: { workers: 0 as const },
+        extractCalls: { "./factory.ts": ["system.css"] }
+      };
+      const options = {
+        absWorkingDir: root,
+        entryPoints: ["entry.ts"],
+        outdir: "out",
+        bundle: true,
+        write: false,
+        format: "cjs" as const,
+        logLevel: "silent" as const
+      };
+      const result =
+        mode === "raw-transaction"
+          ? await buildWithMincho({ ...options, mincho })
+          : await nativeBuild({
+              ...options,
+              plugins: [
+                ...minchoEsbuildPlugins(mincho),
+                ...(mode === "later-loader"
+                  ? [
+                      {
+                        name: "later-script-loader",
+                        setup(build) {
+                          build.onLoad(
+                            { filter: /owned-helper\/index\.js$/ },
+                            () => ({
+                              contents:
+                                'export { system as alias } from "../../factory.ts";',
+                              loader: "js"
+                            })
+                          );
+                        }
+                      } satisfies Plugin
+                    ]
+                  : [])
+              ]
+            });
+      const code = result.outputFiles!.find((file) =>
+        file.path.endsWith(".js")
+      )!.text;
+      const module = { exports: {} as { color: string } };
+      runInNewContext(code, { module, exports: module.exports });
+      expect(module.exports.color).toBe(
+        mode === "later-loader" ? "blue" : "red"
+      );
+      if (mode !== "later-loader") expect(code).not.toContain(".css()");
+    }
+  );
+
+  it.each(["ts", "tsx"])(
+    "preserves owner-configured decorator syntax in the sidecar dependency compile (%s)",
+    async (extension) => {
+      const root = await fixture({
+        "app/.babelrc.json": JSON.stringify({
+          parserOpts: {
+            plugins: [["decorators", { decoratorsBeforeExport: false }]]
+          }
+        }),
+        [`app/entry.${extension}`]:
+          'import { make } from "../factory"; export const className = make();',
+        "factory.ts": `import { style } from "@vanilla-extract/css";
+        function sealed(value) { return value; }
+        export @sealed class Factory {}
+        const rule = <const>{ color: "tomato" };
+        export const make = () => style(rule);`
+      });
+      const result = await buildWithMincho({
+        absWorkingDir: root,
+        entryPoints: [`app/entry.${extension}`],
+        outdir: "out",
+        write: false,
+        mincho: {
+          cache: false,
+          execution: { workers: 0 },
+          extractCalls: { "./factory.ts": ["make"] }
+        }
+      });
+      expect(
+        result
+          .outputFiles!.filter((file) => file.path.endsWith(".css"))
+          .map((file) => file.text)
+          .join("\n")
+      ).toContain("color: tomato");
+    }
+  );
+
   it.each([
     ["text", 'import value from "./value.txt";', "value.txt", "native text"],
     [

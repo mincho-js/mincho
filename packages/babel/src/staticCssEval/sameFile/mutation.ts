@@ -1,7 +1,10 @@
 import { types as t } from "@babel/core";
 import type { NodePath } from "@babel/core";
 import type { Binding } from "@babel/traverse";
-import { hasAliasedStaticCssEvalBindingMutation } from "./mutationAliases.js";
+import {
+  analyzeAliasedStaticCssEvalBindingMutation,
+  type StaticCssMutationProof
+} from "./mutationAliases.js";
 
 const arrayMutationMethods = new Set([
   "copyWithin",
@@ -22,12 +25,13 @@ const objectMutationMethods = new Set([
   "setPrototypeOf"
 ]);
 
-export function hasStaticCssEvalBindingMutation(
+export function analyzeStaticCssEvalBindingMutation(
   programPath: NodePath<t.Program>,
-  binding: Binding
-): boolean {
+  binding: Binding,
+  options: Parameters<typeof analyzeAliasedStaticCssEvalBindingMutation>[2] = {}
+): StaticCssMutationProof {
   if (binding.constantViolations.length > 0) {
-    return true;
+    return { kind: "may-mutate" };
   }
 
   let mutated = false;
@@ -65,8 +69,19 @@ export function hasStaticCssEvalBindingMutation(
     }
   });
 
+  return mutated
+    ? { kind: "may-mutate" }
+    : analyzeAliasedStaticCssEvalBindingMutation(programPath, binding, options);
+}
+
+export function hasStaticCssEvalBindingMutation(
+  programPath: NodePath<t.Program>,
+  binding: Binding,
+  options: Parameters<typeof analyzeStaticCssEvalBindingMutation>[2] = {}
+): boolean {
   return (
-    mutated || hasAliasedStaticCssEvalBindingMutation(programPath, binding)
+    analyzeStaticCssEvalBindingMutation(programPath, binding, options).kind !==
+    "proved-unmodified"
   );
 }
 

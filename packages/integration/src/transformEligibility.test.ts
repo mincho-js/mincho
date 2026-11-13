@@ -50,6 +50,23 @@ describe("adapter transform eligibility", () => {
     );
   });
 
+  it.each([undefined, false])(
+    "keeps host source readers from enabling disabled JSX transforms (%s)",
+    async (jsxCssProp) => {
+      const consumerRuntimeSource = vi.fn();
+
+      expect(
+        await canSkipMinchoTransform({
+          filename: "/App.tsx",
+          source:
+            'export const App = () => <div className="base" css={{ color: "red" }} />;',
+          babel: { ...babel, jsxCssProp, consumerRuntimeSource }
+        })
+      ).toBe(true);
+      expect(consumerRuntimeSource).not.toHaveBeenCalled();
+    }
+  );
+
   it.each([
     "const recipe = require('./recipe'); exports.x = recipe();",
     "import { recipe } from './barrel'; export const cls = recipe({color:'red'});",

@@ -1,3 +1,4 @@
+export { PreparationGraph as internalPreparationGraph } from "./preparationGraph.js";
 export {
   internalCanBypassJsxRuntimeGuards,
   internalHasExplicitJsxRuntimeImport,

@@ -10,7 +10,7 @@ import {
   createStaticCssEvalMutableBindingDiagnostic,
   createStaticCssEvalMutatedBindingDiagnostic
 } from "../diagnostics.js";
-import { hasStaticCssEvalBindingMutation } from "../sameFile.js";
+import { analyzeStaticCssEvalBindingMutation } from "../sameFile/mutation.js";
 import { StaticCssMutationAnalysisLimit } from "../sameFile/mutationAliases.js";
 import type { Binding } from "@babel/traverse";
 import type { StaticMemberReference } from "../candidates.js";
@@ -35,18 +35,34 @@ import {
 
 export function hasImportedStaticCssBindingMutation(
   record: ImportedStaticCssEvalModuleRecord,
-  localName: string
+  localName: string,
+  options: Parameters<typeof analyzeStaticCssEvalBindingMutation>[2] = {}
 ): boolean {
+  return (
+    analyzeImportedStaticCssBindingMutation(record, localName, options) !==
+    "proved-unmodified"
+  );
+}
+
+export function analyzeImportedStaticCssBindingMutation(
+  record: ImportedStaticCssEvalModuleRecord,
+  localName: string,
+  options: Parameters<typeof analyzeStaticCssEvalBindingMutation>[2] = {}
+): "proved-unmodified" | "may-mutate" | "unknown" {
   const binding = record.programPath.scope.getBinding(localName);
 
   try {
     return binding
-      ? hasStaticCssEvalBindingMutation(record.programPath, binding)
-      : false;
+      ? analyzeStaticCssEvalBindingMutation(
+          record.programPath,
+          binding,
+          options
+        ).kind
+      : "proved-unmodified";
   } catch (error) {
     // Exhaustion cannot prove immutability. Treat the binding as potentially
     // mutated so scalar imports stay dynamic and unknown rule shapes fail closed.
-    if (error instanceof StaticCssMutationAnalysisLimit) return true;
+    if (error instanceof StaticCssMutationAnalysisLimit) return "unknown";
     throw error;
   }
 }
@@ -126,21 +142,6 @@ export function resolveSameModuleStaticLiteralReference(
     };
   }
 
-  if (
-    hasImportedStaticCssBindingMutation(
-      options.record,
-      options.reference.bindingName
-    )
-  ) {
-    return {
-      kind: "error",
-      diagnostic: createStaticCssEvalMutatedBindingDiagnostic(
-        createImportedLiteralDiagnosticContext(options.context),
-        options.reference.bindingName
-      )
-    };
-  }
-
   const selectedExpression = selectStaticCssEvalExpressionForMemberPath(
     init,
     options.reference.memberPath
@@ -152,6 +153,20 @@ export function resolveSameModuleStaticLiteralReference(
     localStack: [...options.localStack, currentFrame],
     resolveReference: options.resolveReference
   });
+
+  const mutation = analyzeImportedStaticCssBindingMutation(
+    options.record,
+    options.reference.bindingName
+  );
+  if (mutation !== "proved-unmodified" && literalResult.kind !== "error") {
+    return {
+      kind: "error",
+      diagnostic: createStaticCssEvalMutatedBindingDiagnostic(
+        createImportedLiteralDiagnosticContext(options.context),
+        options.reference.bindingName
+      )
+    };
+  }
 
   if (literalResult.kind === "error") {
     return literalResult;

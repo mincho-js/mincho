@@ -13,7 +13,6 @@ var _$mincho$$App2 = _$mincho$$App;",
 
 exports[`minchoBabelPlugin > accepts enabled jsx css prop mode when JSX has no css prop 2`] = `
 "import { _$mincho$$App as _$mincho$$App2 } from "extracted_1vdysta.css.ts";
-import { style } from '@mincho-js/css';
 function App() {
   return <div class={_$mincho$$App2}>Hello</div>;
 }"
@@ -87,7 +86,7 @@ function Button(props) {
 function App() {
   return <>
             <div className="base" />
-            <div className="base" />
+            <div className={"base"} />
             <div className="" />
             <div className=" " />
             <div className="base active" />
