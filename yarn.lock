@@ -1612,6 +1612,7 @@ __metadata:
   dependencies:
     "@mincho-js/css": "workspace:^"
     "@mincho-js/preset-tailwind": "workspace:^"
+    "@mincho-js/preset-tailwind-react": "workspace:^"
     "@mincho-js/react": "workspace:^"
     "@mincho-js/tailwind": "workspace:^"
     "@mincho-js/vite": "workspace:^"
@@ -2588,6 +2589,33 @@ __metadata:
     vitest: "catalog:"
   peerDependencies:
     "@vanilla-extract/css": "*"
+  languageName: unknown
+  linkType: soft
+
+"@mincho-js/preset-tailwind-react@workspace:^, @mincho-js/preset-tailwind-react@workspace:packages/preset-tailwind-react":
+  version: 0.0.0-use.local
+  resolution: "@mincho-js/preset-tailwind-react@workspace:packages/preset-tailwind-react"
+  dependencies:
+    "@mincho-js/debug-log": "workspace:^"
+    "@mincho-js/preset-tailwind": "workspace:^"
+    "@mincho-js/react": "workspace:^"
+    "@types/node": "catalog:"
+    "@types/react": "catalog:"
+    "@types/react-dom": "catalog:"
+    "@vanilla-extract/css": "catalog:"
+    eslint-config-custom: "workspace:^"
+    prettier-config-custom: "workspace:^"
+    react: "catalog:"
+    react-dom: "catalog:"
+    tsconfig-custom: "workspace:^"
+    vite: "catalog:"
+    vite-config-custom: "workspace:^"
+    vitest: "catalog:"
+  peerDependencies:
+    "@mincho-js/react": "workspace:^"
+    "@vanilla-extract/css": "*"
+    react: ">=16.8.0"
+    react-dom: ">=16.8.0"
   languageName: unknown
   linkType: soft
 

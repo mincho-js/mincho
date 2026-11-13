@@ -27,6 +27,9 @@
       "path": "packages/preset-tailwind"
     },
     {
+      "path": "packages/preset-tailwind-react"
+    },
+    {
       "path": "packages/preset-theme-ui"
     },
     {

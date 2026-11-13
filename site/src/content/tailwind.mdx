@@ -3,6 +3,8 @@
 Use Tailwind CSS 4.3.5's default design tokens and compound styles through
 Mincho's native APIs. `@mincho-js/tailwind` defines the contract and property
 mappings; `@mincho-js/preset-tailwind` supplies the values and compiled CSS.
+`@mincho-js/preset-tailwind-react` adds preset-specific JSX types and `styled`
+components while sharing the same styles.
 
 The port preserves the default OKLCH palette, spacing unit, typography pairs,
 shadows, radii, breakpoints, and four animations. It includes screen-reader,
@@ -15,7 +17,7 @@ the scanner, compiler, plugin API, or variable-based effect compositor.
 ```tsx
 // primary-button.tsx
 import type { ReactNode } from "react";
-import { themeClass } from "@mincho-js/preset-tailwind";
+import { themeClass } from "@mincho-js/preset-tailwind-react";
 import "@mincho-js/preset-tailwind/styles.css";
 
 export function PrimaryButton({ children }: { children: ReactNode }) {
@@ -58,9 +60,12 @@ and responsive conditions independent.
 ## Install and configure [#install-and-configure]
 
 ```sh
-npm install @mincho-js/css @mincho-js/react @mincho-js/tailwind @mincho-js/preset-tailwind @vanilla-extract/css
+npm install react react-dom @mincho-js/css @mincho-js/react @mincho-js/tailwind @mincho-js/preset-tailwind @mincho-js/preset-tailwind-react @vanilla-extract/css
 npm install -D @mincho-js/vite @vanilla-extract/vite-plugin @vitejs/plugin-react
 ```
+
+`@mincho-js/react` is a required peer of the React preset. Declare it directly in
+the application because compiled styled components import its shared runtime.
 
 Configure the [Mincho and Vanilla Extract build plugins](/docs/getting-started)
 before the React plugin. `jsxCssProp.importSource` selects the preset for inline
@@ -76,50 +81,42 @@ configuration data and can be loaded by Node without evaluating styles.
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { minchoVitePlugin } from "@mincho-js/vite";
-import { extractCalls } from "@mincho-js/preset-tailwind/config";
+import { extractCalls } from "@mincho-js/preset-tailwind-react/config";
 import { vanillaExtractPlugin } from "@vanilla-extract/vite-plugin";
 
 export default defineConfig({
   plugins: [
     minchoVitePlugin({
-      jsxCssProp: { importSource: "@mincho-js/preset-tailwind" },
+      jsxCssProp: { importSource: "@mincho-js/preset-tailwind-react" },
       extractCalls,
     }),
     vanillaExtractPlugin(),
-    react({ jsxImportSource: "@mincho-js/react" }),
+    react({ jsxImportSource: "@mincho-js/preset-tailwind-react" }),
   ],
 });
 ```
 
-Use Mincho's JSX types and register the same preset's CSS signature in a
-declaration file included by your TypeScript project:
+Select the same package as TypeScript's JSX source. It supplies the JSX runtime
+and types for Tailwind tokens without a project-wide declaration override:
 
 ```jsonc
 // tsconfig.json
 {
   "compilerOptions": {
     "jsx": "react-jsx",
-    "jsxImportSource": "@mincho-js/react",
+    "jsxImportSource": "@mincho-js/preset-tailwind-react",
   },
-}
-```
-
-```ts
-// mincho.d.ts
-import type { css } from "@mincho-js/preset-tailwind";
-import "@mincho-js/react";
-
-declare module "@mincho-js/react" {
-  interface CssPropConfig {
-    css: typeof css;
-  }
 }
 ```
 
 The [React example](https://github.com/mincho-js/mincho/tree/main/examples/tailwind)
 uses this setup: `app.tsx` contains inline `css` props and a co-located recipe,
-while `theme.css.ts` supplies the reusable custom theme demonstration. Style
-creation is extracted at build time; recipe variants are selected at runtime.
+while `theme.css.ts` supplies the reusable custom theme and button recipe.
+Layout and utility styles stay beside their elements. The custom theme has a
+separate variable contract, so the example passes its changing surface colors
+through React's `style` prop. Style creation is extracted at build time; recipe
+variants are selected at runtime.
+Pass generated classes and recipe results to `className`.
 Apply `themeClass` to the element or an ancestor and import `styles.css` to load
 its variables.
 
@@ -235,33 +232,30 @@ reduced-motion preferences with native media conditions or your application CSS.
 
 ## React recipes [#react-recipes]
 
-Pass the preset definition to `defineRules` from `@mincho-js/react` to keep its
-`css`, `rules` and `cx` APIs and add `styled`. `styled.span()` builds a typed
-intrinsic React component from the same recipe options. Put this creation in a
-`mincho$` block or a `.css.ts` file so the recipe compiles at build time.
+Import `styled` directly from `@mincho-js/preset-tailwind-react`, alongside its
+native `css`, `rules`, and `cx` APIs. A builder such as `styled.span()` creates a
+typed React element from the same recipe options. The configured `extractCalls`
+map compiles these calls directly in component files. Reusable definitions can
+also live in a `.css.ts` file.
 
 ```tsx
-import { mincho$ } from "@mincho-js/css";
-import { defineRules as defineReactRules } from "@mincho-js/react";
-import * as tailwindDefinition from "@mincho-js/preset-tailwind";
+import { styled, themeClass } from "@mincho-js/preset-tailwind-react";
 import "@mincho-js/preset-tailwind/styles.css";
 
-const Badge = mincho$(() =>
-  defineReactRules(tailwindDefinition).styled.span({
-    base: { px: 2.5, py: 1, rounded: "full", fontSize: "sm" },
-    variants: {
-      tone: {
-        info: { color: "sky-900", bg: "sky-100" },
-        success: { color: "emerald-900", bg: "emerald-100" },
-      },
+const Badge = styled.span({
+  base: { px: 2.5, py: 1, rounded: "full", fontSize: "sm" },
+  variants: {
+    tone: {
+      info: { color: "sky-900", bg: "sky-100" },
+      success: { color: "emerald-900", bg: "emerald-100" },
     },
-    defaultVariants: { tone: "info" },
-  }),
-);
+  },
+  defaultVariants: { tone: "info" },
+});
 
 export function Status() {
   return (
-    <Badge className={tailwindDefinition.themeClass} tone="success">
+    <Badge className={themeClass} tone="success">
       Ready
     </Badge>
   );
@@ -272,7 +266,7 @@ export function Status() {
 
 ```ts
 // panel.css.ts
-import { css, rules, cx, themeClass } from "@mincho-js/preset-tailwind";
+import { css, rules, cx, themeClass } from "@mincho-js/preset-tailwind-react";
 
 export const panel = cx(themeClass, css({ container: true, px: 6 }));
 export const label = css({ truncate: true });
@@ -299,15 +293,16 @@ import "@mincho-js/preset-tailwind/preflight.css";
 </main>;
 ```
 
-The root exports native `css`, `rules`, `cx`, and `preset` alongside
-`themeClass`, `vars`, and `contract`. Define the styles and recipes your
+The React preset exports `styled` and native `css`, `rules`, `cx`, and `preset`
+alongside `themeClass`, `vars`, and `contract`. Define the styles and recipes your
 components need in `.css.ts` files, or use co-located calls and JSX `css` props
 with the setup above. Only the styles you use generate component CSS. The
 package does not ship fixed container or utility classes.
 
-`styles.css` contains theme variables and animation keyframes. `/tokens`
-exports plain `tailwindTokens` data. JavaScript imports alone emit no CSS and
-work in Node/SSR. The two CSS entry points are explicit assets. Using the
+`@mincho-js/preset-tailwind/styles.css` contains theme variables and animation
+keyframes. Its `/tokens` entry exports plain `tailwindTokens` data. JavaScript
+imports alone emit no CSS and work in Node/SSR. The two CSS entry points are
+explicit assets. Using the
 authoring APIs requires the build plugins; reading compiled theme data does not.
 
 Preflight preserves the upstream browser fixes and default font stacks in the

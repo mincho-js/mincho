@@ -11,6 +11,8 @@ npm install -D @mincho-js/vite @vanilla-extract/vite-plugin
 
 Configure the Mincho and Vanilla Extract Vite plugins as described in the
 [Tailwind style setup](https://mincho-js.github.io/mincho/docs/tailwind#install-and-configure).
+For preset-specific React JSX types and `styled` components, use
+[@mincho-js/preset-tailwind-react](../preset-tailwind-react/README.md).
 
 ```ts
 // card.css.ts

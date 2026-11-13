@@ -1,0 +1,20 @@
+{
+  "extends": "tsconfig-custom/tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "./src",
+    "baseUrl": "./",
+    "paths": {
+      "@mincho-js/preset-tailwind-react/jsx-runtime": ["./src/jsx-runtime.ts"],
+      "@mincho-js/preset-tailwind-react/jsx-dev-runtime": [
+        "./src/jsx-dev-runtime.ts"
+      ]
+    },
+    "tsBuildInfoFile": "./.cache/typescript/tsbuildinfo-esm",
+    "outDir": "./dist/esm",
+    "declarationDir": "./dist/esm",
+    "jsx": "react-jsx",
+    "jsxImportSource": "@mincho-js/preset-tailwind-react"
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx"],
+  "exclude": ["dist", "_release"]
+}
