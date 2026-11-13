@@ -1,4 +1,5 @@
-import { basename, join, resolve } from "node:path";
+import { realpath } from "node:fs/promises";
+import { basename, isAbsolute, join, resolve } from "node:path";
 import type { Plugin } from "esbuild";
 import type { CompileOptions } from "./compile.js";
 import { currentCompilationExecution } from "./compilationExecution.js";
@@ -74,6 +75,24 @@ async function compileWithInputs(
   }
 
   const cwd = options.cwd ?? process.cwd();
+  let aliasTargets: string[];
+
+  try {
+    // esbuild resolves path aliases from cwd and records physical inputs.
+    // Recheck lexical targets before lookup: their symlinks may have moved
+    // while the old physical files still exist unchanged.
+    // If a target needs extension resolution, let esbuild resolve it uncached.
+    aliasTargets = await Promise.all(
+      Object.values(options.alias ?? {})
+        .filter(
+          (target) => isAbsolute(target) || /^\.{1,2}(?:[/\\]|$)/.test(target)
+        )
+        .map((target) => realpath(resolve(cwd, target)))
+    );
+  } catch {
+    return compile(options);
+  }
+
   const key = `compile-v2:${cacheDigest(
     JSON.stringify([
       options.originalPath,
@@ -82,6 +101,9 @@ async function compileWithInputs(
       cwd,
       options.externals,
       options.loader,
+      options.alias,
+      aliasTargets,
+      options.resolvedImports,
       options.dependencyGraph,
       options.staticStyles,
       currentCompilationExecution()?.evaluation,

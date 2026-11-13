@@ -61,6 +61,67 @@ function extract(source: string) {
 }
 
 describe("extracted lexical bindings", () => {
+  it.each([
+    "false ? size : 4",
+    "true ? 4 : size",
+    "4 || size",
+    "4 ?? size",
+    "(false && size) || 4",
+    "({ value: false ? size : 4 }).value"
+  ])("prunes unreachable parameter references from sidecars: %s", (value) => {
+    const result = extract(`
+      import { css } from '@mincho-js/css';
+      function Component(size) { return css({ padding: ${value} }); }
+    `);
+
+    expect(result.values).toEqual([{ padding: 4 }]);
+    expect(result.sidecar).not.toMatch(/\bsize\b/);
+    expect(result.source).toContain("function Component(size)");
+  });
+
+  it("prunes only sidecar clones of shared declarations", () => {
+    const result = extract(`
+      import { css } from '@mincho-js/css';
+      function Component(size) {
+        const rule = { padding: false ? size : 4 };
+        return { rule, className: css(rule) };
+      }
+    `);
+
+    expect(result.values).toEqual([{ padding: 4 }]);
+    expect(result.sidecar).not.toMatch(/\bsize\b/);
+    expect(result.source).toContain("padding: false ? size : 4");
+  });
+
+  it("preserves logical expression values instead of returning references", () => {
+    const result = extract(`
+      import { css } from '@mincho-js/css';
+      function Component(size) {
+        const width = 4;
+        return css({ padding: +(delete (width || size)) });
+      }
+    `);
+
+    expect(result.values).toEqual([{ padding: 1 }]);
+    expect(result.sidecar).not.toMatch(/\bsize\b/);
+  });
+
+  it.each([
+    "true ? size : 4",
+    "false ? 4 : size",
+    "false || size",
+    "null ?? size",
+    "true && size",
+    "size ? 4 : 8"
+  ])("still rejects reachable parameter references: %s", (value) => {
+    expect(() =>
+      extract(`
+        import { css } from '@mincho-js/css';
+        function Component(size) { return css({ padding: ${value} }); }
+      `)
+    ).toThrow(/captures runtime binding size/);
+  });
+
   it("preserves independently shadowed constants in source and sidecar", () => {
     const result = extract(`
       import { css } from '@mincho-js/css';

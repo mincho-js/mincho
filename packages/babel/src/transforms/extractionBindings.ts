@@ -1,6 +1,7 @@
 import { types as t } from "@babel/core";
 import type { NodePath } from "@babel/core";
 import type { Binding } from "@babel/traverse";
+import { getConfidentlyExecutedBranches } from "../jsxCssProp/sidecarSafety.js";
 import type { ProgramScope } from "../types.js";
 
 interface ExtractionBindings {
@@ -9,6 +10,7 @@ interface ExtractionBindings {
   names: Map<Binding, string>;
   owners: Map<string, Binding>;
   references: WeakMap<t.Identifier, Binding>;
+  executedBranches: WeakMap<t.Node, readonly string[]>;
 }
 
 const extractionBindings = new WeakMap<
@@ -25,7 +27,8 @@ function getState(program: ProgramScope): ExtractionBindings {
       completed: new Set(),
       names: new Map(),
       owners: new Map(),
-      references: new WeakMap()
+      references: new WeakMap(),
+      executedBranches: new WeakMap()
     };
     extractionBindings.set(program.minchoData, state);
   }
@@ -67,6 +70,37 @@ function recordReferences(
   if (path.isIdentifier()) record(path);
 
   path.traverse({ Identifier: record });
+}
+
+function visitExecutedReferences(
+  path: NodePath<t.Node>,
+  state: ExtractionBindings,
+  visit: (reference: NodePath<t.Identifier | t.JSXIdentifier>) => void
+): void {
+  const branches = path.isExpression()
+    ? getConfidentlyExecutedBranches(path)
+    : undefined;
+
+  if (branches) {
+    state.executedBranches.set(
+      path.node,
+      branches.map((branch) => String(branch.key))
+    );
+    for (const branch of branches)
+      visitExecutedReferences(branch, state, visit);
+
+    return;
+  }
+
+  if (path.isReferencedIdentifier()) visit(path);
+
+  path.traverse({
+    "ConditionalExpression|LogicalExpression"(inner) {
+      visitExecutedReferences(inner, state, visit);
+      inner.skip();
+    },
+    ReferencedIdentifier: visit
+  });
 }
 
 /** Collect declarations by lexical binding, retaining nested locals in their owner. */
@@ -119,12 +153,10 @@ export function collectExtractionBindings(path: NodePath<t.Node>): t.Node[] {
     }
 
     recordReferences(root, state);
-    root.traverse({
-      ReferencedIdentifier(reference) {
-        const dependency = reference.scope.getBinding(reference.node.name);
+    visitExecutedReferences(root, state, (reference) => {
+      const dependency = reference.scope.getBinding(reference.node.name);
 
-        if (dependency && !isInside(dependency.path, root)) collect(dependency);
-      }
+      if (dependency && !isInside(dependency.path, root)) collect(dependency);
     });
     state.visiting.delete(root.node);
     state.completed.add(root.node);
@@ -134,18 +166,10 @@ export function collectExtractionBindings(path: NodePath<t.Node>): t.Node[] {
 
   recordReferences(path, state);
 
-  if (path.isReferencedIdentifier()) {
-    const binding = path.scope.getBinding(path.node.name);
+  visitExecutedReferences(path, state, (reference) => {
+    const binding = reference.scope.getBinding(reference.node.name);
 
-    if (binding) collect(binding);
-  }
-
-  path.traverse({
-    ReferencedIdentifier(reference) {
-      const binding = reference.scope.getBinding(reference.node.name);
-
-      if (binding && !isInside(binding.path, path)) collect(binding);
-    }
+    if (binding && !isInside(binding.path, path)) collect(binding);
   });
 
   return nodes;
@@ -155,7 +179,7 @@ export function collectExtractionBindings(path: NodePath<t.Node>): t.Node[] {
 export function cloneExtractionNodes(program: ProgramScope): t.Statement[] {
   const state = getState(program);
 
-  const rename = (source: t.Node, clone: t.Node) => {
+  const rename = (source: t.Node, clone: t.Node): t.Node => {
     if (t.isIdentifier(source) && t.isIdentifier(clone)) {
       const binding = state.references.get(source);
 
@@ -173,7 +197,8 @@ export function cloneExtractionNodes(program: ProgramScope): t.Statement[] {
 
       if (Array.isArray(original) && Array.isArray(copied)) {
         original.forEach((node, index) => {
-          if (node && copied[index]) rename(node, copied[index]);
+          if (node && copied[index])
+            copied[index] = rename(node, copied[index]);
         });
       } else if (
         original &&
@@ -181,15 +206,30 @@ export function cloneExtractionNodes(program: ProgramScope): t.Statement[] {
         !Array.isArray(original) &&
         !Array.isArray(copied)
       ) {
-        rename(original, copied);
+        (clone as unknown as Record<string, t.Node>)[key] = rename(
+          original,
+          copied
+        );
       }
     }
+
+    const branches = state.executedBranches.get(source);
+    if (branches) {
+      const expressions = branches.map(
+        (key) => (clone as unknown as Record<string, t.Expression>)[key]!
+      );
+
+      // Retain test/left evaluation, but never emit uncollected dead references.
+      return expressions.length === 1
+        ? t.sequenceExpression([t.numericLiteral(0), expressions[0]!])
+        : t.sequenceExpression(expressions);
+    }
+
+    return clone;
   };
 
   return program.minchoData.nodes.map((node) => {
     const clone = t.cloneNode(node, true);
-    rename(node, clone);
-
-    return clone as t.Statement;
+    return rename(node, clone) as t.Statement;
   });
 }

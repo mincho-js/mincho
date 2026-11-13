@@ -17,7 +17,7 @@ import {
   cssModuleName
 } from "./constants.js";
 import { getStyleExpression } from "./styleExpression.js";
-import { usesPixelUnits } from "./numericUnits.js";
+import { usesPixelUnits } from "@mincho-js/transform-to-vanilla";
 import type {
   DynamicCssVariableBranchRule,
   DynamicCssVariableLeaf,

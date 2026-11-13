@@ -2277,6 +2277,7 @@ __metadata:
     "@mincho-js/css": "workspace:^"
     "@mincho-js/debug-log": "workspace:^"
     "@mincho-js/transform-runtime": "workspace:^"
+    "@mincho-js/transform-to-vanilla": "workspace:^"
     "@types/babel__core": "catalog:"
     "@types/babel__generator": "catalog:"
     "@types/babel__traverse": "catalog:"

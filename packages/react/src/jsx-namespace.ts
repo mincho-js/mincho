@@ -1,15 +1,24 @@
 import type { ClassPrimitive, ComplexCSSRule } from "@mincho-js/css";
 import type { CSSProperties, JSX as ReactJSX } from "react";
+import type { CssPropConfig } from "./index.js";
 
-type ComplexCSSRuleArrayItem = Extract<ComplexCSSRule, unknown[]>[number];
+type CssPropRule = CssPropConfig extends {
+  css: (...args: infer Args) => unknown;
+}
+  ? Args[0]
+  : ComplexCSSRule;
+
+// Configured sources receive a complete style array in one call, so its elements
+// are available only when the selected CSS function accepts arrays.
+type CssPropRuleArrayItem = Extract<CssPropRule, readonly unknown[]>[number];
 type MinchoCssPropRecursiveArrayItem =
-  ComplexCSSRuleArrayItem | ClassPrimitive | MinchoCssPropRecursiveArray;
+  CssPropRuleArrayItem | ClassPrimitive | MinchoCssPropRecursiveArray;
 type MinchoCssPropRecursiveArray =
   | MinchoCssPropRecursiveArrayItem[]
   | readonly MinchoCssPropRecursiveArrayItem[];
 
 export type MinchoCssPropValue =
-  ComplexCSSRule | ClassPrimitive | MinchoCssPropRecursiveArray;
+  CssPropRule | ClassPrimitive | MinchoCssPropRecursiveArray;
 
 type MinchoCssProp = {
   css?: MinchoCssPropValue;

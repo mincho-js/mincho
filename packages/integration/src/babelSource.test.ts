@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
-import { parseSync } from "@babel/core";
+import { describe, expect, it, onTestFinished as afterTest, vi } from "vitest";
+import { parseSync, type PluginObj } from "@babel/core";
 import { mkdir, mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -10,6 +10,8 @@ import {
 } from "./babel.js";
 import { MinchoProjectEngine } from "./staticCssEvalProjectEngine.js";
 import { CompilationCache } from "./compilationCache.js";
+import { CompilationDiagnostics } from "./diagnostics.js";
+import { typescriptPresetPath } from "./babelPreset.js";
 
 const filename = "/virtual/mincho-owner.tsx";
 const source =
@@ -31,6 +33,382 @@ function seedArtifacts(engine: MinchoProjectEngine) {
 }
 
 describe("babelTransformSource", () => {
+  it.each([
+    "default",
+    "plugin",
+    "preset",
+    "configuration",
+    "override"
+  ] as const)(
+    "honors %s-enabled Flow syntax with a configured JSX source",
+    async (syntax) => {
+      const root = await mkdtemp(join(tmpdir(), "mincho-flow-source-"));
+      afterTest(() => rm(root, { recursive: true, force: true }));
+
+      const visitType = vi.fn();
+      const parserOverride = vi.fn((code: string) =>
+        parseSync(code, {
+          babelrc: false,
+          configFile: false,
+          parserOpts: { plugins: ["flow", "jsx"] }
+        })
+      );
+      const flowSyntax = (): PluginObj => ({
+        manipulateOptions(_options, parser) {
+          parser.plugins.push("flow");
+        },
+        visitor: {
+          TypeAlias(path) {
+            visitType();
+            path.remove();
+          }
+        },
+        ...(syntax === "override" ? { parserOverride } : {})
+      });
+      const flowPreset = () => ({ plugins: [flowSyntax] });
+      const configFile = join(root, "babel.config.cjs");
+
+      if (syntax === "configuration") {
+        await writeFile(
+          configFile,
+          `module.exports = { presets: [() => ({ plugins: [() => ({
+            manipulateOptions(_options, parser) { parser.plugins.push("flow"); },
+            visitor: { TypeAlias(path) { path.remove(); } }
+          })] })] };`
+        );
+      }
+
+      const transformed = await babelTransformSource({
+        filename: join(root, "entry.jsx"),
+        root,
+        source: `
+          type Palette = {| color: string |};
+          export const App = () => <div css={{ color: "red" }} />;
+        `,
+        babel: {
+          configFile: syntax === "configuration" ? configFile : false,
+          babelrc: false,
+          plugins:
+            syntax === "plugin" || syntax === "default" || syntax === "override"
+              ? [flowSyntax]
+              : [],
+          presets: syntax === "preset" ? [flowPreset] : [],
+          jsxCssProp:
+            syntax === "default" ? true : { importSource: "custom-styles" },
+          optimize: { pureFunctions: false }
+        }
+      });
+
+      expect(transformed.jsxCssPropTransformed).toBe(true);
+      expect(transformed.code).not.toContain("type Palette");
+      expect(transformed.code).not.toContain("css=");
+      expect(transformed.result[1]).toContain('color: "red"');
+      expect(transformed.result[1]).toContain(
+        syntax === "default" ? 'from "@mincho-js/css"' : 'from "custom-styles"'
+      );
+
+      if (syntax !== "configuration") expect(visitType).toHaveBeenCalledOnce();
+      if (syntax === "override") expect(parserOverride).toHaveBeenCalledOnce();
+    }
+  );
+
+  it("preserves configured parser failures when extraction parsing falls back", async () => {
+    const parserOverride = vi.fn(() => {
+      throw new Error("configured parser failed");
+    });
+
+    await expect(
+      babelTransformSource({
+        filename: "/virtual/entry.jsx",
+        source:
+          'type Palette = {| color: string |}; export const App = () => <div css={{ color: "red" }} />;',
+        babel: {
+          configFile: false,
+          babelrc: false,
+          jsxCssProp: { importSource: "custom-styles" },
+          plugins: [() => ({ parserOverride, visitor: {} })]
+        }
+      })
+    ).rejects.toMatchObject({
+      name: "BabelTransformError",
+      message: expect.stringContaining("configured parser failed")
+    });
+
+    expect(parserOverride).toHaveBeenCalledOnce();
+  });
+
+  it.each([false, true])(
+    "normalizes TypeScript import-equals after configured syntax retry cached parsing=%s",
+    async (cached) => {
+      const visitDecorator = vi.fn();
+      const transformed = await babelTransformSource({
+        filename: "/virtual/entry.tsx",
+        root: "/virtual",
+        source: `
+          import preset = require("./preset.ts");
+          @sealed class View {}
+          export const primary = preset.css({ color: "red" });
+          export const shadowed = (preset: any) => preset.css({ color: "blue" });
+          export { View };
+        `,
+        babel: {
+          compilationCache: cached ? new CompilationCache() : undefined,
+          configFile: false,
+          babelrc: false,
+          presets: [
+            () => ({
+              plugins: [
+                (): PluginObj => ({
+                  manipulateOptions(_options, parser) {
+                    parser.plugins.push("decorators-legacy");
+                  },
+                  visitor: {
+                    Decorator(path) {
+                      visitDecorator();
+                      path.remove();
+                    }
+                  }
+                })
+              ]
+            })
+          ],
+          extractCalls: { "./preset.ts": ["css"] },
+          staticCssEvalSourceProvider: {
+            resolve: (_importer, specifier) =>
+              specifier === "./preset.ts" ? { id: "/virtual/preset.ts" } : null,
+            load: (id) =>
+              id === "/virtual/preset.ts"
+                ? {
+                    source: `
+                      import { style } from "@vanilla-extract/css";
+                      export const css = (rule) => style(rule);
+                    `
+                  }
+                : null
+          }
+        }
+      });
+
+      expect(transformed.result[1]).toContain('color: "red"');
+      expect(transformed.code).not.toContain('color: "red"');
+      expect(transformed.code).toContain('color: "blue"');
+      expect(transformed.result[1]).not.toContain('color: "blue"');
+      expect(transformed.code).not.toContain("@sealed");
+      expect(visitDecorator).toHaveBeenCalledOnce();
+    }
+  );
+
+  it.each([
+    [false, "jsxPragma", "h", "<div />"],
+    [true, "jsxPragma", "h", "<div />"],
+    [false, "jsxPragmaFrag", "Fragment", "<></>"],
+    [true, "jsxPragmaFrag", "Fragment", "<></>"]
+  ] as const)(
+    "preserves configured JSX imports after syntax retry (cached=%s, %s)",
+    async (cached, option, binding, jsx) => {
+      const visitDecorator = vi.fn();
+      const transformed = await babelTransformSource({
+        filename: "/virtual/pragma.tsx",
+        root: "/virtual",
+        source: `
+          import ${binding} = require("classic-jsx");
+          import T = require("unused-types");
+          type Value = T.Member;
+          @sealed class View {}
+          export const view = ${jsx};
+          export { View };
+        `,
+        babel: {
+          compilationCache: cached ? new CompilationCache() : undefined,
+          configFile: false,
+          babelrc: false,
+          extractCalls: { "custom-styles": ["css"] },
+          presets: [
+            () => ({
+              presets: [[typescriptPresetPath, { [option]: binding }]],
+              plugins: [
+                (): PluginObj => ({
+                  manipulateOptions(_options, parser) {
+                    parser.plugins.push("decorators-legacy");
+                  },
+                  visitor: {
+                    Decorator(path) {
+                      visitDecorator();
+                      path.remove();
+                    }
+                  }
+                })
+              ]
+            })
+          ]
+        }
+      });
+
+      expect(transformed.code).toContain('require("classic-jsx")');
+      expect(transformed.code).not.toContain("unused-types");
+      expect(transformed.code).not.toContain("@sealed");
+      expect(transformed.code).toContain("export const view");
+      expect(visitDecorator).toHaveBeenCalledOnce();
+    }
+  );
+
+  it("keeps local extraction bindings when a preset enables the owner syntax", async () => {
+    const source = `
+      import { style } from "@vanilla-extract/css";
+      type Palette = {| color: string |};
+      const make = (rule) => style(rule);
+      export { make as registered };
+      export const primary = make({ color: "red" });
+      export const shadowed = (make) => make({ color: "blue" });
+    `;
+    const transformed = await babelTransformSource({
+      filename: "/virtual/factory.jsx",
+      root: "/virtual",
+      source,
+      babel: {
+        configFile: false,
+        babelrc: false,
+        presets: [
+          () => ({
+            plugins: [
+              (): PluginObj => ({
+                manipulateOptions(_options, parser) {
+                  parser.plugins.push("flow");
+                },
+                visitor: {}
+              })
+            ]
+          })
+        ],
+        extractCalls: { "./factory.jsx": ["registered"] },
+        staticCssEvalSourceProvider: {
+          resolve: (_importer, specifier) =>
+            specifier === "./factory.jsx"
+              ? { id: "/virtual/factory.jsx" }
+              : null,
+          load: () => null
+        }
+      }
+    });
+
+    expect(transformed.result[1]).toContain('color: "red"');
+    expect(transformed.result[1]).toContain("style(rule)");
+    expect(transformed.result[1]).not.toContain('color: "blue"');
+    expect(transformed.code).not.toContain('color: "red"');
+    expect(transformed.code).toContain('color: "blue"');
+  });
+
+  it.each([false, true])(
+    "uses preset-enabled syntax in a registered dependency with owner syntax=%s",
+    async (ownerUsesFlow) => {
+      const visitType = vi.fn();
+      const transformed = await babelTransformSource({
+        filename: "/virtual/entry.jsx",
+        root: "/virtual",
+        source: `
+          ${ownerUsesFlow ? "type Palette = {| color: string |};" : ""}
+          import { make } from "./factory.js";
+          export const primary = make({ color: "red" });
+        `,
+        babel: {
+          configFile: false,
+          babelrc: false,
+          presets: [
+            () => ({
+              plugins: [
+                (): PluginObj => ({
+                  manipulateOptions(_options, parser) {
+                    parser.plugins.push("flow");
+                  },
+                  visitor: {
+                    TypeAlias(path) {
+                      visitType();
+                      path.remove();
+                    }
+                  }
+                })
+              ]
+            })
+          ],
+          optimize: { pureFunctions: false },
+          extractCalls: { "./factory.js": ["make"] },
+          staticCssEvalSourceProvider: {
+            resolve: (_importer, specifier) =>
+              specifier === "./factory.js"
+                ? { id: "/virtual/factory.js" }
+                : null,
+            load: (id) =>
+              id === "/virtual/factory.js"
+                ? {
+                    source: `
+                      import { style } from "@vanilla-extract/css";
+                      type Palette = {| color: string |};
+                      export const make = (rule: Palette) => style(rule);
+                    `
+                  }
+                : null
+          }
+        }
+      });
+
+      expect(transformed.result[1]).toContain('color: "red"');
+      expect(transformed.code).not.toContain('color: "red"');
+      expect(transformed.code).not.toContain("type Palette");
+      expect(visitType).toHaveBeenCalledTimes(ownerUsesFlow ? 1 : 0);
+      expect(transformed.staticCssEval?.dependencyFiles).toContain(
+        "/virtual/factory.js"
+      );
+    }
+  );
+
+  it("automatically extracts configured JSX css sources and isolates cached source choices", async ({
+    onTestFinished
+  }) => {
+    const root = await mkdtemp(join(tmpdir(), "mincho-jsx-css-source-"));
+    onTestFinished(() => rm(root, { recursive: true, force: true }));
+    const filename = join(root, "entry.tsx");
+    const source = `export const Button = () => <button css={[{bg: "blue", px: 3}, "rounded"]} />;`;
+    await writeFile(filename, source);
+    const cache = new CompilationCache();
+    const diagnostics = new CompilationDiagnostics({ console: true });
+    const transform = (importSource: string) =>
+      diagnostics.run(filename, "transform", () =>
+        babelTransformSource({
+          filename,
+          root,
+          source,
+          loader: "tsx",
+          babel: {
+            jsxCssProp: { importSource },
+            compilationCache: cache,
+            staticCssEvalSourceProvider: {
+              resolve: () => null,
+              load: () => null
+            }
+          }
+        })
+      );
+
+    const first = await transform("first-preset");
+    const second = await transform("second-preset");
+    const repeated = await transform("first-preset");
+
+    expect(first.result[1]).toContain('from "first-preset"');
+    expect(second.result[1]).toContain('from "second-preset"');
+    expect(first.result[0]).not.toBe(second.result[0]);
+    expect(repeated.result).toEqual(first.result);
+    expect(repeated.code).toEqual(first.code);
+    expect(first.code).not.toContain("first-preset");
+    expect(first.jsxCssPropTransformed).toBe(true);
+    expect(first.result[1]).toContain('"rounded"');
+    expect(
+      diagnostics
+        .snapshot()
+        .builds.flatMap((build) => build.events)
+        .filter((event) => event.phase === "cache-hit")
+    ).toHaveLength(1);
+  });
+
   it.each(["cwd", "root", "default"] as const)(
     "observes a sibling Babel configuration selected through %s",
     async (selection) => {
@@ -152,6 +530,146 @@ describe("babelTransformSource", () => {
     expect(transformed.code).not.toContain("make({");
     expect(transformed.result[1]).toContain("make({");
   });
+
+  it.each([false, true])(
+    "preserves configured Flow syntax before extractCalls with cached parsing=%s",
+    async (cached) => {
+      const transformed = await babelTransformSource({
+        filename: "/virtual/entry.jsx",
+        source: `
+          import { make } from "custom-styles";
+          export type Props = {| color: string |};
+          export const value = make({ color: "red" });
+          export const App = (props: Props) => <div>{props.color}</div>;
+        `,
+        babel: {
+          compilationCache: cached ? new CompilationCache() : undefined,
+          extractCalls: { "custom-styles": ["make"] },
+          parserOpts: { plugins: ["flow"] }
+        }
+      });
+
+      expect(transformed.code).toContain("export type Props = {|");
+      expect(transformed.code).toContain("<div>{props.color}</div>");
+      expect(transformed.code).not.toContain("make({");
+      expect(transformed.result[1]).toContain('color: "red"');
+    }
+  );
+
+  it.each([false, true])(
+    "preserves custom parser plugins before extractCalls with cached parsing=%s",
+    async (cached) => {
+      const transformed = await babelTransformSource({
+        filename,
+        source: `
+          import { make as css } from "custom-styles";
+          export @sealed class View {
+            render(): unknown { return <div />; }
+          }
+          export const value = css({ color: "red" });
+        `,
+        babel: {
+          compilationCache: cached ? new CompilationCache() : undefined,
+          extractCalls: { "custom-styles": ["make"] },
+          parserOpts: {
+            plugins: [["decorators", { decoratorsBeforeExport: false }]]
+          }
+        }
+      });
+
+      expect(transformed.code).toContain("@sealed");
+      expect(transformed.code).toContain("<div />");
+      expect(transformed.code).not.toContain("css({");
+      expect(transformed.result[1]).toContain('color: "red"');
+    }
+  );
+
+  it.each([false, true])(
+    "forwards configured parser plugins to registered extraction dependencies with cached parsing=%s",
+    async (cached) => {
+      const transformed = await babelTransformSource({
+        filename,
+        root: "/virtual",
+        source: `
+          import { make } from "./factory.tsx";
+          export const cls = make({ color: "red" });
+        `,
+        babel: {
+          compilationCache: cached ? new CompilationCache() : undefined,
+          extractCalls: { "./factory.tsx": ["make"] },
+          optimize: { pureFunctions: false },
+          parserOpts: {
+            plugins: [["decorators", { decoratorsBeforeExport: false }]]
+          },
+          staticCssEvalSourceProvider: {
+            resolve: (_importer, specifier) =>
+              specifier === "./factory.tsx"
+                ? { id: "/virtual/factory.tsx" }
+                : null,
+            load: (id) =>
+              id === "/virtual/factory.tsx"
+                ? {
+                    source: `
+                      export @sealed class Factory {
+                        render(): unknown { return <div />; }
+                      }
+                      export const make = (rule) => rule;
+                    `
+                  }
+                : null
+          }
+        }
+      });
+
+      expect(transformed.code).not.toContain("make({");
+      expect(transformed.result[1]).toContain("make({");
+      expect(transformed.result[1]).toContain('color: "red"');
+      expect(transformed.staticCssEval?.dependencyFiles).toContain(
+        "/virtual/factory.tsx"
+      );
+    }
+  );
+
+  it.each([false, true])(
+    "forwards configured parser plugins to pure helper dependencies with cached parsing=%s",
+    async (cached) => {
+      const transformed = await babelTransformSource({
+        filename,
+        source: `
+          import { css } from "@mincho-js/css";
+          import { style } from "/virtual/helper.tsx";
+          export @sealed class View { render() { return <div />; } }
+          export const cls = css(style(2));
+        `,
+        babel: {
+          compilationCache: cached ? new CompilationCache() : undefined,
+          parserOpts: {
+            plugins: [["decorators", { decoratorsBeforeExport: false }]]
+          },
+          staticCssEvalSourceProvider: {
+            resolve: (_importer, specifier) =>
+              specifier === "/virtual/helper.tsx" ? { id: specifier } : null,
+            load: (id) =>
+              id === "/virtual/helper.tsx"
+                ? {
+                    source: `
+                      export @sealed class Helper {
+                        render(): unknown { return <div />; }
+                      }
+                      export const style = (n: number) => ({ padding: n * 4 });
+                    `
+                  }
+                : null
+          }
+        }
+      });
+
+      expect(transformed.result[1]).toContain("padding: 8");
+      expect(transformed.result[1]).not.toContain("style(2)");
+      expect(transformed.code).toContain("@sealed");
+      expect(transformed.code).toContain("<div />");
+    }
+  );
 
   it("matches owner bindings from the separately parsed extraction prepass", async () => {
     const source = `

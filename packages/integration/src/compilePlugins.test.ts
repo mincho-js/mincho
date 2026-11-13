@@ -31,6 +31,57 @@ async function fixture() {
 }
 
 describe("caller loaders in child compilation", () => {
+  it.each([false, true])(
+    "keeps host-resolved entry imports out of dependency-local resolution (dependencyGraph: %s)",
+    async (dependencyGraph) => {
+      const { root } = await fixture();
+      const dependency = join(root, "dependency");
+      const nestedPackage = join(dependency, "node_modules", "shared");
+      const appModule = join(root, "app-shared.ts");
+
+      await fs.mkdir(nestedPackage, { recursive: true });
+      await fs.writeFile(appModule, 'export const value = "app";');
+      await fs.writeFile(
+        join(nestedPackage, "package.json"),
+        '{"name":"shared","main":"index.js"}'
+      );
+      await fs.writeFile(
+        join(nestedPackage, "index.js"),
+        'exports.value = "dependency";'
+      );
+      await fs.writeFile(
+        join(dependency, "index.ts"),
+        'export { value } from "shared";'
+      );
+
+      const compiled = await compile({
+        cwd: root,
+        filePath: join(root, "entry.ts"),
+        originalPath: join(root, "entry.ts"),
+        resolverCache: new Map(),
+        contents: `import { value as app } from "shared";
+        import { value as dependency } from "./dependency/index.ts";
+        export const values = [app, dependency];`,
+        resolvedImports: { shared: appModule },
+        dependencyGraph
+      });
+      const module = { exports: {} as { values: string[] } };
+
+      runInNewContext(compiled.source, {
+        module,
+        exports: module.exports,
+        require(id: string) {
+          if (id === "@vanilla-extract/css/fileScope") return vanillaFileScope;
+          throw new Error(`Unexpected dependency: ${id}`);
+        }
+      });
+
+      expect(module.exports.values).toEqual(["app", "dependency"]);
+      expect(compiled.watchFiles).toContain(appModule);
+      expect(compiled.watchFiles).toContain(join(nestedPackage, "index.js"));
+    }
+  );
+
   it("loads generated dependencies outside a named package", async () => {
     const { root } = await fixture();
     const generated = await fs.mkdtemp(join(tmpdir(), "mincho-generated-"));

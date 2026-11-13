@@ -1,4 +1,4 @@
-import type { NodePath, types as t } from "@babel/core";
+import type { NodePath, TransformOptions, types as t } from "@babel/core";
 import type { SourceAstCache } from "../staticCssEval/moduleParser.js";
 
 /** Additional build-time calls, indexed by import source or root-relative file. */
@@ -8,6 +8,11 @@ export interface PreparedExtractCalls {
   readonly imports: ExtractCalls;
   readonly localBindings: readonly string[];
   readonly requires?: ExtractCalls;
+  /** Positive module identity evidence; unresolved sources are omitted. */
+  readonly resolvedSources?: {
+    readonly import: Readonly<Record<string, string>>;
+    readonly require: Readonly<Record<string, string>>;
+  };
   readonly fingerprint: string;
   readonly protectedFunctions: readonly { start: number; end: number }[];
   readonly dependencies: readonly string[];
@@ -21,6 +26,9 @@ export interface ExtractCallsAnalysisOptions {
   readonly jsx?: boolean;
   readonly program?: NodePath<t.Program>;
   readonly parserCache?: SourceAstCache;
+  readonly parserPlugins?: NonNullable<
+    TransformOptions["parserOpts"]
+  >["plugins"];
 }
 
 export type ExtractCallsRequest =
@@ -35,8 +43,12 @@ export type ExtractCallsAnalysis = Generator<
 export class ExtractCallsError extends Error {
   readonly dependencies: readonly string[];
 
-  constructor(message: string, dependencies: Iterable<string>) {
-    super(message);
+  constructor(
+    message: string,
+    dependencies: Iterable<string>,
+    options?: ErrorOptions
+  ) {
+    super(message, options);
     this.name = "ExtractCallsError";
     this.dependencies = [...dependencies].sort();
   }

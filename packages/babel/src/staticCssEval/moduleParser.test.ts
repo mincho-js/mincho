@@ -5,6 +5,57 @@ import { parseStaticCssModuleProgram, SourceAstCache } from "./moduleParser.js";
 import { STATIC_CSS_MODULE_CACHE_PARSER_OPTIONS } from "./moduleCache.js";
 
 describe("source AST cache", () => {
+  it.each([false, true])(
+    "uses configured parser plugin tuples with cached parsing=%s",
+    (cached) => {
+      const result = parseStaticCssModuleProgram(
+        {
+          resolvedFile: "/decorated.tsx",
+          source:
+            "export @sealed class View { render(): unknown { return <div />; } }",
+          parserOptions: {
+            ...STATIC_CSS_MODULE_CACHE_PARSER_OPTIONS,
+            plugins: [
+              ["decorators", { decoratorsBeforeExport: false }],
+              "jsx",
+              "typescript"
+            ]
+          }
+        },
+        cached ? new SourceAstCache() : undefined
+      );
+
+      expect(result.ast.program.body[0]).toMatchObject({
+        type: "ExportNamedDeclaration",
+        declaration: {
+          type: "ClassDeclaration",
+          decorators: [{ expression: { name: "sealed" } }]
+        }
+      });
+    }
+  );
+
+  it("isolates parser plugin options in the AST cache", () => {
+    const hits: boolean[] = [];
+    const cache = new SourceAstCache((hit) => hits.push(hit));
+    const parse = (disallowAmbiguousJSXLike: boolean) =>
+      cache.parse({
+        resolvedFile: "/generic.ts",
+        source: "export const identity = <T>(value: T) => value;",
+        parserOptions: {
+          sourceType: "unambiguous",
+          jsx: false,
+          typescript: true,
+          plugins: [["typescript", { disallowAmbiguousJSXLike }]]
+        }
+      });
+
+    expect(parse(false).program.body).toHaveLength(1);
+    expect(() => parse(true)).toThrow("reserved in files with the .mts");
+    expect(parse(false).program.body).toHaveLength(1);
+    expect(hits).toEqual([false, false, true]);
+  });
+
   it("reparses large modules without retaining or cloning their ASTs", () => {
     const hits: boolean[] = [];
     const cache = new SourceAstCache((hit) => hits.push(hit));

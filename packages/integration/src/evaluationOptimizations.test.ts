@@ -1,4 +1,11 @@
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  symlink,
+  writeFile
+} from "node:fs/promises";
 import { join, relative } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import esbuild, { type PluginBuild } from "esbuild";
@@ -94,6 +101,56 @@ function diagnosticEvents(diagnostics: CompilationDiagnostics) {
 }
 
 describe("closed ESM evaluation demand", () => {
+  it.each([
+    ["TypeScript entry", "export const color: string = palette.red;", ""],
+    [
+      "JSX entry",
+      "export const view = <div style={{color: palette.red}} />;",
+      ""
+    ],
+    ["TypeScript dependency", "export const color = palette.red;", " as const"]
+  ])(
+    "preserves dependency slicing for %s with a cold and warm parser cache",
+    async (_name, entry, tokenSuffix) => {
+      const { root, options } = await fixture(
+        `import {palette} from './tokens'; ${entry}`,
+        {
+          "tokens.ts": `export const palette = {red: 'red', unused: 'UNUSED_PARSER_MEMBER'}${tokenSuffix};`
+        }
+      );
+      const tokens = join(root, "tokens.ts");
+      const input = {
+        source: options.contents,
+        filePath: options.filePath,
+        cwd: root,
+        build: {
+          resolve: async () => ({
+            path: tokens,
+            namespace: "file",
+            errors: []
+          })
+        } as unknown as PluginBuild,
+        readFile: (file: string) => readFile(file, "utf8")
+      };
+      const baseline = await prepareEvaluationDependencyGraph(input);
+      const cache = new CompilationCache();
+
+      expect(baseline?.sources.get(tokens)).toContain("red: 'red'");
+      expect(baseline?.sources.get(tokens)).not.toContain(
+        "UNUSED_PARSER_MEMBER"
+      );
+
+      for (const attempt of ["cold", "warm"]) {
+        const cached = await prepareEvaluationDependencyGraph({
+          ...input,
+          parser: cache.parser
+        });
+
+        expect(cached, attempt).toEqual(baseline);
+      }
+    }
+  );
+
   it("preserves identifiers and slices dependencies through a symlinked workspace", async () => {
     const { root, options } = await fixture(
       `import {style} from '@vanilla-extract/css'; import {palette} from './tokens'; export const box=style({color:palette.red});`,
@@ -210,6 +267,27 @@ describe("closed ESM evaluation demand", () => {
         (event) => event.phase === "dependency-graph-scope-skip"
       )
     ).toBe(true);
+    expect(await evaluate(optimized.source, options.filePath)).toEqual(
+      await evaluate(baseline.source, options.filePath)
+    );
+  });
+
+  it("unions entry import overrides with relative imports during dependency slicing", async () => {
+    const { root, options } = await fixture(
+      `import {style} from '@vanilla-extract/css'; import {color} from 'theme'; import {spacing} from './tokens'; export const box=style({color,padding:spacing});`,
+      {
+        "tokens.ts": `export const color='red'; export const spacing=4; export const unused='UNUSED_OVERRIDE_EXPORT';`
+      }
+    );
+    const resolvedImports = { theme: join(root, "tokens.ts") };
+    const baseline = await compile({ ...options, resolvedImports });
+    const optimized = await compile({
+      ...options,
+      resolvedImports,
+      dependencyGraph: true
+    });
+
+    expect(optimized.source).not.toContain("UNUSED_OVERRIDE_EXPORT");
     expect(await evaluate(optimized.source, options.filePath)).toEqual(
       await evaluate(baseline.source, options.filePath)
     );
@@ -460,6 +538,38 @@ describe("closed ESM evaluation demand", () => {
 });
 
 describe("intrinsic literal static styles", () => {
+  it.each(["alias", "resolvedImports"] as const)(
+    "honors %s overrides before the static-style shortcut",
+    async (override) => {
+      const module =
+        override === "alias" ? "@mincho-js/css" : "@vanilla-extract/css";
+      const intrinsic = override === "alias" ? "css" : "style";
+      const { root, options } = await fixture(
+        `import {${intrinsic} as style} from '${module}'; export const box=style({color:'red'});`,
+        {
+          "replacement.ts": `export function ${intrinsic}() { return "redirected-style"; }`
+        }
+      );
+      const redirected = {
+        ...options,
+        [override]: {
+          [module]: join(root, "replacement.ts")
+        }
+      };
+      const baseline = await compile(redirected);
+      const optimized = await compile({ ...redirected, staticStyles: true });
+
+      expect(readStaticStyleProgram(optimized.source)).toBeUndefined();
+      expect(await evaluate(optimized.source, options.filePath, true)).toEqual(
+        await evaluate(baseline.source, options.filePath)
+      );
+      expect(optimized.watchFiles).toContain(join(root, "replacement.ts"));
+      expect(
+        (await evaluate(optimized.source, options.filePath)).exports
+      ).toContain("redirected-style");
+    }
+  );
+
   it("bypasses intrinsic proof for rules-only sources and preserves ordinary output", async () => {
     const { options } = await fixture(
       `import {rules as makeRules} from '@mincho-js/css'; export const box=makeRules({base:{color:'red'}});`

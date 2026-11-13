@@ -92,7 +92,7 @@ export interface MinchoEsbuildPluginOptions {
   bundleSize?: BabelOptions["bundleSize"];
   optimize?: BabelOptions["optimize"];
   includeNodeModulesPattern?: RegExp;
-  jsxCssProp?: boolean;
+  jsxCssProp?: BabelOptions["jsxCssProp"];
 
   /** Additional build-time calls; local files are relative to absWorkingDir. */
   extractCalls?: BabelOptions["extractCalls"];
@@ -366,6 +366,7 @@ export function minchoEsbuildPlugin({
           externals: [],
           cwd: build.initialOptions.absWorkingDir,
           loader: assets.getCompileLoaders(),
+          alias: build.initialOptions.alias,
           plugins: [assetBridge.plugin],
           cacheBridge: assetBridge.cacheBridge,
           cache: compilationCache,

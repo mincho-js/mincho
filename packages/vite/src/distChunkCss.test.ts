@@ -1878,9 +1878,10 @@ describe("chunk-stage Mincho CSS generation", () => {
     const chunk = await compile(root, {}, config);
     const svg = chunk.output.find((i) => i.fileName.endsWith(".svg"))!;
 
-    expect(chunk.text.replace(`/${svg.fileName}`, "./icon.svg")).toBe(
-      native.text
-    );
+    const nativeSvg = native.output.find((i) => i.fileName.endsWith(".svg"));
+    expect(nativeSvg).toBeDefined();
+    expect(native.text).toContain(`/${nativeSvg!.fileName}`);
+    expect(chunk.text).toBe(native.text);
     expect(chunk.text.indexOf("color: red")).toBeLessThan(
       chunk.text.indexOf("color: purple")
     );

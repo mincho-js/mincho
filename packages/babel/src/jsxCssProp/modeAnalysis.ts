@@ -18,6 +18,7 @@ type AnalysisBinding = NonNullable<ReturnType<AnalysisScope["getBinding"]>>;
 
 export function analyzeCssPropSidecarHoistability(options: {
   readonly expression: t.Expression;
+  readonly path?: NodePath<t.Expression>;
   readonly reducedExpression?: t.Expression;
   readonly scope: AnalysisScope;
 }): CssPropSidecarHoistability {
@@ -61,6 +62,7 @@ export function analyzeCssPropSidecarHoistability(options: {
       ? reducedExpression
       : options.expression,
     rawExpression: options.expression,
+    path: options.path,
     state: {
       scope: options.scope,
       visiting: new Set(),

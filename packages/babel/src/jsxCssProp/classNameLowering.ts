@@ -3,6 +3,7 @@ import type { NodePath } from "@babel/core";
 import { unwrapTransparentCssRuleExpression } from "../staticCssEval/candidates.js";
 import type { ProgramScope } from "../types.js";
 import { registerImportMethod } from "../utils.js";
+import { cssPropImportSource } from "./options.js";
 import {
   canEmitCssClassNameDirectly,
   isArrayClassValueExpression,
@@ -17,8 +18,7 @@ import {
 } from "./classification.js";
 import {
   classNameValueErrorMessage,
-  cssModuleHelperImportCleanupScopes,
-  cssModuleName
+  cssModuleHelperImportCleanupScopes
 } from "./constants.js";
 import { shouldCleanupCssModuleHelperImports } from "./metadata.js";
 import type {
@@ -405,7 +405,11 @@ export function createCssRuleClassNameExpression(
   path: NodePath<t.JSXOpeningElement>,
   cssExpression: t.Expression
 ): t.Expression {
-  const cssIdentifier = registerImportMethod(path, "css", cssModuleName);
+  const cssIdentifier = registerImportMethod(
+    path,
+    "css",
+    cssPropImportSource(path.scope)
+  );
   const cssRuleExpression = unwrapTransparentCssRuleExpression(cssExpression);
 
   return t.callExpression(cssIdentifier, [t.cloneNode(cssRuleExpression)]);

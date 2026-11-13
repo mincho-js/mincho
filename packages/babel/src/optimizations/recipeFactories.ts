@@ -1,3 +1,36 @@
+export const recipeRuntimeFactories = [
+  {
+    source: "@mincho-js/css/rules/createRuntimeFn",
+    name: "createRuntimeFn",
+    full: true,
+    compiled: false,
+    packed: false
+  },
+  {
+    source: "@mincho-js/css/rules/createRuntimeFn",
+    name: "createCompiledRuntimeFn",
+    full: true,
+    compiled: true,
+    packed: false
+  },
+  {
+    source: "@mincho-js/css/rules/createClassRuntimeFn",
+    name: "createCompiledClassRuntimeFn",
+    full: false,
+    compiled: true,
+    packed: false
+  },
+  ...["Compact", "Packed", "PackedCompact"].flatMap((stem) =>
+    [false, true].map((classOnly) => ({
+      source: `@mincho-js/css/rules/create${stem}RuntimeFn`,
+      name: `create${stem}${classOnly ? "Class" : ""}RuntimeFn`,
+      full: !classOnly,
+      compiled: true,
+      packed: stem.startsWith("Packed")
+    }))
+  )
+];
+
 export function recipeFactoryKind(
   factory:
     | { source: string; members: readonly (string | null)[]; unsafe?: string }
@@ -11,32 +44,12 @@ export function recipeFactoryKind(
   )
     return;
   const name = factory.members.join(".");
-  if (
-    factory.source === "@mincho-js/css/rules/createRuntimeFn" &&
-    ["createRuntimeFn", "createCompiledRuntimeFn"].includes(name)
-  )
-    return {
-      full: true,
-      compiled: name === "createCompiledRuntimeFn",
-      packed: false
-    };
-  if (
-    factory.source === "@mincho-js/css/rules/createClassRuntimeFn" &&
-    name === "createCompiledClassRuntimeFn"
-  )
-    return { full: false, compiled: true, packed: false };
-  for (const stem of ["Compact", "Packed", "PackedCompact"]) {
-    if (factory.source !== `@mincho-js/css/rules/create${stem}RuntimeFn`)
-      continue;
-    if (
-      [`create${stem}RuntimeFn`, `create${stem}ClassRuntimeFn`].includes(name)
-    )
-      return {
-        full: name === `create${stem}RuntimeFn`,
-        compiled: true,
-        packed: stem.startsWith("Packed")
-      };
-  }
+  const match = recipeRuntimeFactories.find(
+    (entry) => entry.source === factory.source && entry.name === name
+  );
+  if (!match) return;
+  const { full, compiled, packed } = match;
+  return { full, compiled, packed };
 }
 
 /** Decode only validated compiler data, with a finite budget and no user calls. */

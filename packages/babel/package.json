@@ -61,6 +61,7 @@
     "@emotion/hash": "catalog:",
     "@mincho-js/css": "workspace:^",
     "@mincho-js/transform-runtime": "workspace:^",
+    "@mincho-js/transform-to-vanilla": "workspace:^",
     "@types/babel__core": "catalog:",
     "@types/babel__traverse": "catalog:"
   },
