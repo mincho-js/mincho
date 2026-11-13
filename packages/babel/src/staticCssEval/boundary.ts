@@ -48,6 +48,8 @@ export interface CreateStaticCssEvalDependencyMetadataOptions extends StaticCssE
 }
 
 export interface StaticCssEvalProviderSourcePolicyDescriptor {
+  /** Source file displayed in results, distinct from an internal graph variant. */
+  readonly resolvedFile?: string;
   readonly sourceKind?: StaticCssEvalSourceKind;
   readonly sourceOrigin?: StaticCssEvalSourceOrigin;
   readonly canonicalModuleId?: string;

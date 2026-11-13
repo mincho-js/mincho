@@ -28,6 +28,7 @@ export function babelTransform(
       | "staticCssEvalProvider"
       | "optimize"
       | "extractCalls"
+      | "preparedExtractCalls"
       | "experimental"
     >
   > = {},

@@ -43,7 +43,7 @@ import type {
 import { mapValues, transformVariantSelection } from "./utils.js";
 
 // == Rules ====================================================================
-export const rules = Object.assign(rulesImpl, {
+export const rules = /* @__PURE__ */ Object.assign(rulesImpl, {
   extends: rulesExtends,
   multiple: rulesMultiple,
   raw: rulesRaw,

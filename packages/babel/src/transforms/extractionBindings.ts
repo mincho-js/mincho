@@ -1,14 +1,16 @@
 import { types as t } from "@babel/core";
 import type { NodePath } from "@babel/core";
 import type { Binding } from "@babel/traverse";
+import { getConfidentlyExecutedBranches } from "../jsxCssProp/sidecarSafety.js";
 import type { ProgramScope } from "../types.js";
 
 interface ExtractionBindings {
-  visiting: Set<t.Node>;
   completed: Set<t.Node>;
   names: Map<Binding, string>;
   owners: Map<string, Binding>;
   references: WeakMap<t.Identifier, Binding>;
+  extractedReferences: WeakSet<t.Node>;
+  executedBranches: WeakMap<t.Node, readonly string[]>;
 }
 
 const extractionBindings = new WeakMap<
@@ -21,11 +23,12 @@ function getState(program: ProgramScope): ExtractionBindings {
 
   if (!state) {
     state = {
-      visiting: new Set(),
       completed: new Set(),
       names: new Map(),
       owners: new Map(),
-      references: new WeakMap()
+      references: new WeakMap(),
+      extractedReferences: new WeakSet(),
+      executedBranches: new WeakMap()
     };
     extractionBindings.set(program.minchoData, state);
   }
@@ -50,14 +53,42 @@ function isInside(path: NodePath<t.Node>, root: NodePath<t.Node>): boolean {
   return path === root || Boolean(path.findParent((parent) => parent === root));
 }
 
+/** A captured declaration must execute in the same enclosing branch as its use. */
+function sharesExecutionContext(
+  declaration: NodePath<t.Node>,
+  use: NodePath<t.Node>
+): boolean {
+  for (
+    let child = declaration, parent = child.parentPath;
+    parent;
+    child = parent, parent = parent.parentPath
+  ) {
+    if (
+      (parent.isFunction() ||
+        parent.isIfStatement() ||
+        parent.isLoop() ||
+        parent.isSwitchStatement() ||
+        parent.isTryStatement() ||
+        parent.isCatchClause() ||
+        parent.isWithStatement() ||
+        parent.isStaticBlock()) &&
+      !isInside(use, child)
+    )
+      return false;
+  }
+  return true;
+}
+
 function recordReferences(
   path: NodePath<t.Node>,
-  state: ExtractionBindings
+  state: ExtractionBindings,
+  extracted = false
 ): void {
   const record = (identifier: NodePath<t.Identifier>) => {
     const referenced = identifier.isReferencedIdentifier();
     const declared = identifier.isBindingIdentifier();
     if (!referenced && !declared) return;
+    if (extracted && referenced) state.extractedReferences.add(identifier.node);
 
     const binding = identifier.scope.getBinding(identifier.node.name);
 
@@ -69,93 +100,152 @@ function recordReferences(
   path.traverse({ Identifier: record });
 }
 
-/** Collect declarations by lexical binding, retaining nested locals in their owner. */
-export function collectExtractionBindings(path: NodePath<t.Node>): t.Node[] {
+function visitExecutedReferences(
+  path: NodePath<t.Node>,
+  executedBranches: Pick<Map<t.Node, readonly string[]>, "set">,
+  visit: (reference: NodePath<t.Identifier | t.JSXIdentifier>) => void
+): void {
+  const branches = path.isExpression()
+    ? getConfidentlyExecutedBranches(path)
+    : undefined;
+
+  if (branches) {
+    executedBranches.set(
+      path.node,
+      branches.map((branch) => String(branch.key))
+    );
+    for (const branch of branches)
+      visitExecutedReferences(branch, executedBranches, visit);
+
+    return;
+  }
+
+  if (path.isReferencedIdentifier()) visit(path);
+
+  path.traverse({
+    "ConditionalExpression|LogicalExpression"(inner) {
+      visitExecutedReferences(inner, executedBranches, visit);
+      inner.skip();
+    },
+    ReferencedIdentifier: visit
+  });
+}
+
+export function planExtractionBindings(
+  path: NodePath<t.Node>,
+  completed: ReadonlySet<t.Node> = new Set()
+) {
   const program = path.scope.getProgramParent() as ProgramScope;
-  const state = getState(program);
-  const nodes: t.Node[] = [];
-
-  for (const binding of program.minchoData.bindings)
-    state.completed.add(getRoot(binding).node);
-
-  const registerName = (binding: Binding) => {
-    if (state.names.has(binding)) return;
-
-    const originalName = binding.identifier.name;
-    const owner = state.owners.get(originalName);
-    const name =
-      owner && owner !== binding
-        ? program.generateUidIdentifier(originalName).name
-        : originalName;
-
-    state.owners.set(name, binding);
-    state.names.set(binding, name);
-  };
-
+  const visited = new Set<t.Node>();
+  const declarations: Array<{ binding: Binding; root: NodePath<t.Node> }> = [];
+  const bindings: Binding[] = [];
+  const branches = new Map<t.Node, readonly string[]>();
+  let runtimeBinding: Binding | undefined;
   const collect = (binding: Binding) => {
     const root = getRoot(binding.path);
-    if (!root.isStatement())
-      throw path.buildCodeFrameError(
-        `Cannot extract a call that captures runtime binding ${binding.identifier.name}. Register the local factory with extractCalls or use mincho-js-ignore.`
-      );
-    if (state.completed.has(root.node) || state.visiting.has(root.node)) return;
-
-    // Imports from this sidecar already have a matching generated local alias.
     if (
-      root.isImportDeclaration() &&
-      root.node.source.value === program.minchoData.cssFile
+      !root.isStatement() ||
+      !sharesExecutionContext(root, path) ||
+      (binding.path.isVariableDeclarator() &&
+        path.getFunctionParent() === binding.path.getFunctionParent() &&
+        binding.path.node.end != null &&
+        path.node.start != null &&
+        binding.path.node.end > path.node.start)
+    ) {
+      runtimeBinding ??= binding;
+      return;
+    }
+    if (completed.has(root.node) || visited.has(root.node)) return;
+
+    // Generated imports already have a local alias in this sidecar. Their
+    // declarations can be ESM imports or CommonJS require projections; copying
+    // either would make the sidecar depend on itself.
+    if (
+      [...program.minchoData.imports].some(
+        ([key, identifier]) =>
+          key.startsWith(`${program.minchoData.cssFile}:`) &&
+          identifier.name === binding.identifier.name &&
+          program.getBinding(identifier.name) === binding
+      )
     )
       return;
 
-    state.visiting.add(root.node);
-    registerName(binding);
+    visited.add(root.node);
+    bindings.push(binding);
 
     for (const identifier of Object.values(
       t.getOuterBindingIdentifiers(root.node)
     )) {
       const declared = root.scope.getBinding(identifier.name);
 
-      if (declared && isInside(declared.path, root)) registerName(declared);
+      if (declared && isInside(declared.path, root)) bindings.push(declared);
     }
 
-    recordReferences(root, state);
-    root.traverse({
-      ReferencedIdentifier(reference) {
-        const dependency = reference.scope.getBinding(reference.node.name);
+    visitExecutedReferences(root, branches, (reference) => {
+      const dependency = reference.scope.getBinding(reference.node.name);
 
-        if (dependency && !isInside(dependency.path, root)) collect(dependency);
-      }
+      if (dependency && !isInside(dependency.path, root)) collect(dependency);
     });
-    state.visiting.delete(root.node);
+    declarations.push({ binding, root });
+  };
+  visitExecutedReferences(path, branches, (reference) => {
+    const binding = reference.scope.getBinding(reference.node.name);
+
+    if (binding && !isInside(binding.path, path)) collect(binding);
+  });
+  return { declarations, bindings, branches, runtimeBinding };
+}
+
+/** Babel bindings retain reference paths after their owning call is replaced. */
+export function isExtractedReference(path: NodePath<t.Node>): boolean {
+  const program = path.scope.getProgramParent() as ProgramScope;
+  return getState(program).extractedReferences.has(path.node);
+}
+
+/** Validate a future sidecar owner without committing names or declarations. */
+export function hasExtractableBindings(path: NodePath<t.Node>): boolean {
+  return planExtractionBindings(path).runtimeBinding === undefined;
+}
+
+/** Collect declarations by lexical binding, retaining nested locals in their owner. */
+export function collectExtractionBindings(path: NodePath<t.Node>): t.Node[] {
+  const program = path.scope.getProgramParent() as ProgramScope;
+  const state = getState(program);
+  for (const binding of program.minchoData.bindings)
+    state.completed.add(getRoot(binding).node);
+  const plan = planExtractionBindings(path, state.completed);
+  if (plan.runtimeBinding)
+    throw path.buildCodeFrameError(
+      `Cannot extract a call that captures runtime binding ${plan.runtimeBinding.identifier.name}. Register the local factory with extractCalls or use mincho-js-ignore.`
+    );
+
+  for (const binding of plan.bindings) {
+    if (state.names.has(binding)) continue;
+    const originalName = binding.identifier.name;
+    const owner = state.owners.get(originalName);
+    const name =
+      owner && owner !== binding
+        ? program.generateUidIdentifier(originalName).name
+        : originalName;
+    state.owners.set(name, binding);
+    state.names.set(binding, name);
+  }
+  for (const [node, branches] of plan.branches)
+    state.executedBranches.set(node, branches);
+  recordReferences(path, state, path.isCallExpression());
+  for (const { binding, root } of plan.declarations) {
+    recordReferences(root, state);
     state.completed.add(root.node);
     program.minchoData.bindings.push(binding.path);
-    nodes.push(root.node);
-  };
-
-  recordReferences(path, state);
-
-  if (path.isReferencedIdentifier()) {
-    const binding = path.scope.getBinding(path.node.name);
-
-    if (binding) collect(binding);
   }
-
-  path.traverse({
-    ReferencedIdentifier(reference) {
-      const binding = reference.scope.getBinding(reference.node.name);
-
-      if (binding && !isInside(binding.path, path)) collect(binding);
-    }
-  });
-
-  return nodes;
+  return plan.declarations.map(({ root }) => root.node);
 }
 
 /** Rename only sidecar clones, after other visitors finish rewriting source nodes. */
 export function cloneExtractionNodes(program: ProgramScope): t.Statement[] {
   const state = getState(program);
 
-  const rename = (source: t.Node, clone: t.Node) => {
+  const rename = (source: t.Node, clone: t.Node): t.Node => {
     if (t.isIdentifier(source) && t.isIdentifier(clone)) {
       const binding = state.references.get(source);
 
@@ -173,7 +263,8 @@ export function cloneExtractionNodes(program: ProgramScope): t.Statement[] {
 
       if (Array.isArray(original) && Array.isArray(copied)) {
         original.forEach((node, index) => {
-          if (node && copied[index]) rename(node, copied[index]);
+          if (node && copied[index])
+            copied[index] = rename(node, copied[index]);
         });
       } else if (
         original &&
@@ -181,15 +272,71 @@ export function cloneExtractionNodes(program: ProgramScope): t.Statement[] {
         !Array.isArray(original) &&
         !Array.isArray(copied)
       ) {
-        rename(original, copied);
+        (clone as unknown as Record<string, t.Node>)[key] = rename(
+          original,
+          copied
+        );
       }
     }
+
+    const branches = state.executedBranches.get(source);
+    if (branches) {
+      const expressions = branches.map(
+        (key) => (clone as unknown as Record<string, t.Expression>)[key]!
+      );
+
+      // Retain test/left evaluation, but never emit uncollected dead references.
+      return expressions.length === 1
+        ? t.sequenceExpression([t.numericLiteral(0), expressions[0]!])
+        : t.sequenceExpression(expressions);
+    }
+
+    return clone;
   };
 
-  return program.minchoData.nodes.map((node) => {
-    const clone = t.cloneNode(node, true);
-    rename(node, clone);
+  const nodes = program.minchoData.nodes.flatMap((node) => {
+    if (!t.isVariableDeclaration(node) || node.declarations.length === 1)
+      return [node];
 
-    return clone as t.Statement;
+    return node.declarations.map((declaration) => {
+      const statement = t.variableDeclaration(node.kind, [declaration]);
+
+      statement.start = declaration.start;
+      statement.end = declaration.end;
+      return statement;
+    });
+  });
+
+  for (const node of [...nodes]) {
+    if (
+      (!t.isVariableDeclaration(node) && !t.isClassDeclaration(node)) ||
+      node.end == null
+    )
+      continue;
+
+    const end = node.end;
+    const current = nodes.indexOf(node);
+    const before = nodes.findIndex(
+      (candidate, index) =>
+        index < current &&
+        t.isExportNamedDeclaration(candidate) &&
+        t.isVariableDeclaration(candidate.declaration) &&
+        candidate.declaration.declarations.some(
+          ({ init }) =>
+            t.isCallExpression(init) && init.start != null && end <= init.start
+        )
+    );
+
+    if (before < 0) continue;
+
+    // A dependency first needed by a later call still observes the state
+    // from its original declaration, before any intervening extraction call.
+    nodes.splice(current, 1);
+    nodes.splice(before, 0, node);
+  }
+
+  return nodes.map((node) => {
+    const clone = t.cloneNode(node, true);
+    return rename(node, clone) as t.Statement;
   });
 }

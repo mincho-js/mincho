@@ -117,6 +117,8 @@ export interface ImportedStaticCssEvalResolvedImport {
 
 export interface ImportedStaticCssEvalResolutionState {
   owner: StaticCssEvalSourceLocation;
+  /** Keep graph identities through evaluation; project files at the result boundary. */
+  sourceFiles?: ReadonlyMap<string, string>;
   dependencies: Map<string, ResolutionDependency>;
   resolutionChain: ResolutionChainEntry[];
   stack: StaticCssEvalImportCycleKey[];
@@ -176,6 +178,7 @@ export interface ImportedStaticCssEvalImportResolution extends StaticCssEvalProv
 }
 
 export interface ImportedStaticCssEvalModuleRecord extends StaticCssEvalModuleRecord {
+  readonly resolvedFile?: string;
   source: string;
   imports: ReadonlyMap<string, ImportedStaticCssEvalImportBinding>;
   cjsImports: ReadonlyMap<string, ImportedStaticCssEvalCjsBinding>;

@@ -1,6 +1,7 @@
 import {
   mkdir,
   mkdtemp,
+  readdir,
   writeFile,
   rm,
   realpath,
@@ -9,13 +10,445 @@ import {
 } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
 import esbuild from "esbuild";
+import type { TransformOptions } from "@babel/core";
 import { compile } from "./compile.js";
 import { CompilationCache } from "./compilationCache.js";
 import { CompilationDiagnostics } from "./diagnostics.js";
 
 describe("sidecar compilation cache", () => {
+  it("invalidates scoped dependencies when configured parser plugins change", async () => {
+    const root = await realpath(
+      await mkdtemp(join(tmpdir(), "compile-parser-"))
+    );
+    const cwd = vi.spyOn(process, "cwd").mockReturnValue(root);
+    onTestFinished(async () => {
+      cwd.mockRestore();
+      await rm(root, { recursive: true, force: true });
+    });
+    await writeFile(
+      join(root, "package.json"),
+      '{"name":"compile-parser-fixture"}'
+    );
+    await writeFile(
+      join(root, "dependency.ts"),
+      `
+      const sealed = (value: unknown) => value;
+      export @sealed class Factory {}
+    `
+    );
+    const build = vi.fn(esbuild.build);
+    const options = {
+      cache: new CompilationCache(),
+      esbuild: { ...esbuild, build },
+      cwd: root,
+      filePath: join(root, "entry.css.ts"),
+      originalPath: join(root, "entry.ts"),
+      contents: 'export { Factory } from "./dependency.ts";',
+      resolverCache: new Map<string, string>(),
+      parserPlugins: [
+        ["decorators", { decoratorsBeforeExport: false }]
+      ] as NonNullable<TransformOptions["parserOpts"]>["plugins"]
+    };
+
+    await compile({ ...options, resolverCache: new Map() });
+    await compile({ ...options, resolverCache: new Map() });
+    expect(build).toHaveBeenCalledTimes(1);
+    await expect(
+      compile({ ...options, resolverCache: new Map(), parserPlugins: [] })
+    ).rejects.toThrow(/decorators/);
+    expect(build).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(["alias", "resolvedImports"] as const)(
+    "resolves authoring source %s and invalidates changed targets",
+    async (resolution) => {
+      const root = await mkdtemp(join(tmpdir(), "compile-alias-"));
+      onTestFinished(() => rm(root, { recursive: true, force: true }));
+      await writeFile(
+        join(root, "package.json"),
+        '{"name":"compile-alias-fixture"}'
+      );
+      for (const color of ["red", "blue"])
+        await writeFile(
+          join(root, `${color}.ts`),
+          `export const color = "${color}";`
+        );
+      const build = vi.fn(esbuild.build);
+      const options = {
+        cache: new CompilationCache(),
+        esbuild: { ...esbuild, build },
+        originalPath: join(root, "owner.ts"),
+        filePath: join(root, "owner.css.ts"),
+        cwd: root,
+        contents: 'export { color } from "test-preset";',
+        resolverCache: new Map<string, string>()
+      };
+      const run = (color: string) =>
+        compile({
+          ...options,
+          [resolution]: { "test-preset": join(root, `${color}.ts`) }
+        });
+
+      expect((await run("red")).source).toContain('"red"');
+      expect((await run("blue")).source).toContain('"blue"');
+      expect((await run("red")).source).toContain('"red"');
+      expect(build).toHaveBeenCalledTimes(2);
+    }
+  );
+
+  it.each([
+    { target: "package", persistent: false },
+    { target: "package", persistent: true },
+    { target: "scoped-package-subpath", persistent: false },
+    { target: "directory-subpath", persistent: false },
+    { target: "directory-subpath", persistent: true },
+    { target: "package-import", persistent: false },
+    { target: "package-import", persistent: true },
+    { target: "relative-path", persistent: true }
+  ] as const)(
+    "follows retargeted $target resolutions with persistent cache $persistent",
+    async ({ target, persistent }) => {
+      const root = await realpath(
+        await mkdtemp(join(tmpdir(), "cache-package-alias-"))
+      );
+      const cwd = vi.spyOn(process, "cwd").mockReturnValue(root);
+      onTestFinished(async () => {
+        cwd.mockRestore();
+        await rm(root, { recursive: true, force: true });
+      });
+      await writeFile(
+        join(root, "package.json"),
+        '{"name":"package-alias-test"}'
+      );
+      const scoped = target === "scoped-package-subpath";
+      const directory = target === "directory-subpath";
+      const packageName = scoped ? "@fixture/theme-tokens" : "theme-tokens";
+      await mkdir(join(root, "node_modules", ...(scoped ? ["@fixture"] : [])), {
+        recursive: true
+      });
+      if (directory) await mkdir(join(root, "alias-root"));
+      for (const color of ["red", "blue"]) {
+        await mkdir(join(root, color));
+        await writeFile(
+          join(root, color, "package.json"),
+          JSON.stringify({
+            name: packageName,
+            exports: { ".": "./tokens.ts", "./tokens": "./tokens.ts" }
+          })
+        );
+        await writeFile(
+          join(root, color, "tokens.ts"),
+          `export const color = "${color}";`
+        );
+      }
+      const link = directory
+        ? join(root, "alias-root", "current")
+        : join(root, "node_modules", packageName);
+      await symlink(join(root, "red"), link, "dir");
+      const cacheDirectory = join(root, "cache");
+      const createCache = () => {
+        const cache = new CompilationCache();
+        if (persistent)
+          cache.configure(undefined, cacheDirectory, "alias-test");
+        return cache;
+      };
+      const cache = createCache();
+      const build = vi.fn(esbuild.build);
+      const diagnostics = new CompilationDiagnostics({ json: "unused.json" });
+      const options = {
+        cache,
+        esbuild: { ...esbuild, build },
+        originalPath: join(root, "owner.ts"),
+        filePath: join(root, "owner.css.ts"),
+        cwd: root,
+        contents: `export { color } from "${target === "package-import" ? packageName : directory ? "preset/current/tokens.ts" : "preset"}";`,
+        alias:
+          target === "package-import"
+            ? undefined
+            : {
+                preset: directory
+                  ? "./alias-root"
+                  : target === "relative-path"
+                    ? "./node_modules/theme-tokens/tokens.ts"
+                    : scoped
+                      ? `${packageName}/tokens`
+                      : packageName
+              },
+        resolverCache: new Map<string, string>()
+      };
+      const run = () =>
+        diagnostics.run(options.filePath, "package-alias", () =>
+          compile({ ...options, cache: persistent ? createCache() : cache })
+        );
+
+      expect((await run()).source).toContain('"red"');
+      expect((await run()).source).toContain('"red"');
+      // Old physical files, source and alias text remain unchanged. A fresh
+      // cache instance also exercises the previous persistent manifest.
+      await unlink(link);
+      await symlink(join(root, "blue"), link, "dir");
+      expect((await run()).source).toContain('"blue"');
+      expect((await run()).source).toContain('"blue"');
+
+      // Exact resolution proofs retain warm hits for every supported shape.
+      expect(build).toHaveBeenCalledTimes(2);
+      const bypasses = diagnostics
+        .snapshot()
+        .builds.flatMap((entry) => entry.events)
+        .filter(
+          (entry) =>
+            entry.phase === "cache-bypass" &&
+            (entry.detail as { reason?: string })?.reason ===
+              "unverifiable-resolution"
+        );
+      expect(bypasses).toHaveLength(0);
+      if (persistent)
+        expect((await readdir(cacheDirectory)).length).toBeGreaterThan(0);
+    }
+  );
+
+  it.each([
+    { option: "alias", target: "absolute-file" },
+    { option: "alias", target: "relative-file" },
+    { option: "alias", target: "absolute-directory" },
+    { option: "alias", target: "relative-directory" },
+    { option: "resolvedImports", target: "absolute-file" }
+  ] as const)(
+    "invalidates $option when its $target symlink changes target",
+    async ({ option, target }) => {
+      const root = await realpath(
+        await mkdtemp(join(tmpdir(), "cache-alias-retarget-"))
+      );
+
+      // Keep Babel's cwd fingerprint independent of sibling test fixtures.
+      const cwd = vi.spyOn(process, "cwd").mockReturnValue(root);
+      onTestFinished(async () => {
+        cwd.mockRestore();
+        await rm(root, { recursive: true, force: true });
+      });
+
+      await writeFile(
+        join(root, "package.json"),
+        '{"name":"alias-retarget-test"}'
+      );
+      await mkdir(join(root, "app"));
+      for (const color of ["red", "blue"]) {
+        await mkdir(join(root, color));
+        await writeFile(
+          join(root, color, "tokens.ts"),
+          `export const color = "${color}";`
+        );
+      }
+
+      const link = join(root, "current");
+      await symlink(join(root, "red"), link, "dir");
+
+      const directory = target.endsWith("directory");
+      const replacement = directory ? "current" : "current/tokens.ts";
+      const build = vi.fn(esbuild.build);
+      const options = {
+        cache: new CompilationCache(),
+        esbuild: { ...esbuild, build },
+        originalPath: join(root, "app", "owner.ts"),
+        filePath: join(root, "app", "owner.css.ts"),
+        cwd: root,
+        contents: `export { color } from "${directory ? "preset/tokens" : "preset"}";`,
+        [option]: {
+          preset: target.startsWith("relative")
+            ? `./${replacement}`
+            : join(root, replacement)
+        },
+        resolverCache: new Map<string, string>()
+      };
+
+      expect((await compile(options)).source).toContain('"red"');
+      expect((await compile(options)).source).toContain('"red"');
+      expect(build).toHaveBeenCalledTimes(1);
+
+      // The entry, alias string and old physical dependency stay unchanged.
+      // Only the symlink destination moves to another existing directory.
+      await unlink(link);
+      await symlink(join(root, "blue"), link, "dir");
+
+      expect((await compile(options)).source).toContain('"blue"');
+      expect((await compile(options)).source).toContain('"blue"');
+      expect(build).toHaveBeenCalledTimes(2);
+    }
+  );
+
+  it.each([
+    "absolute-file",
+    "relative-file",
+    "absolute-directory",
+    "relative-directory"
+  ])(
+    "does not publish compilation when its %s alias retargets during the build",
+    async (target) => {
+      const root = await realpath(
+        await mkdtemp(join(tmpdir(), "cache-alias-publication-"))
+      );
+      const cwd = vi.spyOn(process, "cwd").mockReturnValue(root);
+      onTestFinished(async () => {
+        cwd.mockRestore();
+        await rm(root, { recursive: true, force: true });
+      });
+
+      await writeFile(
+        join(root, "package.json"),
+        '{"name":"alias-publication-test"}'
+      );
+      for (const color of ["red", "blue"]) {
+        await mkdir(join(root, color));
+        await writeFile(
+          join(root, color, "tokens.ts"),
+          `export const color = "${color}";`
+        );
+      }
+
+      const link = join(root, "current");
+      await symlink(join(root, "red"), link, "dir");
+      const directory = target.endsWith("directory");
+      const replacement = directory ? "current" : "current/tokens.ts";
+      const build = vi.fn(esbuild.build);
+      build.mockImplementationOnce(async (options) => {
+        // The cache has sampled red, but esbuild resolves the alias to blue.
+        await unlink(link);
+        await symlink(join(root, "blue"), link, "dir");
+        return esbuild.build(options);
+      });
+      const options = {
+        cache: new CompilationCache(),
+        esbuild: { ...esbuild, build },
+        originalPath: join(root, "owner.ts"),
+        filePath: join(root, "owner.css.ts"),
+        cwd: root,
+        contents: `export { color } from "${directory ? "preset/tokens" : "preset"}";`,
+        alias: {
+          preset: target.startsWith("relative")
+            ? `./${replacement}`
+            : join(root, replacement)
+        },
+        resolverCache: new Map<string, string>()
+      };
+
+      expect((await compile(options)).source).toContain('"blue"');
+      expect(build).toHaveBeenCalledTimes(1);
+      await unlink(link);
+      await symlink(join(root, "red"), link, "dir");
+
+      // Both physical files stay unchanged; the old key must not contain blue.
+      expect((await compile(options)).source).toContain('"red"');
+      expect((await compile(options)).source).toContain('"red"');
+      expect(build).toHaveBeenCalledTimes(2);
+    }
+  );
+
+  it.each(["absolute", "relative"] as const)(
+    "does not reuse unresolved %s aliases after extension-resolved symlinks move",
+    async (target) => {
+      const root = await mkdtemp(join(tmpdir(), "cache-alias-extension-"));
+      onTestFinished(() => rm(root, { recursive: true, force: true }));
+
+      await writeFile(
+        join(root, "package.json"),
+        '{"name":"alias-extension-test"}'
+      );
+      for (const color of ["red", "blue"])
+        await writeFile(
+          join(root, `${color}.ts`),
+          `export const color = "${color}";`
+        );
+
+      const link = join(root, "current.ts");
+      await symlink(join(root, "red.ts"), link);
+
+      const options = {
+        cache: new CompilationCache(),
+        originalPath: join(root, "owner.ts"),
+        filePath: join(root, "owner.css.ts"),
+        cwd: root,
+        contents: 'export { color } from "preset";',
+        alias: {
+          preset: target === "relative" ? "./current" : join(root, "current")
+        },
+        resolverCache: new Map<string, string>()
+      };
+
+      expect((await compile(options)).source).toContain('"red"');
+      await unlink(link);
+      await symlink(join(root, "blue.ts"), link);
+      expect((await compile(options)).source).toContain('"blue"');
+    }
+  );
+
+  it.each([false, true])(
+    "resolves direct-file mapped symlinks from their physical owner (cache: %s)",
+    async (cached) => {
+      const root = await realpath(
+        await mkdtemp(join(tmpdir(), "mapped-file-symlink-"))
+      );
+      const cwd = vi.spyOn(process, "cwd").mockReturnValue(root);
+      onTestFinished(async () => {
+        cwd.mockRestore();
+        await rm(root, { recursive: true, force: true });
+      });
+
+      await writeFile(
+        join(root, "package.json"),
+        '{"name":"mapped-file-symlink-test"}'
+      );
+      await mkdir(join(root, "app"));
+      await writeFile(
+        join(root, "app", "tokens.ts"),
+        'export const color = "wrong-owner";'
+      );
+      for (const color of ["red", "blue"]) {
+        await mkdir(join(root, color));
+        await writeFile(
+          join(root, color, "index.ts"),
+          'export { color } from "./tokens";'
+        );
+        await writeFile(
+          join(root, color, "tokens.ts"),
+          `export const color = "${color}";`
+        );
+      }
+
+      const link = join(root, "app", "preset.ts");
+      await symlink(join(root, "red", "index.ts"), link);
+      const build = vi.fn(esbuild.build);
+      const options = {
+        cache: cached ? new CompilationCache() : undefined,
+        esbuild: { ...esbuild, build },
+        originalPath: join(root, "app", "owner.ts"),
+        filePath: join(root, "app", "owner.css.ts"),
+        cwd: root,
+        contents: 'export { color } from "preset";',
+        resolvedImports: { preset: link },
+        resolverCache: new Map<string, string>()
+      };
+
+      for (const color of ["red", "blue"]) {
+        if (color === "blue") {
+          await unlink(link);
+          await symlink(join(root, color, "index.ts"), link);
+        }
+
+        for (let repeat = 0; repeat < 2; repeat++) {
+          const result = await compile(options);
+          expect(result.source).toContain(`"${color}"`);
+          expect(result.source).not.toContain("wrong-owner");
+          expect(result.watchFiles).toContain(join(root, color, "index.ts"));
+          expect(result.watchFiles).toContain(join(root, color, "tokens.ts"));
+        }
+      }
+
+      expect(build).toHaveBeenCalledTimes(cached ? 2 : 4);
+    }
+  );
+
   it("invalidates when a workspace symlink is retargeted", async () => {
     const root = await mkdtemp(join(tmpdir(), "cache-retarget-"));
     const alias = join(root, "workspace");
@@ -114,6 +547,119 @@ describe("sidecar compilation cache", () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+
+  it("revalidates tsconfig paths for a sliced dependency graph", async () => {
+    const root = await realpath(
+      await mkdtemp(join(tmpdir(), "cache-tsconfig-"))
+    );
+    const cwd = vi.spyOn(process, "cwd").mockReturnValue(root);
+    onTestFinished(async () => {
+      cwd.mockRestore();
+      await rm(root, { recursive: true, force: true });
+    });
+    await writeFile(
+      join(root, "package.json"),
+      '{"name":"cache-tsconfig-test"}'
+    );
+    for (const color of ["red", "blue"])
+      await writeFile(
+        join(root, `${color}.ts`),
+        `export const palette={color:"${color}",unused:"UNUSED_GRAPH_MEMBER"};`
+      );
+    const configure = (color: string) =>
+      writeFile(
+        join(root, "tsconfig.json"),
+        JSON.stringify({
+          compilerOptions: { paths: { tokens: [`./${color}.ts`] } }
+        })
+      );
+    await configure("red");
+    const build = vi.fn(esbuild.build);
+    const options = {
+      cache: new CompilationCache(),
+      dependencyGraph: true,
+      esbuild: { ...esbuild, build },
+      originalPath: join(root, "owner.ts"),
+      filePath: join(root, "owner.css.ts"),
+      cwd: root,
+      contents:
+        'import {palette} from "tokens";export const color=palette.color;',
+      resolverCache: new Map<string, string>()
+    };
+    const first = await compile(options);
+    expect(first.source).toContain('"red"');
+    expect(first.source).not.toContain("UNUSED_GRAPH_MEMBER");
+    expect((await compile(options)).source).toBe(first.source);
+    expect(build).toHaveBeenCalledTimes(1);
+    await configure("blue");
+    const changed = await compile(options);
+    expect(changed.source).toContain('"blue"');
+    expect(changed.source).not.toContain("UNUSED_GRAPH_MEMBER");
+    expect((await compile(options)).source).toBe(changed.source);
+    expect(build).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([false, true])(
+    "invalidates same-target package sideEffects metadata (persistent: %s)",
+    async (persistent) => {
+      const root = await realpath(
+        await mkdtemp(join(tmpdir(), "cache-side-effects-"))
+      );
+      const cwd = vi.spyOn(process, "cwd").mockReturnValue(root);
+      onTestFinished(async () => {
+        cwd.mockRestore();
+        await rm(root, { recursive: true, force: true });
+      });
+      await writeFile(
+        join(root, "package.json"),
+        '{"name":"cache-side-effects-test"}'
+      );
+      const directory = join(root, "node_modules", "package-effect");
+      await mkdir(directory, { recursive: true });
+      await writeFile(
+        join(directory, "index.js"),
+        "globalThis.PACKAGE_SIDE_EFFECT=true;"
+      );
+      const configure = (sideEffects: boolean) =>
+        writeFile(
+          join(directory, "package.json"),
+          JSON.stringify({
+            name: "package-effect",
+            main: "index.js",
+            sideEffects
+          })
+        );
+      await configure(true);
+      const createCache = () => {
+        const cache = new CompilationCache();
+        if (persistent)
+          cache.configure(undefined, join(root, "cache"), "side-effects-test");
+        return cache;
+      };
+      const cache = createCache();
+      const build = vi.fn(esbuild.build);
+      const options = {
+        esbuild: { ...esbuild, build },
+        originalPath: join(root, "owner.ts"),
+        filePath: join(root, "owner.css.ts"),
+        cwd: root,
+        contents: 'import "package-effect";export const color="red";',
+        resolverCache: new Map<string, string>()
+      };
+      const run = () =>
+        compile({ ...options, cache: persistent ? createCache() : cache });
+      const first = await run();
+      expect(first.source).toContain("PACKAGE_SIDE_EFFECT");
+      expect((await run()).source).toBe(first.source);
+      expect(build).toHaveBeenCalledTimes(1);
+      // Source bytes and the selected package file are unchanged.
+      await configure(false);
+      const changed = await run();
+      expect(changed.source).not.toContain("PACKAGE_SIDE_EFFECT");
+      expect((await run()).source).toBe(changed.source);
+      expect(build).toHaveBeenCalledTimes(2);
+    }
+  );
 
   it("reuses sliced compilation while retaining absent Babel configuration watches and invalidation", async () => {
     // Isolate both data modules and Babel's working directory from sibling tests.

@@ -1,5 +1,74 @@
 import { describe, expect, it } from "vitest";
-import { annotateRecipeFactories } from "./runtimeExpressions.js";
+import type { TransformOptions } from "@babel/core";
+import { SourceAstCache } from "../staticCssEval/moduleParser.js";
+import {
+  analyzeRuntimeExpressions,
+  annotateRecipeFactories,
+  applyRuntimeExpressions
+} from "./runtimeExpressions.js";
+
+describe("runtime optimizer parser configuration", () => {
+  it.each([
+    ["owner", false],
+    ["owner", true],
+    ["dependency", false],
+    ["dependency", true]
+  ] as const)(
+    "preserves configured parser plugins in the %s with cached parsing=%s",
+    (location, cached) => {
+      const decorated =
+        "export @sealed class View { render(): unknown { return <div />; } }";
+      const recipe = `
+        import { createRuntimeFn } from "@mincho-js/css/rules/createRuntimeFn";
+        export const button = createRuntimeFn({
+          defaultClassName: "base",
+          variantClassNames: {},
+          defaultVariants: {},
+          compoundVariants: []
+        });
+      `;
+      const source = `${location === "owner" ? decorated : ""}
+        import { button } from "/recipe.tsx";
+        export const cls = button();
+      `;
+      const options = {
+        filename: "/app.tsx",
+        source,
+        parserCache: cached ? new SourceAstCache() : undefined,
+        parserPlugins: [
+          ["decorators", { decoratorsBeforeExport: false }]
+        ] satisfies NonNullable<TransformOptions["parserOpts"]>["plugins"]
+      };
+      const flow = analyzeRuntimeExpressions(options);
+      let step = flow.next();
+
+      while (!step.done) {
+        const request = step.value;
+        step = flow.next(
+          request.kind === "load" && request.id === "/recipe.tsx"
+            ? `${location === "dependency" ? decorated : ""} ${recipe}`
+            : request.kind === "resolve" && request.source === "/recipe.tsx"
+              ? request.source
+              : null
+        );
+      }
+
+      expect(step.value.calls).toHaveLength(1);
+
+      const output = applyRuntimeExpressions({
+        ...options,
+        ...(cached ? { ast: step.value.ast } : {}),
+        replacements: [{ key: step.value.calls[0]!.key, value: "base" }]
+      });
+
+      expect(output?.code).toContain('export const cls = "base";');
+      if (location === "owner") {
+        expect(output?.code).toContain("@sealed");
+        expect(output?.code).toContain("<div />");
+      }
+    }
+  );
+});
 
 describe("serialized recipe purity", () => {
   it("preserves serialized bytes and respects lexical shadowing", () => {

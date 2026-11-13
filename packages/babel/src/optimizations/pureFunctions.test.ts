@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { analyzePureFunctions } from "./pureFunctions.js";
-import { transformSync, transformFromAstSync, types as t } from "@babel/core";
+import {
+  transformSync,
+  transformFromAstSync,
+  types as t,
+  type TransformOptions
+} from "@babel/core";
 import { minchoBabelPlugin as mincho } from "../index.js";
+import { SourceAstCache } from "../staticCssEval/moduleParser.js";
 
 const generate = (expression: t.Expression) =>
   transformFromAstSync(
@@ -10,11 +16,19 @@ const generate = (expression: t.Expression) =>
     { configFile: false, babelrc: false }
   )!;
 
-function analyze(source: string, modules: Record<string, string> = {}) {
+function analyze(
+  source: string,
+  modules: Record<string, string> = {},
+  options: {
+    parserCache?: SourceAstCache;
+    parserPlugins?: NonNullable<TransformOptions["parserOpts"]>["plugins"];
+  } = {}
+) {
   const flow = analyzePureFunctions({
     filename: "/app.tsx",
     source,
-    jsxCssProp: true
+    jsxCssProp: true,
+    ...options
   });
 
   let step = flow.next();
@@ -34,6 +48,41 @@ function analyze(source: string, modules: Record<string, string> = {}) {
 }
 
 describe("pure helper evaluation", () => {
+  it.each([
+    ["owner", false],
+    ["owner", true],
+    ["dependency", false],
+    ["dependency", true]
+  ] as const)(
+    "preserves configured parser plugins in the %s with cached parsing=%s",
+    (location, cached) => {
+      const decorated =
+        "export @sealed class View { render(): unknown { return <div />; } }";
+      const helper = "const style = (n: number) => ({ padding: n * 4 });";
+      const source = `${
+        location === "owner"
+          ? `${decorated} ${helper}`
+          : 'import { style } from "/helper.tsx";'
+      } const App = () => <div css={style(2)} />;`;
+      const options = {
+        parserCache: cached ? new SourceAstCache() : undefined,
+        parserPlugins: [
+          ["decorators", { decoratorsBeforeExport: false }]
+        ] satisfies NonNullable<TransformOptions["parserOpts"]>["plugins"]
+      };
+      const result = analyze(
+        source,
+        { "/helper.tsx": `${decorated} export ${helper}` },
+        options
+      );
+
+      expect(result.replacements).toHaveLength(1);
+      expect(generate(result.replacements[0]!.expression).code).toContain(
+        "padding: 8"
+      );
+    }
+  );
+
   it("keeps immediate helper calls eligible while leaving function-valued rules intact", () => {
     const folded = analyze(
       'const App = () => <div css={{ color: (() => "red")() }} />;'

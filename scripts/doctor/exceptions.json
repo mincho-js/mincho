@@ -1,5 +1,115 @@
 [
   {
+    "id": "babel-jsx-attribute-escaping-native-parser",
+    "file": "packages/babel/src/jsxCssPropSpreads.test.ts",
+    "type": "warning",
+    "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
+    "source": "loader: \"tsx\",",
+    "count": 1,
+    "reason": "This regression executes generated JSX using the built-in esbuild TSX parser to verify quote and backslash semantics; it does not resolve a Webpack loader package.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "babel-owned-runtime-external-boundary-fixture",
+    "file": "packages/babel/src/moduleGraph.test.ts",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": "\"/project/node_modules/helper/index.js\",",
+    "count": 1,
+    "reason": "This synthetic external module ID verifies that an explicit unavailable host receipt remains unknown across node_modules boundaries; no filesystem package resolution uses this string.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "babel-external-runtime-fallback-controls",
+    "file": "packages/babel/src/moduleGraph.test.ts",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": "\"/project/node_modules/helper/index.js\"",
+    "count": 2,
+    "reason": "These two synthetic external IDs compare ordinary unowned fallback with a rejected host receipt. The literal node_modules boundary is the behavior under test.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "esbuild-later-loader-consumer-fixture",
+    "file": "packages/esbuild/src/build.test.ts",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": "\"entry.ts\": `import { system } from \"./factory\";",
+    "count": 1,
+    "reason": "This isolated native esbuild fixture deliberately imports its generated node_modules helper to verify that a later loader can redirect an alias to the same provider. It does not resolve application packages by filesystem layout.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "esbuild-later-loader-package-fixture",
+    "file": "packages/esbuild/src/build.test.ts",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": "\"node_modules/owned-helper/index.js\":",
+    "count": 1,
+    "reason": "This generated fixture file must be inside node_modules to reproduce a declined script load followed by a later host loader; production package resolution remains host owned.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "esbuild-later-loader-native-parser",
+    "file": "packages/esbuild/src/build.test.ts",
+    "type": "warning",
+    "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
+    "source": "loader: \"js\"",
+    "count": 1,
+    "reason": "The later onLoad fixture returns JavaScript using esbuild's built-in parser. The loader value is not a Webpack package dependency.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "integration-owned-runtime-external-boundary-fixture",
+    "file": "packages/integration/src/moduleGraph.ts",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": "it.each([\"/project/node_modules/helper/index.js\", \"\\0host:helper\"])(",
+    "count": 1,
+    "reason": "This test compares a synthetic node_modules module ID and a virtual host ID to verify that unavailable runtime ownership survives both graph boundaries and cached requests.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "esbuild-consumer-runtime-test-script-loader",
+    "file": "packages/esbuild/src/consumerRuntimeSource.test.ts",
+    "type": "warning",
+    "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
+    "source": "loader: \"js\"",
+    "count": 2,
+    "reason": "These two host-loader ownership fixtures return JavaScript from esbuild onLoad callbacks. They select esbuild's built-in parser, not a Webpack loader package.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "esbuild-contracts-consumer-alias-script-loader",
+    "file": "packages/esbuild/src/contracts.test.ts",
+    "type": "warning",
+    "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
+    "source": "loader: \"js\"",
+    "count": 1,
+    "reason": "The consumer-alias regression supplies generated JavaScript through esbuild onLoad. Its built-in JavaScript parser is not a Webpack loader dependency.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "babel-jsx-callable-test-esbuild-loader",
+    "file": "packages/babel/src/jsxCssProp/runtimeRecipes.test.ts",
+    "type": "warning",
+    "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
+    "source": "loader: \"tsx\",",
+    "count": 1,
+    "reason": "This regression executes generated JSX and sidecar modules with esbuild's built-in TSX parser. It does not reference a Webpack loader package.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "integration-host-resolved-import-dependency-fixture",
+    "file": "packages/integration/src/compilePlugins.test.ts",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": "const nestedPackage = join(dependency, \"node_modules\", \"shared\");",
+    "count": 1,
+    "reason": "This isolated native Node fixture gives a dependency its own copy of a package to prove that host-resolved entry imports do not override dependency-local resolution.",
+    "expires": "2026-12-31"
+  },
+  {
     "id": "contract-squircle-node10-react-import",
     "file": "scripts/package-contract/fixture/modules/layout-node10.ts",
     "type": "error",
@@ -115,7 +225,7 @@
     "type": "warning",
     "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
     "source": "loader: \"ts\"",
-    "count": 1,
+    "count": 2,
     "reason": "This CommonJS child-compilation regression selects an esbuild built-in JavaScript or TypeScript loader, including a custom extension or caller onLoad result; it does not reference a Webpack loader package.",
     "expires": "2026-12-31"
   },
@@ -1170,6 +1280,16 @@
     "expires": "2026-12-31"
   },
   {
+    "id": "integration-babel-source-test-esbuild-tsx-loader",
+    "file": "packages/integration/src/babelSource.test.ts",
+    "type": "warning",
+    "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
+    "source": "loader: \"tsx\",",
+    "count": 1,
+    "reason": "This babelTransformSource fixture selects the built-in TSX parser to verify configured JSX css extraction and transform-cache isolation; it does not resolve a Webpack loader package.",
+    "expires": "2026-12-31"
+  },
+  {
     "id": "integration-common-js-test-esbuild-loader-01",
     "file": "packages/integration/src/commonJs.test.ts",
     "type": "warning",
@@ -1467,6 +1587,156 @@
     "source": "loader: \"js\"",
     "count": 1,
     "reason": "This esbuild onLoad fixture returns the built-in JavaScript loader enum. It is not a Webpack loader module and must not be resolved as a package.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "babel-extraction-evaluation-operand-use-role",
+    "file": "packages/babel/src/extractionCalls/evaluation.ts",
+    "type": "warning",
+    "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
+    "source": "use: index === 0 ? \"reference\" : \"value\",",
+    "count": 1,
+    "reason": "This evaluation-plan field classifies an assignment operand as a reference or a value. It is not a Webpack use option and names no loader dependency.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "integration-compile-cache-package-alias-fixture-directory",
+    "file": "packages/integration/src/compileCache.test.ts",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": "await mkdir(join(root, \"node_modules\", ...(scoped ? [\"@fixture\"] : [])), {",
+    "count": 1,
+    "reason": "This isolated native-resolution fixture creates the package directory, including a scoped package, before retargeting its symlink to verify memory and persistent cache invalidation.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "integration-compile-cache-package-alias-fixture-link",
+    "file": "packages/integration/src/compileCache.test.ts",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": ": join(root, \"node_modules\", packageName);",
+    "count": 1,
+    "reason": "This fixture deliberately addresses the native package symlink so it can change the resolved target while preserving the old physical files and import text.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "integration-compile-cache-relative-package-alias-fixture",
+    "file": "packages/integration/src/compileCache.test.ts",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": "? \"./node_modules/theme-tokens/tokens.ts\"",
+    "count": 1,
+    "reason": "This explicit relative alias is a regression input for a retargeted native package symlink. Resolving it up front would remove the lexical alias path that the cache must revalidate.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "integration-compile-cache-package-side-effects-fixture",
+    "file": "packages/integration/src/compileCache.test.ts",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": "const directory = join(root, \"node_modules\", \"package-effect\");",
+    "count": 1,
+    "reason": "This isolated native package fixture changes only package.json sideEffects metadata to prove that memory and persistent caches invalidate even when the selected file and its contents stay unchanged.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "integration-compile-resolution-stdin-esbuild-loader",
+    "file": "packages/integration/src/compileResolution.test.ts",
+    "type": "warning",
+    "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
+    "source": "loader: \"ts\",",
+    "count": 1,
+    "reason": "This native esbuild comparison uses the built-in TypeScript stdin parser. It is not a Webpack loader package.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "integration-compile-resolution-package-directory-fixture",
+    "file": "packages/integration/src/compileResolution.test.ts",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": "await mkdir(join(root, \"node_modules\", \"theme-tokens\"), {",
+    "count": 1,
+    "reason": "This isolated fixture creates a native package before testing package export, sideEffects and nearer-package changes against the observed resolution proof.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "integration-compile-resolution-package-metadata-fixture",
+    "file": "packages/integration/src/compileResolution.test.ts",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": "const packagePath = join(root, \"node_modules\", \"theme-tokens\");",
+    "count": 1,
+    "reason": "The native package directory is retained so this fixture can rewrite its manifest and prove that resolution validation observes metadata changes without recompiling sources.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "integration-compile-resolution-nearer-package-fixture",
+    "file": "packages/integration/src/compileResolution.test.ts",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": "const nearer = join(root, \"app\", \"node_modules\", \"theme-tokens\");",
+    "count": 1,
+    "reason": "This fixture intentionally creates a previously absent nearer package directory to verify native resolution shadowing; resolving the old package would not address the new candidate location.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "integration-compile-resolution-alias-priority-fixture",
+    "file": "packages/integration/src/compileResolution.test.ts",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": "const directory = join(options.cwd!, \"node_modules\", name!);",
+    "count": 1,
+    "reason": "This isolated fixture installs two native package candidates to verify esbuild alias priority without recursively rewriting an alias target.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "integration-compile-resolution-conditional-exports-fixture",
+    "file": "packages/integration/src/compileResolution.test.ts",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": "const directory = join(options.cwd!, \"node_modules\", \"theme-tokens\");",
+    "count": 1,
+    "reason": "This isolated native package provides distinct import and require exports so the resolution observer must retain each edge's actual mode and target.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "integration-compile-resolution-virtual-esbuild-loader",
+    "file": "packages/integration/src/compileResolution.test.ts",
+    "type": "warning",
+    "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
+    "source": "loader: \"js\"",
+    "count": 1,
+    "reason": "This opaque resolver fixture returns esbuild's built-in JavaScript onLoad parser while verifying original hook order and cache bypass. It does not name a Webpack loader dependency.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "integration-compile-resolution-plugin-data-esbuild-loader",
+    "file": "packages/integration/src/compileResolution.test.ts",
+    "type": "warning",
+    "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
+    "source": "loader: \"js\",",
+    "count": 1,
+    "reason": "This onLoad pluginData regression selects esbuild's built-in JavaScript parser. The loader value is syntax configuration, not a Webpack package reference.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "integration-compile-resolution-esbuild-loader-options",
+    "file": "packages/integration/src/compileResolution.ts",
+    "type": "warning",
+    "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
+    "source": "loader: options.loader",
+    "count": 1,
+    "reason": "This shared BuildOptions mapping forwards esbuild extension-to-loader enums identically to compilation and native resolution validation. It is not a Webpack loader package lookup.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "esbuild-native-runtime-handler-script-loader",
+    "file": "packages/esbuild/src/plugin.ts",
+    "type": "warning",
+    "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
+    "source": "loader: \"js\" as const,",
+    "count": 1,
+    "reason": "This native esbuild onLoad fixture returns the built-in JavaScript parser and verifies that the original handler result is preserved. It is not a Webpack loader package.",
     "expires": "2026-12-31"
   }
 ]

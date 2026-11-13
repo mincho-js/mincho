@@ -22,6 +22,14 @@ import { tags, type SupportedElements } from "./tags.js";
 
 export { $$styled } from "./runtime.js";
 
+/**
+ * Selects the CSS function used by the scoped JSX namespace.
+ * Augment this interface with `css: typeof css` and configure the same module
+ * with `jsxCssProp: { importSource }` in the Mincho build plugin.
+ */
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type -- Applications augment this interface to select their style definition.
+export interface CssPropConfig {}
+
 // == Main =====================================================================
 function styledImpl<
   Props,

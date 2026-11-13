@@ -142,7 +142,7 @@ function defineRulesImpl<
   };
 }
 
-export const defineRules = Object.assign(defineRulesImpl, {
+export const defineRules = /* @__PURE__ */ Object.assign(defineRulesImpl, {
   extends: defineRulesExtends,
   propertyValues: defineRulesPropertyValues
 });

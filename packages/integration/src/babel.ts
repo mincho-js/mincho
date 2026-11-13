@@ -13,6 +13,8 @@ import { jsxSyntaxPluginPath, typescriptPresetPath } from "./babelPreset.js";
 import {
   type BabelFileResult,
   type TransformOptions,
+  parseAsync,
+  traverse,
   types as t,
   transformFromAstAsync,
   transformAsync
@@ -25,13 +27,18 @@ import {
   type InternalRuntimeCandidates,
   internalCollectRuntimeCandidates,
   internalParseModuleProgram,
+  internalNormalizeTypeScriptCommonJs,
   minchoBabelPlugin,
   minchoStyledComponentPlugin,
   InternalExtractCallsError,
-  internalAnalyzePureFunctions
+  internalAnalyzePureFunctions,
+  internalJsxCssPropExtractCalls
 } from "@mincho-js/babel";
 import { inferCommonJsSourceType, transformCommonJsToEsm } from "./commonJs.js";
-import { prepareExtractCalls } from "./extractCalls.js";
+import {
+  prepareExtractCalls,
+  retainRuntimeSourceDependencies
+} from "./extractCalls.js";
 import {
   createEmptyStaticCssEvalMetadata,
   createObservingStaticCssEvalProvider,
@@ -103,6 +110,8 @@ export type StaticCssEvalSourceUnsupportedReason = NonNullable<
 // Integration supplies bundler-aware identity/source freshness; Babel static
 // eval remains the only owner of css value and symbol provenance.
 export interface StaticCssEvalSourceResolution {
+  /** @internal Host module identity, including transform queries, for consumers. */
+  consumerRuntimeId?: string;
   /**
    * Legacy alias. When newer fields are absent, this is treated as the
    * resolved file, canonical module id, and normalized load key.
@@ -176,6 +185,22 @@ export interface StaticCssEvalSourceProvider {
   ): MaybePromise<{ value: string; identity: string } | null>;
 }
 
+/** @internal The consumer surface observed from the host's existing transform. */
+export type ConsumerRuntimeSource =
+  | {
+      source: string;
+      sourceHash: string;
+      version: string;
+      watchFiles: readonly string[];
+      /** Physical authoring owner when the host id denotes a generated module. */
+      authoringId?: string;
+    }
+  | {
+      source?: never;
+      watchFiles: readonly string[];
+      authoringId?: string;
+    };
+
 export interface StaticCssEvalPrepassResult {
   dependencyFiles: string[];
   ownerToDependencies: ReadonlyMap<string, string[]>;
@@ -239,7 +264,7 @@ export type BabelOptions = Omit<
   /** @internal Vite dist-chunk private-resource proof, independent of JS folding. */
   privateRecipes?: boolean;
   extractCalls?: PluginOptions["extractCalls"];
-  jsxCssProp?: boolean;
+  jsxCssProp?: PluginOptions["jsxCssProp"];
   bundleSize?: PluginOptions["bundleSize"];
   optimize?: PluginOptions["optimize"];
   experimental?: PluginOptions["experimental"];
@@ -247,10 +272,21 @@ export type BabelOptions = Omit<
 
   /** @internal Async source provider used to prepare imported css eval data. */
   staticCssEvalSourceProvider?: StaticCssEvalSourceProvider;
+  /**
+   * @internal Undefined leaves an ordinary source module unchanged. An owned
+   * but unavailable runtime surface retains its watches and remains unknown.
+   * Worker requests and transform-cache observations preserve this separate
+   * purpose and revalidate the host's actual source identity.
+   */
+  consumerRuntimeSource?: (
+    id: string
+  ) => MaybePromise<ConsumerRuntimeSource | undefined>;
   staticCssEvalProjectEngine?: StaticEvalProjectEngine;
 };
 
 export type BabelTransformResult = {
+  /** @internal Effective owner syntax reused by extracted dependency compilation. */
+  readonly parserPlugins?: NonNullable<BabelOptions["parserOpts"]>["plugins"];
   /** @internal Original use graph; never emitted to the application. */
   privateRecipeUses?: readonly import("./vanillaCssIr.js").PrivateRecipeUse[];
   privateResourceReferences?: readonly string[];
@@ -311,6 +347,24 @@ export async function babelTransform(
 export async function babelTransformSource(
   options: BabelTransformSourceOptions
 ): Promise<BabelTransformResult> {
+  // Discover receipts after configured parsing, but before cache/worker
+  // observation. Custom Babel configurations run inline without transform
+  // caching, so cache validation still uses the caller's parser options.
+  const runtimeParserOptions = { plugins: options.babel?.parserOpts?.plugins };
+  if (options.babel?.consumerRuntimeSource)
+    options = {
+      ...options,
+      babel: {
+        ...options.babel,
+        consumerRuntimeSource: retainRuntimeSourceDependencies(
+          options.babel.consumerRuntimeSource,
+          options.babel.staticCssEvalSourceProvider,
+          options.babel.compilationCache?.parser,
+          () => runtimeParserOptions.plugins
+        )
+      }
+    };
+
   const cache = options.babel?.compilationCache;
 
   const transform = (
@@ -318,7 +372,7 @@ export async function babelTransformSource(
     reuseSourceAst = false
   ) =>
     executeTransform(input, () =>
-      transformSourceUncached(input, reuseSourceAst)
+      transformSourceUncached(input, reuseSourceAst, runtimeParserOptions)
     );
 
   return cache
@@ -338,23 +392,32 @@ export async function transformSourceUncached(
     sourceMaps = false,
     inputSourceMap
   }: BabelTransformSourceOptions,
-  reuseSourceAst = false
+  reuseSourceAst = false,
+  runtimeParserOptions?: {
+    plugins: NonNullable<BabelOptions["parserOpts"]>["plugins"];
+  }
 ): Promise<BabelTransformResult> {
   const {
     compilationCache,
     compilationContext: _compilationContext,
     privateRecipes: _privateRecipes,
     diagnostics,
-    extractCalls,
+    extractCalls: configuredExtractCalls,
     jsxCssProp = false,
     optimize,
     bundleSize,
     experimental,
     staticCssEvalProvider,
     staticCssEvalSourceProvider,
+    consumerRuntimeSource,
     staticCssEvalProjectEngine,
     ...babelCoreOptions
   } = babel;
+
+  const extractCalls = internalJsxCssPropExtractCalls(
+    jsxCssProp,
+    configuredExtractCalls
+  );
 
   const projectEngine = staticCssEvalProjectEngine;
   const sourceLoads = new Map<
@@ -433,103 +496,10 @@ export async function transformSourceUncached(
   let commonJsTransformed = false;
   let preparedProgram:
     ReturnType<typeof internalParseModuleProgram> | undefined;
+  let preparedWithBabel = false;
+  let parserPlugins = babelCoreOptions.parserOpts?.plugins;
 
   try {
-    if (
-      optimize?.pureFunctions !== false &&
-      /@(?:mincho-js|vanilla-extract)\/|\bcss\b/.test(source)
-    ) {
-      try {
-        preparedProgram = internalParseModuleProgram(
-          path,
-          source,
-          loader === "jsx" || loader === "tsx",
-          compilationCache?.parser
-        );
-      } catch {
-        // The optional pre-pass must defer syntax errors to configured Babel.
-        preparedProgram = undefined;
-      }
-    }
-
-    if (preparedProgram && optimize?.pureFunctions !== false) {
-      options.preparedPureFunctions = await measureCompilationPhase(
-        "pure-functions",
-        () =>
-          driveModuleGraph(
-            internalAnalyzePureFunctions({
-              program: preparedProgram,
-              filename: path,
-              source,
-              jsxCssProp,
-              parserCache: compilationCache?.parser
-            }),
-            prepassSourceProvider,
-            extractCallsDependencies
-          )
-      );
-
-      for (const file of options.preparedPureFunctions.dependencies)
-        extractCallsDependencies.add(file);
-
-      recordCompilationDiagnostic("pure-functions-result", {
-        folded: options.preparedPureFunctions.replacements.length,
-        deopt: options.preparedPureFunctions.diagnostics.filter(
-          (item) => item.result === "deopt"
-        ).length
-      });
-    }
-
-    if (extractCalls !== undefined) {
-      preparedProgram ??= internalParseModuleProgram(
-        path,
-        source,
-        loader === "jsx" || loader === "tsx",
-        compilationCache?.parser
-      );
-      options.preparedExtractCalls = await prepareExtractCalls(
-        {
-          extractCalls,
-          root,
-          filename: path,
-          source,
-          program: preparedProgram,
-          parserCache: compilationCache?.parser,
-          jsx: loader === "jsx" || loader === "tsx"
-        },
-        prepassSourceProvider
-      );
-
-      for (const file of options.preparedExtractCalls.dependencies)
-        extractCallsDependencies.add(file);
-    }
-
-    staticCssEvalPrepass =
-      jsxCssProp && prepassSourceProvider
-        ? await measureCompilationPhase("static-prepass", () =>
-            createStaticCssEvalPrepass(
-              path,
-              prepassSourceProvider,
-              compilationCache?.parser,
-              preparedProgram
-            )
-          )
-        : undefined;
-
-    observedStaticCssEvalMetadata.diagnostics.push(
-      ...(staticCssEvalPrepass?.diagnostics ?? [])
-    );
-
-    const preparedProvider =
-      staticCssEvalProvider ?? staticCssEvalPrepass?.provider;
-
-    if (preparedProvider) {
-      options.staticCssEvalProvider = createObservingStaticCssEvalProvider(
-        preparedProvider,
-        observedStaticCssEvalMetadata
-      );
-    }
-
     const transformOptions: TransformOptions = {
       sourceType: "unambiguous",
       ...babelCoreOptions,
@@ -543,7 +513,18 @@ export async function transformSourceUncached(
           ? babelCoreOptions.plugins
           : []),
         minchoStyledComponentPlugin(),
-        [minchoBabelPlugin(), options]
+        [minchoBabelPlugin(), options],
+        {
+          parserOverride(
+            _source: string,
+            options: NonNullable<TransformOptions["parserOpts"]>
+          ) {
+            parserPlugins = options.plugins;
+            if (runtimeParserOptions)
+              runtimeParserOptions.plugins = parserPlugins;
+            return undefined;
+          }
+        }
       ],
       presets: [
         ...(Array.isArray(babelCoreOptions.presets)
@@ -566,12 +547,183 @@ export async function transformSourceUncached(
       ...(inputSourceMap !== undefined ? { inputSourceMap } : {})
     };
 
+    const parseConfiguredProgram = async () => {
+      let configuredOptions = transformOptions;
+      // Observe the final parser options after every preset/plugin has run
+      // manipulateOptions, without overriding parsing or running visitors.
+      const ast = await parseAsync(source, {
+        ...transformOptions,
+        plugins: [
+          ...transformOptions.plugins!,
+          {
+            manipulateOptions(options: TransformOptions) {
+              configuredOptions = options;
+            }
+          }
+        ]
+      });
+
+      if (!ast) return false;
+
+      traverse(ast, {
+        Program(program) {
+          internalNormalizeTypeScriptCommonJs(program, {
+            opts: configuredOptions,
+            ast
+          });
+          preparedProgram = program;
+          preparedWithBabel = true;
+          program.stop();
+        }
+      });
+
+      return true;
+    };
+
+    // Imported static data may need preset syntax even when the owner parses
+    // without it. Prepare the configured AST once and reuse its parser options
+    // across extraction and value analysis before running transform visitors.
+    if (
+      prepassSourceProvider &&
+      (jsxCssProp || (extractCalls !== undefined && consumerRuntimeSource))
+    )
+      await parseConfiguredProgram();
+
+    if (
+      !preparedProgram &&
+      optimize?.pureFunctions !== false &&
+      /@(?:mincho-js|vanilla-extract)\/|\bcss\b/.test(source)
+    ) {
+      try {
+        preparedProgram = internalParseModuleProgram(
+          path,
+          source,
+          loader === "jsx" || loader === "tsx",
+          compilationCache?.parser,
+          parserPlugins
+        );
+      } catch {
+        // The optional pre-pass must defer syntax errors to configured Babel.
+        preparedProgram = undefined;
+      }
+    }
+
+    if (preparedProgram && optimize?.pureFunctions !== false) {
+      options.preparedPureFunctions = await measureCompilationPhase(
+        "pure-functions",
+        () =>
+          driveModuleGraph(
+            internalAnalyzePureFunctions({
+              program: preparedProgram,
+              filename: path,
+              source,
+              jsxCssProp: Boolean(jsxCssProp),
+              parserCache: compilationCache?.parser,
+              parserPlugins
+            }),
+            prepassSourceProvider,
+            extractCallsDependencies
+          )
+      );
+
+      for (const file of options.preparedPureFunctions.dependencies)
+        extractCallsDependencies.add(file);
+
+      recordCompilationDiagnostic("pure-functions-result", {
+        folded: options.preparedPureFunctions.replacements.length,
+        deopt: options.preparedPureFunctions.diagnostics.filter(
+          (item) => item.result === "deopt"
+        ).length
+      });
+    }
+
+    if (extractCalls !== undefined) {
+      if (!preparedProgram) {
+        try {
+          preparedProgram = internalParseModuleProgram(
+            path,
+            source,
+            loader === "jsx" || loader === "tsx",
+            compilationCache?.parser,
+            parserPlugins
+          );
+        } catch (error) {
+          if (!(error instanceof SyntaxError)) throw error;
+
+          if (!(await parseConfiguredProgram())) throw error;
+        }
+      }
+
+      const prepareCalls = () =>
+        prepareExtractCalls(
+          {
+            extractCalls,
+            root,
+            filename: path,
+            source,
+            program: preparedProgram,
+            parserCache: compilationCache?.parser,
+            parserPlugins,
+            jsx: loader === "jsx" || loader === "tsx"
+          },
+          prepassSourceProvider,
+          consumerRuntimeSource
+        );
+
+      try {
+        options.preparedExtractCalls = await prepareCalls();
+      } catch (error) {
+        // A dependency can need configured syntax even when the owner does not.
+        if (
+          preparedWithBabel ||
+          !(error instanceof InternalExtractCallsError) ||
+          !(error.cause instanceof SyntaxError) ||
+          !(await parseConfiguredProgram())
+        )
+          throw error;
+
+        options.preparedExtractCalls = await prepareCalls();
+      }
+
+      for (const file of options.preparedExtractCalls.dependencies)
+        extractCallsDependencies.add(file);
+    }
+
+    staticCssEvalPrepass =
+      jsxCssProp && prepassSourceProvider
+        ? await measureCompilationPhase("static-prepass", () =>
+            createStaticCssEvalPrepass(
+              path,
+              prepassSourceProvider,
+              compilationCache?.parser,
+              preparedProgram,
+              "values",
+              parserPlugins
+            )
+          )
+        : undefined;
+
+    observedStaticCssEvalMetadata.diagnostics.push(
+      ...(staticCssEvalPrepass?.diagnostics ?? [])
+    );
+
+    const preparedProvider =
+      staticCssEvalProvider ?? staticCssEvalPrepass?.provider;
+
+    if (preparedProvider) {
+      options.staticCssEvalProvider = createObservingStaticCssEvalProvider(
+        preparedProvider,
+        observedStaticCssEvalMetadata
+      );
+    }
+
     const transformed = await measureCompilationPhase("babel", () =>
-      reuseSourceAst &&
       preparedProgram &&
-      !babelCoreOptions.parserOpts &&
-      (!babelCoreOptions.sourceType ||
-        babelCoreOptions.sourceType === "unambiguous")
+      (preparedWithBabel ||
+        (reuseSourceAst &&
+          !babelCoreOptions.parserOpts &&
+          (!babelCoreOptions.sourceType ||
+            babelCoreOptions.sourceType === "unambiguous")))
         ? transformFromAstAsync(
             preparedProgram.parent as t.File,
             source,
@@ -595,7 +747,7 @@ export async function transformSourceUncached(
         dependencies: extractCallsDependencies,
         sidecar: options.result[0],
         sourceMaps,
-        parserPlugins: babelCoreOptions.parserOpts?.plugins,
+        parserPlugins,
         inputSourceMap: transformed.map ?? undefined
       });
 
@@ -674,6 +826,7 @@ export async function transformSourceUncached(
     });
 
   return {
+    ...(parserPlugins ? { parserPlugins: [...parserPlugins] } : {}),
     ...(result.ast?.type === "File"
       ? { runtimeCandidates: internalCollectRuntimeCandidates(result.ast) }
       : {}),

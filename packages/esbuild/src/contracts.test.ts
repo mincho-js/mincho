@@ -9,7 +9,7 @@ import {
   type Plugin
 } from "esbuild";
 import { afterEach, describe, expect, it } from "vitest";
-import { minchoEsbuildPlugins } from "./index.js";
+import { buildWithMincho, minchoEsbuildPlugins } from "./index.js";
 import { EsbuildAssets } from "./assets.js";
 
 const roots: string[] = [];
@@ -69,6 +69,60 @@ function cssVariable(result: BuildResult, name: string): string {
 
   return value;
 }
+
+it.each([false, true])(
+  "does not extract through an alias that an earlier loader may redirect to the registered receiver (transaction: %s)",
+  async (transaction) => {
+    const root = await fixture({
+      "entry.tsx": `
+      import { system } from "./factory";
+      import { alias } from "./helper";
+      alias.css = () => "replacement";
+      export const value = system.css();
+    `,
+      "factory.ts": 'export const system = { css: () => "original" };',
+      "helper.ts": 'export const alias = { css: () => "independent" };'
+    });
+    const redirectAlias: Plugin = {
+      name: "redirect-consumer-alias",
+      setup(build) {
+        build.onLoad({ filter: /helper\.ts$/ }, () => ({
+          contents: 'export { system as alias } from "./factory";',
+          loader: "js"
+        }));
+      }
+    };
+
+    const mincho = {
+      cache: false as const,
+      extractCalls: { "./factory.ts": ["system.css"] }
+    };
+    const result = transaction
+      ? await buildWithMincho({
+          absWorkingDir: root,
+          entryPoints: ["entry.tsx"],
+          outdir: "out",
+          write: false,
+          format: "cjs",
+          logLevel: "silent",
+          mincho,
+          plugins: () => [redirectAlias]
+        })
+      : await build(
+          buildOptions(root, {
+            format: "cjs",
+            plugins: [redirectAlias, ...minchoEsbuildPlugins(mincho)]
+          })
+        );
+    const module = { exports: {} as { value: string } };
+    new Function("module", "exports", outputText(result, ".js"))(
+      module,
+      module.exports
+    );
+    expect(module.exports.value).toBe("replacement");
+    expect(outputText(result, ".css")).toBe("");
+  }
+);
 
 it.each([
   [undefined, undefined, false, true],

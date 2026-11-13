@@ -15,6 +15,7 @@ import {
   styleAttributeName
 } from "./constants.js";
 import { getStyleExpression } from "./styleExpression.js";
+import { createJsxAttributeString } from "./attributeValue.js";
 import type {
   AggregatePropsBinding,
   NormalizedJsxCssPropElement,
@@ -23,6 +24,18 @@ import type {
 
 const keyAttributeName = "key";
 const refAttributeName = "ref";
+
+// Merging className must not move a runtime CSS value across other attributes.
+export function requiresClassValueStaging(
+  element: NormalizedJsxCssPropElement
+): boolean {
+  return (
+    element.cssValueClassification === "class-value" &&
+    element.classNameAttribute !== null &&
+    element.attributesBeforeCss.at(-1) !== element.classNameAttribute &&
+    !t.isStringLiteral(element.cssExpression)
+  );
+}
 
 export function transformSpreadAggregatedCssProp(
   path: NodePath<t.JSXOpeningElement>,
@@ -119,7 +132,11 @@ export function createSpreadAggregatedCssPropLowering(
   normalizedElement: NormalizedJsxCssPropElement
 ): SpreadAggregatedCssPropLowering {
   const type = captureJsxElementType(path);
-  const lowering = !normalizedElement.hasSpreadAfterCss
+  const stageAfterCss =
+    normalizedElement.hasSpreadAfterCss ||
+    (requiresClassValueStaging(normalizedElement) &&
+      normalizedElement.attributesAfterCss.length > 0);
+  const lowering = !stageAfterCss
     ? createPreCssSpreadAggregatedCssPropLowering(path, normalizedElement)
     : createPostCssSpreadAggregatedCssPropLowering(path, normalizedElement);
 
@@ -257,9 +274,9 @@ function createPostCssSpreadAggregatedCssPropLowering(
     postCssBinding
   );
 
-  const canInlineExplicitCssClassName =
-    t.isIdentifier(normalizedElement.cssExpression) ||
-    t.isStringLiteral(normalizedElement.cssExpression);
+  const canInlineExplicitCssClassName = t.isStringLiteral(
+    normalizedElement.cssExpression
+  );
 
   const explicitCssClassNameIdentifier = canInlineExplicitCssClassName
     ? null
@@ -287,7 +304,14 @@ function createPostCssSpreadAggregatedCssPropLowering(
     cssValueClassification: explicitCssClassNameIdentifier
       ? "class-value"
       : normalizedElement.cssValueClassification,
-    classNameAttribute: null,
+    classNameAttribute: normalizedElement.hasSpreadAfterCss
+      ? null
+      : t.jsxAttribute(
+          t.jsxIdentifier(classNameAttributeName),
+          t.jsxExpressionContainer(
+            t.cloneNode(postCssBinding.classNameIdentifier)
+          )
+        ),
     ...(preCssBinding
       ? {
           preAggregateClassNameExpression: t.cloneNode(
@@ -295,9 +319,13 @@ function createPostCssSpreadAggregatedCssPropLowering(
           )
         }
       : {}),
-    postAggregateClassNameExpression: t.cloneNode(
-      postCssBinding.classNameIdentifier
-    )
+    ...(normalizedElement.hasSpreadAfterCss
+      ? {
+          postAggregateClassNameExpression: t.cloneNode(
+            postCssBinding.classNameIdentifier
+          )
+        }
+      : {})
   });
 
   const classNameAttribute = t.jsxAttribute(
@@ -875,7 +903,7 @@ function getAggregateAttributeValue(
   }
 
   if (t.isStringLiteral(attribute.value)) {
-    return t.cloneNode(attribute.value);
+    return createJsxAttributeString(attribute.value);
   }
 
   if (t.isJSXExpressionContainer(attribute.value)) {

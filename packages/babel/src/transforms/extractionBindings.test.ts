@@ -61,6 +61,207 @@ function extract(source: string) {
 }
 
 describe("extracted lexical bindings", () => {
+  it("keeps a captured value after its class dependency", () => {
+    const result = extract(`
+      import { css } from '@mincho-js/css';
+      class Palette { static red = 'red'; }
+      const captured = Palette.red;
+      css({ color: 'blue' });
+      css({ color: captured });
+    `);
+
+    expect(result.values).toEqual([{ color: "blue" }, { color: "red" }]);
+  });
+
+  it.each([
+    "function Component() { return css(styles); }",
+    "const Component = () => css(styles);",
+    "const Component = { render() { return css(styles); } };"
+  ])(
+    "captures later module constants from deferred bodies: %s",
+    (component) => {
+      const result = extract(`
+      import { css } from '@mincho-js/css';
+      ${component}
+      const styles = { color: 'red' };
+    `);
+
+      expect(result.values).toEqual([{ color: "red" }]);
+      expect(result.source).not.toContain("css(styles)");
+    }
+  );
+
+  it.each([
+    "css(styles); const styles = { color: 'red' };",
+    "function Component() { css(styles); const styles = { color: 'red' }; }"
+  ])("rejects a later declaration in the same frame: %s", (source) => {
+    expect(() =>
+      extract(`import { css } from '@mincho-js/css'; ${source}`)
+    ).toThrow(/captures runtime binding styles/);
+  });
+
+  it("preserves an earlier primitive read before a mutating extracted call", () => {
+    const result = extract(`
+      import { css } from '@mincho-js/css';
+      const state = { color: 'red' };
+      const captured = state.color;
+      css({ color: state.color = 'blue' });
+      css({ color: captured });
+    `);
+
+    expect(result.values).toEqual([{ color: "blue" }, { color: "red" }]);
+    expect(result.sidecar.match(/const captured =/g)).toHaveLength(1);
+  });
+
+  it("keeps an extracted result declaration after its own call", () => {
+    const result = extract(`
+      import { css } from '@mincho-js/css';
+      const first = css({ color: 'red' });
+      const second = css({ color: 'blue' });
+      css({ first, second });
+    `);
+
+    expect(result.values).toEqual([
+      { color: "red" },
+      { color: "blue" },
+      { first: { color: "red" }, second: { color: "blue" } }
+    ]);
+  });
+
+  it.each([
+    [
+      "const Math = { min: () => 0 };",
+      'Math.min(1, 2) ? "red" : "blue"',
+      "blue"
+    ],
+    ["const Math = { max: () => 0 };", 'Math.max(1, 2) || "blue"', "blue"],
+    [
+      "const Number = { isFinite: () => false };",
+      'Number.isFinite(1) ? "red" : "blue"',
+      "blue"
+    ],
+    [
+      'const String = { fromCharCode: () => "" };',
+      'String.fromCharCode(65) || "blue"',
+      "blue"
+    ],
+    [
+      "const Math = { min: () => 0 }; const selected = Math.min(1, 2);",
+      'selected ? "red" : "blue"',
+      "blue"
+    ],
+    [
+      "const Math = { min: () => 0 }; const first = Math.min(1, 2); const selected = first ? 1 : 0;",
+      'selected ? "red" : "blue"',
+      "blue"
+    ],
+    ["", 'Math.min(1, 2) ? "red" : "blue"', "red"],
+    ["", 'Number.isFinite(1) && "red"', "red"],
+    ["const selected = 0;", 'selected || "blue"', "blue"]
+  ])(
+    "respects lexical bindings in branch proofs: %s / %s",
+    (setup, value, expected) => {
+      const result = extract(`
+      import { css } from '@mincho-js/css';
+      ${setup}
+      export const cls = css({ color: ${value} });
+    `);
+
+      expect(result.values).toEqual([{ color: expected }]);
+    }
+  );
+
+  it.each([
+    "(false && Math.min(1, 2)) ? size : 4",
+    "(true || Math.min(1, 2)) ? 4 : size",
+    "(true ? false : Math.min(1, 2)) ? size : 4",
+    "(Math.min(1, 2), false) ? size : 4"
+  ])("preserves known branch values with shadowed calls: %s", (value) => {
+    const result = extract(`
+      import { css } from '@mincho-js/css';
+      const Math = { min: () => 0 };
+      function Component(size) { return css({ padding: ${value} }); }
+    `);
+
+    expect(result.values).toEqual([{ padding: 4 }]);
+    expect(result.sidecar).not.toMatch(/\bsize\b/);
+    if (value.includes(", false"))
+      expect(result.sidecar).toContain("Math.min(1, 2)");
+  });
+
+  it("does not hide reachable runtime bindings behind shadowed branch proofs", () => {
+    expect(() =>
+      extract(`
+      import { css } from '@mincho-js/css';
+      const Math = { min: () => 1 };
+      function Component(size) {
+        return css({ padding: Math.min(0, 0) ? size : 4 });
+      }
+    `)
+    ).toThrow(/captures runtime binding size/);
+  });
+
+  it.each([
+    "false ? size : 4",
+    "true ? 4 : size",
+    "4 || size",
+    "4 ?? size",
+    "(false && size) || 4",
+    "({ value: false ? size : 4 }).value"
+  ])("prunes unreachable parameter references from sidecars: %s", (value) => {
+    const result = extract(`
+      import { css } from '@mincho-js/css';
+      function Component(size) { return css({ padding: ${value} }); }
+    `);
+
+    expect(result.values).toEqual([{ padding: 4 }]);
+    expect(result.sidecar).not.toMatch(/\bsize\b/);
+    expect(result.source).toContain("function Component(size)");
+  });
+
+  it("prunes only sidecar clones of shared declarations", () => {
+    const result = extract(`
+      import { css } from '@mincho-js/css';
+      function Component(size) {
+        const rule = { padding: false ? size : 4 };
+        return { rule, className: css(rule) };
+      }
+    `);
+
+    expect(result.values).toEqual([{ padding: 4 }]);
+    expect(result.sidecar).not.toMatch(/\bsize\b/);
+    expect(result.source).toContain("padding: false ? size : 4");
+  });
+
+  it("preserves logical expression values instead of returning references", () => {
+    const result = extract(`
+      import { css } from '@mincho-js/css';
+      function Component(size) {
+        const width = 4;
+        return css({ padding: +(delete (width || size)) });
+      }
+    `);
+
+    expect(result.values).toEqual([{ padding: 1 }]);
+    expect(result.sidecar).not.toMatch(/\bsize\b/);
+  });
+
+  it.each([
+    "true ? size : 4",
+    "false ? 4 : size",
+    "false || size",
+    "null ?? size",
+    "true && size",
+    "size ? 4 : 8"
+  ])("still rejects reachable parameter references: %s", (value) => {
+    expect(() =>
+      extract(`
+        import { css } from '@mincho-js/css';
+        function Component(size) { return css({ padding: ${value} }); }
+      `)
+    ).toThrow(/captures runtime binding size/);
+  });
+
   it("preserves independently shadowed constants in source and sidecar", () => {
     const result = extract(`
       import { css } from '@mincho-js/css';

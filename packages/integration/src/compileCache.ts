@@ -4,6 +4,10 @@ import type { CompileOptions } from "./compile.js";
 import { currentCompilationExecution } from "./compilationExecution.js";
 import { cacheDigest } from "./compilationCache.js";
 import { recordCompilationDiagnostic } from "./diagnostics.js";
+import {
+  validateCompileResolutions,
+  type CompileResolutionManifest
+} from "./compileResolution.js";
 
 export interface CompileCacheBridge {
   readonly plugin: Plugin;
@@ -20,7 +24,11 @@ export interface CompileCacheBridge {
   restore(data: unknown): Promise<boolean>;
 }
 
-type Compiled = { source: string; watchFiles: string[] };
+type Compiled = {
+  source: string;
+  watchFiles: string[];
+  resolutions?: CompileResolutionManifest;
+};
 
 export function cachedCompile(
   options: CompileOptions,
@@ -74,7 +82,9 @@ async function compileWithInputs(
   }
 
   const cwd = options.cwd ?? process.cwd();
-  const key = `compile-v2:${cacheDigest(
+  // Older entries only proved physical file contents, not how imports selected
+  // those files. They must not survive the resolution-manifest boundary.
+  const key = `compile-v3-resolution:${cacheDigest(
     JSON.stringify([
       options.originalPath,
       options.filePath,
@@ -82,6 +92,9 @@ async function compileWithInputs(
       cwd,
       options.externals,
       options.loader,
+      options.parserPlugins,
+      options.alias,
+      options.resolvedImports,
       options.dependencyGraph,
       options.staticStyles,
       currentCompilationExecution()?.evaluation,
@@ -91,129 +104,142 @@ async function compileWithInputs(
     ])
   )}`;
 
-  const result = await cache.run(key, async () => {
-    const observed = new Map<string, string | null>();
-    let cacheable = true;
+  const result = await cache.run(
+    key,
+    async () => {
+      const observed = new Map<string, string | null>();
+      let cacheable = true;
 
-    const observe = async (file: string, bytes: string | Uint8Array) => {
-      const digest = cacheDigest(bytes);
+      const observe = async (file: string, bytes: string | Uint8Array) => {
+        const digest = cacheDigest(bytes);
 
-      if (observed.has(file) && observed.get(file) !== digest)
-        cacheable = false;
+        if (observed.has(file) && observed.get(file) !== digest)
+          cacheable = false;
 
-      observed.set(file, digest);
+        observed.set(file, digest);
 
-      const missing = cache
-        .configurationFiles([file])
-        .filter((path) => !configurations.has(path));
+        const missing = cache
+          .configurationFiles([file])
+          .filter((path) => !configurations.has(path));
+
+        try {
+          for (const [path, value] of await cache.fingerprint(missing))
+            configurations.set(path, value);
+        } catch {
+          cacheable = false;
+        }
+      };
+
+      const readText = cache.bindInputs(async (file: string) => {
+        const text = await (options.readFile?.(file) ??
+          cache
+            .readFile(file)
+            .then((bytes) => Buffer.from(bytes).toString("utf8")));
+
+        await observe(file, text);
+
+        return text;
+      });
+
+      const readBytes = cache.bindInputs(async (file: string) => {
+        const bytes = await (options.readFileBytes?.(file) ??
+          cache.readFile(file));
+
+        await observe(file, bytes);
+
+        return bytes;
+      });
+
+      const compiled = await compile({
+        ...options,
+        readFile: readText,
+        readFileBytes: readBytes
+      });
+
+      const bridge = cacheBridge?.capture();
+
+      for (const file of bridge?.files ?? [])
+        observed.set(file.path, file.digest);
+
+      const synthetic = new Set([
+        resolve(options.filePath),
+        resolve(cwd, basename(options.filePath))
+      ]);
+
+      for (const dependency of compiled.watchFiles)
+        if (
+          !synthetic.has(dependency) &&
+          !observed.has(dependency) &&
+          !configurations.has(dependency)
+        ) {
+          cacheable = false;
+          recordCompilationDiagnostic("cache-bypass", {
+            reason: "unobserved-watch-file",
+            file: dependency
+          });
+        }
+
+      const fingerprints = new Map([...configurations, ...observed]);
 
       try {
-        for (const [path, value] of await cache.fingerprint(missing))
-          configurations.set(path, value);
+        if (
+          !(await cache.unchanged(fingerprints)) ||
+          !(await validateCompileResolutions(options, compiled.resolutions))
+        )
+          cacheable = false;
       } catch {
         cacheable = false;
       }
-    };
+      if (!compiled.resolutions)
+        recordCompilationDiagnostic("cache-bypass", {
+          reason: "unverifiable-resolution"
+        });
 
-    const readText = cache.bindInputs(async (file: string) => {
-      const text = await (options.readFile?.(file) ??
-        cache
-          .readFile(file)
-          .then((bytes) => Buffer.from(bytes).toString("utf8")));
-
-      await observe(file, text);
-
-      return text;
-    });
-
-    const readBytes = cache.bindInputs(async (file: string) => {
-      const bytes = await (options.readFileBytes?.(file) ??
-        cache.readFile(file));
-
-      await observe(file, bytes);
-
-      return bytes;
-    });
-
-    const compiled = await compile({
-      ...options,
-      readFile: readText,
-      readFileBytes: readBytes
-    });
-
-    const bridge = cacheBridge?.capture();
-
-    for (const file of bridge?.files ?? [])
-      observed.set(file.path, file.digest);
-
-    const synthetic = new Set([
-      resolve(options.filePath),
-      resolve(cwd, basename(options.filePath))
-    ]);
-
-    for (const dependency of compiled.watchFiles)
-      if (
-        !synthetic.has(dependency) &&
-        !observed.has(dependency) &&
-        !configurations.has(dependency)
-      ) {
+      // A source transform supplied by an external Babel configuration can read
+      // arbitrary inputs. Its execution is deliberately not memoized.
+      if (await cache.hasExternalBabelConfiguration(configurations)) {
         cacheable = false;
         recordCompilationDiagnostic("cache-bypass", {
-          reason: "unobserved-watch-file",
-          file: dependency
+          reason: "external-babel-configuration"
         });
       }
 
-    const fingerprints = new Map([...configurations, ...observed]);
+      const watches = [...configurations]
+        .filter(
+          ([file, value]) =>
+            value !== null &&
+            !value.startsWith("directory:") &&
+            file.startsWith(cwd + "/")
+        )
+        .map(([file]) => file);
 
-    try {
-      if (!(await cache.unchanged(fingerprints))) cacheable = false;
-    } catch {
-      cacheable = false;
-    }
+      const value = {
+        source: compiled.source,
+        resolutions: compiled.resolutions,
+        watchFiles: [
+          ...new Set([
+            ...compiled.watchFiles,
+            ...watches,
+            ...(bridge?.files.map((file) => file.path) ?? [])
+          ])
+        ],
+        bridge: bridge?.data
+      };
 
-    // A source transform supplied by an external Babel configuration can read
-    // arbitrary inputs. Its execution is deliberately not memoized.
-    if (await cache.hasExternalBabelConfiguration(configurations)) {
-      cacheable = false;
-      recordCompilationDiagnostic("cache-bypass", {
-        reason: "external-babel-configuration"
-      });
-    }
+      return {
+        value,
+        owner: options.originalPath,
+        dependencies: [options.originalPath, ...fingerprints.keys()],
+        bytes: cacheable ? Buffer.byteLength(JSON.stringify(value)) : Infinity,
+        ...(cacheable && (!cacheBridge || cacheBridge.persistent)
+          ? { manifest: { fingerprints: [...fingerprints] } }
+          : {}),
 
-    const watches = [...configurations]
-      .filter(
-        ([file, value]) =>
-          value !== null &&
-          !value.startsWith("directory:") &&
-          file.startsWith(cwd + "/")
-      )
-      .map(([file]) => file);
-
-    const value = {
-      source: compiled.source,
-      watchFiles: [
-        ...new Set([
-          ...compiled.watchFiles,
-          ...watches,
-          ...(bridge?.files.map((file) => file.path) ?? [])
-        ])
-      ],
-      bridge: bridge?.data
-    };
-
-    return {
-      value,
-      owner: options.originalPath,
-      dependencies: [options.originalPath, ...fingerprints.keys()],
-      bytes: cacheable ? Buffer.byteLength(JSON.stringify(value)) : Infinity,
-      ...(cacheable && (!cacheBridge || cacheBridge.persistent)
-        ? { manifest: { fingerprints: [...fingerprints] } }
-        : {}),
-
-      valid: () => cache.unchanged(fingerprints)
-    };
-  });
+        valid: () => cache.unchanged(fingerprints)
+      };
+    },
+    (value) => validateCompileResolutions(options, value.resolutions)
+  );
 
   if (cacheBridge && !(await cacheBridge.restore(result.bridge))) {
     cache.invalidate(options.originalPath);

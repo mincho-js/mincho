@@ -10,6 +10,7 @@ import { createStaticCssEvalCjsReexportRequestParts } from "../cjsResolver.js";
 import {
   createStaticCssEvalCjsDynamicRequireUnsupportedDiagnostic,
   createStaticCssEvalCjsUnsupportedDiagnostic,
+  createStaticCssEvalImportCycleKey,
   createStaticCssEvalPartialNamespaceFailureDiagnostic,
   createStaticCssEvalProviderSourceUnsupportedDiagnostic,
   createStaticCssEvalUnresolvedExportDiagnostic,
@@ -93,6 +94,7 @@ import {
   createUnsupportedExportEntryDiagnostic,
   getCjsModuleUnsupportedEntry,
   getStaticExportEntryCjsRequireSource,
+  formatStaticCssEvalResolutionFrame,
   markResolutionDependenciesContributed,
   markResolutionDependencyInspected,
   resolveStaticExportMapEntry,
@@ -102,6 +104,7 @@ import {
 export class ImportedStaticCssEvalResolver {
   readonly #modules = new Map<string, ImportedStaticCssEvalLoadedModule>();
   readonly #records = new Map<string, ImportedStaticCssEvalModuleRecord>();
+  readonly #sourceFiles = new Map<string, string>();
   readonly #parseFailures = new Map<string, string>();
   readonly #importResolutions = new Map<
     string,
@@ -118,13 +121,22 @@ export class ImportedStaticCssEvalResolver {
 
     for (const loadedModule of options.modules) {
       this.#modules.set(loadedModule.id, loadedModule);
+      if (loadedModule.resolvedFile !== undefined)
+        this.#sourceFiles.set(loadedModule.id, loadedModule.resolvedFile);
     }
 
     for (const moduleRecord of options.moduleRecords ?? []) {
       this.#records.set(moduleRecord.id, moduleRecord);
+      if (moduleRecord.resolvedFile !== undefined)
+        this.#sourceFiles.set(moduleRecord.id, moduleRecord.resolvedFile);
     }
 
     for (const resolution of options.importResolutions) {
+      if (
+        resolution.resolvedFile !== undefined &&
+        !this.#sourceFiles.has(resolution.resolvedId)
+      )
+        this.#sourceFiles.set(resolution.resolvedId, resolution.resolvedFile);
       this.#importResolutions.set(
         createImportResolutionKey(
           resolution.importerId,
@@ -153,6 +165,7 @@ export class ImportedStaticCssEvalResolver {
 
     const owner = createQueryOwnerLocation(query);
     const state = createResolutionState(owner);
+    state.sourceFiles = this.#sourceFiles;
     const importBinding = ownerRecord.imports.get(query.bindingName);
     const cjsBinding = ownerRecord.cjsImports.get(query.bindingName);
     const requestResult = importBinding
@@ -1380,7 +1393,24 @@ export class ImportedStaticCssEvalResolver {
     });
 
     if (!cycleResult.ok) {
-      return cycleResult;
+      const nextKey = createStaticCssEvalImportCycleKey(next);
+      const cycleStart = state.stack.findIndex(
+        (frame) => createStaticCssEvalImportCycleKey(frame) === nextKey
+      );
+      // Detect cycles with graph IDs; format their diagnostic from structured
+      // frames so a fragment in a host ID cannot be mistaken for an export.
+      return {
+        ...cycleResult,
+        diagnostic: {
+          ...cycleResult.diagnostic,
+          importChain: [...state.stack.slice(cycleStart), next].map((frame) =>
+            formatStaticCssEvalResolutionFrame({
+              ...frame,
+              file: state.sourceFiles?.get(frame.file) ?? frame.file
+            })
+          )
+        }
+      };
     }
 
     return guardStaticCssEvalResolutionDepth({

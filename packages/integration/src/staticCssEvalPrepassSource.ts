@@ -117,6 +117,8 @@ export function createLoadedModule(
 
   return {
     id,
+    resolvedFile:
+      loadedSource.resolvedFile ?? options.resolution?.resolvedFile ?? id,
     source: sourceText,
     realpath: loadedSource.realpath ?? options.resolution?.realpath,
     sourceHash: sourceIdentity.sourceHash,

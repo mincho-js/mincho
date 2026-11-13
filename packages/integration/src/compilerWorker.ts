@@ -181,7 +181,10 @@ export async function runCompilerJob(
         babel: {
           ...job.input.babel,
           compilationCache: job.cache ? cache : undefined,
-          staticCssEvalSourceProvider: provider
+          staticCssEvalSourceProvider: provider,
+          consumerRuntimeSource: job.consumerRuntime
+            ? (...args) => request({ kind: "consumer-runtime", args })
+            : undefined
         }
       },
       job.cache

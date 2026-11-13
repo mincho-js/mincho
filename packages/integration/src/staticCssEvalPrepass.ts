@@ -1,4 +1,4 @@
-import type { NodePath } from "@babel/core";
+import type { NodePath, TransformOptions } from "@babel/core";
 import { types as t } from "@babel/core";
 import {
   type InternalSourceAstCache,
@@ -7,6 +7,7 @@ import {
   internalCreateImportedStaticCssEvalProvider as createImportedStaticCssEvalProvider,
   internalGetStaticCssEvalMemberReference as getStaticCssEvalMemberReference,
   internalStaticCssEvalLimits,
+  internalGetStaticCssEvalLiteralRequireImportPath,
   internalUnwrapTransparentCssRuleExpression as unwrapTransparentCssRuleExpression,
   type InternalImportedStaticCssEvalModuleRecord as ImportedStaticCssEvalModuleRecord,
   type MinchoStaticCssEvalMetadata,
@@ -40,6 +41,7 @@ interface PreparedStaticCssEvalPrepass {
   provider: StaticCssEvalProvider;
   result: StaticCssEvalPrepassResult;
   diagnostics: MinchoStaticCssEvalMetadata["diagnostics"];
+  executionDependenciesComplete?: boolean;
 }
 
 // Only bounded prepass exits use this signal; provider and parser failures
@@ -64,6 +66,7 @@ interface StaticCssEvalExecutionBudget {
 
 interface StaticCssEvalPrepassState {
   parserCache?: InternalSourceAstCache;
+  parserPlugins?: NonNullable<TransformOptions["parserOpts"]>["plugins"];
   loadedModules: ImportedStaticCssEvalLoadedModule[];
   dependencies: StaticCssEvalPrepassDependencies;
   resolvedModuleCache: Map<string, ImportedStaticCssEvalModuleRecord>;
@@ -173,7 +176,9 @@ export async function createStaticCssEvalPrepass(
   ownerId: string,
   sourceProvider: StaticCssEvalSourceProvider,
   parserCache?: InternalSourceAstCache,
-  preparedProgram?: NodePath<t.Program>
+  preparedProgram?: NodePath<t.Program>,
+  purpose: "values" | "execution-dependencies" = "values",
+  parserPlugins?: NonNullable<TransformOptions["parserOpts"]>["plugins"]
 ): Promise<PreparedStaticCssEvalPrepass> {
   const ownerSource = await sourceProvider.load(ownerId);
 
@@ -181,20 +186,43 @@ export async function createStaticCssEvalPrepass(
     throw new Error(`Failed to load static css eval owner source ${ownerId}`);
   }
 
-  const ownerModule = createLoadedModule(ownerId, ownerSource);
+  const preparedOwner =
+    purpose === "execution-dependencies"
+      ? prepareStaticCssEvalLoadedSource(
+          ownerId,
+          ownerSource,
+          normalizeStaticCssEvalSourceResolution({
+            id: ownerId,
+            ...ownerSource
+          })
+        )
+      : undefined;
+
+  if (preparedOwner?.kind === "unsupported")
+    throw new Error(`Unsupported execution dependency owner source ${ownerId}`);
+
+  const ownerModule = createLoadedModule(
+    ownerId,
+    preparedOwner?.loadedSource ?? ownerSource,
+    preparedOwner ? { sourceText: preparedOwner.sourceText } : undefined
+  );
   const ownerRecord = createImportedStaticCssEvalModuleRecord(
     ownerModule,
     parserCache,
-    preparedProgram
+    preparedProgram,
+    parserPlugins
   );
 
-  const candidates = collectJsxCssPropStaticCssEvalCandidates(
-    ownerRecord.programPath,
-    { importerId: ownerId }
-  );
+  const candidates =
+    purpose === "values"
+      ? collectJsxCssPropStaticCssEvalCandidates(ownerRecord.programPath, {
+          importerId: ownerId
+        })
+      : [];
 
   const prepassState: StaticCssEvalPrepassState = {
     parserCache,
+    parserPlugins,
     loadedModules: [ownerModule],
     dependencies: new StaticCssEvalPrepassDependencies(),
     resolvedModuleCache: new Map([[ownerRecord.id, ownerRecord]]),
@@ -217,6 +245,7 @@ export async function createStaticCssEvalPrepass(
   };
 
   const diagnostics: MinchoStaticCssEvalMetadata["diagnostics"] = [];
+  let executionDependenciesComplete: boolean | undefined;
 
   try {
     for (const candidate of candidates) {
@@ -259,12 +288,20 @@ export async function createStaticCssEvalPrepass(
       }
     }
 
-    await loadStaticCssEvalPrepassOwnerLiteralDependencies(
-      ownerRecord,
-      prepassContext
-    );
-    if (prepassState.loadedModules.length > 1) {
-      await loadStaticCssEvalExecutionDependencies(ownerRecord, prepassContext);
+    if (purpose === "values")
+      await loadStaticCssEvalPrepassOwnerLiteralDependencies(
+        ownerRecord,
+        prepassContext
+      );
+    if (
+      purpose === "execution-dependencies" ||
+      prepassState.loadedModules.length > 1
+    ) {
+      executionDependenciesComplete =
+        await loadStaticCssEvalExecutionDependencies(
+          ownerRecord,
+          prepassContext
+        );
     }
   } catch (error) {
     if (!(error instanceof StaticCssEvalPrepassLimit)) {
@@ -280,6 +317,7 @@ export async function createStaticCssEvalPrepass(
     });
 
     // Keep discovered watch dependencies, but never evaluate a partial graph.
+    executionDependenciesComplete = false;
     prepassState.loadedModules = [];
     prepassState.resolvedModuleCache.clear();
   }
@@ -292,13 +330,28 @@ export async function createStaticCssEvalPrepass(
     modules: prepassState.loadedModules,
     importResolutions: diagnostics.length
       ? []
-      : prepassState.dependencies.importResolutions,
+      : prepassState.dependencies.importResolutions.map((resolution) => {
+          const resolved = prepassState.resolvedImports.get(
+            `${resolution.importerId}\0${resolution.importPath}\0${resolution.resolutionMode ?? "import"}`
+          );
+          return {
+            ...resolution,
+            resolvedFile: resolution.resolvedId,
+            // An unresolved edge has no graph node. Keep its original source
+            // in diagnostics instead of exposing the unresolved cache sentinel.
+            resolvedId:
+              resolved && resolved.sourceKind !== "unresolved"
+                ? resolved.normalizedPathKey
+                : resolution.resolvedId
+          };
+        }),
     moduleRecords: [...prepassState.resolvedModuleCache.values()]
   });
 
   return {
     provider,
     diagnostics,
+    executionDependenciesComplete,
     result: {
       dependencyFiles: [...prepassState.ownerDependencies],
       ownerToDependencies,
@@ -309,6 +362,136 @@ export async function createStaticCssEvalPrepass(
   };
 }
 
+function getNodeLoaderNamespace(
+  source: string
+): "module" | "process" | undefined {
+  const name = source.startsWith("node:") ? source.slice(5) : source;
+  return name === "module" || name === "process" ? name : undefined;
+}
+
+function usesOpaqueNodeLoader(
+  reference: NodePath<t.Node>,
+  seen = new Set<NonNullable<ReturnType<NodePath["scope"]["getBinding"]>>>(),
+  origin: "module" | "process" | "builtin" = "module",
+  promise = false
+): boolean {
+  const parent = reference.parentPath;
+  if (!parent) return true;
+  // These observations do not pass the capability value to another consumer.
+  if (
+    (parent.isUnaryExpression() &&
+      ["typeof", "void", "!"].includes(parent.node.operator)) ||
+    (parent.isBinaryExpression() &&
+      ["===", "!=="].includes(parent.node.operator)) ||
+    ((parent.isConditionalExpression() ||
+      parent.isIfStatement() ||
+      parent.isWhileStatement() ||
+      parent.isDoWhileStatement() ||
+      parent.isForStatement()) &&
+      parent.node.test === reference.node)
+  )
+    return false;
+  // A selected capability remains the same origin through value-producing
+  // expressions. Follow its eventual consumer instead of treating selection
+  // itself as an escape, including conditional process fallbacks in libraries.
+  if (parent.isConditionalExpression() || parent.isLogicalExpression())
+    return usesOpaqueNodeLoader(parent, seen, origin, promise);
+  if (parent.isSequenceExpression())
+    return (
+      parent.node.expressions.at(-1) === reference.node &&
+      usesOpaqueNodeLoader(parent, seen, origin, promise)
+    );
+  if (
+    parent.isExpression() &&
+    unwrapTransparentCssRuleExpression(parent.node) === reference.node
+  )
+    return usesOpaqueNodeLoader(parent, seen, origin, promise);
+  if (parent.isAwaitExpression() && parent.node.argument === reference.node)
+    return usesOpaqueNodeLoader(parent, seen, origin);
+  if (
+    origin === "builtin" &&
+    (parent.isCallExpression() || parent.isOptionalCallExpression()) &&
+    parent.node.callee === reference.node
+  ) {
+    const [source] = parent.node.arguments;
+    if (!t.isStringLiteral(source)) return true;
+    const namespace = getNodeLoaderNamespace(source.value);
+    return (
+      namespace !== undefined && usesOpaqueNodeLoader(parent, seen, namespace)
+    );
+  }
+  if (
+    (parent.isMemberExpression() || parent.isOptionalMemberExpression()) &&
+    parent.node.object === reference.node
+  ) {
+    // A dynamic import first produces a Promise, not the namespace itself.
+    // Promise members can pass it to opaque callbacks, including chains of
+    // catch/finally before then. Only await exposes a namespace we can track.
+    if (promise) return true;
+    const property = parent.node.property;
+    const name =
+      !parent.node.computed && t.isIdentifier(property)
+        ? property.name
+        : t.isStringLiteral(property)
+          ? property.value
+          : undefined;
+    if (origin === "process") {
+      if (name === "default") return usesOpaqueNodeLoader(parent, seen, origin);
+      return (
+        name === undefined ||
+        (name === "getBuiltinModule" &&
+          usesOpaqueNodeLoader(parent, seen, "builtin"))
+      );
+    }
+    if (origin === "builtin")
+      return name === undefined || ["call", "apply", "bind"].includes(name);
+    if (name === "default" || name === "Module")
+      return usesOpaqueNodeLoader(parent, seen);
+    return name === undefined || name === "createRequire" || name === "require";
+  }
+  if (parent.isVariableDeclarator() && parent.node.init === reference.node) {
+    if (t.isIdentifier(parent.node.id)) {
+      const binding = parent.scope.getBinding(parent.node.id.name);
+      if (binding?.constant) {
+        if (seen.has(binding)) return false;
+        seen.add(binding);
+        return binding.referencePaths.some((path) =>
+          usesOpaqueNodeLoader(path, seen, origin, promise)
+        );
+      }
+    } else if (t.isObjectPattern(parent.node.id)) {
+      if (promise) return true;
+      return parent.node.id.properties.some((property) => {
+        if (!t.isObjectProperty(property)) return true;
+        const name = getStaticCssEvalPrepassObjectPropertyName(property);
+        if (origin === "process") {
+          if (name === null) return true;
+          if (name !== "getBuiltinModule" && name !== "default") return false;
+          if (!t.isIdentifier(property.value)) return true;
+          const binding = parent.scope.getBinding(property.value.name);
+          return (
+            !binding?.constant ||
+            binding.referencePaths.some((path) =>
+              usesOpaqueNodeLoader(
+                path,
+                seen,
+                name === "default" ? "process" : "builtin"
+              )
+            )
+          );
+        }
+        if (origin === "builtin") return true;
+        return (
+          name === null ||
+          ["createRequire", "require", "default", "Module"].includes(name)
+        );
+      });
+    }
+  }
+  // A bare namespace that escapes can manufacture loaders in opaque code.
+  return !parent.isExpressionStatement();
+}
+
 // Effects in sibling imports can mutate a value before its JSX owner renders.
 // Discover all executable edges: an otherwise unused import can transitively
 // reach a CSS object. The evaluator limits mutation checks to reverse-reachable
@@ -316,7 +499,8 @@ export async function createStaticCssEvalPrepass(
 async function loadStaticCssEvalExecutionDependencies(
   owner: ImportedStaticCssEvalModuleRecord,
   context: StaticCssEvalPrepassContext
-): Promise<void> {
+): Promise<boolean> {
+  let complete = true;
   const executionBudget: StaticCssEvalExecutionBudget = {
     loadedIds: new Set([owner.id]),
     traversedNodes: 0
@@ -337,6 +521,7 @@ async function loadStaticCssEvalExecutionDependencies(
     const add = (source: string, mode: "import" | "require") => {
       dependencies.set(`${mode}\0${source}`, { source, mode });
     };
+    const requireReferences: NodePath<t.Node>[] = [];
     record.programPath.traverse({
       enter() {
         if (
@@ -366,23 +551,181 @@ async function loadStaticCssEvalExecutionDependencies(
         add(path.node.source.value, "import");
       },
       ExportNamedDeclaration(path) {
-        if (path.node.source && path.node.exportKind !== "type")
-          add(path.node.source.value, "import");
+        const { source, exportKind, specifiers } = path.node;
+        if (!source || exportKind === "type") return;
+        if (
+          specifiers.length &&
+          specifiers.every(
+            (specifier) =>
+              t.isExportSpecifier(specifier) && specifier.exportKind === "type"
+          )
+        )
+          return;
+        const namespace = getNodeLoaderNamespace(source.value);
+        if (
+          namespace &&
+          specifiers.some(
+            (specifier) =>
+              !t.isExportSpecifier(specifier) ||
+              (specifier.exportKind !== "type" &&
+                (!t.isIdentifier(specifier.local) ||
+                  (namespace === "module"
+                    ? ["createRequire", "default", "Module"]
+                    : ["getBuiltinModule", "default"]
+                  ).includes(specifier.local.name)))
+          )
+        )
+          complete = false;
+        add(source.value, "import");
       },
       ExportAllDeclaration(path) {
-        if (path.node.exportKind !== "type")
+        if (path.node.exportKind !== "type") {
+          if (getNodeLoaderNamespace(path.node.source.value)) complete = false;
           add(path.node.source.value, "import");
+        }
       },
       CallExpression(path) {
+        if (t.isImport(path.node.callee)) {
+          const [source] = path.node.arguments;
+          if (t.isStringLiteral(source)) {
+            add(source.value, "import");
+            const namespace = getNodeLoaderNamespace(source.value);
+            if (
+              namespace &&
+              usesOpaqueNodeLoader(path, undefined, namespace, true)
+            )
+              complete = false;
+          } else complete = false;
+          return;
+        }
+      },
+      TSImportEqualsDeclaration(path) {
+        const { importKind, moduleReference } = path.node;
         if (
-          t.isIdentifier(path.node.callee, { name: "require" }) &&
-          !path.scope.getBinding("require") &&
-          path.node.arguments.length === 1 &&
-          t.isStringLiteral(path.node.arguments[0])
+          importKind === "type" ||
+          !t.isTSExternalModuleReference(moduleReference)
         )
-          add(path.node.arguments[0].value, "require");
+          return;
+        if (t.isStringLiteral(moduleReference.expression)) {
+          add(moduleReference.expression.value, "require");
+          const namespace = getNodeLoaderNamespace(
+            moduleReference.expression.value
+          );
+          if (namespace) {
+            const binding = path.scope.getBinding(path.node.id.name);
+            if (
+              path.node.isExport ||
+              !binding?.constant ||
+              binding.referencePaths.some((reference) =>
+                usesOpaqueNodeLoader(reference, undefined, namespace)
+              )
+            )
+              complete = false;
+          }
+        } else complete = false;
+      },
+      ReferencedIdentifier(path) {
+        if (
+          path.node.name === "process" &&
+          !path.scope.getBinding("process") &&
+          usesOpaqueNodeLoader(path, undefined, "process")
+        )
+          complete = false;
+        if (
+          path.node.name === "module" &&
+          !path.scope.getBinding("module") &&
+          usesOpaqueNodeLoader(path)
+        )
+          complete = false;
+        if (path.node.name === "require" && !path.scope.getBinding("require"))
+          requireReferences.push(path);
+        const imported = record.imports.get(path.node.name);
+        const namespace =
+          imported && getNodeLoaderNamespace(imported.importPath);
+        if (
+          imported &&
+          namespace &&
+          path.scope.getBinding(path.node.name) ===
+            record.programPath.scope.getBinding(path.node.name)
+        ) {
+          if (
+            namespace === "module" &&
+            imported.kind !== "namespace" &&
+            imported.importedName === "createRequire"
+          )
+            complete = false;
+          else if (
+            namespace === "process" &&
+            imported.kind !== "namespace" &&
+            imported.importedName === "getBuiltinModule"
+          ) {
+            if (usesOpaqueNodeLoader(path, undefined, "builtin"))
+              complete = false;
+          } else if (
+            (imported.kind === "namespace" ||
+              imported.importedName === "default" ||
+              (namespace === "module" && imported.importedName === "Module")) &&
+            usesOpaqueNodeLoader(path, undefined, namespace)
+          )
+            complete = false;
+        }
+      },
+      ImportExpression(path) {
+        if (t.isStringLiteral(path.node.source)) {
+          add(path.node.source.value, "import");
+          const namespace = getNodeLoaderNamespace(path.node.source.value);
+          if (
+            namespace &&
+            usesOpaqueNodeLoader(path, undefined, namespace, true)
+          )
+            complete = false;
+        } else complete = false;
       }
     });
+    requireReferences.reverse();
+    const aliases = new Set<
+      NonNullable<ReturnType<typeof record.programPath.scope.getBinding>>
+    >();
+    while (requireReferences.length) {
+      let reference = requireReferences.pop()!;
+      while (
+        reference.parentPath?.isExpression() &&
+        unwrapTransparentCssRuleExpression(reference.parentPath.node) ===
+          reference.node
+      )
+        reference = reference.parentPath;
+      const parent = reference.parentPath;
+      if (parent?.isCallExpression() && parent.node.callee === reference.node) {
+        const source = internalGetStaticCssEvalLiteralRequireImportPath(
+          t.callExpression(t.identifier("require"), parent.node.arguments),
+          parent.scope
+        );
+        if (source !== null) {
+          add(source, "require");
+          const namespace = getNodeLoaderNamespace(source);
+          if (namespace && usesOpaqueNodeLoader(parent, undefined, namespace))
+            complete = false;
+        } else complete = false;
+        continue;
+      }
+      if (
+        parent?.isVariableDeclarator() &&
+        parent.node.init === reference.node &&
+        t.isIdentifier(parent.node.id)
+      ) {
+        const binding = parent.scope.getBinding(parent.node.id.name);
+        if (binding?.constant) {
+          if (!aliases.has(binding)) {
+            aliases.add(binding);
+            requireReferences.push(...[...binding.referencePaths].reverse());
+          }
+          continue;
+        }
+      }
+      // A loader passed to opaque code can load arbitrary, otherwise erased
+      // dependencies. Such a graph cannot support a completed runtime receipt.
+      complete = false;
+    }
     // Reverse a LIFO worklist to retain source-order depth-first discovery.
     // Scan a module immediately after loading, before queuing any more loads,
     // so broad graphs cannot retain uncounted ASTs past the node limit.
@@ -399,7 +742,17 @@ async function loadStaticCssEvalExecutionDependencies(
       mode
     );
     if (dependency) enqueue(dependency);
+    else {
+      const resolution = context.state.resolvedImports.get(
+        `${importer}\0${source}\0${mode}`
+      );
+      // A host-declared external is an intentional graph boundary. Unreadable
+      // or unsupported local sources are missing transitive dependency proof.
+      if (resolution?.sourceKind !== "external-no-source") complete = false;
+    }
   }
+
+  return complete;
 }
 
 async function loadStaticCssEvalPrepassDependency(
@@ -445,22 +798,24 @@ async function loadStaticCssEvalPrepassDependency(
 
   if (context.executionBudget) {
     const { loadedIds } = context.executionBudget;
-    if (!loadedIds.has(resolution.resolvedFile)) {
+    if (!loadedIds.has(resolution.normalizedPathKey)) {
       if (loadedIds.size >= STATIC_CSS_EVAL_EXECUTION_LIMITS.modules)
         throw new StaticCssEvalPrepassLimit(
           "Static CSS execution discovery exceeded max modules per owner"
         );
-      loadedIds.add(resolution.resolvedFile);
+      loadedIds.add(resolution.normalizedPathKey);
     }
   }
 
-  const cachedRecord = state.resolvedModuleCache.get(resolution.resolvedFile);
+  const cachedRecord = state.resolvedModuleCache.get(
+    resolution.normalizedPathKey
+  );
 
   if (cachedRecord) {
     return cachedRecord;
   }
 
-  if (state.loadedDependencyIds.has(resolution.resolvedFile)) {
+  if (state.loadedDependencyIds.has(resolution.normalizedPathKey)) {
     return undefined;
   }
 
@@ -482,7 +837,7 @@ async function loadStaticCssEvalPrepassDependency(
     );
   }
 
-  state.loadedDependencyIds.add(resolution.resolvedFile);
+  state.loadedDependencyIds.add(resolution.normalizedPathKey);
 
   const loadedSource = await sourceProvider.load(resolution.normalizedPathKey);
 
@@ -520,7 +875,7 @@ async function loadStaticCssEvalPrepassDependency(
   }
 
   const loadedModule = createLoadedModule(
-    resolution.resolvedFile,
+    resolution.normalizedPathKey,
     preparedSource.loadedSource,
     { resolution, sourceText: preparedSource.sourceText }
   );
@@ -530,7 +885,9 @@ async function loadStaticCssEvalPrepassDependency(
   try {
     moduleRecord = createImportedStaticCssEvalModuleRecord(
       loadedModule,
-      state.parserCache
+      state.parserCache,
+      undefined,
+      state.parserPlugins
     );
   } catch (error) {
     if (!(error instanceof Error)) {
@@ -2223,7 +2580,13 @@ if (import.meta.vitest) {
         createFixtureResolutionKey(ownerId, "@fixture/styles/tokens.css?raw"),
         entries[7]
       ],
-      [createFixtureResolutionKey(barrelId, "./star-source"), entries[5]],
+      [
+        createFixtureResolutionKey(
+          entries[4].normalizedPathKey,
+          "./star-source"
+        ),
+        entries[5]
+      ],
       [
         createFixtureResolutionKey(unsupportedOwnerId, "@fixture/no-source"),
         entries[8]
@@ -2350,6 +2713,470 @@ if (import.meta.vitest) {
   }
 
   describe("static css eval prepass source provider metadata", () => {
+    it.each([
+      'await import("node:module").then(({ createRequire }) => createRequire(import.meta.url)("./tokens.cjs"));',
+      'const pending = import("node:module"); await pending.then(({ createRequire }) => createRequire(import.meta.url)("./tokens.cjs"));',
+      'await import("node:process").then(({ getBuiltinModule }) => getBuiltinModule("module").createRequire(import.meta.url)("./tokens.cjs"));',
+      'await import("node:module").catch(() => null).then(({ createRequire }) => createRequire(import.meta.url)("./tokens.cjs"));',
+      'await import("node:process").finally(() => {}).then(({ getBuiltinModule }) => getBuiltinModule("module").createRequire(import.meta.url)("./tokens.cjs"));',
+      'const host = typeof process === "object" && !!process ? process : {}; host.getBuiltinModule("module").createRequire(import.meta.url)("./tokens.cjs");',
+      'const host = process || {}; host.getBuiltinModule("module").createRequire(import.meta.url)("./tokens.cjs");',
+      'const host = (0, process); host.getBuiltinModule("module").createRequire(import.meta.url)("./tokens.cjs");',
+      'const builtin = enabled ? process.getBuiltinModule : fallback; builtin("module").createRequire(import.meta.url)("./tokens.cjs");',
+      "consume(process);",
+      'import process from "node:process"; process.getBuiltinModule("module").createRequire(import.meta.url)("./tokens.cjs");',
+      'import { getBuiltinModule } from "node:process"; getBuiltinModule("module").createRequire(import.meta.url)("./tokens.cjs");',
+      'const process = require("node:process"); process.getBuiltinModule("module").createRequire(__filename)("./tokens.cjs");',
+      'import * as process from "process"; process.default.getBuiltinModule("module").createRequire(import.meta.url)("./tokens.cjs");',
+      'const { getBuiltinModule } = await import("node:process"); getBuiltinModule("module").createRequire(import.meta.url)("./tokens.cjs");',
+      'import process = require("node:process"); process.getBuiltinModule("module").createRequire(__filename)("./tokens.cjs");',
+      'export { getBuiltinModule } from "node:process";',
+      'export * from "node:process";',
+      'const load = process.getBuiltinModule("module").createRequire(import.meta.url); export const theme = load("./tokens.cjs").theme;',
+      'const module = process.getBuiltinModule("node:module"); module.createRequire(import.meta.url)("./tokens.cjs");',
+      'const host = process; const { getBuiltinModule: builtin } = host; builtin("module").createRequire(import.meta.url)("./tokens.cjs");',
+      'const builtin = process["getBuiltinModule"]; builtin("module").createRequire(import.meta.url)("./tokens.cjs");',
+      'process.getBuiltinModule(getName()).createRequire(import.meta.url)("./tokens.cjs");',
+      "consume(process.getBuiltinModule);",
+      'module.require("./tokens.cjs");',
+      'module["require"]("./tokens.cjs");',
+      'module?.require?.("./tokens.cjs");',
+      'const owner = module; owner.require("./tokens.cjs");',
+      'const { require: load } = module; load("./tokens.cjs");',
+      "consume(module);",
+      'import { createRequire } from "node:module"; const load = createRequire(import.meta.url); load("./tokens.cjs");',
+      'import { createRequire as make } from "module"; const factory = make; const load = factory(import.meta.url); const alias = load; alias("./tokens.cjs");',
+      'import * as module from "node:module"; const load = module.createRequire(import.meta.url); load("./tokens.cjs");',
+      'import * as module from "node:module"; const alias = module; alias.createRequire(import.meta.url)("./tokens.cjs");',
+      'import module from "module"; const { createRequire: make } = module; make(import.meta.url)("./tokens.cjs");',
+      'const module = await import("node:module"); module.createRequire(import.meta.url)("./tokens.cjs");',
+      'import module = require("node:module"); module.createRequire(__filename)("./tokens.cjs");',
+      'const { createRequire } = require("node:module"); createRequire(__filename)("./tokens.cjs");',
+      'require("module").createRequire(__filename)("./tokens.cjs");',
+      'export { createRequire as makeLoader } from "node:module";'
+    ])(
+      "declines execution receipts for opaque Node loaders: %s",
+      async (source: string) => {
+        const result = await createStaticCssEvalPrepass(
+          "/theme.css.ts",
+          {
+            resolve: (_importer, specifier) => ({
+              resolvedFile: specifier,
+              sourceKind: "external-no-source"
+            }),
+            load: () => ({ source })
+          },
+          undefined,
+          undefined,
+          "execution-dependencies"
+        );
+        expect(result.executionDependenciesComplete).toBe(false);
+      }
+    );
+
+    it.each([
+      'const host = typeof process === "object" && !!process ? process : {}; export const environment = host.env;',
+      "const host = process || {}; export const environment = host.env;",
+      "const host = (0, process); export const environment = host.env;",
+      "export const available = typeof process === 'object';",
+      "export const available = !!process;",
+      "void process;",
+      "export const available = process !== undefined;",
+      "if (process) { process.env.NODE_ENV; }",
+      'export const available = typeof process.getBuiltinModule === "function";',
+      'import process from "node:process"; export const environment = process.env;',
+      'import { getBuiltinModule } from "node:process"; export const fs = getBuiltinModule("fs");',
+      'const { getBuiltinModule } = require("node:process"); export const names = getBuiltinModule("module").builtinModules;',
+      'import process = require("node:process"); export const pid = process.pid;',
+      'export { pid } from "node:process";',
+      'process.getBuiltinModule("fs").readFileSync("./tokens.cjs");',
+      'export const names = process.getBuiltinModule("module").builtinModules;',
+      "const builtin = process.getBuiltinModule;",
+      'const process = { getBuiltinModule: () => ({ createRequire: () => () => "red" }) }; export const color = process.getBuiltinModule("module").createRequire()();',
+      'function read(process) { return process.getBuiltinModule("module").createRequire(import.meta.url)("./tokens.cjs"); }',
+      'import { createRequire } from "node:module"; export const color = "red";',
+      'import { builtinModules } from "node:module"; export const names = builtinModules;',
+      'import * as module from "node:module"; export const names = module.builtinModules;',
+      'const { builtinModules } = await import("node:module"); export const names = builtinModules;',
+      'const pending = import("node:module"); const { builtinModules } = await pending; export const names = builtinModules;',
+      'import module = require("node:module"); export const names = module.builtinModules;',
+      'const module = { require: () => "red" }; export const color = module.require();',
+      'function read(module) { return module.require("./tokens.cjs"); }',
+      'module.exports = { color: "red" };',
+      "export const filename = module.filename;",
+      'function createRequire() { return () => "red"; } export const color = createRequire()();'
+    ])(
+      "retains execution receipts without an opaque Node loader: %s",
+      async (source: string) => {
+        const result = await createStaticCssEvalPrepass(
+          "/theme.css.ts",
+          {
+            resolve: (_importer, specifier) => ({
+              resolvedFile: specifier,
+              sourceKind: "external-no-source"
+            }),
+            load: () => ({ source })
+          },
+          undefined,
+          undefined,
+          "execution-dependencies"
+        );
+        expect(result.executionDependenciesComplete).toBe(true);
+      }
+    );
+
+    it.each([
+      ['export type { Theme } from "./types";', []],
+      ['export { type Theme } from "./types";', []],
+      ['export { type Theme as Renamed, type Palette } from "./types";', []],
+      ['export { type Theme, color } from "./values";', ["/values.ts"]],
+      ['export { color } from "./values";', ["/values.ts"]],
+      ['export {} from "./values";', ["/values.ts"]],
+      ['export * as colors from "./values";', ["/values.ts"]]
+    ])(
+      "discovers only runtime re-export dependencies: %s",
+      async (source: string, dependencies: string[]) => {
+        const resolutions: string[] = [];
+        const sources: Record<string, string> = {
+          "/theme.css.ts": source,
+          "/values.ts":
+            'export type Theme = "light"; export const color = "red";'
+        };
+        const result = await createStaticCssEvalPrepass(
+          "/theme.css.ts",
+          {
+            resolve: (_importer, specifier) => {
+              resolutions.push(specifier);
+              return specifier === "./values" ? { id: "/values.ts" } : null;
+            },
+            load: (id) => ({ source: sources[id]! })
+          },
+          undefined,
+          undefined,
+          "execution-dependencies"
+        );
+
+        expect(result.executionDependenciesComplete).toBe(true);
+        expect(result.result.dependencyFiles).toEqual(dependencies);
+        expect(resolutions).toEqual(dependencies.length ? ["./values"] : []);
+      }
+    );
+
+    it("discovers TypeScript import-equals execution dependencies and their transitive requires", async () => {
+      const sources: Record<string, string> = {
+        "/theme.css.ts":
+          "import tokens = require('./tokens.cts'); export const color = tokens.color;",
+        "/tokens.cts":
+          "import colors = require('./colors.cjs'); export const color = colors.red;",
+        "/colors.cjs": "exports.red = 'red';"
+      };
+      const resolutions: string[] = [];
+      const result = await createStaticCssEvalPrepass(
+        "/theme.css.ts",
+        {
+          resolve: (_importer, specifier, options) => {
+            resolutions.push(`${options?.kind}:${specifier}`);
+            return { id: specifier.replace("./", "/") };
+          },
+          load: (id) => ({ source: sources[id]! })
+        },
+        undefined,
+        undefined,
+        "execution-dependencies"
+      );
+
+      expect(result.executionDependenciesComplete).toBe(true);
+      expect(result.result.dependencyFiles).toEqual([
+        "/tokens.cts",
+        "/colors.cjs"
+      ]);
+      expect(resolutions).toEqual([
+        "require:./tokens.cts",
+        "require:./colors.cjs"
+      ]);
+    });
+
+    it("omits type-only import-equals and namespace aliases from execution dependencies", async () => {
+      const result = await createStaticCssEvalPrepass(
+        "/theme.css.ts",
+        {
+          resolve: () => {
+            throw new Error("No runtime module import");
+          },
+          load: () => ({
+            source:
+              "import type Tokens = require('./types'); namespace Colors { export const red = 'red'; } import colors = Colors; export const color = colors.red;"
+          })
+        },
+        undefined,
+        undefined,
+        "execution-dependencies"
+      );
+
+      expect(result.executionDependenciesComplete).toBe(true);
+      expect(result.result.dependencyFiles).toEqual([]);
+    });
+
+    it.each([
+      [
+        "const load = require; const again = load; again('./tokens.cjs');",
+        true
+      ],
+      ["const load = require; load(getSpecifier());", false],
+      [
+        "let load = require; load = chooseLoader(); load('./tokens.cjs');",
+        false
+      ],
+      ["registerLoader(require);", false]
+    ])(
+      "discovers require aliases without certifying escaped loaders: %s",
+      async (source: string, complete: boolean) => {
+        const sources: Record<string, string> = {
+          "/theme.css.ts": source,
+          "/tokens.cjs": "const load = require; load('./colors.cjs');",
+          "/colors.cjs": "exports.color = 'red';"
+        };
+        const result = await createStaticCssEvalPrepass(
+          "/theme.css.ts",
+          {
+            resolve: (_importer, specifier) => ({
+              id: specifier.replace("./", "/")
+            }),
+            load: (id) => ({ source: sources[id]! })
+          },
+          undefined,
+          undefined,
+          "execution-dependencies"
+        );
+
+        expect(result.executionDependenciesComplete).toBe(complete);
+        if (complete)
+          expect(result.result.dependencyFiles).toEqual([
+            "/tokens.cjs",
+            "/colors.cjs"
+          ]);
+      }
+    );
+
+    it("discovers each host variant and its transitive dependency", async () => {
+      const sources: Record<string, string> = {
+        "/theme.css.ts": "import './tokens.ts?a'; import './tokens.ts?b';",
+        "/tokens.ts?a": "import './colors-a.ts';",
+        "/tokens.ts?b": "import './colors-b.ts';",
+        "/colors-a.ts": "export const color = 'red';",
+        "/colors-b.ts": "export const color = 'blue';"
+      };
+      const loaded: string[] = [];
+      const result = await createStaticCssEvalPrepass(
+        "/theme.css.ts",
+        {
+          resolve: (_importer, specifier) => ({
+            resolvedFile: specifier.replace("./", "/").split("?")[0],
+            normalizedPathKey: specifier.replace("./", "/")
+          }),
+          load(id) {
+            loaded.push(id);
+            return { source: sources[id]! };
+          }
+        },
+        undefined,
+        undefined,
+        "execution-dependencies"
+      );
+
+      expect(result.executionDependenciesComplete).toBe(true);
+      expect(loaded).toEqual([
+        "/theme.css.ts",
+        "/tokens.ts?a",
+        "/colors-a.ts",
+        "/tokens.ts?b",
+        "/colors-b.ts"
+      ]);
+      expect(result.result.dependencyFiles).toContain("/colors-b.ts");
+      expect(result.result.resolvedModuleCache.get("/tokens.ts?b")?.id).toBe(
+        "/tokens.ts?b"
+      );
+    });
+
+    it("evaluates literal imports against their own host source variants", async () => {
+      const owner =
+        "import {style as a} from './style.ts?a'; import {style as b} from './style.ts?b'; <><div css={a} /><div css={b} /></>;";
+      const result = await createStaticCssEvalPrepass("/owner.tsx", {
+        resolve: (_importer, specifier) => ({
+          resolvedFile: "/style.ts",
+          normalizedPathKey: specifier.replace("./", "/")
+        }),
+        load: (id) => ({
+          source:
+            id === "/owner.tsx"
+              ? owner
+              : `export const style = {color: '${id.endsWith("?a") ? "red" : "blue"}'} as const;`
+        })
+      });
+
+      for (const [bindingName, color] of [
+        ["a", "red"],
+        ["b", "blue"]
+      ]) {
+        const start = owner.indexOf(`css={${bindingName}}`) + "css={".length;
+        const value = result.provider.getResolvedCssValue({
+          importerId: "/owner.tsx",
+          expressionStart: start,
+          expressionEnd: start + 1,
+          bindingName
+        });
+        expect(value).toMatchObject({
+          kind: "resolved",
+          value: { color },
+          provenance: { file: "/style.ts" },
+          cacheKey: {
+            resolvedFile: "/style.ts",
+            resolvedId: "/style.ts",
+            normalizedPathKey: `/style.ts?${bindingName}`
+          },
+          dependencies: [
+            expect.objectContaining({
+              file: "/style.ts",
+              normalizedPathKey: `/style.ts?${bindingName}`
+            })
+          ],
+          resolutionChain: [expect.objectContaining({ source: "/style.ts" })]
+        });
+      }
+    });
+
+    it("reports physical source locations for errors reached through graph variants", async () => {
+      const owner =
+        "import {style} from './barrel.ts?wrapper'; <div css={style} />;";
+      const sources: Record<string, string> = {
+        "/owner.tsx": owner,
+        "/barrel.ts?wrapper": "export {style} from './style.ts#dark';",
+        "/style.ts#dark": "export const style = makeStyle();"
+      };
+      const result = await createStaticCssEvalPrepass("/owner.tsx", {
+        resolve: (_importer: string, specifier: string) => ({
+          resolvedFile: specifier.replace("./", "/").split(/[?#]/, 1)[0],
+          normalizedPathKey: specifier.replace("./", "/")
+        }),
+        load: (id: string) => ({ source: sources[id]! })
+      });
+      const start = owner.indexOf("css={style}") + "css={".length;
+      const value = result.provider.getResolvedCssValue({
+        importerId: "/owner.tsx",
+        expressionStart: start,
+        expressionEnd: start + "style".length,
+        bindingName: "style"
+      });
+
+      expect(value).toMatchObject({
+        kind: "error",
+        diagnostic: {
+          owner: { file: "/owner.tsx" },
+          dependency: { file: "/style.ts" }
+        },
+        cacheKey: {
+          resolvedFile: "/style.ts",
+          resolvedId: "/style.ts",
+          normalizedPathKey: "/style.ts#dark"
+        },
+        dependencies: [
+          expect.objectContaining({
+            file: "/barrel.ts",
+            normalizedPathKey: "/barrel.ts?wrapper"
+          }),
+          expect.objectContaining({
+            file: "/style.ts",
+            normalizedPathKey: "/style.ts#dark"
+          })
+        ]
+      });
+      if (value.kind === "error") {
+        expect(value.diagnostic.importChain).toEqual([
+          "/owner.tsx",
+          "/style.ts#style"
+        ]);
+      }
+    });
+
+    it("keeps direct provider cache identities distinct when normalized keys are omitted", () => {
+      const owner =
+        "import {style as a} from './a'; import {style as b} from './b';";
+      const provider = createImportedStaticCssEvalProvider({
+        modules: [
+          { id: "/owner.ts", source: owner },
+          ...["a", "b"].map((variant) => ({
+            id: `/style.ts?${variant}`,
+            resolvedFile: "/style.ts",
+            source: "export const style = {color: 'red'};"
+          }))
+        ],
+        importResolutions: ["a", "b"].map((variant) => ({
+          importerId: "/owner.ts",
+          importPath: `./${variant}`,
+          resolvedId: `/style.ts?${variant}`
+        }))
+      });
+      const results = ["a", "b"].map((bindingName) =>
+        provider.getResolvedCssValue({
+          importerId: "/owner.ts",
+          expressionStart: 0,
+          expressionEnd: 1,
+          bindingName
+        })
+      );
+      for (const [index, variant] of ["a", "b"].entries())
+        expect(results[index]).toMatchObject({
+          kind: "resolved",
+          cacheKey: {
+            resolvedFile: "/style.ts",
+            resolvedId: "/style.ts",
+            normalizedPathKey: `/style.ts?${variant}`
+          }
+        });
+    });
+
+    it("discovers erased authoring imports without evaluating CSS or requiring JSX", async () => {
+      const sources: Record<string, string> = {
+        "/theme.css.ts":
+          'import {token} from "./tokens.ts"; throw new Error("must not execute"); export const theme = serialize(token);',
+        "/tokens.ts":
+          'const values = require("./values.cjs"); export const token = values.color;',
+        "/values.cjs": 'require("./tokens.ts"); exports.color = "red";'
+      };
+      const loads: string[] = [];
+      const provider: StaticCssEvalSourceProvider = {
+        resolve(_importer, source) {
+          return { id: source.replace("./", "/") };
+        },
+        load(id) {
+          loads.push(id);
+
+          return sources[id] === undefined ? null : { source: sources[id] };
+        }
+      };
+      const result = await createStaticCssEvalPrepass(
+        "/theme.css.ts",
+        provider,
+        undefined,
+        undefined,
+        "execution-dependencies"
+      );
+
+      expect(result.diagnostics).toEqual([]);
+      expect(result.result.dependencyFiles.sort()).toEqual([
+        "/tokens.ts",
+        "/values.cjs"
+      ]);
+      expect(loads).toEqual(["/theme.css.ts", "/tokens.ts", "/values.cjs"]);
+      expect(result.result.resolvedDependencies).toContainEqual(
+        expect.objectContaining({
+          importerId: "/tokens.ts",
+          specifier: "./values.cjs",
+          loaded: true
+        })
+      );
+    });
+
     it("preserves legacy id/source provider metadata", async () => {
       const ownerId = "/project/src/App.tsx";
       const stylesId = "/project/src/styles.ts";
@@ -3385,7 +4212,11 @@ if (import.meta.vitest) {
         { importerId: ownerId, importPath: "virtual:mincho/styles" }
       ]);
       expect(result.dependencyFiles).toEqual([packageId, virtualId]);
-      expect(result.resolvedModuleCache.has(packageId)).toBe(true);
+      expect(
+        result.resolvedModuleCache.has(
+          "pkg:@scope/styles/index.ts?condition=import"
+        )
+      ).toBe(true);
       expect(result.resolvedModuleCache.has(virtualId)).toBe(true);
       expect(result.resolvedDependencies).toEqual([
         expect.objectContaining({
@@ -3683,7 +4514,13 @@ if (import.meta.vitest) {
           }
 
           for (const moduleId of fixture.moduleIds.supported) {
-            expect(result.resolvedModuleCache.has(moduleId)).toBe(true);
+            const dependency = result.resolvedDependencies.find(
+              (dependency) => dependency.resolvedFile === moduleId
+            );
+            expect(dependency).toBeDefined();
+            expect([...result.resolvedModuleCache.keys()]).toContain(
+              dependency!.normalizedPathKey
+            );
           }
 
           expect(result.dependencyFiles).toEqual(
@@ -3728,7 +4565,7 @@ if (import.meta.vitest) {
                 loaded: true
               }),
               expect.objectContaining({
-                importerId: fixture.moduleIds.barrel,
+                importerId: `${fixture.moduleIds.barrel}?conditions=import`,
                 specifier: "./star-source",
                 resolvedFile: fixture.moduleIds.starSource,
                 sourceKind: "package-source",
