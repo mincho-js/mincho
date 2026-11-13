@@ -2445,6 +2445,7 @@ __metadata:
     "@mincho-js/css": "workspace:^"
     "@mincho-js/csstype": "catalog:"
     "@mincho-js/debug-log": "workspace:^"
+    "@mincho-js/transform-to-vanilla": "workspace:^"
     "@types/node": "catalog:"
     "@types/react": "catalog:"
     "@types/react-dom": "catalog:"

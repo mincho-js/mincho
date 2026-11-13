@@ -27,7 +27,9 @@ type StyledProps = {
 
 export function $$styled<T extends ComponentType<unknown>>(
   component: T,
-  styles: StyledRecipe
+  styles: StyledRecipe,
+  propNames: readonly string[] = [],
+  numericUnits: Readonly<Record<string, "px" | "mixed">> = {}
 ) {
   type Props = ComponentProps<typeof component> & StyledProps;
 
@@ -39,12 +41,39 @@ export function $$styled<T extends ComponentType<unknown>>(
 
       const variantSelection: VariantObjectSelection<VariantGroups> = {};
       const otherProps: Record<string, unknown> = {};
-      const canReuseProps = splitVariantProps(
+      let canReuseProps = splitVariantProps(
         props,
         variantKeys,
         variantSelection,
         otherProps
       );
+
+      if (propNames.length > 0) {
+        const dynamicProps: Record<string, unknown> = Object.create(null);
+
+        for (const name of propNames) {
+          if (Object.prototype.hasOwnProperty.call(props, name)) {
+            const value = props[name];
+            const unit = numericUnits[name];
+
+            if (typeof value === "number" && value !== 0 && unit === "mixed") {
+              throw new Error(
+                `Dynamic prop "${name}" targets both length and unitless properties; use an explicit CSS string instead of a number`
+              );
+            }
+
+            dynamicProps[name] =
+              typeof value === "number" && unit === "px" ? `${value}px` : value;
+            delete otherProps[name];
+          }
+        }
+
+        otherProps.style = {
+          ...styles.props(dynamicProps as Parameters<StyledRecipe["props"]>[0]),
+          ...(otherProps.style as object | undefined)
+        };
+        canReuseProps = false;
+      }
 
       const className = [styles(variantSelection), classNameProp].join(" ");
 

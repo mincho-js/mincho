@@ -21,6 +21,7 @@ import type {
 import { tags, type SupportedElements } from "./tags.js";
 
 export { $$styled } from "./runtime.js";
+export { defineRules } from "./defineRules.js";
 
 /**
  * Selects the CSS function used by the scoped JSX namespace.

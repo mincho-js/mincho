@@ -390,6 +390,52 @@ const Box = styled('div', {
 
 ---
 
+## Use a CSS definition
+
+The React `defineRules()` adapter accepts the result of the core CSS
+`defineRules()`. It preserves `css`, `rules`, `cx`, and `preset`, and adds a
+`styled` factory with the same properties, tokens, conditions, and shortcuts:
+
+```tsx
+// button.css.ts
+import { defineRules as defineCssRules } from "@mincho-js/css";
+import { defineRules } from "@mincho-js/react";
+
+const definition = defineCssRules({
+  properties: {
+    color: { accent: "#079b59", muted: "#5f685d" },
+    paddingLeft: { compact: 8, comfortable: 16 },
+    paddingRight: { compact: 8, comfortable: 16 },
+  },
+  shortcuts: { px: ["paddingLeft", "paddingRight"] },
+});
+
+const { styled } = defineRules(definition);
+
+export const Button = styled.button({
+  base: { px: "comfortable" },
+  variants: {
+    tone: {
+      accent: { color: "accent" },
+      muted: { color: "muted" },
+    },
+  },
+  defaultVariants: { tone: "accent" },
+});
+```
+
+Use `<Button tone="muted">Continue</Button>` in a React component.
+`styled('button', options)` is also supported. The adapter accepts only intrinsic
+HTML and SVG element names, so `defineRules(definition).styled(MyComponent, options)`
+is not supported in any extraction context. Author these intrinsic component
+definitions in a `.css.ts` file, a `mincho$()` static block, or a module registered
+with `extractCalls`. The output uses the existing styled runtime and compiled
+recipe classes.
+
+To wrap a React component function, use the separate top-level `styled` export
+from `@mincho-js/react`: `styled(MyComponent, options)`. This call must be processed
+by Mincho's transform, as shown in [Component Composition](#component-composition).
+
 ## CSS Prop
 
 The `css` prop is available when TypeScript uses the scoped JSX runtime and the Mincho transform runs with `jsxCssProp: true`. Supported values compile away before React handles JSX:
@@ -416,7 +462,9 @@ minchoVitePlugin({
 ```
 
 `importSource` is a package or bundler alias, rather than a relative or absolute
-file path. Token values must be static. For state-dependent tokens, choose
+file path. In Vite, it must resolve to a physical module file; virtual modules
+cannot supply the authoring function. Token values must be static. For
+state-dependent tokens, choose
 between complete static style objects and precompiled classes; dynamic leaves
 such as `css={{ px: spacing }}` cannot map runtime values through the definition.
 
