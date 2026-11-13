@@ -2,9 +2,10 @@
   "extends": "tsconfig-custom/tsconfig.node.json",
   "compilerOptions": {
     "jsx": "react-jsx",
+    "jsxImportSource": "@mincho-js/preset-theme-ui-react",
     "rootDir": ".",
     "tsBuildInfoFile": "./.cache/tsbuildinfo",
     "types": ["node", "vite/client"]
   },
-  "include": ["*.ts", "*.tsx", "tests/**/*.ts"]
+  "include": ["*.ts", "*.tsx", "tests/**/*.ts", "tests/**/*.tsx"]
 }

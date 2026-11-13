@@ -15,6 +15,8 @@
   "dependencies": {
     "@mincho-js/css": "workspace:^",
     "@mincho-js/preset-theme-ui": "workspace:^",
+    "@mincho-js/preset-theme-ui-react": "workspace:^",
+    "@mincho-js/react": "workspace:^",
     "@mincho-js/theme-ui": "workspace:^",
     "@vanilla-extract/css": "catalog:",
     "react": "catalog:",

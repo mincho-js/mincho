@@ -27,6 +27,9 @@
       "path": "packages/preset-theme-ui"
     },
     {
+      "path": "packages/preset-theme-ui-react"
+    },
+    {
       "path": "packages/react"
     },
     {

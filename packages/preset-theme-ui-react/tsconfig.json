@@ -1,0 +1,12 @@
+{
+  "files": [],
+  "references": [
+    { "path": "../css" },
+    { "path": "../preset-theme-ui" },
+    { "path": "../react" },
+    { "path": "../debug-log" },
+    { "path": "../../configs/vite-config-custom" },
+    { "path": "./tsconfig.node.json" },
+    { "path": "./tsconfig.lib.json" }
+  ]
+}
