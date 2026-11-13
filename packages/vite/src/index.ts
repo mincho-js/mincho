@@ -3104,6 +3104,9 @@ if (import.meta.vitest) {
 
   // Define local interfaces instead of importing directly from Vite
   interface ViteDevServer {
+    watcher?: {
+      add(file: string): void;
+    };
     moduleGraph: {
       getModuleById(id: string): Module | undefined;
 
@@ -3975,11 +3978,26 @@ if (import.meta.vitest) {
 
     const resolvedConfig = createResolvedConfig(configOverrides);
     const watchFiles: string[] = [];
+    const serverWatchFiles: string[] = [];
 
     await plugin.configResolved?.(resolvedConfig);
 
-    if (server) {
-      plugin.configureServer?.(server);
+    // Vite creates its watcher before configureServer, including when file
+    // watching is disabled. Keep watcher-only dependencies separate from
+    // transform addWatchFile entries, which Vite also treats as imports.
+    if (server || resolvedConfig.command === "serve") {
+      plugin.configureServer?.({
+        ...server,
+        moduleGraph: server?.moduleGraph ?? {
+          getModuleById: () => undefined,
+          invalidateModule() {}
+        },
+        watcher: {
+          add(file: string) {
+            serverWatchFiles.push(file);
+          }
+        }
+      });
     }
 
     return {
@@ -4106,6 +4124,7 @@ if (import.meta.vitest) {
         );
       },
 
+      serverWatchFiles,
       watchFiles
     };
   }
@@ -5752,6 +5771,13 @@ if (import.meta.vitest) {
 
         modules.set(redArtifact.extractedId, sidecarModule);
         modules.set(redArtifact.resolvedVirtualId, virtualModule);
+
+        expect(harness.serverWatchFiles).toContain(
+          normalizePath(resolve(fixture.root, "package.json"))
+        );
+        expect(harness.watchFiles).not.toContain(
+          normalizePath(resolve(fixture.root, "package.json"))
+        );
 
         expect(redArtifact.extractedSource).toContain('color: "red"');
         expect(redArtifact.virtualCss).toContain("color: red;");

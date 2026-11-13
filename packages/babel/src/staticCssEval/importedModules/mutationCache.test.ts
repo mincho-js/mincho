@@ -77,3 +77,28 @@ describe("imported mutation analysis reuse", () => {
     ]);
   });
 });
+
+it.each([undefined, "/project/tokens.ts"])(
+  "displays the physical file for a missing export when supplied: %s",
+  (resolvedFile) => {
+    const id = "/project/tokens.ts?variant=a";
+    const instance = new ImportedStaticCssEvalResolver({
+      modules: [
+        { id: "/project/owner.tsx", source: `import {missing} from "${id}";` },
+        { id, resolvedFile, source: "export const present=1;" }
+      ],
+      importResolutions: []
+    });
+    const result = instance.resolve({
+      importerId: "/project/owner.tsx",
+      bindingName: "missing",
+      memberPath: [],
+      expressionStart: 0,
+      expressionEnd: 1
+    });
+    expect(result).toMatchObject({
+      kind: "error",
+      diagnostic: { dependency: { file: resolvedFile ?? id } }
+    });
+  }
+);

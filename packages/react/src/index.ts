@@ -22,6 +22,19 @@ import { tags, type SupportedElements } from "./tags.js";
 
 export { $$styled } from "./runtime.js";
 
+/**
+ * Selects CSS types for the scoped JSX namespace.
+ * Augment this interface with `css: typeof css`. This foundation change only
+ * selects types; it does not activate a different CSS helper in the build.
+ * Host support for `jsxCssProp: { importSource }` is planned in #479.
+ *
+ * Expose the chosen single-argument signature for overloaded helpers, for
+ * example `css: (rule: Rule) => string`. TypeScript infers from the last
+ * signature when an overload set is supplied directly.
+ */
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type -- Applications augment this interface to select their style definition.
+export interface CssPropConfig {}
+
 // == Main =====================================================================
 function styledImpl<
   Props,

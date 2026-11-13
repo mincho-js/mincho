@@ -169,7 +169,7 @@ function themeWith<
   );
 }
 
-export const theme = Object.assign(themeImpl, {
+export const theme = /* @__PURE__ */ Object.assign(themeImpl, {
   extends: themeExtends,
   with: themeWith
 });
