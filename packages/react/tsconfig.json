@@ -5,6 +5,9 @@
       "path": "../css"
     },
     {
+      "path": "../transform-to-vanilla"
+    },
+    {
       "path": "../debug-log"
     },
     {

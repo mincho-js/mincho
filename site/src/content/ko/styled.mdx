@@ -390,6 +390,51 @@ const Box = styled('div', {
 
 ---
 
+## CSS 정의 연결하기 [#use-a-css-definition]
+
+React의 `defineRules()` 어댑터는 코어 CSS `defineRules()`의 반환값을 받습니다.
+`css`, `rules`, `cx`, `preset`은 그대로 유지하고 같은 속성, 토큰, 조건, 단축 속성을
+사용하는 `styled` 팩터리를 추가합니다.
+
+```tsx
+// button.css.ts
+import { defineRules as defineCssRules } from "@mincho-js/css";
+import { defineRules } from "@mincho-js/react";
+
+const definition = defineCssRules({
+  properties: {
+    color: { accent: "#079b59", muted: "#5f685d" },
+    paddingLeft: { compact: 8, comfortable: 16 },
+    paddingRight: { compact: 8, comfortable: 16 },
+  },
+  shortcuts: { px: ["paddingLeft", "paddingRight"] },
+});
+
+const { styled } = defineRules(definition);
+
+export const Button = styled.button({
+  base: { px: "comfortable" },
+  variants: {
+    tone: {
+      accent: { color: "accent" },
+      muted: { color: "muted" },
+    },
+  },
+  defaultVariants: { tone: "accent" },
+});
+```
+
+React 컴포넌트에서 `<Button tone="muted">Continue</Button>`처럼 사용합니다.
+`styled('button', options)` 표기도 지원합니다. 이 어댑터는 기본 HTML·SVG 요소
+이름만 받으므로 `defineRules(definition).styled(MyComponent, options)`는 어떤
+추출 컨텍스트에서도 지원하지 않습니다. 기본 요소를 사용하는 이 컴포넌트 정의는
+`.css.ts` 파일, `mincho$()` 정적 블록 또는 `extractCalls`에 등록한 모듈에서
+작성하세요. 결과물은 기존 styled 런타임과 컴파일된 recipe 클래스를 사용합니다.
+
+React 컴포넌트 함수를 감싸려면 `@mincho-js/react`에서 별도로 내보내는 최상위
+`styled`를 가져와 `styled(MyComponent, options)`로 호출하세요.
+[컴포넌트 합성](#component-composition) 예시처럼 이 호출은 Mincho 변환을 거쳐야 합니다.
+
 ## CSS Prop [#css-prop]
 
 TypeScript가 범위 지정 JSX 런타임을 사용하고 Mincho 변환이 `jsxCssProp: true`로 실행될 때 `css` prop을 사용할 수 있습니다. 지원되는 값은 React가 JSX를 처리하기 전에 컴파일되어 제거됩니다.
@@ -416,6 +461,8 @@ minchoVitePlugin({
 ```
 
 `importSource`에는 상대·절대 파일 경로 대신 패키지나 번들러 별칭을 지정합니다.
+Vite에서는 실제 모듈 파일로 해석되어야 하며, 가상 모듈은 스타일 작성 함수를
+제공할 수 없습니다.
 토큰 값은 정적이어야 합니다. 상태에 따라 토큰을 바꾸려면 완전한 정적 스타일
 객체나 미리 만든 클래스 중에서 선택하세요. `css={{ px: spacing }}`처럼 속성
 값만 동적으로 전달하면 런타임 값을 정의에 따라 변환할 수 없습니다.
