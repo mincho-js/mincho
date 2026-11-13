@@ -367,7 +367,8 @@ describe("compiler workers", () => {
             timeout = setTimeout(
               () =>
                 reject(new Error("Nested provider transform did not finish")),
-              5000
+              // Include cold worker startup and leave time for cleanup below.
+              10_000
             );
           })
         ]);
