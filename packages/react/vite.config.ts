@@ -13,6 +13,7 @@ export default (viteConfigEnv: ConfigEnv) => {
           "layout/index": resolve(process.cwd(), "src/layout/index.ts"),
           "squircle/index": resolve(process.cwd(), "src/squircle/index.ts"),
           index: resolve(process.cwd(), "src/index.ts"),
+          config: resolve(process.cwd(), "src/config.ts"),
           runtime: resolve(process.cwd(), "src/runtime.ts"),
           "jsx-runtime": resolve(process.cwd(), "src/jsx-runtime.ts"),
           "jsx-dev-runtime": resolve(process.cwd(), "src/jsx-dev-runtime.ts"),
