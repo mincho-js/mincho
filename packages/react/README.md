@@ -23,7 +23,7 @@ import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
 export default defineConfig({
-  plugins: [minchoVitePlugin({ jsxCssProp: true }), react()]
+  plugins: [minchoVitePlugin({ jsxCssProp: true }), react()],
 });
 ```
 
@@ -45,11 +45,19 @@ import type { CSSProperties } from "react";
 import { css } from "@mincho-js/css";
 
 const styleA = css({
-  display: "block"
+  display: "block",
 });
 
-function Panel(props: { className?: string; style?: CSSProperties; label: string }) {
-  return <section className={props.className} style={props.style}>{props.label}</section>;
+function Panel(props: {
+  className?: string;
+  style?: CSSProperties;
+  label: string;
+}) {
+  return (
+    <section className={props.className} style={props.style}>
+      {props.label}
+    </section>
+  );
 }
 
 export function App() {
@@ -78,13 +86,13 @@ Mincho picks the narrowest compile-away path that matches the reduced `css` prop
 
 Shape-to-path quick reference:
 
-| `css` shape | Path | Notes |
-| --- | --- | --- |
-| `{ color: "red" }`, `{ ...staticBase, color: "red" }`, proven same-file/import static object or array | AST static reduction | Reduced AST literals fold into one generated Mincho class. |
-| `makeRule()`, `{ color: makeColor() }`, `{ ...makeRule() }` where the whole expression is hoistable | Generated `.css.ts` sidecar (build-time execution delegation) | Whole expression is preserved and emitted as `css(<expression>)` inside the generated sidecar; vanilla-extract runs the call at build time, not Babel. |
-| `{ color: props.color }`, `condition ? { color: props.color } : { color: "red" }` | Dynamic declaration leaf CSS-var lowering | Class rule reads a generated CSS variable; the component writes only the leaf value via inline `style`. |
-| `activeClass`, `styles.activeClass`, `getClassName()`, `condition ? "a" : "b"` | Class-value fallback | Lowers through `cx(...)`; no CSS rule extraction. |
-| `{ ...makeRule(props.variant) }`, `{ [runtimeKey]: value }`, `styles[props.variant]`, `{ ...props.base, color: "red" }` | Unsupported | Runtime values would change rule shape; router emits a static-eval diagnostic. |
+| `css` shape                                                                                                             | Path                                                          | Notes                                                                                                                                                  |
+| ----------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `{ color: "red" }`, `{ ...staticBase, color: "red" }`, proven same-file/import static object or array                   | AST static reduction                                          | Reduced AST literals fold into one generated Mincho class.                                                                                             |
+| `makeRule()`, `{ color: makeColor() }`, `{ ...makeRule() }` where the whole expression is hoistable                     | Generated `.css.ts` sidecar (build-time execution delegation) | Whole expression is preserved and emitted as `css(<expression>)` inside the generated sidecar; vanilla-extract runs the call at build time, not Babel. |
+| `{ color: props.color }`, `condition ? { color: props.color } : { color: "red" }`                                       | Dynamic declaration leaf CSS-var lowering                     | Class rule reads a generated CSS variable; the component writes only the leaf value via inline `style`.                                                |
+| `activeClass`, `styles.activeClass`, `getClassName()`, `condition ? "a" : "b"`                                          | Class-value fallback                                          | Lowers through `cx(...)`; no CSS rule extraction.                                                                                                      |
+| `{ ...makeRule(props.variant) }`, `{ [runtimeKey]: value }`, `styles[props.variant]`, `{ ...props.base, color: "red" }` | Unsupported                                                   | Runtime values would change rule shape; router emits a static-eval diagnostic.                                                                         |
 
 Supported examples:
 
@@ -186,6 +194,31 @@ A custom component receives typed Mincho `css` only when it accepts and forwards
 Unsupported dynamic CSS shapes stay unsupported: dynamic keys, computed runtime CSS keys, object or array spreads as branch shapes, call-returned branch objects, function-valued css props, sequence-wrapped branch rules, and other dynamic CSS shapes. Static-shape branch rule objects and arrays are supported only when their keys, spreads, and branch shapes are statically analyzable. This is not Emotion-style runtime parity: Mincho does not add a runtime serializer, runtime CSS cache, runtime stylesheet insertion, wrapper component, or runtime CSS generation for the `css` prop.
 
 Unsupported cases include dynamic arrays that would require runtime expansion, dynamic responsive arrays, arbitrary runtime object spreads, dynamic runtime CSS shapes, dynamic keys, whole-rule runtime returns, function-valued CSS, and runtime stylesheet engines. If you already have a plain React-compatible inline declaration object at runtime, pass it to React directly as `style={runtimeStyle}`; do not route selectors, media queries, token rules, or runtime CSS objects through `style`.
+
+### Preset JSX types
+
+Preset packages can reuse the type-only `CssPropJSX` namespace to bind their
+scoped JSX runtime to a different `css` function. Forward its standard JSX types
+and specialize these two aliases inside the runtime's exported `JSX` namespace:
+
+```ts
+import type { CssPropJSX } from "@mincho-js/react";
+import type { css } from "./preset.js";
+
+type IntrinsicElements = CssPropJSX.IntrinsicElements<typeof css>;
+type LibraryManagedAttributes<C, P> = CssPropJSX.LibraryManagedAttributes<
+  C,
+  P,
+  typeof css
+>;
+```
+
+This retains React's managed props, Mincho's class and array composition, and the
+`className`/`style` requirements for custom components. An explicitly declared
+component `css` prop keeps its own contract. The types remain scoped to the
+package's `jsxImportSource`; they do not change another preset or the default
+Mincho JSX types. The corresponding compiler `jsxCssProp.importSource` must point
+to the same preset.
 
 ### Value Semantics
 
@@ -393,26 +426,26 @@ Dynamic `css` prop branches are recursive in result positions and guard-preservi
 
 Support matrix:
 
-| Shape | Support | Compile-away behavior |
-| --- | --- | --- |
-| Static computed object key | Supported | Reduces the key through visible AST syntax, then extracts the rule like an inline object. |
-| Static object or array spread | Supported | Reduces and inlines static spread operands before extraction. |
-| Runtime computed object key | Rejected | Dynamic keys fail closed instead of creating runtime CSS keys. |
-| Runtime object or array spread | Rejected | Dynamic spreads fail closed instead of expanding rule objects or arrays at runtime. |
-| Runtime whole-rule object | Rejected as CSS rule | Use a static shape, a sidecar-safe whole-rule expression, a dynamic declaration leaf, or a class value. |
-| Unresolved primitive identifier/member/call | Class-value fallback | Lowers through `cx(...)` unless the expression is proven CSS-rule-shaped or unsupported. |
-| Sidecar-safe module-scope call/factory | Supported through sidecar | Preserves the whole expression for generated `.css.ts`; Babel does not execute the call. |
-| Static shape with dynamic declaration leaves | Supported | Extracts the static rule and writes only generated CSS variable values through `style`. |
-| Static direct array | Supported | Stays one `css([...])` composition rule. |
-| Dynamic primitive array item | Supported | Lowers through `cx(...)`, preserving primitive leaves such as `""`, `false`, `0`, and `1n`. |
-| Dynamic object/array CSS-rule branch | Supported | Extracts the static rule branch at build time and merges or selects the generated class. |
-| nested/chained ternary result branch | Supported | Recurses through consequent and alternate result values; the test remains a guard. |
-| Chained logical result branch | Supported | Recurses through supported right/result values without flattening guards into extra `cx(...)` arguments. |
-| nested dynamic array literal | Supported | Lowers nested literal arrays through nested `cx(...)` calls or equivalent class-value composition. |
-| Direct CSS-rule array branch | Supported as one CSS-rule unit | `condition && ["active", { color: "red" }]` extracts one generated array-rule class instead of decomposing the string and object. |
-| Dynamic spread inside a `css` array | Rejected at any depth | Use explicit array elements; dynamic spread would require runtime array expansion. |
-| Sequence expression object/array CSS-rule value | Rejected | Sequence values are not CSS-rule syntax in compile-away mode. |
-| Branch-internal static eval expansion | Not performed | Identifiers, members, imports, factories, and calls inside recursive branches remain class-value expressions unless they are direct rule calls already supported at the top level. |
+| Shape                                           | Support                        | Compile-away behavior                                                                                                                                                              |
+| ----------------------------------------------- | ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Static computed object key                      | Supported                      | Reduces the key through visible AST syntax, then extracts the rule like an inline object.                                                                                          |
+| Static object or array spread                   | Supported                      | Reduces and inlines static spread operands before extraction.                                                                                                                      |
+| Runtime computed object key                     | Rejected                       | Dynamic keys fail closed instead of creating runtime CSS keys.                                                                                                                     |
+| Runtime object or array spread                  | Rejected                       | Dynamic spreads fail closed instead of expanding rule objects or arrays at runtime.                                                                                                |
+| Runtime whole-rule object                       | Rejected as CSS rule           | Use a static shape, a sidecar-safe whole-rule expression, a dynamic declaration leaf, or a class value.                                                                            |
+| Unresolved primitive identifier/member/call     | Class-value fallback           | Lowers through `cx(...)` unless the expression is proven CSS-rule-shaped or unsupported.                                                                                           |
+| Sidecar-safe module-scope call/factory          | Supported through sidecar      | Preserves the whole expression for generated `.css.ts`; Babel does not execute the call.                                                                                           |
+| Static shape with dynamic declaration leaves    | Supported                      | Extracts the static rule and writes only generated CSS variable values through `style`.                                                                                            |
+| Static direct array                             | Supported                      | Stays one `css([...])` composition rule.                                                                                                                                           |
+| Dynamic primitive array item                    | Supported                      | Lowers through `cx(...)`, preserving primitive leaves such as `""`, `false`, `0`, and `1n`.                                                                                        |
+| Dynamic object/array CSS-rule branch            | Supported                      | Extracts the static rule branch at build time and merges or selects the generated class.                                                                                           |
+| nested/chained ternary result branch            | Supported                      | Recurses through consequent and alternate result values; the test remains a guard.                                                                                                 |
+| Chained logical result branch                   | Supported                      | Recurses through supported right/result values without flattening guards into extra `cx(...)` arguments.                                                                           |
+| nested dynamic array literal                    | Supported                      | Lowers nested literal arrays through nested `cx(...)` calls or equivalent class-value composition.                                                                                 |
+| Direct CSS-rule array branch                    | Supported as one CSS-rule unit | `condition && ["active", { color: "red" }]` extracts one generated array-rule class instead of decomposing the string and object.                                                  |
+| Dynamic spread inside a `css` array             | Rejected at any depth          | Use explicit array elements; dynamic spread would require runtime array expansion.                                                                                                 |
+| Sequence expression object/array CSS-rule value | Rejected                       | Sequence values are not CSS-rule syntax in compile-away mode.                                                                                                                      |
+| Branch-internal static eval expansion           | Not performed                  | Identifiers, members, imports, factories, and calls inside recursive branches remain class-value expressions unless they are direct rule calls already supported at the top level. |
 
 Dynamic primitive array branches lower through one `cx(...)` merge. Primitive branches pass through as arguments, so the empty string stays present as a `ClassPrimitive` value in dynamic arrays.
 
@@ -576,23 +609,23 @@ There is no Emotion runtime parity. Mincho does not provide an Emotion runtime s
 
 When `jsxCssProp: true` is enabled, unsupported css prop cases fail during the transform with explicit diagnostics:
 
-| Case | Message |
-| --- | --- |
-| Fragment target | `Mincho JSX css prop does not support fragments because fragments cannot receive className` |
-| Namespaced JSX target | `Mincho JSX css prop does not support namespaced JSX elements` |
-| Unsupported JSX target | `Mincho JSX css prop only supports JSX identifiers and member expressions` |
+| Case                                                                                                                    | Message                                                                                                                                                           |
+| ----------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Fragment target                                                                                                         | `Mincho JSX css prop does not support fragments because fragments cannot receive className`                                                                       |
+| Namespaced JSX target                                                                                                   | `Mincho JSX css prop does not support namespaced JSX elements`                                                                                                    |
+| Unsupported JSX target                                                                                                  | `Mincho JSX css prop only supports JSX identifiers and member expressions`                                                                                        |
 | Spread aggregation outside supported statement-list, replaceable expression, JSX attribute value, or JSX child contexts | `Mincho JSX css prop spread aggregation only supports statement-list JSX, replaceable expression JSX, JSX attribute values, or JSX children in compile-away mode` |
-| Nested `await` or `yield` inside moved spread, `css`, or `className` expressions | `Mincho JSX css prop nested spread aggregation does not support await or yield expressions in compile-away mode` |
-| Explicit `key` or `ref` on a spread css-prop element | `Mincho JSX css prop does not support key/ref on spread elements in compile-away mode` |
-| Shorthand `css` | `Mincho JSX css prop requires an expression value` |
-| Unsupported `css` expression shape | `Mincho JSX css prop expects a Mincho CSS object/expression` |
-| Function value | `Mincho JSX css prop does not support function values in compile-away mode` |
-| Dynamic spread element inside a `css` array at any depth | `Mincho JSX css prop array values do not support spread elements in compile-away mode` |
-| Sequence expression object/array CSS-rule value | `Mincho JSX css prop does not support conditional, logical, or wrapped object/array CSS rule values in compile-away mode` |
-| Unsupported dynamically resolved object/array CSS-rule value | `Mincho JSX css prop does not support conditional, logical, or wrapped object/array CSS rule values in compile-away mode` |
-| Duplicate `css` | `Mincho JSX css prop must appear only once` |
-| Duplicate `className` | `Mincho JSX css prop cannot merge duplicate className attributes` |
-| Shorthand or unsupported `className` value | `Mincho JSX css prop requires className to be a string literal or expression` |
+| Nested `await` or `yield` inside moved spread, `css`, or `className` expressions                                        | `Mincho JSX css prop nested spread aggregation does not support await or yield expressions in compile-away mode`                                                  |
+| Explicit `key` or `ref` on a spread css-prop element                                                                    | `Mincho JSX css prop does not support key/ref on spread elements in compile-away mode`                                                                            |
+| Shorthand `css`                                                                                                         | `Mincho JSX css prop requires an expression value`                                                                                                                |
+| Unsupported `css` expression shape                                                                                      | `Mincho JSX css prop expects a Mincho CSS object/expression`                                                                                                      |
+| Function value                                                                                                          | `Mincho JSX css prop does not support function values in compile-away mode`                                                                                       |
+| Dynamic spread element inside a `css` array at any depth                                                                | `Mincho JSX css prop array values do not support spread elements in compile-away mode`                                                                            |
+| Sequence expression object/array CSS-rule value                                                                         | `Mincho JSX css prop does not support conditional, logical, or wrapped object/array CSS rule values in compile-away mode`                                         |
+| Unsupported dynamically resolved object/array CSS-rule value                                                            | `Mincho JSX css prop does not support conditional, logical, or wrapped object/array CSS rule values in compile-away mode`                                         |
+| Duplicate `css`                                                                                                         | `Mincho JSX css prop must appear only once`                                                                                                                       |
+| Duplicate `className`                                                                                                   | `Mincho JSX css prop cannot merge duplicate className attributes`                                                                                                 |
+| Shorthand or unsupported `className` value                                                                              | `Mincho JSX css prop requires className to be a string literal or expression`                                                                                     |
 
 Static evaluation failures use diagnostics that start with `Cannot statically evaluate css prop value`, followed by the unsupported reason. Reasons include dynamic or wrong-shape spread operands, nested function/factory/call values, optional calls, dynamic member paths, dynamic or nullish optional member paths, runtime or non-primitive template interpolation, dynamic import graphs, unsupported source kinds such as `external-no-source` or `provider-virtual-no-source`, and unsupported dynamic CommonJS.
 

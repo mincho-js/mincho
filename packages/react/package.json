@@ -36,6 +36,16 @@
         "default": "./dist/cjs/index.cjs"
       }
     },
+    "./config": {
+      "import": {
+        "types": "./dist/esm/config.d.ts",
+        "default": "./dist/esm/config.mjs"
+      },
+      "require": {
+        "types": "./dist/cjs/config.d.cts",
+        "default": "./dist/cjs/config.cjs"
+      }
+    },
     "./runtime": {
       "import": {
         "types": "./dist/esm/runtime.d.ts",
