@@ -37,6 +37,19 @@ describe("compiler-owned class strategies", () => {
     ).not.toContain("compilePrivateDefineRulesClass");
   });
 
+  it("keeps a registered authoring barrier when its invocation cannot move", () => {
+    const input =
+      `import { system } from "custom-style";
+      system.style = () => "runtime";
+      system.style({color: "blue"});` + source;
+    const result = babelTransform(input, {
+      ...enabled,
+      extractCalls: { "custom-style": ["system.style"] }
+    });
+    expect(result.code).toContain("system.style({");
+    expect(result.result[1]).not.toContain("compilePrivateDefineRulesClass");
+  });
+
   it("accepts literal private named self/media/supports conditions", () => {
     for (const condition of [
       '{selector:"&:hover"}',

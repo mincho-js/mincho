@@ -1,5 +1,10 @@
+import type { ProgramScope } from "../types.js";
 import { types as t } from "@babel/core";
 import type { SidecarSafetyState } from "./sidecarSafety.js";
+import {
+  everyPatternNodeExpression,
+  patternSelectionEnvironment
+} from "./patternExpressions.js";
 
 export type SidecarSafeExpression = (
   expression: t.Expression | t.Super,
@@ -13,6 +18,16 @@ export function isSidecarSafeFunctionLike(
 ): boolean {
   const localNames = new Set(state.localNames);
   collectPatternNames(node.params, localNames);
+
+  // Parameter expressions execute outside the function body's local bindings.
+  const parameterState = { ...state, localNames };
+  if (
+    !node.params.every((parameter) =>
+      isSidecarSafeParameter(parameter, parameterState, isSidecarSafeExpression)
+    )
+  )
+    return false;
+
   collectStatementLocalNames(node.body, localNames);
 
   const nextState = { ...state, localNames };
@@ -22,6 +37,42 @@ export function isSidecarSafeFunctionLike(
         isSidecarSafeStatement(statement, nextState, isSidecarSafeExpression)
       )
     : isSidecarSafeExpression(node.body, nextState);
+}
+
+function isSidecarSafeParameter(
+  parameter: t.Node,
+  state: SidecarSafetyState,
+  isSidecarSafeExpression: SidecarSafeExpression
+): boolean {
+  if (t.isAssignmentPattern(parameter)) {
+    return (
+      isSidecarSafeExpression(parameter.right, state) &&
+      isSidecarSafeParameter(parameter.left, state, isSidecarSafeExpression)
+    );
+  }
+  if (t.isRestElement(parameter))
+    return isSidecarSafeParameter(
+      parameter.argument,
+      state,
+      isSidecarSafeExpression
+    );
+  if (t.isArrayPattern(parameter))
+    return parameter.elements.every(
+      (element) =>
+        !element ||
+        isSidecarSafeParameter(element, state, isSidecarSafeExpression)
+    );
+  if (t.isObjectPattern(parameter))
+    return parameter.properties.every((property) =>
+      t.isRestElement(property)
+        ? isSidecarSafeParameter(property, state, isSidecarSafeExpression)
+        : (!property.computed ||
+            (t.isExpression(property.key) &&
+              isSidecarSafeExpression(property.key, state))) &&
+          isSidecarSafeParameter(property.value, state, isSidecarSafeExpression)
+    );
+
+  return t.isIdentifier(parameter);
 }
 
 function isSidecarSafeStatement(
@@ -42,11 +93,38 @@ function isSidecarSafeStatement(
   }
 
   if (t.isVariableDeclaration(statement)) {
+    const program = state.scope.getProgramParent().path;
+    const graph = (state.scope.getProgramParent() as ProgramScope).minchoData
+      ?.extractCalls?.arrayMapIntrinsics;
+    const environment = program.isProgram()
+      ? patternSelectionEnvironment(program, {
+          requireReplaySafety: true,
+          nativeArrayIteration:
+            (graph?.iterationIntact ?? graph?.intact) !== false,
+          standardPrototypeAbsence:
+            (graph?.prototypeAbsenceIntact ?? graph?.intact) !== false,
+          prototypeMutationKeys: graph?.prototypeMutationKeys
+        })
+      : {
+          nativeArrayIteration: false,
+          standardPrototypeAbsence: false,
+          requireReplaySafety: true
+        };
     return statement.declarations.every(
       (declaration) =>
-        !declaration.init ||
-        (t.isExpression(declaration.init) &&
-          isSidecarSafeExpression(declaration.init, state))
+        everyPatternNodeExpression(
+          declaration.id,
+          (expression) => isSidecarSafeExpression(expression, state),
+          declaration.init,
+          !state.localNames.has("undefined") &&
+            !state.scope.getBinding("undefined"),
+          "",
+          undefined,
+          environment
+        ) &&
+        (!declaration.init ||
+          (t.isExpression(declaration.init) &&
+            isSidecarSafeExpression(declaration.init, state)))
     );
   }
 

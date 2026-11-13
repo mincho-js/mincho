@@ -1,8 +1,12 @@
 import { types as t, type NodePath } from "@babel/core";
-import { getModuleReference } from "../commonjs/bindings.js";
+import {
+  getModuleReference,
+  type ModuleReference
+} from "../commonjs/bindings.js";
 import type { ProgramScope } from "../types.js";
 import { hasDynamicScope } from "./dynamicScope.js";
 import { builtInExtractionCalls } from "../extractionCalls/builtins.js";
+import { getStaticCssEvalLiteralRequireImportPath } from "../staticCssEval/cjsBindings.js";
 
 /** Authoring imports already evaluated in the sidecar need no client runtime. */
 export function removeUnusedExtractedImports(
@@ -11,25 +15,161 @@ export function removeUnusedExtractedImports(
   const data = (program.scope as ProgramScope).minchoData;
   if (!data || hasDynamicScope(program)) return;
 
-  const extracted = new Set(
-    data.nodes.filter((node) => t.isImportDeclaration(node))
-  );
+  const extracted = new Set(data.nodes);
   if (!extracted.size) return;
 
   program.scope.crawl();
+  const candidates: {
+    declaration: NodePath<t.VariableDeclarator>;
+    reference: ModuleReference;
+    names: readonly string[];
+    initializesSource: boolean;
+  }[] = [];
+  for (const path of program.get("body")) {
+    if (!path.isVariableDeclaration() || !extracted.has(path.node)) continue;
+    for (const declaration of path.get("declarations")) {
+      const init = declaration.get("init");
+      if (!init.isExpression()) continue;
+      const reference = getModuleReference(init);
+      if (!reference || reference.unsafe) continue;
+      const names = Object.hasOwn(builtInExtractionCalls, reference.source)
+        ? builtInExtractionCalls[reference.source]
+        : undefined;
+      if (!names) continue;
 
+      let initializesSource = false;
+      const collectRequire = (call: NodePath<t.CallExpression>) => {
+        if (
+          getStaticCssEvalLiteralRequireImportPath(call.node, call.scope) ===
+          reference.source
+        )
+          initializesSource = true;
+      };
+      if (init.isCallExpression()) collectRequire(init);
+      init.traverse({ CallExpression: collectRequire });
+      candidates.push({ declaration, reference, names, initializesSource });
+    }
+  }
+
+  // Plan the complete dead alias chain before deciding which sources still
+  // execute at runtime. A reference inside another dead declaration is unused.
+  const removed = new Set<t.Node>();
+  const isRemoved = (path: NodePath<t.Node>) =>
+    removed.has(path.node) ||
+    Boolean(path.findParent((parent) => removed.has(parent.node)));
+  const unused = (path: NodePath<t.Node>, name: string) => {
+    const binding = path.scope.getBinding(name);
+    return binding?.constant && binding.referencePaths.every(isRemoved);
+  };
+  let changed: boolean;
+  do {
+    const size = removed.size;
+    for (const { declaration, reference, names } of candidates) {
+      if (removed.has(declaration.node)) continue;
+      const pattern = declaration.get("id");
+      if (pattern.isIdentifier()) {
+        if (
+          (!reference.members.length ||
+            (reference.members.length === 1 &&
+              names.includes(reference.members[0]!))) &&
+          unused(pattern, pattern.node.name)
+        )
+          removed.add(declaration.node);
+        continue;
+      }
+      if (
+        !pattern.isObjectPattern() ||
+        reference.members.length ||
+        pattern.node.properties.some((property) => t.isRestElement(property))
+      )
+        continue;
+
+      for (const property of pattern.get("properties")) {
+        if (
+          !property.isObjectProperty() ||
+          property.node.computed ||
+          !t.isIdentifier(property.node.value)
+        )
+          continue;
+        const key = property.node.key;
+        const name = t.isIdentifier(key)
+          ? key.name
+          : t.isStringLiteral(key)
+            ? key.value
+            : undefined;
+        if (
+          name &&
+          names.includes(name) &&
+          unused(property, property.node.value.name)
+        )
+          removed.add(property.node);
+      }
+
+      if (pattern.node.properties.every((property) => removed.has(property)))
+        removed.add(declaration.node);
+    }
+    changed = removed.size !== size;
+  } while (changed);
+
+  const runtimeRequires = new Set<string>();
+  let unknownRuntimeRequire = false;
+  program.traverse({
+    enter(path) {
+      if (removed.has(path.node)) path.skip();
+    },
+    ReferencedIdentifier(path) {
+      if (
+        !path.isIdentifier({ name: "require" }) ||
+        path.scope.getBinding("require")
+      )
+        return;
+      const call = path.parentPath;
+      const source =
+        call.isCallExpression() && call.node.callee === path.node
+          ? getStaticCssEvalLiteralRequireImportPath(call.node, call.scope)
+          : null;
+      // Escaped loaders and dynamic specifiers can request any source, so their
+      // surviving uses still require the original initialization order.
+      if (source === null) unknownRuntimeRequire = true;
+      else runtimeRequires.add(source);
+    }
+  });
+
+  for (const { declaration, reference, initializesSource } of candidates) {
+    const retainInitialization =
+      initializesSource &&
+      (unknownRuntimeRequire || runtimeRequires.has(reference.source));
+    if (removed.has(declaration.node) && !retainInitialization) {
+      declaration.remove();
+      continue;
+    }
+    const pattern = declaration.get("id");
+    if (pattern.isObjectPattern())
+      for (const property of pattern.get("properties"))
+        if (removed.has(property.node)) property.remove();
+  }
+
+  // Removing a destructured authoring binding can make its namespace import
+  // unused. Recompute references after pruning, independent of statement order.
+  program.scope.crawl();
   for (const path of program.get("body")) {
     if (!path.isImportDeclaration() || !extracted.has(path.node)) continue;
 
-    const names = builtInExtractionCalls[path.node.source.value];
+    const names = Object.hasOwn(builtInExtractionCalls, path.node.source.value)
+      ? builtInExtractionCalls[path.node.source.value]
+      : undefined;
     if (!names) continue;
 
     for (const specifier of path.get("specifiers")) {
+      const binding = program.scope.getBinding(specifier.node.local.name);
+      if (specifier.isImportNamespaceSpecifier()) {
+        if (binding?.constant && !binding.referenced) specifier.remove();
+        continue;
+      }
       if (!specifier.isImportSpecifier()) continue;
 
       const imported = specifier.node.imported;
       const name = t.isIdentifier(imported) ? imported.name : imported.value;
-      const binding = program.scope.getBinding(specifier.node.local.name);
 
       if (names.includes(name) && binding?.constant && !binding.referenced)
         specifier.remove();

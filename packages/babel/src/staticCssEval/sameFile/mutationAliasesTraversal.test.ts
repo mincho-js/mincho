@@ -20,28 +20,37 @@ describe("mutation analysis traversal budget", () => {
       import assert from "node:assert/strict";
       import { transformSync } from "@babel/core";
       import { hasStaticCssEvalBindingMutation } from ${JSON.stringify(mutationPath)};
-      function helpers(depth) {
+      import { analyzeAliasedStaticCssEvalBindingMutation } from ${JSON.stringify(fileURLToPath(new URL("./mutationAliases.ts", mutationUrl)))};
+      function helpers(depth, condition = "condition") {
         return 'const f0 = () => ({color: "red"});' +
           Array.from({ length: depth }, (_, i) =>
-            'const f' + (i + 1) + ' = () => false ? f' + i + '() : f' + i + '();'
+            'const f' + (i + 1) + ' = () => ' + condition + ' ? f' + i + '() : f' + i + '();'
           ).join('') + 'export const style = f' + depth + '();';
       }
-      for (const depth of [10, 25]) {
+      // An unknown branch still expands both paths; literal false now has
+      // a bounded selection proof and should not consume an exponential budget.
+      for (const [depth, condition] of [[10, "condition"], [25, "condition"], [25, "false"]]) {
         let mutated;
-        const run = () => transformSync(helpers(depth) + '<div css={style}/>;', {
+        let proof;
+        const run = () => transformSync(helpers(depth, condition) + '<div css={style}/>;', {
           filename: "/owner.tsx", configFile: false, babelrc: false,
           parserOpts: { plugins: ["jsx"] },
           plugins: [() => ({ visitor: { Program(program) {
-            mutated = hasStaticCssEvalBindingMutation(program, program.scope.getBinding("style"));
+            const binding = program.scope.getBinding("style");
+            proof = analyzeAliasedStaticCssEvalBindingMutation(program, binding);
+            mutated = hasStaticCssEvalBindingMutation(program, binding);
             program.stop();
           }}})]
         });
-        if (depth === 10) {
+        if (depth === 10 || condition === "false") {
           assert.doesNotThrow(run);
           assert.equal(mutated, false);
+          assert.equal(proof.kind, "proved-unmodified");
         } else {
-          assert.throws(run, /mutation analysis node visit limit exceeded/);
-          assert.equal(mutated, undefined);
+          assert.doesNotThrow(run);
+          assert.equal(mutated, true);
+          assert.equal(proof.kind, "unknown");
+          assert.equal(proof.reason, "analysis-limit");
         }
       }
       process.stdout.write("mutation analysis bounded");

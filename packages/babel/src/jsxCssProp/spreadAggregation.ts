@@ -15,6 +15,7 @@ import {
   styleAttributeName
 } from "./constants.js";
 import { getStyleExpression } from "./styleExpression.js";
+import { createJsxAttributeString } from "./attributeValue.js";
 import type {
   AggregatePropsBinding,
   NormalizedJsxCssPropElement,
@@ -23,6 +24,18 @@ import type {
 
 const keyAttributeName = "key";
 const refAttributeName = "ref";
+
+// Merging className must not move a runtime CSS value across other attributes.
+export function requiresClassValueStaging(
+  element: NormalizedJsxCssPropElement
+): boolean {
+  return (
+    element.cssValueClassification === "class-value" &&
+    element.classNameAttribute !== null &&
+    element.attributesBeforeCss.at(-1) !== element.classNameAttribute &&
+    !t.isStringLiteral(element.cssExpression)
+  );
+}
 
 export function transformSpreadAggregatedCssProp(
   path: NodePath<t.JSXOpeningElement>,
@@ -119,7 +132,11 @@ export function createSpreadAggregatedCssPropLowering(
   normalizedElement: NormalizedJsxCssPropElement
 ): SpreadAggregatedCssPropLowering {
   const type = captureJsxElementType(path);
-  const lowering = !normalizedElement.hasSpreadAfterCss
+  const stageAfterCss =
+    normalizedElement.hasSpreadAfterCss ||
+    (requiresClassValueStaging(normalizedElement) &&
+      normalizedElement.attributesAfterCss.length > 0);
+  const lowering = !stageAfterCss
     ? createPreCssSpreadAggregatedCssPropLowering(path, normalizedElement)
     : createPostCssSpreadAggregatedCssPropLowering(path, normalizedElement);
 
@@ -257,9 +274,9 @@ function createPostCssSpreadAggregatedCssPropLowering(
     postCssBinding
   );
 
-  const canInlineExplicitCssClassName =
-    t.isIdentifier(normalizedElement.cssExpression) ||
-    t.isStringLiteral(normalizedElement.cssExpression);
+  const canInlineExplicitCssClassName = t.isStringLiteral(
+    normalizedElement.cssExpression
+  );
 
   const explicitCssClassNameIdentifier = canInlineExplicitCssClassName
     ? null
@@ -287,7 +304,14 @@ function createPostCssSpreadAggregatedCssPropLowering(
     cssValueClassification: explicitCssClassNameIdentifier
       ? "class-value"
       : normalizedElement.cssValueClassification,
-    classNameAttribute: null,
+    classNameAttribute: normalizedElement.hasSpreadAfterCss
+      ? null
+      : t.jsxAttribute(
+          t.jsxIdentifier(classNameAttributeName),
+          t.jsxExpressionContainer(
+            t.cloneNode(postCssBinding.classNameIdentifier)
+          )
+        ),
     ...(preCssBinding
       ? {
           preAggregateClassNameExpression: t.cloneNode(
@@ -295,9 +319,13 @@ function createPostCssSpreadAggregatedCssPropLowering(
           )
         }
       : {}),
-    postAggregateClassNameExpression: t.cloneNode(
-      postCssBinding.classNameIdentifier
-    )
+    ...(normalizedElement.hasSpreadAfterCss
+      ? {
+          postAggregateClassNameExpression: t.cloneNode(
+            postCssBinding.classNameIdentifier
+          )
+        }
+      : {})
   });
 
   const classNameAttribute = t.jsxAttribute(
@@ -612,7 +640,9 @@ export function assertSupportedSpreadAggregationContext(
 
 function getDirectSpreadAggregationStatementPath(
   path: NodePath<t.JSXOpeningElement>
-): NodePath<t.ReturnStatement | t.ExpressionStatement> | null {
+): NodePath<
+  t.ReturnStatement | t.ExpressionStatement | t.VariableDeclaration
+> | null {
   const jsxElementPath = getSpreadAggregationJsxElementPath(path);
 
   if (!jsxElementPath) {
@@ -620,6 +650,20 @@ function getDirectSpreadAggregationStatementPath(
   }
 
   const expressionParentPath = jsxElementPath.parentPath;
+
+  // A single direct initializer evaluates before its binding pattern. Hoist
+  // only here: multiple declarators or nested expressions have earlier work
+  // whose evaluation must not be reordered. Keeping the element in place also
+  // preserves await/yield children in their enclosing function context.
+  if (
+    expressionParentPath.isVariableDeclarator() &&
+    expressionParentPath.node.init === jsxElementPath.node &&
+    expressionParentPath.parentPath.isVariableDeclaration() &&
+    expressionParentPath.parentPath.node.declarations.length === 1 &&
+    hasStatementListParent(expressionParentPath.parentPath) &&
+    containsAwaitOrYieldExpression(jsxElementPath)
+  )
+    return expressionParentPath.parentPath;
 
   if (
     expressionParentPath.isReturnStatement() &&
@@ -875,7 +919,7 @@ function getAggregateAttributeValue(
   }
 
   if (t.isStringLiteral(attribute.value)) {
-    return t.cloneNode(attribute.value);
+    return createJsxAttributeString(attribute.value);
   }
 
   if (t.isJSXExpressionContainer(attribute.value)) {

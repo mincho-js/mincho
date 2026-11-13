@@ -3,6 +3,9 @@ import type { NodePath } from "@babel/core";
 import { unwrapTransparentCssRuleExpression } from "../staticCssEval/candidates.js";
 import type { ProgramScope } from "../types.js";
 import { registerImportMethod } from "../utils.js";
+import { markBuildEvaluation } from "../extractionCalls/index.js";
+import { cssPropImportSource } from "./options.js";
+import { createJsxAttributeString } from "./attributeValue.js";
 import {
   canEmitCssClassNameDirectly,
   isArrayClassValueExpression,
@@ -17,8 +20,7 @@ import {
 } from "./classification.js";
 import {
   classNameValueErrorMessage,
-  cssModuleHelperImportCleanupScopes,
-  cssModuleName
+  cssModuleHelperImportCleanupScopes
 } from "./constants.js";
 import { shouldCleanupCssModuleHelperImports } from "./metadata.js";
 import type {
@@ -143,6 +145,7 @@ export function createClassNameExpression(
 export function createClassNameAttributeValue(
   path: NodePath<t.JSXOpeningElement>,
   normalizedElement: {
+    cssAttribute: t.JSXAttribute;
     cssExpression: t.Expression;
     cssValueClassification: CssPropValueClassification;
     classNameAttribute: t.JSXAttribute | null;
@@ -157,7 +160,11 @@ export function createClassNameAttributeValue(
     !normalizedElement.postAggregateClassNameExpression &&
     !normalizedElement.classNameAttribute
   ) {
-    return createStaticStringExpression(normalizedElement.cssExpression);
+    // An unchanged JSX quote can stay quoted. A JavaScript string expression
+    // must keep its braces, since JSX would interpret its escapes literally.
+    return t.isStringLiteral(normalizedElement.cssAttribute.value)
+      ? t.cloneNode(normalizedElement.cssAttribute.value)
+      : t.jsxExpressionContainer(t.cloneNode(normalizedElement.cssExpression));
   }
 
   return t.jsxExpressionContainer(
@@ -295,7 +302,7 @@ function lowerArrayElementCssResultClassNameExpression(
   );
 
   if (t.isStringLiteral(unwrappedExpression)) {
-    return createStaticStringExpression(unwrappedExpression);
+    return t.cloneNode(unwrappedExpression);
   }
 
   if (isDirectCssRuleLiteralExpression(unwrappedExpression)) {
@@ -405,10 +412,16 @@ export function createCssRuleClassNameExpression(
   path: NodePath<t.JSXOpeningElement>,
   cssExpression: t.Expression
 ): t.Expression {
-  const cssIdentifier = registerImportMethod(path, "css", cssModuleName);
+  const cssIdentifier = registerImportMethod(
+    path,
+    "css",
+    cssPropImportSource(path.scope)
+  );
   const cssRuleExpression = unwrapTransparentCssRuleExpression(cssExpression);
 
-  return t.callExpression(cssIdentifier, [t.cloneNode(cssRuleExpression)]);
+  return markBuildEvaluation(
+    t.callExpression(cssIdentifier, [t.cloneNode(cssRuleExpression)])
+  );
 }
 
 export function createConditionalCssRuleClassNameExpression(
@@ -485,18 +498,12 @@ function createLogicalAndRightClassNameExpression(
   });
 }
 
-function createStaticStringExpression(
-  expression: t.StringLiteral
-): t.StringLiteral {
-  return t.cloneNode(expression);
-}
-
 export function getClassNameExpression(
   path: NodePath<t.JSXOpeningElement>,
   attribute: t.JSXAttribute
 ): t.Expression {
   if (t.isStringLiteral(attribute.value)) {
-    return t.cloneNode(attribute.value);
+    return createJsxAttributeString(attribute.value);
   }
 
   if (!t.isJSXExpressionContainer(attribute.value)) {

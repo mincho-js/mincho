@@ -60,7 +60,7 @@ export function* symbolicTokenReferences(
         name: reference.members[0]!
       };
 
-      if (value !== null) {
+      if (typeof value === "string") {
         graph.dependencies.add(id);
         output.push({
           key: expressionKey(path),
@@ -80,7 +80,7 @@ export function* symbolicTokenReferences(
         value: target.path.node.value
       };
 
-      if (verified !== null)
+      if (typeof verified === "string")
         output.push({
           key: expressionKey(path),
           expression: t.stringLiteral(verified)

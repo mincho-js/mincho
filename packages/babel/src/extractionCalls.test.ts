@@ -1,3 +1,4 @@
+import { prepareModuleSourceFixture } from "./testUtils/moduleSourceFixture.js";
 import {
   mkdirSync,
   mkdtempSync,
@@ -7,9 +8,17 @@ import {
   writeFileSync
 } from "node:fs";
 import { dirname, join } from "node:path";
+import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
+import { transformSync } from "@babel/core";
+import { mincho$ } from "@mincho-js/css";
+import { transformSync as transformModule } from "esbuild";
+import { execFileSync } from "node:child_process";
+import { analyzeExtractCalls } from "./extractionCalls/analysis.js";
+import { minchoBabelPlugin } from "./index.js";
+import { styledComponentPlugin } from "./styled.js";
 import { babelTransform } from "./testUtils/plugin.js";
-import type { ExtractCalls } from "./types.js";
+import type { ExtractCalls, PluginOptions } from "./types.js";
 
 const roots: string[] = [];
 
@@ -43,7 +52,1464 @@ function fixture(files: Record<string, string>) {
   };
 }
 
+function executeModule(source: string, modules: Record<string, unknown>) {
+  const { code } = transformModule(source, { format: "cjs" });
+  const module = { exports: {} as Record<string, unknown> };
+
+  new Function("require", "exports", "module", code)(
+    (specifier: string) => {
+      if (!(specifier in modules))
+        throw new Error(`Unexpected module: ${specifier}`);
+
+      return modules[specifier];
+    },
+    module.exports,
+    module
+  );
+
+  return module.exports;
+}
+
+describe("dynamic array receiver selections", () => {
+  it.each([
+    ["direct", "const owners = [system]; const index = 0;"],
+    ["sparse", "const owners = [, system]; const index = 1;"],
+    [
+      "spread",
+      "const source = [system]; const owners = [...source]; const index = 0;"
+    ],
+    ["nested", "const owners = [[system]]; const index = 0;"]
+  ])("rejects a mutated receiver selected from a %s array", (name, setup) => {
+    const selection = name === "nested" ? "owners[index][0]" : "owners[index]";
+    const project = fixture({
+      "factory.ts": `import { style } from "@vanilla-extract/css";
+        export const system = {
+          helper(rule) { return style(rule); },
+          css(rule) { return this.helper(rule); }
+        };
+        ${setup}
+        const selected = ${selection};
+        selected.helper = () => "replacement";`
+    });
+
+    expect(() =>
+      project.transform("factory.ts", {
+        "./factory.ts": ["system.css"]
+      })
+    ).toThrow("Cannot use mutated extractCalls receiver");
+  });
+
+  it.each([
+    "const index = 1; const selected = owners[index]; export const label = selected.themeClass;",
+    "const selected = owners[0]; selected.helper = () => 'other';"
+  ])("preserves a safe receiver selection: %s", (selection) => {
+    const project = fixture({
+      "factory.ts": `import { style } from "@vanilla-extract/css";
+        export const system = {
+          themeClass: "theme",
+          helper(rule) { return style(rule); },
+          css(rule) { return this.helper(rule); }
+        };
+        const owners = [{ helper: null }, system];
+        ${selection}`
+    });
+    const { code, result } = project.transform("factory.ts", {
+      "./factory.ts": ["system.css"]
+    });
+    const { system } = executeModule(code, {
+      "@vanilla-extract/css": { style: (rule: { color: string }) => rule.color }
+    });
+
+    expect(
+      (system as { css(rule: { color: string }): string }).css({ color: "red" })
+    ).toBe("red");
+    expect(result[1]).not.toContain("style(");
+  });
+});
+
 describe("extractCalls configuration", () => {
+  it.each([
+    {
+      name: "custom factory initialization and all consumers",
+      imports: 'import { defineRules } from "test-preset";',
+      body: `const owner = defineRules({ color: "red" });
+        return { red: owner.css({ color: "red" }),
+          blue: owner.css({ color: "blue" }), joined: owner.cx("red", "blue") };`,
+      expected: { red: "red", blue: "blue", joined: "red blue" }
+    },
+    {
+      name: "recursive helper initialization and invocation",
+      imports: "",
+      body: `function read(depth = 0) { return depth ? 4 : read(1); }
+        return { padding: read() };`,
+      expected: { padding: 4 }
+    },
+    {
+      name: "bound intrinsic initialization and invocation",
+      imports: "",
+      body: `const max = Math.max.bind(Math); return { padding: max(2, 4) };`,
+      expected: { padding: 4 }
+    }
+  ])(
+    "preserves an explicit complete build boundary: $name",
+    ({ imports, body, expected }) => {
+      const source = `import { mincho$ } from "@mincho-js/css";
+      ${imports}
+      export const value = mincho$(() => { ${body} });`;
+      const modules = {
+        "@mincho-js/css": { mincho$ },
+        "test-preset": {
+          defineRules: () => ({
+            css: (value: { color: string }) => value.color,
+            cx: (...values: string[]) => values.join(" ")
+          })
+        }
+      };
+      const original = executeModule(source, modules);
+      const { code, result } = babelTransform(source);
+      const sidecar = executeModule(result[1], modules);
+      const runtime = executeModule(code, { ...modules, [result[0]]: sidecar });
+
+      expect(runtime.value).toEqual(original.value);
+      expect(runtime.value).toEqual(expected);
+      expect(code).not.toContain("mincho$(");
+      expect(result[1]).toContain("mincho$(");
+    }
+  );
+
+  it.each([
+    [
+      "const style = factory();",
+      /Unproven argument binding style: unsupported-origin/
+    ],
+    [
+      'const style = { color: "red" }; style.color = "blue";',
+      /Mutated argument binding style/
+    ]
+  ])(
+    "distinguishes argument mutation from unknown origin: %s",
+    (setup, diagnostic) => {
+      expect(() =>
+        babelTransform(
+          `const { css } = require("test-preset"); ${setup} export const cls = css(style);`,
+          { extractCalls: { "test-preset": ["css"] } }
+        )
+      ).toThrow(diagnostic);
+    }
+  );
+
+  it.each([
+    ["conditional", "if (flag) next();", false],
+    ["unconditional", "next();", true],
+    ["literal false", "if (false) next();", true],
+    ["deferred", "function later() { next(); }", false],
+    ["conditional alias", "const alias = next; if (flag) alias();", false],
+    ["unregistered alias", "const alias = next; alias();", false],
+    ["shadowed", "if (flag) { const next = () => 100; next(); }", true]
+  ] as const)(
+    "preserves local provider state for a %s sibling call",
+    (_name, sibling, extracted) => {
+      const source = `import { flag } from "outside";
+        let count = 0;
+        export function next() { return ++count; }
+        ${sibling}
+        export const value = next();`;
+      const project = fixture({ "factory.ts": source });
+      const { code, result } = project.transform("factory.ts", {
+        "./factory.ts": ["next"]
+      });
+      const modules = { outside: { flag: false } };
+      const original = executeModule(source, modules);
+      const sidecar = executeModule(result[1], modules);
+      const runtime = executeModule(code, { ...modules, [result[0]]: sidecar });
+
+      expect(runtime.value).toBe(original.value);
+      expect(result[1].includes("next()")).toBe(extracted);
+    }
+  );
+
+  it("retains local argument consumers whose execution is conditional", () => {
+    const source = `export function configure(value) { value.color += "!"; return value.color; }
+      const input = { color: "red" };
+      export const first = configure(input);
+      if (globalThis.enabled) configure(input);
+      export const second = configure(input);`;
+    const project = fixture({ "factory.ts": source });
+    const { code, result } = project.transform("factory.ts", {
+      "./factory.ts": ["configure"]
+    });
+    const sidecar = executeModule(result[1], {});
+    const runtime = executeModule(code, { [result[0]]: sidecar });
+    expect(runtime.first).toBe("red!");
+    expect(runtime.second).toBe("red!!");
+    expect(result[1]).not.toContain("configure(input)");
+  });
+
+  it("extracts local registered mutations when every argument consumer moves", () => {
+    const source = `export function configure(value) { value.color = "blue"; return value.color; }
+      const input = { color: "red" };
+      export const first = configure(input);
+      export const second = configure(input);`;
+    const project = fixture({ "factory.ts": source });
+    const { code, result } = project.transform("factory.ts", {
+      "./factory.ts": ["configure"]
+    });
+    const sidecar = executeModule(result[1], {});
+    const runtime = executeModule(code, { [result[0]]: sidecar });
+    expect(runtime.first).toBe("blue");
+    expect(runtime.second).toBe("blue");
+    expect(result[1]).toContain("configure(input)");
+    expect(code).not.toContain("configure(input)");
+  });
+
+  it.each(["input.color", "read()"])(
+    "preserves local registered argument mutations observed by %s",
+    (observation) => {
+      const source = `export function configure(value) { value.color = "blue"; return "class"; }
+      const input = { color: "red" };
+      function read() { return input.color; }
+      export const cls = configure(input);
+      export const color = ${observation};`;
+      const project = fixture({ "factory.ts": source });
+      const { code, result } = project.transform("factory.ts", {
+        "./factory.ts": ["configure"]
+      });
+      const sidecar = executeModule(result[1], {});
+      const runtime = executeModule(code, { [result[0]]: sidecar });
+      expect(runtime.color).toBe("blue");
+      expect(runtime.cls).toBe("class");
+      expect(result[1]).not.toContain("configure(input)");
+    }
+  );
+
+  it.each([
+    ["direct", 'const input = { color: "red" };', "input", "input.color"],
+    [
+      "member",
+      'const box = { current: { color: "red" } };',
+      "box.current",
+      "box.current.color"
+    ],
+    [
+      "alias",
+      'const box = { current: { color: "red" } }; const input = box.current;',
+      "input",
+      "box.current.color"
+    ],
+    [
+      "exported",
+      'export const input = { color: "red" };',
+      "input",
+      "input.color"
+    ],
+    [
+      "deferred",
+      'const input = { color: "red" }; export const read = () => input.color;',
+      "input",
+      "read()"
+    ]
+  ])(
+    "preserves registered mutations of runtime-observed %s arguments",
+    (_name, declaration, argument, observation) => {
+      const source = `import { configure } from "test-preset";
+      ${declaration}
+      export const cls = configure(${argument});
+      export const color = ${observation};`;
+      const { code, result } = babelTransform(source, {
+        extractCalls: { "test-preset": ["configure"] },
+        optimize: { pureFunctions: false }
+      });
+      const createModules = () => ({
+        "test-preset": {
+          configure(value: { color: string }) {
+            value.color = "blue";
+            return "class";
+          }
+        }
+      });
+      const original = executeModule(source, createModules());
+      const sidecar = executeModule(result[1], createModules());
+      const runtime = executeModule(code, {
+        ...createModules(),
+        [result[0]]: sidecar
+      });
+      expect(runtime.cls).toBe(original.cls);
+      expect(runtime.color).toBe(original.color);
+      expect(runtime.color).toBe("blue");
+      expect(code).toContain(`configure(${argument})`);
+      expect(result[1]).not.toContain(`configure(${argument})`);
+    }
+  );
+
+  it("does not invent a returned allocation contract for an unavailable factory source", () => {
+    const { code, result } = babelTransform(
+      `
+      import {staticValue} from "test-build";
+      import {defineRules} from "test-preset";
+      const owner = defineRules({color: "red"});
+      export const red = staticValue(() => owner.css({color: "red"}));
+    `,
+      { extractCalls: { "test-build": ["staticValue"] } }
+    );
+    expect(code).toContain("staticValue(");
+    expect(result[1]).not.toContain("defineRules(");
+  });
+
+  it.each([
+    ["direct", 'import { defineRules } from "test-preset";', "defineRules"],
+    [
+      "alias",
+      'import { defineRules } from "test-preset"; const create = defineRules;',
+      "create"
+    ]
+  ])(
+    "captures a %s factory initializer with its registered callback",
+    (_name, setup, factory) => {
+      const source = `import { staticValue } from "test-build";
+      ${setup}
+      const owner = ${factory}({ color: "red" });
+      export const red = staticValue(() => owner.css({ color: "red" }));
+      export const blue = staticValue(() => owner.css({ color: "blue" }));
+      export const cx = staticValue(() => owner.cx);`;
+      const moduleSources = {
+        "test-build": `export const staticValue = callback => callback();`,
+        "test-preset": `export const defineRules = config => ({
+          css: style => style.color,
+          cx: (...classes) => classes.join(" ")
+        });`
+      };
+      const extractCalls = { "test-build": ["staticValue"] };
+      const { code, result } = babelTransform(
+        source,
+        {
+          extractCalls,
+          preparedExtractCalls: prepareModuleSourceFixture(
+            source,
+            moduleSources,
+            extractCalls
+          )
+        },
+        { filename: "/fixture/entry.ts", root: "/fixture" }
+      );
+      // This fixture verifies the Babel extraction layer. Exporting a raw cx
+      // function is not evidence of successful production function serialization.
+      const modules = Object.fromEntries(
+        Object.entries(moduleSources).map(([name, body]) => [
+          name,
+          executeModule(body, {})
+        ])
+      );
+      const sidecar = executeModule(result[1], modules);
+      const runtime = executeModule(code, { ...modules, [result[0]]: sidecar });
+
+      expect(runtime.red).toBe("red");
+      expect(runtime.blue).toBe("blue");
+      expect(
+        (runtime.cx as (...classes: string[]) => string)("red", "blue")
+      ).toBe("red blue");
+      expect(code).not.toContain("staticValue(");
+      expect(result[1]).toContain(`${factory}({`);
+      expect(result[1].match(/staticValue\(/g)).toHaveLength(3);
+    }
+  );
+
+  it.each([
+    [
+      "input mutation",
+      'export const value = input => { input.color="blue"; return 1; };',
+      'export const style={color:"red"}; export const result=value(style); export const observed=style.color;'
+    ],
+    [
+      "provider observable state",
+      "export const state={count:0}; export const value=()=>{state.count++; return 1;};",
+      "export {state}; export const result=value(); export const observed=state.count;"
+    ],
+    [
+      "argument getter",
+      "export const value=input=>+input;",
+      'export const style={color:"red"}; const input={get value(){style.color="blue";return 1;}}; export const result=value(input.value); export const observed=style.color;'
+    ],
+    [
+      "argument coercion",
+      "export const value=input=>+input;",
+      'export const style={color:"red"}; const input={valueOf(){style.color="blue";return 1;}}; export const result=value(input); export const observed=style.color;'
+    ],
+    [
+      "argument throw",
+      "export const value=input=>+input;",
+      'export const style={color:"red"}; const input={get value(){style.color="blue";throw new Error("argument-failure");}}; export const result=value(input.value);'
+    ]
+  ])(
+    "keeps primitive source results separate from %s effects",
+    (label, provider, usage) => {
+      const source = `import {value${label === "provider observable state" ? ",state" : ""}} from "test-result"; ${usage}`;
+      const modules = { "test-result": provider };
+      const extractCalls = { "test-result": ["value"] };
+      const preparedExtractCalls = prepareModuleSourceFixture(
+        source,
+        modules,
+        extractCalls
+      );
+      expect(
+        preparedExtractCalls.exportOrigins?.["/fixture/test-result.ts"]
+          ?.sourceInvocationResults?.[JSON.stringify(["value"])]
+      ).toEqual({ kind: "primitive" });
+      const transformed = babelTransform(
+        source,
+        { extractCalls, preparedExtractCalls },
+        { filename: "/fixture/entry.ts", root: "/fixture" }
+      );
+      const run = (input: string, sidecar?: [string, string]) => {
+        const runtimeModules = { "test-result": executeModule(provider, {}) };
+        return executeModule(
+          input,
+          sidecar
+            ? {
+                ...runtimeModules,
+                [sidecar[0]]: executeModule(sidecar[1], runtimeModules)
+              }
+            : runtimeModules
+        );
+      };
+      if (label === "argument throw") {
+        expect(() => run(source)).toThrow("argument-failure");
+        expect(() => run(transformed.code, transformed.result)).toThrow(
+          "argument-failure"
+        );
+      } else {
+        expect(run(transformed.code, transformed.result)).toEqual(run(source));
+      }
+      expect(transformed.code).toContain("value(");
+      expect(transformed.result[1]).not.toContain("value(");
+    }
+  );
+
+  it.each([
+    [
+      "a captured theme call",
+      'import { theme } from "@mincho-js/css";',
+      'theme({ one: "red" })',
+      true
+    ],
+    [
+      "a renamed captured theme call",
+      'import { theme as createTokens } from "@mincho-js/css";',
+      'createTokens({ one: "red" })',
+      true
+    ],
+    [
+      "a local captured function alias",
+      'import { theme } from "@mincho-js/css"; const createTokens = theme;',
+      'createTokens({ one: "red" })',
+      true
+    ],
+    [
+      "an explicitly ignored captured call",
+      'import { theme } from "@mincho-js/css";',
+      "{ return /* mincho-js-ignore */ theme(); }",
+      false
+    ],
+    [
+      "an explicitly ignored captured call statement",
+      'import { theme } from "@mincho-js/css";',
+      "{ /* mincho-js-ignore */ return theme(); }",
+      false
+    ],
+    [
+      "a mutated captured function",
+      'import { theme } from "@mincho-js/css"; theme.color = "blue";',
+      "theme()",
+      false
+    ],
+    [
+      "a reassigned captured function alias",
+      'import { theme } from "@mincho-js/css"; let createTokens = theme; createTokens = () => "blue";',
+      "createTokens()",
+      false
+    ],
+    [
+      "an externally escaped captured function",
+      'import { theme } from "@mincho-js/css"; import { mutate } from "outside"; mutate(theme);',
+      "theme()",
+      false
+    ],
+    [
+      "a captured namespace receiver",
+      'import { system } from "test-preset";',
+      "system.theme()",
+      false
+    ],
+    [
+      "a captured function consumed by another call",
+      'import { theme } from "@mincho-js/css"; import { consume } from "outside";',
+      "consume(theme)",
+      false
+    ]
+  ])(
+    "checks registered wrapper callback safety for %s",
+    (_name, setup, expression, extracted) => {
+      const source = `import { staticValue } from "test-build";
+        ${setup}
+        export const tokens = staticValue(() => ${expression});`;
+      const { code, result } = babelTransform(source, {
+        extractCalls: { "test-build": ["staticValue"] }
+      });
+      const createModules = () => {
+        const theme: (() => string) & { color: string } = Object.assign(
+          () => theme.color,
+          { color: "red" }
+        );
+        return {
+          "test-build": {
+            staticValue: (callback: () => unknown) => callback()
+          },
+          "@mincho-js/css": { theme },
+          "test-preset": { system: { theme } },
+          outside: {
+            mutate(value: { color: string }) {
+              value.color = "blue";
+            },
+            consume: (callback: () => unknown) => callback()
+          }
+        };
+      };
+      const original = executeModule(source, createModules());
+      const sidecar = executeModule(result[1], createModules());
+      const runtime = executeModule(code, {
+        ...createModules(),
+        [result[0]]: sidecar
+      });
+      expect(runtime.tokens).toBe(original.tokens);
+      expect(result[1].includes("staticValue(")).toBe(extracted);
+      expect(code.includes("staticValue(")).toBe(!extracted);
+    }
+  );
+
+  it.each([
+    ["direct write", 'system.color = "blue";', "system", false, "blue"],
+    [
+      "write through alias",
+      'const owner = system; owner.color = "blue";',
+      "system",
+      false,
+      "blue"
+    ],
+    [
+      "argument alias",
+      'const owner = system; system.color = "blue";',
+      "owner",
+      false,
+      "blue"
+    ],
+    ["property deletion", "delete system.color;", "system", false, "undefined"],
+    [
+      "unregistered consumer",
+      'function configure(value) { value.color = "blue"; } configure(system);',
+      "system",
+      false,
+      "blue"
+    ],
+    [
+      "registered consumer",
+      "tools.configure(system);",
+      "system",
+      true,
+      "red-configured"
+    ],
+    [
+      "write before a registered consumer",
+      'system.color = "blue"; tools.configure(system);',
+      "system",
+      false,
+      "blue-configured"
+    ],
+    [
+      "literal-false registered consumer",
+      "if (false) tools.configure(system);",
+      "system",
+      true,
+      "red"
+    ],
+    [
+      "nonliteral registered consumer",
+      "if (flag) tools.configure(system);",
+      "system",
+      false,
+      "red-configured"
+    ],
+    [
+      "deferred registered consumer",
+      "function later() { tools.configure(system); }",
+      "system",
+      false,
+      "red"
+    ],
+    [
+      "ignored registered consumer",
+      "/* mincho-js-ignore */ tools.configure(system);",
+      "system",
+      false,
+      "red-configured"
+    ],
+    ["unchanged namespace", "", "system", true, "red"],
+    ["unrelated object write", 'other.color = "blue";', "system", true, "red"]
+  ] as const)(
+    "preserves namespace argument state after a %s",
+    (_, setup, argument, extracted, color) => {
+      const source = `import { tools, system, other } from "test-preset";
+        ${setup.includes("flag") ? 'import { flag } from "outside";' : ""}
+        ${setup}
+        export const cls = tools.css(${argument});`;
+      const { code, result } = babelTransform(source, {
+        extractCalls: { "test-preset": ["tools.css", "tools.configure"] }
+      });
+      const createModules = (events: string[]) => ({
+        outside: { flag: true },
+        "test-preset": {
+          tools: {
+            configure(value: { color: string }) {
+              value.color += "-configured";
+              events.push(`configure:${value.color}`);
+            },
+            css(value: { color?: string }) {
+              events.push(`css:${value.color}`);
+              return `color-${value.color}`;
+            }
+          },
+          system: { color: "red" },
+          other: { color: "red" }
+        }
+      });
+      const originalEvents: string[] = [];
+      const buildEvents: string[] = [];
+      const runtimeEvents: string[] = [];
+      const original = executeModule(source, createModules(originalEvents));
+      const sidecar = executeModule(result[1], createModules(buildEvents));
+      const runtime = executeModule(code, {
+        ...createModules(runtimeEvents),
+        [result[0]]: sidecar
+      });
+
+      expect(original.cls).toBe(`color-${color}`);
+      expect(runtime.cls).toBe(original.cls);
+      expect(originalEvents.at(-1)).toBe(`css:${color}`);
+      expect([...buildEvents, ...runtimeEvents]).toEqual(originalEvents);
+      if (
+        setup.startsWith("if (false)") ||
+        setup.startsWith("function later")
+      ) {
+        expect(originalEvents).toEqual(["css:red"]);
+        expect(result[1]).not.toContain("tools.configure(system)");
+      }
+      expect(result[1].includes(`tools.css(${argument})`)).toBe(extracted);
+      expect(code.includes(`tools.css(${argument})`)).toBe(!extracted);
+    }
+  );
+
+  it.each([
+    ["object", "{ nested: system }", ""],
+    ["argument spread", "...[system]", ""],
+    ["nested object spread", "{ nested: { ...system } }", ""],
+    ["nested argument spread", "...[{ nested: system }]", ""],
+    ["const assertion", "({ nested: system } as const)", ""],
+    ["satisfies", "({ nested: system } satisfies { nested: unknown })", ""],
+    ["container alias", "input", "const input = { nested: system };"],
+    [
+      "container alias chain",
+      "input",
+      "const initial = { nested: system }; const input = initial;"
+    ]
+  ] as const)(
+    "preserves a namespace argument in a %s",
+    (_, argument, setup) => {
+      for (const mutation of [false, true]) {
+        const source = `import { tools, system } from "test-preset";
+        ${setup}
+        ${mutation ? 'system.color = "blue";' : ""}
+        export const cls = tools.css(${argument});`;
+        const { code, result } = babelTransform(source, {
+          extractCalls: { "test-preset": ["tools.css"] }
+        });
+        const createModules = () => ({
+          "test-preset": {
+            tools: {
+              css(value: { color?: string; nested?: { color?: string } }) {
+                return `color-${(value.nested ?? value).color}`;
+              }
+            },
+            system: { color: "red" }
+          }
+        });
+        const original = executeModule(
+          babelTransform(source).code,
+          createModules()
+        );
+        const sidecar = executeModule(
+          babelTransform(result[1]).code,
+          createModules()
+        );
+        const runtime = executeModule(code, {
+          ...createModules(),
+          [result[0]]: sidecar
+        });
+
+        expect(original.cls).toBe(mutation ? "color-blue" : "color-red");
+        expect(runtime.cls).toBe(original.cls);
+        expect(result[1].includes("tools.css(")).toBe(!mutation);
+        expect(code.includes("tools.css(")).toBe(mutation);
+      }
+    }
+  );
+
+  it.each(["system", "{ nested: system }", "...[system]"])(
+    "keeps pure component-local namespace argument extraction for %s",
+    (argument) => {
+      const source = `import { tools, system } from "test-preset";
+      export function App() { return tools.css(${argument}); }`;
+      const { code, result } = babelTransform(source, {
+        extractCalls: { "test-preset": ["tools.css"] }
+      });
+      const createModules = () => ({
+        "test-preset": {
+          tools: {
+            css: (value: { color?: string; nested?: { color?: string } }) =>
+              `color-${(value.nested ?? value).color}`
+          },
+          system: { color: "red" }
+        }
+      });
+      const original = executeModule(source, createModules());
+      const sidecar = executeModule(result[1], createModules());
+      const runtime = executeModule(code, {
+        ...createModules(),
+        [result[0]]: sidecar
+      });
+
+      expect((original.App as () => string)()).toBe("color-red");
+      expect((runtime.App as () => string)()).toBe("color-red");
+      expect(result[1]).toContain("tools.css(");
+      expect(code).not.toContain("tools.css(");
+    }
+  );
+
+  it.each([
+    [
+      "callback mutation",
+      'system.color = "blue";',
+      "{ nested: () => system }",
+      "blue",
+      false
+    ],
+    [
+      "getter mutation",
+      'system.color = "blue";',
+      "{ get nested() { return system; } }",
+      "blue",
+      false
+    ],
+    ["readonly callback capture", "", "{ nested: () => system }", "red", false],
+    [
+      "readonly getter capture",
+      "",
+      "{ get nested() { return system; } }",
+      "red",
+      false
+    ],
+    [
+      "local callback",
+      "",
+      '{ nested: () => ({ color: "green" }) }',
+      "green",
+      true
+    ],
+    [
+      "local getter",
+      "",
+      '{ get nested() { return { color: "green" }; } }',
+      "green",
+      true
+    ],
+    [
+      "shadowed parameter",
+      'system.color = "blue";',
+      '{ nested: (system = { color: "green" }) => system }',
+      "green",
+      true
+    ],
+    [
+      "shadowed getter binding",
+      'system.color = "blue";',
+      '{ get nested() { const system = { color: "green" }; return system; } }',
+      "green",
+      true
+    ],
+    [
+      "captured alias",
+      'const owner = system; system.color = "blue";',
+      "{ nested: () => owner }",
+      "blue",
+      false
+    ],
+    [
+      "escaped capture",
+      'function configure(value) { value.color = "blue"; } configure(system);',
+      "{ nested: () => system }",
+      "blue",
+      false
+    ]
+  ] as const)(
+    "preserves namespace argument function safety for %s",
+    (_, setup, argument, color, extracted) => {
+      const source = `import { tools, system } from "test-preset";
+        ${setup}
+        export const cls = tools.css(${argument});`;
+      const { code, result } = babelTransform(source, {
+        extractCalls: { "test-preset": ["tools.css"] }
+      });
+      const createModules = () => ({
+        "test-preset": {
+          tools: {
+            css(value: {
+              nested: { color: string } | (() => { color: string });
+            }) {
+              const selected =
+                typeof value.nested === "function"
+                  ? value.nested()
+                  : value.nested;
+              return `color-${selected.color}`;
+            }
+          },
+          system: { color: "red" }
+        }
+      });
+      const original = executeModule(source, createModules());
+      const sidecar = executeModule(result[1], createModules());
+      const runtime = executeModule(code, {
+        ...createModules(),
+        [result[0]]: sidecar
+      });
+
+      expect(original.cls).toBe(`color-${color}`);
+      expect(runtime.cls).toBe(original.cls);
+      expect(result[1].includes("tools.css(")).toBe(extracted);
+      expect(code.includes("tools.css(")).toBe(!extracted);
+    }
+  );
+
+  it.each([
+    [
+      "member write",
+      'const input = { nested: system }; input.nested = { color: "blue" };'
+    ],
+    [
+      "binding reassignment",
+      'const original = { nested: system }; let input = original; input = { nested: { color: "blue" } };'
+    ]
+  ])("preserves namespace argument container alias %s", (_, setup) => {
+    const source = `import { tools, system } from "test-preset";
+      ${setup}
+      export const cls = tools.css(input);`;
+    const { code, result } = babelTransform(source, {
+      extractCalls: { "test-preset": ["tools.css"] }
+    });
+    const createModules = () => ({
+      "test-preset": {
+        tools: {
+          css(value: { nested: { color: string } }) {
+            return `color-${value.nested.color}`;
+          }
+        },
+        system: { color: "red" }
+      }
+    });
+    const original = executeModule(source, createModules());
+    const sidecar = executeModule(result[1], createModules());
+    const runtime = executeModule(code, {
+      ...createModules(),
+      [result[0]]: sidecar
+    });
+
+    expect(original.cls).toBe("color-blue");
+    expect(runtime.cls).toBe(original.cls);
+    expect(result[1]).not.toContain("tools.css(");
+    expect(code).toContain("tools.css(");
+  });
+
+  it("rejects a mutated CommonJS namespace argument", () => {
+    expect(() =>
+      babelTransform(
+        `const { tools, system } = require("test-preset");
+        system.color = "blue";
+        export const cls = tools.css(system);`,
+        { extractCalls: { "test-preset": ["tools.css"] } }
+      )
+    ).toThrow(/Cannot safely extract.*test-preset/);
+  });
+
+  it.each([
+    ["await", "await Promise.resolve();", false, "blue"],
+    ["for await", "for await (const item of [0]) {}", false, "blue"],
+    [
+      "computed object method",
+      "({ [await Promise.resolve('key')]() {} });",
+      false,
+      "blue"
+    ],
+    [
+      "computed class method",
+      "class Example { [await Promise.resolve('key')]() {} }",
+      false,
+      "blue"
+    ],
+    [
+      "deferred await",
+      "async function later() { await Promise.resolve(); }",
+      true,
+      "red"
+    ],
+    ["enclosing await", "await system.configure();", false, "blue"],
+    [
+      "enclosing await expression",
+      "await (0, system.configure());",
+      false,
+      "blue"
+    ],
+    [
+      "enclosing promise await",
+      "await Promise.resolve(system.configure());",
+      false,
+      "blue"
+    ],
+    ["synchronous statement", "const unrelated = 1;", true, "red"]
+  ] as const)(
+    "preserves shared receiver ordering across %s",
+    (name, between, extracted, color) => {
+      const source = `import { system } from "test-preset";
+        ${name.startsWith("enclosing") ? "" : "system.configure();"}
+        ${between}
+        export const cls = system.css();`;
+      const project = fixture({ "entry.ts": source });
+      const { code, result } = project.transform("entry.ts", {
+        "test-preset": ["system.configure", "system.css"]
+      });
+      const moduleUrl = (
+        source: string,
+        imports: Record<string, string> = {}
+      ) =>
+        `data:text/javascript,${encodeURIComponent(
+          Object.entries(imports).reduce(
+            (code, [specifier, replacement]) =>
+              code.replaceAll(
+                JSON.stringify(specifier),
+                JSON.stringify(replacement)
+              ),
+            source
+          )
+        )}`;
+      const createPreset = (name: string) =>
+        moduleUrl(`// ${project.root}/${name}
+        export const system = {
+          color: "red",
+          configure() {
+            queueMicrotask(() => { this.color = "blue"; });
+          },
+          css() { return "color-" + this.color; }
+        };`);
+      const originalUrl = moduleUrl(source, {
+        "test-preset": createPreset("original")
+      });
+      const sidecar = moduleUrl(result[1], {
+        "test-preset": createPreset("build")
+      });
+      const runtimeUrl = moduleUrl(code, {
+        "test-preset": createPreset("runtime"),
+        [result[0]]: sidecar
+      });
+      // Native ESM preserves top-level suspension and dependency evaluation.
+      const { original, runtime } = JSON.parse(
+        execFileSync(process.execPath, ["--input-type=module"], {
+          encoding: "utf8",
+          input: `const original = await import(${JSON.stringify(originalUrl)});
+            const runtime = await import(${JSON.stringify(runtimeUrl)});
+            process.stdout.write(JSON.stringify({ original: original.cls, runtime: runtime.cls }));`
+        })
+      );
+
+      expect(original).toBe(`color-${color}`);
+      expect(runtime).toBe(original);
+      expect(result[1].includes("system.css()")).toBe(extracted);
+      expect(code.includes("system.css()")).toBe(!extracted);
+    }
+  );
+
+  it.each([
+    ["false guard", "if (false) renamed.configure();", false, true],
+    ["true guard", "if (true) renamed.configure();", false, true],
+    ["nonliteral guard", "if (flag) renamed.configure();", false, false],
+    ["deferred", "function later() { renamed.configure(); }", false, false],
+    ["unconditional", "renamed.configure();", false, true],
+    ["independent receiver", "if (true) renamed.configure();", true, true]
+  ] as const)(
+    "preserves renamed-barrel receiver ordering for a %s call",
+    (_, usage, independent, extracted) => {
+      const factory = `let color = "red";
+      export const system = {
+        configure() { color = "blue"; },
+        css() { return "color-" + color; }
+      };`;
+      const barrel = independent
+        ? `let color = "red";
+          export const renamed = { configure() { color = "blue"; } };`
+        : `export { system as renamed } from "./factory.ts";`;
+      const source = `import { system } from "./factory.ts";
+        import { renamed } from "./barrel.ts";
+        ${usage.includes("flag") ? 'import { flag } from "outside";' : ""}
+        ${usage}
+        export const cls = system.css();`;
+      const project = fixture({
+        "factory.ts": factory,
+        "barrel.ts": barrel,
+        "entry.ts": source
+      });
+      const { code, result } = project.transform("entry.ts", {
+        "./factory.ts": ["system.css"],
+        "./barrel.ts": ["renamed.configure"]
+      });
+      const createModules = (events: string[]) => {
+        const modules = { "./factory.ts": executeModule(factory, {}) };
+        const forwarded = executeModule(barrel, modules);
+        type Owner = { configure(): void; css?(): string };
+        const observe = (owner: Owner, name: string) => {
+          const configure = owner.configure;
+          owner.configure = () => {
+            configure.call(owner);
+            events.push(`${name}.configure`);
+          };
+          const css = owner.css;
+          if (css)
+            owner.css = () => {
+              const value = css.call(owner);
+              events.push(`${name}.css:${value}`);
+              return value;
+            };
+        };
+        const system = modules["./factory.ts"].system as Owner;
+        const renamed = forwarded.renamed as Owner;
+        observe(system, "system");
+        if (renamed !== system) observe(renamed, "renamed");
+        return {
+          ...modules,
+          "./barrel.ts": forwarded,
+          outside: { flag: true }
+        };
+      };
+      const originalEvents: string[] = [];
+      const buildEvents: string[] = [];
+      const runtimeEvents: string[] = [];
+      const original = executeModule(source, createModules(originalEvents));
+      const sidecar = executeModule(result[1], createModules(buildEvents));
+      const runtime = executeModule(code, {
+        ...createModules(runtimeEvents),
+        [result[0]]: sidecar
+      });
+
+      expect(runtime.cls).toBe(original.cls);
+      const configureRuns =
+        !usage.startsWith("if (false)") && !usage.startsWith("function later");
+      expect(original.cls).toBe(
+        configureRuns && !independent ? "color-blue" : "color-red"
+      );
+      expect([...buildEvents, ...runtimeEvents]).toEqual(originalEvents);
+      expect(originalEvents).toEqual([
+        ...(configureRuns
+          ? [`${independent ? "renamed" : "system"}.configure`]
+          : []),
+        `system.css:${original.cls}`
+      ]);
+      if (!configureRuns)
+        expect(result[1]).not.toContain("renamed.configure()");
+      expect(result[1].includes("system.css()")).toBe(extracted);
+      expect(code.includes("system.css()")).toBe(!extracted);
+      expect(result[1].includes("renamed.configure()")).toBe(
+        extracted && configureRuns
+      );
+    }
+  );
+
+  it.each([
+    ["literal-true", "if (true) tools.configure(system);", true, "blue"],
+    ["nonliteral", "if (flag) tools.configure(system);", false, "blue"],
+    ["deferred", "function later() { tools.configure(system); }", false, "red"],
+    [
+      "ignored",
+      "/* mincho-js-ignore */ tools.configure(system);",
+      false,
+      "blue"
+    ],
+    ["unconditional", "tools.configure(system);", true, "blue"]
+  ] as const)(
+    "preserves undotted namespace state for a %s registered consumer",
+    (_, configure, extracted, color) => {
+      const factory = `export const state = { color: "red" };
+        export const css = () => "color-" + state.color;`;
+      const source = `import * as system from "./system.ts";
+        import { tools } from "test-preset";
+        ${configure.includes("flag") ? 'import { flag } from "outside";' : ""}
+        ${configure}
+        export const cls = system.css();`;
+      const project = fixture({ "system.ts": factory, "entry.ts": source });
+      const { code, result } = project.transform("entry.ts", {
+        "./system.ts": ["css"],
+        "test-preset": ["tools.configure"]
+      });
+      const createModules = (events: string[]) => {
+        const system = executeModule(factory, {});
+        const css = system.css as () => string;
+        const observedCss = () => {
+          const value = css();
+          events.push(`css:${value}`);
+          return value;
+        };
+        return {
+          "./system.ts": new Proxy(system, {
+            get(target, key, receiver) {
+              return key === "css"
+                ? observedCss
+                : Reflect.get(target, key, receiver);
+            }
+          }),
+          outside: { flag: true },
+          "test-preset": {
+            tools: {
+              configure(value: { state: { color: string } }) {
+                value.state.color = "blue";
+                events.push(`configure:${value.state.color}`);
+              }
+            }
+          }
+        };
+      };
+      const originalEvents: string[] = [];
+      const buildEvents: string[] = [];
+      const runtimeEvents: string[] = [];
+      const original = executeModule(source, createModules(originalEvents));
+      const sidecar = executeModule(result[1], createModules(buildEvents));
+      const runtime = executeModule(code, {
+        ...createModules(runtimeEvents),
+        [result[0]]: sidecar
+      });
+
+      expect(original.cls).toBe(`color-${color}`);
+      expect(runtime.cls).toBe(original.cls);
+      expect(originalEvents).toEqual([
+        ...(color === "blue" ? ["configure:blue"] : []),
+        `css:color-${color}`
+      ]);
+      expect([...buildEvents, ...runtimeEvents]).toEqual(originalEvents);
+      if (configure.startsWith("function later"))
+        expect(result[1]).not.toContain("tools.configure(system)");
+      expect(result[1].includes("system.css()")).toBe(extracted);
+      expect(code.includes("system.css()")).toBe(!extracted);
+      expect(result[1].includes("tools.configure(system)")).toBe(extracted);
+    }
+  );
+
+  it.each([
+    ["rest copy", "copy", "preset.css", true],
+    ["projected sibling", "inner", "preset.css", true],
+    ["projected receiver", "inner", "preset.inner.css", false]
+  ] as const)(
+    "distinguishes destructured export identity for a %s",
+    (_, changed, registration, extracted) => {
+      const factory = `export const preset = {
+        color: "red", css() { return "color-" + this.color; },
+        inner: { color: "red", css() { return "color-" + this.color; } }
+      };
+      export const { ...copy } = preset;
+      export const { inner } = preset;`;
+      const source = `import { preset, ${changed} } from "./factory.ts";
+        ${changed}.color = "blue";
+        export const cls = ${registration}();`;
+      const project = fixture({ "factory.ts": factory, "entry.ts": source });
+      const { code, result } = project.transform("entry.ts", {
+        "./factory.ts": [registration]
+      });
+      const createModules = () => ({
+        "./factory.ts": executeModule(factory, {})
+      });
+      const original = executeModule(source, createModules());
+      const sidecar = executeModule(result[1], createModules());
+      const runtime = executeModule(code, {
+        ...createModules(),
+        [result[0]]: sidecar
+      });
+
+      expect(original.cls).toBe(extracted ? "color-red" : "color-blue");
+      expect(runtime.cls).toBe(original.cls);
+      expect(result[1].includes(`${registration}()`)).toBe(extracted);
+      expect(code.includes(`${registration}()`)).toBe(!extracted);
+    }
+  );
+
+  it.each([
+    ["import", "././factory.ts", "binding"],
+    ["import", "./alias.ts", "binding"],
+    ["require", "././factory.ts", "binding"],
+    ["import", "././factory.ts", "direct-require"],
+    ["import", "./alias.ts", "direct-require"],
+    ["require", "././factory.ts", "import-binding"]
+  ] as const)(
+    "checks canonical module mutation for %s via %s (%s)",
+    (kind, alias, mutationKind) => {
+      const selected =
+        kind === "import"
+          ? 'import { system } from "./factory.ts";'
+          : 'const { system } = require("./factory.ts");';
+      const mutation =
+        mutationKind === "direct-require"
+          ? `require("${alias}").system.css = () => "blue";`
+          : mutationKind === "import-binding" || kind === "import"
+            ? `import { system as changed } from "${alias}"; changed.css = () => "blue";`
+            : `const { system: changed } = require("${alias}"); changed.css = () => "blue";`;
+      const source = `${selected} ${mutation} export const cls = system.css();`;
+      const project = fixture({
+        "entry.ts": source,
+        "factory.ts": 'export const system = { css: () => "red" };'
+      });
+      if (alias === "./alias.ts")
+        symlinkSync(
+          join(project.root, "factory.ts"),
+          join(project.root, "alias.ts")
+        );
+
+      const module = { system: { css: () => "red" } };
+      expect(
+        executeModule(source, { "./factory.ts": module, [alias]: module }).cls
+      ).toBe("blue");
+
+      const transform = () =>
+        project.transform("entry.ts", { "./factory.ts": ["system.css"] });
+      if (kind === "require") {
+        expect(transform).toThrow(/Cannot safely extract/);
+      } else {
+        const result = transform();
+        expect(result.code).toContain("system.css()");
+        expect(result.result[1]).not.toContain("system.css()");
+        expect(
+          executeModule(result.code, {
+            "./factory.ts": module,
+            [alias]: module
+          }).cls
+        ).toBe("blue");
+      }
+    }
+  );
+
+  it.each(["read-only-alias", "different-module"])(
+    "preserves canonical module %s controls",
+    (control) => {
+      const alias =
+        control === "read-only-alias" ? "././factory.ts" : "./other.ts";
+      const access =
+        control === "read-only-alias"
+          ? "const label = changed.color;"
+          : 'changed.css = () => "blue";';
+      const project = fixture({
+        "entry.ts": `import { system } from "./factory.ts";
+          import { system as changed } from "${alias}";
+          ${access}
+          export const cls = system.css();`,
+        "factory.ts":
+          'export const system = { color: "red", css: () => "red" };',
+        "other.ts":
+          'export const system = { color: "other", css: () => "other" };'
+      });
+      const result = project.transform("entry.ts", {
+        "./factory.ts": ["system.css"]
+      });
+
+      expect(result.result[1]).toContain("system.css()");
+      expect(result.code).not.toContain("system.css()");
+    }
+  );
+
+  it.each(["import", "require"] as const)(
+    "keeps canonical module identity specific to %s resolution",
+    (kind) => {
+      const source =
+        kind === "import"
+          ? `import { system } from "./factory.ts";
+            import * as inspected from "test-preset";
+            require("test-preset").system.css = () => "blue";
+            const label = inspected.system.color;
+            export const cls = system.css();`
+          : `const { system } = require("./factory.ts");
+            const inspected = require("test-preset");
+            import { system as changed } from "test-preset";
+            changed.css = () => "blue";
+            const label = inspected.system.color;
+            export const cls = system.css();`;
+      const project = fixture({
+        "entry.ts": source,
+        "factory.ts":
+          'export const system = { color: "red", css: () => "red" };',
+        "other.ts":
+          'export const system = { color: "other", css: () => "other" };'
+      });
+      const extractCalls = { "./factory.ts": ["system.css"] };
+      const analysis = analyzeExtractCalls({
+        extractCalls,
+        root: project.root,
+        filename: join(project.root, "entry.ts"),
+        source
+      });
+      let step = analysis.next();
+
+      while (!step.done) {
+        const request = step.value;
+        if (request.kind === "load") {
+          step = analysis.next(readFileSync(request.id, "utf8"));
+        } else if (request.kind === "resolve") {
+          const file =
+            request.source === "test-preset"
+              ? request.mode === kind
+                ? "factory.ts"
+                : "other.ts"
+              : request.source;
+          step = analysis.next(join(project.root, file));
+        } else {
+          throw new Error(`Unexpected analysis request: ${request.kind}`);
+        }
+      }
+
+      const result = babelTransform(source, {
+        extractCalls,
+        preparedExtractCalls: step.value
+      } as Omit<PluginOptions, "result">);
+      expect(result.result[1]).toContain("system.css()");
+      expect(result.code).not.toContain("system.css()");
+    }
+  );
+
+  it.each([false, true])(
+    "preserves runtime receiver selection after holder reassignment=%s",
+    (reassigned) => {
+      const factory =
+        'export const system = { mode: "red", css() { return this.mode; } };';
+      const barrel = `import { system } from "./factory.ts";
+        const independent = { mode: "other" };
+        const holder = { selected: system };
+        ${reassigned ? "holder.selected = independent;" : ""}
+        export const changed = holder.selected;`;
+      const source = `import { system } from "./factory.ts";
+        import { changed } from "./barrel.ts";
+        changed.mode = "blue";
+        export const cls = system.css();`;
+      const project = fixture({
+        "factory.ts": factory,
+        "barrel.ts": barrel,
+        "entry.ts": source
+      });
+      const createModules = () => {
+        const factoryModule = executeModule(factory, {});
+        return {
+          "./factory.ts": factoryModule,
+          "./barrel.ts": executeModule(barrel, {
+            "./factory.ts": factoryModule
+          })
+        };
+      };
+      const originalModules = createModules();
+      expect(
+        originalModules["./barrel.ts"].changed ===
+          originalModules["./factory.ts"].system
+      ).toBe(!reassigned);
+      const original = executeModule(source, originalModules);
+      expect(original.cls).toBe(reassigned ? "red" : "blue");
+
+      const transformed = project.transform("entry.ts", {
+        "./factory.ts": ["system.css"]
+      });
+      const modules = createModules();
+      const extracted = executeModule(transformed.result[1], modules);
+      expect(
+        executeModule(transformed.code, {
+          ...modules,
+          [transformed.result[0]]: extracted
+        }).cls
+      ).toBe(original.cls);
+      // A producer that replaces receiver slots supplies no immutable shape.
+      // Preserve execution instead of replaying writes to guess its identity.
+      expect(transformed.result[1].includes("system.css()")).toBe(false);
+      expect(transformed.code.includes("system.css()")).toBe(true);
+    }
+  );
+
+  it.each([
+    ["same module", "factory.ts", false],
+    ["different module", "other.ts", true],
+    ["unknown module", null, true]
+  ] as const)(
+    "checks canonical module aliases for package registration: %s",
+    (_label, aliasTarget, extracted) => {
+      const source = `import { system } from "test-preset";
+        import { system as changed } from "alias-preset";
+        changed.css = () => "blue";
+        export const cls = system.css();`;
+      const project = fixture({
+        "entry.ts": source,
+        "factory.ts": 'export const system = { css: () => "red" };',
+        "other.ts": 'export const system = { css: () => "other" };'
+      });
+      const extractCalls = { "test-preset": ["system.css"] };
+      const prepare = (aliasFile: string | null, input = source) => {
+        const analysis = analyzeExtractCalls({
+          extractCalls,
+          root: project.root,
+          filename: join(project.root, "entry.ts"),
+          source: input
+        });
+        let step = analysis.next();
+
+        while (!step.done) {
+          const request = step.value;
+          if (request.kind === "load") {
+            step = analysis.next(readFileSync(request.id, "utf8"));
+          } else if (request.kind === "resolve") {
+            expect(["test-preset", "alias-preset"]).toContain(request.source);
+            const file =
+              request.source === "test-preset" ? "factory.ts" : aliasFile;
+            step = analysis.next(file ? join(project.root, file) : null);
+          } else {
+            throw new Error(`Unexpected analysis request: ${request.kind}`);
+          }
+        }
+
+        return step.value;
+      };
+      const result = babelTransform(source, {
+        extractCalls,
+        preparedExtractCalls: prepare(aliasTarget)
+      } as Omit<PluginOptions, "result">);
+      expect(result.result[1].includes("system.css()")).toBe(extracted);
+      expect(result.code.includes("system.css()")).toBe(!extracted);
+
+      if (aliasTarget === "factory.ts") {
+        const readOnly = source.replace(
+          'changed.css = () => "blue";',
+          "changed.css;"
+        );
+        const sidecar = (aliasFile: string) =>
+          babelTransform(readOnly, {
+            extractCalls,
+            preparedExtractCalls: prepare(aliasFile, readOnly)
+          } as Omit<PluginOptions, "result">).result[0];
+
+        expect(sidecar("factory.ts")).not.toBe(sidecar("other.ts"));
+      }
+    }
+  );
+
   it.each([
     ['import { defineStyle } from "custom-styles";', "defineStyle"],
     ['import { defineStyle as make } from "custom-styles";', "make"],
@@ -114,6 +1580,39 @@ describe("extractCalls configuration", () => {
     expect(first.result[0]).not.toBe(baseline.result[0]);
   });
 
+  it.each([
+    {
+      label: "registered imports",
+      source:
+        'import { css } from "test-preset"; export const value = css({ padding: 12 });',
+      options: { extractCalls: { "test-preset": ["css"] } }
+    },
+    {
+      label: "configured JSX css",
+      source: "export const Component = () => <div css={{ padding: 12 }} />;",
+      options: { jsxCssProp: { importSource: "test-preset" } }
+    }
+  ])(
+    "isolates sidecar owner fingerprints for $label",
+    ({ source, options }) => {
+      const files = { "first.tsx": source, "second.tsx": source };
+      const original = fixture(files);
+      const relocated = fixture(files);
+      const transform = (root: string, file: string) =>
+        babelTransform(source, options, { root, filename: join(root, file) })
+          .result;
+
+      const first = transform(original.root, "first.tsx");
+      const second = transform(original.root, "second.tsx");
+
+      expect(first[0]).not.toBe(second[0]);
+      expect(transform(original.root, "first.tsx")).toEqual(first);
+      expect(transform(original.root, "second.tsx")).toEqual(second);
+      expect(transform(relocated.root, "first.tsx")).toEqual(first);
+      expect(transform(relocated.root, "second.tsx")).toEqual(second);
+    }
+  );
+
   it("accepts source names that also exist on Object.prototype", () => {
     const transformed = babelTransform(
       'import { make } from "constructor"; export const value = make({});',
@@ -154,6 +1653,439 @@ describe("extractCalls configuration", () => {
     expect(result[1]).not.toContain("defineStyle({");
   });
 
+  it.each([
+    [
+      "ignored statement with a named import",
+      'import { system } from "test-preset";',
+      "system",
+      "/* mincho-js-ignore */ system.configure();",
+      true,
+      false
+    ],
+    [
+      "ignored call with a namespace import",
+      'import * as preset from "test-preset";',
+      "preset.system",
+      "const configured = /* mincho-js-ignore */ preset.system.configure();",
+      true,
+      false
+    ],
+    [
+      "registered calls without ignore",
+      'import { system } from "test-preset";',
+      "system",
+      "system.configure();",
+      true,
+      true
+    ],
+    [
+      "an unregistered configuration call",
+      'import * as preset from "test-preset";',
+      "preset.system",
+      "preset.system.configure();",
+      false,
+      false
+    ]
+  ] as const)(
+    "preserves namespace changes before CSS generation: %s",
+    (_, declaration, callee, configure, registered, extracted) => {
+      const source = `${declaration}
+        ${configure}
+        export const cls = ${callee}.css();`;
+      const { code, result } = babelTransform(source, {
+        extractCalls: {
+          "test-preset": registered
+            ? ["system.configure", "system.css"]
+            : ["system.css"]
+        }
+      });
+      const createPreset = (events: string[]) => ({
+        system: {
+          color: "red",
+          configure() {
+            this.color = "blue";
+            events.push(`configure:${this.color}`);
+          },
+          css() {
+            events.push(`css:${this.color}`);
+            return `color-${this.color}`;
+          }
+        }
+      });
+      const originalEvents: string[] = [];
+      const original = executeModule(source, {
+        "test-preset": createPreset(originalEvents)
+      });
+      const buildEvents: string[] = [];
+      const sidecar = executeModule(result[1], {
+        "test-preset": createPreset(buildEvents)
+      });
+      const runtimeEvents: string[] = [];
+      const runtime = executeModule(code, {
+        "test-preset": createPreset(runtimeEvents),
+        [result[0]]: sidecar
+      });
+
+      expect(original.cls).toBe("color-blue");
+      expect(runtime.cls).toBe(original.cls);
+      expect(originalEvents).toEqual(["configure:blue", "css:blue"]);
+      expect(buildEvents).toEqual(extracted ? originalEvents : []);
+      expect(runtimeEvents).toEqual(extracted ? [] : originalEvents);
+    }
+  );
+
+  it.each([
+    "/* mincho-js-ignore */ system.configure();",
+    "const configured = /* mincho-js-ignore */ system.configure();"
+  ])("diagnoses namespace changes from ignored CommonJS calls: %s", (usage) => {
+    expect(() =>
+      babelTransform(
+        `const { system } = require("test-preset");
+        ${usage}
+        export const cls = system.css();`,
+        { extractCalls: { "test-preset": ["system.configure", "system.css"] } }
+      )
+    ).toThrow(/Cannot safely extract.*[Ee]scaped CommonJS namespace system/);
+  });
+
+  it.each([
+    ['require("test-preset").system.css = replacement;', "before"],
+    ['require("test-preset").system.css = replacement;', "after"],
+    ['require("test-preset").system.color = "blue";', "before"],
+    ['delete require("test-preset").system.css;', "before"],
+    ['configure(require("test-preset").system);', "before"],
+    [
+      'function update() { configure(require("test-preset").system); } update();',
+      "after"
+    ]
+  ])(
+    "rejects a direct require owner mutation or escape: %s %s",
+    (usage, order) => {
+      const call = "export const cls = system.css();";
+      const source = `const { system } = require("test-preset");
+      const replacement = () => "replaced";
+      function configure(value) { value.color = "blue"; }
+      ${order === "before" ? `${usage}\n${call}` : `${call}\n${usage}`}`;
+
+      expect(() =>
+        babelTransform(source, {
+          extractCalls: { "test-preset": ["system.css"] }
+        })
+      ).toThrow(
+        /Cannot safely extract.*(?:[Mm]utated|[Ee]scaped) CommonJS namespace/
+      );
+    }
+  );
+
+  it.each([
+    [
+      "bound require mutation",
+      "import",
+      'const changed = require("test-preset"); changed.system.color = "blue";'
+    ],
+    [
+      "direct require mutation",
+      "import",
+      'require("test-preset").system.color = "blue";'
+    ],
+    [
+      "require escape",
+      "import",
+      'const changed = require("test-preset"); configure(changed.system);'
+    ],
+    [
+      "named import mutation",
+      "require",
+      'import { system as changed } from "test-preset"; changed.color = "blue";'
+    ],
+    [
+      "namespace import mutation",
+      "require",
+      'import * as changed from "test-preset"; changed.system.color = "blue";'
+    ],
+    [
+      "import escape",
+      "require",
+      'import { system as changed } from "test-preset"; configure(changed);'
+    ]
+  ])("keeps mixed module access unsafe for %s", (_name, kind, mutation) => {
+    const owner =
+      kind === "import"
+        ? 'import { system } from "test-preset";'
+        : 'const { system } = require("test-preset");';
+    const source = `${owner}
+      function configure(value) { value.color = "blue"; }
+      ${mutation}
+      export const cls = system.css();`;
+    const transform = () =>
+      babelTransform(source, {
+        extractCalls: { "test-preset": ["system.css"] }
+      });
+
+    if (kind === "require") {
+      expect(transform).toThrow(
+        /Cannot safely extract.*(?:[Mm]utated|[Ee]scaped) CommonJS namespace/
+      );
+    } else {
+      const { code, result } = transform();
+      expect(code).toContain("system.css()");
+      expect(result[1]).not.toContain("system.css()");
+      const system = {
+        color: "red",
+        css() {
+          return `color-${this.color}`;
+        }
+      };
+      expect(executeModule(code, { "test-preset": { system } })).toEqual({
+        cls: "color-blue"
+      });
+    }
+  });
+
+  it.each(["import", "require"])(
+    "allows mixed module access to an unrelated owner for a %s consumer",
+    (kind) => {
+      const owner =
+        kind === "import"
+          ? 'import { system } from "test-preset";'
+          : 'const { system } = require("test-preset");';
+      const mutation =
+        kind === "import"
+          ? 'const changed = require("test-preset"); changed.dark.color = "blue";'
+          : 'import { dark as changed } from "test-preset"; changed.color = "blue";';
+      const { code, result } = babelTransform(
+        `${owner}
+        ${mutation}
+        export const cls = system.css();`,
+        {
+          extractCalls: { "test-preset": ["system.css"] }
+        }
+      );
+      expect(result[1]).toContain("system.css()");
+      expect(code).not.toContain("system.css()");
+    }
+  );
+
+  it.each([
+    ["import", "namespace.system.color = 'blue';"],
+    ["require", "namespace.system.color = 'blue';"],
+    ["import", "change(namespace.system);"],
+    ["require", "change(namespace.system);"]
+  ])(
+    "keeps shared re-exports unsafe across separate %s entries: %s",
+    (kind, mutation) => {
+      const owner =
+        kind === "import"
+          ? 'import { system } from "test-preset"; const namespace = require("test-preset");'
+          : 'import * as namespace from "test-preset"; const { system } = require("test-preset");';
+      const source = `${owner}
+        function change(value) { value.color = 'blue'; }
+        ${mutation}
+        export const cls = system.css();`;
+      const sharedSource =
+        'exports.system = { color: "red", css() { return `color-${this.color}`; } };';
+      const importSource = 'export { system } from "./shared.cjs";';
+      const requireSource = 'module.exports = require("./shared.cjs");';
+      const project = fixture({
+        "entry.ts": source,
+        "shared.cjs": sharedSource,
+        "import.js": importSource,
+        "require.cjs": requireSource
+      });
+      const shared = executeModule(sharedSource, {});
+      const imported = executeModule(importSource, { "./shared.cjs": shared });
+      const required = executeModule(requireSource, { "./shared.cjs": shared });
+      expect(imported.system).toBe(required.system);
+      expect(executeModule(source, { "test-preset": imported }).cls).toBe(
+        "color-blue"
+      );
+
+      const extractCalls = { "test-preset": ["system.css"] };
+      const analysis = analyzeExtractCalls({
+        extractCalls,
+        root: project.root,
+        filename: join(project.root, "entry.ts"),
+        source
+      });
+      let step = analysis.next();
+      while (!step.done) {
+        const request = step.value;
+        if (request.kind === "load") {
+          step = analysis.next(readFileSync(request.id, "utf8"));
+        } else if (request.kind === "resolve") {
+          expect(["test-preset", "./shared.cjs"]).toContain(request.source);
+          step = analysis.next(
+            request.source === "test-preset"
+              ? join(
+                  project.root,
+                  request.mode === "require" ? "require.cjs" : "import.js"
+                )
+              : join(dirname(request.importer), request.source)
+          );
+        } else {
+          throw new Error(`Unexpected analysis request: ${request.kind}`);
+        }
+      }
+
+      const preparedExtractCalls = step.value;
+      const options: Omit<PluginOptions, "result"> = {
+        extractCalls,
+        preparedExtractCalls
+      };
+      const transform = () => babelTransform(source, options);
+      if (kind === "require") {
+        expect(transform).toThrow(/Cannot safely extract/);
+      } else {
+        const result = transform();
+        expect(result.code).toContain("system.css()");
+        expect(result.result[1]).not.toContain("system.css()");
+        expect(
+          executeModule(result.code, { "test-preset": imported }).cls
+        ).toBe("color-blue");
+      }
+    }
+  );
+
+  it.each(["import", "require"])(
+    "checks mixed %s mutations conservatively even for independent entries",
+    (kind) => {
+      const owner =
+        kind === "import"
+          ? 'import { system } from "test-preset";'
+          : 'const { system } = require("test-preset");';
+      const mutation =
+        kind === "import"
+          ? 'require("test-preset").system.color = "blue";'
+          : 'import { system as changed } from "test-preset"; changed.color = "blue";';
+      const source = `${owner} ${mutation} export const cls = system.css();`;
+      const importSource =
+        'export const system = { color: "red", css() { return `color-${this.color}`; } };';
+      const requireSource =
+        'exports.system = { color: "red", css() { return `color-${this.color}`; } };';
+      const project = fixture({
+        "entry.ts": source,
+        "import.js": importSource,
+        "require.cjs": requireSource
+      });
+      const imported = executeModule(importSource, {});
+      const required = executeModule(requireSource, {});
+      expect(imported.system).not.toBe(required.system);
+
+      const extractCalls = { "test-preset": ["system.css"] };
+      const prepare = (source: string) => {
+        const analysis = analyzeExtractCalls({
+          extractCalls,
+          root: project.root,
+          filename: join(project.root, "entry.ts"),
+          source
+        });
+        let step = analysis.next();
+
+        while (!step.done) {
+          const request = step.value;
+          if (request.kind === "load") {
+            step = analysis.next(readFileSync(request.id, "utf8"));
+          } else if (request.kind === "resolve") {
+            expect(request.source).toBe("test-preset");
+            step = analysis.next(
+              join(
+                project.root,
+                request.mode === "require" ? "require.cjs" : "import.js"
+              )
+            );
+          } else {
+            throw new Error(`Unexpected analysis request: ${request.kind}`);
+          }
+        }
+
+        return step.value;
+      };
+      // Different entry files alone cannot prove that their exports are distinct.
+      const options: Omit<PluginOptions, "result"> = {
+        extractCalls,
+        preparedExtractCalls: prepare(source)
+      };
+      const transform = () => babelTransform(source, options);
+      if (kind === "require") {
+        expect(transform).toThrow(
+          /Cannot safely extract.*[Mm]utated CommonJS namespace/
+        );
+      } else {
+        const result = transform();
+        expect(result.code).toContain("system.css()");
+        expect(result.result[1]).not.toContain("system.css()");
+      }
+
+      const readOnly = source.replace(
+        mutation,
+        kind === "import"
+          ? 'const label = require("test-preset").system.color;'
+          : 'import { system as inspected } from "test-preset"; const label = inspected.color;'
+      );
+      const readOnlyOptions: Omit<PluginOptions, "result"> = {
+        extractCalls,
+        preparedExtractCalls: prepare(readOnly)
+      };
+      const result = babelTransform(readOnly, readOnlyOptions);
+      expect(result.result[1]).toContain("system.css()");
+      expect(result.code).not.toContain("system.css()");
+    }
+  );
+
+  it("checks direct require calls without any namespace declaration", () => {
+    expect(() =>
+      babelTransform(
+        `require("test-preset").system.color = "blue";
+         export const cls = require("test-preset").system.css();`,
+        { extractCalls: { "test-preset": ["system.css"] } }
+      )
+    ).toThrow(/Cannot safely extract.*[Mm]utated CommonJS namespace/);
+  });
+
+  it.each([
+    'require("test-preset").dark.color = "blue"; configure(require("test-preset").dark);',
+    'require("other-preset").system.color = "blue"; configure(require("other-preset").system);',
+    'function update(require) { require("test-preset").system.color = "blue"; }',
+    'require("test-preset");'
+  ])(
+    "preserves direct require reads unrelated to the extracted owner: %s",
+    (usage) => {
+      const source = `const { system } = require("test-preset");
+      function configure(value) { value.color = "blue"; }
+      ${usage}
+      export const cls = system.css();`;
+      const { code, result } = babelTransform(source, {
+        extractCalls: { "test-preset": ["system.css"] }
+      });
+      const createPreset = () => ({
+        system: {
+          color: "red",
+          css() {
+            return `color-${this.color}`;
+          }
+        },
+        dark: { color: "black" }
+      });
+      const original = executeModule(source, {
+        "test-preset": createPreset(),
+        "other-preset": createPreset()
+      });
+      const sidecar = executeModule(result[1], {
+        "test-preset": createPreset()
+      });
+      const runtime = executeModule(code, {
+        "test-preset": createPreset(),
+        "other-preset": createPreset(),
+        [result[0]]: sidecar
+      });
+
+      expect(result[1]).toContain("system.css()");
+      expect(code).not.toContain("system.css()");
+      expect(runtime.cls).toBe(original.cls);
+      expect(runtime.cls).toBe("color-red");
+    }
+  );
+
   it("does not trust registered calls as read-only during CSS prop evaluation", () => {
     expect(() =>
       babelTransform(
@@ -167,10 +2099,671 @@ describe("extractCalls configuration", () => {
       )
     ).toThrow();
   });
+
+  it.each([false, true])(
+    "preserves argument mutations by a registered call with runtime replacement=%s",
+    (replaced) => {
+      const source = `
+      import { tools, system } from "test-preset";
+      ${replaced ? 'tools.configure = (value) => { value.color = "blue"; };' : ""}
+      tools.configure(system);
+      export const cls = system.css();
+    `;
+      const { code, result } = babelTransform(source, {
+        extractCalls: { "test-preset": ["tools.configure", "system.css"] }
+      });
+      const createPreset = () => ({
+        tools: {
+          configure: (value: { color: string }) => {
+            value.color = "blue";
+          }
+        },
+        system: {
+          color: "red",
+          css() {
+            return `color-${this.color}`;
+          }
+        }
+      });
+      const original = executeModule(source, { "test-preset": createPreset() });
+      const sidecar = executeModule(result[1], {
+        "test-preset": createPreset()
+      });
+      const runtime = executeModule(code, {
+        "test-preset": createPreset(),
+        [result[0]]: sidecar
+      });
+
+      expect(original.cls).toBe("color-blue");
+      expect(runtime.cls).toBe(original.cls);
+      expect(code.includes("system.css()")).toBe(replaced);
+      expect(result[1].includes("system.css()")).toBe(!replaced);
+    }
+  );
 });
 
 describe("local extractCalls implementations", () => {
+  it.each([
+    [
+      "css(rule) { return this.helper(rule); }",
+      "helper(rule) { return this.finish(rule); }, finish(rule) { return style(rule); }"
+    ],
+    [
+      "css(rule) { return this?.helper(rule); }",
+      "helper(rule) { return style(rule); }"
+    ],
+    [
+      "css(rule) { return this.helper?.(rule); }",
+      "helper(rule) { return style(rule); }"
+    ],
+    [
+      "css(rule) { return this?.helpers?.paint(rule); }",
+      "helpers: { paint(rule) { return style(rule); } }"
+    ],
+    [
+      "css(rule) { return (this as typeof system)?.helper(rule); }",
+      "helper(rule) { return style(rule); }"
+    ],
+    [
+      "css: function(rule) { return (() => this.helper(rule))(); }",
+      "helper(rule) { return style(rule); }"
+    ],
+    [
+      "css(rule) { return this.helpers.paint(rule); }",
+      "helpers: { paint(rule) { return style(rule); } }"
+    ],
+    [
+      "css(rule) { return (this as typeof system).helper(rule); }",
+      "helper(rule) { return style(rule); }"
+    ],
+    [
+      "css(rule) { return (<typeof system>this).helper(rule); }",
+      "helper(rule) { return style(rule); }"
+    ],
+    [
+      "css(rule) { return this!.helper(rule); }",
+      "helper(rule) { return style(rule); }"
+    ],
+    [
+      "css(rule) { return (this satisfies typeof system).helper(rule); }",
+      "helper(rule) { return style(rule); }"
+    ],
+    [
+      "css(rule) { return ((this as typeof system).helpers as typeof system.helpers).paint(rule); }",
+      "helpers: { paint(rule) { return style(rule); } }"
+    ],
+    [
+      "css(rule) { return system.helper(rule); }",
+      "helper(rule) { return this.finish(rule); }, finish(rule) { return style(rule); }"
+    ],
+    [
+      "css(rule) { return this.helper(rule); }",
+      "helper(rule) { return rule.recurse ? this.css({ ...rule, recurse: false }) : style(rule); }"
+    ]
+  ])(
+    "protects statically reachable receiver helpers: %s",
+    (method, helpers) => {
+      const project = fixture({
+        "factory.ts": `import { style } from "@vanilla-extract/css";
+        export const system = {
+          ${helpers},
+          ${method},
+          unrelated() { return style({ color: "green" }); }
+        };`
+      });
+      const transformed = project.transform("factory.ts", {
+        "./factory.ts": ["system.css"]
+      });
+
+      expect(transformed.code).toContain("style(rule)");
+      expect(transformed.result[1]).toContain('color: "green"');
+      expect(transformed.result[1]).not.toContain("style(rule)");
+
+      const style = (rule: { color: string }) => rule.color;
+      const imports = { "@vanilla-extract/css": { style } };
+      const extracted = executeModule(transformed.result[1], imports);
+      const output = executeModule(transformed.code, {
+        ...imports,
+        [transformed.result[0]]: extracted
+      }) as {
+        system: { css(rule: { color: string; recurse?: boolean }): string };
+      };
+
+      expect(output.system.css({ color: "red", recurse: true })).toBe("red");
+    }
+  );
+
+  it("protects a shared method against each registered receiver", () => {
+    const project = fixture({
+      "factory.ts": `import { style } from "@vanilla-extract/css";
+        const shared = function(rule) { return this.helper(rule); };
+        export const system = {
+          helper(rule) { return style(rule); },
+          css: shared
+        };
+        export const alternate = {
+          helper(rule) { return style({ ...rule, color: "blue" }); },
+          css: shared
+        };`
+    });
+    const transformed = project.transform("factory.ts", {
+      "./factory.ts": ["system.css", "alternate.css"]
+    });
+    const output = executeModule(transformed.code, {
+      "@vanilla-extract/css": { style: (rule: { color: string }) => rule.color }
+    }) as {
+      system: { css(rule: { color: string }): string };
+      alternate: { css(rule: { color: string }): string };
+    };
+
+    expect(output.system.css({ color: "red" })).toBe("red");
+    expect(output.alternate.css({ color: "red" })).toBe("blue");
+    expect(transformed.result[1]).not.toContain("style(");
+  });
+
+  it.each([
+    "system.helper = replacement;",
+    "Object.assign(system, { helper: replacement });"
+  ])("rejects an unsafe optional receiver helper: %s", (mutation) => {
+    const project = fixture({
+      "factory.ts": `import { style } from "@vanilla-extract/css";
+        const replacement = rule => style(rule);
+        export const system = {
+          helper(rule) { return style(rule); },
+          css(rule) { return this?.helper(rule); }
+        };
+        ${mutation}`
+    });
+
+    expect(() =>
+      project.transform("factory.ts", { "./factory.ts": ["system.css"] })
+    ).toThrow(/Cannot use (?:mutated|escaped) extractCalls receiver/);
+  });
+
+  it.each([
+    "system.helper = replacement;",
+    "const alias = system; alias.helper = replacement;",
+    "let alias = {}; alias = system; alias.helper = replacement;",
+    "let alias = {}; alias = system; const copy = alias; copy.helper = replacement;",
+    "let alias = system; alias = {}; alias.helper = replacement;",
+    "const { nested } = system; nested.helper = replacement;",
+    "const { current: alias } = { current: system }; alias.helper = replacement;",
+    "const { chosen: alias = system } = {}; alias.helper = replacement;",
+    "let alias; ({ current: alias } = { current: system }); alias.helper = replacement;",
+    "delete system.helper;"
+  ])("rejects a receiver changed after its declaration: %s", (mutation) => {
+    const project = fixture({
+      "factory.ts": `import { style } from "@vanilla-extract/css";
+        const replacement = rule => style(rule);
+        export const system = {
+          helper(rule) { return style(rule); },
+          nested: {},
+          css(rule) { return this.helper(rule); }
+        };
+        ${mutation}`
+    });
+
+    expect(() =>
+      project.transform("factory.ts", { "./factory.ts": ["system.css"] })
+    ).toThrow("Cannot use mutated extractCalls receiver");
+  });
+
+  it.each([
+    "Object.assign(system, { helper: replacement });",
+    "Reflect.set(system, 'helper', replacement);",
+    "replace(system);",
+    "((strings, owner) => replace(owner))`${system}`;",
+    "const box = { owner: system }; ((strings, owner) => replace(owner))`${box.owner}`;",
+    "const alias = system; replace(alias);",
+    "let alias = {}; alias = system; replace(alias);"
+  ])("rejects an escaped receiver: %s", (escape) => {
+    const project = fixture({
+      "factory.ts": `import { style } from "@vanilla-extract/css";
+        const replacement = rule => style(rule);
+        function replace(owner) { owner.helper = replacement; }
+        export const system = {
+          helper(rule) { return style(rule); },
+          css(rule) { return this.helper(rule); }
+        };
+        ${escape}`
+    });
+
+    expect(() =>
+      project.transform("factory.ts", { "./factory.ts": ["system.css"] })
+    ).toThrow("Cannot use escaped extractCalls receiver");
+  });
+
+  it.each([
+    "class Box { owner = system; } const box = new Box(); box.owner.helper = replacement;",
+    "class Box { #owner = system; replace() { this.#owner.helper = replacement; } } new Box().replace();",
+    "class Box { static owner = system; } Box.owner.helper = replacement;",
+    "try { throw system; } catch (owner) { owner.helper = replacement; }",
+    "try { throw { owner: system }; } catch ({ owner }) { owner.helper = replacement; }"
+  ])(
+    "rejects receiver escapes through storage and exceptions: %s",
+    (escape) => {
+      const project = fixture({
+        "factory.ts": `import { style } from "@vanilla-extract/css";
+        const replacement = () => style({ color: "blue" });
+        export const system = {
+          helper(rule) { return style(rule); },
+          css(rule) { return this.helper(rule); }
+        };
+        ${escape}`
+      });
+      expect(() =>
+        project.transform("factory.ts", { "./factory.ts": ["system.css"] })
+      ).toThrow("Cannot use escaped extractCalls receiver");
+    }
+  );
+
+  it.each([
+    "class Box { owner = { helper: null }; }",
+    "class Box { owner = system.themeClass; }",
+    "try { throw system.themeClass; } catch (label) {}",
+    "try { throw { owner: {} }; } catch (box) { box.owner.helper = replacement; }"
+  ])("preserves unrelated class storage and thrown values: %s", (usage) => {
+    const project = fixture({
+      "factory.ts": `import { style } from "@vanilla-extract/css";
+        const replacement = () => "blue";
+        export const system = {
+          themeClass: "theme",
+          helper(rule) { return style(rule); },
+          css(rule) { return this.helper(rule); }
+        };
+        ${usage}`
+    });
+    const { code, result } = project.transform("factory.ts", {
+      "./factory.ts": ["system.css"]
+    });
+    expect(code).toContain("style(rule)");
+    expect(result[1]).not.toContain("style(");
+  });
+
+  it("does not confuse writes to a separate object with the receiver", () => {
+    const project = fixture({
+      "factory.ts": `import { style } from "@vanilla-extract/css";
+        const other = { helper: null };
+        other.helper = () => 'other';
+        export const system = {
+          helper(rule) { return style(rule); },
+          css(rule) { return this.helper(rule); }
+        };`
+    });
+    const transformed = project.transform("factory.ts", {
+      "./factory.ts": ["system.css"]
+    });
+
+    expect(transformed.code).toContain("style(rule)");
+    expect(transformed.result[1]).not.toContain("style(");
+  });
+
+  it("keeps copied receiver values and unrelated object arguments usable", () => {
+    const project = fixture({
+      "factory.ts": `import { style } from "@vanilla-extract/css";
+        const identity = value => value;
+        export const system = {
+          themeClass: 'theme',
+          helper(rule) { return style(rule); },
+          css(rule) { return this.helper(rule); }
+        };
+        const label = system.themeClass;
+        export const copied = identity(label);
+        export const direct = identity(system.themeClass);
+        export const tagged = ((strings, value) => value)\`\${system.themeClass}\`;
+        export const unrelated = identity({ color: 'blue' });`
+    });
+    const transformed = project.transform("factory.ts", {
+      "./factory.ts": ["system.css"]
+    });
+
+    expect(transformed.code).toContain("style(rule)");
+    expect(transformed.result[1]).not.toContain("style(");
+  });
+
+  it.each([
+    "const { themeClass: label } = system;",
+    "const { themeClass } = system; const label = themeClass;",
+    "const { tokens: { themeClass: label } } = system;",
+    "const alias = system; const { themeClass: label } = alias;",
+    "const { themeClass: label = 'fallback' } = system;",
+    "const { chosen: label = 'theme' } = {};",
+    "const { chosen: label = system } = { chosen: 'theme' };",
+    "const { tokens: { themeClass: label = system } } = { tokens: { themeClass: 'theme' } };",
+    "const { tokens: { themeClass: label } = { themeClass: 'theme' } } = {};",
+    "const { themeClass: label } = system.tokens;",
+    "const [label] = ['theme'];",
+    "let label; ({ themeClass: label } = system);",
+    "let label; ({ chosen: label = system } = { chosen: 'theme' });"
+  ])("keeps a selected destructured receiver value: %s", (selection) => {
+    const project = fixture({
+      "factory.ts": `import { style } from "@vanilla-extract/css";
+        const identity = value => value;
+        export const system = {
+          themeClass: 'theme',
+          tokens: { themeClass: 'theme' },
+          css(rule) { return style(rule); }
+        };
+        ${selection}
+        export const copied = identity(label);`
+    });
+    const transformed = project.transform("factory.ts", {
+      "./factory.ts": ["system.css"]
+    });
+    const output = executeModule(transformed.code, {
+      "@vanilla-extract/css": { style: (rule: { color: string }) => rule.color }
+    }) as { copied: string; system: { css(rule: { color: string }): string } };
+
+    expect(output.copied).toBe("theme");
+    expect(output.system.css({ color: "red" })).toBe("red");
+    expect(transformed.result[1]).not.toContain("style(");
+  });
+
+  it.each([
+    "const { current: alias } = { current: system };",
+    "const holder = { current: system }; const { current: alias } = holder;",
+    "const holder = { nested: { current: system } }; const { nested: { current: alias } } = holder;",
+    "let { themeClass: alias } = system; alias = system;",
+    "let first; let second; first = second; second = first; first = system; const { current: alias } = { current: first };",
+    "const { chosen: alias = system } = {};",
+    "const { nested: { chosen: alias } = { chosen: system } } = {};",
+    "const holder = { nested: { current: system } }; const { current: alias } = holder.nested;",
+    "const [alias] = [system];",
+    "let alias; ({ current: alias } = { current: system });",
+    "let alias; ({ chosen: alias = system } = {});"
+  ])("rejects an escaped destructured receiver object: %s", (selection) => {
+    const project = fixture({
+      "factory.ts": `import { style } from "@vanilla-extract/css";
+        const identity = value => value;
+        export const system = {
+          themeClass: 'theme',
+          css(rule) { return style(rule); }
+        };
+        ${selection}
+        identity(alias);`
+    });
+
+    expect(() =>
+      project.transform("factory.ts", { "./factory.ts": ["system.css"] })
+    ).toThrow("Cannot use escaped extractCalls receiver");
+  });
+
+  it("allows a rest copy that excludes the callable and retains only primitive values", () => {
+    const project = fixture({
+      "factory.ts": `import { style } from "@vanilla-extract/css";
+        const identity = value => value;
+        export const system = {
+          themeClass: 'theme',
+          get computed() { return 'theme'; },
+          css(rule) { return style(rule); }
+        };
+        const { css, ...alias } = system;
+        export const copied = identity(alias);`
+    });
+    const transformed = project.transform("factory.ts", {
+      "./factory.ts": ["system.css"]
+    });
+    const output = executeModule(transformed.code, {
+      "@vanilla-extract/css": { style: () => "class" }
+    });
+
+    expect(output.copied).toEqual({ themeClass: "theme", computed: "theme" });
+    expect(output.copied).not.toBe(output.system);
+    expect(output.copied).not.toHaveProperty("css");
+    expect(transformed.code).toContain("style(rule)");
+    expect(transformed.result[1]).not.toContain("style(");
+  });
+
+  it.each([
+    "const key = 'themeClass'; const { [key]: alias } = system;",
+    "const { computed: alias } = system;"
+  ])("keeps uncertain receiver selections conservative: %s", (selection) => {
+    const project = fixture({
+      "factory.ts": `import { style } from "@vanilla-extract/css";
+        const identity = value => value;
+        export const system = {
+          themeClass: 'theme',
+          get computed() { return 'theme'; },
+          css(rule) { return style(rule); }
+        };
+        ${selection}
+        identity(alias);`
+    });
+
+    expect(() =>
+      project.transform("factory.ts", { "./factory.ts": ["system.css"] })
+    ).toThrow("Cannot use escaped extractCalls receiver");
+  });
+
+  it.each([
+    "this.helper",
+    "(this as typeof system).helper",
+    "(this.helper as typeof replacement)",
+    "(this.helper satisfies typeof replacement)"
+  ])("rejects replacement of a receiver helper: %s", (target) => {
+    const project = fixture({
+      "factory.ts": `import { style } from "@vanilla-extract/css";
+        const replacement = rule => style(rule);
+        export const system = {
+          helper(rule) { return style(rule); },
+          css(rule) { ${target} = replacement; return this.helper(rule); }
+        };`
+    });
+
+    expect(() =>
+      project.transform("factory.ts", { "./factory.ts": ["system.css"] })
+    ).toThrow("Cannot use mutated extractCalls receiver");
+  });
+
+  it.each([
+    "helperName: 'helper', css(rule) { return this[this.helperName](rule); }",
+    "helperName: 'helper', css(rule) { return this?.[this.helperName](rule); }",
+    "get helper() { return function(rule) { return style(rule); }; }, css(rule) { return this.helper(rule); }"
+  ])(
+    "rejects a receiver helper that cannot be resolved statically: %s",
+    (members) => {
+      const project = fixture({
+        "factory.ts": `import { style } from "@vanilla-extract/css";
+        export const system = { ${members} };`
+      });
+
+      expect(() =>
+        project.transform("factory.ts", { "./factory.ts": ["system.css"] })
+      ).toThrow("Cannot identify extractCalls receiver member");
+    }
+  );
+
   const extractCalls = { "./src/factory.ts": ["defineStyle", "default"] };
+
+  it("parses a registered TypeScript dependency without its TSX owner's JSX plugin", () => {
+    const project = fixture({
+      "factory.ts": `export const make = (rule) => <const>{ color: "red", ...rule };`,
+      "app.tsx":
+        'import { make } from "./factory"; export const cls = make({ padding: 4 }); export const view = <div />;'
+    });
+    const { code, result } = project.transform("app.tsx", {
+      "./factory.ts": ["make"]
+    });
+
+    expect(result[1]).toContain("make({");
+    expect(code).not.toContain("make({");
+    expect(code).toContain("<div />");
+  });
+
+  it.each([false, true])(
+    "resolves local nested registrations through an object export with reexport=%s",
+    (reexport) => {
+      const project = fixture({
+        "factory.ts": `import { style } from "@vanilla-extract/css";
+        const definition = { css(rule) { return style(rule); } };
+        export { definition as system };
+        export const standalone = style({ color: "pink" });`,
+        "barrel.ts": 'export { system } from "./factory";',
+        "app.ts": `import { system } from "./${reexport ? "barrel" : "factory"}";
+        export const cls = system.css({ color: "red" });`
+      });
+      const config = {
+        [reexport ? "./barrel.ts" : "./factory.ts"]: ["system.css"]
+      };
+      const caller = project.transform("app.ts", config);
+      const factory = project.transform("factory.ts", config);
+
+      expect(caller.result[1]).toContain('color: "red"');
+      expect(caller.code).not.toContain('color: "red"');
+      expect(factory.code).toContain("style(rule)");
+      expect(factory.result[1]).not.toContain("style(rule)");
+      expect(factory.result[1]).toContain('color: "pink"');
+    }
+  );
+
+  it("preserves literal dotted export names in local registrations", () => {
+    const project = fixture({
+      "factory.ts": `import { style } from "@vanilla-extract/css";
+        const make = (rule) => style(rule);
+        export { make as "system.css" };`,
+      "app.ts":
+        'import { "system.css" as make } from "./factory"; export const cls = make({ color: "red" });'
+    });
+    const { code, result } = project.transform("app.ts", {
+      "./factory.ts": ["system.css"]
+    });
+
+    expect(result[1]).toContain('color: "red"');
+    expect(code).not.toContain('color: "red"');
+  });
+
+  it.each([false, true])(
+    "protects both literal dotted exports and member implementations with receiver helper=%s",
+    (helper) => {
+      const project = fixture({
+        "factory.ts": `import { style } from "@vanilla-extract/css";
+          const literal = rule => style(rule);
+          export { literal as "system.css" };
+          export const system = {
+            ${helper ? "helper(rule) { return style(rule); }," : ""}
+            css(rule) { return ${helper ? "this.helper(rule)" : "style(rule)"}; }
+          };`,
+        "app.ts": `import { "system.css" as make, system } from "./factory";
+          export const literal = make({ color: "red" });
+          export const member = system.css({ color: "blue" });`
+      });
+      const config = { "./factory.ts": ["system.css"] };
+      const factory = project.transform("factory.ts", config);
+
+      expect(factory.result[1]).toBe("");
+
+      const calls: string[] = [];
+      const definitions = executeModule(factory.code, {
+        "@vanilla-extract/css": {
+          style(rule: { color: string }) {
+            calls.push(rule.color);
+            return `class-${rule.color}`;
+          }
+        }
+      });
+      const caller = project.transform("app.ts", config);
+      const classes = executeModule(caller.result[1], {
+        "./factory": definitions
+      });
+
+      expect(Object.values(classes)).toEqual(["class-red", "class-blue"]);
+      expect(calls).toEqual(["red", "blue"]);
+      expect(caller.code).not.toContain("make({");
+      expect(caller.code).not.toContain("system.css({");
+    }
+  );
+
+  it("extracts a TypeScript dependency from a Flow owner", () => {
+    const source = `import { make } from "./factory.ts";
+      type Props = {| padding: number |};
+      export const value = make({ padding: 4 });`;
+    const project = fixture({
+      "factory.ts": "export const make = rule => <const>{ ...rule };",
+      "app.jsx": source
+    });
+    const options: PluginOptions = {
+      result: ["", ""],
+      extractCalls: { "./factory.ts": ["make"] },
+      optimize: { pureFunctions: false }
+    };
+    const transformed = transformSync(source, {
+      filename: join(project.root, "app.jsx"),
+      root: project.root,
+      babelrc: false,
+      configFile: false,
+      parserOpts: { plugins: ["flow", "jsx"] },
+      plugins: [[minchoBabelPlugin(), options], [styledComponentPlugin()]]
+    });
+
+    expect(transformed?.code).not.toContain("make({");
+    expect(options.result[1]).toContain("padding: 4");
+  });
+
+  it("resolves deeper CommonJS object registrations through local aliases", () => {
+    const project = fixture({
+      "factory.cjs": `const { style } = require("@vanilla-extract/css");
+        const make = (rule) => style(rule);
+        const methods = { css: make };
+        exports.system = { styles: methods };`,
+      "app.ts":
+        'const { system } = require("./factory.cjs"); export const cls = system.styles.css({ color: "red" });'
+    });
+    const config = { "./factory.cjs": ["system.styles.css"] };
+    const caller = project.transform("app.ts", config);
+    const factory = project.transform("factory.cjs", config);
+
+    expect(caller.result[1]).toContain('color: "red"');
+    expect(caller.code).not.toContain('color: "red"');
+    expect(factory.code).toContain("style(rule)");
+    expect(factory.result[1]).not.toContain("style(rule)");
+  });
+
+  it.each([
+    "export const system = { ...dynamic, css: (rule) => rule };",
+    "export const system = { [method]: (rule) => rule };",
+    "export const system = { get css() { return (rule) => rule; } };"
+  ])("rejects unproven local object implementations: %s", (factory) => {
+    const project = fixture({
+      "factory.ts": factory,
+      "app.ts":
+        'import { system } from "./factory"; export const cls = system.css({});'
+    });
+
+    expect(() =>
+      project.transform("app.ts", { "./factory.ts": ["system.css"] })
+    ).toThrow(/Cannot statically identify a function implementation/);
+  });
+
+  it("forwards configured parser plugins to registered dependencies", () => {
+    const source =
+      'import { make } from "./factory.ts"; export const value = make({ color: "red" });';
+    const project = fixture({
+      "factory.ts": `
+        export @sealed class Factory {}
+        export const make = (rule) => rule;
+      `,
+      "app.ts": source
+    });
+    const options: PluginOptions = {
+      result: ["", ""],
+      extractCalls: { "./factory.ts": ["make"] },
+      optimize: { pureFunctions: false }
+    };
+    const transformed = transformSync(source, {
+      filename: join(project.root, "app.ts"),
+      root: project.root,
+      babelrc: false,
+      configFile: false,
+      parserOpts: {
+        plugins: [["decorators", { decoratorsBeforeExport: false }]]
+      },
+      plugins: [[minchoBabelPlugin(), options], [styledComponentPlugin()]]
+    });
+
+    expect(transformed?.code).not.toContain("make({");
+    expect(options.result[1]).toContain("make({");
+    expect(options.result[1]).toContain('color: "red"');
+  });
 
   it("leaves dynamic inline members of external CommonJS factories alone", () => {
     const project = fixture({
@@ -283,51 +2876,268 @@ describe("local extractCalls implementations", () => {
     expect(project.transform("second.ts", config).result[1]).toBe("");
   });
 
-  it("generates the same sidecar filename in different project checkout directories", () => {
-    const files = {
-      "factory.ts": 'export const make = () => "class";',
-      "app.ts": 'import { make } from "./factory"; export const value = make();'
-    };
-
-    const first = fixture(files);
-    const second = fixture(files);
-    const config = { "./factory.ts": ["make"] };
-
-    expect(first.transform("app.ts", config).result).toEqual(
-      second.transform("app.ts", config).result
-    );
-  });
-
-  it("generates the same sidecar filename through symlinked checkout roots", () => {
-    const files = {
-      "factory.ts": 'export const make = () => "class";',
-      "app.ts": 'import { make } from "./factory"; export const value = make();'
-    };
-    const first = fixture(files);
-    const second = fixture(files);
-    const links = fixture({});
-    const config = { "./factory.ts": ["make"] };
-    const baseline = first.transform("app.ts", config).result;
-
-    for (const [name, project] of [
-      ["first", first],
-      ["second", second]
-    ] as const) {
-      const root = join(links.root, name);
-      symlinkSync(project.root, root, "junction");
-
-      expect(
-        babelTransform(
-          files["app.ts"],
-          { extractCalls: config },
-          {
-            filename: join(root, "app.ts"),
-            root
+  it.each([
+    ["direct write", 'palette.color = "blue";'],
+    ["alias write", 'const alias = palette; alias.color = "blue";'],
+    [
+      "nested alias",
+      'const holder = { palette }; holder.palette.color = "blue";'
+    ],
+    ["escaped alias", "const alias = palette; update(alias);"],
+    ["readonly", ""],
+    [
+      "function expression",
+      'const alias = palette; alias.color = "blue";',
+      "const palette = function() {};"
+    ],
+    [
+      "arrow function",
+      'const alias = palette; alias.color = "blue";',
+      "const palette = () => {};"
+    ],
+    [
+      "object method",
+      'palette.method.color = "blue";',
+      "const palette = { method() {} };",
+      "palette.method"
+    ],
+    [
+      "function prototype",
+      'const alias = palette.prototype; alias.color = "blue";',
+      "function palette() {}",
+      "palette.prototype"
+    ],
+    [
+      "class property",
+      'const alias = palette; alias.color = "blue";',
+      "class palette {}"
+    ],
+    [
+      "class prototype",
+      'const alias = palette.prototype; alias.color = "blue";',
+      "class palette {}",
+      "palette.prototype"
+    ],
+    [
+      "constructed instance",
+      'palette.color = "blue";',
+      "class Palette {} const palette = new Palette();"
+    ],
+    [
+      "inline factory result",
+      'palette.color = "blue";',
+      'const palette = (() => ({ color: "red" }))();'
+    ],
+    [
+      "opaque factory result",
+      'palette.color = "blue";',
+      "const palette = makePalette();"
+    ]
+  ])(
+    "preserves captured function properties after %s",
+    (
+      _name,
+      mutation,
+      declaration = "function palette() {}",
+      value = "palette"
+    ) => {
+      const source = `import { tools, update, makePalette } from "test-preset";
+      ${declaration}
+      ${mutation}
+      export const cls = tools.css({ color: ${value}.color ?? "red" });`;
+      const { code, result } = babelTransform(source, {
+        extractCalls: { "test-preset": ["tools.css"] },
+        optimize: { pureFunctions: false }
+      });
+      const modules = {
+        "test-preset": {
+          tools: { css: (style: { color: string }) => style.color },
+          makePalette: () => ({ color: "red" }),
+          update(value: { color: string }) {
+            value.color = "blue";
           }
-        ).result
-      ).toEqual(baseline);
+        }
+      };
+      const original = executeModule(source, modules);
+      const sidecar = executeModule(result[1], modules);
+      const runtime = executeModule(code, { ...modules, [result[0]]: sidecar });
+
+      expect(runtime.cls).toBe(original.cls);
+      expect(runtime.cls).toBe(mutation ? "blue" : "red");
+      expect(result[1].includes("tools.css(")).toBe(!mutation);
     }
-  });
+  );
+
+  it.each([false, true])(
+    "preserves observations of registered factory results with early read=%s",
+    (earlyRead) => {
+      const source = `import { makePalette, configure } from "test-preset";
+        const palette = makePalette();
+        ${earlyRead ? "export const before = palette.color;" : ""}
+        export const cls = configure(palette);
+        export const after = palette.color;`;
+      const { code, result } = babelTransform(source, {
+        extractCalls: { "test-preset": ["makePalette", "configure"] },
+        optimize: { pureFunctions: false }
+      });
+      const modules = {
+        "test-preset": {
+          makePalette: () => ({ color: "red" }),
+          configure(value: { color: string }) {
+            value.color = "blue";
+            return value.color;
+          }
+        }
+      };
+      const original = executeModule(source, modules);
+      const sidecar = executeModule(result[1], modules);
+      const runtime = executeModule(code, { ...modules, [result[0]]: sidecar });
+
+      expect(runtime).toEqual(original);
+      expect(runtime.after).toBe("blue");
+      if (earlyRead) expect(runtime.before).toBe("red");
+    }
+  );
+
+  const relocationCases = [
+    {
+      factory: 'export const make = () => "class";',
+      imported: "make",
+      registration: "make"
+    },
+    {
+      factory: 'export const system = { css() { return "class"; } };',
+      imported: "system",
+      registration: "system.css"
+    }
+  ];
+
+  it.each(relocationCases)(
+    "generates the same sidecar filename in different project checkout directories for $registration",
+    ({ factory, imported, registration }) => {
+      const files = {
+        "factory.ts": factory,
+        "app.ts": `import { ${imported} } from "./factory"; export const value = ${registration}();`
+      };
+
+      const first = fixture(files);
+      const second = fixture(files);
+      const config = { "./factory.ts": [registration] };
+
+      expect(first.transform("app.ts", config).result).toEqual(
+        second.transform("app.ts", config).result
+      );
+    }
+  );
+
+  it.each(relocationCases)(
+    "generates the same sidecar filename through symlinked checkout roots for $registration",
+    ({ factory, imported, registration }) => {
+      const files = {
+        "factory.ts": factory,
+        "app.ts": `import { ${imported} } from "./factory"; export const value = ${registration}();`
+      };
+      const first = fixture(files);
+      const second = fixture(files);
+      const links = fixture({});
+      const config = { "./factory.ts": [registration] };
+      const baseline = first.transform("app.ts", config).result;
+
+      for (const [name, project] of [
+        ["first", first],
+        ["second", second]
+      ] as const) {
+        const root = join(links.root, name);
+        symlinkSync(project.root, root, "junction");
+
+        expect(
+          babelTransform(
+            files["app.ts"],
+            { extractCalls: config },
+            {
+              filename: join(root, "app.ts"),
+              root
+            }
+          ).result
+        ).toEqual(baseline);
+      }
+    }
+  );
+
+  it.each(
+    relocationCases.flatMap((entry) =>
+      [false, true].map((virtual) => ({ ...entry, virtual }))
+    )
+  )(
+    "keeps host runtime receipts stable across checkouts for $registration with virtual=$virtual",
+    ({ factory, imported, registration, virtual }) => {
+      const source = `import { ${imported} } from "./factory.ts"; export const value = ${registration}();`;
+      const first = fixture({ "factory.ts": factory, "app.ts": source });
+      const second = fixture({
+        "nested/factory.ts": factory,
+        "nested/app.ts": source
+      });
+      const config = { "./factory.ts": [registration] };
+      const transform = (
+        root: string,
+        version = "runtime-v1",
+        runtime = factory
+      ) => {
+        const filename = join(root, "app.ts");
+        const analysis = analyzeExtractCalls({
+          extractCalls: config,
+          root,
+          filename,
+          source
+        });
+        let step = analysis.next();
+        let receipts = 0;
+
+        while (!step.done) {
+          const request = step.value;
+          if (request.kind === "resolve") {
+            step = analysis.next(
+              virtual && request.purpose === "consumer-runtime"
+                ? "\0host:factory.ts"
+                : join(root, request.source)
+            );
+          } else if (request.kind === "load") {
+            if (request.purpose === "consumer-runtime") {
+              receipts++;
+              step = analysis.next({
+                source: runtime,
+                sourceHash: createHash("sha256").update(runtime).digest("hex"),
+                version,
+                watchFiles: [request.id]
+              });
+            } else {
+              step = analysis.next(readFileSync(request.id, "utf8"));
+            }
+          } else {
+            throw new Error(`Unexpected analysis request: ${request.kind}`);
+          }
+        }
+
+        expect(receipts).toBeGreaterThan(0);
+        return babelTransform(
+          source,
+          { extractCalls: config, preparedExtractCalls: step.value },
+          { root, filename }
+        ).result;
+      };
+      const baseline = transform(first.root);
+
+      expect(transform(join(second.root, "nested"))).toEqual(baseline);
+      expect(transform(first.root, "runtime-v2")[0]).not.toBe(baseline[0]);
+      expect(
+        transform(
+          first.root,
+          "runtime-v1",
+          factory.replace("class", "updated")
+        )[0]
+      ).not.toBe(baseline[0]);
+    }
+  );
 
   it.each(["css", "styles"])(
     "resolves dotted .%s factory and helper imports",
@@ -531,4 +3341,47 @@ describe("local extractCalls implementations", () => {
       /Ambiguous export make/
     );
   });
+});
+
+describe("registered receiver function result wrappers", () => {
+  it.each([
+    "async function owner() { return system; }",
+    "function* owner() { return system; }",
+    "async function* owner() { yield system; }"
+  ])("does not alias the wrapper returned by %s", (factory) => {
+    const project = fixture({
+      "factory.ts": `export const system = { css(rule) { return rule; } };
+        ${factory}
+        const pending = owner();
+        pending.cached = true;`
+    });
+    expect(() =>
+      project.transform("factory.ts", {
+        "./factory.ts": ["system.css"]
+      })
+    ).not.toThrow();
+  });
+
+  it.each([
+    ["function owner() { return system; }", "owner().cached = true;"],
+    ["async function owner() { return system; }", "consume(owner);"],
+    ["function* owner() { yield system; }", "consume(owner);"],
+    ["async function owner() { return system; }", "consume(owner());"],
+    ["function* owner() { yield system; }", "consume(owner());"]
+  ])(
+    "keeps direct aliases and exposed callback values: %s %s",
+    (factory, use) => {
+      const project = fixture({
+        "factory.ts": `import { consume } from "external-consumer";
+        export const system = { css(rule) { return rule; } };
+        ${factory}
+        ${use}`
+      });
+      expect(() =>
+        project.transform("factory.ts", {
+          "./factory.ts": ["system.css"]
+        })
+      ).toThrow(/Cannot use (mutated|escaped) extractCalls receiver/);
+    }
+  );
 });

@@ -1,3 +1,4 @@
+import { runInNewContext } from "node:vm";
 import { describe, expect, it } from "vitest";
 import { STATIC_CSS_EVAL_LIMITS } from "./staticCssEval/types.js";
 import {
@@ -2453,6 +2454,32 @@ describe("minchoBabelPlugin", () => {
     });
   });
 
+  it.each([
+    ["styleA", "const styleA = styleB; const styleB = styleA;", "styleA"],
+    ["styleB", "const styleA = styleB; const styleB = styleA;", "styleB"],
+    [
+      "entry",
+      "const entry = styleA; const styleA = styleB; const styleB = styleA;",
+      "styleA"
+    ]
+  ])(
+    "keeps the JSX cycle diagnostic independent of mutation-proof order: %s",
+    (reference, declarations, cycleBinding) => {
+      const failure = captureJsxCssPropFailure(
+        `
+      ${declarations}
+      function App() { return <div css={${reference}} />; }
+    `,
+        { jsxCssProp: true }
+      );
+      expect(failure.error.message.split("\n")[0]).toBe(
+        `Cannot statically evaluate css prop value: binding cycle detected while resolving "${cycleBinding}"`
+      );
+      expect(failure.code).not.toContain("_css(");
+      expect(failure.code).not.toContain("style={{");
+    }
+  );
+
   it("maps partial evaluator deopt diagnostics and preserves unchanged diagnostics", () => {
     const depthBindingCount =
       STATIC_CSS_EVAL_LIMITS.maxObjectArrayRecursionDepth + 1;
@@ -2935,3 +2962,168 @@ describe("minchoBabelPlugin", () => {
     }
   });
 });
+
+describe("activated pattern default mutation safety", () => {
+  it.each([
+    [
+      "intervening default",
+      "const {a,b=(a.x=undefined),a:{x=fallback()}}={a:{x:{color:'other'}}};"
+    ],
+    [
+      "intervening computed key",
+      "const {a,[(a.x=undefined,'b')]:b,a:{x=fallback()}}={a:{x:{color:'other'}}};"
+    ],
+    [
+      "inherited array hole",
+      "Array.prototype[0]={x:undefined}; const [{x=fallback()}={x:{color:'other'}}]=[,];"
+    ],
+    [
+      "inherited object absence",
+      "Object.prototype.slot={x:undefined}; const {slot:{x=fallback()}={x:{color:'other'}}}={};"
+    ],
+    [
+      "replaced array iterator",
+      "Array.prototype[Symbol.iterator]=function*(){yield undefined}; const [x=fallback()]=[{color:'other'}];"
+    ]
+  ])("does not emit stale static CSS after %s", (_name, pattern) => {
+    const source = `const style={color:'red'}; const fallback=()=>style; ${pattern} x.color='blue'; function App(){return <div css={style}/>;}`;
+    expect(
+      runInNewContext(
+        `const style={color:'red'}; const fallback=()=>style; ${pattern} x.color='blue'; style.color`
+      )
+    ).toBe("blue");
+    const failure = captureJsxCssPropFailure(source, { jsxCssProp: true });
+    expect(failure.error.message).toMatch(
+      /Cannot statically evaluate|mutat|unknown|unsupported/i
+    );
+    expect(failure.code).not.toContain("_css(");
+  });
+  it.each([
+    "const {slot:{x=fallback()}={x:{color:'other'}}}={slot:undefined};",
+    "const {slot:{x=fallback()}={x:{color:'other'}}}={__proto__:null};",
+    "const [x=fallback()]=[{color:'other'}];"
+  ])("preserves independent own/default data: %s", (pattern) => {
+    const { result } = babelTransform(
+      `const style={color:'red'}; const fallback=()=>({color:'unrelated'}); ${pattern} x.color='blue'; function App(){return <div css={style}/>;}`,
+      { jsxCssProp: true }
+    );
+    expect(result[1]).toMatch(/color: ['"]red['"]/);
+  });
+});
+
+it("does not replay a captured JSX default after loaded sources revoke native iteration", () => {
+  const source = `import {getStyles} from './theme.css.js'; import {readSize} from './runtime'; export const Box=()=>{const [size=readSize()]=[4];return <div css={getStyles(size)}/>;}`;
+  const prepared = {
+    imports: { "./theme.css.js": ["getStyles"] },
+    requires: {},
+    localBindings: [],
+    protectedFunctions: [],
+    dependencies: [],
+    fingerprint: "observed-iterator-change",
+    arrayMapIntrinsics: {
+      intact: false,
+      revision: 1,
+      fingerprint: "observed-iterator-change"
+    }
+  };
+  expect(() =>
+    babelTransform(source, { jsxCssProp: true, preparedExtractCalls: prepared })
+  ).toThrow(/runtime|statically|unsupported|precompiled/i);
+});
+
+it("does not replay an inherited object default when loaded sources revoke prototype absence", () => {
+  const source = `import {getStyles} from './theme.css.js'; import {readSize} from './runtime'; export const Box=()=>{const {slot:{size=readSize()}={size:4}}={};return <div css={getStyles(size)}/>;}`;
+  const prepared = {
+    imports: { "./theme.css.js": ["getStyles"] },
+    requires: {},
+    localBindings: [],
+    protectedFunctions: [],
+    dependencies: [],
+    fingerprint: "observed-prototype-change",
+    arrayMapIntrinsics: {
+      intact: false,
+      revision: 1,
+      fingerprint: "observed-prototype-change"
+    }
+  };
+  expect(() =>
+    babelTransform(source, { jsxCssProp: true, preparedExtractCalls: prepared })
+  ).toThrow(/runtime|statically|unsupported|precompiled/i);
+});
+
+it("does not replay a pure default in a different known iterator realm", () => {
+  const source = `import {getStyles} from './theme.css.js'; function readSize(){return 9}; export const Box=()=>{const [size=readSize()]=[4];return <div css={getStyles(size)}/>;}`;
+  const prepared = {
+    imports: { "./theme.css.js": ["getStyles"] },
+    requires: {},
+    localBindings: [],
+    protectedFunctions: [],
+    dependencies: [],
+    fingerprint: "different-iterator",
+    arrayMapIntrinsics: {
+      intact: false,
+      iterationIntact: false,
+      prototypeAbsenceIntact: false,
+      revision: 1,
+      fingerprint: "different-iterator"
+    }
+  };
+  expect(() =>
+    babelTransform(source, { jsxCssProp: true, preparedExtractCalls: prepared })
+  ).toThrow(/runtime|statically|unsupported|precompiled/i);
+});
+
+it("keeps ordinary object defaults after unrelated loaded display-name writes", () => {
+  const source = `import {getStyles} from './theme.css.js'; export const Box=()=>{const {size=4}={};return <div css={getStyles(size)}/>;}`;
+  const prepared = {
+    imports: { "./theme.css.js": ["getStyles"] },
+    requires: {},
+    localBindings: [],
+    protectedFunctions: [],
+    dependencies: [],
+    fingerprint: "react-display-writes",
+    arrayMapIntrinsics: {
+      intact: false,
+      iterationIntact: true,
+      prototypeAbsenceIntact: false,
+      prototypeMutationKeys: ["name", "displayName"],
+      revision: 1,
+      fingerprint: "react-display-writes"
+    }
+  };
+  expect(
+    babelTransform(source, { jsxCssProp: true, preparedExtractCalls: prepared })
+      .result[1]
+  ).toContain("getStyles");
+});
+
+it.each(["{}", "{name:undefined}", "{__proto__:null}"])(
+  "keeps precise same-key absence protection with own/null-prototype contrasts: %s",
+  (input) => {
+    const source = `import {getStyles} from './theme.css.js';export const Box=()=>{const {name=4}=${input};return <div css={getStyles(name)}/>;}`;
+    const prepared = {
+      imports: { "./theme.css.js": ["getStyles"] },
+      requires: {},
+      localBindings: [],
+      protectedFunctions: [],
+      dependencies: [],
+      fingerprint: "name-write",
+      arrayMapIntrinsics: {
+        intact: false,
+        iterationIntact: true,
+        prototypeAbsenceIntact: false,
+        prototypeMutationKeys: ["name"],
+        revision: 1,
+        fingerprint: "name-write"
+      }
+    };
+    const run = () =>
+      babelTransform(source, {
+        jsxCssProp: true,
+        preparedExtractCalls: prepared
+      });
+    if (input === "{}")
+      expect(run).toThrow(/runtime|statically|unsupported|precompiled/i);
+    else expect(run().result[1]).toContain("getStyles");
+  }
+);

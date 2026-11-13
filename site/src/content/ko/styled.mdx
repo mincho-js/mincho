@@ -406,6 +406,41 @@ function MyComponent() {
 }
 ```
 
+`defineRules()`로 정의한 속성과 토큰을 사용하려면 해당 정의의 `css` 함수를
+내보내는 모듈을 플러그인에 지정하세요.
+
+```ts
+minchoVitePlugin({
+  jsxCssProp: { importSource: "@acme/styles" },
+});
+```
+
+`importSource`에는 상대·절대 파일 경로 대신 패키지나 번들러 별칭을 지정합니다.
+토큰 값은 정적이어야 합니다. 상태에 따라 토큰을 바꾸려면 완전한 정적 스타일
+객체나 미리 만든 클래스 중에서 선택하세요. `css={{ px: spacing }}`처럼 속성
+값만 동적으로 전달하면 런타임 값을 정의에 따라 변환할 수 없습니다.
+
+TypeScript 설정의 `jsxImportSource`를 `'@mincho-js/react'`로 지정하고, 앱에
+포함되는 선언 파일에서 같은 함수를 JSX 타입 검사에 등록합니다.
+
+```ts
+// mincho.d.ts
+import type { css } from "@acme/styles";
+import type {} from "@mincho-js/react";
+
+declare module "@mincho-js/react" {
+  interface CssPropConfig {
+    css: typeof css;
+  }
+}
+```
+
+이제 `css` prop의 객체와 정적 배열에 해당 정의의 속성, 토큰, 조건, 단축 속성을
+사용할 수 있습니다. 정적 배열은 전체를 함께 컴파일하므로 단축 속성 분해와
+덮어쓰기 순서가 유지됩니다. 이 설정은 전역 React JSX 타입을 변경하거나 런타임
+스타일 엔진을 추가하지 않습니다. 타입 등록이 없으면 범위 지정 런타임은 기존
+Mincho CSS 타입을 사용합니다.
+
 명시적인 `css` prop 앞이나 뒤에 펼침 구문이 있는 경우 직접적인 JSX 위치와 중첩된 위치 모두 지원합니다. 직접 반환하거나 표현식 문으로 사용하는 경우에는 IIFE 없이 문을 끌어올리는 변환을 유지합니다. 표현식 본문 화살표 함수, 조건식, 논리/nullish 피연산자, 호출 인수, 프래그먼트나 요소의 자식, JSX 속성 표현식, 중괄호 없는 제어 흐름 본문처럼 중첩된 위치에서는 인수가 없는 로컬 화살표 IIFE를 사용합니다. 이를 통해 JavaScript 평가 순서를 유지하면서 React가 JSX를 처리하기 전에 CSS를 컴파일하여 제거합니다.
 
 다음 제약은 의도된 동작입니다. `<div {...{ css: styleA }} />`처럼 펼침 구문에만 있는 `css`는 요소에 명시적인 `css` prop이 없으므로 변환하거나 제거하지 않습니다. 펼침 구문과 css prop이 함께 있는 요소의 명시적 `key`/`ref`는 거부합니다. 프래그먼트 대상과 지원하지 않는 JSX 대상도 오류가 발생합니다. 로컬 IIFE로 옮겨지는 표현식에 중첩된 `await`나 `yield`는 허용하지 않습니다. 또한 Mincho는 Emotion 방식의 런타임 직렬화기, 캐시, 스타일 삽입, 헬퍼 라이브러리 동작이나 런타임 펼침 구문의 모든 동작을 제공하지 않습니다.

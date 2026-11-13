@@ -1,5 +1,6 @@
 import { types as t } from "@babel/core";
 import type { NodePath } from "@babel/core";
+import type { Binding } from "@babel/traverse";
 import { collectStaticCssEvalCjsRequireBindings } from "./cjsBindings.js";
 import {
   collectAssignmentExpressionOperations,
@@ -11,6 +12,7 @@ import type { ExportGraphStarReexportEntry } from "./moduleCache.js";
 import { createUnsupportedOperation } from "./cjsExportOperationEntries.js";
 import {
   getCjsAssignmentTarget,
+  isExportsIdentifier,
   getTargetExportName,
   formatAssignmentTarget
 } from "./cjsExportTargets.js";
@@ -27,12 +29,15 @@ export type StaticCssEvalCjsExportMapOperation =
 interface StaticCssEvalCjsExportCollectorOptions {
   readonly file: string;
   readonly programPath: NodePath<t.Program>;
+  /** A validated emitted wrapper's private, non-escaping exports alias. */
+  readonly exportsBinding?: Binding;
 }
 
 export type StaticCssEvalCjsExportState = {
   readonly file: string;
   exportsAliasSafe: boolean;
   moduleObjectLike: boolean;
+  readonly exportsBinding?: Binding;
 };
 
 export function collectStaticCssEvalCjsExportMapOperations(
@@ -41,7 +46,10 @@ export function collectStaticCssEvalCjsExportMapOperations(
   const state: StaticCssEvalCjsExportState = {
     file: options.file,
     exportsAliasSafe: true,
-    moduleObjectLike: true
+    moduleObjectLike: true,
+    ...(options.exportsBinding
+      ? { exportsBinding: options.exportsBinding }
+      : {})
   };
 
   const operations: StaticCssEvalCjsExportMapOperation[] = [];
@@ -50,6 +58,20 @@ export function collectStaticCssEvalCjsExportMapOperations(
   );
 
   for (const statementPath of options.programPath.get("body")) {
+    // Emitted wrappers have already had every private-alias use validated.
+    // Reuse direct publication ordering without interpreting unrelated global
+    // CommonJS helpers as writes to this separate, lexical exports object.
+    if (options.exportsBinding) {
+      if (
+        statementPath.isExpressionStatement() &&
+        t.isAssignmentExpression(statementPath.node.expression)
+      )
+        operations.push(
+          ...collectTopLevelCjsExportOperations(statementPath, state)
+        );
+      continue;
+    }
+
     // esbuild emits this unreachable assignment for Node's named-export lexer.
     if (
       statementPath.isExpressionStatement() &&
@@ -146,8 +168,8 @@ function collectNestedCjsExportUnsupportedOperations(
     mutation: string
   ): void {
     if (
-      t.isIdentifier(targetNode, { name: "exports" }) &&
-      !scope.hasBinding("exports")
+      t.isIdentifier(targetNode) &&
+      isExportsIdentifier(targetNode, scope, state.exportsBinding)
     ) {
       state.exportsAliasSafe = false;
       operations.push(
@@ -187,7 +209,11 @@ function collectNestedCjsExportUnsupportedOperations(
     }
     if (!t.isMemberExpression(targetNode)) return;
 
-    const target = getCjsAssignmentTarget(targetNode, scope);
+    const target = getCjsAssignmentTarget(
+      targetNode,
+      scope,
+      state.exportsBinding
+    );
     if (target.kind === "not-cjs") return;
     if (target.kind === "module-replacement") {
       state.exportsAliasSafe = false;

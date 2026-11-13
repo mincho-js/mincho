@@ -1,7 +1,23 @@
+import type { Binding } from "@babel/traverse";
+import { getDestructuredBindingSource } from "../staticCssEval/partialEvaluator/destructuring.js";
+import {
+  reduceFixture,
+  setPartialEvalTestExpect
+} from "../staticCssEval/partialEvaluator/__tests__/helpers.js";
+import { createPartialEvalContext } from "../staticCssEval/partialEvaluator/context.js";
+import { reducePartialEvalExpression } from "../staticCssEval/partialEvaluator/reducer.js";
+import { babelTransform } from "../testUtils/plugin.js";
+import { prepareModuleSourceFixture } from "../testUtils/moduleSourceFixture.js";
 import { describe, expect, it } from "vitest";
 import { analyzePureFunctions } from "./pureFunctions.js";
-import { transformSync, transformFromAstSync, types as t } from "@babel/core";
+import {
+  transformSync,
+  transformFromAstSync,
+  types as t,
+  type TransformOptions
+} from "@babel/core";
 import { minchoBabelPlugin as mincho } from "../index.js";
+import { SourceAstCache } from "../staticCssEval/moduleParser.js";
 
 const generate = (expression: t.Expression) =>
   transformFromAstSync(
@@ -10,11 +26,20 @@ const generate = (expression: t.Expression) =>
     { configFile: false, babelrc: false }
   )!;
 
-function analyze(source: string, modules: Record<string, string> = {}) {
+function analyze(
+  source: string,
+  modules: Record<string, string> = {},
+  options: {
+    nativeArrayIteration?: boolean;
+    parserCache?: SourceAstCache;
+    parserPlugins?: NonNullable<TransformOptions["parserOpts"]>["plugins"];
+  } = {}
+) {
   const flow = analyzePureFunctions({
     filename: "/app.tsx",
     source,
-    jsxCssProp: true
+    jsxCssProp: true,
+    ...options
   });
 
   let step = flow.next();
@@ -34,6 +59,41 @@ function analyze(source: string, modules: Record<string, string> = {}) {
 }
 
 describe("pure helper evaluation", () => {
+  it.each([
+    ["owner", false],
+    ["owner", true],
+    ["dependency", false],
+    ["dependency", true]
+  ] as const)(
+    "preserves configured parser plugins in the %s with cached parsing=%s",
+    (location, cached) => {
+      const decorated =
+        "export @sealed class View { render(): unknown { return <div />; } }";
+      const helper = "const style = (n: number) => ({ padding: n * 4 });";
+      const source = `${
+        location === "owner"
+          ? `${decorated} ${helper}`
+          : 'import { style } from "/helper.tsx";'
+      } const App = () => <div css={style(2)} />;`;
+      const options = {
+        parserCache: cached ? new SourceAstCache() : undefined,
+        parserPlugins: [
+          ["decorators", { decoratorsBeforeExport: false }]
+        ] satisfies NonNullable<TransformOptions["parserOpts"]>["plugins"]
+      };
+      const result = analyze(
+        source,
+        { "/helper.tsx": `${decorated} export ${helper}` },
+        options
+      );
+
+      expect(result.replacements).toHaveLength(1);
+      expect(generate(result.replacements[0]!.expression).code).toContain(
+        "padding: 8"
+      );
+    }
+  );
+
   it("keeps immediate helper calls eligible while leaving function-valued rules intact", () => {
     const folded = analyze(
       'const App = () => <div css={{ color: (() => "red")() }} />;'
@@ -171,4 +231,257 @@ describe("pure helper evaluation", () => {
     );
     expect(() => run(false)).toThrow();
   });
+});
+
+it.each([true, false])(
+  "respects observed native iteration for imported helper folding: %s",
+  (intact) => {
+    const result = analyze(
+      'import {getStyles} from "/theme.ts";export const Box=()=>{const[size]=[4];return <div css={getStyles(size)}/>}',
+      { "/theme.ts": "export function getStyles(size){return {padding:size}}" },
+      { nativeArrayIteration: intact }
+    );
+    expect(result.replacements).toHaveLength(intact ? 1 : 0);
+  }
+);
+
+it.each([true, false])(
+  "respects native iteration for spread-only pure helper folding: %s",
+  (intact) => {
+    const result = analyze(
+      'import {getStyles} from "/theme.ts";export const Box=()=>{const values=[...[4]];const size=values[0];return <div css={getStyles(size)}/>}',
+      { "/theme.ts": "export function getStyles(size){return {padding:size}}" },
+      { nativeArrayIteration: intact }
+    );
+    expect(result.replacements).toHaveLength(intact ? 1 : 0);
+  }
+);
+
+setPartialEvalTestExpect(expect);
+
+function bindingFrom(source: string): Binding {
+  let binding: Binding | undefined;
+  transformSync(source, {
+    configFile: false,
+    babelrc: false,
+    plugins: [
+      {
+        visitor: {
+          Program(path) {
+            binding = path.scope.getBinding("size");
+          }
+        }
+      }
+    ]
+  });
+  if (!binding) throw new Error("Missing size binding");
+  return binding;
+}
+describe("destructuring operation evidence", () => {
+  it.each([
+    "const [size]=[4];",
+    "const {values:[size]}={values:[4]};",
+    "const [{size}]=[{size:4}];"
+  ])(
+    "does not replace iteration with indexed access when revoked: %s",
+    (source) => {
+      const binding = bindingFrom(source);
+      expect(
+        getDestructuredBindingSource(binding, "size", {
+          nativeArrayIteration: false
+        })
+      ).toBeNull();
+      expect(
+        getDestructuredBindingSource(binding, "size", {
+          nativeArrayIteration: true
+        })
+      ).not.toBeNull();
+    }
+  );
+  it("observes local iterator mutation even with an incoming positive receipt", () => {
+    const binding = bindingFrom(
+      "Array.prototype[Symbol.iterator]=function*(){yield 9}; const [size]=[4];"
+    );
+    expect(
+      getDestructuredBindingSource(binding, "size", {
+        nativeArrayIteration: true
+      })
+    ).toBeNull();
+  });
+  it("keeps object own-property reads separate from native array iteration", () => {
+    const binding = bindingFrom("const {0:size}=[4];");
+    expect(
+      getDestructuredBindingSource(binding, "size", {
+        nativeArrayIteration: false
+      })?.memberPath
+    ).toEqual(["0"]);
+  });
+});
+
+it("does not equate a custom iterable object with its numeric properties", () => {
+  const binding = bindingFrom(
+    "const [size]={0:4,*[Symbol.iterator](){yield 9}};"
+  );
+  expect(
+    getDestructuredBindingSource(binding, "size", {
+      nativeArrayIteration: true
+    })
+  ).toBeNull();
+});
+
+it("reduces an unchanged const-array alias before checking the iteration receiver", () => {
+  const [result] = reduceFixture(
+    "const array=[4];const [size]=array;capture(size);"
+  );
+  expect(result?.kind).toBe("confident");
+  if (result?.kind === "confident")
+    expect(result.expression).toMatchObject({
+      type: "NumericLiteral",
+      value: 4
+    });
+});
+it("carries incoming iteration revocation through the partial evaluator context", () => {
+  const binding = bindingFrom("const array=[4];const [size]=array;");
+  const program = binding.scope.getProgramParent().path;
+  if (!program.isProgram()) throw new Error("Expected Program");
+  const result = reducePartialEvalExpression({
+    expression: t.identifier("size"),
+    scope: binding.scope,
+    programPath: program,
+    context: createPartialEvalContext({
+      owner: { file: "/fixture.ts" },
+      nativeArrayIteration: false
+    })
+  });
+  expect(result.kind).toBe("deopt");
+});
+it.each([
+  "const [size]=[4];",
+  "const {slot:[size]}={slot:[4]};",
+  "const [{size}]=[{size:4}];"
+])(
+  "does not publish stale JSX css from revoked no-default iteration: %s",
+  (pattern) => {
+    const source = `import {getStyles} from './theme.css.js';export const Box=()=>{${pattern}return <div css={getStyles(size)}/>}`;
+    const modules = {
+      "./theme.css.js":
+        "export function getStyles(size){return {padding:size}}",
+      "./mutator.js": "Array.prototype[Symbol.iterator]=function*(){yield 9};",
+      "custom-preset": 'export function css(value){return "c"}'
+    };
+    const prepared = prepareModuleSourceFixture(
+      "import './mutator.js';" + source,
+      modules,
+      {
+        "custom-preset": ["css"]
+      }
+    );
+    expect(prepared.arrayMapIntrinsics?.iterationIntact).toBe(false);
+    let result: ReturnType<typeof babelTransform>;
+    try {
+      result = babelTransform(source, {
+        jsxCssProp: true,
+        preparedExtractCalls: prepared,
+        optimize: { pureFunctions: true }
+      });
+    } catch (error) {
+      expect(String(error)).toMatch(
+        /Cannot|Unsupported|Configured|unsafe|static/
+      );
+      return;
+    }
+    expect(result.result[1]).toContain(
+      "Configured JSX css prop accepts runtime calls only"
+    );
+    expect(result.result[1]).not.toContain("const [size]");
+  }
+);
+it("preserves clean no-default destructuring in JSX css", () => {
+  const source =
+    'import {getStyles} from "./theme.css.js";export const Box=()=>{const array=[4];const[size]=array;return <div css={getStyles(size)}/>};';
+  const prepared = prepareModuleSourceFixture(
+    source,
+    {
+      "./theme.css.js":
+        "export function getStyles(size){return {padding:size}}",
+      "custom-preset": 'export function css(value){return "c"}'
+    },
+    { "custom-preset": ["css"] }
+  );
+  const result = babelTransform(source, {
+    jsxCssProp: true,
+    preparedExtractCalls: prepared,
+    optimize: { pureFunctions: false }
+  });
+  expect(result.result[1]).not.toContain(
+    "Configured JSX css prop accepts runtime calls only"
+  );
+  const values: unknown[] = [];
+  const sidecar = result.result[1]
+    .replace(/^import .*;$/gm, "")
+    .replace(/export /g, "");
+  new Function("_css", "getStyles", sidecar)(
+    (value: unknown) => values.push(value),
+    (size: number) => ({ padding: size })
+  );
+  expect(values).toEqual([{ padding: 4 }]);
+});
+it("does not let pure function preprocessing erase a revoked iterator operation", () => {
+  const source =
+    "function getStyles(size){return {padding:size}};export const Box=()=>{const[size]=[4];return <div css={getStyles(size)}/>};";
+  const prepared = prepareModuleSourceFixture(
+    "import './mutator.js';" + source,
+    {
+      "./mutator.js": "Array.prototype[Symbol.iterator]=function*(){yield 9};",
+      "custom-preset": 'export function css(value){return "c"}'
+    },
+    { "custom-preset": ["css"] }
+  );
+  expect(prepared.arrayMapIntrinsics?.iterationIntact).toBe(false);
+  expect(() =>
+    babelTransform(source, {
+      jsxCssProp: true,
+      preparedExtractCalls: prepared,
+      optimize: { pureFunctions: true }
+    })
+  ).toThrow(/Cannot statically evaluate/);
+});
+
+it.each([true, false])(
+  "requires native iteration to flatten array spreads: %s",
+  (intact) => {
+    const result = reducePartialEvalExpression({
+      expression: t.arrayExpression([
+        t.spreadElement(t.arrayExpression([t.numericLiteral(4)]))
+      ]),
+      context: createPartialEvalContext({
+        owner: { file: "/fixture.ts" },
+        nativeArrayIteration: intact
+      })
+    });
+    expect(result.kind).toBe(intact ? "confident" : "deopt");
+    if (result.kind === "deopt")
+      expect(result.fallbackExpression).toMatchObject({
+        elements: [{ type: "SpreadElement" }]
+      });
+  }
+);
+it("does not flatten spreads after a source-observed iterator mutation", () => {
+  const binding = bindingFrom(
+    "Array.prototype[Symbol.iterator]=function*(){yield 9}; const size=4;"
+  );
+  const program = binding.scope.getProgramParent().path;
+  if (!program.isProgram()) throw new Error("Expected Program");
+  const result = reducePartialEvalExpression({
+    expression: t.arrayExpression([
+      t.spreadElement(t.arrayExpression([t.numericLiteral(4)]))
+    ]),
+    programPath: program,
+    scope: binding.scope,
+    context: createPartialEvalContext({
+      owner: { file: "/fixture.ts" },
+      nativeArrayIteration: true
+    })
+  });
+  expect(result.kind).toBe("deopt");
 });

@@ -13,6 +13,8 @@ import { jsxSyntaxPluginPath, typescriptPresetPath } from "./babelPreset.js";
 import {
   type BabelFileResult,
   type TransformOptions,
+  parseAsync,
+  traverse,
   types as t,
   transformFromAstAsync,
   transformAsync
@@ -23,15 +25,21 @@ import {
   type PluginOptions,
   type MinchoCompilationMetadata,
   type InternalRuntimeCandidates,
+  type InternalPreparedExtractCalls,
   internalCollectRuntimeCandidates,
   internalParseModuleProgram,
+  internalNormalizeTypeScriptCommonJs,
   minchoBabelPlugin,
   minchoStyledComponentPlugin,
   InternalExtractCallsError,
-  internalAnalyzePureFunctions
+  internalAnalyzePureFunctions,
+  internalJsxCssPropExtractCalls
 } from "@mincho-js/babel";
 import { inferCommonJsSourceType, transformCommonJsToEsm } from "./commonJs.js";
-import { prepareExtractCalls } from "./extractCalls.js";
+import {
+  prepareExtractCalls,
+  retainRuntimeSourceDependencies
+} from "./extractCalls.js";
 import {
   createEmptyStaticCssEvalMetadata,
   createObservingStaticCssEvalProvider,
@@ -103,6 +111,8 @@ export type StaticCssEvalSourceUnsupportedReason = NonNullable<
 // Integration supplies bundler-aware identity/source freshness; Babel static
 // eval remains the only owner of css value and symbol provenance.
 export interface StaticCssEvalSourceResolution {
+  /** @internal Host module identity, including transform queries, for consumers. */
+  consumerRuntimeId?: string;
   /**
    * Legacy alias. When newer fields are absent, this is treated as the
    * resolved file, canonical module id, and normalized load key.
@@ -176,6 +186,57 @@ export interface StaticCssEvalSourceProvider {
   ): MaybePromise<{ value: string; identity: string } | null>;
 }
 
+/** @internal An AST-observed edge, not a filename-only intrinsic assertion. */
+export type IntrinsicEffectRequest =
+  | {
+      /** Existing eligible runtime view, for intrinsic observation only. */
+      purpose: "intrinsic-runtime";
+    }
+  | {
+      purpose: "intrinsic-effects";
+      importerId: string;
+      specifier: string;
+      resolutionMode: "import" | "require";
+      attributes: "none";
+    }
+  | {
+      /** Additional native owner view for vetoes, not final-host equivalence. */
+      purpose: "intrinsic-owner";
+      sourceHash: string;
+    };
+
+/** @internal The consumer surface observed from the host's existing transform. */
+export type ConsumerRuntimeSource =
+  | {
+      source: string;
+      sourceHash: string;
+      version: string;
+      intrinsicEffects?: never;
+      /** Trusted host callback bound to exact final bytes and current generation.
+       * Only pattern-realm observation; not map/Math/value/purity authority. */
+      validatesPatternIntrinsicEffects?: (view: {
+        source: string;
+        sourceHash: string;
+        version: string;
+      }) => boolean;
+      watchFiles: readonly string[];
+      /** Physical authoring owner when the host id denotes a generated module. */
+      authoringId?: string;
+    }
+  | {
+      source?: never;
+      /** Trusted host-native initialization receipt; never export/call/purity evidence.
+       * CSS-module mapping exports may exist, but are not authorized by this tag. */
+      intrinsicEffects?: {
+        kind: "native-css";
+        loader: "css" | "local-css";
+        sourceHash: string;
+        version: string;
+      };
+      watchFiles: readonly string[];
+      authoringId?: string;
+    };
+
 export interface StaticCssEvalPrepassResult {
   dependencyFiles: string[];
   ownerToDependencies: ReadonlyMap<string, string[]>;
@@ -239,7 +300,7 @@ export type BabelOptions = Omit<
   /** @internal Vite dist-chunk private-resource proof, independent of JS folding. */
   privateRecipes?: boolean;
   extractCalls?: PluginOptions["extractCalls"];
-  jsxCssProp?: boolean;
+  jsxCssProp?: PluginOptions["jsxCssProp"];
   bundleSize?: PluginOptions["bundleSize"];
   optimize?: PluginOptions["optimize"];
   experimental?: PluginOptions["experimental"];
@@ -247,10 +308,22 @@ export type BabelOptions = Omit<
 
   /** @internal Async source provider used to prepare imported css eval data. */
   staticCssEvalSourceProvider?: StaticCssEvalSourceProvider;
+  /**
+   * @internal Undefined leaves an ordinary source module unchanged. An owned
+   * but unavailable runtime surface retains its watches and remains unknown.
+   * Worker requests and transform-cache observations preserve this separate
+   * purpose and revalidate the host's actual source identity.
+   */
+  consumerRuntimeSource?: (
+    id: string,
+    request?: IntrinsicEffectRequest
+  ) => MaybePromise<ConsumerRuntimeSource | undefined>;
   staticCssEvalProjectEngine?: StaticEvalProjectEngine;
 };
 
 export type BabelTransformResult = {
+  /** @internal Effective owner syntax reused by extracted dependency compilation. */
+  readonly parserPlugins?: NonNullable<BabelOptions["parserOpts"]>["plugins"];
   /** @internal Original use graph; never emitted to the application. */
   privateRecipeUses?: readonly import("./vanillaCssIr.js").PrivateRecipeUse[];
   privateResourceReferences?: readonly string[];
@@ -308,9 +381,149 @@ export async function babelTransform(
   return babelTransformSource({ filename: path, source, babel });
 }
 
+/** Destructuring and flattened array spreads consume the native iteration contract. */
+function hasLocalPattern(
+  program?: ReturnType<typeof internalParseModuleProgram>
+) {
+  let found = false;
+  program?.traverse({
+    "ArrayPattern|ObjectPattern"(path) {
+      found = true;
+      path.stop();
+    },
+    SpreadElement(path) {
+      if (!path.parentPath.isArrayExpression()) return;
+      found = true;
+      path.stop();
+    }
+  });
+  return found;
+}
+
+function mergeIntrinsicObservations(
+  prepared: InternalPreparedExtractCalls | undefined,
+  environment: Pick<
+    InternalPreparedExtractCalls,
+    "mathIntrinsics" | "arrayMapIntrinsics"
+  >,
+  dependencies: readonly string[]
+): InternalPreparedExtractCalls {
+  const base: InternalPreparedExtractCalls = prepared ?? {
+    imports: {},
+    localBindings: [],
+    protectedFunctions: [],
+    dependencies: [],
+    fingerprint: ""
+  };
+  const combine = <
+    T extends { intact: boolean; revision: number; fingerprint: string }
+  >(
+    previous: T | undefined,
+    observed: T | undefined
+  ): T | undefined =>
+    observed
+      ? {
+          ...observed,
+          intact: observed.intact && previous?.intact !== false,
+          revision: observed.revision + (previous?.revision ?? 0),
+          fingerprint: JSON.stringify([
+            previous?.fingerprint ?? null,
+            observed.fingerprint
+          ])
+        }
+      : previous;
+  const math = combine(base.mathIntrinsics, environment.mathIntrinsics);
+  const mathIntrinsics = math
+    ? {
+        ...math,
+        bindIntact: math.bindIntact && base.mathIntrinsics?.bindIntact !== false
+      }
+    : undefined;
+  const array = combine(
+    base.arrayMapIntrinsics,
+    environment.arrayMapIntrinsics
+  );
+  const patternFlag = (key: "iterationIntact" | "prototypeAbsenceIntact") =>
+    (base.arrayMapIntrinsics?.[key] ??
+      base.arrayMapIntrinsics?.intact ??
+      true) &&
+    (environment.arrayMapIntrinsics?.[key] ??
+      environment.arrayMapIntrinsics?.intact ??
+      true);
+  const prototypeKeys = (
+    snapshot: InternalPreparedExtractCalls["arrayMapIntrinsics"]
+  ): readonly string[] | null => {
+    if (snapshot?.prototypeMutationKeys !== undefined)
+      return snapshot.prototypeMutationKeys;
+    return (snapshot?.prototypeAbsenceIntact ?? snapshot?.intact) !== false
+      ? []
+      : null;
+  };
+  const previousKeys = prototypeKeys(base.arrayMapIntrinsics);
+  const observedKeys = prototypeKeys(environment.arrayMapIntrinsics);
+  const arrayMapIntrinsics = array
+    ? {
+        ...array,
+        iterationIntact: patternFlag("iterationIntact"),
+        prototypeAbsenceIntact: patternFlag("prototypeAbsenceIntact"),
+        prototypeMutationKeys:
+          previousKeys === null || observedKeys === null
+            ? null
+            : [...new Set([...previousKeys, ...observedKeys])].sort()
+      }
+    : undefined;
+  // Artifact names contain semantic authority only, never host paths or AST hashes.
+  const semantic = [
+    mathIntrinsics?.intact !== false,
+    mathIntrinsics?.bindIntact !== false,
+    arrayMapIntrinsics?.intact !== false,
+    (arrayMapIntrinsics?.iterationIntact ?? arrayMapIntrinsics?.intact) !==
+      false,
+    (arrayMapIntrinsics?.prototypeAbsenceIntact ??
+      arrayMapIntrinsics?.intact) !== false
+  ];
+  return {
+    ...base,
+    mathIntrinsics,
+    arrayMapIntrinsics,
+    dependencies: [...new Set([...base.dependencies, ...dependencies])].sort(),
+    fingerprint:
+      semantic.every(Boolean) &&
+      (arrayMapIntrinsics === undefined ||
+        arrayMapIntrinsics.prototypeMutationKeys?.length === 0)
+        ? base.fingerprint
+        : JSON.stringify([
+            base.fingerprint,
+            [
+              "jsx-pattern-intrinsics",
+              ...semantic,
+              arrayMapIntrinsics?.prototypeMutationKeys
+            ]
+          ])
+  };
+}
+
 export async function babelTransformSource(
   options: BabelTransformSourceOptions
 ): Promise<BabelTransformResult> {
+  // Discover receipts after configured parsing, but before cache/worker
+  // observation. Custom Babel configurations run inline without transform
+  // caching, so cache validation still uses the caller's parser options.
+  const runtimeParserOptions = { plugins: options.babel?.parserOpts?.plugins };
+  if (options.babel?.consumerRuntimeSource)
+    options = {
+      ...options,
+      babel: {
+        ...options.babel,
+        consumerRuntimeSource: retainRuntimeSourceDependencies(
+          options.babel.consumerRuntimeSource,
+          options.babel.staticCssEvalSourceProvider,
+          options.babel.compilationCache?.parser,
+          () => runtimeParserOptions.plugins
+        )
+      }
+    };
+
   const cache = options.babel?.compilationCache;
 
   const transform = (
@@ -318,7 +531,7 @@ export async function babelTransformSource(
     reuseSourceAst = false
   ) =>
     executeTransform(input, () =>
-      transformSourceUncached(input, reuseSourceAst)
+      transformSourceUncached(input, reuseSourceAst, runtimeParserOptions)
     );
 
   return cache
@@ -338,23 +551,32 @@ export async function transformSourceUncached(
     sourceMaps = false,
     inputSourceMap
   }: BabelTransformSourceOptions,
-  reuseSourceAst = false
+  reuseSourceAst = false,
+  runtimeParserOptions?: {
+    plugins: NonNullable<BabelOptions["parserOpts"]>["plugins"];
+  }
 ): Promise<BabelTransformResult> {
   const {
     compilationCache,
     compilationContext: _compilationContext,
     privateRecipes: _privateRecipes,
     diagnostics,
-    extractCalls,
+    extractCalls: configuredExtractCalls,
     jsxCssProp = false,
     optimize,
     bundleSize,
     experimental,
     staticCssEvalProvider,
     staticCssEvalSourceProvider,
+    consumerRuntimeSource,
     staticCssEvalProjectEngine,
     ...babelCoreOptions
   } = babel;
+
+  const extractCalls = internalJsxCssPropExtractCalls(
+    jsxCssProp,
+    configuredExtractCalls
+  );
 
   const projectEngine = staticCssEvalProjectEngine;
   const sourceLoads = new Map<
@@ -433,103 +655,10 @@ export async function transformSourceUncached(
   let commonJsTransformed = false;
   let preparedProgram:
     ReturnType<typeof internalParseModuleProgram> | undefined;
+  let preparedWithBabel = false;
+  let parserPlugins = babelCoreOptions.parserOpts?.plugins;
 
   try {
-    if (
-      optimize?.pureFunctions !== false &&
-      /@(?:mincho-js|vanilla-extract)\/|\bcss\b/.test(source)
-    ) {
-      try {
-        preparedProgram = internalParseModuleProgram(
-          path,
-          source,
-          loader === "jsx" || loader === "tsx",
-          compilationCache?.parser
-        );
-      } catch {
-        // The optional pre-pass must defer syntax errors to configured Babel.
-        preparedProgram = undefined;
-      }
-    }
-
-    if (preparedProgram && optimize?.pureFunctions !== false) {
-      options.preparedPureFunctions = await measureCompilationPhase(
-        "pure-functions",
-        () =>
-          driveModuleGraph(
-            internalAnalyzePureFunctions({
-              program: preparedProgram,
-              filename: path,
-              source,
-              jsxCssProp,
-              parserCache: compilationCache?.parser
-            }),
-            prepassSourceProvider,
-            extractCallsDependencies
-          )
-      );
-
-      for (const file of options.preparedPureFunctions.dependencies)
-        extractCallsDependencies.add(file);
-
-      recordCompilationDiagnostic("pure-functions-result", {
-        folded: options.preparedPureFunctions.replacements.length,
-        deopt: options.preparedPureFunctions.diagnostics.filter(
-          (item) => item.result === "deopt"
-        ).length
-      });
-    }
-
-    if (extractCalls !== undefined) {
-      preparedProgram ??= internalParseModuleProgram(
-        path,
-        source,
-        loader === "jsx" || loader === "tsx",
-        compilationCache?.parser
-      );
-      options.preparedExtractCalls = await prepareExtractCalls(
-        {
-          extractCalls,
-          root,
-          filename: path,
-          source,
-          program: preparedProgram,
-          parserCache: compilationCache?.parser,
-          jsx: loader === "jsx" || loader === "tsx"
-        },
-        prepassSourceProvider
-      );
-
-      for (const file of options.preparedExtractCalls.dependencies)
-        extractCallsDependencies.add(file);
-    }
-
-    staticCssEvalPrepass =
-      jsxCssProp && prepassSourceProvider
-        ? await measureCompilationPhase("static-prepass", () =>
-            createStaticCssEvalPrepass(
-              path,
-              prepassSourceProvider,
-              compilationCache?.parser,
-              preparedProgram
-            )
-          )
-        : undefined;
-
-    observedStaticCssEvalMetadata.diagnostics.push(
-      ...(staticCssEvalPrepass?.diagnostics ?? [])
-    );
-
-    const preparedProvider =
-      staticCssEvalProvider ?? staticCssEvalPrepass?.provider;
-
-    if (preparedProvider) {
-      options.staticCssEvalProvider = createObservingStaticCssEvalProvider(
-        preparedProvider,
-        observedStaticCssEvalMetadata
-      );
-    }
-
     const transformOptions: TransformOptions = {
       sourceType: "unambiguous",
       ...babelCoreOptions,
@@ -543,7 +672,18 @@ export async function transformSourceUncached(
           ? babelCoreOptions.plugins
           : []),
         minchoStyledComponentPlugin(),
-        [minchoBabelPlugin(), options]
+        [minchoBabelPlugin(), options],
+        {
+          parserOverride(
+            _source: string,
+            options: NonNullable<TransformOptions["parserOpts"]>
+          ) {
+            parserPlugins = options.plugins;
+            if (runtimeParserOptions)
+              runtimeParserOptions.plugins = parserPlugins;
+            return undefined;
+          }
+        }
       ],
       presets: [
         ...(Array.isArray(babelCoreOptions.presets)
@@ -566,12 +706,201 @@ export async function transformSourceUncached(
       ...(inputSourceMap !== undefined ? { inputSourceMap } : {})
     };
 
+    const parseConfiguredProgram = async () => {
+      let configuredOptions = transformOptions;
+      // Observe the final parser options after every preset/plugin has run
+      // manipulateOptions, without overriding parsing or running visitors.
+      const ast = await parseAsync(source, {
+        ...transformOptions,
+        plugins: [
+          ...transformOptions.plugins!,
+          {
+            manipulateOptions(options: TransformOptions) {
+              configuredOptions = options;
+            }
+          }
+        ]
+      });
+
+      if (!ast) return false;
+
+      traverse(ast, {
+        Program(program) {
+          internalNormalizeTypeScriptCommonJs(program, {
+            opts: configuredOptions,
+            ast
+          });
+          preparedProgram = program;
+          preparedWithBabel = true;
+          program.stop();
+        }
+      });
+
+      return true;
+    };
+
+    // Imported static data may need preset syntax even when the owner parses
+    // without it. Prepare the configured AST once and reuse its parser options
+    // across extraction and value analysis before running transform visitors.
+    if (
+      prepassSourceProvider &&
+      (jsxCssProp || (extractCalls !== undefined && consumerRuntimeSource))
+    )
+      await parseConfiguredProgram();
+
+    if (
+      !preparedProgram &&
+      optimize?.pureFunctions !== false &&
+      /@(?:mincho-js|vanilla-extract)\/|\bcss\b/.test(source)
+    ) {
+      try {
+        preparedProgram = internalParseModuleProgram(
+          path,
+          source,
+          loader === "jsx" || loader === "tsx",
+          compilationCache?.parser,
+          parserPlugins
+        );
+      } catch {
+        // The optional pre-pass must defer syntax errors to configured Babel.
+        preparedProgram = undefined;
+      }
+    }
+
+    if (extractCalls !== undefined) {
+      if (!preparedProgram) {
+        try {
+          preparedProgram = internalParseModuleProgram(
+            path,
+            source,
+            loader === "jsx" || loader === "tsx",
+            compilationCache?.parser,
+            parserPlugins
+          );
+        } catch (error) {
+          if (!(error instanceof SyntaxError)) throw error;
+
+          if (!(await parseConfiguredProgram())) throw error;
+        }
+      }
+
+      const prepareCalls = () =>
+        prepareExtractCalls(
+          {
+            extractCalls,
+            root,
+            filename: path,
+            source,
+            program: preparedProgram,
+            parserCache: compilationCache?.parser,
+            parserPlugins,
+            jsx: loader === "jsx" || loader === "tsx"
+          },
+          prepassSourceProvider,
+          consumerRuntimeSource
+        );
+
+      try {
+        options.preparedExtractCalls = await prepareCalls();
+      } catch (error) {
+        // A dependency can need configured syntax even when the owner does not.
+        if (
+          preparedWithBabel ||
+          !(error instanceof InternalExtractCallsError) ||
+          !(error.cause instanceof SyntaxError) ||
+          !(await parseConfiguredProgram())
+        )
+          throw error;
+
+        options.preparedExtractCalls = await prepareCalls();
+      }
+
+      for (const file of options.preparedExtractCalls.dependencies)
+        extractCallsDependencies.add(file);
+    }
+
+    staticCssEvalPrepass =
+      jsxCssProp && prepassSourceProvider
+        ? await measureCompilationPhase("static-prepass", () =>
+            createStaticCssEvalPrepass(
+              path,
+              prepassSourceProvider,
+              compilationCache?.parser,
+              preparedProgram,
+              "values",
+              parserPlugins,
+              undefined,
+              hasLocalPattern(preparedProgram)
+                ? { consumerRuntimeSource }
+                : undefined
+            )
+          )
+        : undefined;
+
+    if (staticCssEvalPrepass?.intrinsicEnvironment) {
+      options.preparedExtractCalls = mergeIntrinsicObservations(
+        options.preparedExtractCalls,
+        staticCssEvalPrepass.intrinsicEnvironment,
+        staticCssEvalPrepass.result.dependencyFiles
+      );
+      for (const file of options.preparedExtractCalls.dependencies)
+        extractCallsDependencies.add(file);
+    }
+
+    observedStaticCssEvalMetadata.diagnostics.push(
+      ...(staticCssEvalPrepass?.diagnostics ?? [])
+    );
+
+    if (preparedProgram && optimize?.pureFunctions !== false) {
+      options.preparedPureFunctions = await measureCompilationPhase(
+        "pure-functions",
+        () =>
+          driveModuleGraph(
+            internalAnalyzePureFunctions({
+              nativeArrayIteration:
+                options.preparedExtractCalls?.arrayMapIntrinsics
+                  ?.iterationIntact ??
+                options.preparedExtractCalls?.arrayMapIntrinsics?.intact,
+              program: preparedProgram,
+              filename: path,
+              source,
+              jsxCssProp: Boolean(jsxCssProp),
+              parserCache: compilationCache?.parser,
+              parserPlugins
+            }),
+            prepassSourceProvider,
+            extractCallsDependencies
+          )
+      );
+
+      for (const file of options.preparedPureFunctions.dependencies)
+        extractCallsDependencies.add(file);
+
+      recordCompilationDiagnostic("pure-functions-result", {
+        folded: options.preparedPureFunctions.replacements.length,
+        deopt: options.preparedPureFunctions.diagnostics.filter(
+          (item) => item.result === "deopt"
+        ).length
+      });
+    }
+
+    const preparedProvider =
+      staticCssEvalProvider ?? staticCssEvalPrepass?.provider;
+
+    if (preparedProvider) {
+      options.staticCssEvalProvider = createObservingStaticCssEvalProvider(
+        preparedProvider,
+        observedStaticCssEvalMetadata
+      );
+    }
+
     const transformed = await measureCompilationPhase("babel", () =>
-      reuseSourceAst &&
       preparedProgram &&
-      !babelCoreOptions.parserOpts &&
-      (!babelCoreOptions.sourceType ||
-        babelCoreOptions.sourceType === "unambiguous")
+      (preparedWithBabel ||
+        (reuseSourceAst &&
+          !babelCoreOptions.parserOpts &&
+          (!babelCoreOptions.sourceType ||
+            babelCoreOptions.sourceType === "unambiguous")))
         ? transformFromAstAsync(
             preparedProgram.parent as t.File,
             source,
@@ -595,7 +924,7 @@ export async function transformSourceUncached(
         dependencies: extractCallsDependencies,
         sidecar: options.result[0],
         sourceMaps,
-        parserPlugins: babelCoreOptions.parserOpts?.plugins,
+        parserPlugins,
         inputSourceMap: transformed.map ?? undefined
       });
 
@@ -674,6 +1003,7 @@ export async function transformSourceUncached(
     });
 
   return {
+    ...(parserPlugins ? { parserPlugins: [...parserPlugins] } : {}),
     ...(result.ast?.type === "File"
       ? { runtimeCandidates: internalCollectRuntimeCandidates(result.ast) }
       : {}),
@@ -839,6 +1169,65 @@ if (import.meta.vitest) {
     };
   }
 
+  it.each([
+    [false, "const[size]=[4];"],
+    [true, "const[size]=[4];"],
+    [false, "const values=[...[4]];const size=values[0];"],
+    [true, "const values=[...[4]];const size=values[0];"]
+  ] as const)(
+    "checks native owner iteration before imported pure helper folding: %s %s",
+    async (mutated: boolean, declaration: string) => {
+      const source = `import {getStyles} from "./theme.ts";export const Box=()=>{${declaration}return <div css={getStyles(size)}/>};`;
+      const { filePaths: files } = await createBabelFixtureFiles(
+        {
+          "owner.tsx": source,
+          "theme.ts": "export function getStyles(size){return {padding:size}}",
+          "jsx-runtime.js": mutated
+            ? "Array.prototype[Symbol.iterator]=function*(){yield 9};"
+            : "export const jsx=()=>null;"
+        },
+        `pure-iteration-${mutated}`
+      );
+      const run = () =>
+        babelTransform(files["owner.tsx"], {
+          jsxCssProp: true,
+          staticCssEvalSourceProvider:
+            createFileBackedStaticCssEvalSourceProvider({
+              resolutions: {
+                [`${files["owner.tsx"]}\0./theme.ts`]: files["theme.ts"],
+                [`${files["owner.tsx"]}\0./jsx-runtime.js`]:
+                  files["jsx-runtime.js"]
+              }
+            }),
+          consumerRuntimeSource: async (id, request) => {
+            if (request?.purpose === "intrinsic-owner")
+              return {
+                source: 'import "./jsx-runtime.js";' + source,
+                sourceHash: `native-${mutated}`,
+                version: "native-v1",
+                watchFiles: [files["owner.tsx"]]
+              };
+            if (
+              id === files["jsx-runtime.js"] &&
+              request?.purpose === "intrinsic-runtime"
+            ) {
+              const fs = await import("node:fs/promises");
+              return {
+                source: await fs.readFile(id, "utf8"),
+                sourceHash: `runtime-${mutated}`,
+                version: "runtime-v1",
+                watchFiles: [id]
+              };
+            }
+            return undefined;
+          }
+        });
+      if (mutated)
+        await expect(run()).rejects.toThrow(/Cannot|Configured|Unsupported/);
+      else expect((await run()).result[1]).toMatch(/padding:\s*4/);
+    }
+  );
+
   type StaticCssEvalProvider = NonNullable<
     PluginOptions["staticCssEvalProvider"]
   >;
@@ -950,6 +1339,240 @@ if (import.meta.vitest) {
   }
 
   describe("babelTransform", () => {
+    it.each([false, true])(
+      "observes side-effect-only JSX intrinsic mutations without registered calls (explicit: %s)",
+      async (explicit: boolean) => {
+        const filename = "/jsx-intrinsics/entry.tsx";
+        const dependency = "/jsx-intrinsics/reset.ts";
+        const source = `import './reset'; const [value=4]=[4];
+          export const App=()=> <div css={{color:'red'}}>{value}</div>;`;
+        for (const changed of [false, true]) {
+          const { provider, calls } = createFakeStaticCssEvalSourceProvider({
+            sources: {
+              [dependency]: changed
+                ? "Array.prototype[Symbol.iterator]=function*(){yield undefined};"
+                : "export const marker=1;"
+            },
+            resolutions: { [`${filename}\0./reset`]: dependency }
+          });
+          let observed: InternalPreparedExtractCalls | undefined;
+          const result = await babelTransformSource({
+            filename,
+            source,
+            babel: {
+              jsxCssProp: true,
+              ...(explicit ? { extractCalls: {} } : {}),
+              staticCssEvalSourceProvider: provider,
+              configFile: false,
+              babelrc: false,
+              plugins: [
+                () => ({
+                  visitor: {
+                    Program: {
+                      exit(path: import("@babel/core").NodePath<t.Program>) {
+                        observed = (
+                          path.scope as typeof path.scope & {
+                            minchoData?: {
+                              extractCalls?: InternalPreparedExtractCalls;
+                            };
+                          }
+                        ).minchoData?.extractCalls;
+                      }
+                    }
+                  }
+                })
+              ]
+            }
+          });
+          expect(result.result[1]).toMatch(/color: ["']red["']/);
+          expect(result.staticCssEval?.dependencyFiles).toContain(dependency);
+          expect(calls.loaded).toContain(dependency);
+          expect(observed?.arrayMapIntrinsics?.intact).toBe(!changed);
+          expect(observed?.imports).toEqual({});
+          expect(observed?.localBindings).toEqual([]);
+        }
+      }
+    );
+
+    it("merges JSX intrinsic observations without granting call registrations", () => {
+      const environment = {
+        mathIntrinsics: {
+          intact: true,
+          bindIntact: true,
+          revision: 1,
+          fingerprint: "host-a"
+        },
+        arrayMapIntrinsics: { intact: true, revision: 1, fingerprint: "host-a" }
+      };
+      const normal = mergeIntrinsicObservations(undefined, environment, [
+        "/dep.ts"
+      ]);
+      expect(normal.imports).toEqual({});
+      expect(normal.localBindings).toEqual([]);
+      expect(normal.protectedFunctions).toEqual([]);
+      expect(normal.dependencies).toEqual(["/dep.ts"]);
+      expect(normal.fingerprint).toBe("");
+      const mutation = mergeIntrinsicObservations(
+        normal,
+        {
+          ...environment,
+          arrayMapIntrinsics: {
+            ...environment.arrayMapIntrinsics,
+            intact: false,
+            fingerprint: "host-b"
+          }
+        },
+        ["/runtime.ts"]
+      );
+      const repeated = mergeIntrinsicObservations(mutation, environment, []);
+      expect(repeated.arrayMapIntrinsics?.intact).toBe(false);
+      expect(repeated.dependencies).toEqual(["/dep.ts", "/runtime.ts"]);
+      expect(repeated.fingerprint).not.toContain("host-");
+      expect(repeated.arrayMapIntrinsics?.fingerprint).toContain("host-b");
+    });
+
+    it("ANDs each pattern operation without borrowing the map/includes veto", () => {
+      const environment = {
+        arrayMapIntrinsics: {
+          intact: false,
+          iterationIntact: true,
+          prototypeAbsenceIntact: false,
+          revision: 1,
+          fingerprint: "operations"
+        }
+      };
+      const first = mergeIntrinsicObservations(undefined, environment, []);
+      expect(first.arrayMapIntrinsics?.intact).toBe(false);
+      expect(first.arrayMapIntrinsics?.iterationIntact).toBe(true);
+      expect(first.arrayMapIntrinsics?.prototypeAbsenceIntact).toBe(false);
+      const revoked = mergeIntrinsicObservations(
+        first,
+        {
+          arrayMapIntrinsics: {
+            ...environment.arrayMapIntrinsics,
+            iterationIntact: false,
+            prototypeAbsenceIntact: true
+          }
+        },
+        []
+      );
+      expect(revoked.arrayMapIntrinsics?.iterationIntact).toBe(false);
+      expect(revoked.arrayMapIntrinsics?.prototypeAbsenceIntact).toBe(false);
+      expect(revoked.fingerprint).not.toBe(first.fingerprint);
+      const legacyFalse = mergeIntrinsicObservations(
+        undefined,
+        {
+          arrayMapIntrinsics: {
+            intact: false,
+            revision: 1,
+            fingerprint: "legacy"
+          }
+        },
+        []
+      );
+      const unchanged = mergeIntrinsicObservations(
+        legacyFalse,
+        environment,
+        []
+      );
+      expect(unchanged.arrayMapIntrinsics?.iterationIntact).toBe(false);
+    });
+
+    it("unions exact prototype keys and preserves unknown and legacy vetoes", () => {
+      const snapshot = {
+        intact: false,
+        iterationIntact: true,
+        prototypeAbsenceIntact: false,
+        prototypeMutationKeys: ["name"],
+        revision: 1,
+        fingerprint: "keys"
+      };
+      const first = mergeIntrinsicObservations(
+        undefined,
+        { arrayMapIntrinsics: snapshot },
+        []
+      );
+      const union = mergeIntrinsicObservations(
+        first,
+        {
+          arrayMapIntrinsics: {
+            ...snapshot,
+            prototypeMutationKeys: ["size", "name"]
+          }
+        },
+        []
+      );
+      expect(union.arrayMapIntrinsics?.prototypeMutationKeys).toEqual([
+        "name",
+        "size"
+      ]);
+      expect(union.fingerprint).not.toBe(first.fingerprint);
+      const unknown = mergeIntrinsicObservations(
+        first,
+        { arrayMapIntrinsics: { ...snapshot, prototypeMutationKeys: null } },
+        []
+      );
+      expect(unknown.arrayMapIntrinsics?.prototypeMutationKeys).toBeNull();
+      const legacy = mergeIntrinsicObservations(
+        first,
+        {
+          arrayMapIntrinsics: {
+            intact: false,
+            revision: 1,
+            fingerprint: "legacy"
+          }
+        },
+        []
+      );
+      expect(legacy.arrayMapIntrinsics?.prototypeMutationKeys).toBeNull();
+    });
+
+    it("preserves explicit extraction authority while ANDing intrinsic snapshots", () => {
+      const prepared: InternalPreparedExtractCalls = {
+        imports: { "./build": ["make"] },
+        localBindings: ["make"],
+        protectedFunctions: [{ start: 1, end: 5 }],
+        dependencies: ["/build.ts"],
+        fingerprint: "registered-semantics",
+        mathIntrinsics: {
+          intact: false,
+          bindIntact: false,
+          revision: 2,
+          fingerprint: "original"
+        },
+        arrayMapIntrinsics: {
+          intact: true,
+          revision: 2,
+          fingerprint: "original"
+        }
+      };
+      const result = mergeIntrinsicObservations(
+        prepared,
+        {
+          mathIntrinsics: {
+            intact: true,
+            bindIntact: true,
+            revision: 1,
+            fingerprint: "observed"
+          },
+          arrayMapIntrinsics: {
+            intact: false,
+            revision: 1,
+            fingerprint: "observed"
+          }
+        },
+        ["/reset.ts"]
+      );
+      expect(result.imports).toBe(prepared.imports);
+      expect(result.localBindings).toBe(prepared.localBindings);
+      expect(result.protectedFunctions).toBe(prepared.protectedFunctions);
+      expect(result.mathIntrinsics?.intact).toBe(false);
+      expect(result.mathIntrinsics?.bindIntact).toBe(false);
+      expect(result.arrayMapIntrinsics?.intact).toBe(false);
+      expect(result.dependencies).toEqual(["/build.ts", "/reset.ts"]);
+      expect(result.fingerprint).toContain("registered-semantics");
+    });
+
     it("resolves its TypeScript preset outside the consumer cwd", async () => {
       const fs = await import("node:fs/promises");
       const { tmpdir } = await import("node:os");
