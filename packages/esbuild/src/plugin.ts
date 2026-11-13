@@ -1244,6 +1244,7 @@ if (import.meta.vitest) {
     ) => string;
   };
 
+  let sourceBabelTransform: typeof babelTransformSource;
   let consumerFixturePath: string;
   let registryFixtureMatrixCases: DefineRulesPresetSerializationFixtureCase[] =
     [];
@@ -1301,6 +1302,8 @@ if (import.meta.vitest) {
     initializeDefineRulesPresetSerializationFixtures(
       await loadDefineRulesPresetSerializationManifest()
     );
+
+    sourceBabelTransform = await loadSourceBabelTransform();
   });
 
   interface MockLoadArgs {
@@ -2355,7 +2358,7 @@ if (import.meta.vitest) {
     };
   }
 
-  async function spyOnSourceBabelTransform() {
+  async function loadSourceBabelTransform() {
     const sourceIntegrationUrl = new URL(
       "../../integration/src/babel" + ".ts",
       // eslint-disable-next-line @typescript-eslint/ban-ts-comment
@@ -2369,9 +2372,13 @@ if (import.meta.vitest) {
       babelTransformSource: typeof babelTransformSource;
     };
 
+    return sourceIntegrationModule.babelTransformSource;
+  }
+
+  function spyOnSourceBabelTransform() {
     return vi
       .spyOn(integrationHelpers, "babelTransformSource")
-      .mockImplementation(sourceIntegrationModule.babelTransformSource);
+      .mockImplementation(sourceBabelTransform);
   }
 
   async function loadExtractedCssFromEntry(
