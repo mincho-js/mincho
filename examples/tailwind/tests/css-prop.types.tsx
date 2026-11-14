@@ -1,0 +1,48 @@
+import { css, cx, rules, styled } from "@mincho-js/preset-tailwind-react";
+
+export const button = (
+  <button
+    css={{
+      bg: { base: "blue-500", _hover: "blue-700" },
+      text: "white",
+      font: "bold",
+      py: 2,
+      px: 3,
+      rounded: true
+    }}
+  />
+);
+
+export const composed = (
+  <div css={[{ p: 4 }, { px: 3, py: 2 }, { pl: 1 }, "rounded"]} />
+);
+
+const readonlyStyles = [{ p: 4 }, { px: 3, py: 2 }, "rounded"] as const;
+
+export const readonlyComposed = <div css={readonlyStyles} />;
+
+const label = rules({ base: { font: "bold", text: "sky-900" } });
+
+export const recipe = <span className={cx(css({ px: 3 }), label())} />;
+
+// @ts-expect-error The preset's font alias accepts declared family or weight tokens.
+export const invalidToken = <button css={{ font: "missing-font-token" }} />;
+
+// @ts-expect-error Unknown utility aliases are not valid CSS properties.
+export const invalidAlias = <button css={{ paddingXTypo: 3 }} />;
+
+const Badge = styled.span({
+  base: { px: 2, rounded: "full" },
+  variants: {
+    tone: { info: { bg: "sky-100" }, success: { bg: "emerald-100" } }
+  },
+  defaultVariants: { tone: "info" }
+});
+
+export const styledBadge = <Badge id="badge" tone="success" />;
+
+// @ts-expect-error The styled component preserves the recipe's variant names.
+export const invalidVariant = <Badge tone="missing" />;
+
+// @ts-expect-error Styled recipes preserve the preset's token vocabulary.
+styled.span({ base: { bg: "missing" } });

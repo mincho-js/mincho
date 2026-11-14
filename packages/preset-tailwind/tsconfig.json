@@ -1,0 +1,23 @@
+{
+  "files": [],
+  "references": [
+    {
+      "path": "../css"
+    },
+    {
+      "path": "../tailwind"
+    },
+    {
+      "path": "../debug-log"
+    },
+    {
+      "path": "../../configs/vite-config-custom"
+    },
+    {
+      "path": "./tsconfig.lib.json"
+    },
+    {
+      "path": "./tsconfig.node.json"
+    }
+  ]
+}

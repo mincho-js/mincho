@@ -1580,6 +1580,76 @@
     "expires": "2026-12-31"
   },
   {
+    "id": "contract-tailwind-entry-2",
+    "file": "scripts/package-contract/fixture/tailwind/entry.ts",
+    "type": "error",
+    "message": "Undeclared dependency on @mincho-js/preset-tailwind",
+    "source": "export { vars as presetVars } from \"@mincho-js/preset-tailwind\";",
+    "count": 1,
+    "reason": "This fixture runs after copying into isolated npm and strict PnP consumer projects. scripts/package-contract/index.ts declares and installs the packed Tailwind packages there; the repository root does not execute this fixture.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "contract-tailwind-entry-3",
+    "file": "scripts/package-contract/fixture/tailwind/entry.ts",
+    "type": "error",
+    "message": "Undeclared dependency on @mincho-js/preset-tailwind",
+    "source": "import \"@mincho-js/preset-tailwind/styles.css\";",
+    "count": 1,
+    "reason": "This fixture runs after copying into isolated npm and strict PnP consumer projects. scripts/package-contract/index.ts declares and installs the packed Tailwind packages there; the repository root does not execute this fixture.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "contract-tailwind-entry-4",
+    "file": "scripts/package-contract/fixture/tailwind/entry.ts",
+    "type": "error",
+    "message": "Undeclared dependency on @mincho-js/preset-tailwind",
+    "source": "import \"@mincho-js/preset-tailwind/preflight.css\";",
+    "count": 1,
+    "reason": "This fixture runs after copying into isolated npm and strict PnP consumer projects. scripts/package-contract/index.ts declares and installs the packed Tailwind packages there; the repository root does not execute this fixture.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "contract-tailwind-precompiled-1",
+    "file": "scripts/package-contract/fixture/tailwind/precompiled.ts",
+    "type": "error",
+    "message": "Undeclared dependency on @mincho-js/preset-tailwind",
+    "source": "export { themeClass } from \"@mincho-js/preset-tailwind\";",
+    "count": 1,
+    "reason": "This fixture runs after copying into isolated npm and strict PnP consumer projects. scripts/package-contract/index.ts declares and installs the packed Tailwind packages there; the repository root does not execute this fixture.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "contract-tailwind-precompiled-2",
+    "file": "scripts/package-contract/fixture/tailwind/precompiled.ts",
+    "type": "error",
+    "message": "Undeclared dependency on @mincho-js/preset-tailwind",
+    "source": "import \"@mincho-js/preset-tailwind/styles.css\";",
+    "count": 1,
+    "reason": "This fixture runs after copying into isolated npm and strict PnP consumer projects. scripts/package-contract/index.ts declares and installs the packed Tailwind packages there; the repository root does not execute this fixture.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "contract-tailwind-tokens-only-1",
+    "file": "scripts/package-contract/fixture/tailwind/tokens-only.ts",
+    "type": "error",
+    "message": "Undeclared dependency on @mincho-js/preset-tailwind",
+    "source": "export { tailwindTokens } from \"@mincho-js/preset-tailwind/tokens\";",
+    "count": 1,
+    "reason": "This fixture runs after copying into isolated npm and strict PnP consumer projects. scripts/package-contract/index.ts declares and installs the packed Tailwind packages there; the repository root does not execute this fixture.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "contract-tailwind-vars-only-1",
+    "file": "scripts/package-contract/fixture/tailwind/vars-only.ts",
+    "type": "error",
+    "message": "Undeclared dependency on @mincho-js/preset-tailwind",
+    "source": "export { vars, contract } from \"@mincho-js/preset-tailwind\";",
+    "count": 1,
+    "reason": "This fixture runs after copying into isolated npm and strict PnP consumer projects. scripts/package-contract/index.ts declares and installs the packed Tailwind packages there; the repository root does not execute this fixture.",
+    "expires": "2026-12-31"
+  },
+  {
     "id": "contract-theme-ui-colocated-preset",
     "file": "scripts/package-contract/fixture/theme-ui/co-located.ts",
     "type": "error",
@@ -1600,6 +1670,46 @@
     "expires": "2026-12-31"
   },
   {
+    "id": "contract-tailwind-colocated-preset",
+    "file": "scripts/package-contract/fixture/tailwind/co-located.ts",
+    "type": "error",
+    "message": "Undeclared dependency on @mincho-js/preset-tailwind",
+    "source": "import { rules } from \"@mincho-js/preset-tailwind\";",
+    "count": 1,
+    "reason": "This fixture runs after copying into isolated npm and strict PnP consumer projects. scripts/package-contract/index.ts declares and installs these packed packages there; the repository root does not execute this fixture.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "contract-tailwind-styles-tokens",
+    "file": "scripts/package-contract/fixture/tailwind/theme.css.ts",
+    "type": "error",
+    "message": "Undeclared dependency on @mincho-js/preset-tailwind",
+    "source": "import { tailwindTokens } from \"@mincho-js/preset-tailwind/tokens\";",
+    "count": 1,
+    "reason": "This fixture runs after copying into isolated npm and strict PnP consumer projects. scripts/package-contract/index.ts declares and installs these packed packages there; the repository root does not execute this fixture.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "contract-tailwind-styles-contract",
+    "file": "scripts/package-contract/fixture/tailwind/theme.css.ts",
+    "type": "error",
+    "message": "Undeclared dependency on @mincho-js/tailwind",
+    "source": "import { themeSpec } from \"@mincho-js/tailwind\";",
+    "count": 1,
+    "reason": "This fixture runs after copying into isolated npm and strict PnP consumer projects. scripts/package-contract/index.ts declares and installs these packed packages there; the repository root does not execute this fixture.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "contract-tailwind-styles-preset",
+    "file": "scripts/package-contract/fixture/tailwind/preset.css.ts",
+    "type": "error",
+    "message": "Undeclared dependency on @mincho-js/preset-tailwind",
+    "source": "import { css, rules, cx, themeClass } from \"@mincho-js/preset-tailwind\";",
+    "count": 1,
+    "reason": "This fixture runs after copying into isolated npm and strict PnP consumer projects. scripts/package-contract/index.ts declares and installs these packed packages there; the repository root does not execute this fixture.",
+    "expires": "2026-12-31"
+  },
+  {
     "id": "integration-colocated-preset-esbuild-loader",
     "file": "packages/integration/src/coLocatedPreset.test.ts",
     "type": "warning",
@@ -1607,6 +1717,56 @@
     "source": "loader: \"js\"",
     "count": 1,
     "reason": "This esbuild onLoad fixture returns the built-in JavaScript loader enum. It is not a Webpack loader module and must not be resolved as a package.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "contract-tailwind-react-types-preset",
+    "file": "scripts/package-contract/fixture/modules/tailwind-react-types.tsx",
+    "type": "error",
+    "message": "Undeclared dependency on @mincho-js/preset-tailwind-react",
+    "source": "import { styled, css, rules } from \"@mincho-js/preset-tailwind-react\";",
+    "count": 1,
+    "reason": "This fixture runs after copying into isolated npm and strict PnP consumer projects. scripts/package-contract/index.ts declares and installs the packed React Tailwind preset and React there; the repository root does not execute this fixture.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "contract-tailwind-react-types-config",
+    "file": "scripts/package-contract/fixture/modules/tailwind-react-types.tsx",
+    "type": "error",
+    "message": "Undeclared dependency on @mincho-js/preset-tailwind-react",
+    "source": "import { extractCalls } from \"@mincho-js/preset-tailwind-react/config\";",
+    "count": 1,
+    "reason": "This fixture runs after copying into isolated npm and strict PnP consumer projects. scripts/package-contract/index.ts declares and installs the packed React Tailwind preset and React there; the repository root does not execute this fixture.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "contract-tailwind-react-types-react",
+    "file": "scripts/package-contract/fixture/modules/tailwind-react-types.tsx",
+    "type": "error",
+    "message": "Undeclared dependency on react",
+    "source": "import type { CSSProperties } from \"react\";",
+    "count": 1,
+    "reason": "This fixture runs after copying into isolated npm and strict PnP consumer projects. scripts/package-contract/index.ts declares and installs the packed React Tailwind preset and React there; the repository root does not execute this fixture.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "contract-tailwind-react-entry-preset",
+    "file": "scripts/package-contract/fixture/tailwind-react/entry.tsx",
+    "type": "error",
+    "message": "Undeclared dependency on @mincho-js/preset-tailwind-react",
+    "source": "import {",
+    "count": 1,
+    "reason": "This fixture runs after copying into isolated npm and strict PnP consumer projects. scripts/package-contract/index.ts declares and installs the packed React Tailwind preset and React there; the repository root does not execute this fixture.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "contract-tailwind-react-entry-vars",
+    "file": "scripts/package-contract/fixture/tailwind-react/entry.tsx",
+    "type": "error",
+    "message": "Undeclared dependency on @mincho-js/preset-tailwind-react",
+    "source": "export { vars } from \"@mincho-js/preset-tailwind-react\";",
+    "count": 1,
+    "reason": "This fixture runs after copying into isolated npm and strict PnP consumer projects. scripts/package-contract/index.ts declares and installs the packed React Tailwind preset and React there; the repository root does not execute this fixture.",
     "expires": "2026-12-31"
   },
   {

@@ -1,0 +1,39 @@
+{
+  "name": "@examples/tailwind",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "check": "yarn run -T tsc --project tsconfig.app.json",
+    "lint": "yarn g:lint",
+    "test": "yarn g:test",
+    "test:browser": "MINCHO_TAILWIND_BROWSER=1 yarn g:test"
+  },
+  "prettier": "prettier-config-custom",
+  "dependencies": {
+    "@mincho-js/css": "workspace:^",
+    "@mincho-js/preset-tailwind": "workspace:^",
+    "@mincho-js/preset-tailwind-react": "workspace:^",
+    "@mincho-js/react": "workspace:^",
+    "@mincho-js/tailwind": "workspace:^",
+    "@vanilla-extract/css": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:"
+  },
+  "devDependencies": {
+    "@mincho-js/vite": "workspace:^",
+    "@types/node": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "@vanilla-extract/vite-plugin": "catalog:",
+    "@vitejs/plugin-react": "catalog:",
+    "eslint-config-custom": "workspace:^",
+    "playwright": "catalog:",
+    "prettier-config-custom": "workspace:^",
+    "tsconfig-custom": "workspace:^",
+    "vite": "catalog:",
+    "vitest": "catalog:"
+  }
+}

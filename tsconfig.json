@@ -24,6 +24,12 @@
       "path": "packages/integration"
     },
     {
+      "path": "packages/preset-tailwind"
+    },
+    {
+      "path": "packages/preset-tailwind-react"
+    },
+    {
       "path": "packages/preset-theme-ui"
     },
     {
@@ -31,6 +37,9 @@
     },
     {
       "path": "packages/react"
+    },
+    {
+      "path": "packages/tailwind"
     },
     {
       "path": "packages/theme-ui"
@@ -55,6 +64,9 @@
     },
     {
       "path": "examples/shared-component"
+    },
+    {
+      "path": "examples/tailwind"
     },
     {
       "path": "examples/theme-ui"

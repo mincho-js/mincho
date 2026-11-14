@@ -1,0 +1,11 @@
+{
+  "files": [],
+  "references": [
+    { "path": "../preset-tailwind" },
+    { "path": "../react" },
+    { "path": "../debug-log" },
+    { "path": "../../configs/vite-config-custom" },
+    { "path": "./tsconfig.node.json" },
+    { "path": "./tsconfig.lib.json" }
+  ]
+}
