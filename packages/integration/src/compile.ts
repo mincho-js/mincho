@@ -43,6 +43,9 @@ export interface CompileOptions {
   cwd?: string;
   externals?: Array<string>;
   loader?: BuildOptions["loader"];
+  alias?: BuildOptions["alias"];
+  /** Host-resolved exact entry imports; dependencies keep local resolution. */
+  resolvedImports?: Readonly<Record<string, string>>;
   plugins?: BuildOptions["plugins"];
 
   /** Transaction-owned input reader used by multi-pass build integrations. */
@@ -162,8 +165,44 @@ export function transformScopedDependencySource({
   return source;
 }
 
+function scopedDependencyOptions(
+  contents: string,
+  filePath: string,
+  loader: ScopedDependencyOptions["loader"],
+  fallbackRootPath: string
+): ScopedDependencyOptions {
+  const directory = dirname(filePath);
+  let packageInfo: ReturnType<typeof getPackageInfo>;
+
+  try {
+    packageInfo = getPackageInfo(directory);
+  } catch (error) {
+    if (
+      !(error instanceof Error) ||
+      error.message !==
+        `Couldn't find parent package.json with a name field from '${directory}'`
+    ) {
+      throw error;
+    }
+
+    // Generated dependencies may have no owning package. Retain their original
+    // path in the build scope; do not disguise an escaping preset producer path.
+    packageInfo = {
+      ...getPackageInfo(fallbackRootPath),
+      dirname: fallbackRootPath
+    };
+  }
+
+  return {
+    contents,
+    filePath,
+    loader,
+    rootPath: packageInfo.dirname,
+    packageName: packageInfo.name
+  };
+}
+
 function createScopedOnLoadPlugin(
-  packageName: string,
   loaders: BuildOptions["loader"] = {},
   readFile: (path: string) => Promise<string> = (path) =>
     fs.promises.readFile(path, "utf-8"),
@@ -207,13 +246,12 @@ function createScopedOnLoadPlugin(
 
           const contents = await readFile(args.path);
 
-          const input: ScopedDependencyOptions = {
+          const input = scopedDependencyOptions(
             contents,
-            filePath: args.path,
+            args.path,
             loader,
-            rootPath: build.initialOptions.absWorkingDir!,
-            packageName
-          };
+            build.initialOptions.absWorkingDir!
+          );
 
           return {
             contents: await executeScopedTransform(input, () =>
@@ -228,7 +266,7 @@ function createScopedOnLoadPlugin(
   };
 }
 
-function scopeLoadedDependencies(plugin: Plugin, packageName: string): Plugin {
+function scopeLoadedDependencies(plugin: Plugin): Plugin {
   return {
     ...plugin,
     setup(build) {
@@ -254,16 +292,14 @@ function scopeLoadedDependencies(plugin: Plugin, packageName: string): Plugin {
                 return result;
               }
 
-              const input: ScopedDependencyOptions = {
-                contents:
-                  typeof result.contents === "string"
-                    ? result.contents
-                    : Buffer.from(result.contents).toString("utf8"),
-                filePath: args.path,
+              const input = scopedDependencyOptions(
+                typeof result.contents === "string"
+                  ? result.contents
+                  : Buffer.from(result.contents).toString("utf8"),
+                args.path,
                 loader,
-                rootPath: build.initialOptions.absWorkingDir!,
-                packageName
-              };
+                build.initialOptions.absWorkingDir!
+              );
 
               return {
                 ...result,
@@ -305,12 +341,19 @@ function getWatchFiles(
 export async function compile(options: CompileOptions) {
   // Resolve before cache lookup so retargeted workspace symlinks cannot reuse
   // results whose old canonical dependencies still exist unchanged.
-  const [cwd, filePath, originalPath] = await Promise.all([
+  const [cwd, filePath, originalPath, resolvedImports] = await Promise.all([
     canonicalFilePath(options.cwd ?? process.cwd()),
     canonicalFilePath(options.filePath),
-    canonicalFilePath(options.originalPath ?? options.filePath)
+    canonicalFilePath(options.originalPath ?? options.filePath),
+    options.resolvedImports &&
+      Promise.all(
+        Object.entries(options.resolvedImports).map(async ([source, path]) => [
+          source,
+          await canonicalFilePath(path)
+        ])
+      ).then(Object.fromEntries)
   ]);
-  options = { ...options, cwd, filePath, originalPath };
+  options = { ...options, cwd, filePath, originalPath, resolvedImports };
   return options.cache
     ? cachedCompile(options, compileUncached)
     : compileUncached(options);
@@ -323,6 +366,8 @@ async function compileUncached({
   cwd = process.cwd(),
   externals = [],
   loader,
+  alias,
+  resolvedImports,
   plugins = [],
   cache,
   cacheBridge,
@@ -333,7 +378,6 @@ async function compileUncached({
   resolverCache = new Map(),
   originalPath
 }: CompileOptions) {
-  const packageInfo = getPackageInfo(cwd);
   const sourcePackageInfo = getPackageInfo(dirname(originalPath));
   const trustedPlugins =
     !plugins.length ||
@@ -341,6 +385,8 @@ async function compileUncached({
 
   if (
     staticStyles &&
+    !alias &&
+    !resolvedImports &&
     currentCompilationExecution()?.evaluation !== "fresh" &&
     trustedPlugins
   ) {
@@ -389,10 +435,24 @@ async function compileUncached({
       write: false,
       absWorkingDir: cwd,
       loader,
+      alias,
       plugins: [
-        ...plugins.map((plugin) =>
-          scopeLoadedDependencies(plugin, packageInfo.name)
-        ),
+        ...(resolvedImports
+          ? [
+              {
+                name: "mincho:resolved-imports",
+                setup(build: PluginBuild) {
+                  build.onResolve({ filter: /.*/ }, ({ path, importer }) =>
+                    importer === filePath &&
+                    Object.hasOwn(resolvedImports, path)
+                      ? { path: resolvedImports[path] }
+                      : undefined
+                  );
+                }
+              }
+            ]
+          : []),
+        ...plugins.map(scopeLoadedDependencies),
         ...(dependencyGraph && trustedPlugins
           ? [
               {
@@ -427,13 +487,7 @@ async function compileUncached({
               }
             ]
           : []),
-        createScopedOnLoadPlugin(
-          packageInfo.name,
-          loader,
-          readFile,
-          readFileBytes,
-          () => graph
-        )
+        createScopedOnLoadPlugin(loader, readFile, readFileBytes, () => graph)
       ]
     })
   );
@@ -497,7 +551,8 @@ if (import.meta.vitest) {
 
         if (onLoadHandlers[0]) {
           await onLoadHandlers[0].callback({
-            path: options.onLoadPath ?? "/workspace/scoped-dependency.tsx"
+            path:
+              options.onLoadPath ?? join(process.cwd(), "scoped-dependency.tsx")
           });
         }
 

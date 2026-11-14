@@ -128,7 +128,7 @@ describe("mincho with the Vite runtime", () => {
       module.id?.startsWith("\0mincho-extracted-css:")
     )!;
     const css = [...sidecar.importedModules].find((module) =>
-      module.id?.startsWith("\0mincho-virtual-css:")
+      module.id?.endsWith(".vanilla.css")
     )!;
     const privateId = `\0mincho-virtual-css:${join(root, "src/private.vanilla.css")}`;
     expect(await client.pluginContainer.load(privateId)).toBeNull();

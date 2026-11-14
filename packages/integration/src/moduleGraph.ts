@@ -94,10 +94,11 @@ export async function driveModuleGraph<T>(
         step = analysis.throw(error);
       } catch (failure) {
         if (failure instanceof InternalExtractCallsError)
-          throw new InternalExtractCallsError(failure.message, [
-            ...failure.dependencies,
-            ...watchFiles
-          ]);
+          throw new InternalExtractCallsError(
+            failure.message,
+            [...failure.dependencies, ...watchFiles],
+            { cause: failure.cause }
+          );
 
         throw failure;
       }

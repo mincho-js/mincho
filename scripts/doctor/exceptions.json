@@ -1,5 +1,25 @@
 [
   {
+    "id": "babel-jsx-callable-test-esbuild-loader",
+    "file": "packages/babel/src/jsxCssProp/runtimeRecipes.test.ts",
+    "type": "warning",
+    "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
+    "source": "loader: \"tsx\",",
+    "count": 1,
+    "reason": "This regression executes generated JSX and sidecar modules with esbuild's built-in TSX parser. It does not reference a Webpack loader package.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "integration-host-resolved-import-dependency-fixture",
+    "file": "packages/integration/src/compilePlugins.test.ts",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": "const nestedPackage = join(dependency, \"node_modules\", \"shared\");",
+    "count": 1,
+    "reason": "This isolated native Node fixture gives a dependency its own copy of a package to prove that host-resolved entry imports do not override dependency-local resolution.",
+    "expires": "2026-12-31"
+  },
+  {
     "id": "contract-squircle-node10-react-import",
     "file": "scripts/package-contract/fixture/modules/layout-node10.ts",
     "type": "error",
@@ -117,6 +137,16 @@
     "source": "loader: \"ts\"",
     "count": 1,
     "reason": "This CommonJS child-compilation regression selects an esbuild built-in JavaScript or TypeScript loader, including a custom extension or caller onLoad result; it does not reference a Webpack loader package.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "integration-compile-plugins-generated-tokens-loader",
+    "file": "packages/integration/src/compilePlugins.test.ts",
+    "type": "warning",
+    "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
+    "source": "loader: \"ts\",",
+    "count": 1,
+    "reason": "This generated-token fixture supplies TypeScript source through esbuild's built-in ts loader in an onLoad result. It does not reference a Webpack loader package.",
     "expires": "2026-12-31"
   },
   {
@@ -1160,6 +1190,16 @@
     "expires": "2026-12-31"
   },
   {
+    "id": "integration-babel-source-test-esbuild-tsx-loader",
+    "file": "packages/integration/src/babelSource.test.ts",
+    "type": "warning",
+    "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
+    "source": "loader: \"tsx\",",
+    "count": 1,
+    "reason": "This babelTransformSource fixture selects the built-in TSX parser to verify configured JSX css extraction and transform-cache isolation; it does not resolve a Webpack loader package.",
+    "expires": "2026-12-31"
+  },
+  {
     "id": "integration-common-js-test-esbuild-loader-01",
     "file": "packages/integration/src/commonJs.test.ts",
     "type": "warning",
@@ -1447,6 +1487,16 @@
     "source": "setFileScope(\"../node_modules/parent/rules.js\", \"@consumer/app\");",
     "count": 1,
     "reason": "This synthetic producer file scope tests deferred consumer registration. It does not locate a package or access the filesystem.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "integration-colocated-preset-esbuild-loader",
+    "file": "packages/integration/src/coLocatedPreset.test.ts",
+    "type": "warning",
+    "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
+    "source": "loader: \"js\"",
+    "count": 1,
+    "reason": "This esbuild onLoad fixture returns the built-in JavaScript loader enum. It is not a Webpack loader module and must not be resolved as a package.",
     "expires": "2026-12-31"
   }
 ]

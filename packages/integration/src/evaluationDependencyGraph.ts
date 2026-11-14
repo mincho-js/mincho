@@ -209,11 +209,15 @@ function inspect(
   try {
     const jsx = loader === "jsx" || loader === "tsx";
     const typescript = loader === "ts" || loader === "tsx";
+    const plugins = [
+      ...(typescript ? ["typescript" as const] : []),
+      ...(jsx ? ["jsx" as const] : [])
+    ];
     const input = {
       resolvedFile: path,
       source,
       parserOptions: {
-        plugins: [],
+        plugins,
         sourceType: "module" as const,
         jsx,
         typescript
@@ -228,10 +232,7 @@ function inspect(
         configFile: false,
         sourceType: "module",
         parserOpts: {
-          plugins: [
-            ...(typescript ? ["typescript" as const] : []),
-            ...(jsx ? ["jsx" as const] : [])
-          ]
+          plugins
         }
       });
     if (!ast) return;
@@ -592,6 +593,7 @@ export async function prepareEvaluationDependencyGraph(input: {
 
       for (const edge of module.edges) {
         const resolved = await input.build.resolve(edge.source, {
+          importer: module.path,
           resolveDir: dirname(module.path),
           kind: "import-statement"
         });

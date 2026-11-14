@@ -258,6 +258,75 @@ describe("private recipe resource proofs", () => {
 });
 
 describe("static recipe invocations", () => {
+  it.each([false, true])(
+    "preserves configured parser plugins in owners and dependencies with cached parsing=%s",
+    async (cached) => {
+      const code = `
+        import { button } from "/recipe.tsx";
+        export @sealed class View { render() { return <div />; } }
+        export const cls = button();
+      `;
+      const output = await new RuntimeOptimizations().transform(
+        {
+          filename: "/app.tsx",
+          source: code,
+          babel: {
+            compilationCache: cached ? new CompilationCache() : undefined,
+            parserOpts: {
+              plugins: [["decorators", { decoratorsBeforeExport: false }]]
+            }
+          }
+        },
+        result(code),
+        provider({
+          "/recipe.tsx": `${factory}
+            export @sealed class Helper {
+              render(): unknown { return <div />; }
+            }
+          `
+        })
+      );
+
+      expect(output.code).toContain('export const cls = "base small";');
+      expect(output.code).toContain("@sealed");
+      expect(output.code).toContain("<div />");
+    }
+  );
+
+  it("invalidates runtime analysis when dependency parser plugin options change", async () => {
+    const code =
+      'import { button } from "/recipe.ts"; export const cls = button();';
+    const input = result(code);
+    const optimization = new RuntimeOptimizations();
+    const compilationCache = new CompilationCache();
+    const sourceProvider = provider({
+      "/recipe.ts": `${factory} export @sealed class Helper {}`
+    });
+    const transform = (decoratorsBeforeExport: boolean) =>
+      optimization.transform(
+        {
+          filename: "/app.ts",
+          source: code,
+          babel: {
+            compilationCache,
+            parserOpts: {
+              plugins: [["decorators", { decoratorsBeforeExport }]]
+            }
+          }
+        },
+        input,
+        sourceProvider
+      );
+
+    expect((await transform(false)).code).toContain(
+      'export const cls = "base small";'
+    );
+    expect(await transform(true)).toBe(input);
+    expect((await transform(false)).code).toContain(
+      'export const cls = "base small";'
+    );
+  });
+
   it("validates concurrent requests against their own provider and environment", async () => {
     const code =
       'import { button } from "/extracted_rules.css.ts"; export const cls = button();';

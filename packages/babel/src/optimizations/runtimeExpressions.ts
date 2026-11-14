@@ -5,7 +5,6 @@ import {
   types as t,
   parseSync,
   traverse,
-  transformSync,
   transformFromAstSync,
   type NodePath,
   type TransformOptions
@@ -209,6 +208,7 @@ export function* analyzeRuntimeExpressions(options: {
   filename: string;
   source: string;
   parserCache?: SourceAstCache;
+  parserPlugins?: NonNullable<TransformOptions["parserOpts"]>["plugins"];
   pureFunctions?: boolean;
   staticRecipes?: boolean;
   styledComponents?: boolean;
@@ -249,7 +249,13 @@ export function* analyzeRuntimeExpressions(options: {
       (/\.css\.[cm]?[jt]s$/.test(id) && !/extracted_[^/]+\.css\.ts$/.test(id)),
 
     parse: (id, source, jsx) =>
-      parseModuleProgram(id, source, jsx, options.parserCache)
+      parseModuleProgram(
+        id,
+        source,
+        jsx,
+        options.parserCache,
+        options.parserPlugins
+      )
   });
 
   const owner = {
@@ -258,7 +264,8 @@ export function* analyzeRuntimeExpressions(options: {
       options.filename,
       options.source,
       true,
-      options.parserCache
+      options.parserCache,
+      options.parserPlugins
     )
   };
 
@@ -779,7 +786,8 @@ export function* analyzeRuntimeExpressions(options: {
         options.filename,
         options.source,
         true,
-        options.parserCache
+        options.parserCache,
+        options.parserPlugins
       ).parent as t.File
     );
 
@@ -1425,6 +1433,7 @@ export function applyRuntimeExpressions(options: {
   bundleSize?: import("../bundleSize.js").BundleSizeOptions;
   filename: string;
   source: string;
+  parserPlugins?: NonNullable<TransformOptions["parserOpts"]>["plugins"];
   replacements: ReadonlyArray<{ key: string; value: string }>;
   expressions?: ReadonlyArray<{ key: string; expression: t.Expression }>;
   finiteCalls?: ReadonlyArray<{
@@ -1450,7 +1459,6 @@ export function applyRuntimeExpressions(options: {
     configFile: false,
     babelrc: false,
     sourceType: "unambiguous",
-    parserOpts: { plugins: ["jsx", "typescript"] },
     sourceMaps: options.sourceMaps,
     inputSourceMap: options.inputSourceMap,
     plugins: [
@@ -1524,9 +1532,17 @@ export function applyRuntimeExpressions(options: {
     ]
   };
 
-  return options.ast
-    ? transformFromAstSync(options.ast, options.source, transformOptions)
-    : transformSync(options.source, transformOptions);
+  const ast =
+    options.ast ??
+    (parseModuleProgram(
+      options.filename,
+      options.source,
+      true,
+      undefined,
+      options.parserPlugins
+    ).parent as t.File);
+
+  return transformFromAstSync(ast, options.source, transformOptions);
 }
 
 function staticData(node: t.Expression): StaticData {

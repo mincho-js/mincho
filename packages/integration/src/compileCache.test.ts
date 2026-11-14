@@ -9,13 +9,223 @@ import {
 } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
 import esbuild from "esbuild";
 import { compile } from "./compile.js";
 import { CompilationCache } from "./compilationCache.js";
 import { CompilationDiagnostics } from "./diagnostics.js";
 
 describe("sidecar compilation cache", () => {
+  it.each(["alias", "resolvedImports"] as const)(
+    "resolves authoring source %s and invalidates changed targets",
+    async (resolution) => {
+      const root = await mkdtemp(join(tmpdir(), "compile-alias-"));
+      onTestFinished(() => rm(root, { recursive: true, force: true }));
+      await writeFile(
+        join(root, "package.json"),
+        '{"name":"compile-alias-fixture"}'
+      );
+      for (const color of ["red", "blue"])
+        await writeFile(
+          join(root, `${color}.ts`),
+          `export const color = "${color}";`
+        );
+      const build = vi.fn(esbuild.build);
+      const options = {
+        cache: new CompilationCache(),
+        esbuild: { ...esbuild, build },
+        originalPath: join(root, "owner.ts"),
+        filePath: join(root, "owner.css.ts"),
+        cwd: root,
+        contents: 'export { color } from "test-preset";',
+        resolverCache: new Map<string, string>()
+      };
+      const run = (color: string) =>
+        compile({
+          ...options,
+          [resolution]: { "test-preset": join(root, `${color}.ts`) }
+        });
+
+      expect((await run("red")).source).toContain('"red"');
+      expect((await run("blue")).source).toContain('"blue"');
+      expect((await run("red")).source).toContain('"red"');
+      expect(build).toHaveBeenCalledTimes(2);
+    }
+  );
+
+  it.each([
+    { option: "alias", target: "absolute-file" },
+    { option: "alias", target: "relative-file" },
+    { option: "alias", target: "absolute-directory" },
+    { option: "alias", target: "relative-directory" },
+    { option: "resolvedImports", target: "absolute-file" }
+  ] as const)(
+    "invalidates $option when its $target symlink changes target",
+    async ({ option, target }) => {
+      const root = await realpath(
+        await mkdtemp(join(tmpdir(), "cache-alias-retarget-"))
+      );
+
+      // Keep Babel's cwd fingerprint independent of sibling test fixtures.
+      const cwd = vi.spyOn(process, "cwd").mockReturnValue(root);
+      onTestFinished(async () => {
+        cwd.mockRestore();
+        await rm(root, { recursive: true, force: true });
+      });
+
+      await writeFile(
+        join(root, "package.json"),
+        '{"name":"alias-retarget-test"}'
+      );
+      await mkdir(join(root, "app"));
+      for (const color of ["red", "blue"]) {
+        await mkdir(join(root, color));
+        await writeFile(
+          join(root, color, "tokens.ts"),
+          `export const color = "${color}";`
+        );
+      }
+
+      const link = join(root, "current");
+      await symlink(join(root, "red"), link, "dir");
+
+      const directory = target.endsWith("directory");
+      const replacement = directory ? "current" : "current/tokens.ts";
+      const build = vi.fn(esbuild.build);
+      const options = {
+        cache: new CompilationCache(),
+        esbuild: { ...esbuild, build },
+        originalPath: join(root, "app", "owner.ts"),
+        filePath: join(root, "app", "owner.css.ts"),
+        cwd: root,
+        contents: `export { color } from "${directory ? "preset/tokens" : "preset"}";`,
+        [option]: {
+          preset: target.startsWith("relative")
+            ? `./${replacement}`
+            : join(root, replacement)
+        },
+        resolverCache: new Map<string, string>()
+      };
+
+      expect((await compile(options)).source).toContain('"red"');
+      expect((await compile(options)).source).toContain('"red"');
+      expect(build).toHaveBeenCalledTimes(1);
+
+      // The entry, alias string and old physical dependency stay unchanged.
+      // Only the symlink destination moves to another existing directory.
+      await unlink(link);
+      await symlink(join(root, "blue"), link, "dir");
+
+      expect((await compile(options)).source).toContain('"blue"');
+      expect((await compile(options)).source).toContain('"blue"');
+      expect(build).toHaveBeenCalledTimes(2);
+    }
+  );
+
+  it.each(["absolute", "relative"] as const)(
+    "does not reuse unresolved %s aliases after extension-resolved symlinks move",
+    async (target) => {
+      const root = await mkdtemp(join(tmpdir(), "cache-alias-extension-"));
+      onTestFinished(() => rm(root, { recursive: true, force: true }));
+
+      await writeFile(
+        join(root, "package.json"),
+        '{"name":"alias-extension-test"}'
+      );
+      for (const color of ["red", "blue"])
+        await writeFile(
+          join(root, `${color}.ts`),
+          `export const color = "${color}";`
+        );
+
+      const link = join(root, "current.ts");
+      await symlink(join(root, "red.ts"), link);
+
+      const options = {
+        cache: new CompilationCache(),
+        originalPath: join(root, "owner.ts"),
+        filePath: join(root, "owner.css.ts"),
+        cwd: root,
+        contents: 'export { color } from "preset";',
+        alias: {
+          preset: target === "relative" ? "./current" : join(root, "current")
+        },
+        resolverCache: new Map<string, string>()
+      };
+
+      expect((await compile(options)).source).toContain('"red"');
+      await unlink(link);
+      await symlink(join(root, "blue.ts"), link);
+      expect((await compile(options)).source).toContain('"blue"');
+    }
+  );
+
+  it.each([false, true])(
+    "resolves direct-file mapped symlinks from their physical owner (cache: %s)",
+    async (cached) => {
+      const root = await realpath(
+        await mkdtemp(join(tmpdir(), "mapped-file-symlink-"))
+      );
+      const cwd = vi.spyOn(process, "cwd").mockReturnValue(root);
+      onTestFinished(async () => {
+        cwd.mockRestore();
+        await rm(root, { recursive: true, force: true });
+      });
+
+      await writeFile(
+        join(root, "package.json"),
+        '{"name":"mapped-file-symlink-test"}'
+      );
+      await mkdir(join(root, "app"));
+      await writeFile(
+        join(root, "app", "tokens.ts"),
+        'export const color = "wrong-owner";'
+      );
+      for (const color of ["red", "blue"]) {
+        await mkdir(join(root, color));
+        await writeFile(
+          join(root, color, "index.ts"),
+          'export { color } from "./tokens";'
+        );
+        await writeFile(
+          join(root, color, "tokens.ts"),
+          `export const color = "${color}";`
+        );
+      }
+
+      const link = join(root, "app", "preset.ts");
+      await symlink(join(root, "red", "index.ts"), link);
+      const build = vi.fn(esbuild.build);
+      const options = {
+        cache: cached ? new CompilationCache() : undefined,
+        esbuild: { ...esbuild, build },
+        originalPath: join(root, "app", "owner.ts"),
+        filePath: join(root, "app", "owner.css.ts"),
+        cwd: root,
+        contents: 'export { color } from "preset";',
+        resolvedImports: { preset: link },
+        resolverCache: new Map<string, string>()
+      };
+
+      for (const color of ["red", "blue"]) {
+        if (color === "blue") {
+          await unlink(link);
+          await symlink(join(root, color, "index.ts"), link);
+        }
+
+        for (let repeat = 0; repeat < 2; repeat++) {
+          const result = await compile(options);
+          expect(result.source).toContain(`"${color}"`);
+          expect(result.source).not.toContain("wrong-owner");
+          expect(result.watchFiles).toContain(join(root, color, "index.ts"));
+          expect(result.watchFiles).toContain(join(root, color, "tokens.ts"));
+        }
+      }
+
+      expect(build).toHaveBeenCalledTimes(cached ? 2 : 4);
+    }
+  );
+
   it("invalidates when a workspace symlink is retargeted", async () => {
     const root = await mkdtemp(join(tmpdir(), "cache-retarget-"));
     const alias = join(root, "workspace");
@@ -98,7 +308,7 @@ describe("sidecar compilation cache", () => {
       for (const color of ["blue", "green"]) {
         await writeFile(
           config,
-          JSON.stringify({ plugins: [`./${color}.cjs`] })
+          JSON.stringify({ plugins: [join(babelRoot, `${color}.cjs`)] })
         );
 
         expect((await compile(options)).source).toContain(color);

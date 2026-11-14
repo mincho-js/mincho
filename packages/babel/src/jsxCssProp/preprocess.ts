@@ -2,7 +2,10 @@ import type { NodePath } from "@babel/core";
 import { types as t } from "@babel/core";
 import type { PluginState, ProgramScope } from "../types.js";
 import { createCssBooleanGateLowering } from "./cssBooleanGates.js";
+import { jsxCssPropImportSource } from "./options.js";
+import { isStaticCssShapeExpression } from "./expressionShape.js";
 import { prepareRuntimeCssImports } from "./runtimeImports.js";
+import { prepareRuntimeClassValue } from "./runtimeRecipes.js";
 import { registerStaticCssEvalResultMetadata } from "./metadata.js";
 import { isInsideExtractCallsImplementation } from "../extractionCalls/index.js";
 import {
@@ -60,10 +63,13 @@ export function preprocessJsxCssProp(
   path: NodePath<t.Program>,
   state: PluginState
 ): boolean {
-  if (state.opts.jsxCssProp !== true) {
+  if (!state.opts.jsxCssProp) {
     return false;
   }
 
+  const importSource = jsxCssPropImportSource(state.opts.jsxCssProp);
+  (path.scope as ProgramScope).minchoData.jsxCssPropImportSource = importSource;
+  const customCss = importSource !== cssModuleName;
   let transformed = false;
 
   path.traverse({
@@ -87,30 +93,32 @@ export function preprocessJsxCssProp(
 
       const normalizedElement: NormalizedJsxCssPropElement = {
         ...analyzedElement,
-        dynamicCssVariableLowering:
-          createCssBooleanGateLowering(
-            openingElementPath,
-            analyzedElement,
-            state
-          ) ??
-          createOrderedCssLowering(openingElementPath, analyzedElement, {
-            splitConditions: state.opts.optimize?.runtimeCodegen === true,
-            nonInheritingCssVars: state.opts.experimental?.nonInheritingCssVars
-          }) ??
-          (rule
-            ? createDynamicCssVariableLowering({
-                path: openingElementPath,
-                rule,
-                nonInheritingCssVars:
-                  state.opts.experimental?.nonInheritingCssVars,
-                needsClassNameMerge:
-                  analyzedElement.classNameAttribute !== null ||
-                  hasSpread ||
-                  (rule.kind === "branch" &&
-                    (analyzedElement.attributesBeforeCss.length > 0 ||
-                      analyzedElement.attributesAfterCss.length > 0))
-              })
-            : null)
+        dynamicCssVariableLowering: customCss
+          ? null
+          : (createCssBooleanGateLowering(
+              openingElementPath,
+              analyzedElement,
+              state
+            ) ??
+            createOrderedCssLowering(openingElementPath, analyzedElement, {
+              splitConditions: state.opts.optimize?.runtimeCodegen === true,
+              nonInheritingCssVars:
+                state.opts.experimental?.nonInheritingCssVars
+            }) ??
+            (rule
+              ? createDynamicCssVariableLowering({
+                  path: openingElementPath,
+                  rule,
+                  nonInheritingCssVars:
+                    state.opts.experimental?.nonInheritingCssVars,
+                  needsClassNameMerge:
+                    analyzedElement.classNameAttribute !== null ||
+                    hasSpread ||
+                    (rule.kind === "branch" &&
+                      (analyzedElement.attributesBeforeCss.length > 0 ||
+                        analyzedElement.attributesAfterCss.length > 0))
+                })
+              : null))
       };
 
       const { cssAttribute, classNameAttribute, styleAttribute } =
@@ -323,7 +331,37 @@ function analyzeOpeningElement(
     );
   }
 
+  const cssAttributePath = openingElementPath
+    .get("attributes")
+    .find((attribute) => attribute.node === cssAttribute);
+  const valuePath = cssAttributePath?.isJSXAttribute()
+    ? cssAttributePath.get("value")
+    : undefined;
+  const preparedRuntimeClassValue =
+    jsxCssPropImportSource(state.opts.jsxCssProp) !== cssModuleName &&
+    valuePath?.isJSXExpressionContainer() &&
+    prepareRuntimeClassValue(valuePath.get("expression"));
   const rawCssExpression = getCssExpression(openingElementPath, cssAttribute);
+
+  if (preparedRuntimeClassValue)
+    return {
+      cssAttribute,
+      cssExpression: rawCssExpression,
+      cssShapeExpression: rawCssExpression,
+      cssValueClassification: "class-value",
+      cssLoweringMode: {
+        kind: "class-value",
+        cssValueClassification: "class-value"
+      },
+      classNameAttribute: classNameAttributes[0] ?? null,
+      styleAttribute: styleAttributes[0] ?? null,
+      dynamicCssVariableRule: null,
+      attributesBeforeCss,
+      attributesAfterCss,
+      hasSpreadBeforeCss,
+      hasSpreadAfterCss
+    };
+
   prepareRuntimeCssImports(
     rawCssExpression,
     openingElementPath.scope,
@@ -346,6 +384,7 @@ function analyzeOpeningElement(
 
   const cssShapeExpression = getCssPropShapeExpression(partialEvalResult);
   if (
+    jsxCssPropImportSource(state.opts.jsxCssProp) === cssModuleName &&
     state.opts.optimize?.runtimeCodegen === true &&
     canSplitStaticConditions(cssShapeExpression)
   ) {
@@ -380,6 +419,17 @@ function analyzeOpeningElement(
     scope: openingElementPath.scope
   });
 
+  // Token resolvers may transform both the property and its value. Lowering a
+  // runtime token directly to a raw CSS variable would bypass that contract.
+  if (
+    dynamicCssVariableRule &&
+    jsxCssPropImportSource(state.opts.jsxCssProp) !== cssModuleName
+  )
+    throw openingElementPath.buildCodeFrameError(
+      "Mincho JSX css prop with a custom importSource requires static token values. " +
+        "Select complete static style branches, or use React style for runtime values."
+    );
+
   const sidecarHoistability = dynamicCssVariableRule
     ? ({ kind: "not-candidate" } satisfies CssPropSidecarHoistability)
     : getCssPropSidecarHoistabilityRoute({
@@ -408,6 +458,15 @@ function analyzeOpeningElement(
     state
   });
 
+  if (
+    jsxCssPropImportSource(state.opts.jsxCssProp) !== cssModuleName &&
+    hasRuntimeStyleArray(route.cssExpression)
+  )
+    throw openingElementPath.buildCodeFrameError(
+      "Mincho JSX css prop with a custom importSource requires complete static style arrays. " +
+        "Select the complete array in each conditional branch to preserve token and atomic precedence."
+    );
+
   assertSupportedCssPropLoweringMode(
     openingElementPath,
     state,
@@ -429,6 +488,28 @@ function analyzeOpeningElement(
     hasSpreadBeforeCss,
     hasSpreadAfterCss
   };
+}
+
+function hasRuntimeStyleArray(expression: t.Expression): boolean {
+  const branches = (value: t.Expression): t.Expression[] => {
+    if (t.isArrayExpression(value))
+      return value.elements.filter((element): element is t.Expression =>
+        t.isExpression(element)
+      );
+    if (t.isConditionalExpression(value))
+      return [value.consequent, value.alternate];
+    if (t.isLogicalExpression(value)) return [value.left, value.right];
+    return [];
+  };
+  const containsRule = (value: t.Expression): boolean =>
+    t.isObjectExpression(value) || branches(value).some(containsRule);
+
+  return (
+    (t.isArrayExpression(expression) &&
+      !isStaticCssShapeExpression(expression) &&
+      containsRule(expression)) ||
+    branches(expression).some(hasRuntimeStyleArray)
+  );
 }
 
 function assertSupportedCssPropElement(

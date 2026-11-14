@@ -59,7 +59,7 @@ export function minchoBabelPlugin(): PluginObj<PluginState> {
                 filename: state.file.opts.filename ?? "/__mincho__.tsx",
                 source: state.file.code,
                 program: path,
-                jsxCssProp: state.opts.jsxCssProp
+                jsxCssProp: Boolean(state.opts.jsxCssProp)
               });
 
               let step = flow.next();
@@ -168,6 +168,7 @@ export type {
   PluginOptions
 } from "./types.js";
 export { analyzeExtractCalls as internalAnalyzeExtractCalls } from "./extractionCalls/analysis.js";
+export { jsxCssPropExtractCalls as internalJsxCssPropExtractCalls } from "./jsxCssProp/options.js";
 export {
   canonicalExtractCallsFile as internalCanonicalExtractCallsFile,
   resolveExtractCallsFile as internalResolveExtractCallsFile
@@ -178,6 +179,7 @@ export {
   inspectCommonJs as internalInspectCommonJs,
   commonJsToEsmPlugin as internalCommonJsToEsmPlugin
 } from "./commonjs/esm.js";
+export { normalizeTypeScriptCommonJs as internalNormalizeTypeScriptCommonJs } from "./commonjs/modules.js";
 
 export {
   createModuleGraph as internalCreateModuleGraph,

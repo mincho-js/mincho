@@ -70,7 +70,7 @@ function isTypeReference(path: NodePath<t.Node>): boolean {
 
 function jsxPragmaBindings(
   program: NodePath<t.Program>,
-  file?: BabelFile
+  file?: Pick<BabelFile, "opts" | "ast">
 ): Set<string> {
   const pragmas = {
     jsxPragma: "React.createElement",
@@ -118,7 +118,7 @@ function jsxPragmaBindings(
 /** TypeScript's CommonJS surface is normalized before the TypeScript preset runs. */
 export function normalizeTypeScriptCommonJs(
   program: NodePath<t.Program>,
-  file?: BabelFile
+  file?: Pick<BabelFile, "opts" | "ast">
 ): void {
   let changed = false;
   let hasJsx: boolean | undefined;

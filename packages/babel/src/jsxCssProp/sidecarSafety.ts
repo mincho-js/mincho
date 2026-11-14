@@ -1,6 +1,7 @@
 import { types as t } from "@babel/core";
 import type { NodePath } from "@babel/core";
 import { unwrapTransparentCssRuleExpression } from "../staticCssEval/candidates.js";
+import { everyPatternExpression } from "./patternExpressions.js";
 import { isSidecarSafeFunctionLike } from "./sidecarFunctionSafety.js";
 import {
   hasSidecarBranch,
@@ -29,13 +30,21 @@ export type SidecarSafetyState = {
   readonly scope: AnalysisScope;
   readonly visiting: ReadonlySet<SidecarBinding>;
   readonly localNames: ReadonlySet<string>;
+  readonly executedBranches?: ReadonlyMap<
+    t.Expression,
+    readonly NodePath<t.Expression>[]
+  >;
 };
 
 export function isSidecarSafeCssRuleExpression(options: {
   readonly expression: t.Expression;
   readonly rawExpression?: t.Expression;
+  readonly path?: NodePath<t.Expression>;
   readonly state: SidecarSafetyState;
 }): boolean {
+  const state = options.path
+    ? withExecutedBranches(options.path, options.state)
+    : options.state;
   const expression = unwrapTransparentCssRuleExpression(options.expression);
   const rawExpression = options.rawExpression
     ? unwrapTransparentCssRuleExpression(options.rawExpression)
@@ -46,13 +55,13 @@ export function isSidecarSafeCssRuleExpression(options: {
     !isSidecarSafePreservedRawCssRuleExpression(
       rawExpression,
       expression,
-      options.state
+      state
     )
   ) {
     return false;
   }
 
-  return isSidecarSafeCssRuleExpressionNode(expression, options.state);
+  return isSidecarSafeCssRuleExpressionNode(expression, state);
 }
 
 function isSidecarSafeCssRuleExpressionNode(
@@ -157,6 +166,14 @@ function isSidecarSafeExpression(
   const unwrappedExpression = t.isSuper(expression)
     ? expression
     : unwrapTransparentCssRuleExpression(expression);
+
+  const executedBranches = t.isSuper(unwrappedExpression)
+    ? undefined
+    : state.executedBranches?.get(unwrappedExpression);
+  if (executedBranches)
+    return executedBranches.every((branch) =>
+      isSidecarSafeExpression(branch.node, { ...state, scope: branch.scope })
+    );
 
   if (t.isIdentifier(unwrappedExpression)) {
     return isSidecarSafeIdentifier(unwrappedExpression, state);
@@ -352,9 +369,89 @@ function isSidecarSafeBinding(
       binding.constant &&
       Boolean(binding.path.node.init) &&
       t.isExpression(binding.path.node.init) &&
-      isSidecarSafeExpression(binding.path.node.init, nextState)
+      everyPatternExpression(
+        binding.path.get("id"),
+        (expression) => isSidecarSafeExpressionPath(expression, nextState),
+        binding.path.node.init
+      ) &&
+      isSidecarSafeExpressionPath(binding.path.get("init"), nextState)
     );
   }
 
   return false;
+}
+
+function isSidecarSafeExpressionPath(
+  path: NodePath<t.Node | null | undefined>,
+  state: SidecarSafetyState
+): boolean {
+  if (!path.isExpression()) return false;
+  if (
+    path.isTSAsExpression() ||
+    path.isTSTypeAssertion() ||
+    path.isTSNonNullExpression() ||
+    path.isTSSatisfiesExpression() ||
+    path.isTypeCastExpression() ||
+    path.isParenthesizedExpression()
+  )
+    return isSidecarSafeExpressionPath(
+      path.get("expression") as NodePath<t.Expression>,
+      state
+    );
+
+  if (path.isBinaryExpression())
+    return (
+      isSidecarSafeExpressionPath(path.get("left"), state) &&
+      isSidecarSafeExpressionPath(path.get("right"), state)
+    );
+  if (path.isSequenceExpression())
+    return path
+      .get("expressions")
+      .every((item) => isSidecarSafeExpressionPath(item, state));
+  const branches = getConfidentlyExecutedBranches(path);
+  return branches
+    ? branches.every((branch) => isSidecarSafeExpressionPath(branch, state))
+    : isSidecarSafeExpression(path.node, withExecutedBranches(path, state));
+}
+
+function withExecutedBranches(
+  path: NodePath<t.Expression>,
+  state: SidecarSafetyState
+): SidecarSafetyState {
+  const executedBranches = new Map(state.executedBranches);
+  const visit = (inner: NodePath<t.Expression>) => {
+    const branches = getConfidentlyExecutedBranches(inner);
+    if (branches) executedBranches.set(inner.node, branches);
+  };
+  visit(path);
+  path.traverse({
+    "ConditionalExpression|LogicalExpression"(inner) {
+      if (inner.isExpression()) visit(inner);
+    }
+  });
+
+  return { ...state, scope: path.scope, executedBranches };
+}
+
+export function getConfidentlyExecutedBranches(
+  path: NodePath<t.Expression>
+): readonly NodePath<t.Expression>[] | undefined {
+  if (path.isConditionalExpression()) {
+    const test = path.get("test");
+    const evaluated = test.evaluate();
+    if (evaluated.confident)
+      return [test, path.get(evaluated.value ? "consequent" : "alternate")];
+  }
+  if (path.isLogicalExpression()) {
+    const left = path.get("left");
+    const evaluated = left.evaluate();
+    if (!evaluated.confident) return;
+    const readsRight =
+      path.node.operator === "&&"
+        ? !!evaluated.value
+        : path.node.operator === "||"
+          ? !evaluated.value
+          : evaluated.value == null;
+    return readsRight ? [left, path.get("right")] : [left];
+  }
 }

@@ -1,5 +1,11 @@
 import type { SourceAstCache } from "./staticCssEval/moduleParser.js";
-import { parseSync, traverse, types as t, type NodePath } from "@babel/core";
+import {
+  parseSync,
+  traverse,
+  types as t,
+  type NodePath,
+  type TransformOptions
+} from "@babel/core";
 import type { Binding } from "@babel/traverse";
 import { isAbsolute } from "node:path";
 import {
@@ -52,17 +58,40 @@ export function parseModuleProgram(
   id: string,
   source: string,
   jsx = /\.(?:[jt]sx|[cm]?js)$/.test(id),
-  cache?: SourceAstCache
+  cache?: SourceAstCache,
+  parserPlugins: NonNullable<TransformOptions["parserOpts"]>["plugins"] = []
 ): NodePath<t.Program> {
+  const typescript = /\.[cm]?tsx?$/.test(id);
+  const plugins = parserPlugins.filter((entry) => {
+    const name = typeof entry === "string" ? entry : entry[0];
+
+    if (typescript && (name === "flow" || name === "flowComments"))
+      return false;
+
+    return jsx || !/\.[cm]?ts$/.test(id) || name !== "jsx";
+  });
+  const pluginNames = new Set(
+    plugins.map((entry) => (typeof entry === "string" ? entry : entry[0]))
+  );
+
+  for (const plugin of ["jsx", "typescript"] as const) {
+    if (plugin === "jsx" && !jsx) continue;
+    if (plugin === "typescript" && pluginNames.has("flow")) continue;
+    if (!pluginNames.has(plugin)) {
+      plugins.push(plugin);
+      pluginNames.add(plugin);
+    }
+  }
+
   const ast = cache
     ? cache.parse({
         resolvedFile: id,
         source,
         parserOptions: {
-          plugins: jsx ? ["jsx", "typescript"] : ["typescript"],
+          plugins,
           sourceType: "unambiguous",
           jsx,
-          typescript: true
+          typescript: pluginNames.has("typescript")
         }
       })
     : parseSync(source, {
@@ -71,7 +100,7 @@ export function parseModuleProgram(
         babelrc: false,
         parserOpts: {
           sourceType: "unambiguous",
-          plugins: ["typescript", ...(jsx ? ["jsx" as const] : [])]
+          plugins
         }
       });
 

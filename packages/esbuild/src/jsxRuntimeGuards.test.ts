@@ -32,6 +32,53 @@ afterEach(async () => {
 });
 
 describe("esbuild automatic JSX runtime specialization", () => {
+  it("compiles a configured css source through the bundler alias resolver", async () => {
+    const root = await fixture(
+      'export const App = () => <div css={{bg: "brand"}} />;'
+    );
+    await writeFile(
+      join(root, "package.json"),
+      JSON.stringify({ name: "jsx-css-source-fixture", type: "module" })
+    );
+    await writeFile(
+      join(root, "preset.ts"),
+      `
+      import { defineRules } from "@mincho-js/css";
+      export const { css } = defineRules({
+        properties: { backgroundColor: {brand: "#147aff"} },
+        shortcuts: {bg: "backgroundColor"}
+      });
+    `
+    );
+    const result = await build({
+      absWorkingDir: root,
+      entryPoints: ["entry.tsx"],
+      outdir: "out",
+      bundle: true,
+      write: false,
+      format: "esm",
+      jsx: "automatic",
+      jsxImportSource: "@mincho-js/react",
+      external: ["@mincho-js/react/*"],
+      alias: { "test-preset": join(root, "preset.ts") },
+      plugins: minchoEsbuildPlugins({
+        cache: false,
+        jsxCssProp: { importSource: "test-preset" }
+      })
+    });
+
+    expect(output(result)).toContain("className");
+    expect(output(result)).not.toMatch(
+      /defineRules|compileCSSRule|[,{]\s*css\s*:/
+    );
+    expect(
+      result
+        .outputFiles!.filter((file) => file.path.endsWith(".css"))
+        .map((file) => file.text)
+        .join("\n")
+    ).toContain("background-color: #147aff");
+  });
+
   it.each(["esm", "cjs"] as const)(
     "redirects the native automatic %s import after Mincho lowering",
     async (format) => {

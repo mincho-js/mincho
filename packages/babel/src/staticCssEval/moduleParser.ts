@@ -214,10 +214,7 @@ export class SourceAstCache {
         babelrc: false,
         parserOpts: {
           sourceType: input.parserOptions.sourceType,
-          plugins: [
-            ...(input.parserOptions.jsx ? ["jsx" as const] : []),
-            ...(input.parserOptions.typescript ? ["typescript" as const] : [])
-          ]
+          plugins: [...input.parserOptions.plugins]
         }
       });
       if (!ast) throw new TypeError(`Cannot parse ${input.resolvedFile}`);
@@ -256,10 +253,7 @@ export function parseStaticCssModuleProgram(
     configFile: false,
     babelrc: false,
     parserOpts: {
-      plugins: [
-        ...(input.parserOptions.jsx ? (["jsx"] as const) : []),
-        ...(input.parserOptions.typescript ? (["typescript"] as const) : [])
-      ]
+      plugins: [...input.parserOptions.plugins]
     },
     plugins: [captureProgramPathPlugin]
   } satisfies Parameters<typeof transformSync>[1];

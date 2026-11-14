@@ -1,12 +1,14 @@
 import { resolve, dirname } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { transformWithEsbuild } from "vite";
+import type { TransformOptions } from "@babel/core";
 import * as commonJs from "./commonjs/modules.js";
 import {
   createModuleGraph,
   parseModuleProgram,
   type ModuleGraphFlow
 } from "./moduleGraph.js";
+import { SourceAstCache } from "./staticCssEval/moduleParser.js";
 
 function fixture(files: Record<string, string>) {
   const graph = createModuleGraph();
@@ -45,6 +47,153 @@ function fixture(files: Record<string, string>) {
 }
 
 describe("shared module graph", () => {
+  it.each([false, true])(
+    "parses TypeScript dependencies despite forwarded Flow plugins with cached parsing=%s",
+    (cached) => {
+      const cache = cached ? new SourceAstCache() : undefined;
+      const plugins = [
+        "jsx",
+        ["flow", { all: true }],
+        "flowComments",
+        ["decorators", { decoratorsBeforeExport: false }]
+      ] satisfies NonNullable<
+        NonNullable<TransformOptions["parserOpts"]>["plugins"]
+      >;
+
+      for (const extension of ["ts", "tsx", "mts", "cts"]) {
+        const source = `export @sealed class Factory {}
+          export const rule = ${extension === "tsx" ? '{ color: "red" } as const' : '<const>{ color: "red" }'};
+          ${extension === "tsx" ? "export const view = <div />;" : ""}`;
+        const program = parseModuleProgram(
+          `/project/factory.${extension}`,
+          source,
+          undefined,
+          cache,
+          plugins
+        );
+
+        expect(program.scope.hasBinding("rule")).toBe(true);
+        expect(program.node.body[0]).toMatchObject({
+          type: "ExportNamedDeclaration",
+          declaration: { type: "ClassDeclaration", decorators: [{}] }
+        });
+        if (extension === "tsx")
+          expect(program.scope.hasBinding("view")).toBe(true);
+      }
+
+      expect(
+        plugins.map((entry) => (typeof entry === "string" ? entry : entry[0]))
+      ).toContain("flow");
+    }
+  );
+
+  it.each([false, true])(
+    "preserves Flow syntax instead of appending TypeScript with cached parsing=%s",
+    (cached) => {
+      const cache = cached ? new SourceAstCache() : undefined;
+      const configurations = [
+        ["flow"],
+        [["flow", { all: true }]]
+      ] satisfies NonNullable<
+        NonNullable<TransformOptions["parserOpts"]>["plugins"]
+      >[];
+
+      for (const plugins of configurations) {
+        const program = parseModuleProgram(
+          "/project/view.jsx",
+          `type Props = {| color: string |};
+           export const View = (props: Props) => <div>{props.color}</div>;`,
+          true,
+          cache,
+          plugins
+        );
+
+        expect(program.node.body[0]).toMatchObject({
+          type: "TypeAlias",
+          right: { type: "ObjectTypeAnnotation", exact: true }
+        });
+        expect(program.scope.hasBinding("View")).toBe(true);
+      }
+    }
+  );
+
+  it.each([false, true])(
+    "preserves configured decorator syntax with cached parsing=%s",
+    (cached) => {
+      const program = parseModuleProgram(
+        "/project/view.tsx",
+        "export @sealed class View { render(): unknown { return <div />; } }",
+        true,
+        cached ? new SourceAstCache() : undefined,
+        [["decorators", { decoratorsBeforeExport: false }]]
+      );
+
+      expect(program.node.body[0]).toMatchObject({
+        type: "ExportNamedDeclaration",
+        declaration: {
+          type: "ClassDeclaration",
+          decorators: [{ expression: { name: "sealed" } }]
+        }
+      });
+    }
+  );
+
+  it.each([false, true])(
+    "keeps user TypeScript plugin options over defaults with cached parsing=%s",
+    (cached) => {
+      const cache = cached ? new SourceAstCache() : undefined;
+      const parse = (disallowAmbiguousJSXLike: boolean) =>
+        parseModuleProgram(
+          "/project/generic.ts",
+          "export const identity = <T>(value: T) => value;",
+          false,
+          cache,
+          [["typescript", { disallowAmbiguousJSXLike }]]
+        );
+
+      expect(parse(false).scope.hasBinding("identity")).toBe(true);
+      expect(() => parse(true)).toThrow("reserved in files with the .mts");
+    }
+  );
+
+  it.each([false, true])(
+    "keeps TS assertions and TSX syntax filename-specific with cached parsing=%s",
+    (cached) => {
+      const cache = cached ? new SourceAstCache() : undefined;
+      const plugins = [
+        "jsx",
+        ["decorators", { decoratorsBeforeExport: false }]
+      ] satisfies NonNullable<
+        NonNullable<TransformOptions["parserOpts"]>["plugins"]
+      >;
+      const program = parseModuleProgram(
+        "/project/factory.ts",
+        'export @sealed class Factory {} export const rule = <const>{ color: "red" };',
+        undefined,
+        cache,
+        plugins
+      );
+      const view = parseModuleProgram(
+        "/project/view.tsx",
+        "export const view = <div />;",
+        undefined,
+        cache,
+        plugins
+      );
+      const javascript = parseModuleProgram(
+        "/project/view.js",
+        "export const view = <div />;",
+        undefined,
+        cache,
+        plugins
+      );
+
+      expect(program.scope.hasBinding("rule")).toBe(true);
+      expect(view.scope.hasBinding("view")).toBe(true);
+      expect(javascript.scope.hasBinding("view")).toBe(true);
+    }
+  );
+
   it.each([
     ["entry.ts", true, "other"],
     ["entry.mts", true, "raw"],
