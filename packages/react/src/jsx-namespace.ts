@@ -10,54 +10,106 @@ type CssPropRule = CssPropConfig extends {
 
 // Configured sources receive a complete style array in one call, so its elements
 // are available only when the selected CSS function accepts arrays.
-type CssPropRuleArrayItem = Extract<CssPropRule, readonly unknown[]>[number];
-type MinchoCssPropRecursiveArrayItem =
-  CssPropRuleArrayItem | ClassPrimitive | MinchoCssPropRecursiveArray;
-type MinchoCssPropRecursiveArray =
-  | MinchoCssPropRecursiveArrayItem[]
-  | readonly MinchoCssPropRecursiveArrayItem[];
+type CssPropRuleArrayItem<Rule> = Extract<Rule, readonly unknown[]>[number];
+type MinchoCssPropRecursiveArrayItem<Rule> =
+  | CssPropRuleArrayItem<Rule>
+  | ClassPrimitive
+  | MinchoCssPropRecursiveArray<Rule>;
+type MinchoCssPropRecursiveArray<Rule = CssPropRule> =
+  | MinchoCssPropRecursiveArrayItem<Rule>[]
+  | readonly MinchoCssPropRecursiveArrayItem<Rule>[];
 
-export type MinchoCssPropValue =
-  CssPropRule | ClassPrimitive | MinchoCssPropRecursiveArray;
+type CssPropValue<Rule> =
+  Rule | ClassPrimitive | MinchoCssPropRecursiveArray<Rule>;
 
-type MinchoCssProp = {
-  css?: MinchoCssPropValue;
+export type MinchoCssPropValue = CssPropValue<CssPropRule>;
+
+type MinchoCssProp<Rule> = {
+  css?: CssPropValue<Rule>;
 };
 
-type WithConditionalCSSProp<Props> = "className" extends keyof Props
-  ? string extends NonNullable<Props["className"]>
-    ? "style" extends keyof Props
-      ? CSSProperties extends NonNullable<Props["style"]>
-        ? NonNullable<Props["style"]> extends CSSProperties
-          ? Props & MinchoCssProp
+// A polymorphic component's inferred index signature is not a css declaration.
+type DeclaredCssProp<Props> = {
+  [Key in keyof Props as Key extends "css" ? Key : never]: Props[Key];
+};
+
+type WithConditionalCSSProp<Props, Rule = CssPropRule> = Props extends unknown
+  ? "css" extends keyof DeclaredCssProp<Props>
+    ? Props
+    : "className" extends keyof Props
+      ? string extends NonNullable<Props["className"]>
+        ? "style" extends keyof Props
+          ? CSSProperties extends NonNullable<Props["style"]>
+            ? NonNullable<Props["style"]> extends CSSProperties
+              ? Props & MinchoCssProp<Rule>
+              : Props
+            : Props
           : Props
         : Props
       : Props
-    : Props
-  : Props;
+  : never;
+
+type CssPropFunction = (...args: never[]) => unknown;
+type DefaultCssPropFunction = (rule: CssPropRule) => unknown;
+
+/**
+ * Adds a scoped css prop using a CSS function's first argument.
+ * Explicit function types do not read the global CssPropConfig augmentation.
+ * An existing css declaration remains the component's own contract.
+ */
+export type WithCssProp<
+  Props,
+  Css extends CssPropFunction
+> = WithConditionalCSSProp<Props, Parameters<Css>[0]>;
 
 type MinchoIntrinsicElements<
-  IntrinsicElements extends object = ReactJSX.IntrinsicElements
+  IntrinsicElements extends object = ReactJSX.IntrinsicElements,
+  Css extends CssPropFunction = DefaultCssPropFunction
 > = {
-  [Element in keyof IntrinsicElements]: WithConditionalCSSProp<
-    IntrinsicElements[Element]
+  [Element in keyof IntrinsicElements]: WithCssProp<
+    IntrinsicElements[Element],
+    Css
   >;
 };
 
+/**
+ * Scoped JSX contracts shared by Mincho and preset runtimes.
+ * Pass a CSS function to IntrinsicElements and LibraryManagedAttributes to
+ * select its input. Omitting it preserves the default CssPropConfig contract.
+ */
 // eslint-disable-next-line @typescript-eslint/no-namespace -- TypeScript scoped JSX runtimes are modeled as exported JSX namespaces.
-export declare namespace JSX {
+export declare namespace CssPropJSX {
   type ElementType = ReactJSX.ElementType;
   type Element = ReactJSX.Element;
   type ElementClass = ReactJSX.ElementClass;
   type ElementAttributesProperty = ReactJSX.ElementAttributesProperty;
   type ElementChildrenAttribute = ReactJSX.ElementChildrenAttribute;
-  type LibraryManagedAttributes<Component, Props> = WithConditionalCSSProp<
-    ReactJSX.LibraryManagedAttributes<Component, Props>
-  >;
+  type LibraryManagedAttributes<
+    Component,
+    Props,
+    Css extends CssPropFunction = DefaultCssPropFunction
+  > = WithCssProp<ReactJSX.LibraryManagedAttributes<Component, Props>, Css>;
   type IntrinsicAttributes = ReactJSX.IntrinsicAttributes;
   type IntrinsicClassAttributes<Element> =
     ReactJSX.IntrinsicClassAttributes<Element>;
-  type IntrinsicElements = MinchoIntrinsicElements;
+  type IntrinsicElements<Css extends CssPropFunction = DefaultCssPropFunction> =
+    MinchoIntrinsicElements<ReactJSX.IntrinsicElements, Css>;
+}
+
+// The JSX checker needs concrete intrinsic attributes, not a generic type alias.
+// eslint-disable-next-line @typescript-eslint/no-namespace -- TypeScript scoped JSX runtimes are modeled as exported JSX namespaces.
+export declare namespace JSX {
+  type ElementType = CssPropJSX.ElementType;
+  type Element = CssPropJSX.Element;
+  type ElementClass = CssPropJSX.ElementClass;
+  type ElementAttributesProperty = CssPropJSX.ElementAttributesProperty;
+  type ElementChildrenAttribute = CssPropJSX.ElementChildrenAttribute;
+  type LibraryManagedAttributes<Component, Props> =
+    CssPropJSX.LibraryManagedAttributes<Component, Props>;
+  type IntrinsicAttributes = CssPropJSX.IntrinsicAttributes;
+  type IntrinsicClassAttributes<Element> =
+    CssPropJSX.IntrinsicClassAttributes<Element>;
+  type IntrinsicElements = CssPropJSX.IntrinsicElements;
 }
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
@@ -68,6 +120,179 @@ if (import.meta.vitest) {
   const { describe, it, assertType, expectTypeOf } = import.meta.vitest;
 
   describe("scoped Mincho JSX namespace", () => {
+    it("keeps explicit CSS definitions independent of the default namespace", () => {
+      type PresetRule = { bg?: "blue-500" | "blue-700"; px?: 2 | 3 };
+      const _presetCss = (_rule: PresetRule | readonly PresetRule[]) =>
+        "preset";
+      type PresetProps = CssPropJSX.IntrinsicElements<
+        typeof _presetCss
+      >["button"];
+
+      expectTypeOf<PresetProps>().toEqualTypeOf<
+        WithCssProp<ReactJSX.IntrinsicElements["button"], typeof _presetCss>
+      >();
+
+      assertType<PresetProps>({ css: { bg: "blue-500", px: 3 } });
+      assertType<PresetProps>({ css: ["external", [{ px: 2 }]] as const });
+      assertType<PresetProps>({ css: false });
+
+      assertType<PresetProps>({
+        // @ts-expect-error the selected definition retains its token values.
+        css: { bg: "unknown-color" }
+      });
+      assertType<PresetProps>({
+        // @ts-expect-error a preset input does not inherit default CSS properties.
+        css: { padding: 12 }
+      });
+
+      assertType<JSX.IntrinsicElements["button"]>({ css: { padding: 12 } });
+      assertType<JSX.IntrinsicElements["button"]>({
+        // @ts-expect-error scoped preset properties do not augment default JSX.
+        css: { bg: "blue-500" }
+      });
+      assertType<ReactJSX.IntrinsicElements["button"]>({
+        // @ts-expect-error scoped css props do not augment React's namespace.
+        css: { bg: "blue-500" }
+      });
+
+      const _otherCss = (_rule: { foreground?: "primary" }) => "other";
+      type OtherProps = CssPropJSX.IntrinsicElements<
+        typeof _otherCss
+      >["button"];
+
+      assertType<OtherProps>({ css: { foreground: "primary" } });
+      assertType<OtherProps>({
+        // @ts-expect-error two explicit definitions keep separate vocabularies.
+        css: { bg: "blue-500" }
+      });
+    });
+
+    it("keeps custom CSS functions' array support and forwarding gates", () => {
+      const _objectCss = (_rule: { bg?: "blue-500" }) => "preset";
+      type ForwardingProps = {
+        className?: string;
+        style?: CSSProperties;
+        label: string;
+      };
+      type Component = (props: ForwardingProps) => ReactJSX.Element;
+      type ManagedProps = CssPropJSX.LibraryManagedAttributes<
+        Component,
+        ForwardingProps,
+        typeof _objectCss
+      >;
+
+      assertType<ManagedProps>({ label: "Button", css: { bg: "blue-500" } });
+      assertType<ManagedProps>({ label: "Button", css: ["external", false] });
+      assertType<ManagedProps>({
+        label: "Button",
+        // @ts-expect-error object-only functions do not accept style arrays.
+        css: [{ bg: "blue-500" }]
+      });
+
+      expectTypeOf<
+        WithCssProp<{ className?: string; label: string }, typeof _objectCss>
+      >().toEqualTypeOf<{ className?: string; label: string }>();
+      expectTypeOf<
+        WithCssProp<
+          { className?: "fixed"; style?: CSSProperties },
+          typeof _objectCss
+        >
+      >().toEqualTypeOf<{ className?: "fixed"; style?: CSSProperties }>();
+      expectTypeOf<
+        WithCssProp<{ className?: string; style?: string }, typeof _objectCss>
+      >().toEqualTypeOf<{ className?: string; style?: string }>();
+
+      type OwnCssProps = ForwardingProps & { css: "own-css-contract" };
+      type OwnCssComponent = (props: OwnCssProps) => ReactJSX.Element;
+
+      expectTypeOf<
+        CssPropJSX.LibraryManagedAttributes<
+          OwnCssComponent,
+          OwnCssProps,
+          typeof _objectCss
+        >
+      >().toEqualTypeOf<OwnCssProps>();
+    });
+
+    it("preserves explicit component css contracts through scoped JSX", () => {
+      type PresetRule = { bg?: "blue-500" | "blue-700"; px?: 2 | 3 };
+      const _presetCss = (_rule: PresetRule | readonly PresetRule[]) =>
+        "preset";
+      type PresetProps = WithCssProp<
+        ReactJSX.IntrinsicElements["button"],
+        typeof _presetCss
+      >;
+      type Component = (props: PresetProps) => ReactJSX.Element;
+      type ManagedProps = JSX.LibraryManagedAttributes<Component, PresetProps>;
+
+      assertType<ManagedProps>({ css: { bg: "blue-500", px: 3 } });
+      assertType<ManagedProps>({
+        css: ["external", [{ bg: "blue-700", px: 2 }]] as const
+      });
+      assertType<ManagedProps>({ css: false });
+      expectTypeOf<ManagedProps>().toEqualTypeOf<PresetProps>();
+
+      assertType<ManagedProps>({
+        // @ts-expect-error JSX preserves the selected definition's token values.
+        css: { bg: "unknown-color" }
+      });
+      assertType<ManagedProps>({
+        // @ts-expect-error JSX does not widen the explicit contract to default CSS.
+        css: { padding: 12 }
+      });
+
+      type IndexedProps = PresetProps & { [name: string]: unknown };
+      type IndexedComponent = (props: IndexedProps) => ReactJSX.Element;
+      type IndexedManagedProps = JSX.LibraryManagedAttributes<
+        IndexedComponent,
+        IndexedProps
+      >;
+
+      assertType<IndexedManagedProps>({
+        css: [{ bg: "blue-500", px: 3 }] as const,
+        custom: true
+      });
+      expectTypeOf<IndexedManagedProps>().toEqualTypeOf<IndexedProps>();
+      assertType<IndexedManagedProps>({
+        // @ts-expect-error A string index does not widen an explicit css prop.
+        css: { padding: 12 }
+      });
+
+      type UnionProps =
+        | (PresetProps & { kind: "preset" })
+        | {
+            kind: "native";
+            className?: string;
+            style?: CSSProperties;
+          };
+      type UnionComponent = (props: UnionProps) => ReactJSX.Element;
+      type UnionManagedProps = JSX.LibraryManagedAttributes<
+        UnionComponent,
+        UnionProps
+      >;
+
+      assertType<UnionManagedProps>({
+        kind: "preset",
+        css: [{ bg: "blue-500" }] as const
+      });
+      assertType<UnionManagedProps>({ kind: "native", css: { padding: 12 } });
+      // @ts-expect-error The preset branch retains its explicit token contract.
+      assertType<UnionManagedProps>({ kind: "preset", css: { padding: 12 } });
+
+      type RequiredProps = PresetProps & {
+        css: NonNullable<PresetProps["css"]>;
+      };
+      type RequiredComponent = (props: RequiredProps) => ReactJSX.Element;
+      type RequiredManagedProps = JSX.LibraryManagedAttributes<
+        RequiredComponent,
+        RequiredProps
+      >;
+
+      assertType<RequiredManagedProps>({ css: { bg: "blue-500" } });
+      // @ts-expect-error JSX keeps an explicitly required css prop required.
+      assertType<RequiredManagedProps>({});
+    });
+
     it("defines css values from ComplexCSSRule and ClassPrimitive", () => {
       const cssRule: ComplexCSSRule = { color: "red" };
       const condition = true as boolean;

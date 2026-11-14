@@ -211,6 +211,8 @@ css.raw({ border: "1px" }); // ❌ Type error: property is disabled
 
 Use functions for dynamic property resolution:
 
+Function resolvers receive ordinary object arguments unchanged; objects whose keys are all `base`, selectors, at-rules, or registered conditions are interpreted as conditional values before each leaf is passed to the resolver.
+
 ```typescript
 const { css } = defineRules({
   properties: {

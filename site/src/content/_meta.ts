@@ -4,6 +4,7 @@ export default {
   literal: "Literal CSS",
   rules: "Rules",
   theme: "Theme",
+  "theme-ui": "Theme UI Presets",
   styled: "Styled Components",
   classname: "Class Name Utilities",
   "define-rules": "Define Rules"

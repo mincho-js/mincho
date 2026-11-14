@@ -1,4 +1,5 @@
 import type { CSSRule } from "@mincho-js/transform-to-vanilla";
+import type { DefineRulesDirectCssInput } from "./types.js";
 import { rules as rootRules } from "../rules/index.js";
 import { mapValues } from "../rules/utils.js";
 import type {
@@ -66,26 +67,191 @@ export type DefineRulesPatternOptions<
   }>;
 };
 
+type ValidatedStyle<Style, Input> = Style extends (
+  ...args: infer Args
+) => infer Result
+  ? (...args: Args) => DefineRulesDirectCssInput<Result, Input>
+  : DefineRulesDirectCssInput<Style, Input>;
+
+type ValidatedVariantValues<Values, Input> = {
+  [Value in keyof Values]: ValidatedStyle<Values[Value], Input>;
+};
+
+type ValidatedVariants<Groups, Input> = {
+  [Group in keyof Groups]: ValidatedVariantValues<Groups[Group], Input>;
+};
+
+type ValidatedCompounds<Callback, Input> = Callback extends (
+  ...args: infer Args
+) => infer Compounds
+  ? (...args: Args) => {
+      [Index in keyof Compounds]: Compounds[Index] extends {
+        style: infer Style;
+      }
+        ? Omit<Compounds[Index], "style"> & {
+            style: ValidatedStyle<Style, Input>;
+          }
+        : Compounds[Index];
+    }
+  : Callback;
+
+type ValidatedPattern<Options, Input> = {
+  [Key in keyof Options]: Key extends "base"
+    ? ValidatedStyle<Options[Key], Input>
+    : Key extends "variants"
+      ? ValidatedVariants<Options[Key], Input>
+      : Key extends "compoundVariants"
+        ? ValidatedCompounds<Options[Key], Input>
+        : Key extends keyof Input
+          ? DefineRulesDirectCssInput<Options[Key], Input[Key]>
+          : Options[Key];
+};
+
+type PatternInputGate<
+  Options,
+  Input,
+  Validate extends boolean
+> = Validate extends true
+  ? [Options] extends [ValidatedPattern<Options, Input>]
+    ? unknown
+    : never
+  : unknown;
+
+// Limit the inference capture to known keys so fresh object literals keep the
+// ordinary excess-property checks. Optional captures also accept typed inputs
+// whose supported fields are optional.
+type PatternInputCapture<
+  Options,
+  Input,
+  Validate extends boolean
+> = Validate extends true
+  ? {
+      [
+        Key in keyof Options &
+          (
+            | keyof Input
+            | "base"
+            | "variants"
+            | "props"
+            | "defaultVariants"
+            | "compoundVariants"
+          )
+      ]?: Options[Key];
+    }
+  : unknown;
+
+/** Reuses scoped recipe input validation in authoring adapters. */
+export type DefineRulesPatternInput<
+  Options,
+  Input,
+  Validate extends boolean = false
+> = PatternInputCapture<Options, Input, Validate> &
+  PatternInputGate<NoInfer<Options>, Input, Validate>;
+
+type PatternsInputCapture<
+  Patterns,
+  Input,
+  Validate extends boolean
+> = Validate extends true
+  ? { [Key in keyof Patterns]: PatternInputCapture<Patterns[Key], Input, true> }
+  : unknown;
+
+type StyleInputCapture<
+  Args,
+  Style,
+  Input,
+  Validate extends boolean
+> = Validate extends true
+  ? {
+      [Key in keyof Args & keyof Style]?: Key extends keyof Input
+        ? DefineRulesDirectCssInput<Args[Key], Input[Key]>
+        : Args[Key];
+    }
+  : unknown;
+
 type ScopedResult<Variants, Props extends PropsDefinition> = RuntimeFn<
   ResolvedVariants<Exclude<Variants, undefined>>,
   Exclude<Props, undefined>
 >;
 
-interface ScopedRulesWith<Style, Variants, Props extends PropsDefinition> {
-  (style: Style, debugId?: string): ScopedResult<Variants, Props>;
-  raw(
-    style: Style
+type StyleInputGate<
+  Style,
+  Input,
+  Validate extends boolean
+> = Validate extends true
+  ? [Pick<Style, keyof Style & keyof Input>] extends [
+      DefineRulesDirectCssInput<Pick<Style, keyof Style & keyof Input>, Input>
+    ]
+    ? unknown
+    : never
+  : unknown;
+
+type PatternsInputGate<
+  Patterns,
+  Input,
+  Validate extends boolean
+> = Validate extends true
+  ? { [Key in keyof Patterns]: PatternInputGate<Patterns[Key], Input, true> }
+  : unknown;
+
+type ScopedPatterns<Input, Context, Variants, Props> = {
+  [Key in keyof Variants]: DefineRulesPatternOptions<
+    Input,
+    Context,
+    Variants[Key],
+    PatternProps<Props, Key>
+  >;
+} & {
+  [Key in keyof Props]: { props?: Props[Key] & PropsDefinition };
+};
+
+type ExtendedPatternOptions<
+  Input,
+  Context,
+  ParentVariants extends VariantGroups,
+  Variants,
+  Props extends PropsDefinition
+> = DefineRulesPatternOptions<
+  Input,
+  Context,
+  Variants,
+  Props,
+  ExtendedVariants<
+    ParentVariants,
+    ResolvedVariants<Exclude<Variants, undefined>>
+  >
+>;
+
+interface ScopedRulesWith<
+  Style,
+  Variants,
+  Props extends PropsDefinition,
+  Input,
+  Validate extends boolean
+> {
+  <const Args extends Style>(
+    style: Style & StyleInputCapture<Args, Style, Input, Validate>,
+    debugId?: string
+  ): ScopedResult<Variants, Props>;
+  raw<const Args extends Style>(
+    style: Style & StyleInputCapture<Args, Style, Input, Validate>
   ): PatternOptions<ResolvedVariants<Exclude<Variants, undefined>>, Props>;
-  multiple<Styles extends Record<string | number, Style>>(
-    styles: Styles,
+  multiple<const Styles extends Record<string | number, Style>>(
+    styles: Styles &
+      (Validate extends true
+        ? {
+            [Key in keyof Styles]: StyleInputGate<Styles[Key], Input, true>;
+          }
+        : unknown),
     debugId?: string
   ): { [Key in keyof Styles]: ScopedResult<Variants, Props> };
   extends<
     ParentVariants extends VariantGroups,
-    ParentProps extends ComplexPropDefinitions<PropTarget | undefined>
+    ParentProps extends ComplexPropDefinitions<PropTarget | undefined>,
+    const Args extends Style = Style
   >(
     parent: RuntimeFn<ParentVariants, ParentProps>,
-    style: Style,
+    style: Style & StyleInputCapture<Args, Style, Input, Validate>,
     debugId?: string
   ): RuntimeFn<
     ExtendedVariants<
@@ -96,59 +262,84 @@ interface ScopedRulesWith<Style, Variants, Props extends PropsDefinition> {
   >;
 }
 
-export interface DefineRulesRules<Input, Context = undefined> {
+export interface DefineRulesRules<
+  Input,
+  Context = undefined,
+  ValidateEmptyInputs extends boolean = false
+> {
   // Declared variants must infer even when every style is a context callback.
   // Separate optional overloads keep recipes without variants from widening.
   <
     Variants extends ScopedVariants<Input, Context>,
-    Props extends PropsDefinition = undefined
+    Props extends PropsDefinition = undefined,
+    const Options extends DefineRulesPatternOptions<
+      Input,
+      Context,
+      Variants,
+      Props
+    > = DefineRulesPatternOptions<Input, Context, Variants, Props>
   >(
     options: DefineRulesPatternOptions<Input, Context, Variants, Props> & {
       variants: Variants;
-    },
+    } & DefineRulesPatternInput<Options, Input, ValidateEmptyInputs>,
     debugId?: string
   ): ScopedResult<Variants, Props>;
 
   <
     Variants extends ScopedVariants<Input, Context> | undefined = undefined,
-    Props extends PropsDefinition = undefined
+    Props extends PropsDefinition = undefined,
+    const Options extends DefineRulesPatternOptions<
+      Input,
+      Context,
+      Variants,
+      Props
+    > = DefineRulesPatternOptions<Input, Context, Variants, Props>
   >(
-    options: DefineRulesPatternOptions<Input, Context, Variants, Props>,
+    options: DefineRulesPatternOptions<Input, Context, Variants, Props> &
+      DefineRulesPatternInput<Options, Input, ValidateEmptyInputs>,
     debugId?: string
   ): ScopedResult<Variants, Props>;
 
   raw<
     Variants extends ScopedVariants<Input, Context>,
-    Props extends PropsDefinition = undefined
+    Props extends PropsDefinition = undefined,
+    const Options extends DefineRulesPatternOptions<
+      Input,
+      Context,
+      Variants,
+      Props
+    > = DefineRulesPatternOptions<Input, Context, Variants, Props>
   >(
     options: DefineRulesPatternOptions<Input, Context, Variants, Props> & {
       variants: Variants;
-    }
+    } & DefineRulesPatternInput<Options, Input, ValidateEmptyInputs>
   ): PatternOptions<ResolvedVariants<Exclude<Variants, undefined>>, Props>;
 
   raw<
     Variants extends ScopedVariants<Input, Context> | undefined = undefined,
-    Props extends PropsDefinition = undefined
+    Props extends PropsDefinition = undefined,
+    const Options extends DefineRulesPatternOptions<
+      Input,
+      Context,
+      Variants,
+      Props
+    > = DefineRulesPatternOptions<Input, Context, Variants, Props>
   >(
-    options: DefineRulesPatternOptions<Input, Context, Variants, Props>
+    options: DefineRulesPatternOptions<Input, Context, Variants, Props> &
+      DefineRulesPatternInput<Options, Input, ValidateEmptyInputs>
   ): PatternOptions<ResolvedVariants<Exclude<Variants, undefined>>, Props>;
 
   // Independent maps keep missing/optional fields in one recipe from widening
   // the inferred variants and runtime props of its siblings.
   multiple<
     Variants extends Record<string | number, unknown>,
-    Props extends Record<string | number, unknown>
+    Props extends Record<string | number, unknown>,
+    const Patterns extends ScopedPatterns<Input, Context, Variants, Props> =
+      ScopedPatterns<Input, Context, Variants, Props>
   >(
-    patterns: {
-      [Key in keyof Variants]: DefineRulesPatternOptions<
-        Input,
-        Context,
-        Variants[Key],
-        PatternProps<Props, Key>
-      >;
-    } & {
-      [Key in keyof Props]: { props?: Props[Key] & PropsDefinition };
-    },
+    patterns: ScopedPatterns<Input, Context, Variants, Props> &
+      PatternsInputCapture<Patterns, Input, ValidateEmptyInputs> &
+      PatternsInputGate<NoInfer<Patterns>, Input, ValidateEmptyInputs>,
     debugId?: string
   ): {
     [Key in keyof Variants]: ScopedResult<
@@ -160,7 +351,13 @@ export interface DefineRulesRules<Input, Context = undefined> {
   with<
     Style extends Input,
     Variants extends ScopedVariants<Input, Context>,
-    Props extends PropsDefinition = undefined
+    Props extends PropsDefinition = undefined,
+    const Options extends DefineRulesPatternOptions<
+      Input,
+      Context,
+      Variants,
+      Props
+    > = DefineRulesPatternOptions<Input, Context, Variants, Props>
   >(
     callback: (style: Style) => DefineRulesPatternOptions<
       Input,
@@ -169,36 +366,53 @@ export interface DefineRulesRules<Input, Context = undefined> {
       Props
     > & {
       variants: Variants;
-    }
-  ): ScopedRulesWith<Style, Variants, Props>;
+    } & (ValidateEmptyInputs extends true ? Options : unknown) &
+      PatternInputGate<NoInfer<Options>, Input, ValidateEmptyInputs>
+  ): ScopedRulesWith<Style, Variants, Props, Input, ValidateEmptyInputs>;
 
   with<
     Style extends Input,
     Variants extends ScopedVariants<Input, Context> | undefined = undefined,
-    Props extends PropsDefinition = undefined
+    Props extends PropsDefinition = undefined,
+    const Options extends DefineRulesPatternOptions<
+      Input,
+      Context,
+      Variants,
+      Props
+    > = DefineRulesPatternOptions<Input, Context, Variants, Props>
   >(
     callback: (
       style: Style
-    ) => DefineRulesPatternOptions<Input, Context, Variants, Props>
-  ): ScopedRulesWith<Style, Variants, Props>;
+    ) => DefineRulesPatternOptions<Input, Context, Variants, Props> &
+      (ValidateEmptyInputs extends true ? Options : unknown) &
+      PatternInputGate<NoInfer<Options>, Input, ValidateEmptyInputs>
+  ): ScopedRulesWith<Style, Variants, Props, Input, ValidateEmptyInputs>;
 
   extends<
     ParentVariants extends VariantGroups,
     ParentProps extends ComplexPropDefinitions<PropTarget | undefined>,
     Variants extends ScopedVariants<Input, Context>,
-    Props extends PropsDefinition = undefined
-  >(
-    parent: RuntimeFn<ParentVariants, ParentProps>,
-    options: DefineRulesPatternOptions<
+    Props extends PropsDefinition = undefined,
+    const Options extends ExtendedPatternOptions<
       Input,
       Context,
+      ParentVariants,
       Variants,
-      Props,
-      ExtendedVariants<
-        ParentVariants,
-        ResolvedVariants<Exclude<Variants, undefined>>
-      >
-    > & { variants: Variants },
+      Props
+    > = ExtendedPatternOptions<Input, Context, ParentVariants, Variants, Props>
+  >(
+    parent: RuntimeFn<ParentVariants, ParentProps>,
+    options: ExtendedPatternOptions<
+      Input,
+      Context,
+      ParentVariants,
+      Variants,
+      Props
+    > & { variants: Variants } & DefineRulesPatternInput<
+        Options,
+        Input,
+        ValidateEmptyInputs
+      >,
     debugId?: string
   ): RuntimeFn<
     ExtendedVariants<
@@ -211,19 +425,24 @@ export interface DefineRulesRules<Input, Context = undefined> {
     ParentVariants extends VariantGroups,
     ParentProps extends ComplexPropDefinitions<PropTarget | undefined>,
     Variants extends ScopedVariants<Input, Context> | undefined = undefined,
-    Props extends PropsDefinition = undefined
-  >(
-    parent: RuntimeFn<ParentVariants, ParentProps>,
-    options: DefineRulesPatternOptions<
+    Props extends PropsDefinition = undefined,
+    const Options extends ExtendedPatternOptions<
       Input,
       Context,
+      ParentVariants,
       Variants,
-      Props,
-      ExtendedVariants<
-        ParentVariants,
-        ResolvedVariants<Exclude<Variants, undefined>>
-      >
-    >,
+      Props
+    > = ExtendedPatternOptions<Input, Context, ParentVariants, Variants, Props>
+  >(
+    parent: RuntimeFn<ParentVariants, ParentProps>,
+    options: ExtendedPatternOptions<
+      Input,
+      Context,
+      ParentVariants,
+      Variants,
+      Props
+    > &
+      DefineRulesPatternInput<Options, Input, ValidateEmptyInputs>,
     debugId?: string
   ): RuntimeFn<
     ExtendedVariants<
@@ -237,9 +456,13 @@ export interface DefineRulesRules<Input, Context = undefined> {
 /** Resolve scoped authoring styles before using the existing recipe compiler.
  * Generated recipes keep the same serialization, runtime and optimization path.
  */
-export function createDefineRulesRules<Input, Context>(css: {
+export function createDefineRulesRules<
+  Input,
+  Context,
+  ValidateEmptyInputs extends boolean = false
+>(css: {
   raw(input: never): CSSRule;
-}): DefineRulesRules<Input, Context> {
+}): DefineRulesRules<Input, Context, ValidateEmptyInputs> {
   type Options = PatternOptions<
     VariantGroups,
     ComplexPropDefinitions<PropTarget>
@@ -302,5 +525,5 @@ export function createDefineRulesRules<Input, Context>(css: {
         debugId?: string
       ) => rootRules.extends(parent, raw(options), debugId)
     }
-  ) as DefineRulesRules<Input, Context>;
+  ) as DefineRulesRules<Input, Context, ValidateEmptyInputs>;
 }

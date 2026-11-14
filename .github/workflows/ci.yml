@@ -116,16 +116,13 @@ jobs:
           key: build-and-test
 
       - name: Test
-        run: yarn test
+        run: yarn test --concurrency=2
 
-      - name: Install layout test browser
-        run: yarn workspace @examples/layout-playground playwright install --with-deps chromium
+      - name: Install browser test runtime
+        run: yarn test:browser:install
 
-      - name: Verify layout geometry in Chromium
-        run: yarn workspace @examples/layout-playground test:browser
-
-      - name: Verify selector matching in the browser
-        run: yarn workspace @mincho-js/css test:selectors:browser
+      - name: Browser tests
+        run: yarn test:browser
 
   production-contract:
     needs: pre_job

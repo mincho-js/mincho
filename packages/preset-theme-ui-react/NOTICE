@@ -1,0 +1,6 @@
+Theme UI component defaults and variant behavior are adapted from Theme UI (MIT).
+Upstream: https://github.com/system-ui/theme-ui
+Source revision: bc87592449bdd43312b363753c077dcd8cb05b30
+Copyright (c) 2019 Brent Jackson
+
+This package compiles styles with Mincho. It does not include the Theme UI runtime or Emotion.

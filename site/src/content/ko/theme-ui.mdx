@@ -1,0 +1,183 @@
+# Theme UI 프리셋
+
+프리셋 패키지는 Theme UI v0.17.4의 토큰 값, 컴파일된 테마와 Mincho 스타일 정의를 제공합니다. `@mincho-js/theme-ui`는 계약, Theme Spec 매핑과 선택적인 정규화를, `@mincho-js/preset-theme-ui-react`는 컴포넌트, variant 그룹과 React JSX 타입을 제공합니다.
+
+## 설치와 설정 [#install-and-configure]
+
+React 앱에서 컴포넌트와 함께 작성한 스타일을 컴파일하려면 Mincho 플러그인을 React 플러그인 앞에 두세요. 공유하는 `.css.ts` 테마를 위해 Vanilla Extract 플러그인도 유지합니다. 프리셋 스타일시트를 한 번 불러오면 테마 변수가 적용됩니다. 컴파일된 React 컴포넌트가 공유하는 런타임을 위해 앱 의존성에 `@mincho-js/react`도 유지하세요.
+
+```sh
+npm install @mincho-js/css @mincho-js/react @mincho-js/theme-ui @mincho-js/preset-theme-ui @mincho-js/preset-theme-ui-react @vanilla-extract/css
+npm install -D @mincho-js/vite @vanilla-extract/vite-plugin @vitejs/plugin-react
+```
+
+```ts
+// vite.config.ts
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+import { minchoVitePlugin } from "@mincho-js/vite";
+import { extractCalls } from "@mincho-js/preset-theme-ui-react/config";
+import { vanillaExtractPlugin } from "@vanilla-extract/vite-plugin";
+
+export default defineConfig({
+  plugins: [
+    minchoVitePlugin({
+      jsxCssProp: { importSource: "@mincho-js/preset-theme-ui-react" },
+      extractCalls,
+    }),
+    vanillaExtractPlugin(),
+    react({ jsxImportSource: "@mincho-js/preset-theme-ui-react" }),
+  ],
+});
+```
+
+TypeScript에서도 같은 패키지를 JSX 소스로 지정하세요:
+
+```json
+{
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "jsxImportSource": "@mincho-js/preset-theme-ui-react"
+  }
+}
+```
+
+## 컴포넌트 variant 사용하기 [#use-the-shared-definition]
+
+`@mincho-js/preset-theme-ui-react`는 기존 `base`, `system`, `dark` 정의에 `styled`와 `components()`를 더합니다. `components()`는 `Box`, `Text`, `Heading`, `Button`, `Link` 같은 기본 컴포넌트를 선택한 테마에 연결합니다. 원본 프리셋의 그룹을 유지하면서 애플리케이션의 컴포넌트 variant를 합칩니다.
+
+설정한 `extractCalls`가 컴포넌트의 `.tsx` 파일에서 `components()`, `styled`, `css`, `rules`, `cx` 호출을 직접 컴파일합니다. 공유할 정의를 `.css.ts`에 작성해도 됩니다. `/config`는 일반 데이터이며 Node에서 테마 CSS나 스타일 작성 코드를 불러오지 않습니다.
+
+[Theme UI의 컴포넌트 variant](https://theme-ui.com/components/variants)는 `<Heading variant="display">`처럼 그룹 안의 이름이나 `variant="text.display"` 같은 전체 경로를 사용합니다. 컴포넌트는 자기 그룹에서 먼저 찾고, 없으면 테마의 전체 경로를 찾습니다. variant의 `variant` 속성으로 다른 스타일을 상속하고 뒤에 작성한 속성으로 덮어쓸 수 있습니다. 기본 `Heading`은 `text.heading`, `Button`은 `buttons.primary`, `Link`는 `styles.a`를 사용합니다.
+
+```tsx
+// Card.tsx
+import { system, systemClass } from "@mincho-js/preset-theme-ui-react";
+import "@mincho-js/preset-theme-ui/styles.css";
+
+const { Box, Heading, Button } = system.components({
+  buttons: {
+    primary: { color: "background", bg: "primary" },
+    secondary: { variant: "buttons.primary", bg: "secondary" },
+  },
+});
+
+export function Card() {
+  return (
+    <Box
+      as="section"
+      className={systemClass}
+      css={{ color: "text", bg: "background", p: { base: 3, _md: 4 } }}
+    >
+      <Heading variant="display">A shared vocabulary</Heading>
+      <Button variant="secondary">Create project</Button>
+    </Box>
+  );
+}
+```
+
+위 예제의 `text.display`는 원본 system 프리셋에 있고, `buttons`는 애플리케이션 설정입니다. 컴포넌트의 variant prop은 렌더링할 때 컴파일된 recipe를 선택합니다. JSX `css`는 system 정의를 사용하며 Mincho 조건 객체를 받습니다. base, dark 또는 사용자 계약의 의미 토큰은 해당 정의의 컴포넌트 그룹에 작성하거나 그 정의의 `css()`로 만든 클래스를 사용하세요.
+
+## 패키지의 역할 [#package-responsibilities]
+
+`styles.css`에는 테마 변수와 system의 색상 모드만 들어 있습니다. 문서 선택자, 컨테이너, 제목이나 애플리케이션 recipe를 자동 생성하지 않습니다. 소비자가 공개된 정의나 `components()` 호출로 필요한 스타일을 컴파일합니다. React 컴포넌트는 그 결과인 클래스와 recipe 선택 함수를 사용하며, 컴포넌트 생성기가 전역 문서 스타일을 추가하지는 않습니다.
+
+루트는 `baseClass`, `systemClass`, `darkClass`, 각각의 `*Vars`, `*Contract`와 `systemModeClasses`도 제공합니다. JavaScript import만으로 CSS를 불러오지 않습니다. 컴파일된 테마 데이터를 Node/SSR에서 읽는 데 플러그인은 필요하지 않으며, `css()`와 `rules()` 호출은 스타일 빌드에서 수행합니다.
+
+`system.preset`은 테마 값 객체가 아니라 Mincho의 컴파일된 스타일 정보입니다. 스타일 작성 규칙은 `defineRules.extends(system, ...)`로 확장하세요:
+
+```ts
+import { defineRules } from "@mincho-js/css";
+import { system } from "@mincho-js/preset-theme-ui";
+
+const { css } = defineRules.extends(system, {
+  properties: { display: ["grid", "flex"] },
+});
+export const layout = css({ display: "grid", gap: 3, color: "primary" });
+```
+
+## 토큰과 조건 변경하기 [#customize-tokens-and-conditions]
+
+`/presets`는 정규화된 `baseTokens`, `systemTokens`, `darkTokens`, `systemModes`를 일반 데이터로 내보냅니다. Mincho의 원래 `theme()` 함수로 독립된 테마를 만들고 `themeSpec()`에 변수를 연결하세요. 이 스타일에는 기본 프리셋 스타일시트가 필요하지 않습니다.
+
+타입 계약은 원본의 차이를 유지합니다. base에는 `fontWeights.bold`, system과 dark에는 `fontWeights.display`, system에는 `colors.accent`, dark에는 `colors.purple`이 있습니다.
+
+```ts
+// custom.css.ts
+import { theme, defineRules } from "@mincho-js/css";
+import { themeSpec } from "@mincho-js/theme-ui";
+import { systemTokens, systemModes } from "@mincho-js/preset-theme-ui/presets";
+
+const tokens = {
+  ...systemTokens,
+  colors: { ...systemTokens.colors, primary: "rebeccapurple" },
+};
+export const [themeClass, vars, contract] = theme(tokens);
+export const [darkClass] = theme.extends(contract, {
+  ...systemModes.dark,
+  colors: { ...systemModes.dark.colors, primary: tokens.colors.primary },
+});
+const { css, rules, cx } = defineRules(themeSpec(vars, { tablet: "48em" }));
+
+export const panel = cx(
+  themeClass,
+  css({ bg: "background", _tablet: { p: 4 } }),
+);
+export const action = rules({ base: { bg: "primary", color: "background" } });
+```
+
+React에서는 native 정의와 variant 그룹을 `createComponents()`에 전달하세요. 컴포넌트 파일의 호출을 추출해 사용자 변수와 조건으로 컴파일합니다:
+
+```tsx
+// CustomButton.tsx
+import { defineRules } from "@mincho-js/css";
+import { themeSpec } from "@mincho-js/theme-ui";
+import { createComponents } from "@mincho-js/preset-theme-ui-react";
+import { vars } from "./custom.css";
+
+export const { Button } = createComponents(
+  defineRules(themeSpec(vars, { tablet: "48em" })),
+  {
+    buttons: {
+      primary: {
+        px: { base: 2, _tablet: 4 },
+        color: "background",
+        bg: "primary",
+      },
+      secondary: { variant: "buttons.primary", bg: "secondary" },
+    },
+  },
+);
+```
+
+컴포넌트 상위에 사용자 테마 클래스를 적용하세요. 그룹의 스타일은 사용자 계약에 연결되고, 패키지의 기본 JSX `css` 소스는 system에 연결됩니다.
+
+## 스케일과 색상 모드 [#scales-and-color-modes]
+
+Theme Specification의 16개 스케일을 CSS 속성에 연결합니다. `p: 2`는 `space[2]`인 `8px`을, `mx: -2`는 그 음수 값을 사용합니다. 인덱스 스케일은 범위를 유지하고 중첩 토큰은 점으로 연결합니다. 길이 토큰에는 단위가 있으며 굵기와 줄 높이는 단위 없는 값을 유지합니다. 제공된 스케일은 토큰 이름으로 값을 제한하고 없는 스케일은 일반 CSS 값을 허용합니다.
+
+`p`는 `px`, `py`를 거쳐 네 방향의 물리적 padding 속성으로 분해됩니다. margin 단축 속성도 같은 방식입니다. 예를 들어 `cx(css({ p: 2 }), css({ px: 3 }))`는 좌우 padding을 바꾸고 위아래 padding은 `space[2]`로 유지합니다. 서로 다른 조건의 스타일은 각자의 값을 유지합니다.
+
+기본 조건은 `_sm: 40em`, `_md: 52em`, `_lg: 64em`입니다. 사용자 조건을 전달하면 기본값을 대체합니다. 반응형 값은 `fontSize: { base: 3, _sm: 4 }`처럼 Mincho 조건 객체로 작성합니다. 사용자 컴포넌트 그룹과 JSX `css`에서도 이 조건 객체를 사용하세요. 배포된 프리셋의 원본 반응형 배열은 내부에서 변환하며, 사용자 그룹은 Mincho 조건을 사용합니다.
+
+`systemModeClasses`에는 `default`, `dark`, `deep`, `swiss` 클래스 이름이 있습니다. 활성 클래스를 교체해 모드를 바꾸세요. 컴포넌트의 `color: "text"`, `bg: "primary"` 같은 의미 토큰은 유지하고 클래스가 그 값을 바꿉니다. [Theme UI 색상 모드의 의미](https://theme-ui.com/color-modes)를 따르는 방식입니다.
+
+`/presets`는 기본 모드의 `systemTokens`와 나머지 모드의 `systemModes.dark`, `systemModes.deep`, `systemModes.swiss`를 내보냅니다. 컴파일된 system 변수를 공유하는 모드는 `theme.extends(systemContract, values)`로 만듭니다. OS 설정과 저장 방식은 애플리케이션에서 관리합니다.
+
+## 원본 토큰 정규화하기 [#normalize-original-tokens]
+
+배포된 토큰은 이미 정규화되어 있습니다. 원본 Theme UI 데이터를 가져올 때 `normalizeTheme()`는 CSS를 생성하지 않고 길이 단위를 변환하고 색상 모드를 완성해 `{ tokens, modes }`를 반환합니다. 토큰 정규화와 컴포넌트 컴파일은 별개입니다. 프리셋의 컴포넌트 그룹과 variant 참조는 `components()`로, 직접 작성한 정의는 Mincho의 `css()`, `rules()`, `styled`로 사용하세요. React 프리셋은 Theme UI provider나 `sx` 런타임을 제공하지 않습니다.
+
+공개 타입에는 Mincho의 `@mincho-js/csstype`을 사용하며 원본 타입은 개발 단계 호환 검증에만 사용합니다. Theme UI와 Emotion 스타일 패키지는 소비자 의존성이 아닙니다. TypeScript 5.9.3으로 검증하며, `yarn workspace @examples/theme-ui dev`로 React 예제를 실행할 수 있습니다.
+
+```ts
+import { theme } from "@mincho-js/css";
+import { normalizeTheme } from "@mincho-js/theme-ui";
+
+const normalized = normalizeTheme({
+  space: [0, 4, 8],
+  colors: { text: "#111", modes: { dark: { text: "#fff" } } },
+});
+export const [light, vars, contract] = theme(normalized.tokens);
+export const [dark] = theme.extends(contract, normalized.modes.dark);
+```

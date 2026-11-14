@@ -232,7 +232,8 @@
     "lint": "yarn g:lint",
     "fix": "yarn g:fix",
     "check": "yarn g:check",
-    "test:selectors:browser": "MINCHO_SELECTORS_BROWSER=1 yarn g:test src/selectors/browser.test.ts"
+    "test:selectors:browser": "MINCHO_SELECTORS_BROWSER=1 yarn g:test src/selectors/browser.test.ts",
+    "test:browser": "yarn test:selectors:browser"
   },
   "prettier": "prettier-config-custom",
   "dependencies": {

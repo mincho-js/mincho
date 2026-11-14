@@ -24,7 +24,16 @@
       "path": "packages/integration"
     },
     {
+      "path": "packages/preset-theme-ui"
+    },
+    {
+      "path": "packages/preset-theme-ui-react"
+    },
+    {
       "path": "packages/react"
+    },
+    {
+      "path": "packages/theme-ui"
     },
     {
       "path": "packages/transform-runtime"
@@ -46,6 +55,9 @@
     },
     {
       "path": "examples/shared-component"
+    },
+    {
+      "path": "examples/theme-ui"
     },
     {
       "path": "site"

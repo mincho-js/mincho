@@ -1,0 +1,26 @@
+{
+  "files": [],
+  "references": [
+    {
+      "path": "../../packages/css"
+    },
+    {
+      "path": "../../packages/preset-theme-ui"
+    },
+    {
+      "path": "../../packages/preset-theme-ui-react"
+    },
+    {
+      "path": "../../packages/react"
+    },
+    {
+      "path": "../../packages/theme-ui"
+    },
+    {
+      "path": "../../packages/vite"
+    },
+    {
+      "path": "./tsconfig.app.json"
+    }
+  ]
+}

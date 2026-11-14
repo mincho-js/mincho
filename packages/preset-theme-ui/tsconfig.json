@@ -1,0 +1,23 @@
+{
+  "files": [],
+  "references": [
+    {
+      "path": "../css"
+    },
+    {
+      "path": "../theme-ui"
+    },
+    {
+      "path": "../debug-log"
+    },
+    {
+      "path": "../../configs/vite-config-custom"
+    },
+    {
+      "path": "./tsconfig.lib.json"
+    },
+    {
+      "path": "./tsconfig.node.json"
+    }
+  ]
+}
