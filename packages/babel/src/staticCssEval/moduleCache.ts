@@ -28,6 +28,8 @@ export const STATIC_CSS_MODULE_CACHE_PARSER_OPTIONS = {
 
 export interface StaticCssModuleSource {
   resolvedFile: string;
+  /** Physical filename for syntax inference; resolvedFile remains graph identity. */
+  syntaxFilename?: string;
   source: string;
   sourceHash: string;
   sourceVersion?: string | number;
@@ -205,7 +207,8 @@ const cacheInstrumentation = new WeakMap<
 
 export function createStaticCssModuleCache(
   parserCache?: SourceAstCache,
-  preparedProgram?: NodePath<t.Program>
+  preparedProgram?: NodePath<t.Program>,
+  parserPlugins: StaticCssEvalParserOptionsKey["plugins"] = []
 ): StaticCssModuleCache {
   const parsedModules = new Map<string, ParsedStaticCssModule>();
   const instrumentation: StaticCssModuleCacheInstrumentation = {
@@ -216,7 +219,7 @@ export function createStaticCssModuleCache(
 
   const cache: StaticCssModuleCache = {
     getParsedModule(source) {
-      const cacheKey = createExportMapCacheKey(source);
+      const cacheKey = createExportMapCacheKey(source, parserPlugins);
       const formattedCacheKey = formatExportMapCacheKey(cacheKey);
       const parsedModule = parsedModules.get(formattedCacheKey);
 
@@ -259,14 +262,18 @@ export function createStaticCssModuleCache(
 }
 
 export function createExportMapCacheKey(
-  source: StaticCssModuleSource
+  source: StaticCssModuleSource,
+  parserPlugins: StaticCssEvalParserOptionsKey["plugins"] = []
 ): ExportMapCacheKey {
   return {
     resolvedFile: source.resolvedFile,
     sourceHash: source.sourceHash,
     parserVersion: STATIC_CSS_MODULE_CACHE_PARSER_VERSION,
     supportVersion: STATIC_CSS_MODULE_CACHE_SUPPORT_VERSION,
-    parserOptions: getStaticCssModuleParserOptions(source.resolvedFile),
+    parserOptions: getStaticCssModuleParserOptions(
+      source.syntaxFilename ?? source.resolvedFile,
+      parserPlugins
+    ),
     ...(source.sourceVersion !== undefined
       ? { sourceVersion: source.sourceVersion }
       : {})
@@ -349,19 +356,30 @@ function parseStaticCssModule(
 }
 
 function getStaticCssModuleParserOptions(
-  filePath: string
+  filePath: string,
+  parserPlugins: StaticCssEvalParserOptionsKey["plugins"]
 ): StaticCssEvalParserOptionsKey {
+  // Host variants remain distinct cache identities but share filename syntax.
+  const filename = filePath.split(/[?#]/, 1)[0]!;
   const typescript =
-    /\.[cm]?tsx?$/.test(filePath) ||
-    /^(?:\0?virtual:|pkg:|data:)/.test(filePath);
+    /\.[cm]?tsx?$/.test(filename) ||
+    /^(?:\0?virtual:|pkg:|data:)/.test(filename);
 
-  const jsx = /\.[jt]sx$/.test(filePath);
+  const jsx = /\.[jt]sx$/.test(filename);
+  const plugins = parserPlugins.filter((entry) => {
+    const name = typeof entry === "string" ? entry : entry[0];
+    if (typescript && (name === "flow" || name === "flowComments"))
+      return false;
+    return jsx || !/\.[cm]?ts$/.test(filename) || name !== "jsx";
+  });
+  const names = new Set(
+    plugins.map((entry) => (typeof entry === "string" ? entry : entry[0]))
+  );
+  if (jsx && !names.has("jsx")) plugins.push("jsx");
+  if (typescript && !names.has("typescript")) plugins.push("typescript");
 
   return {
-    plugins: [
-      ...(jsx ? (["jsx"] as const) : []),
-      ...(typescript ? (["typescript"] as const) : [])
-    ],
+    plugins,
     sourceType: "unambiguous",
     jsx,
     typescript
@@ -1116,6 +1134,32 @@ if (import.meta.vitest) {
       expect(parsedModule.importDeclarations).toHaveLength(1);
       expect(parsedModule.exportDeclarations).toHaveLength(1);
     });
+
+    it.each(["ts", "tsx"] as const)(
+      "infers %s syntax without collapsing query and fragment identities",
+      (extension) => {
+        const cache = createStaticCssModuleCache();
+        const source =
+          extension === "ts"
+            ? "export const value = <number>1;"
+            : "export const value = <div /> satisfies JSX.Element;";
+        const records = ["", "?theme=dark", "#theme=light"].map((suffix) => {
+          const id = `/project/styles.${extension}${suffix}`;
+          const parsed = cache.getParsedModule({
+            resolvedFile: id,
+            source,
+            sourceHash: "same-source"
+          });
+          expect(parsed.cacheKey.resolvedFile).toBe(id);
+          expect(parsed.cacheKey.parserOptions).toMatchObject({
+            typescript: true,
+            jsx: extension === "tsx"
+          });
+          return parsed;
+        });
+        expect(new Set(records).size).toBe(3);
+      }
+    );
 
     it("parses CommonJS source with CJS-capable parser cache identity", () => {
       const cache = createStaticCssModuleCache();

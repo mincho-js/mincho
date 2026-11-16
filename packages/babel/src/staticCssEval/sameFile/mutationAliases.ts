@@ -1,4 +1,4 @@
-import { referencesModuleExport } from "../../commonjs/bindings.js";
+import { referencesModuleExports } from "../../commonjs/bindings.js";
 import { types as t } from "@babel/core";
 import type { NodePath } from "@babel/core";
 import type { Binding } from "@babel/traverse";
@@ -6,15 +6,25 @@ import { isBuiltInExtractionCall } from "../../extractionCalls/builtins.js";
 import { STATIC_CSS_EVAL_LIMITS } from "../types.js";
 import { isStaticCssEvalLiteralRequireCallExpression } from "../cjsBindings.js";
 import { getCjsAssignmentTarget } from "../cjsExportTargets.js";
+import {
+  isObjectPrototypeSetter,
+  selectObjectLiteralMember,
+  staticObjectMemberName as propertyName,
+  staticPropertyName
+} from "../propertySelection.js";
 
 type ObjectPath = NodePath<
   | t.ObjectExpression
+  | t.Function
+  | t.Class
+  | t.NewExpression
   | t.ArrayExpression
   | t.RestElement
   | t.ImportSpecifier
   | t.ImportDefaultSpecifier
   | t.ImportNamespaceSpecifier
   | t.CallExpression
+  | t.OptionalCallExpression
 >;
 
 interface ObjectReference {
@@ -38,6 +48,53 @@ export class StaticCssMutationAnalysisLimit extends Error {}
 class ObjectReferences {
   private allocations = new WeakMap<t.Node, WeakMap<t.Node, object>>();
   private visits = 0;
+  private deletedProperties = new Map<object, Set<string | null>>();
+  private possibleDeletedNames?: Set<string | null>;
+
+  constructor(
+    private opaqueCalls: ReadonlySet<t.CallExpression>,
+    private selectedBranches?: ReadonlyMap<t.Node, NodePath<t.Expression>>,
+    program?: NodePath
+  ) {
+    if (!program) return;
+
+    const deletions: NodePath<
+      t.MemberExpression | t.OptionalMemberExpression
+    >[] = [];
+    program.traverse({
+      UnaryExpression(path) {
+        const argument = path.get("argument");
+        if (
+          path.node.operator === "delete" &&
+          (argument.isMemberExpression() ||
+            argument.isOptionalMemberExpression())
+        )
+          deletions.push(argument);
+      }
+    });
+    // Resolve deletion receivers with every possibly deleted slot open first.
+    // Narrowing to allocation identities afterwards preserves unrelated shadows.
+    this.possibleDeletedNames = new Set(
+      deletions.map((path) => memberName(path.node))
+    );
+    for (const deletion of deletions) {
+      const name = memberName(deletion.node);
+      for (const reference of this.resolve(deletion.get("object"))) {
+        const identity = this.identity(reference);
+        const names = this.deletedProperties.get(identity) ?? new Set();
+        names.add(name);
+        this.deletedProperties.set(identity, names);
+      }
+    }
+    this.possibleDeletedNames = undefined;
+  }
+
+  private mayDelete(reference: ObjectReference, name: string): boolean {
+    const names =
+      this.possibleDeletedNames ??
+      this.deletedProperties.get(this.identity(reference));
+    return names?.has(null) === true || names?.has(name) === true;
+  }
 
   // Count repeated work too: acyclic helper graphs can expand exponentially.
   private visit(): void {
@@ -90,7 +147,16 @@ class ObjectReferences {
     if (seen.has(path.node)) return [];
 
     const next = new Set(seen).add(path.node);
-    if (path.isObjectExpression() || path.isArrayExpression())
+    const selected = this.selectedBranches?.get(path.node);
+
+    if (selected) return this.resolve(selected, next);
+    if (
+      path.isObjectExpression() ||
+      path.isArrayExpression() ||
+      path.isFunction() ||
+      path.isClass() ||
+      path.isNewExpression()
+    )
       return [{ path }];
 
     if (path.isIdentifier()) {
@@ -140,16 +206,23 @@ class ObjectReferences {
     if (path.isCallExpression() || path.isOptionalCallExpression()) {
       if (
         path.isCallExpression() &&
-        isStaticCssEvalLiteralRequireCallExpression(path.node, path.scope)
+        (this.opaqueCalls.has(path.node) ||
+          isStaticCssEvalLiteralRequireCallExpression(path.node, path.scope))
       )
         return [{ path }];
       const callee = child(path, "callee");
-      if (!callee.isIdentifier()) return [];
-
-      const binding = callee.scope.getBinding(callee.node.name);
+      const binding = callee.isIdentifier()
+        ? callee.scope.getBinding(callee.node.name)
+        : undefined;
       const owner = binding?.path;
-      const fn = owner?.isVariableDeclarator() ? owner.get("init") : owner;
-      if (!fn || !fn.isFunction() || next.has(fn.node)) return [];
+      const fn = callee.isFunction()
+        ? callee
+        : owner?.isVariableDeclarator()
+          ? owner.get("init")
+          : owner;
+      // An uninspected result can still be an object. Preserve its identity
+      // instead of treating a missing return proof as a primitive value.
+      if (!fn || !fn.isFunction() || next.has(fn.node)) return [{ path }];
 
       const nested = new Set(next).add(fn.node);
       const body = fn.get("body");
@@ -189,6 +262,9 @@ class ObjectReferences {
       declaration.isImportNamespaceSpecifier()
     )
       return [{ path: declaration }];
+
+    if (declaration.isFunctionDeclaration() || declaration.isClassDeclaration())
+      values.push({ path: declaration });
 
     if (declaration.isVariableDeclarator()) {
       const iteration = declaration.parentPath.parentPath;
@@ -232,15 +308,23 @@ class ObjectReferences {
     return values;
   }
 
+  storedValues(
+    pattern: NodePath<t.Node>,
+    value: NodePath<t.Expression>
+  ): ObjectReference[] {
+    return this.pattern(pattern, undefined, this.resolve(value), new Set());
+  }
+
   private pattern(
     pattern: NodePath<t.Node>,
-    name: string,
+    name: string | undefined,
     values: ObjectReference[],
     seen: Set<t.Node>
   ): ObjectReference[] {
     this.visit();
 
     if (pattern.isIdentifier()) return pattern.node.name === name ? values : [];
+    if (pattern.isMemberExpression()) return name === undefined ? values : [];
     if (pattern.isAssignmentPattern()) {
       return this.pattern(
         pattern.get("left"),
@@ -317,31 +401,40 @@ class ObjectReferences {
   select(
     objects: ObjectReference[],
     name: string | null,
-    seen = new Set<t.Node>()
+    seen = new Set<t.Node>(),
+    ownOnly = false
   ): ObjectReference[] {
     return this.selectProperties(
       objects,
       (key) => name === null || key === null || key === name,
-      seen
+      seen,
+      ownOnly,
+      name
     );
   }
 
   private selectProperties(
     objects: ObjectReference[],
     accepts: (key: string | null) => boolean,
-    seen: Set<t.Node>
+    seen: Set<t.Node>,
+    ownOnly = false,
+    name?: string | null
   ): ObjectReference[] {
     return objects.flatMap((reference) => {
       this.visit();
 
       const object = reference.path;
-      // Imported values have no local allocation to inspect. A nested reference
-      // may alias the same external object, so retain its opaque identity.
+      // Opaque contents, including callable prototypes, need not come from
+      // object literals. Keep their identity when following nested aliases.
       if (
         object.isImportSpecifier() ||
         object.isImportDefaultSpecifier() ||
         object.isImportNamespaceSpecifier() ||
-        object.isCallExpression()
+        object.isCallExpression() ||
+        object.isOptionalCallExpression() ||
+        object.isFunction() ||
+        object.isClass() ||
+        object.isNewExpression()
       )
         return [reference];
       if (seen.has(object.node)) return [];
@@ -375,12 +468,43 @@ class ObjectReferences {
                 accepts(String(index - offset))
               );
             },
-            next
+            next,
+            true
           )
         );
       }
 
       if (object.isObjectExpression()) {
+        if (name !== undefined && name !== null) {
+          const selected = selectObjectLiteralMember(
+            object.node,
+            name,
+            ownOnly
+          );
+          if (selected.kind === "missing") return [];
+          if (selected.kind === "prototype") {
+            const prototype = this.resolve(child(object, selected.path), next);
+            // The inherited __proto__ accessor can expose this allocation;
+            // this is a possible alias, not proof of an own data property.
+            return inherit([
+              ...(name === "__proto__" ? prototype : []),
+              ...this.select(prototype, name, next)
+            ]);
+          }
+          if (
+            selected.kind === "property" &&
+            !this.mayDelete(reference, name)
+          ) {
+            const property = child(object, selected.path);
+            return inherit(
+              property.isObjectProperty()
+                ? this.resolve(property.get("value"), next)
+                : property.isObjectMethod({ kind: "method" })
+                  ? [{ path: property }]
+                  : []
+            );
+          }
+        }
         return inherit(
           object.get("properties").flatMap((property) => {
             this.visit();
@@ -389,13 +513,35 @@ class ObjectReferences {
               return this.selectProperties(
                 this.resolve(property.get("argument"), next),
                 accepts,
-                next
+                next,
+                true,
+                name
               );
 
-            return property.isObjectProperty() &&
+            if (
+              property.isObjectProperty() &&
+              isObjectPrototypeSetter(property.node)
+            ) {
+              if (ownOnly) return [];
+              const prototype = this.resolve(property.get("value"), next);
+              return [
+                ...(name === null || name === "__proto__" ? prototype : []),
+                ...this.selectProperties(prototype, accepts, next, false, name)
+              ];
+            }
+
+            if (
+              property.isObjectProperty() &&
               accepts(propertyName(property.node))
-              ? this.resolve(property.get("value"), next)
-              : [];
+            )
+              return this.resolve(property.get("value"), next);
+            if (
+              property.isObjectMethod({ kind: "method" }) &&
+              accepts(propertyName(property.node))
+            )
+              return [{ path: property }];
+
+            return [];
           })
         );
       }
@@ -425,6 +571,48 @@ class ObjectReferences {
     });
   }
 
+  readsImportedMember(
+    objects: ObjectReference[],
+    name: string | null,
+    seen = new Set<t.Node>()
+  ): boolean {
+    return objects.some((reference) => {
+      this.visit();
+      if (isImportedReference(reference)) return true;
+      const object = reference.path;
+      if (!object.isObjectExpression() || seen.has(object.node)) return false;
+      const next = new Set(seen).add(object.node);
+      if (name !== null) {
+        const selected = selectObjectLiteralMember(object.node, name);
+        if (
+          selected.kind === "missing" ||
+          (selected.kind === "property" && !this.mayDelete(reference, name))
+        )
+          return false;
+        if (selected.kind === "prototype")
+          return this.readsImportedMember(
+            this.resolve(child(object, selected.path), next),
+            name,
+            next
+          );
+      }
+      // An unknown own selection can still fall through to the explicit
+      // prototype. Spread/rest copies themselves contain own data properties.
+      return object
+        .get("properties")
+        .some(
+          (property) =>
+            property.isObjectProperty() &&
+            isObjectPrototypeSetter(property.node) &&
+            this.readsImportedMember(
+              this.resolve(property.get("value"), next),
+              name,
+              next
+            )
+        );
+    });
+  }
+
   reachable(objects: ObjectReference[]): Set<object> {
     const nodes = new Set<object>();
     const queue = [...objects];
@@ -444,26 +632,69 @@ class ObjectReferences {
   }
 }
 
-function propertyName(property: t.ObjectProperty): string | null {
-  if (!property.computed && t.isIdentifier(property.key))
-    return property.key.name;
+/** Follow the selected value's origin, without conflating container contents. */
+export function hasImportedValueOrigin(
+  path: NodePath<t.Node>,
+  memberPath: readonly (string | null)[] = []
+): boolean {
+  try {
+    const objects = new ObjectReferences(
+      new Set(),
+      undefined,
+      path.scope.getProgramParent().path
+    );
+    let values = objects.resolve(path);
+    for (const member of memberPath) values = objects.select(values, member);
 
-  return t.isStringLiteral(property.key) || t.isNumericLiteral(property.key)
-    ? String(property.key.value)
-    : null;
+    return values.some(isImportedReference);
+  } catch (error) {
+    if (error instanceof StaticCssMutationAnalysisLimit) return true;
+    throw error;
+  }
+}
+
+function isImportedReference({ path }: ObjectReference): boolean {
+  return (
+    path.isImportSpecifier() ||
+    path.isImportDefaultSpecifier() ||
+    path.isImportNamespaceSpecifier() ||
+    (path.isCallExpression() &&
+      isStaticCssEvalLiteralRequireCallExpression(path.node, path.scope))
+  );
+}
+
+/** Whether a property read can reach a live imported receiver, including a prototype. */
+export function hasImportedMemberReadOrigin(
+  path: NodePath<t.Node>,
+  member: string | null,
+  memberPath: readonly (string | null)[] = []
+): boolean {
+  try {
+    const objects = new ObjectReferences(
+      new Set(),
+      undefined,
+      path.scope.getProgramParent().path
+    );
+    let values = objects.resolve(path);
+    for (const key of memberPath) values = objects.select(values, key);
+    return objects.readsImportedMember(values, member);
+  } catch (error) {
+    if (error instanceof StaticCssMutationAnalysisLimit) return true;
+    throw error;
+  }
 }
 
 function memberName(
   member: t.MemberExpression | t.OptionalMemberExpression
 ): string | null {
-  if (!member.computed && t.isIdentifier(member.property))
-    return member.property.name;
-
-  return t.isStringLiteral(member.property) ||
-    t.isNumericLiteral(member.property)
-    ? String(member.property.value)
-    : null;
+  return staticPropertyName(member.property, member.computed);
 }
+
+const readOnlyRuntimeCalls = {
+  "@mincho-js/css": ["cx"],
+  "@mincho-js/css/classname": ["cx"],
+  "@mincho-js/react": ["styled"]
+};
 
 function isKnownReadOnlyCall(
   path: NodePath<t.CallExpression | t.OptionalCallExpression | t.NewExpression>
@@ -473,10 +704,9 @@ function isKnownReadOnlyCall(
   const callee = child(path, "callee");
   if (
     isBuiltInExtractionCall(callee) ||
-    referencesModuleExport(callee, "@mincho-js/css", "cx")
+    referencesModuleExports(callee, readOnlyRuntimeCalls)
   )
     return true;
-  if (referencesModuleExport(callee, "@mincho-js/react", "styled")) return true;
   if (!callee.isMemberExpression()) return false;
 
   const object = child(callee, "object");
@@ -491,20 +721,36 @@ function isKnownReadOnlyCall(
 
 export function hasAliasedStaticCssEvalBindingMutation(
   program: NodePath<t.Program>,
-  binding: Binding
+  binding: Binding,
+  options: {
+    opaqueCalls?: ReadonlySet<t.CallExpression>;
+    selectedBranches?: ReadonlyMap<t.Node, NodePath<t.Expression>>;
+    isReadOnlyCall?: (
+      path: NodePath<
+        t.CallExpression | t.OptionalCallExpression | t.NewExpression
+      >
+    ) => boolean;
+  } = {}
 ): boolean {
-  const references = new ObjectReferences();
+  const references = new ObjectReferences(
+    options.opaqueCalls ?? new Set(),
+    options.selectedBranches,
+    program
+  );
   const targets = references.reachable(references.binding(binding));
+
   if (targets.size === 0) return false;
 
-  const touches = (path: NodePath<t.Node | null | undefined>, deep = false) => {
-    const objects = references.resolve(path);
+  const touchesObjects = (objects: ObjectReference[], deep = false) => {
     const nodes = deep
       ? references.reachable(objects)
       : new Set(objects.map((object) => references.identity(object)));
 
     return [...nodes].some((node) => targets.has(node));
   };
+
+  const touches = (path: NodePath<t.Node | null | undefined>, deep = false) =>
+    touchesObjects(references.resolve(path), deep);
 
   const writes = (path: NodePath<t.Node | null | undefined>): boolean => {
     if (path.isMemberExpression() || path.isOptionalMemberExpression())
@@ -553,17 +799,15 @@ export function hasAliasedStaticCssEvalBindingMutation(
       (callee.isMemberExpression() || callee.isOptionalMemberExpression()) &&
       touches(child(callee, "object"), true);
 
-    if (
-      receiver ||
-      path
-        .get("arguments")
-        .some((argument) =>
-          touches(
-            argument.isSpreadElement() ? argument.get("argument") : argument,
-            true
-          )
+    const argumentEscapes = path
+      .get("arguments")
+      .some((argument) =>
+        touches(
+          argument.isSpreadElement() ? argument.get("argument") : argument,
+          true
         )
-    )
+      );
+    if ((receiver || argumentEscapes) && !options.isReadOnlyCall?.(path))
       mark(path);
   };
 
@@ -576,8 +820,10 @@ export function hasAliasedStaticCssEvalBindingMutation(
       if (
         writes(path.get("left")) ||
         (!reexport &&
-          path.get("left").isMemberExpression() &&
-          touches(path.get("right"), true))
+          touchesObjects(
+            references.storedValues(path.get("left"), path.get("right")),
+            true
+          ))
       )
         mark(path);
     },

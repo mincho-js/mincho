@@ -1,4 +1,4 @@
-import { types as t, type NodePath } from "@babel/core";
+import { types as t, type NodePath, type TransformOptions } from "@babel/core";
 import type { Binding } from "@babel/traverse";
 import { referencesModuleExport } from "../commonjs/bindings.js";
 import { isBuiltInExtractionCall } from "../extractionCalls/builtins.js";
@@ -49,12 +49,19 @@ export function* analyzePureFunctions(options: {
   jsxCssProp?: boolean;
   program?: NodePath<t.Program>;
   parserCache?: SourceAstCache;
+  parserPlugins?: NonNullable<TransformOptions["parserOpts"]>["plugins"];
 }): ModuleGraphFlow<PreparedPureFunctions> {
   const graph = createModuleGraph({
     isExternal: (id) => /(?:^|\/)(?:node_modules|\.yarn)\//.test(id),
 
     parse: (id, source, jsx) =>
-      parseModuleProgram(id, source, jsx, options.parserCache)
+      parseModuleProgram(
+        id,
+        source,
+        jsx,
+        options.parserCache,
+        options.parserPlugins
+      )
   });
 
   const owner = {
@@ -65,7 +72,8 @@ export function* analyzePureFunctions(options: {
         options.filename,
         options.source,
         true,
-        options.parserCache
+        options.parserCache,
+        options.parserPlugins
       )
   };
 

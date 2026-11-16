@@ -35,6 +35,9 @@ export function createImportedStaticCssEvalModuleRecordWithCache(
 
   return {
     id: loadedModule.id,
+    ...(loadedModule.resolvedFile !== undefined
+      ? { resolvedFile: loadedModule.resolvedFile }
+      : {}),
     realpath: loadedModule.realpath ?? loadedModule.id,
     sourceHash:
       loadedModule.sourceHash ??
@@ -106,6 +109,9 @@ export function createStaticCssModuleSource(
 ): StaticCssModuleSource {
   return {
     resolvedFile: loadedModule.id,
+    ...(loadedModule.resolvedFile !== undefined
+      ? { syntaxFilename: loadedModule.resolvedFile }
+      : {}),
     source: loadedModule.source,
     sourceHash:
       loadedModule.sourceHash ??

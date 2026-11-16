@@ -1,15 +1,33 @@
 import type { ClassPrimitive, ComplexCSSRule } from "@mincho-js/css";
 import type { CSSProperties, JSX as ReactJSX } from "react";
+import type { CssPropConfig } from "./index.js";
 
-type ComplexCSSRuleArrayItem = Extract<ComplexCSSRule, unknown[]>[number];
-type MinchoCssPropRecursiveArrayItem =
-  ComplexCSSRuleArrayItem | ClassPrimitive | MinchoCssPropRecursiveArray;
-type MinchoCssPropRecursiveArray =
-  | MinchoCssPropRecursiveArrayItem[]
-  | readonly MinchoCssPropRecursiveArrayItem[];
+type MinchoCssPropRecursiveArray<Rule = ClassPrimitive> =
+  | (Rule | MinchoCssPropRecursiveArray<Rule>)[]
+  | readonly (Rule | MinchoCssPropRecursiveArray<Rule>)[];
 
-export type MinchoCssPropValue =
-  ComplexCSSRule | ClassPrimitive | MinchoCssPropRecursiveArray;
+type DefaultCssPropRule =
+  | ComplexCSSRule
+  | MinchoCssPropRecursiveArray<
+      Extract<ComplexCSSRule, readonly unknown[]>[number] | ClassPrimitive
+    >;
+
+type CssPropRule = CssPropConfig extends {
+  css: (...args: infer Args) => unknown;
+}
+  ? Args[0]
+  : DefaultCssPropRule;
+
+// Configured helpers receive the whole style value. Preserve tuples, readonly
+// arrays and nesting exactly. Readonly views keep the same structure; only
+// class-only arrays bypass the CSS helper.
+type CssPropValue<Rule> =
+  | Rule
+  | Readonly<Extract<Rule, readonly unknown[]>>
+  | ClassPrimitive
+  | MinchoCssPropRecursiveArray;
+
+export type MinchoCssPropValue = CssPropValue<CssPropRule>;
 
 type MinchoCssProp = {
   css?: MinchoCssPropValue;
@@ -59,6 +77,21 @@ if (import.meta.vitest) {
   const { describe, it, assertType, expectTypeOf } = import.meta.vitest;
 
   describe("scoped Mincho JSX namespace", () => {
+    it("preserves configured tuple structure and readonly views", () => {
+      type Rule = { tone: "brand" };
+      type Value = CssPropValue<readonly [Rule, Rule]>;
+      assertType<Value>([{ tone: "brand" }, { tone: "brand" }] as const);
+      assertType<CssPropValue<[Rule, Rule]>>([
+        { tone: "brand" },
+        { tone: "brand" }
+      ] as const);
+      assertType<Value>(["external", [false]] as const);
+      // @ts-expect-error the helper requires both tuple entries.
+      assertType<Value>([{ tone: "brand" }] as const);
+      // @ts-expect-error the helper does not accept nested style tuples.
+      assertType<Value>([[{ tone: "brand" }, { tone: "brand" }]] as const);
+    });
+
     it("defines css values from ComplexCSSRule and ClassPrimitive", () => {
       const cssRule: ComplexCSSRule = { color: "red" };
       const condition = true as boolean;
@@ -73,7 +106,10 @@ if (import.meta.vitest) {
       const emptyClassName: ClassPrimitive = "";
 
       expectTypeOf<MinchoCssPropValue>().toEqualTypeOf<
-        ComplexCSSRule | ClassPrimitive | MinchoCssPropRecursiveArray
+        | DefaultCssPropRule
+        | Readonly<Extract<DefaultCssPropRule, readonly unknown[]>>
+        | ClassPrimitive
+        | MinchoCssPropRecursiveArray
       >();
 
       assertType<ClassPrimitive>(emptyClassName);

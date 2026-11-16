@@ -59,7 +59,7 @@ export function minchoBabelPlugin(): PluginObj<PluginState> {
                 filename: state.file.opts.filename ?? "/__mincho__.tsx",
                 source: state.file.code,
                 program: path,
-                jsxCssProp: state.opts.jsxCssProp
+                jsxCssProp: Boolean(state.opts.jsxCssProp)
               });
 
               let step = flow.next();
@@ -93,9 +93,9 @@ export function minchoBabelPlugin(): PluginObj<PluginState> {
           if (state.opts.optimize?.runtimeCodegen === true) {
             optimizeRuntimeCodegen(path);
             pruneRecipeMetadata(path);
-            removeUnusedExtractedImports(path);
           }
 
+          removeUnusedExtractedImports(path);
           removeUnusedJsxCssPropCssModuleImports(path);
           removeUnusedGeneratedImports(path);
           compactRecipes(path, {
@@ -168,6 +168,7 @@ export type {
   PluginOptions
 } from "./types.js";
 export { analyzeExtractCalls as internalAnalyzeExtractCalls } from "./extractionCalls/analysis.js";
+export { jsxCssPropExtractCalls as internalJsxCssPropExtractCalls } from "./jsxCssProp/options.js";
 export {
   canonicalExtractCallsFile as internalCanonicalExtractCallsFile,
   resolveExtractCallsFile as internalResolveExtractCallsFile
@@ -178,6 +179,7 @@ export {
   inspectCommonJs as internalInspectCommonJs,
   commonJsToEsmPlugin as internalCommonJsToEsmPlugin
 } from "./commonjs/esm.js";
+export { normalizeTypeScriptCommonJs as internalNormalizeTypeScriptCommonJs } from "./commonjs/modules.js";
 
 export {
   createModuleGraph as internalCreateModuleGraph,
@@ -189,6 +191,7 @@ export {
 } from "./moduleGraph.js";
 
 export { SourceAstCache as InternalSourceAstCache } from "./staticCssEval/moduleParser.js";
+export { getStaticCssEvalLiteralRequireImportPath as internalGetStaticCssEvalLiteralRequireImportPath } from "./staticCssEval/cjsBindings.js";
 export { analyzeSource as internalAnalyzeSource } from "./sourceAnalysis.js";
 export {
   semanticExports as internalSemanticExports,

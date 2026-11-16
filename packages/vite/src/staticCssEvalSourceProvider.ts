@@ -23,7 +23,8 @@ import {
 } from "@mincho-js/integration";
 import { normalizePath } from "@rollup/pluginutils";
 import * as fs from "node:fs";
-import type { DevEnvironment, Rollup } from "vite";
+import { isAbsolute } from "node:path";
+import { isFileLoadingAllowed, type DevEnvironment, type Rollup } from "vite";
 import { customNormalize } from "./cssState.js";
 import { commonJsRuntimeId } from "./commonJs.js";
 
@@ -38,8 +39,15 @@ export function createViteStaticCssEvalSourceProvider(
 ): StaticCssEvalSourceProvider {
   return {
     async resolve(importerId, importPath, options) {
+      // Vite's client output wraps virtual ids as browser URLs. Resolve the
+      // original host id so the same plugin owns its load and watch records.
+      const source = importPath.startsWith("/@id/")
+        ? importPath.slice(5).replace("__x00__", "\0")
+        : importPath;
       const resolveOptions = {
-        skipSelf: true,
+        // Analysis also follows modules emitted by this plugin. Include its
+        // resolver just as the host does for the resulting runtime imports.
+        skipSelf: false,
 
         // Analyze original sources without registering or reading optimizer output.
         ...(devEnvironment ? { scan: true } : {}),
@@ -50,11 +58,11 @@ export function createViteStaticCssEvalSourceProvider(
 
       const resolved = devEnvironment?.pluginContainer.resolveId
         ? await devEnvironment.pluginContainer.resolveId(
-            importPath,
+            source,
             importerId,
             resolveOptions
           )
-        : await pluginContext.resolve?.(importPath, importerId, resolveOptions);
+        : await pluginContext.resolve?.(source, importerId, resolveOptions);
 
       if (!resolved) {
         return null;
@@ -127,6 +135,7 @@ export function createViteStaticCssEvalSourceProvider(
       return {
         id: metadata.resolvedFile,
         ...metadata,
+        consumerRuntimeId: resolved.id,
         ...(options?.kind === "require" &&
         metadata.sourceKind === "package-source" &&
         !localSource
@@ -184,7 +193,7 @@ export function createViteStaticCssEvalSourceProvider(
       }
 
       if (isVirtualStaticCssEvalId(id)) {
-        const virtualSource = await loadViteStaticCssEvalVirtualSource(
+        const virtualSource = await loadViteTransformedModuleSource(
           id,
           pluginContext,
           devEnvironment
@@ -395,7 +404,7 @@ function canLoadViteStaticCssEvalVirtualSource(
   return Boolean(devEnvironment?.pluginContainer || pluginContext.load);
 }
 
-async function loadViteStaticCssEvalVirtualSource(
+export async function loadViteTransformedModuleSource(
   id: string,
   pluginContext: PluginContext,
   devEnvironment: DevEnvironment | undefined
@@ -406,7 +415,23 @@ async function loadViteStaticCssEvalVirtualSource(
     await devEnvironment.moduleGraph.ensureEntryFromUrl(id);
 
     const loaded = await devEnvironment.pluginContainer.load(id);
-    const source = typeof loaded === "string" ? loaded : loaded?.code;
+    let source = typeof loaded === "string" ? loaded : loaded?.code;
+    // Vite loads ordinary files after plugin load hooks decline them. Keep
+    // that input policy, then run the complete host transform pipeline.
+    const file = id.split(/[?#]/, 1)[0]!;
+    if (
+      loaded == null &&
+      isAbsolute(file) &&
+      !file.includes("\0") &&
+      isFileLoadingAllowed(devEnvironment.getTopLevelConfig(), file)
+    ) {
+      try {
+        source = await fs.promises.readFile(file, "utf8");
+        pluginContext.addWatchFile(file);
+      } catch (error) {
+        if (!isMissingFileSystemEntryError(error)) throw error;
+      }
+    }
     if (typeof source !== "string") return null;
 
     const transformed = await devEnvironment.pluginContainer.transform(
@@ -487,4 +512,55 @@ function isUnsupportedStaticCssEvalResolutionId(id: string): boolean {
 
 function isExternalStaticCssEvalResolutionId(id: string): boolean {
   return id.startsWith(externalStaticCssEvalResolutionPrefix);
+}
+
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore import.meta is removed from the CommonJS build.
+if (import.meta.vitest) {
+  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+  // @ts-ignore import.meta is removed from the CommonJS build.
+  const { expect, it } = import.meta.vitest;
+
+  it("retains the actual host query ID independently of raw source identity", async () => {
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const root = await fs.promises.mkdtemp(
+      join(tmpdir(), "mincho-runtime-id-")
+    );
+    const file = join(root, "theme.css.ts");
+    const owner = join(root, "app.ts");
+
+    try {
+      await fs.promises.writeFile(file, 'export const theme = "authoring";');
+      const provider = createViteStaticCssEvalSourceProvider(
+        {
+          resolve: async (source: string) => ({
+            id: `${file}${source.slice(source.indexOf("?"))}`
+          })
+        } as unknown as PluginContext,
+        owner,
+        "",
+        root
+      );
+      const dark = await provider.resolve(owner, "./theme.css.ts?theme=dark");
+      const light = await provider.resolve(
+        owner,
+        "./theme.css.ts?theme=light",
+        { kind: "require" }
+      );
+
+      expect(dark).toMatchObject({
+        consumerRuntimeId: `${file}?theme=dark`,
+        realpath: file,
+        canonicalModuleId: file,
+        normalizedPathKey: file
+      });
+      expect(light?.consumerRuntimeId).toBe(`${file}?theme=light`);
+      expect((await provider.load(dark!.normalizedPathKey!))?.sourceText).toBe(
+        'export const theme = "authoring";'
+      );
+    } finally {
+      await fs.promises.rm(root, { recursive: true, force: true });
+    }
+  });
 }

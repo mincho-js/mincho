@@ -1,4 +1,6 @@
 import { types as t, type BabelFile, type NodePath } from "@babel/core";
+import type { Binding } from "@babel/traverse";
+import { hasDynamicScope } from "../optimizations/dynamicScope.js";
 import { collectStaticCssEvalCjsExportMapOperations } from "../staticCssEval/cjsExports.js";
 import type {
   ExportMapEntry,
@@ -8,14 +10,16 @@ import type {
 /** Preserve the existing CommonJS collector's ordering and helper fingerprints. */
 export function commonJsExports(
   program: NodePath<t.Program>,
-  filename: string
+  filename: string,
+  exportsBinding?: Binding
 ) {
   const exports = new Map<string | null, ExportMapEntry>();
   const stars: ExportGraphStarReexportEntry[] = [];
 
   for (const operation of collectStaticCssEvalCjsExportMapOperations({
     programPath: program,
-    file: filename
+    file: filename,
+    ...(exportsBinding ? { exportsBinding } : {})
   })) {
     if (operation.kind === "clear-cjs-exports") {
       exports.clear();
@@ -28,6 +32,42 @@ export function commonJsExports(
   }
 
   return { exports, stars };
+}
+
+/** Direct writes to an intact exports object publish values without consuming them. */
+export function commonJsDataPublications(program: NodePath<t.Program>) {
+  const values = new Set<t.Node>();
+  if (hasDynamicScope(program)) return values;
+  let closed = true;
+  program.traverse({
+    Identifier(path) {
+      if (
+        !["exports", "module"].includes(path.node.name) ||
+        path.scope.getBinding(path.node.name) ||
+        (!t.isReferenced(path.node, path.parent) &&
+          !t.isBinding(path.node, path.parent, path.parentPath.parent))
+      )
+        return;
+      const slot = path.parentPath;
+      const write = slot.parentPath;
+      if (
+        path.node.name !== "exports" ||
+        !slot.isMemberExpression() ||
+        slot.node.computed ||
+        slot.node.object !== path.node ||
+        !t.isIdentifier(slot.node.property) ||
+        slot.node.property.name === "__proto__" ||
+        !write?.isAssignmentExpression({ operator: "=" }) ||
+        write.node.left !== slot.node ||
+        !write.parentPath.isExpressionStatement() ||
+        !write.parentPath.parentPath.isProgram()
+      ) {
+        closed = false;
+        path.stop();
+      } else values.add(write.node.right);
+    }
+  });
+  return closed ? values : new Set<t.Node>();
 }
 
 export function findNodePath(
@@ -70,7 +110,7 @@ function isTypeReference(path: NodePath<t.Node>): boolean {
 
 function jsxPragmaBindings(
   program: NodePath<t.Program>,
-  file?: BabelFile
+  file?: Pick<BabelFile, "opts" | "ast">
 ): Set<string> {
   const pragmas = {
     jsxPragma: "React.createElement",
@@ -118,7 +158,7 @@ function jsxPragmaBindings(
 /** TypeScript's CommonJS surface is normalized before the TypeScript preset runs. */
 export function normalizeTypeScriptCommonJs(
   program: NodePath<t.Program>,
-  file?: BabelFile
+  file?: Pick<BabelFile, "opts" | "ast">
 ): void {
   let changed = false;
   let hasJsx: boolean | undefined;

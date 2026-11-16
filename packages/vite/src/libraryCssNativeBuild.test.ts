@@ -209,6 +209,42 @@ function diamondArtifacts() {
 }
 
 describe("native library CSS in one Vite application build", () => {
+  it.each([false, true])(
+    "preserves package side effects while preloading imports (vanilla: %s)",
+    async (vanilla) => {
+      const root = await fixture({
+        "entry.js":
+          'import "./preset/style.css"; export { themeClass } from "./preset/index.js";',
+        "preset/package.json": JSON.stringify({
+          name: "precompiled-preset-fixture",
+          type: "module",
+          sideEffects: ["**/*.css"]
+        }),
+        "preset/index.js":
+          'export { themeClass } from "./theme.js"; export { factory } from "./authoring.js";',
+        "preset/theme.js": 'export const themeClass = "compiled-theme";',
+        "preset/style.css": ".compiled-theme { --color: purple; }",
+        "preset/authoring.js":
+          'import { createDefinition } from "../compiler.js"; export const factory = createDefinition();',
+        "compiler.js":
+          'export function createDefinition() { console.log("AUTHORING_ENGINE_EXECUTED"); return {}; }'
+      });
+
+      const output = await compile(root, { vanilla });
+      const javascript = chunks(output)
+        .map((chunk) => chunk.code)
+        .join("\n");
+      const css = cssAssets(output)
+        .map((asset) => String(asset.source))
+        .join("\n");
+
+      expect(javascript).toContain('"compiled-theme"');
+      expect(javascript).not.toContain("AUTHORING_ENGINE_EXECUTED");
+      expect(css).toContain(".compiled-theme");
+      expect(css).toContain("--color: purple");
+    }
+  );
+
   it.each(
     [false, true].flatMap((vanilla) =>
       ["ts", "cjs"].map((extension) => [vanilla, extension] as const)

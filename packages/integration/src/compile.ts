@@ -16,7 +16,12 @@ import {
 import { cacheDigest } from "./compilationCache.js";
 import type { CompilationCache } from "./compilationCache.js";
 import { cachedCompile, type CompileCacheBridge } from "./compileCache.js";
-import { transformSync } from "@babel/core";
+import {
+  compilationResolutionOptions,
+  createCompileResolutionObserver,
+  resolvedImportPlugin
+} from "./compileResolution.js";
+import { transformSync, type TransformOptions } from "@babel/core";
 import { minchoStyledComponentPlugin } from "@mincho-js/babel";
 import { addFileScope, getPackageInfo } from "@vanilla-extract/integration";
 import defaultEsbuild, {
@@ -43,7 +48,11 @@ export interface CompileOptions {
   cwd?: string;
   externals?: Array<string>;
   loader?: BuildOptions["loader"];
+  alias?: BuildOptions["alias"];
+  /** Host-resolved exact entry imports; dependencies keep local resolution. */
+  resolvedImports?: Readonly<Record<string, string>>;
   plugins?: BuildOptions["plugins"];
+  parserPlugins?: NonNullable<TransformOptions["parserOpts"]>["plugins"];
 
   /** Transaction-owned input reader used by multi-pass build integrations. */
   readFile?: (path: string) => Promise<string>;
@@ -125,6 +134,7 @@ export interface ScopedDependencyOptions {
   loader: "js" | "jsx" | "ts" | "tsx";
   packageName: string;
   rootPath: string;
+  parserPlugins?: CompileOptions["parserPlugins"];
 }
 
 export function transformScopedDependencySource({
@@ -132,7 +142,8 @@ export function transformScopedDependencySource({
   filePath,
   loader,
   packageName,
-  rootPath
+  rootPath,
+  parserPlugins
 }: ScopedDependencyOptions) {
   let source = addScopedSource({
     source: contents,
@@ -143,6 +154,7 @@ export function transformScopedDependencySource({
 
   source = transformSync(source, {
     filename: filePath,
+    ...(parserPlugins ? { parserOpts: { plugins: [...parserPlugins] } } : {}),
     plugins: [
       ...(loader === "jsx" || loader === "tsx" ? [jsxSyntaxPluginPath] : []),
       minchoStyledComponentPlugin()
@@ -162,13 +174,52 @@ export function transformScopedDependencySource({
   return source;
 }
 
+function scopedDependencyOptions(
+  contents: string,
+  filePath: string,
+  loader: ScopedDependencyOptions["loader"],
+  fallbackRootPath: string,
+  parserPlugins?: CompileOptions["parserPlugins"]
+): ScopedDependencyOptions {
+  const directory = dirname(filePath);
+  let packageInfo: ReturnType<typeof getPackageInfo>;
+
+  try {
+    packageInfo = getPackageInfo(directory);
+  } catch (error) {
+    if (
+      !(error instanceof Error) ||
+      error.message !==
+        `Couldn't find parent package.json with a name field from '${directory}'`
+    ) {
+      throw error;
+    }
+
+    // Generated dependencies may have no owning package. Retain their original
+    // path in the build scope; do not disguise an escaping preset producer path.
+    packageInfo = {
+      ...getPackageInfo(fallbackRootPath),
+      dirname: fallbackRootPath
+    };
+  }
+
+  return {
+    contents,
+    filePath,
+    loader,
+    parserPlugins,
+    rootPath: packageInfo.dirname,
+    packageName: packageInfo.name
+  };
+}
+
 function createScopedOnLoadPlugin(
-  packageName: string,
   loaders: BuildOptions["loader"] = {},
   readFile: (path: string) => Promise<string> = (path) =>
     fs.promises.readFile(path, "utf-8"),
   readFileBytes?: (path: string) => Promise<Uint8Array>,
-  graph?: () => EvaluationDependencyGraph | undefined
+  graph?: () => EvaluationDependencyGraph | undefined,
+  parserPlugins?: CompileOptions["parserPlugins"]
 ) {
   return {
     name: "mincho:custom-extract-scope",
@@ -207,13 +258,13 @@ function createScopedOnLoadPlugin(
 
           const contents = await readFile(args.path);
 
-          const input: ScopedDependencyOptions = {
+          const input = scopedDependencyOptions(
             contents,
-            filePath: args.path,
+            args.path,
             loader,
-            rootPath: build.initialOptions.absWorkingDir!,
-            packageName
-          };
+            build.initialOptions.absWorkingDir!,
+            parserPlugins
+          );
 
           return {
             contents: await executeScopedTransform(input, () =>
@@ -228,7 +279,10 @@ function createScopedOnLoadPlugin(
   };
 }
 
-function scopeLoadedDependencies(plugin: Plugin, packageName: string): Plugin {
+function scopeLoadedDependencies(
+  plugin: Plugin,
+  parserPlugins?: CompileOptions["parserPlugins"]
+): Plugin {
   return {
     ...plugin,
     setup(build) {
@@ -254,16 +308,15 @@ function scopeLoadedDependencies(plugin: Plugin, packageName: string): Plugin {
                 return result;
               }
 
-              const input: ScopedDependencyOptions = {
-                contents:
-                  typeof result.contents === "string"
-                    ? result.contents
-                    : Buffer.from(result.contents).toString("utf8"),
-                filePath: args.path,
+              const input = scopedDependencyOptions(
+                typeof result.contents === "string"
+                  ? result.contents
+                  : Buffer.from(result.contents).toString("utf8"),
+                args.path,
                 loader,
-                rootPath: build.initialOptions.absWorkingDir!,
-                packageName
-              };
+                build.initialOptions.absWorkingDir!,
+                parserPlugins
+              );
 
               return {
                 ...result,
@@ -311,29 +364,33 @@ export async function compile(options: CompileOptions) {
     canonicalFilePath(options.originalPath ?? options.filePath)
   ]);
   options = { ...options, cwd, filePath, originalPath };
-  return options.cache
+  const result = options.cache
     ? cachedCompile(options, compileUncached)
     : compileUncached(options);
+  const { source, watchFiles } = await result;
+  return { source, watchFiles };
 }
 
-async function compileUncached({
-  esbuild = defaultEsbuild,
-  filePath,
-  contents,
-  cwd = process.cwd(),
-  externals = [],
-  loader,
-  plugins = [],
-  cache,
-  cacheBridge,
-  dependencyGraph = false,
-  staticStyles = false,
-  readFile,
-  readFileBytes,
-  resolverCache = new Map(),
-  originalPath
-}: CompileOptions) {
-  const packageInfo = getPackageInfo(cwd);
+async function compileUncached(options: CompileOptions) {
+  const {
+    esbuild = defaultEsbuild,
+    filePath,
+    contents,
+    cwd = process.cwd(),
+    loader,
+    alias,
+    resolvedImports,
+    plugins = [],
+    parserPlugins,
+    cache,
+    cacheBridge,
+    dependencyGraph = false,
+    staticStyles = false,
+    readFile,
+    readFileBytes,
+    resolverCache = new Map(),
+    originalPath
+  } = options;
   const sourcePackageInfo = getPackageInfo(dirname(originalPath));
   const trustedPlugins =
     !plugins.length ||
@@ -341,6 +398,8 @@ async function compileUncached({
 
   if (
     staticStyles &&
+    !alias &&
+    !resolvedImports &&
     currentCompilationExecution()?.evaluation !== "fresh" &&
     trustedPlugins
   ) {
@@ -357,7 +416,11 @@ async function compileUncached({
         avoided: "esbuild"
       });
 
-      return { source: direct, watchFiles: [] as string[] };
+      return {
+        source: direct,
+        watchFiles: [] as string[],
+        resolutions: { version: 1 as const, records: [] }
+      };
     }
 
     recordCompilationDiagnostic("static-styles-bypass", {
@@ -366,6 +429,9 @@ async function compileUncached({
   }
 
   let graph: EvaluationDependencyGraph | undefined;
+  const resolution = cache
+    ? createCompileResolutionObserver(options)
+    : undefined;
   const source = getScopedSourceWithCache({
     contents,
     originalPath,
@@ -376,6 +442,7 @@ async function compileUncached({
 
   const result = await measureCompilationPhase("esbuild", () =>
     esbuild.build({
+      ...compilationResolutionOptions(options),
       stdin: {
         contents: source,
         loader: "tsx",
@@ -384,15 +451,16 @@ async function compileUncached({
       },
       metafile: true,
       bundle: true,
-      external: ["@vanilla-extract", "@mincho-js/css", ...externals],
-      platform: "node",
+      // Decorators accepted by Babel must be lowered before VM evaluation.
+      supported: { decorators: false },
       write: false,
-      absWorkingDir: cwd,
-      loader,
       plugins: [
-        ...plugins.map((plugin) =>
-          scopeLoadedDependencies(plugin, packageInfo.name)
-        ),
+        ...(resolution ? [resolution.plugin] : []),
+        ...resolvedImportPlugin(options),
+        ...plugins.map((plugin) => {
+          const scoped = scopeLoadedDependencies(plugin, parserPlugins);
+          return resolution ? resolution.observePlugin(scoped) : scoped;
+        }),
         ...(dependencyGraph && trustedPlugins
           ? [
               {
@@ -428,11 +496,11 @@ async function compileUncached({
             ]
           : []),
         createScopedOnLoadPlugin(
-          packageInfo.name,
           loader,
           readFile,
           readFileBytes,
-          () => graph
+          () => graph,
+          parserPlugins
         )
       ]
     })
@@ -442,6 +510,7 @@ async function compileUncached({
 
   return {
     source: compiledSource,
+    resolutions: resolution?.finish(result.metafile),
     watchFiles: [
       ...new Set([
         ...getWatchFiles(cwd, result.metafile),
@@ -497,7 +566,8 @@ if (import.meta.vitest) {
 
         if (onLoadHandlers[0]) {
           await onLoadHandlers[0].callback({
-            path: options.onLoadPath ?? "/workspace/scoped-dependency.tsx"
+            path:
+              options.onLoadPath ?? join(process.cwd(), "scoped-dependency.tsx")
           });
         }
 

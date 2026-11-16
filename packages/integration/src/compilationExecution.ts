@@ -4,6 +4,7 @@ import { internalResolveFromModule as resolveFromModule } from "@mincho-js/babel
 import type Tinypool from "tinypool";
 import {
   BabelTransformError,
+  type BabelOptions,
   type BabelTransformSourceOptions,
   type BabelTransformResult,
   type StaticCssEvalSourceProvider
@@ -392,7 +393,8 @@ export class CompilationExecution {
     input: BabelTransformSourceOptions | ScopedDependencyOptions,
     provider: StaticCssEvalSourceProvider | undefined,
     pool: CompilerPool,
-    partitions: number
+    partitions: number,
+    consumerRuntimeSource?: BabelOptions["consumerRuntimeSource"]
   ): Promise<CompilerResponse> {
     const generation = this.generation;
     const source = "source" in input ? input.source : input.contents;
@@ -493,6 +495,13 @@ export class CompilationExecution {
           recordCompilationDiagnostic("worker-ipc-fetch", {
             bytes: sourceBytes
           });
+        } else if (request.kind === "consumer-runtime") {
+          if (!consumerRuntimeSource)
+            throw new Error("Compiler consumer runtime source is unavailable");
+
+          value = await providerRequest.run(true, () =>
+            consumerRuntimeSource(...request.args)
+          );
         } else {
           value = await providerRequest.run(true, () =>
             request.kind === "resolve"
@@ -539,6 +548,7 @@ export class CompilationExecution {
             kind,
             input: transferredInput,
             provider: !!provider,
+            consumerRuntime: !!consumerRuntimeSource,
             environment: this.environment,
             generation,
             cache: this.cacheEnabled,
@@ -613,6 +623,7 @@ export async function executeTransform(
     compilationCache,
     staticCssEvalSourceProvider: provider,
     staticCssEvalProjectEngine: engine,
+    consumerRuntimeSource,
     ...babel
   } = options.babel ?? {};
   if (
@@ -655,7 +666,8 @@ export async function executeTransform(
         { ...options, babel },
         currentProvider,
         compiler,
-        partitions
+        partitions,
+        consumerRuntimeSource
       );
 
       assertCurrent();

@@ -24,7 +24,8 @@ const objectMutationMethods = new Set([
 
 export function hasStaticCssEvalBindingMutation(
   programPath: NodePath<t.Program>,
-  binding: Binding
+  binding: Binding,
+  options: Parameters<typeof hasAliasedStaticCssEvalBindingMutation>[2] = {}
 ): boolean {
   if (binding.constantViolations.length > 0) {
     return true;
@@ -66,7 +67,8 @@ export function hasStaticCssEvalBindingMutation(
   });
 
   return (
-    mutated || hasAliasedStaticCssEvalBindingMutation(programPath, binding)
+    mutated ||
+    hasAliasedStaticCssEvalBindingMutation(programPath, binding, options)
   );
 }
 

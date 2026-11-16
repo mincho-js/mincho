@@ -1,3 +1,4 @@
+export { usesPixelUnits } from "./numericUnits.js";
 export { transform } from "./transform.js";
 export {
   collectStyleDeclarations,

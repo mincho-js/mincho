@@ -36,12 +36,26 @@ function hasMutation(source: string): boolean {
 }
 
 const mutations = [
+  `const holder = {}; ({ value: holder.value } = { value: style });`,
+  `const holder = {}; [holder.value] = [style];`,
+  `const holder = {}; ({ nested: [holder.value] } = { nested: [style] });`,
+  `const holder = {}; ({ ...holder.value } = { nested: style });`,
+
+  `const holder = { __proto__: style, ["__proto__"]: {} }; delete holder.__proto__; holder.__proto__.color = "blue";`,
+  `const holder = { __proto__: style, ["__proto__"]: {} }; delete holder?.__proto__; holder.__proto__.color = "blue";`,
+  `const holder = { __proto__: { nested: style }, nested: {} }; delete holder[unknownKey]; holder.nested.color = "blue";`,
+  `const holder = { __proto__: { nested: style }, nested: {} }; const alias = holder; delete alias.nested; holder.nested.color = "blue";`,
+
   `const alias = style; alias.color = 'blue';`,
   `let alias; alias = style; alias.color = 'blue';`,
+  `function alias() {} alias = style; alias.color = 'blue';`,
+  `class Alias {} Alias = style; Alias.color = 'blue';`,
   `const alias = style.nested; alias.color = 'blue';`,
   `const { nested: alias } = style; alias.color = 'blue';`,
   `const [alias] = [style]; delete alias.color;`,
   `const wrapped = { rule: style }; wrapped.rule.color = 'blue';`,
+  `const inherited = { __proto__: { rule: style } }; inherited.rule.color = 'blue';`,
+  `const inherited = { __proto__: style }; unknownFunction(inherited);`,
   `const alias = { ...style }; alias.nested.color = 'blue';`,
   `const alias = style as Record<string, unknown>; alias.color = 'blue';`,
   `function mutate(rule) { rule.color = 'blue'; } mutate(style);`,
@@ -64,6 +78,27 @@ const mutations = [
 ];
 
 describe("mutable object reference analysis", () => {
+  it.each(["@mincho-js/css", "@mincho-js/css/classname"])(
+    "recognizes lexical cx imports from %s without trusting shadowed calls",
+    (source) => {
+      for (const declaration of [
+        `import { cx as combine } from "${source}";`,
+        `const { cx: combine } = require("${source}");`
+      ]) {
+        expect(
+          hasMutation(
+            `${declaration} const style = externalValue(); combine(style);`
+          )
+        ).toBe(false);
+        expect(
+          hasMutation(
+            `${declaration} const style = externalValue(); function render(combine) { combine(style); }`
+          )
+        ).toBe(true);
+      }
+    }
+  );
+
   it.each([
     'import { style } from "./tokens";',
     'import style from "./tokens";',
@@ -99,6 +134,13 @@ describe("mutable object reference analysis", () => {
     `const [, ...copy] = [style, { color: 'green' }]; copy[0].color = 'blue';`,
     `const [, ...first] = [style, style.nested, { color: 'green' }]; const [, ...copy] = first; copy[0].color = 'blue';`,
     `const copy = { nested: { color: 'blue' } }; copy.nested.color = 'green';`,
+    `const copy = { __proto__: { nested: style }, nested: { color: 'blue' } }; copy.nested.color = 'green';`,
+    `let color; ({ color } = style);`,
+    `const holder = {}; ({ safe: holder.value } = { safe: {}, unused: style });`,
+    `const holder = {}; [holder.value] = [{}, style];`,
+    `const other = { nested: {} }; delete other.nested; const copy = { __proto__: { nested: style }, nested: { color: 'blue' } }; copy.nested.color = 'green';`,
+    `const copy = { nested: { color: 'blue' }, __proto__: { nested: style } }; copy.nested.color = 'green';`,
+    `const copy = { ...{ __proto__: { nested: style } } }; unknownFunction(copy);`,
     `const color = style.color; unknownFunction(color);`,
     `const { color } = style; unknownFunction(color);`,
     `Object.keys(style);`,
@@ -132,6 +174,17 @@ describe("mutable object reference analysis", () => {
       false
     );
   });
+
+  it.each(["unknownFunction(holder);", 'holder.__proto__.color = "blue";'])(
+    "retains the explicit prototype's possible alias identity: %s",
+    (use) => {
+      expect(
+        hasMutation(
+          `const style = { color: "red" }; const holder = { __proto__: style }; ${use}`
+        )
+      ).toBe(true);
+    }
+  );
 
   it.each([
     `const style = [{ color: 'red' }]; const [...copy] = style; copy[0] = { color: 'blue' };`,

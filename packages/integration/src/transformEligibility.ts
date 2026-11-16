@@ -27,6 +27,7 @@ async function inspectTransformEligibility(
     experimental: _experimental,
     diagnostics: _diagnostics,
     staticCssEvalSourceProvider: _provider,
+    consumerRuntimeSource: _runtimeSource,
     staticCssEvalProjectEngine: _engine,
     ...babel
   } = options.babel ?? {};

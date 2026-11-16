@@ -2,6 +2,7 @@ import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { runInNewContext } from "node:vm";
+import type { TransformOptions } from "@babel/core";
 import * as vanillaCss from "@vanilla-extract/css";
 import * as vanillaFileScope from "@vanilla-extract/css/fileScope";
 import { addFileScope } from "@vanilla-extract/integration";
@@ -31,6 +32,108 @@ async function fixture() {
 }
 
 describe("caller loaders in child compilation", () => {
+  it.each([false, true])(
+    "keeps host-resolved entry imports out of dependency-local resolution (dependencyGraph: %s)",
+    async (dependencyGraph) => {
+      const { root } = await fixture();
+      const dependency = join(root, "dependency");
+      const nestedPackage = join(dependency, "node_modules", "shared");
+      const appModule = join(root, "app-shared.ts");
+
+      await fs.mkdir(nestedPackage, { recursive: true });
+      await fs.writeFile(appModule, 'export const value = "app";');
+      await fs.writeFile(
+        join(nestedPackage, "package.json"),
+        '{"name":"shared","main":"index.js"}'
+      );
+      await fs.writeFile(
+        join(nestedPackage, "index.js"),
+        'exports.value = "dependency";'
+      );
+      await fs.writeFile(
+        join(dependency, "index.ts"),
+        'export { value } from "shared";'
+      );
+
+      const compiled = await compile({
+        cwd: root,
+        filePath: join(root, "entry.ts"),
+        originalPath: join(root, "entry.ts"),
+        resolverCache: new Map(),
+        contents: `import { value as app } from "shared";
+        import { value as dependency } from "./dependency/index.ts";
+        export const values = [app, dependency];`,
+        resolvedImports: { shared: appModule },
+        dependencyGraph
+      });
+      const module = { exports: {} as { values: string[] } };
+
+      runInNewContext(compiled.source, {
+        module,
+        exports: module.exports,
+        require(id: string) {
+          if (id === "@vanilla-extract/css/fileScope") return vanillaFileScope;
+          throw new Error(`Unexpected dependency: ${id}`);
+        }
+      });
+
+      expect(module.exports.values).toEqual(["app", "dependency"]);
+      expect(compiled.watchFiles).toContain(appModule);
+      expect(compiled.watchFiles).toContain(join(nestedPackage, "index.js"));
+    }
+  );
+
+  it("loads generated dependencies outside a named package", async () => {
+    const { root } = await fixture();
+    const generated = await fs.mkdtemp(join(tmpdir(), "mincho-generated-"));
+    roots.push(generated);
+    const dependency = join(generated, "tokens.ts");
+    await fs.writeFile(
+      join(root, "color.ts"),
+      'export const color = "royalblue";'
+    );
+
+    const compiled = await compile({
+      cwd: root,
+      filePath: join(root, "entry.ts"),
+      originalPath: join(root, "entry.ts"),
+      contents: 'export { value } from "virtual:tokens";',
+      resolverCache: new Map(),
+      plugins: [
+        {
+          name: "generated-tokens",
+          setup(build) {
+            build.onResolve({ filter: /^virtual:tokens$/ }, () => ({
+              path: dependency,
+              namespace: "file"
+            }));
+            build.onLoad({ filter: /tokens\.ts$/ }, () => ({
+              contents:
+                'import { color } from "./color.ts"; export const value: string = color;',
+              loader: "ts",
+              resolveDir: root
+            }));
+          }
+        }
+      ]
+    });
+    const module = { exports: {} as { value: string } };
+    runInNewContext(compiled.source, {
+      module,
+      exports: module.exports,
+      require(id: string) {
+        if (id === "@vanilla-extract/css/fileScope") return vanillaFileScope;
+        throw new Error(`Unexpected dependency: ${id}`);
+      }
+    });
+
+    expect(module.exports.value).toBe("royalblue");
+    expect(compiled.source).toContain(
+      JSON.stringify(relative(root, dependency))
+    );
+    expect(vanillaFileScope.hasFileScope()).toBe(false);
+  });
+
   it.each(["tsx", undefined] as const)(
     "scopes and transforms caller contents with loader %s",
     async (loader) => {
@@ -84,7 +187,7 @@ describe("caller loaders in child compilation", () => {
       });
 
       expect(compiled.source).toContain(
-        JSON.stringify(relative(process.cwd(), dependency))
+        JSON.stringify(relative(root, dependency))
       );
       expect(compiled.source).toContain("$$styled");
       expect(compiled.source).toContain('var color = "red"');
@@ -136,7 +239,7 @@ describe("caller loaders in child compilation", () => {
         namespace === "file" ? contents : "virtual contents"
       );
       expect(compiled.source).not.toContain(
-        JSON.stringify(relative(process.cwd(), dependency))
+        JSON.stringify(relative(root, dependency))
       );
     }
   );
@@ -297,6 +400,65 @@ describe("CommonJS dependencies in child compilation", () => {
     expect(result.exports.value).toBe("Example");
     expect(result.events).toEqual(["lazy", "0"]);
   });
+
+  it.each([
+    { kind: "file", dependencyGraph: false },
+    { kind: "file", dependencyGraph: true },
+    { kind: "caller-loader", dependencyGraph: false },
+    { kind: "caller-loader", dependencyGraph: true }
+  ])(
+    "forwards configured decorator syntax through $kind dependencies (dependencyGraph=$dependencyGraph)",
+    async ({ kind, dependencyGraph }) => {
+      const { root } = await fixture();
+      const dependency = join(
+        root,
+        kind === "file" ? "decorated.ts" : "decorated.custom"
+      );
+      const contents = `
+        const events: string[] = [];
+        function sealed(value: typeof Factory) {
+          events.push("decorated");
+          return value;
+        }
+        export @sealed class Factory {
+          static marker: string = "original";
+        }
+        export const value = events.join(",");
+      `;
+      await fs.writeFile(dependency, contents);
+      const options = {
+        filePath: join(root, "entry.ts"),
+        originalPath: join(root, "entry.ts"),
+        contents: `export { value } from ${JSON.stringify(dependency)};`,
+        cwd: root,
+        resolverCache: new Map<string, string>(),
+        dependencyGraph,
+        parserPlugins: [
+          ["decorators", { decoratorsBeforeExport: false }]
+        ] as NonNullable<TransformOptions["parserOpts"]>["plugins"]
+      };
+      const compiled = await compile({
+        ...options,
+        plugins:
+          kind === "caller-loader"
+            ? [
+                {
+                  name: "decorated-typescript",
+                  setup(build) {
+                    build.onLoad({ filter: /decorated\.custom$/ }, () => ({
+                      contents,
+                      loader: "ts"
+                    }));
+                  }
+                }
+              ]
+            : []
+      });
+
+      expect(evaluate(compiled.source).exports.value).toBe("decorated");
+      expect(compiled.watchFiles).toContain(dependency);
+    }
+  );
 
   it("reports invalid entry syntax through esbuild", async () => {
     const { root } = await fixture();

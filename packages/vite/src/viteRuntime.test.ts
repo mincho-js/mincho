@@ -44,8 +44,7 @@ async function createFixture(files: Record<string, string>) {
 async function createFixtureServer(
   root: string,
   plugins: Plugin[],
-  watch = false,
-  optimizeCommonJs = false
+  watch = false
 ) {
   const server = await createServer({
     root,
@@ -64,10 +63,7 @@ async function createFixtureServer(
           }
         : null
     },
-    optimizeDeps: {
-      noDiscovery: !optimizeCommonJs,
-      include: optimizeCommonJs ? ["@mincho-js/css"] : []
-    },
+    optimizeDeps: { noDiscovery: true },
     plugins
   });
 
@@ -112,6 +108,122 @@ async function readCssPropOutput(
 }
 
 describe("mincho with the Vite runtime", () => {
+  it.each(["physical", "prefixed"])(
+    "serves cached generated CSS through URL imports in development and build (%s)",
+    async (requestForm) => {
+      const root = await createFixture({
+        "src/entry.ts": 'export { className, stylesheet } from "./styles";',
+        "src/styles.ts":
+          'import { css } from "@mincho-js/css"; export const className = css({ color: "red" });'
+      });
+      const exposeUrl: Plugin = {
+        name: "expose-generated-stylesheet-url",
+        enforce: "post",
+        transform(code, id) {
+          const source = code.match(
+            /import\s*["']([^"']+\.vanilla\.css)["']/
+          )?.[1];
+          if (source)
+            return `${code}\nexport { default as stylesheet } from ${JSON.stringify(`${requestForm === "physical" ? source.replace(/^mincho-virtual-css:/, "") : source}?url`)};`;
+          if (!id.endsWith("/styles.ts")) return;
+          const sidecar = code.match(
+            /["']([^"']*extracted_[^"']+\.css\.ts)["']/
+          )?.[1];
+          if (!sidecar)
+            throw new Error(
+              `Expected generated CSS before requesting its URL: ${code}`
+            );
+          return `${code}\nexport { stylesheet } from ${JSON.stringify(sidecar)};`;
+        }
+      };
+      const server = await createFixtureServer(root, [
+        minchoVitePlugin(),
+        exposeUrl
+      ]);
+      const runtime = await server.ssrLoadModule("/src/entry.ts");
+      expect(runtime.stylesheet).toMatch(/\.vanilla\.css$/);
+      const client = server.environments.client!;
+      await readCssPropOutput(client, "/src/styles.ts");
+      const resolved = await client.pluginContainer.resolveId(
+        runtime.stylesheet
+      );
+      const cached = await client.pluginContainer.load(resolved!.id);
+      const css = typeof cached === "string" ? cached : cached?.code;
+      expect(css).toContain(runtime.className);
+      expect(css).toContain("color: red;");
+      const stylesheet = await client.transformRequest(
+        `${runtime.stylesheet}?direct`
+      );
+      expect(stylesheet?.code).toBe(css);
+
+      const result = await build({
+        root,
+        configFile: false,
+        logLevel: "silent",
+        base: "/assets-base/",
+        plugins: [minchoVitePlugin(), exposeUrl],
+        build: {
+          write: false,
+          minify: false,
+          cssMinify: false,
+          rollupOptions: {
+            input: join(root, "src/entry.ts"),
+            preserveEntrySignatures: "strict"
+          }
+        }
+      });
+      const outputs = (Array.isArray(result) ? result : [result]).flatMap(
+        (item) => ("output" in item ? item.output : [])
+      );
+      const js = outputs.find((item) => item.type === "chunk" && item.isEntry);
+      expect(
+        outputs.some(
+          (item) =>
+            item.type === "asset" &&
+            item.fileName.endsWith(".css") &&
+            String(item.source).includes("color: red") &&
+            js?.type === "chunk" &&
+            js.code.includes(`/assets-base/${item.fileName}`)
+        )
+      ).toBe(true);
+    }
+  );
+
+  it("serves cached virtual CSS as a string module for raw requests", async () => {
+    const root = await createFixture({
+      "src/entry.tsx":
+        'export const App = () => <div css={{ color: "red" }} />;'
+    });
+    const server = await createFixtureServer(root, [
+      minchoVitePlugin({ jsxCssProp: true })
+    ]);
+    for (const environment of [
+      server.environments.client!,
+      server.environments.ssr!
+    ]) {
+      const output = await readCssPropOutput(environment);
+      expect(output.css).toContain("color: red;");
+      const owner =
+        await environment.moduleGraph.getModuleByUrl("/src/entry.tsx");
+      const sidecar = [...owner!.importedModules].find((module) =>
+        module.id?.startsWith("\0mincho-extracted-css:")
+      )!;
+      const css = [...sidecar.importedModules].find((module) =>
+        module.id?.endsWith(".vanilla.css")
+      )!;
+      for (const query of ["raw", "import&raw", "raw&inline"]) {
+        const raw = await environment.transformRequest(`${css.url}?${query}`);
+        if (environment.name === "client")
+          expect(raw?.code).toContain("export default ");
+        expect(raw?.code).toContain(JSON.stringify(output.css));
+      }
+      if (environment.name === "ssr") {
+        const raw = await server.ssrLoadModule(`${css.url}?raw`);
+        expect(raw.default).toBe(output.css);
+      }
+    }
+  });
+
   it("serves retired CSS to already resolved loads without authorizing filesystem reads", async () => {
     const root = await createFixture({
       "src/entry.tsx":
@@ -128,7 +240,7 @@ describe("mincho with the Vite runtime", () => {
       module.id?.startsWith("\0mincho-extracted-css:")
     )!;
     const css = [...sidecar.importedModules].find((module) =>
-      module.id?.startsWith("\0mincho-virtual-css:")
+      module.id?.endsWith(".vanilla.css")
     )!;
     const privateId = `\0mincho-virtual-css:${join(root, "src/private.vanilla.css")}`;
     expect(await client.pluginContainer.load(privateId)).toBeNull();
@@ -139,7 +251,11 @@ describe("mincho with the Vite runtime", () => {
     );
 
     expect(await client.pluginContainer.load(css.id!)).toBe("");
+    expect(await client.pluginContainer.load(`${css.id!}?raw`)).toBe(
+      'export default "";'
+    );
     expect(await client.pluginContainer.load(privateId)).toBeNull();
+    expect(await client.pluginContainer.load(`${privateId}?raw`)).toBeNull();
   });
 
   it("keeps import and require package conditions distinct", async () => {
@@ -335,6 +451,30 @@ describe("mincho with the Vite runtime", () => {
           : 'export { defineStyle, makeRecipe } from "./alternate";'
       );
 
+      // The old parameterized helper is no longer reachable from a registered
+      // factory. It must not silently keep stale protection after the re-export
+      // changes, even when the entry only imports its unrelated static style.
+      await expect(
+        server.environments.client!.transformRequest(`/src/helper.${extension}`)
+      ).rejects.toThrow(/captures runtime binding rule/);
+      await update(
+        `src/implementation.${extension}`,
+        extension === "cjs"
+          ? `const { recipe } = require("@vanilla-extract/recipes");
+              function makeRecipe(options) { return recipe(options); }
+              exports.makeRecipe = makeRecipe;
+              exports.localClassName = makeRecipe({ base: { color: "orchid" } })();`
+          : `import { recipe } from "@vanilla-extract/recipes";
+              export function makeRecipe(options) { return recipe(options); }
+              export const localClassName = makeRecipe({ base: { color: "orchid" } })();`
+      );
+      await update(
+        `src/helper.${extension}`,
+        extension === "cjs"
+          ? 'const { style } = require("@vanilla-extract/css"); exports.unrelated = style({ outlineStyle: "dotted" });'
+          : 'import { style } from "@vanilla-extract/css"; export const unrelated = style({ outlineStyle: "dotted" });'
+      );
+
       const alternate = await readCssPropOutput(
         server.environments.client!,
         `/src/entry.${extension}`
@@ -373,12 +513,10 @@ describe("mincho with the Vite runtime", () => {
             : source
       });
 
-      const server = await createFixtureServer(
-        root,
-        [minchoVitePlugin(), ...(vanilla ? vanillaExtractPlugin() : [])],
-        false,
-        extension === "cjs"
-      );
+      const server = await createFixtureServer(root, [
+        minchoVitePlugin(),
+        ...(vanilla ? vanillaExtractPlugin() : [])
+      ]);
 
       for (const environment of [
         server.environments.client!,
@@ -404,12 +542,14 @@ describe("mincho with the Vite runtime", () => {
           );
 
           const runtime = [...owner!.importedModules].find((module) =>
-            module.id?.includes("/.vite/deps/")
+            /vanilla-extract[-_/]dynamic/.test(module.id ?? "")
           );
 
-          const optimized = await environment.transformRequest(runtime!.url);
+          expect(runtime).toBeDefined();
+          const native = await environment.transformRequest(runtime!.url);
 
-          expect(optimized?.code).toMatch(/export\s+(default|\{)/);
+          expect(native?.code).toMatch(/export\s+(default|\{)/);
+          expect(native?.code).toContain("assignInlineVars");
         }
       }
 

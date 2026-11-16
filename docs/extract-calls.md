@@ -140,6 +140,20 @@ Registration does **not** declare a function read-only. Existing mutation checks
 for shared JSX CSS values still apply. This API does not accept AST callbacks,
 wildcards or computed export selection.
 
+Keep registered receivers and their wrapper objects immutable. Receiver analysis
+uses known own data properties; it does not reconstruct an object's earlier state
+from assignments. Getters, iterators, implicit conversions and imported live values
+can affect evaluation order even when the expression has no explicit function call.
+An unresolved effect is not evidence that a call can safely move into a sidecar.
+Build-time-only APIs still need a supported extraction path before they can run.
+
+CSS modules have two surfaces: the source used to build styles and the generated
+exports used by the application. Vite and the paired esbuild plugins analyze the
+host's generated exports when checking consumers of classes, theme variables and
+runtime recipes. Registered factory implementations are still analyzed from their
+source. Changes to either surface and its dependencies invalidate the analysis;
+an unavailable runtime module is not treated as a safe source module.
+
 ## CommonJS sources
 
 The same registrations work with `require()`, including object destructuring, aliases,
@@ -147,6 +161,11 @@ namespace members and direct calls. Mincho and the supported official
 vanilla-extract packages need no additional registration.
 Array destructuring consumes iterator elements and does not identify registered
 module exports, so those calls remain in place.
+
+Namespace safety failures in registered CommonJS calls are reported as errors.
+This includes descriptor-changing operations such as deleting a copied receiver
+property: a later write could invoke an inherited setter. Use `mincho-js-ignore`
+when the call is intended to remain at runtime.
 
 ```js
 const { style: makeStyle } = require("@vanilla-extract/css");

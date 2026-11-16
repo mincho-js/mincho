@@ -122,10 +122,15 @@ async function resolveEsbuildStaticCssEvalImport(options: {
     !isEsbuildStaticCssEvalFileNamespace(resolved.namespace) ||
     isVirtualStaticCssEvalId(resolved.path)
   ) {
-    return createUnsupportedStaticCssEvalResolution(
-      options.importPath,
-      createEsbuildStaticCssEvalCanonicalModuleId(resolved)
-    );
+    const consumerRuntimeId =
+      createEsbuildStaticCssEvalCanonicalModuleId(resolved);
+    return {
+      ...createUnsupportedStaticCssEvalResolution(
+        options.importPath,
+        consumerRuntimeId
+      ),
+      consumerRuntimeId
+    };
   }
 
   return createEsbuildStaticCssEvalFileResolution(
@@ -404,7 +409,7 @@ function createEsbuildStaticCssEvalModuleId({
   return `${esbuildStaticCssEvalModuleIdPrefix}${namespace}:${path}${suffix}`;
 }
 
-function parseEsbuildStaticCssEvalLoadId(
+export function parseEsbuildStaticCssEvalLoadId(
   id: string
 ): EsbuildStaticCssEvalLoadId {
   if (!id.startsWith(esbuildStaticCssEvalModuleIdPrefix)) {

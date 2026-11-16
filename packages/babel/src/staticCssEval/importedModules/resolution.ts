@@ -36,6 +36,7 @@ import type {
 } from "../moduleCache.js";
 import type {
   BindingProvenance,
+  ResolutionChainEntry,
   ResolutionDependency,
   ResolutionDependencyKind,
   StaticCssEvalCacheKey,
@@ -434,8 +435,8 @@ export function createImportedLiteralContext(
   state: ImportedStaticCssEvalResolutionState
 ): ImportedStaticCssEvalContext {
   return {
-    owner: state.owner,
-    dependency: { file: record.id },
+    owner: { ...state.owner, file: sourceFile(state, state.owner.file) },
+    dependency: { file: sourceFile(state, record.id) },
     importPath: request.specifier,
     exportName: request.exportName,
     memberPath: [...request.memberPath]
@@ -564,9 +565,11 @@ export function createImportedStaticCssEvalCacheKey(
   memberPath: readonly string[],
   sourceMetadata?: StaticCssEvalProviderSourcePolicyDescriptor
 ): StaticCssEvalCacheKey {
+  const resolvedFile =
+    sourceMetadata?.resolvedFile ?? parsedModule.resolvedFile;
   return {
     importerFile,
-    resolvedFile: parsedModule.resolvedFile,
+    resolvedFile,
     exportName,
     memberPath: [...memberPath],
     sourceHash: parsedModule.sourceHash,
@@ -577,11 +580,15 @@ export function createImportedStaticCssEvalCacheKey(
     resolverOptionsVersion: "static-css-eval-provider:v1",
     parserVersion: parsedModule.cacheKey.parserVersion,
     staticEvalSupportVersion: STATIC_CSS_MODULE_CACHE_SUPPORT_VERSION,
-    resolvedId: parsedModule.resolvedFile,
+    resolvedId: resolvedFile,
     ...(sourceMetadata
       ? omitCacheKeySourceIdentity(
           createStaticCssEvalProviderSourceMetadata(sourceMetadata)
         )
+      : {}),
+    ...(resolvedFile !== parsedModule.resolvedFile &&
+    sourceMetadata?.normalizedPathKey === undefined
+      ? { normalizedPathKey: parsedModule.resolvedFile }
       : {}),
     parserOptions: parsedModule.cacheKey.parserOptions
   };
@@ -599,6 +606,70 @@ function omitCacheKeySourceIdentity(
   return metadata;
 }
 
+function sourceFile(
+  state: ImportedStaticCssEvalResolutionState,
+  id: string
+): string {
+  return state.sourceFiles?.get(id) ?? id;
+}
+
+function resultProvenance(
+  state: ImportedStaticCssEvalResolutionState,
+  provenance: BindingProvenance
+): BindingProvenance {
+  return {
+    ...provenance,
+    file: sourceFile(state, provenance.file),
+    ...("importer" in provenance
+      ? { importer: sourceFile(state, provenance.importer) }
+      : {})
+  };
+}
+
+function resultResolutionChain(
+  state: ImportedStaticCssEvalResolutionState
+): ResolutionChainEntry[] {
+  return state.resolutionChain.map((entry) => ({
+    ...entry,
+    importer: sourceFile(state, entry.importer),
+    source: sourceFile(state, entry.source),
+    ...(entry.provenance
+      ? { provenance: resultProvenance(state, entry.provenance) }
+      : {})
+  }));
+}
+
+function resultDiagnostic(
+  state: ImportedStaticCssEvalResolutionState,
+  diagnostic: StaticCssEvalDiagnostic
+): StaticCssEvalDiagnostic {
+  return {
+    ...diagnostic,
+    owner: {
+      ...diagnostic.owner,
+      file: sourceFile(state, diagnostic.owner.file)
+    },
+    ...(diagnostic.dependency
+      ? {
+          dependency: {
+            ...diagnostic.dependency,
+            file: sourceFile(state, diagnostic.dependency.file)
+          }
+        }
+      : {})
+  };
+}
+
+function resultCacheKey(
+  state: ImportedStaticCssEvalResolutionState,
+  cacheKey: StaticCssEvalCacheKey
+): StaticCssEvalCacheKey {
+  return {
+    ...cacheKey,
+    importerFile: sourceFile(state, cacheKey.importerFile)
+  };
+}
+
 export function createImportedStaticCssEvalResolvedResult(options: {
   query: StaticCssEvalQuery;
   value: StaticCssLiteral;
@@ -611,11 +682,11 @@ export function createImportedStaticCssEvalResolvedResult(options: {
     status: "resolved",
     expression: formatStaticCssEvalQueryExpression(options.query),
     value: options.value,
-    provenance: options.provenance,
+    provenance: resultProvenance(options.state, options.provenance),
     dependencies: getResolutionDependencies(options.state),
-    resolutionChain: [...options.state.resolutionChain],
+    resolutionChain: resultResolutionChain(options.state),
     diagnostics: [],
-    cacheKey: options.cacheKey
+    cacheKey: resultCacheKey(options.state, options.cacheKey)
   };
 }
 
@@ -626,16 +697,21 @@ export function createImportedStaticCssEvalErrorResult(options: {
   provenance?: BindingProvenance;
   cacheKey?: StaticCssEvalCacheKey;
 }): StaticCssEvalResult {
+  const diagnostic = resultDiagnostic(options.state, options.diagnostic);
   return {
     kind: "error",
     status: "error",
     expression: formatStaticCssEvalQueryExpression(options.query),
-    ...(options.provenance ? { provenance: options.provenance } : {}),
+    ...(options.provenance
+      ? { provenance: resultProvenance(options.state, options.provenance) }
+      : {}),
     dependencies: getResolutionDependencies(options.state),
-    resolutionChain: [...options.state.resolutionChain],
-    diagnostic: options.diagnostic,
-    diagnostics: [options.diagnostic],
-    ...(options.cacheKey ? { cacheKey: options.cacheKey } : {})
+    resolutionChain: resultResolutionChain(options.state),
+    diagnostic,
+    diagnostics: [diagnostic],
+    ...(options.cacheKey
+      ? { cacheKey: resultCacheKey(options.state, options.cacheKey) }
+      : {})
   };
 }
 
@@ -718,6 +794,8 @@ export function getResolutionDependencies(
 ): ResolutionDependency[] {
   return [...state.dependencies.values()].map((dependency) => ({
     ...dependency,
+    file: sourceFile(state, dependency.file),
+    importer: sourceFile(state, dependency.importer),
     memberPath: [...dependency.memberPath],
     ...(dependency.watchFiles ? { watchFiles: [...dependency.watchFiles] } : {})
   }));
@@ -863,11 +941,16 @@ export function createAmbiguousExportStarImportChain(
   candidates: readonly ImportedStaticCssEvalExportStarCandidate[]
 ): string[] {
   return [
-    state.owner.file,
-    ...state.stack.map(formatStaticCssEvalResolutionFrame),
+    sourceFile(state, state.owner.file),
+    ...state.stack.map((frame) =>
+      formatStaticCssEvalResolutionFrame({
+        ...frame,
+        file: sourceFile(state, frame.file)
+      })
+    ),
     ...candidates.map(
       (candidate) =>
-        `${candidate.record.id}#${formatExportName(request.exportName)}`
+        `${sourceFile(state, candidate.record.id)}#${formatExportName(request.exportName)}`
     )
   ];
 }
@@ -877,9 +960,14 @@ export function createResolutionImportChain(
   nextFile: string
 ): string[] {
   return [
-    state.owner.file,
-    ...state.stack.map(formatStaticCssEvalResolutionFrame),
-    nextFile
+    sourceFile(state, state.owner.file),
+    ...state.stack.map((frame) =>
+      formatStaticCssEvalResolutionFrame({
+        ...frame,
+        file: sourceFile(state, frame.file)
+      })
+    ),
+    sourceFile(state, nextFile)
   ];
 }
 

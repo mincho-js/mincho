@@ -88,7 +88,6 @@ var _$mincho$$styleA2 = _$mincho$$styleA;",
 exports[`minchoBabelPlugin > lowers identifier css result through cx without double wrapping 2`] = `
 "import { _$mincho$$styleA as _$mincho$$styleA2 } from "extracted_mcgo2u.css.ts";
 import { cx as _cx } from "@mincho-js/css/classname";
-import { css } from "@mincho-js/css";
 const styleA = _$mincho$$styleA2;
 function App() {
   return <div className={_cx(styleA)} />;

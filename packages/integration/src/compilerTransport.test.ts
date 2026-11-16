@@ -1,6 +1,10 @@
 import { MessageChannel } from "node:worker_threads";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CompilationExecution } from "./compilationExecution.js";
+import {
+  CompilationExecution,
+  currentCompilationExecution,
+  executeTransform
+} from "./compilationExecution.js";
 import { runCompilerJob } from "./compilerWorker.js";
 import {
   CompilerPayloadCache,
@@ -12,7 +16,12 @@ import type {
   ProviderRequest
 } from "./compilerProtocol.js";
 import type { ScopedDependencyOptions } from "./compile.js";
-import type { BabelTransformSourceOptions } from "./babel.js";
+import type {
+  BabelTransformSourceOptions,
+  ConsumerRuntimeSource
+} from "./babel.js";
+import { restoreTransform } from "./transformSnapshot.js";
+import type { TransformSnapshot } from "./transformSnapshot.js";
 
 type CompilerPool = Parameters<CompilationExecution["dispatch"]>[3];
 
@@ -35,6 +44,29 @@ vi.mock("./babel.js", async (importOriginal) => {
       options: BabelTransformSourceOptions,
       cache: boolean
     ) => {
+      if (options.filename === "/virtual/consumer-runtime.ts") {
+        const runtime = options.babel!.consumerRuntimeSource!;
+        const [value, fallback, unavailable, raw] = await Promise.all([
+          runtime("/theme.css.ts?runtime"),
+          runtime("/ordinary.ts"),
+          runtime("/pending.css.ts"),
+          options.babel!.staticCssEvalSourceProvider!.load("/theme.css.ts")
+        ]);
+        return {
+          code: JSON.stringify({
+            value,
+            raw,
+            unavailable,
+            fallback: fallback === undefined
+          }),
+          result: ["", ""]
+        };
+      }
+      if (options.filename === "/virtual/runtime-generation.ts") {
+        const value =
+          await options.babel!.consumerRuntimeSource!("/theme.css.ts");
+        return { code: value?.source ?? "unproven", result: ["", ""] };
+      }
       if (options.filename !== "/virtual/batch-provider.ts")
         return original.transformSourceUncached(options, cache);
 
@@ -79,6 +111,163 @@ function execution(cache = true) {
 }
 
 describe("worker source transport", () => {
+  it("retains effective parser plugins through worker result snapshots", async () => {
+    const runtime = execution();
+    const pool: CompilerPool = { run: (job) => runCompilerJob(job) };
+    const plugins: NonNullable<
+      NonNullable<BabelTransformSourceOptions["babel"]>["parserOpts"]
+    >["plugins"] = [["decorators", { decoratorsBeforeExport: false }]];
+    const result = await runtime.dispatch(
+      "transform",
+      {
+        filename: "/virtual/decorated.ts",
+        source:
+          "function sealed(value) { return value; } export @sealed class Factory {}",
+        babel: { configFile: false, babelrc: false, parserOpts: { plugins } }
+      },
+      undefined,
+      pool,
+      2
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const transformed = restoreTransform(result.value as TransformSnapshot);
+      expect(transformed.parserPlugins).toEqual(
+        expect.arrayContaining(plugins!)
+      );
+    }
+  });
+
+  it("routes consumer runtime and ordinary source requests independently through worker RPC", async () => {
+    const runtime = execution();
+    const jobs: CompilerJob[] = [];
+    const pool: CompilerPool = {
+      run: async (job) => {
+        jobs.push(job);
+        return runCompilerJob(job);
+      }
+    };
+    const dispatch = runtime.dispatch.bind(runtime);
+    const dispatched = vi
+      .spyOn(runtime, "dispatch")
+      .mockImplementation(
+        (kind, input, provider, _pool, partitions, consumer) =>
+          dispatch(kind, input, provider, pool, partitions, consumer)
+      );
+    const nestedInline = vi.fn(async () => ({
+      code: "nested",
+      result: ["", ""] as [string, string]
+    }));
+    const generated: ConsumerRuntimeSource = {
+      source: "export const className = 'generated';",
+      sourceHash: "runtime-hash",
+      version: "client:7",
+      watchFiles: ["/tokens.json"]
+    };
+    const consumer = vi.fn(async (id: string) => {
+      expect(currentCompilationExecution()).toBe(runtime);
+      if (id === "/ordinary.ts") return undefined;
+      if (id === "/pending.css.ts") return { watchFiles: ["/missing.json"] };
+      await executeTransform(
+        { filename: "/virtual/nested-runtime.ts", source: "" },
+        nestedInline
+      );
+      return generated;
+    });
+    const rawLoad = vi.fn(() => ({ source: "raw authoring" }));
+    const inline = vi.fn(async () => ({
+      code: "unexpected inline bypass",
+      result: ["", ""] as [string, string]
+    }));
+
+    const result = await runtime.run(() =>
+      executeTransform(
+        {
+          filename: "/virtual/consumer-runtime.ts",
+          source: "",
+          babel: {
+            consumerRuntimeSource: consumer,
+            staticCssEvalSourceProvider: { resolve: () => null, load: rawLoad }
+          }
+        },
+        inline
+      )
+    );
+
+    expect(JSON.parse(result.code)).toEqual({
+      value: generated,
+      raw: { source: "raw authoring" },
+      unavailable: { watchFiles: ["/missing.json"] },
+      fallback: true
+    });
+    expect(inline).not.toHaveBeenCalled();
+    expect(nestedInline).toHaveBeenCalledOnce();
+    expect(dispatched).toHaveBeenCalledOnce();
+    expect(consumer.mock.calls.map(([id]) => id)).toEqual([
+      "/theme.css.ts?runtime",
+      "/ordinary.ts",
+      "/pending.css.ts"
+    ]);
+    expect(rawLoad).toHaveBeenCalledExactlyOnceWith("/theme.css.ts");
+    expect(jobs[0]).toMatchObject({ provider: true, consumerRuntime: true });
+    expect(
+      (jobs[0].input as BabelTransformSourceOptions).babel
+        ?.consumerRuntimeSource
+    ).toBeUndefined();
+  });
+
+  it("rejects consumer runtime responses from an obsolete generation", async () => {
+    const runtime = execution();
+    let entered!: () => void;
+    let release!: (value: ConsumerRuntimeSource) => void;
+    const ready = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const gate = new Promise<ConsumerRuntimeSource>((resolve) => {
+      release = resolve;
+    });
+    const consumer = () => {
+      entered();
+      return gate;
+    };
+    const pool: CompilerPool = { run: (job) => runCompilerJob(job) };
+    const input = { filename: "/virtual/runtime-generation.ts", source: "" };
+    const pending = runtime.run(() =>
+      runtime.dispatch("transform", input, undefined, pool, 2, consumer)
+    );
+    await ready;
+    runtime.begin();
+    release({
+      source: "stale",
+      sourceHash: "stale",
+      version: "old",
+      watchFiles: []
+    });
+    expect(await pending).toMatchObject({
+      ok: false,
+      error: { name: "MinchoCompilationStaleGenerationError" }
+    });
+
+    const fresh = await runtime.dispatch(
+      "transform",
+      input,
+      undefined,
+      pool,
+      2,
+      () => ({
+        source: "current",
+        sourceHash: "current",
+        version: "new",
+        watchFiles: []
+      })
+    );
+    expect(fresh.ok).toBe(true);
+    if (fresh.ok)
+      expect(restoreTransform(fresh.value as TransformSnapshot).code).toBe(
+        "current"
+      );
+  });
+
   it("retains direct delivery when optional compiler identity cannot be read", async () => {
     transportIdentity.mockRejectedValueOnce(
       new Error("compiler artifacts unavailable")
