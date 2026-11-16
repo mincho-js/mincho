@@ -191,6 +191,16 @@ async function main(): Promise<void> {
         true
       );
       await runNode(
+        ["fixture/modules/tailwind.mjs"],
+        join(consumerRoot, "fixture", "tailwind"),
+        true
+      );
+      await runNode(
+        ["fixture/modules/tailwind-react.mjs"],
+        join(consumerRoot, "fixture", "tailwind-react"),
+        true
+      );
+      await runNode(
         ["fixture/modules/define-rules-language-service.mjs"],
         join(consumerRoot, "fixture", "modules"),
         true

@@ -7,6 +7,7 @@
     "skipLibCheck": false,
     "noEmit": true,
     "jsx": "react-jsx",
+    "jsxImportSource": "@mincho-js/preset-tailwind-react",
     "types": ["node"]
   },
   "files": [
@@ -16,6 +17,11 @@
     "theme-ui-types.mts",
     "theme-ui-types.cts",
     "theme-ui-react-types.tsx",
-    "theme-ui-react-types.cts"
+    "theme-ui-react-types.cts",
+    "tailwind-types.mts",
+    "tailwind-types.cts",
+    "tailwind-react-types.tsx",
+    "tailwind-react-types.cts",
+    "mincho-jsx-types.tsx"
   ]
 }

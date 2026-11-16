@@ -1,0 +1,319 @@
+# Tailwind Styles
+
+Use Tailwind CSS 4.3.5's default design tokens and compound styles through
+Mincho's native APIs. `@mincho-js/tailwind` defines the contract and property
+mappings; `@mincho-js/preset-tailwind` supplies the values and compiled CSS.
+`@mincho-js/preset-tailwind-react` adds preset-specific JSX types and `styled`
+components while sharing the same styles.
+
+The port preserves the default OKLCH palette, spacing unit, typography pairs,
+shadows, radii, breakpoints, and four animations. It includes screen-reader,
+truncation, line-clamp, and container styles. Ordinary single-property styles use
+native CSS properties. It does not interpret Tailwind class strings or include
+the scanner, compiler, plugin API, or variable-based effect compositor.
+
+## Familiar utility vocabulary [#utility-vocabulary]
+
+```tsx
+// primary-button.tsx
+import type { ReactNode } from "react";
+import { themeClass } from "@mincho-js/preset-tailwind-react";
+import "@mincho-js/preset-tailwind/styles.css";
+
+export function PrimaryButton({ children }: { children: ReactNode }) {
+  return (
+    <button
+      className={themeClass}
+      css={[
+        {
+          bg: { base: "blue-500", _hover: "blue-700" },
+          text: "white",
+          font: "bold",
+          py: 2,
+          px: 3,
+        },
+        "rounded",
+      ]}
+    >
+      {children}
+    </button>
+  );
+}
+```
+
+Configure the preset as the `css` prop's source using the setup below. Write
+style objects directly in JSX, such as `css={{ bg: "blue-500", px: 3 }}`, or
+combine them with compound utility names in an array. The prop compiles to
+static classes and is removed before React renders.
+
+`text` selects color, font-size or alignment tokens; `font` selects font-family
+or weight tokens. `"rounded"` uses the default radius, while `rounded: "lg"`
+selects a named size. Property-level `base`, `_hover` and `_md` values use native
+Mincho conditions.
+
+Spacing decomposes into directional atoms: `p` refers to `px` and `py`, `px`
+to `paddingLeft` and `paddingRight`, and `py` to `paddingTop` and `paddingBottom`.
+The same applies to `m`. Applying `p: 4`, then `px: 3` and `pl: 1` changes only
+the relevant sides. `cx()` uses the same atomic properties while keeping hover
+and responsive conditions independent.
+
+## Install and configure [#install-and-configure]
+
+```sh
+npm install react react-dom @mincho-js/css @mincho-js/react @mincho-js/tailwind @mincho-js/preset-tailwind @mincho-js/preset-tailwind-react @vanilla-extract/css
+npm install -D @mincho-js/vite @vanilla-extract/vite-plugin @vitejs/plugin-react
+```
+
+`@mincho-js/react` is a required peer of the React preset. Declare it directly in
+the application because compiled styled components import its shared runtime.
+
+Configure the [Mincho and Vanilla Extract build plugins](/docs/getting-started)
+before the React plugin. `jsxCssProp.importSource` selects the preset for inline
+style objects. `extractCalls` also lets explicit `css`, `rules` and `cx` calls
+live beside components in `.tsx` files. Reusable themes in `.css.ts` files
+continue to compile as before.
+
+Import the preset's `extractCalls` map from `/config`. This entry contains only
+configuration data and can be loaded by Node without evaluating styles.
+
+```ts
+// vite.config.ts
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+import { minchoVitePlugin } from "@mincho-js/vite";
+import { extractCalls } from "@mincho-js/preset-tailwind-react/config";
+import { vanillaExtractPlugin } from "@vanilla-extract/vite-plugin";
+
+export default defineConfig({
+  plugins: [
+    minchoVitePlugin({
+      jsxCssProp: { importSource: "@mincho-js/preset-tailwind-react" },
+      extractCalls,
+    }),
+    vanillaExtractPlugin(),
+    react({ jsxImportSource: "@mincho-js/preset-tailwind-react" }),
+  ],
+});
+```
+
+Select the same package as TypeScript's JSX source. It supplies the JSX runtime
+and types for Tailwind tokens without a project-wide declaration override:
+
+```jsonc
+// tsconfig.json
+{
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "jsxImportSource": "@mincho-js/preset-tailwind-react",
+  },
+}
+```
+
+The [React example](https://github.com/mincho-js/mincho/tree/main/examples/tailwind)
+uses this setup: `app.tsx` contains inline `css` props and a co-located recipe,
+while `theme.css.ts` supplies the reusable custom theme and button recipe.
+Layout and utility styles stay beside their elements. The custom theme has a
+separate variable contract, so the example passes its changing surface colors
+through React's `style` prop. Style creation is extracted at build time; recipe
+variants are selected at runtime.
+Pass generated classes and recipe results to `className`.
+Apply `themeClass` to the element or an ancestor and import `styles.css` to load
+its variables.
+
+## Theme → definition → component [#theme-definition-component]
+
+```ts
+// button.css.ts
+import { theme, defineRules } from "@mincho-js/css";
+import { themeSpec } from "@mincho-js/tailwind";
+import { tailwindTokens } from "@mincho-js/preset-tailwind/tokens";
+
+const tokens = {
+  ...tailwindTokens,
+  colors: { ...tailwindTokens.colors, brand: "rebeccapurple" },
+};
+export const [themeClass, vars, contract] = theme(tokens);
+const { css, rules, cx } = defineRules(themeSpec(vars));
+
+export const panel = cx(themeClass, css({ p: 6, _md: { p: 8 } }));
+export const button = rules({
+  base: { px: 4, py: 2, rounded: "lg", fontWeight: "semibold" },
+  variants: {
+    tone: {
+      solid: { bg: "brand", color: "white" },
+      soft: { bg: "violet-100", color: "violet-900" },
+    },
+  },
+});
+```
+
+```tsx
+import { panel, button } from "./button.css";
+
+export function Card() {
+  return (
+    <section className={panel}>
+      <button className={button({ tone: "solid" })}>Create project</button>
+    </section>
+  );
+}
+```
+
+`theme()` is the function from `@mincho-js/css`. It creates a class, variables
+and a reusable contract. `theme.extends(contract, tokens)` implements another
+set of values with the same variable names. `themeSpec()` creates the native
+`defineRules()` configuration; it does not create classes by itself. Keep that
+definition inside `.css.ts` and export generated classes and recipes.
+
+## Values and mappings [#values-and-mappings]
+
+| Style           | Native authoring                                                    |
+| --------------- | ------------------------------------------------------------------- |
+| Palette         | `color: "sky-600"`, `bg: "olive-50"`, `fill: "current"`             |
+| Spacing         | `p: 4`, `gap: 1.5`, `mx: -2`, `p: "12px"`                           |
+| Sizing          | `w: "1/2"`, `h: "dvh"`, `maxWidth: "prose"`                         |
+| Typography      | `fontFamily: "sans"`, `fontSize: "lg"`, `fontWeight: "bold"`        |
+| Effects         | `rounded: "xl"`, `shadow: "sm"`, `blur: "xs"`, `animate: "pulse"`   |
+| Compound styles | `srOnly: true`, `notSrOnly: true`, `truncate: true`, `lineClamp: 2` |
+| Container       | `container: true`                                                   |
+
+Numeric spacing multiplies the default `0.25rem` token; finite quarter steps are
+supported. Negative values apply to margin, inset, text indent and scroll margin.
+CSS length strings are literal. Axis shortcuts resolve to individual physical
+longhands so atomic composition can override each side independently.
+
+Named font sizes include their original line heights. Place `lineHeight` after
+`fontSize` to override it. Numeric line heights use the spacing unit; a string
+such as `"1.5"` means a literal unitless value.
+
+`TailwindTokens` describes the complete default contract. `TailwindScales`
+accepts custom names in a complete theme. Spread the default values to retain
+the required groups while adding or overriding tokens. Breakpoint lengths stay
+outside the variable contract because media queries cannot use CSS variables.
+
+## Responsive styles [#responsive-styles]
+
+Defaults are `_sm` at 40rem, `_md` at 48rem, `_lg` at 64rem, `_xl` at 80rem,
+and `_screen2xl` at 96rem. Native condition names start with a letter, so the
+upstream `2xl` key uses the alias `screen2xl`.
+
+```ts
+const { css } = defineRules(
+  themeSpec(vars, { tablet: "48rem", wide: "80rem" }),
+);
+export const layout = css({ display: "grid", _tablet: { gap: 6 } });
+```
+
+Custom breakpoints replace the defaults. The container style sets `width: 100%`
+and responsive maximum widths; add centering and padding separately.
+
+## Compose effects and use animations [#compose-effects-and-use-animations]
+
+Each `blur`, `dropShadow`, `insetShadow` or `shadow` mapping assigns a whole CSS
+property. To combine effects, use Mincho's literal `css()` with resolved tokens:
+
+```ts
+import { css as literalCss } from "@mincho-js/css";
+
+export const effects = literalCss({
+  filter_: [
+    "blur(0px)",
+    ...vars.dropShadows.DEFAULT.map((s) => `drop-shadow(${s})`),
+  ],
+  boxShadow$: [vars.shadows.sm, vars.insetShadows.xs],
+});
+```
+
+`filter_` joins with spaces and `boxShadow$` joins with commas. This uses native
+Mincho composition without a Tailwind utility-state engine. The default
+animation values reference scoped keyframes; import
+`@mincho-js/preset-tailwind/styles.css` when using those animations. Handle
+reduced-motion preferences with native media conditions or your application CSS.
+
+## React recipes [#react-recipes]
+
+Import `styled` directly from `@mincho-js/preset-tailwind-react`, alongside its
+native `css`, `rules`, and `cx` APIs. A builder such as `styled.span()` creates a
+typed React element from the same recipe options. The configured `extractCalls`
+map compiles these calls directly in component files. Reusable definitions can
+also live in a `.css.ts` file.
+
+```tsx
+import { styled, themeClass } from "@mincho-js/preset-tailwind-react";
+import "@mincho-js/preset-tailwind/styles.css";
+
+const Badge = styled.span({
+  base: { px: 2.5, py: 1, rounded: "full", fontSize: "sm" },
+  variants: {
+    tone: {
+      info: { color: "sky-900", bg: "sky-100" },
+      success: { color: "emerald-900", bg: "emerald-100" },
+    },
+  },
+  defaultVariants: { tone: "info" },
+});
+
+export function Status() {
+  return (
+    <Badge className={themeClass} tone="success">
+      Ready
+    </Badge>
+  );
+}
+```
+
+## Compiled styles and optional reset [#compiled-styles-and-optional-reset]
+
+```ts
+// panel.css.ts
+import { css, rules, cx, themeClass } from "@mincho-js/preset-tailwind-react";
+
+export const panel = cx(themeClass, css({ container: true, px: 6 }));
+export const label = css({ truncate: true });
+export const button = rules({
+  base: { px: 4, py: 2, rounded: "lg" },
+  variants: {
+    tone: {
+      solid: { color: "white", bg: "sky-700" },
+      soft: { color: "sky-900", bg: "sky-100" },
+    },
+  },
+});
+```
+
+```tsx
+import { panel, label, button } from "./panel.css";
+import "@mincho-js/preset-tailwind/styles.css";
+// Optional, global browser reset:
+import "@mincho-js/preset-tailwind/preflight.css";
+
+<main className={panel}>
+  <p className={label}>A long description</p>
+  <button className={button({ tone: "soft" })}>Create project</button>
+</main>;
+```
+
+The React preset exports `styled` and native `css`, `rules`, `cx`, and `preset`
+alongside `themeClass`, `vars`, and `contract`. Define the styles and recipes your
+components need in `.css.ts` files, or use co-located calls and JSX `css` props
+with the setup above. Only the styles you use generate component CSS. The
+package does not ship fixed container or utility classes.
+
+`@mincho-js/preset-tailwind/styles.css` contains theme variables and animation
+keyframes. Its `/tokens` entry exports plain `tailwindTokens` data. JavaScript
+imports alone emit no CSS and work in Node/SSR. The two CSS entry points are
+explicit assets. Using the
+authoring APIs requires the build plugins; reading compiled theme data does not.
+
+Preflight preserves the upstream browser fixes and default font stacks in the
+`mincho-tailwind-preflight` cascade layer. Unlayered application rules override
+normal reset declarations; the original `[hidden]` rule remains important. Set
+layer order deliberately when combining it with other layered stylesheets.
+Override reset fonts on `html` and `code, kbd, samp, pre`; changing a local theme
+does not change the reset. All upstream `--theme()` calls are resolved to CSS
+values, so Tailwind is not a consumer dependency.
+
+Try the React example with `yarn workspace @examples/tailwind dev`. It exercises
+theme modes, variants, responsive styles, compound effects and explicit Preflight.
+The original MIT notices and pinned source revision are in each package's
+`NOTICE` and `LICENSE`. Type checks use TypeScript 5.9.3.

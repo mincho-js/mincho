@@ -1,0 +1,26 @@
+{
+  "files": [],
+  "references": [
+    {
+      "path": "../../packages/css"
+    },
+    {
+      "path": "../../packages/preset-tailwind"
+    },
+    {
+      "path": "../../packages/preset-tailwind-react"
+    },
+    {
+      "path": "../../packages/react"
+    },
+    {
+      "path": "../../packages/tailwind"
+    },
+    {
+      "path": "../../packages/vite"
+    },
+    {
+      "path": "./tsconfig.app.json"
+    }
+  ]
+}

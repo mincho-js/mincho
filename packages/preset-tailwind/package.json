@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "@mincho-js/preset-tailwind",
+  "version": "0.1.0",
+  "description": "Compiled Tailwind tokens, styles and opt-in Preflight for Mincho",
+  "type": "module",
+  "sideEffects": [
+    "**/*.css"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mincho-js/mincho.git",
+    "directory": "packages/preset-tailwind"
+  },
+  "typings": "./dist/esm/index.d.ts",
+  "main": "./dist/cjs/index.cjs",
+  "module": "./dist/esm/index.mjs",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/esm/index.d.ts",
+        "default": "./dist/esm/index.mjs"
+      },
+      "require": {
+        "types": "./dist/cjs/index.d.cts",
+        "default": "./dist/cjs/index.cjs"
+      }
+    },
+    "./config": {
+      "import": {
+        "types": "./dist/esm/config.d.ts",
+        "default": "./dist/esm/config.mjs"
+      },
+      "require": {
+        "types": "./dist/cjs/config.d.cts",
+        "default": "./dist/cjs/config.cjs"
+      }
+    },
+    "./styles.css": "./dist/styles.css",
+    "./tokens": {
+      "import": {
+        "types": "./dist/esm/tokens.d.ts",
+        "default": "./dist/esm/tokens.mjs"
+      },
+      "require": {
+        "types": "./dist/cjs/tokens.d.cts",
+        "default": "./dist/cjs/tokens.cjs"
+      }
+    },
+    "./preflight.css": "./dist/preflight.css"
+  },
+  "files": [
+    "README.md",
+    "LICENSE",
+    "NOTICE",
+    "dist/"
+  ],
+  "publishConfig": {
+    "directory": "_release/package"
+  },
+  "scripts": {
+    "clean": "yarn g:clean",
+    "build": "yarn g:build",
+    "build:watch": "yarn g:build-watch",
+    "test": "yarn g:test",
+    "test:watch": "yarn g:test-watch",
+    "lint": "yarn g:lint",
+    "fix": "yarn g:fix",
+    "check": "yarn g:check"
+  },
+  "prettier": "prettier-config-custom",
+  "dependencies": {
+    "@mincho-js/css": "workspace:^",
+    "@mincho-js/tailwind": "workspace:^"
+  },
+  "peerDependencies": {
+    "@vanilla-extract/css": "*"
+  },
+  "devDependencies": {
+    "@mincho-js/debug-log": "workspace:^",
+    "@types/node": "catalog:",
+    "@vanilla-extract/css": "catalog:",
+    "@vanilla-extract/vite-plugin": "catalog:",
+    "eslint-config-custom": "workspace:^",
+    "prettier-config-custom": "workspace:^",
+    "tsconfig-custom": "workspace:^",
+    "vite": "catalog:",
+    "vite-config-custom": "workspace:^",
+    "vitest": "catalog:"
+  }
+}
