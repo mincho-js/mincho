@@ -191,6 +191,8 @@ css.raw({ border: "1px" }); // ❌ Type error: property is disabled
 
 함수로 속성을 동적으로 해석합니다.
 
+일반 객체 인자는 함수에 그대로 전달합니다. 모든 키가 `base`, 선택자, at-rule 또는 등록된 조건인 객체는 조건부 값으로 먼저 해석한 뒤 각 끝단의 값을 함수에 전달합니다.
+
 ```typescript
 const { css } = defineRules({
   properties: {

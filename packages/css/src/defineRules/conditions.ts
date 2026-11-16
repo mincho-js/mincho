@@ -16,15 +16,24 @@ export interface NormalizedCondition {
 
 export type DefineRulesCondition = string | DefineRulesConditionObject;
 
-export type DefineRulesConditions = Record<string, DefineRulesCondition>;
+export type DefineRulesConditions = Record<
+  string,
+  DefineRulesCondition | undefined
+>;
 
 export type ConditionAliasValue = string | DefineRulesConditionObject;
 
 export type ConditionAliasMap = Record<`_${string}`, ConditionAliasValue>;
 
+type DefinedConditionKey<Conditions extends DefineRulesConditions> = {
+  [Key in keyof Conditions]-?: [Conditions[Key]] extends [undefined]
+    ? never
+    : Key;
+}[keyof Conditions];
+
 export type DefineRulesConditionAliasKey<
   Conditions extends DefineRulesConditions
-> = `_${Extract<keyof Conditions, string>}`;
+> = `_${Extract<DefinedConditionKey<Conditions>, string>}`;
 
 const CONDITION_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9]*$/;
 const MEDIA_PREFIX_PATTERN = /^@media\s+/;
@@ -57,6 +66,8 @@ export function normalizeDefineRulesConditions(
   const normalized: ConditionAliasMap = {};
 
   for (const [name, value] of Object.entries(conditions)) {
+    if (value === undefined) continue;
+
     validateDefineRulesConditionName(name);
     normalized[`_${name}`] = normalizeDefineRulesConditionValue(value, name);
   }
@@ -156,6 +167,7 @@ if (import.meta.vitest) {
           mobile: {},
           tablet: "screen and (min-width: 768px)",
           desktop: "@media screen and (min-width: 1024px)",
+          omitted: undefined,
           grid: {
             "@supports": "(display: grid)",
             "@media": "@media screen and (min-width: 1280px)"

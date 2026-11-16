@@ -1244,6 +1244,7 @@ if (import.meta.vitest) {
     ) => string;
   };
 
+  let sourceBabelTransform: typeof babelTransformSource;
   let consumerFixturePath: string;
   let registryFixtureMatrixCases: DefineRulesPresetSerializationFixtureCase[] =
     [];
@@ -1301,6 +1302,8 @@ if (import.meta.vitest) {
     initializeDefineRulesPresetSerializationFixtures(
       await loadDefineRulesPresetSerializationManifest()
     );
+
+    sourceBabelTransform = await loadSourceBabelTransform();
   });
 
   interface MockLoadArgs {
@@ -2355,7 +2358,7 @@ if (import.meta.vitest) {
     };
   }
 
-  async function spyOnSourceBabelTransform() {
+  async function loadSourceBabelTransform() {
     const sourceIntegrationUrl = new URL(
       "../../integration/src/babel" + ".ts",
       // eslint-disable-next-line @typescript-eslint/ban-ts-comment
@@ -2369,9 +2372,13 @@ if (import.meta.vitest) {
       babelTransformSource: typeof babelTransformSource;
     };
 
+    return sourceIntegrationModule.babelTransformSource;
+  }
+
+  function spyOnSourceBabelTransform() {
     return vi
       .spyOn(integrationHelpers, "babelTransformSource")
-      .mockImplementation(sourceIntegrationModule.babelTransformSource);
+      .mockImplementation(sourceBabelTransform);
   }
 
   async function loadExtractedCssFromEntry(
@@ -4191,42 +4198,38 @@ if (import.meta.vitest) {
       }
     });
 
-    it("real esbuild registry builds helper-wrapped, IIFE, nested, multiple instances, and imported helper fixtures", async () => {
-      const realBuildCaseIds = [
-        "registry-helper-wrapped-executed",
-        "registry-iife-executed",
-        "registry-nested-function-executed",
-        "registry-multiple-instances",
-        "registry-imported-helper-executed"
-      ];
+    it.each([
+      "registry-helper-wrapped-executed",
+      "registry-iife-executed",
+      "registry-nested-function-executed",
+      "registry-multiple-instances",
+      "registry-imported-helper-executed"
+    ])("real esbuild registry builds %s", async (caseId: string) => {
+      const fixtureCase = serializedRegistryFixtureCases.find(
+        (candidate) => candidate.caseId === caseId
+      );
+      if (fixtureCase == null) {
+        throw new Error(`Missing registry fixture case ${caseId}`);
+      }
 
-      for (const caseId of realBuildCaseIds) {
-        const fixtureCase = serializedRegistryFixtureCases.find(
-          (candidate) => candidate.caseId === caseId
+      const { registrySource } =
+        await buildRealEsbuildRegistryFixture(fixtureCase);
+
+      expect(registrySource).not.toBe("");
+
+      expectSourceToContainV5PresetArtifact(registrySource);
+      expectSourceToContainPopulatedPresetAtom(registrySource);
+
+      if (fixtureCase.expectedRegistryInstances > 1) {
+        const artifactCount = Array.from(
+          registrySource.matchAll(
+            /["']?schema["']?\s*:\s*["']mincho\.defineRulesPreset["']/g
+          )
+        ).length;
+
+        expect(artifactCount).toBeGreaterThanOrEqual(
+          fixtureCase.expectedRegistryInstances
         );
-        if (fixtureCase == null) {
-          throw new Error(`Missing registry fixture case ${caseId}`);
-        }
-
-        const { registrySource } =
-          await buildRealEsbuildRegistryFixture(fixtureCase);
-
-        expect(registrySource).not.toBe("");
-
-        expectSourceToContainV5PresetArtifact(registrySource);
-        expectSourceToContainPopulatedPresetAtom(registrySource);
-
-        if (fixtureCase.expectedRegistryInstances > 1) {
-          const artifactCount = Array.from(
-            registrySource.matchAll(
-              /["']?schema["']?\s*:\s*["']mincho\.defineRulesPreset["']/g
-            )
-          ).length;
-
-          expect(artifactCount).toBeGreaterThanOrEqual(
-            fixtureCase.expectedRegistryInstances
-          );
-        }
       }
     });
 

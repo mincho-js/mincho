@@ -1,0 +1,10 @@
+Theme UI base, system, and dark preset data is ported unchanged from
+system-ui/theme-ui v0.17.4.
+Commit: 7e17eb6d6350ee04ae37b2b54ac0f9aa1d6e7b0b
+https://github.com/system-ui/theme-ui/tree/v0.17.4
+
+Upstream copyright and MIT permission notice are retained in LICENSE.
+Raw data preserves the original arrays, colors.modes, styles, variant references,
+and configuration metadata. The upstream system config.initialColorMode spelling
+is retained; provider configuration is not interpreted by this static port.
+Mincho's authoring adapter normalizes tokens and resolves styles at package build.

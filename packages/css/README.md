@@ -354,6 +354,17 @@ The `defineRules()` function creates a scoped authoring API and returns `css`, `
 
 `context` is a generic runtime authoring context for scoped `css` and `css.raw` callbacks. It is not a theme-specific API. Use it for any authoring data shape you want shared with styles.
 
+Function resolvers receive ordinary object arguments unchanged. Objects whose keys are all `base` or supported condition keys are interpreted as condition maps first. The value inside `base` is the final resolver argument and is not interpreted as another condition map. If the argument itself has only condition keys, wrap it in an explicit `base`, including inside nested conditions:
+
+```typescript
+const { css } = defineRules({
+  properties: { color: (value: { base: string }) => value.base },
+});
+
+css({ color: { base: { base: "red" } } });
+css({ color: { _hover: { base: { base: "blue" } } } });
+```
+
 Callbacks are top-level only: pass `css((theme) => ({ ... }))` or `css.raw((theme) => ({ ... }))` directly. Nested callbacks are not supported. Direct object, array, and string inputs still work. These callbacks are static authoring helpers, not render-time dynamic props or React context.
 
 ```typescript

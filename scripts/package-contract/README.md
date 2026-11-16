@@ -94,6 +94,13 @@ order while excluding the unused component. A separate pure ESM barrel records
 native esbuild's unused-CSS retention. Both npm and strict PnP run these checks;
 component subpaths are the supported selective-loading contract at this stage.
 
+`modules/theme-ui-react.mjs` checks the scoped Theme UI React preset in both
+installed consumers. It verifies pure ESM/CJS extraction config, component
+variants and inherited preset styles, native recipes, and Vite/esbuild JSX
+runtime output without the compiler. The strict declaration program loads
+Theme UI, Tailwind, and default Mincho JSX types together so their CSS
+vocabularies stay independent.
+
 The original unminified diamond fixtures remain static decoder and package
 contract regressions. Production minification runs separately; a passing
 unminified assertion does not establish a compression result.

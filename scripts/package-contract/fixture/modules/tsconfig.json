@@ -6,7 +6,16 @@
     "strict": true,
     "skipLibCheck": false,
     "noEmit": true,
+    "jsx": "react-jsx",
     "types": ["node"]
   },
-  "files": ["consumer.mts", "consumer.cts", "preset-types.mts"]
+  "files": [
+    "consumer.mts",
+    "consumer.cts",
+    "preset-types.mts",
+    "theme-ui-types.mts",
+    "theme-ui-types.cts",
+    "theme-ui-react-types.tsx",
+    "theme-ui-react-types.cts"
+  ]
 }
