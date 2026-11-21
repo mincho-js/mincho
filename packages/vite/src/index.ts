@@ -61,6 +61,7 @@ import type {
   EnvironmentModuleNode,
   Plugin,
   ResolvedConfig,
+  ResolverFunction,
   Rollup,
   ViteDevServer
 } from "vite";
@@ -544,8 +545,17 @@ export function minchoVitePlugin(_options?: MinchoVitePluginOptions) {
                 : find.test(input)
             );
             const custom = entry?.customResolver;
-            const previous =
+            const hook: unknown =
               typeof custom === "function" ? custom : custom?.resolveId;
+            // Match Vite's native Rollup alias handling for JS config too.
+            const handler =
+              hook && typeof hook === "object" && "handler" in hook
+                ? hook.handler
+                : hook;
+            const previous =
+              typeof handler === "function"
+                ? (handler as ResolverFunction)
+                : undefined;
             let selected: Rollup.ResolveIdResult;
             if (entry) {
               const mapped = input.replace(entry.find, entry.replacement);

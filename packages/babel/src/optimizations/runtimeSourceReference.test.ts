@@ -31,6 +31,64 @@ function environments(source: string) {
   return { math: math.snapshot(), array: array.snapshot() };
 }
 
+it.each([
+  [
+    "a classic top-level block",
+    "{ function fixtureHelper() {} }",
+    "script",
+    true
+  ],
+  [
+    "a classic switch",
+    "switch (1) { case 1: function fixtureHelper() {} }",
+    "script",
+    true
+  ],
+  [
+    "a strict script",
+    '"use strict"; { function fixtureHelper() {} }',
+    "script",
+    false
+  ],
+  ["a module", "{ function fixtureHelper() {} }", "module", false],
+  [
+    "a function-owned block",
+    "function wrap() { { function fixtureHelper() {} } }",
+    "script",
+    false
+  ],
+  [
+    "an intervening lexical declaration",
+    "{ let fixtureHelper; { function fixtureHelper() {} } }",
+    "script",
+    false
+  ],
+  [
+    "an existing program lexical declaration",
+    "let fixtureHelper; { function fixtureHelper() {} }",
+    "script",
+    false
+  ]
+] as const)(
+  "reports a possible shared script global write for %s",
+  (_case, source, sourceType, writesProgram) => {
+    const ast = parseSync(source, {
+      configFile: false,
+      babelrc: false,
+      sourceType
+    })!;
+    traverse(ast, {
+      Program(path) {
+        const evidence = collectRuntimeSourceEvidence(path);
+        expect(evidence.writesScriptGlobal("fixtureHelper")).toBe(
+          writesProgram
+        );
+        expect(evidence.writesScriptGlobal("unrelated")).toBe(false);
+      }
+    });
+  }
+);
+
 describe("runtime intrinsic references exclude erased TypeScript", () => {
   it.each([
     "const fn: Function = () => 1;",

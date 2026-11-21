@@ -1064,10 +1064,13 @@ async function evaluateVanilla(
     }
     return facade;
   };
+  // Public CommonJS acquisitions share a module object for this evaluation,
+  // without receiving the compiler-issued producer facade or its authority.
+  let publicScopeFacade: ReturnType<typeof makeScopeFacade> | undefined;
   const scopedRequire = Object.assign(
     (name: string) =>
       name === "@vanilla-extract/css/fileScope"
-        ? makeScopeFacade()
+        ? (publicScopeFacade ??= makeScopeFacade())
         : require(name),
     require
   );

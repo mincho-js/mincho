@@ -1202,6 +1202,54 @@ it.each([
   }
 );
 
+it("preserves repeated public fileScope acquisitions in registered CSS-text evaluation", async () => {
+  const compiledInput = await compiled(`
+    const specifier = ['@vanilla-extract/css','fileScope'].join('/');
+    const first = require(specifier);
+    const second = require(specifier);
+    const color = new Map([[first,'green']]).get(second) ?? 'red';
+    require('@vanilla-extract/css').globalStyle('.scope-identity',{color});
+    module.exports.color = color;
+  `);
+  expect(
+    validateCssScopeRuntimeOrigins(
+      compiledInput.source,
+      compiledInput.cssScopeOrigins
+    )
+  ).toBeDefined();
+
+  const input = {
+    ...compiledInput,
+    filePath,
+    serializeVirtualCssPath: ({ source }: { source: string }) =>
+      JSON.stringify(source)
+  };
+  const upstream = await processVanillaFile(input);
+  expect(upstream).toContain("color: green");
+  expect(await processVanillaWithExecution(input)).toBe(upstream);
+});
+
+it("isolates public fileScope facade state between registered evaluations", async () => {
+  const compiledInput = await compiled(`
+    const specifier = ['@vanilla-extract/css','fileScope'].join('/');
+    const scope = require(specifier);
+    const seen = Object.hasOwn(scope, 'minchoExampleLabel') ? 'retained' : 'fresh';
+    scope.minchoExampleLabel = 'custom';
+    module.exports.seen = seen;
+  `);
+  expect(
+    validateCssScopeRuntimeOrigins(
+      compiledInput.source,
+      compiledInput.cssScopeOrigins
+    )
+  ).toBeDefined();
+  const input = { ...compiledInput, filePath };
+  for (let run = 0; run < 2; run++)
+    expect(await processVanillaWithExecution(input)).toContain(
+      "export var seen = 'fresh';"
+    );
+});
+
 it("keeps upstream CSS-text fallback for unsupported adapter versions without granting artifact authority", async () => {
   vi.resetModules();
   vi.doMock("node:fs", async () => {

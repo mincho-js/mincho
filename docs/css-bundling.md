@@ -383,9 +383,19 @@ require an attributed source; ambiguous known origins are never bypassed.
 IR/dist-chunk output continues to require verified physical provenance.
 With an unvalidated Vanilla Extract adapter, native evaluation can attach an
 origin only when it can independently verify the producer for that scope.
-If dynamic authoring prevents verification, CSS text may still be emitted,
-but publishing a relative asset requires verified provenance; the host reports
-a missing-origin diagnostic rather than resolving it from the wrong directory.
+If dynamic authoring prevents verification, CSS text may still be emitted.
+Vite reports a missing-origin diagnostic rather than publishing a relative
+asset without verified provenance. The esbuild native serializer leaves an
+unattributed CSS import unchanged: Vanilla Extract uses the CSS scope path's
+directory as the base, which an explicit scope can make different from the
+authoring file's directory.
+
+In Vite development, an attributed producer in a directory containing a literal
+`%` may use an SVG both as an inline asset candidate and as an external fragment
+reference. Vite passes the same resolver input for `./icon.svg` and
+`./icon.svg#shape`, leaving their intent ambiguous at this boundary. Use
+`./icon.svg?no-inline#shape` for the external reference so the two inputs remain
+distinct. Mincho reports the ambiguity rather than selecting the wrong asset.
 
 If low-level code mixes compiler-attributed and unattributed emissions in the
 same logical file scope, CSS-text output retains their original cascade order

@@ -789,10 +789,20 @@ export function collectRuntimeSourceEvidence(
         ((parent.isBlockStatement() && !parent.parentPath?.isFunction()) ||
           parent.isSwitchCase())
       ) {
-        recordUnmodeledName(
-          parent.scope.getFunctionParent() ?? parent.scope.getProgramParent(),
-          name
-        );
+        const owner =
+          parent.scope.getFunctionParent() ?? parent.scope.getProgramParent();
+        recordUnmodeledName(owner, name);
+        // A sibling classic script cannot see this Program's local shadow
+        // map. Annex B's possible var-scoped write is shared realm evidence.
+        if (owner.path.isProgram() && program.node.sourceType === "script") {
+          const enclosing = resolveRuntimeBinding(
+            parent.scope.parent?.getBinding(name),
+            name,
+            (candidate) => attachedPath(candidate.path, children)
+          );
+          if (!enclosing || isPossibleScriptGlobalBinding(enclosing))
+            writtenGlobals.add(name);
+        }
       }
     },
     AssignmentExpression(path) {

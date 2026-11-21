@@ -83,6 +83,39 @@ describe("caller loaders in child compilation", () => {
     }
   );
 
+  it.each(["assert", "with"] as const)(
+    "preserves caller-selected ESM import %s syntax in the emitted child bytes",
+    async (keyword) => {
+      const { root } = await fixture();
+      const filePath = join(root, "entry.ts");
+      let emittedSource = "";
+      const result = await compile({
+        cwd: root,
+        filePath,
+        originalPath: filePath,
+        resolverCache: new Map(),
+        externals: ["./theme.json"],
+        contents: `import theme from "./theme.json" ${keyword} { type: "json" }; export const color = theme.color;`,
+        esbuild: {
+          ...esbuild,
+          async build(options) {
+            const output = await esbuild.build({
+              ...options,
+              format: "esm",
+              supported: { "import-assertions": true }
+            });
+            emittedSource = output.outputFiles?.[0]?.text ?? "";
+            return output;
+          }
+        }
+      });
+      expect(emittedSource).toContain(
+        `from "./theme.json" ${keyword} { type: "json" };`
+      );
+      expect(result.source).toBe(emittedSource);
+    }
+  );
+
   it("parses sloppy CommonJS output using its emitted grammar", async () => {
     const { root } = await fixture();
     const filePath = join(root, "entry.cjs");

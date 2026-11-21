@@ -10,6 +10,7 @@ import {
   type DevEnvironment,
   type InlineConfig,
   type Plugin,
+  type ResolverObject,
   type Rollup,
   type ViteDevServer
 } from "vite";
@@ -1019,6 +1020,62 @@ describe("mincho with the Vite runtime", () => {
       ).toBe(true);
     }
   );
+
+  it("preserves Vite's native CSS alias resolver hook descriptor", async () => {
+    const root = await createFixture({
+      "src/entry.css":
+        '.fixture { background: url("./fixture.svg?no-inline"); }',
+      "src/selected.svg":
+        '<svg xmlns="http://www.w3.org/2000/svg" fill="green"/>'
+    });
+    const calls: Array<{ importer?: string; canResolve: boolean }> = [];
+    const customResolver = {
+      resolveId: {
+        handler(this: Rollup.PluginContext, id: string, importer?: string) {
+          calls.push({
+            importer,
+            canResolve: typeof this.resolve === "function"
+          });
+          return { id };
+        }
+      }
+      // The pinned native alias plugin also accepts the Rollup hook descriptor
+      // in JavaScript config, beyond Vite's narrower exported ResolverObject.
+    } as unknown as ResolverObject;
+    const server = await createServer({
+      root,
+      configFile: false,
+      logLevel: "silent",
+      resolve: {
+        alias: [
+          {
+            find: "./fixture.svg?no-inline",
+            replacement: join(root, "src/selected.svg?no-inline"),
+            customResolver
+          }
+        ]
+      },
+      server: { host: "127.0.0.1", port: 0, watch: null },
+      plugins: [minchoVitePlugin()]
+    });
+    servers.push(server);
+    await server.listen();
+    const base = server.resolvedUrls!.local[0];
+    const css = await fetch(new URL("src/entry.css", base), {
+      headers: { Accept: "text/css" }
+    });
+    expect(css.status).toBe(200);
+    expect(await css.text()).toContain("/src/selected.svg?no-inline");
+    expect(calls).toEqual([
+      {
+        importer: normalizePath(join(root, "src/entry.css")),
+        canResolve: true
+      }
+    ]);
+    const svg = await fetch(new URL("src/selected.svg?no-inline", base));
+    expect(svg.status).toBe(200);
+    expect(await svg.text()).toContain('fill="green"');
+  });
 
   it.each([
     ["icons", false],
