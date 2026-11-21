@@ -1,6 +1,7 @@
 import { parseSync } from "@babel/core";
 import {
   parse as parseCss,
+  generate as generateCss,
   walk as walkCss,
   lexer as cssLexer
 } from "css-tree";
@@ -50,6 +51,7 @@ import {
   runDefineRulesPresetRegistryStep
 } from "@mincho-js/integration";
 import { normalizePath } from "@rollup/pluginutils";
+import MagicString from "magic-string";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, randomUUID } from "node:crypto";
 import * as fs from "node:fs";
@@ -446,13 +448,27 @@ export function minchoVitePlugin(_options?: MinchoVitePluginOptions) {
     string,
     Pick<
       ReturnType<typeof createMinchoViteEnvironmentPlugin>,
-      "processedCssGuard" | "directCssGuard"
+      "processedCssGuard" | "directCssGuard" | "captureDirectCss"
     >
   >();
   const devCssGuard = {
     name: "mincho-dev-origin-free-css",
     applyToEnvironment(environment) {
       return devCssGuards.get(environment.name)?.processedCssGuard ?? false;
+    }
+  } satisfies Plugin;
+  const devDirectCssInput = {
+    name: "mincho-dev-direct-css-input",
+    applyToEnvironment(environment) {
+      return environment.config.consumer === "client";
+    },
+    transform: {
+      order: "pre",
+      handler(code, id) {
+        return devCssGuards
+          .get(this.environment.name)
+          ?.captureDirectCss(this, code, id);
+      }
     }
   } satisfies Plugin;
   const devDirectCssGuard = {
@@ -522,6 +538,7 @@ export function minchoVitePlugin(_options?: MinchoVitePluginOptions) {
           !hostPlugins.includes(devCssGuard)
         ) {
           (hostPlugins as Plugin[]).splice(capture, 0, devCssGuard);
+          (hostPlugins as Plugin[]).unshift(devDirectCssInput);
           (hostPlugins as Plugin[]).push(devDirectCssGuard);
         }
       }
@@ -545,6 +562,7 @@ export function minchoVitePlugin(_options?: MinchoVitePluginOptions) {
       const {
         plugin: environmentPlugin,
         processedCssGuard,
+        captureDirectCss,
         directCssGuard
       } = createMinchoViteEnvironmentPlugin(
         _options,
@@ -565,6 +583,7 @@ export function minchoVitePlugin(_options?: MinchoVitePluginOptions) {
       if (config.command === "serve")
         devCssGuards.set(environment.name, {
           processedCssGuard,
+          captureDirectCss,
           directCssGuard
         });
 
@@ -1397,12 +1416,180 @@ function createMinchoViteEnvironmentPlugin(
     Rollup.TransformPluginContext,
     { id: string; publication: PublishedStylesheet }
   >();
+  // A load and its transforms have different Vite contexts. Bind the bytes
+  // to their publication across that gap, then remove the transport comment
+  // before native CSS and user transforms see the stylesheet.
+  const directLoadTags = new WeakMap<PublishedStylesheet, string>();
+  function captureDirectCss(
+    context: Rollup.TransformPluginContext,
+    code: string,
+    id: string
+  ) {
+    if (
+      !isDirectStyleRequest(id) ||
+      !id.startsWith(virtualCssIdPrefix + unattributedCssPrefix)
+    )
+      return;
+    const request = virtualCssRequest(id);
+    if (request?.representation !== "css") return;
+    const publication = cssState.publication(request.cacheId);
+    if (!publication && code === "") return; // A fresh retired HMR load.
+    const tag = publication && directLoadTags.get(publication);
+    if (!publication || !tag || !code.endsWith(tag))
+      throw new Error(
+        "[mincho] Generated stylesheet changed during host processing."
+      );
+    directPublications.set(context, { id, publication });
+    return { code: code.slice(0, -tag.length), map: null };
+  }
+
+  // Vite's graph and CSS resolver use filesystem spellings. Escape only a
+  // known path at the browser boundary, preserving the host base and suffix.
+  function encodeDevFileUrl(
+    url: string,
+    paths: ReadonlySet<string>,
+    base: string,
+    hostBase = base
+  ) {
+    if (!url.startsWith(hostBase)) return;
+    const path = url.slice(hostBase.length).split(/[?#]/, 1)[0]!;
+    if (paths.has(path))
+      return (
+        base +
+        path.replaceAll("%", "%25") +
+        url.slice(hostBase.length + path.length)
+      );
+  }
+
+  function renderDevUrlEdits(edited: MagicString | undefined, id: string) {
+    if (edited)
+      return {
+        code: edited.toString(),
+        map: edited.generateMap({ source: id, hires: "boundary" }).toString()
+      };
+  }
+
+  function encodeDevAssetUrls(
+    ctx: Rollup.TransformPluginContext,
+    code: string,
+    id: string,
+    publication: PublishedStylesheet
+  ) {
+    if (
+      !publication.origin ||
+      !dirname(publication.origin).includes("%") ||
+      !code.includes("%") ||
+      ctx.environment?.mode !== "dev"
+    )
+      return;
+    // Before vite:css-post captures these bytes, Vite 7 holds the files from
+    // this transform in the same set vite:css-analysis uses for file-only nodes.
+    const inputs = (ctx as { _addedImports?: ReadonlySet<string> })
+      ._addedImports;
+    if (!inputs?.size) return;
+    const paths = new Set<string>();
+    const origin = config.server.origin ?? "";
+    const mount = config.base.replace(/\/$/, "");
+    // Native asset URLs use decodedBase; module import URLs use base.
+    const hostBase = origin + decodeURI(mount);
+    const base = origin + mount;
+    const root = normalizePath(config.root).replace(/\/$/, "") + "/";
+    for (const input of inputs) {
+      const file = normalizePath(input).split(/[?#]/, 1)[0]!;
+      const path = file.startsWith(root)
+        ? "/" + file.slice(root.length)
+        : posix.join("/@fs", file);
+      if (path.includes("%")) paths.add(path);
+    }
+    if (!paths.size) return;
+    let edited: MagicString | undefined;
+    let ast: ReturnType<typeof parseCss>;
+    try {
+      ast = parseCss(code, { positions: true, parseCustomProperty: true });
+    } catch {
+      return; // Preserve native output for syntax css-tree cannot represent.
+    }
+    walkCss(ast, function (node) {
+      if (
+        !(
+          node.type === "Url" ||
+          (node.type === "String" &&
+            /^(?:-webkit-)?image-set$/i.test(this.function?.name ?? ""))
+        ) ||
+        !node.loc
+      )
+        return;
+      const encoded = encodeDevFileUrl(node.value, paths, base, hostBase);
+      if (!encoded) return;
+      (edited ??= new MagicString(code)).update(
+        node.loc.start.offset,
+        node.loc.end.offset,
+        generateCss({ ...node, value: encoded })
+      );
+    });
+    return renderDevUrlEdits(edited, id);
+  }
+
+  // Vite 7's import analysis prints the filesystem ID verbatim. Encode the
+  // browser spelling only after Vite has resolved the native module graph.
+  function encodeGeneratedDevImports(
+    ctx: Rollup.TransformPluginContext,
+    code: string,
+    id: string
+  ) {
+    if (
+      !code.includes("%") ||
+      (!code.includes(virtualExt) &&
+        !code.includes(extractedSidecarIdPrefix.slice(1)))
+    )
+      return;
+    const environment = ctx.environment;
+    if (environment?.mode !== "dev") return;
+    const owner = environment.moduleGraph.getModuleById(id);
+    if (!owner) return;
+    const paths = new Set<string>();
+    for (const child of owner.importedModules) {
+      if (!child.id || !child.url.includes("%")) continue;
+      const cssId = virtualCssCacheId(child.id);
+      const origin =
+        ownedExtractedSidecarPath(child.id) ??
+        (cssId && cssState.publication(cssId)?.origin);
+      if (!origin?.includes("%")) continue;
+      const url = child.url.startsWith("\0")
+        ? "/@id/__x00__" + child.url.slice(1)
+        : child.url;
+      paths.add(url.split(/[?#]/, 1)[0]!);
+    }
+    if (!paths.size) return;
+    const base = config.base.replace(/\/$/, "");
+    let edited: MagicString | undefined;
+    for (const node of ctx.parse(code).body) {
+      if (
+        node.type !== "ImportDeclaration" ||
+        typeof node.source.value !== "string"
+      )
+        continue;
+      const encoded = encodeDevFileUrl(node.source.value, paths, base);
+      if (!encoded) continue;
+      const { start, end } = node.source as typeof node.source & {
+        start: number;
+        end: number;
+      };
+      (edited ??= new MagicString(code)).update(
+        start,
+        end,
+        JSON.stringify(encoded)
+      );
+    }
+    return renderDevUrlEdits(edited, id);
+  }
   const directCssGuard = {
     name: "mincho-validate-final-direct-css",
     transform: {
       order: "post",
       handler(this: Rollup.TransformPluginContext, code: string, id: string) {
-        if (!isDirectStyleRequest(id)) return;
+        if (!isDirectStyleRequest(id))
+          return encodeGeneratedDevImports(this, code, id);
         const receipt = directPublications.get(this);
         if (!receipt) {
           if (originFreeStylePublication(id))
@@ -1425,8 +1612,14 @@ function createMinchoViteEnvironmentPlugin(
   const processedCssGuard = {
     name: "mincho-validate-origin-free-css",
     transform(this: Rollup.TransformPluginContext, code: string, id: string) {
-      const publication = originFreeStylePublication(id);
+      const request = virtualCssRequest(id);
+      if (request?.representation !== "css") return;
+      const publication =
+        directPublications.get(this)?.publication ??
+        cssState.publication(request.cacheId);
       if (!publication) return;
+      if (publication.origin !== null)
+        return encodeDevAssetUrls(this, code, id, publication);
       const environment = this.environment;
       const clientDirect =
         environment?.mode === "dev" &&
@@ -1441,7 +1634,6 @@ function createMinchoViteEnvironmentPlugin(
           "[mincho] Cannot validate final origin-free direct CSS: unsupported Vite transform order."
         );
       finishCssView(publication, "style", id, code, []);
-      if (clientDirect) directPublications.set(this, { id, publication });
     }
   } satisfies Plugin;
 
@@ -1926,6 +2118,21 @@ function createMinchoViteEnvironmentPlugin(
           representation === "raw"
             ? `export default ${JSON.stringify(css)};`
             : css;
+        if (
+          representation === "css" &&
+          isDirectStyleRequest(id) &&
+          this.environment?.mode === "dev" &&
+          this.environment.config.consumer === "client"
+        ) {
+          const publication = cssState.publication(virtualCssId);
+          if (publication?.origin === null) {
+            const tag =
+              directLoadTags.get(publication) ??
+              `\n/* mincho-direct:${randomUUID()} */`;
+            directLoadTags.set(publication, tag);
+            return publication.source + tag;
+          }
+        }
         const cached = cssState.getCss(virtualCssId);
         if (cached !== undefined) {
           return cssResponse(cached);
@@ -3085,7 +3292,7 @@ function createMinchoViteEnvironmentPlugin(
     return runRequest(id, "load-request", () => load.call(this, id));
   };
 
-  return { plugin, processedCssGuard, directCssGuard };
+  return { plugin, processedCssGuard, directCssGuard, captureDirectCss };
 }
 
 let collectDefineRulesPresetViteRegistrySource:

@@ -244,10 +244,15 @@ describe("mincho with the Vite runtime", () => {
     "origin-free",
     "attributed",
     "unverified order",
-    "in-flight retirement"
+    "in-flight retirement",
+    "early replacement",
+    "early retirement",
+    "early restored bytes",
+    "early republication"
   ] as const)(
     "validates final client direct CSS after ordered Vite transforms (%s)",
     async (scope) => {
+      const early = scope.startsWith("early ");
       const root = await createFixture({
         "src/entry.ts":
           'import { css } from "@mincho-js/css"; export const cls = css({color:"red"});',
@@ -261,13 +266,13 @@ describe("mincho with the Vite runtime", () => {
       } as Awaited<ReturnType<typeof integration.compile>>);
       let source = ".probe { color: red; }";
       let styleRequest: string | undefined;
-      let enterPostTransform!: () => void;
-      let releasePostTransform!: () => void;
-      const inPostTransform = new Promise<void>((resolve) => {
-        enterPostTransform = resolve;
+      let enterPausedRequest!: () => void;
+      let releasePausedRequest!: () => void;
+      const pausedRequest = new Promise<void>((resolve) => {
+        enterPausedRequest = resolve;
       });
-      const resumePostTransform = new Promise<void>((resolve) => {
-        releasePostTransform = resolve;
+      const resumeRequest = new Promise<void>((resolve) => {
+        releasePausedRequest = resolve;
       });
       const registry = vi
         .spyOn(integration, "processDefineRulesPresetRegistryFile")
@@ -302,6 +307,17 @@ describe("mincho with the Vite runtime", () => {
         logLevel: "silent",
         server: { host: "127.0.0.1", port: 0, watch: null },
         plugins: [
+          {
+            name: "observe-direct-css-input",
+            enforce: "pre",
+            transform: {
+              order: "pre",
+              handler(css, id) {
+                if (id.endsWith("?direct"))
+                  expect(css).not.toContain("mincho-direct:");
+              }
+            }
+          },
           minchoVitePlugin(),
           {
             name: "late-direct-css-probe",
@@ -322,9 +338,10 @@ describe("mincho with the Vite runtime", () => {
                   scope === "in-flight retirement" &&
                   css.includes("color: blue;")
                 ) {
-                  enterPostTransform();
-                  await resumePostTransform;
+                  enterPausedRequest();
+                  await resumeRequest;
                 }
+                if (early && css.includes("color: blue;")) return;
                 return css.includes("color: blue;")
                   ? css +
                       '\n.local-icon { background-image: url("./icon.svg"); }'
@@ -337,6 +354,21 @@ describe("mincho with the Vite runtime", () => {
       servers.push(server);
       await server.listen();
       const client = server.environments.client!;
+      if (early) {
+        const nativeLoad = client.pluginContainer.load.bind(
+          client.pluginContainer
+        );
+        vi.spyOn(client.pluginContainer, "load").mockImplementation(
+          async (id) => {
+            const loaded = await nativeLoad(id);
+            if (id.endsWith("?direct") && source.includes("color: blue;")) {
+              enterPausedRequest();
+              await resumeRequest;
+            }
+            return loaded;
+          }
+        );
+      }
       await readCssPropOutput(client, "/src/entry.ts");
       const owner = (await client.moduleGraph.getModuleByUrl("/src/entry.ts"))!;
       const sidecar = [...owner.importedModules].find((module) =>
@@ -363,8 +395,8 @@ describe("mincho with the Vite runtime", () => {
         ).toContain("color: red;");
         return;
       }
-      expect(cold.status).toBe(200);
       const prepared = await cold.text();
+      expect(cold.status, prepared).toBe(200);
       expect(prepared).toContain("color: purple;");
       const warm = await getCss();
       expect(warm.status).toBe(200);
@@ -374,22 +406,48 @@ describe("mincho with the Vite runtime", () => {
       client.moduleGraph.invalidateModule(sidecar);
       await client.transformRequest(sidecar.url);
       const fetching = getCss();
-      if (scope === "in-flight retirement") {
+      if (early || scope === "in-flight retirement") {
         try {
-          await inPostTransform;
-          await client.pluginContainer.transform(
-            "export {};",
-            normalizePath(join(root, "src/entry.ts"))
-          );
+          await pausedRequest;
+          if (
+            scope === "early replacement" ||
+            scope === "early restored bytes" ||
+            scope === "early republication"
+          ) {
+            if (scope !== "early republication")
+              source = ".probe { color: green; }";
+            client.moduleGraph.invalidateModule(sidecar);
+            await client.transformRequest(sidecar.url);
+            if (scope === "early restored bytes") {
+              source = ".probe { color: blue; }";
+              client.moduleGraph.invalidateModule(sidecar);
+              await client.transformRequest(sidecar.url);
+            }
+          } else {
+            await client.pluginContainer.transform(
+              "export {};",
+              normalizePath(join(root, "src/entry.ts"))
+            );
+          }
         } finally {
-          releasePostTransform();
+          releasePausedRequest();
         }
         const response = await fetching;
         const body = await response.text();
+        if (scope === "early republication") {
+          expect(response.status).toBe(200);
+          expect(body).toContain("color: blue;");
+          return;
+        }
         expect(response.status, body).toBe(500);
         expect(body).toMatch(
           /Generated stylesheet changed during host processing/
         );
+        if (scope === "early replacement" || scope === "early restored bytes") {
+          const fresh = await getCss();
+          expect(fresh.status).toBe(200);
+          expect(await fresh.text()).toContain(source);
+        }
         return;
       }
       const response = await fetching;
@@ -958,6 +1016,80 @@ describe("mincho with the Vite runtime", () => {
             js.code.includes(`/assets-base/${item.fileName}`)
         )
       ).toBe(true);
+    }
+  );
+
+  it.each(["icons", "100%", "literal%20dir"])(
+    "serves native CSS and its sibling SVG from the %s producer directory",
+    async (directory) => {
+      const root = await createFixture({
+        "src/icon.svg": '<svg xmlns="http://www.w3.org/2000/svg" fill="blue"/>'
+      });
+      if (directory === "literal%20dir") {
+        const decoy = join(root, "src/literal dir");
+        await mkdir(decoy);
+        await writeFile(
+          join(decoy, "icon.svg"),
+          '<svg xmlns="http://www.w3.org/2000/svg" fill="blue"/>'
+        );
+      }
+      const producer = join(root, "src", directory);
+      await mkdir(producer);
+      await writeFile(
+        join(producer, "producer.ts"),
+        `import { css } from "@mincho-js/css"; export const cls = css({ backgroundImage: 'url("./icon.svg")', maskImage: 'url("./icon.svg?no-inline")' });`
+      );
+      await writeFile(
+        join(producer, "icon.svg"),
+        '<svg xmlns="http://www.w3.org/2000/svg" fill="orange"/>'
+      );
+      const server = await createServer({
+        root,
+        base: "/preview%20assets/",
+        configFile: false,
+        logLevel: "silent",
+        server: { host: "127.0.0.1", port: 0, watch: null },
+        plugins: [minchoVitePlugin()]
+      });
+      servers.push(server);
+      await server.listen();
+      const base = server.resolvedUrls!.local[0];
+      const ownerUrl = `src/${directory}/producer.ts`;
+      const owner = await fetch(new URL(encodeURI(ownerUrl), base));
+      expect(owner.status).toBe(200);
+      const sidecarHref = (await owner.text()).match(
+        /import[^"';]*["']([^"']+mincho-extracted-css:[^"']+)["']/
+      )?.[1];
+      expect(sidecarHref).toBeDefined();
+      const sidecar = await fetch(new URL(sidecarHref!, base));
+      expect(sidecar.status, sidecarHref).toBe(200);
+      const href = (await sidecar.text()).match(
+        /import\s*["']([^"']+\.vanilla\.css(?:\?[^"']*)?)["']/
+      )?.[1];
+      expect(href).toBeDefined();
+      const response = await fetch(new URL(href!, base), {
+        headers: { Accept: "text/css" }
+      });
+      const css = await response.text();
+      expect(response.status, href).toBe(200);
+      expect(css).toMatch(
+        /background-image:\s*url\(["']?data:image\/svg\+xml,[^;]*orange/
+      );
+      const external = css.match(
+        /mask-image:\s*url\(["']?([^"')]+)["']?\)/
+      )?.[1];
+      expect(external).toBeDefined();
+      const asset = await fetch(new URL(external!, response.url));
+      expect(asset.status, external).toBe(200);
+      expect(await asset.text()).toContain('fill="orange"');
+      const styleModule = await fetch(new URL(href!, base));
+      expect(styleModule.status).toBe(200);
+      expect(await styleModule.text()).toContain(external!);
+      const rawUrl = new URL(href!, base);
+      rawUrl.search = "?raw";
+      const raw = await fetch(rawUrl);
+      expect(raw.status).toBe(200);
+      expect(await raw.text()).toContain("./icon.svg?no-inline");
     }
   );
 
