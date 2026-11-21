@@ -986,13 +986,12 @@ async function compileUncached(options: CompileOptions) {
   const runtimeNamespace = "mincho-css-scope-proxy";
   let hasCallerResolvers = false;
   const resolveRuntimeApi = (args: OnResolveArgs) => {
+    // A resolution-only query uses the native external edge. Let the normal
+    // resolution observer record it without creating an executable facade.
+    if (args.kind === "require-resolve") return;
     // Unowned virtual modules retain the public API, but receive no producer
     // facade or artifact authority. Evaluation enforces provenance on emitted CSS.
-    if (
-      args.kind === "require-resolve" ||
-      !args.importer ||
-      (args.namespace && args.namespace !== "file")
-    )
+    if (!args.importer || (args.namespace && args.namespace !== "file"))
       return { path: args.path, external: true };
     const origin =
       resolve(args.importer) === resolve(filePath)
@@ -1158,7 +1157,10 @@ async function compileUncached(options: CompileOptions) {
     babelrc: false,
     configFile: false,
     sourceType: "unambiguous",
-    parserOpts: { allowReturnOutsideFunction: true, plugins: ["jsx"] }
+    parserOpts: {
+      allowReturnOutsideFunction: true,
+      plugins: ["jsx", "decorators"]
+    }
   })!;
   const seenIds = new Set<string>();
   traverse(program, {

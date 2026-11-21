@@ -998,3 +998,19 @@ it.each([
     expect(env.provesPrimitiveResult(target.call)).toBe(intact);
   }
 );
+
+it.each(["script", "module"] as const)(
+  "checks sibling lexical references to prior aliases only for %s",
+  (kind) => {
+    const alias = source("const M=Math;", kind);
+    const sibling = source("const input=M;Math.max(1,2);");
+    for (const programs of [
+      [alias.program, sibling.program],
+      [sibling.program, alias.program]
+    ]) {
+      const env = createMathIntrinsicEnvironment();
+      programs.forEach((program) => env.observe(program));
+      expect(env.provesPrimitiveResult(sibling.call)).toBe(kind === "module");
+    }
+  }
+);

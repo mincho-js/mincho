@@ -118,6 +118,26 @@ it("rejects a live dependency retarget instead of assigning another producer's a
 });
 
 describe("sidecar compilation cache", () => {
+  it("reuses the native external edge for a scope API resolution query", async () => {
+    const filePath = join(process.cwd(), "src/resolve-scope-api.css.ts");
+    const build = vi.fn(esbuild.build);
+    const options = {
+      filePath,
+      originalPath: filePath,
+      contents:
+        'export const descriptor = require.resolve("@vanilla-extract/css/fileScope");',
+      cache: new CompilationCache(),
+      resolverCache: new Map(),
+      esbuild: { ...esbuild, build }
+    };
+    const first = await compile(options);
+    expect(first.source).toContain(
+      'require.resolve("@vanilla-extract/css/fileScope")'
+    );
+    expect((await compile(options)).source).toBe(first.source);
+    expect(build).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps a dependency's native tsconfig JSX factory on cold and warm compiles", async () => {
     const cacheDir = join(process.cwd(), ".cache");
     await mkdir(cacheDir, { recursive: true });

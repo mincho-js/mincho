@@ -527,7 +527,9 @@ export interface RuntimeSourceEvidence {
   /** Possible intrinsic eval access, including shadowed aliases. This is not
    * limited to unbound global identifiers; only exact local functions exclude it. */
   readonly hasGlobalEval: boolean;
-  references(binding: Binding): readonly NodePath<t.Identifier>[];
+  references(
+    binding: Binding
+  ): readonly NodePath<t.Identifier | t.JSXIdentifier>[];
   isExported(binding: Binding): boolean;
   hasGlobalPropertyUse(binding: Binding): boolean;
   writesScriptGlobal(name: string): boolean;
@@ -549,7 +551,7 @@ export function collectRuntimeSourceEvidence(
   program: NodePath<t.Program>
 ): RuntimeSourceEvidence {
   const children = new Map<t.Node, Set<t.Node>>();
-  const refs = new Map<Binding, NodePath<t.Identifier>[]>();
+  const refs = new Map<Binding, NodePath<t.Identifier | t.JSXIdentifier>[]>();
   const exported = new Set<Binding>();
   const globalPropertyUses = new Set<Binding>();
   let unknownGlobalPropertyUse = false;
@@ -602,6 +604,26 @@ export function collectRuntimeSourceEvidence(
       if (binding && isPossibleScriptGlobalBinding(binding))
         writtenGlobals.add(binding.identifier.name);
     }
+  };
+  const recordReference = (
+    path: NodePath<t.Identifier | t.JSXIdentifier>,
+    used: boolean
+  ): void => {
+    const binding = path.scope.getBinding(path.node.name);
+    if (
+      binding &&
+      (binding.scope.getProgramParent().path.node !== program.node ||
+        !attachedPath(binding.path, children))
+    )
+      bindingsCurrent = false;
+    if (!used || binding?.identifier === path.node) return;
+    if (!binding) {
+      unboundNames.add(path.node.name);
+      return;
+    }
+    const list = refs.get(binding) ?? [];
+    list.push(path);
+    refs.set(binding, list);
   };
   program.traverse({
     "TSEnumDeclaration|TSModuleDeclaration"(path: NodePath<t.Node>) {
@@ -798,25 +820,31 @@ export function collectRuntimeSourceEvidence(
       if (!isRuntimeSourceReference(path)) return;
       if (path.node.name === "eval" && path.isReferencedIdentifier())
         evalReferences.push(path);
-      const binding = path.scope.getBinding(path.node.name);
-      if (
-        binding &&
-        (binding.scope.getProgramParent().path.node !== program.node ||
-          !attachedPath(binding.path, children))
+      // Keep actual assignments even when Babel does not classify them as reads.
+      const property = path.parentPath;
+      const isPatternKey =
+        path.key === "key" &&
+        property.isObjectProperty() &&
+        property.parentPath.isObjectPattern();
+      const writeTarget = !isPatternKey && path.isBindingIdentifier();
+      recordReference(path, path.isReferencedIdentifier() || writeTarget);
+    },
+    JSXIdentifier(path) {
+      if (!isRuntimeSourceReference(path) || path.node.name === "this") return;
+      // The opening tag evaluates only a component name or a member-chain root.
+      // Closing tags, property names, attributes and intrinsic tags are not reads.
+      let tag: NodePath<t.Node> = path;
+      while (
+        tag.parentPath?.isJSXMemberExpression() &&
+        tag.parentPath.node.object === tag.node
       )
-        bindingsCurrent = false;
-      if (binding?.identifier === path.node) return;
-      // Property names/types are not uses; assignment targets are uses even though
-      // Babel does not classify all of them as ReferencedIdentifier.
-      const writeTarget = path.isBindingIdentifier();
-      if (!path.isReferencedIdentifier() && !writeTarget) return;
-      if (!binding) {
-        unboundNames.add(path.node.name);
-        return;
-      }
-      const list = refs.get(binding) ?? [];
-      list.push(path);
-      refs.set(binding, list);
+        tag = tag.parentPath;
+      if (
+        tag.parentPath?.isJSXOpeningElement() &&
+        tag.parentPath.node.name === tag.node &&
+        (tag !== path || !t.react.isCompatTag(path.node.name))
+      )
+        recordReference(path, true);
     }
   });
   const evidence: RuntimeSourceEvidence = {

@@ -110,6 +110,7 @@ function literalKey(
     !binding?.constant ||
     !binding.path.isVariableDeclarator() ||
     !t.isIdentifier(binding.path.node.id) ||
+    !isRuntimeSourceReference(binding.path) ||
     !binding.path.parentPath.isVariableDeclaration({ kind: "const" }) ||
     binding.path.scope !== path.scope ||
     !initializedBefore(binding.path, path)
@@ -197,7 +198,7 @@ function written(path: NodePath<t.Node>): boolean {
   const use = path.parentPath;
   if (!use) return false;
   if (use.isObjectProperty() && use.parentPath.isObjectPattern())
-    return written(use.parentPath);
+    return path.key === "value" && written(use.parentPath);
   if (
     use.isArrayPattern() ||
     use.isRestElement() ||

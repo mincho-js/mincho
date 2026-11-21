@@ -1,5 +1,8 @@
 import type { Binding } from "@babel/traverse";
-import { isRuntimeSourceReference } from "../optimizations/runtimeSourceReference.js";
+import {
+  isPossibleScriptGlobalBinding,
+  isRuntimeSourceReference
+} from "../optimizations/runtimeSourceReference.js";
 import { observePatternRealm } from "../optimizations/arrayMapIntrinsic.js";
 import { types as t, type NodePath } from "@babel/core";
 import { staticMemberName } from "../commonjs/bindings.js";
@@ -89,7 +92,7 @@ function combinePatternEnvironment(
   };
 }
 
-/** A var initializer resolves its target through an intervening with object. */
+/** A var write can target an intervening with object or a script-global property. */
 function hasInterceptableVarBinding(
   declaration: NodePath<t.VariableDeclarator> | undefined
 ): boolean {
@@ -111,7 +114,12 @@ function hasInterceptableVarBinding(
     if (parent.isWithStatement() && parent.node.body === child.node)
       return true;
   }
-  return false;
+  return Object.keys(t.getBindingIdentifiers(declaration.node.id)).some(
+    (name) => {
+      const binding = declaration.scope.getBinding(name);
+      return !!binding && isPossibleScriptGlobalBinding(binding);
+    }
+  );
 }
 
 /** Check computed keys and defaults that may execute during destructuring. */

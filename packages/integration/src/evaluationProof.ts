@@ -433,6 +433,10 @@ function analyzeReusableEvaluation(
           : t.isMemberExpression(callee)
             ? expression(callee.object)
             : undefined;
+        // A known endpoint does not give its arbitrary members a scope effect.
+        // A supported sequence callee has already been unwrapped above.
+        if (binding?.kind === "file-scope" && !t.isIdentifier(callee))
+          return fail();
         const method =
           binding?.kind === "file-scope"
             ? binding.method

@@ -818,3 +818,54 @@ it("rechecks an already observed sibling source after an in-place edit", () => {
   expect(math.snapshot().intact).toBe(false);
   expect(array.snapshot().iterationIntact).toBe(false);
 });
+
+it("indexes only lexical opening JSX tags and opening member roots", () => {
+  const ast = parseSync(
+    `
+    class Tool { method(){ return this; } }
+    const ns = {}; const local = 1; const thing = 2; const Member = 3;
+    const child = <Tool local={1}><thing/><ns.Member /></Tool>;
+  `,
+    {
+      configFile: false,
+      babelrc: false,
+      sourceType: "module",
+      parserOpts: { plugins: ["jsx"] }
+    }
+  )!;
+  traverse(ast, {
+    Program(program) {
+      const evidence = collectRuntimeSourceEvidence(program);
+      for (const name of ["Tool", "ns", "local", "thing", "Member"]) {
+        const binding = program.scope.getBinding(name)!;
+        expect(
+          evidence.references(binding).map((path) => path.node.type)
+        ).toEqual(["Tool", "ns"].includes(name) ? ["JSXIdentifier"] : []);
+      }
+      program.traverse({
+        ThisExpression(path) {
+          expect(isPossibleGlobalThis(path, evidence)).toBe(true);
+        }
+      });
+      program.stop();
+    }
+  });
+});
+
+it("keeps object pattern label names out of lexical reference discovery", () => {
+  const ast = parseSync(
+    `let label,value;({label:value}=data);({[label]:value}=data);`,
+    { configFile: false, babelrc: false }
+  )!;
+  traverse(ast, {
+    Program(program) {
+      const evidence = collectRuntimeSourceEvidence(program);
+      expect(
+        evidence.references(program.scope.getBinding("label")!)
+      ).toHaveLength(1);
+      expect(
+        evidence.references(program.scope.getBinding("value")!)
+      ).toHaveLength(2);
+    }
+  });
+});

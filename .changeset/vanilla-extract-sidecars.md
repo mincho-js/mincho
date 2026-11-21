@@ -13,5 +13,5 @@ Verify mixed styles and serialized runtime functions in esbuild and Vite builds.
 Low-level CSS artifact serializers must pass `compile().cssScopeOrigins` together
 with the same compiled `source` to Mincho’s
 `processDefineRulesPresetRegistryFile`. Artifact callbacks now require this
-explicit physical-producer metadata. When compiler-issued runtime origin metadata is present, multiple physical producers emitting under the same explicit package/file scope are rejected, including CSS-text output. Metadata-free legacy CSS text cannot identify those collisions; assign each producer a distinct scope ID. See
+explicit physical-producer metadata. When Mincho can attest the physical producers that emit under the same explicit package/file scope, it rejects the collision, including in CSS-text output. Legacy CSS-text fallback cannot identify those collisions; assign each producer a distinct scope ID. See
 [CSS bundling](https://github.com/mincho-js/mincho/blob/main/docs/css-bundling.md) for the complete callback migration example.

@@ -357,7 +357,8 @@ function safeAliasDeclaration(
           aliasKind === "namespace"
             ? safeNamespaceUse(reference, seen, evidence)
             : safeMethodUse(reference, seen, evidence)
-        )
+        ) &&
+      evidence.hasSharedLexicalUse?.(binding) !== true
     );
   };
   if (t.isIdentifier(declaration.node.id))

@@ -1992,12 +1992,16 @@ it.each([
     "with (owner) { function local(){var {a,a:{x=fallback()}}={a:{x:4}};} }",
     true
   ],
-  ["var {a, a:{x=fallback()}}={a:{x:4}};", true]
+  ["var {a, a:{x=fallback()}}={a:{x:4}};", false],
+  ["let {a, a:{x=fallback()}}={a:{x:4}};", true],
+  ["const {a, a:{x=fallback()}}={a:{x:4}};", true],
+  ["function local(){var {a,a:{x=fallback()}}={a:{x:4}};}", true],
+  ["export {}; var {a,a:{x=fallback()}}={a:{x:4}};", true]
 ] as const)(
   "separates dynamic binding writes from lexical ones: %s",
   (source, expected) => {
     transformSync(source, {
-      sourceType: "script",
+      sourceType: source.startsWith("export") ? "module" : "script",
       configFile: false,
       babelrc: false,
       plugins: [
@@ -2081,6 +2085,42 @@ it.each([
       configFile: false,
       babelrc: false,
       sourceType: "script",
+      plugins: [
+        (): PluginObj => ({
+          visitor: {
+            VariableDeclarator(path) {
+              expect(
+                everyPatternExpression(
+                  path.get("id"),
+                  () => true,
+                  path.node.init,
+                  undefined,
+                  {
+                    nativeArrayIteration: true,
+                    requireReplaySafety: true
+                  }
+                )
+              ).toBe(expected);
+            }
+          }
+        })
+      ]
+    });
+  }
+);
+
+it.each([
+  ["var value;", "script", true],
+  ["var value=4;", "script", false],
+  ["for(var value of items) {}", "script", false],
+  ["var value=4;", "module", true]
+] as const)(
+  "distinguishes realm-property writes from confined bindings: %s (%s)",
+  (source, sourceType, expected) => {
+    transformSync(source, {
+      configFile: false,
+      babelrc: false,
+      sourceType,
       plugins: [
         (): PluginObj => ({
           visitor: {

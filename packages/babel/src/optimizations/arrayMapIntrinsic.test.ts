@@ -1026,3 +1026,40 @@ describe("classic shared pattern realm observations", () => {
     }
   );
 });
+
+it.each([
+  ["declare const", false],
+  ["const", true]
+] as const)(
+  "requires an emitted computed-method key: %s",
+  (declaration, expected) => {
+    const { program } = source(
+      `${declaration} key="map";[1][key](value=>value)`
+    );
+    let call!: NodePath<t.CallExpression>;
+    program.traverse({
+      CallExpression(path) {
+        call = path;
+      }
+    });
+    const env = createArrayMapIntrinsicEnvironment();
+    env.observe(program);
+    expect(env.provesNativeMap(call)).toBe(expected);
+  }
+);
+
+it.each([
+  ["let value; ({Array:value}=data);", true],
+  ["({value:Array}=data);", false],
+  ["({Array}=data);", false],
+  ["let value; ({[Array]:value}=data);", false]
+] as const)(
+  "distinguishes destructuring labels, writes and evaluated keys: %s",
+  (code, expected) => {
+    const { program, call } = source(`${code}[1].map(value=>value)`);
+    const env = createArrayMapIntrinsicEnvironment();
+    env.observe(program);
+    expect(env.provesNativeMap(call)).toBe(expected);
+    expect(env.snapshot().iterationIntact).toBe(expected);
+  }
+);

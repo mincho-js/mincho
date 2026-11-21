@@ -43,6 +43,38 @@ describe("co-located preset package scopes", () => {
     );
   });
 
+  it("returns standard decorators preserved by a low-level esnext build", async () => {
+    const filePath = join(
+      process.cwd(),
+      "src/public-decorator-preserve.css.ts"
+    );
+    const result = await compile({
+      filePath,
+      originalPath: filePath,
+      contents: `
+        function annotate(value: unknown) { return value; }
+        @annotate export class Appearance {}
+      `,
+      resolverCache: new Map(),
+      plugins: [
+        {
+          name: "preserve-standard-decorators",
+          setup(build) {
+            build.initialOptions.target = "esnext";
+            build.initialOptions.supported = {
+              ...build.initialOptions.supported,
+              decorators: true
+            };
+          }
+        }
+      ]
+    });
+    expect(result.source).toContain("@annotate");
+    expect(result.cssScopeOrigins).toContainEqual(
+      expect.objectContaining({ origin: filePath, runtime: expect.any(Object) })
+    );
+  });
+
   it("keeps encoded external scopes distinct from literal paths across cache and relocation", async () => {
     await mkdir(join(process.cwd(), ".cache"), { recursive: true });
     const snapshots: unknown[] = [];
