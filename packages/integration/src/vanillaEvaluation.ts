@@ -1106,6 +1106,7 @@ async function evaluateVanilla(
       staticProgram ? "static-styles-execute" : "vm-evaluate",
       async () => {
         let removedEnclosingScope = false;
+        let registeredRealm: ReturnType<typeof freshNodeContext> | undefined;
         try {
           if (originalNodeEnv !== undefined)
             process.env.NODE_ENV = originalNodeEnv;
@@ -1175,9 +1176,7 @@ async function evaluateVanilla(
                 runtimeFactory
               );
               script.runInContext(realm);
-              // As in upstream eval, read the resulting realm module once,
-              // including replacements. Its exports need not be writable.
-              registeredExports = (realm.module as typeof module).exports;
+              registeredRealm = realm;
             } else if (!cachedData || !context) {
               const evalCode = ownRequire("eval") as (
                 source: string,
@@ -1243,12 +1242,17 @@ async function evaluateVanilla(
               }
             }
           }
+          if (removedEnclosingScope)
+            throw new Error("CSS scope runtime removed its enclosing scope");
+          // Like upstream eval, read the resulting realm module once after
+          // adapter teardown, while the evaluation NODE_ENV is still active.
+          if (registeredRealm)
+            registeredExports = (registeredRealm.module as typeof module)
+              .exports;
         } finally {
           if (nodeEnv === undefined) delete process.env.NODE_ENV;
           else process.env.NODE_ENV = nodeEnv;
         }
-        if (removedEnclosingScope)
-          throw new Error("CSS scope runtime removed its enclosing scope");
       }
     );
   } catch (error) {

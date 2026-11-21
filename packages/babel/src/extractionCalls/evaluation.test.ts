@@ -1108,6 +1108,23 @@ it.each([
   }
 );
 
+it.each(["token", "(0, token)", "(true && (0, token))"])(
+  "requires a position-safe read for a stable result: %s",
+  (source) => {
+    expression(source, (path) => {
+      for (const read of ["unknown", "pending", "proven"] as const) {
+        expect(
+          proveStableEvaluationValue(path, {
+            replay: () => "proven",
+            sharedValue: () => "proven",
+            binding: () => read
+          })
+        ).toBe(read);
+      }
+    });
+  }
+);
+
 it("does not promote an inert binding read into a stable comparison value", () => {
   expression("mode === 0", (path) => {
     const orderOnly = {
@@ -1195,6 +1212,9 @@ it("keeps the entire test on the execution path when only its normal result is k
 });
 
 it.each([
+  ["+1n", false],
+  ["-1n", true, false],
+  ["~1n", true, false],
   ["1n / 0n", false],
   ["1n % 0x0n", false],
   ["1 / 2", true],
@@ -1202,7 +1222,8 @@ it.each([
   ['"rule-" + 2', true]
 ] as const)(
   "requires completion after operand coercion before later replay: %s",
-  (first, completes) => {
+  (first, completes, withoutReceipt?: boolean) => {
+    const completesWithoutReceipt = withoutReceipt ?? completes;
     expression(`(${first}, later())`, (path) => {
       const requested: string[] = [];
       const requirements = {
@@ -1213,9 +1234,9 @@ it.each([
         binding: () => "unknown" as const
       };
       expect(proveEvaluationOrder(path, requirements)).toBe(
-        completes ? "proven" : "unknown"
+        completesWithoutReceipt ? "proven" : "unknown"
       );
-      expect(requested).toEqual(completes ? ["later()"] : []);
+      expect(requested).toEqual(completesWithoutReceipt ? ["later()"] : []);
       requested.length = 0;
 
       // Even an explicit operand coercion receipt cannot prove the operator.

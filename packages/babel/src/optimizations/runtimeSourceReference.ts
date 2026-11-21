@@ -410,6 +410,7 @@ export function hasLocalRuntimeShadow(
 /** Literal string keys and closed const aliases; no coercion or evaluation. */
 export function closedRuntimeString(
   path: NodePath<t.Node>,
+  mayHaveUnmodeledShadow?: RuntimeSourceEvidence["mayHaveUnmodeledShadow"],
   seen = new Set<t.Node>()
 ): string | undefined {
   if (path.isStringLiteral()) return path.node.value;
@@ -427,11 +428,13 @@ export function closedRuntimeString(
     !binding.path.parentPath.isVariableDeclaration({ kind: "const" }) ||
     !t.isIdentifier(binding.path.node.id) ||
     !isRuntimeSourceReference(binding.path) ||
+    mayHaveUnmodeledShadow?.(path.scope, path.node.name, binding.scope) ||
     (binding.path.node.end ?? Infinity) >= (path.node.start ?? -Infinity)
   )
     return;
   return closedRuntimeString(
     binding.path.get("init") as NodePath<t.Node>,
+    mayHaveUnmodeledShadow,
     new Set(seen).add(path.node)
   );
 }

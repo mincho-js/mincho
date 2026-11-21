@@ -386,6 +386,30 @@ describe("unexecuted empty-own-key observations", () => {
       );
     }
   );
+  it.each([
+    ["sloppy", "", "globalThis", 1],
+    ["strict", '"use strict";', "globalThis", 0],
+    ["unrelated", "", "unrelated", 0]
+  ] as const)(
+    "does not exclude the global context fallback through a %s block function",
+    (_case, directive, binding, visits) => {
+      const text = `(function() {
+        ${directive}
+        const localContext = (() => {
+          if (typeof globalThis !== "undefined") return globalThis;
+          observe(Array.prototype);
+        })();
+        { function ${binding}() {} }
+      })();`;
+      // The fallback only observes its argument and never changes any intrinsic.
+      const observe = vi.fn();
+      runInNewContext(text, { observe });
+      expect(observe).toHaveBeenCalledTimes(visits);
+      expect(observePatternRealm(source(text).program).iteration).toBe(
+        visits === 0
+      );
+    }
+  );
   it("withdraws all skipped-body effect assumptions after a later native-method overwrite", () => {
     const env = createArrayMapIntrinsicEnvironment();
     env.observe(
@@ -999,6 +1023,21 @@ describe("classic shared pattern realm observations", () => {
     }
   );
 
+  it.each([
+    ["sloppy", "", "Reflect", null],
+    ["strict", '"use strict";', "Reflect", ["label"]],
+    ["unrelated", "", "unrelated", ["label"]]
+  ] as const)(
+    "does not grant native descriptor dispatch through a %s block function",
+    (_case, directive, binding, expected) => {
+      const text = `(function() {
+        ${directive}
+        { function ${binding}() {} }
+        Reflect.defineProperty(Array.prototype, "label", { value: 1 });
+      })();`;
+      expect(observePatternRealm(source(text).program).keys).toEqual(expected);
+    }
+  );
   it.each([
     ["Object", "script", null],
     ["Reflect", "script", null],

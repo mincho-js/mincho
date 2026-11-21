@@ -118,15 +118,25 @@ export function createLoadedModule(
 
   // A backing filename is syntax evidence only if it describes source code.
   // Keep the provider's physical path regardless of the parser's choice.
-  const syntaxSourceId =
+  const loaderFilename = loadedSource.resolvedFile;
+  const loaderEchoesVirtualId =
+    loaderFilename === id &&
+    (loadedSource.sourceKind ?? options.resolution?.sourceKind) ===
+      "provider-virtual";
+  const syntaxSource =
     loadedSource.realpath !== undefined &&
     internalHasStaticCssEvalSyntaxFilename(loadedSource.realpath, true)
       ? undefined
-      : [loadedSource.resolvedFile, id].find(
-          (candidate) =>
-            candidate !== undefined &&
-            internalHasStaticCssEvalSyntaxFilename(candidate)
-        );
+      : loaderFilename !== undefined &&
+          !loaderEchoesVirtualId &&
+          internalHasStaticCssEvalSyntaxFilename(loaderFilename)
+        ? {
+            syntaxSourceId: loaderFilename,
+            syntaxSourceIdKind: "loader-filename" as const
+          }
+        : internalHasStaticCssEvalSyntaxFilename(id)
+          ? { syntaxSourceId: id }
+          : undefined;
 
   return {
     id,
@@ -134,7 +144,7 @@ export function createLoadedModule(
       loadedSource.resolvedFile ?? options.resolution?.resolvedFile ?? id,
     source: sourceText,
     realpath: loadedSource.realpath ?? options.resolution?.realpath,
-    ...(syntaxSourceId !== undefined ? { syntaxSourceId } : {}),
+    ...syntaxSource,
     sourceHash: sourceIdentity.sourceHash,
     version: sourceIdentity.version,
     ...createLoadedModuleSourceMetadata(loadedSource, options.resolution)

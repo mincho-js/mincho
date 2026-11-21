@@ -173,7 +173,10 @@ export function isClosedFreshAllocationFactory(
           return;
         }
         const binding = reference.scope.getBinding(reference.node.name);
-        let scope = binding?.scope;
+        let scope =
+          binding && isRuntimeSourceReference(binding.path)
+            ? binding.scope
+            : undefined;
         while (scope && scope !== functionScope) scope = scope.parent;
         if (!scope) {
           closed = false;

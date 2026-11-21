@@ -24,6 +24,7 @@ describe("closed returned allocation ownership", () => {
     expect(proves(source)).toBe(true)
   );
   it.each([
+    `const palette = {red: "red"}; const factory = () => ({read: () => {declare const palette: {red: string}; return palette.red;}});`,
     `const shared={}; function factory() {return shared;}`,
     `const shared={}; function factory() {return {value: shared};}`,
     `const shared={}; function factory() {return {read: () => shared};}`,

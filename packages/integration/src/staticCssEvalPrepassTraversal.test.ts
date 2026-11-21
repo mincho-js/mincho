@@ -115,6 +115,55 @@ it.each([
   }
 );
 
+it.each([
+  [
+    "/src/archive.ts#old/tokens.tsx",
+    "/src/archive.ts#old/tokens.tsx",
+    undefined
+  ],
+  ["/tokens.tsx?theme=/dark.js#preview", undefined, undefined],
+  [
+    "/tokens.tsx?theme=/dark.js#preview",
+    "/tokens.tsx?theme=/dark.js#preview",
+    "provider-virtual"
+  ]
+] as const)(
+  "preserves JSX syntax for %s without requiring physical metadata",
+  async (moduleId, loaderFilename, sourceKind) => {
+    const ownerId = "/owner.tsx";
+    const owner = 'import {rule} from "tokens"; <div css={rule} />;';
+    const expressionStart = owner.lastIndexOf("rule");
+    const result = await createStaticCssEvalPrepass(ownerId, {
+      resolve: (_importer, specifier) =>
+        specifier === "tokens" ? { resolvedFile: moduleId } : null,
+      load: (id) =>
+        id === ownerId
+          ? { source: owner }
+          : id === moduleId
+            ? {
+                source:
+                  'export function View() { return <span />; } export const rule: {color: string} = {color: "tomato"};',
+                ...(loaderFilename ? { resolvedFile: loaderFilename } : {}),
+                ...(sourceKind ? { sourceKind } : {})
+              }
+            : null
+    });
+
+    expect(
+      result.provider.getResolvedCssValue({
+        importerId: ownerId,
+        expressionStart,
+        expressionEnd: expressionStart + "rule".length,
+        bindingName: "rule"
+      })
+    ).toMatchObject({ kind: "resolved", value: { color: "tomato" } });
+    expect(result.result.resolvedModuleCache.get(moduleId)).toMatchObject({
+      id: moduleId,
+      resolvedFile: moduleId
+    });
+  }
+);
+
 const execute = promisify(execFile);
 
 function prepass(modules: Record<string, string>) {

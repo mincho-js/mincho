@@ -2,7 +2,11 @@ import { parseSync, traverse, types as t, type NodePath } from "@babel/core";
 import { describe, expect, it, vi } from "vitest";
 import { createMathIntrinsicEnvironment } from "./mathIntrinsic.js";
 
-function source(text: string, sourceType: "script" | "module" = "script") {
+function source(
+  text: string,
+  sourceType: "script" | "module" = "script",
+  receiver = "Math"
+) {
   let program!: NodePath<t.Program>;
   let call!: NodePath<t.CallExpression>;
   traverse(
@@ -19,7 +23,7 @@ function source(text: string, sourceType: "script" | "module" = "script") {
       CallExpression(path) {
         if (
           t.isMemberExpression(path.node.callee) &&
-          t.isIdentifier(path.node.callee.object, { name: "Math" })
+          t.isIdentifier(path.node.callee.object, { name: receiver })
         )
           call = path;
       }
@@ -29,6 +33,50 @@ function source(text: string, sourceType: "script" | "module" = "script") {
 }
 
 describe("Math primitive result environment", () => {
+  it.each([
+    ["sloppy alias shadow", "", "Alias", "Alias", ".max", false],
+    ["strict alias shadow", '"use strict";', "Alias", "Alias", ".max", true],
+    ["sloppy key shadow", "", "key", "Math", "[key]", false],
+    ["strict key shadow", '"use strict";', "key", "Math", "[key]", true],
+    ["unrelated shadow", "", "unrelated", "Alias", "[key]", true]
+  ] as const)(
+    "requires lexical authority for native method identity: %s",
+    (_case, directive, declaration, receiver, member, proven) => {
+      const { program, call } = source(
+        `const Alias = Math; const key = "max";
+         function sample() {
+           ${directive}
+           { function ${declaration}() {} }
+           return ${receiver}${member}(1, 2);
+         }`,
+        "script",
+        receiver
+      );
+      const environment = createMathIntrinsicEnvironment();
+      environment.observe(program);
+      expect(environment.referenceIdentity(call.get("callee"))?.kind).toBe(
+        proven ? "method" : undefined
+      );
+      expect(environment.provesPrimitiveResult(call)).toBe(proven);
+    }
+  );
+
+  it.each([
+    ["__proto__", false],
+    ["toString", true]
+  ] as const)(
+    "separates legacy descriptor acquisition from direct Math authority: %s",
+    (key, bindIntact) => {
+      const { program, call } = source(
+        `Object.getOwnPropertyDescriptor(Object.prototype, "${key}"); Math.max(1,2);`
+      );
+      const environment = createMathIntrinsicEnvironment();
+      environment.observe(program);
+      expect(environment.snapshot().bindIntact).toBe(bindIntact);
+      expect(environment.provesPrimitiveResult(call)).toBe(true);
+    }
+  );
+
   it.each([
     "Math.max(1, 2)",
     "Math.random()",

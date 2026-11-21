@@ -63,13 +63,19 @@ const numericConstants = new Set([
   "SQRT2"
 ]);
 
+type ScopeShadowCheck = RuntimeSourceEvidence["mayHaveUnmodeledShadow"];
+
 function memberName(
-  path: NodePath<t.MemberExpression | t.OptionalMemberExpression>
+  path: NodePath<t.MemberExpression | t.OptionalMemberExpression>,
+  mayHaveUnmodeledShadow?: ScopeShadowCheck
 ): string | undefined {
   const { computed, property } = path.node;
   return !computed && t.isIdentifier(property)
     ? property.name
-    : closedString(path.get("property") as NodePath<t.Node>);
+    : closedString(
+        path.get("property") as NodePath<t.Node>,
+        mayHaveUnmodeledShadow
+      );
 }
 function written(path: NodePath<t.Node>): boolean {
   const parent = path.parentPath;
@@ -103,12 +109,17 @@ function unobservedReference(path: NodePath<t.Node>): boolean {
   );
 }
 type AliasKind = "namespace" | "method";
-function constantAlias(path: NodePath<t.Node>) {
+function constantAlias(
+  path: NodePath<t.Node>,
+  mayHaveUnmodeledShadow?: ScopeShadowCheck
+) {
   if (!path.isIdentifier()) return;
   const binding = path.scope.getBinding(path.node.name);
   return binding?.constant &&
     binding.path.isVariableDeclarator() &&
-    binding.path.parentPath.isVariableDeclaration({ kind: "const" })
+    binding.path.parentPath.isVariableDeclaration({ kind: "const" }) &&
+    isRuntimeSourceReference(binding.path) &&
+    !mayHaveUnmodeledShadow?.(path.scope, path.node.name, binding.scope)
     ? binding
     : undefined;
 }
@@ -214,22 +225,28 @@ function possibleCallableOrigin(
 }
 function namespaceOrigin(
   path: NodePath<t.Node>,
+  shadow?: ScopeShadowCheck,
   seen = new Set<t.Node>()
 ): boolean {
   if (seen.size > 32 || seen.has(path.node)) return false;
   const next = new Set(seen).add(path.node);
-  if (path.isIdentifier({ name: "Math" }) && !hasRuntimeBinding(path, "Math"))
+  if (
+    path.isIdentifier({ name: "Math" }) &&
+    !hasRuntimeBinding(path, "Math") &&
+    !shadow?.(path.scope, "Math")
+  )
     return true;
-  const binding = constantAlias(path);
+  const binding = constantAlias(path, shadow);
   return (
     !!binding &&
     binding.path.isVariableDeclarator() &&
     t.isIdentifier(binding.path.node.id) &&
-    namespaceOrigin(binding.path.get("init") as NodePath<t.Node>, next)
+    namespaceOrigin(binding.path.get("init") as NodePath<t.Node>, shadow, next)
   );
 }
 function methodOrigin(
   path: NodePath<t.Node>,
+  shadow?: ScopeShadowCheck,
   seen = new Set<t.Node>()
 ): { name: string; bound: boolean } | undefined {
   if (seen.size > 32 || seen.has(path.node)) return;
@@ -239,10 +256,11 @@ function methodOrigin(
     namespaceOrigin(
       (path as NodePath<t.MemberExpression | t.OptionalMemberExpression>).get(
         "object"
-      )
+      ),
+      shadow
     )
   ) {
-    const name = memberName(path);
+    const name = memberName(path, shadow);
     return name && numericMethods.has(name)
       ? { name, bound: false }
       : undefined;
@@ -253,31 +271,36 @@ function methodOrigin(
     const args = call.get("arguments");
     if (
       (callee.isMemberExpression() || callee.isOptionalMemberExpression()) &&
-      memberName(callee) === "bind" &&
+      memberName(callee, shadow) === "bind" &&
       args.length >= 1 &&
       !call.node.arguments.some((argument) =>
         t.isArgumentPlaceholder(argument)
       ) &&
-      namespaceOrigin(args[0])
+      namespaceOrigin(args[0], shadow)
     ) {
       const origin = methodOrigin(
         (
           callee as NodePath<t.MemberExpression | t.OptionalMemberExpression>
         ).get("object"),
+        shadow,
         next
       );
       return origin ? { ...origin, bound: true } : undefined;
     }
   }
-  const binding = constantAlias(path);
+  const binding = constantAlias(path, shadow);
   if (!binding) return;
   const declaration = binding.path;
   if (!declaration.isVariableDeclarator()) return;
   if (t.isIdentifier(declaration.node.id))
-    return methodOrigin(declaration.get("init") as NodePath<t.Node>, next);
+    return methodOrigin(
+      declaration.get("init") as NodePath<t.Node>,
+      shadow,
+      next
+    );
   if (
     !t.isObjectPattern(declaration.node.id) ||
-    !namespaceOrigin(declaration.get("init") as NodePath<t.Node>)
+    !namespaceOrigin(declaration.get("init") as NodePath<t.Node>, shadow)
   )
     return;
   for (const property of declaration.node.id.properties) {
@@ -297,6 +320,7 @@ function methodOrigin(
 }
 function methodDependencies(
   path: NodePath<t.Node>,
+  shadow?: ScopeShadowCheck,
   seen = new Set<t.Node>()
 ): NodePath<t.Node>[] {
   if (seen.size > 32 || seen.has(path.node)) return [];
@@ -306,25 +330,27 @@ function methodDependencies(
     const callee = call.get("callee");
     if (
       (callee.isMemberExpression() || callee.isOptionalMemberExpression()) &&
-      memberName(callee) === "bind"
+      memberName(callee, shadow) === "bind"
     )
       return [
         ...methodDependencies(
           (
             callee as NodePath<t.MemberExpression | t.OptionalMemberExpression>
           ).get("object"),
+          shadow,
           next
         ),
         ...call.get("arguments").slice(1)
       ];
   }
-  const binding = constantAlias(path);
+  const binding = constantAlias(path, shadow);
   if (
     binding?.path.isVariableDeclarator() &&
     t.isIdentifier(binding.path.node.id)
   )
     return methodDependencies(
       binding.path.get("init") as NodePath<t.Node>,
+      shadow,
       next
     );
   return [];
@@ -406,13 +432,13 @@ function safeMethodUse(
   if (
     (use?.isMemberExpression() || use?.isOptionalMemberExpression()) &&
     use.node.object === method.node &&
-    memberName(use) === "bind"
+    memberName(use, evidence.mayHaveUnmodeledShadow) === "bind"
   ) {
     const call = use.parentPath;
     return (
       (call?.isCallExpression() || call?.isOptionalCallExpression()) &&
       call.node.callee === use.node &&
-      !!methodOrigin(call) &&
+      !!methodOrigin(call, evidence.mayHaveUnmodeledShadow) &&
       safeMethodUse(call, next, evidence)
     );
   }
@@ -433,7 +459,7 @@ function safeNamespaceUse(
   if (
     (member?.isCallExpression() || member?.isOptionalCallExpression()) &&
     member.node.arguments[0] === namespace.node &&
-    methodOrigin(member)
+    methodOrigin(member, evidence.mayHaveUnmodeledShadow)
   )
     return safeMethodUse(member, next, evidence);
   if (
@@ -442,7 +468,7 @@ function safeNamespaceUse(
   )
     return safeAliasDeclaration(namespace, "namespace", next, evidence);
   if (written(member)) return false;
-  const name = memberName(member);
+  const name = memberName(member, evidence.mayHaveUnmodeledShadow);
   if (!name) return false;
   if (numericConstants.has(name)) return true;
   return numericMethods.has(name) && safeMethodUse(member, next, evidence);
@@ -672,7 +698,10 @@ function observeMathMutation(
   program.traverse({
     "CallExpression|OptionalCallExpression"(path) {
       if (!isRuntimeSourceReference(path)) return;
-      if (!nativeBindIntact && methodOrigin(path)) {
+      if (
+        !nativeBindIntact &&
+        methodOrigin(path, evidence.mayHaveUnmodeledShadow)
+      ) {
         observed = true;
         return;
       }
@@ -828,6 +857,38 @@ export function hasObservableBindMutation(
   const evidence = collectRuntimeSourceEvidence(program);
   return !evidence.bindingsCurrent || observeBindMutation(program, evidence);
 }
+function readsLegacyPrototypeDescriptor(
+  callee: NodePath<t.Node>,
+  invocation: NodePath<t.CallExpression | t.OptionalCallExpression>,
+  shadow: ScopeShadowCheck
+): boolean {
+  const method = directReflectionOperation(callee);
+  if (
+    method !== "getOwnPropertyDescriptor" &&
+    method !== "getOwnPropertyDescriptors"
+  )
+    return false;
+  const [target, property] = invocation.get("arguments");
+  if (
+    !target?.isMemberExpression() ||
+    memberName(target, shadow) !== "prototype"
+  )
+    return false;
+  const object = target.get("object");
+  if (
+    !object.isIdentifier({ name: "Object" }) ||
+    hasLocalRuntimeShadow(object, "Object") ||
+    shadow(object.scope, "Object")
+  )
+    return false;
+  const key = property && closedString(property, shadow);
+  return (
+    method === "getOwnPropertyDescriptors" ||
+    key === undefined ||
+    key === "__proto__"
+  );
+}
+
 function observeBindMutation(
   program: NodePath<t.Program>,
   evidence: RuntimeSourceEvidence
@@ -882,10 +943,24 @@ function observeBindMutation(
       )
         observed = true;
     },
-    CallExpression(path) {
-      if (!isRuntimeSourceReference(path)) return;
-      const callee = path.get("callee");
-      if (!callee.isMemberExpression()) return;
+    "CallExpression|OptionalCallExpression"(path) {
+      if (observed || !isRuntimeSourceReference(path)) return;
+      const invocation = path as NodePath<
+        t.CallExpression | t.OptionalCallExpression
+      >;
+      const callee = invocation.get("callee");
+      if (
+        readsLegacyPrototypeDescriptor(
+          callee,
+          invocation,
+          evidence.mayHaveUnmodeledShadow
+        )
+      ) {
+        observed = true;
+        return;
+      }
+      if (!invocation.isCallExpression() || !callee.isMemberExpression())
+        return;
       const object = (
         callee as NodePath<t.MemberExpression | t.OptionalMemberExpression>
       ).get("object");
@@ -981,11 +1056,10 @@ export function createMathIntrinsicEnvironment(
   let revision = 0;
   let invalidated = false;
   let bindInvalidated = initial.bindIntact === false;
-  function validate() {
+  function validate(evidenceFor = createRealmSourceEvidence(programs)) {
     // AST transforms can introduce writes after registration. Do not cache a
     // positive result by Program identity, or by the first queried call.
     if (invalidated && bindInvalidated) return false;
-    const evidenceFor = createRealmSourceEvidence(programs);
     if (
       !bindInvalidated &&
       [...programs].some((program) => {
@@ -1035,21 +1109,30 @@ export function createMathIntrinsicEnvironment(
         programs.add(program);
         revision++;
       }
-      if (!validate()) return;
-      if (namespaceOrigin(path)) return { kind: "namespace", dependencies: [] };
-      const origin = methodOrigin(path);
+      const evidenceFor = createRealmSourceEvidence(programs);
+      if (!validate(evidenceFor)) return;
+      const shadow = evidenceFor(program).mayHaveUnmodeledShadow;
+      if (namespaceOrigin(path, shadow))
+        return { kind: "namespace", dependencies: [] };
+      const origin = methodOrigin(path, shadow);
       if (origin && (!origin.bound || !bindInvalidated))
-        return { kind: "method", dependencies: methodDependencies(path) };
+        return {
+          kind: "method",
+          dependencies: methodDependencies(path, shadow)
+        };
       if (
         !bindInvalidated &&
         (path.isMemberExpression() || path.isOptionalMemberExpression()) &&
-        memberName(path) === "bind"
+        memberName(path, shadow) === "bind"
       ) {
         const object = (
           path as NodePath<t.MemberExpression | t.OptionalMemberExpression>
         ).get("object");
-        if (methodOrigin(object))
-          return { kind: "bind", dependencies: methodDependencies(object) };
+        if (methodOrigin(object, shadow))
+          return {
+            kind: "bind",
+            dependencies: methodDependencies(object, shadow)
+          };
       }
     },
     provesPrimitiveResult(call) {
@@ -1059,19 +1142,23 @@ export function createMathIntrinsicEnvironment(
         )
       )
         return false;
-      const name = methodOrigin(call.get("callee"));
-      if (!name) return false;
+      const callee = call.get("callee");
+      // Keep the cheap shape prefilter for unrelated calls; only the fresh
+      // lexical observation below can authorize a native result.
+      if (!methodOrigin(callee)) return false;
       const program = call.scope.getProgramParent().path;
       if (!program.isProgram()) return false;
       if (!programs.has(program)) {
         programs.add(program);
         revision++;
       }
-      return (
-        validate() &&
-        (!name.bound || !bindInvalidated) &&
-        numericMethods.has(name.name)
+      const evidenceFor = createRealmSourceEvidence(programs);
+      if (!validate(evidenceFor)) return false;
+      const name = methodOrigin(
+        callee,
+        evidenceFor(program).mayHaveUnmodeledShadow
       );
+      return !!name && (!name.bound || !bindInvalidated);
     }
   };
 }

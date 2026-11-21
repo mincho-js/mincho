@@ -579,7 +579,8 @@ function unexecutedPatternObservations(
   };
   const isRealm = (path: NodePath<t.Node | null | undefined>) =>
     path.isIdentifier({ name: "globalThis" }) &&
-    !hasRuntimeBinding(path, "globalThis");
+    !hasRuntimeBinding(path, "globalThis") &&
+    !evidence.mayHaveUnmodeledShadow(path.scope, "globalThis");
   const realmExists = (path: NodePath<t.Node>): boolean => {
     if (!path.isBinaryExpression({ operator: "!==" })) return false;
     const left = path.get("left"),
@@ -759,18 +760,19 @@ function observeFreshPatternRealm(
     }
     if (use?.isCallExpression() && use.node.arguments[0] === path.node) {
       const callee = use.get("callee");
-      // Only an unused defineProperty result cannot expose the prototype again.
+      const receiver = callee.isMemberExpression()
+        ? callee.get("object")
+        : undefined;
+      // Only an unused native defineProperty result cannot expose the
+      // prototype again.
       if (
         callee.isMemberExpression() &&
         name(callee) === "defineProperty" &&
-        callee.get("object").isIdentifier() &&
-        ["Object", "Reflect"].includes(
-          callee.node.object.type === "Identifier"
-            ? callee.node.object.name
-            : ""
-        ) &&
-        !hasRuntimeBinding(callee, (callee.node.object as t.Identifier).name) &&
-        !shared?.shadowsDispatch((callee.node.object as t.Identifier).name) &&
+        receiver?.isIdentifier() &&
+        ["Object", "Reflect"].includes(receiver.node.name) &&
+        !hasRuntimeBinding(receiver, receiver.node.name) &&
+        !evidence.mayHaveUnmodeledShadow(receiver.scope, receiver.node.name) &&
+        !shared?.shadowsDispatch(receiver.node.name) &&
         unobserved(use)
       ) {
         if (

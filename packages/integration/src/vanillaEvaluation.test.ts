@@ -1150,9 +1150,17 @@ it("uses the exact static program origin in native CSS-text fallback", async () 
   }
 });
 
-it.each(["read-only", "replace module", "single getter"] as const)(
+it.each([
+  "read-only",
+  "replace module",
+  "single getter",
+  "adapter-sensitive getter"
+] as const)(
   "serializes ordinary CommonJS exports (%s) without a write-back",
   async (mode) => {
+    const defaultIdent =
+      process.env.NODE_ENV === "production" ? "short" : "debug";
+    const identOption = defaultIdent === "debug" ? "short" : "debug";
     const compiledInput = await compiled(`
       require('@vanilla-extract/css').globalStyle('.ordinary-exports',{color:'red'});
       ${
@@ -1160,10 +1168,12 @@ it.each(["read-only", "replace module", "single getter"] as const)(
           ? "Object.defineProperty(module,'exports',{value:{label:'ordinary'},writable:false});"
           : mode === "replace module"
             ? "Object.freeze(module); module={exports:{label:'ordinary'}};"
-            : "let reads=0; Object.defineProperty(module,'exports',{get(){if(++reads>1)throw new Error('exports read twice');return {label:'ordinary'};}});"
+            : mode === "adapter-sensitive getter"
+              ? "let reads=0; Object.defineProperty(module,'exports',{get(){if(++reads>1)throw new Error('exports read twice');return {label:require('@vanilla-extract/css/adapter').getIdentOption()};}});"
+              : "let reads=0; Object.defineProperty(module,'exports',{get(){if(++reads>1)throw new Error('exports read twice');return {label:'ordinary'};}});"
       }
     `);
-    const input = { ...compiledInput, filePath };
+    const input = { ...compiledInput, filePath, identOption } as const;
     const upstreamCss: string[] = [];
     const registeredCss: string[] = [];
     const upstream = await processVanillaFile({
@@ -1184,7 +1194,11 @@ it.each(["read-only", "replace module", "single getter"] as const)(
     expect(upstreamCss[0]).toContain("red");
     expect(registeredCss).toEqual(upstreamCss);
     expect(registered).toBe(upstream);
-    expect(registered).toMatch(/export var label = ['"]ordinary['"]/);
+    const expectedLabel =
+      mode === "adapter-sensitive getter" ? defaultIdent : "ordinary";
+    expect(registered).toMatch(
+      new RegExp(`export var label = ['"]${expectedLabel}['"]`)
+    );
   }
 );
 

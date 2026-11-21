@@ -110,7 +110,9 @@ export function createStaticCssModuleSource(
   // from the parser-facing source. A logical syntax ID is not a physical path.
   const syntaxFilename =
     loadedModule.syntaxSourceId !== undefined
-      ? inferLogicalSyntaxFilename(loadedModule.syntaxSourceId)
+      ? loadedModule.syntaxSourceIdKind === "loader-filename"
+        ? inferSyntaxFilename(loadedModule.syntaxSourceId)
+        : inferLogicalSyntaxFilename(loadedModule.syntaxSourceId)
       : (loadedModule.realpath ??
         (loadedModule.resolvedFile !== undefined
           ? inferSyntaxFilename(loadedModule.resolvedFile)

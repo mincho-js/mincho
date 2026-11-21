@@ -169,8 +169,10 @@ export interface ImportedStaticCssEvalLoadedModule extends StaticCssEvalProvider
   source: string;
   /** Physical resolution filename, not a query-bearing module ID. */
   realpath?: string;
-  /** Logical syntax ID when physical resolution metadata did not come from the loader. */
+  /** Parser-facing source identifier, independent of graph and origin identity. */
   syntaxSourceId?: string;
+  /** Loader filenames use metadata-free inference; a graph ID is logical. */
+  syntaxSourceIdKind?: "loader-filename";
 }
 
 export interface ImportedStaticCssEvalImportResolution extends StaticCssEvalProviderSourcePolicyDescriptor {

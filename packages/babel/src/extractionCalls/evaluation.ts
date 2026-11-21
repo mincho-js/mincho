@@ -461,7 +461,13 @@ export function planEvaluation(
     if (["+", "-", "~"].includes(path.node.operator))
       steps.push(coerce(path.get("argument")));
     if (plan.operation === "observation") steps.push(observe());
-    if (path.node.operator === "throw") {
+    if (
+      path.node.operator === "throw" ||
+      (path.node.operator === "+" &&
+        t.isBigIntLiteral(
+          unwrapTransparentCssRuleExpression(path.node.argument)
+        ))
+    ) {
       steps.push({ kind: "abrupt", path });
       plan.result = { kind: "unknown" };
     }
@@ -761,16 +767,7 @@ function proveStableEvaluationValueUncached(
     requirePrimitive
   );
   if (result === "unknown") return "unknown";
-  // A stable value cannot discharge the binding's read at this position. In
-  // particular a replay receipt does not establish initialization.
-  if (path.isIdentifier()) {
-    const read = requirements.binding(path);
-    return read === "unknown"
-      ? "unknown"
-      : read === "pending" || result === "pending"
-        ? "pending"
-        : "proven";
-  }
+  if (path.isIdentifier()) return result;
   // Result evidence cannot schedule work. Replay the admitted expression
   // once, in source order, rather than replaying selected nested operands first.
   const order = proveEvaluationOrder(path, requirements, allowReplay, context);
@@ -788,12 +785,22 @@ function proveStableResult(
   requirePrimitive: boolean
 ): EvaluationProof {
   if (path.isIdentifier()) {
-    if (requirePrimitive)
-      return requirements.primitiveBinding?.(path) ?? "unknown";
-    const shared = requirements.sharedValue?.(path) ?? "unknown";
-    return shared === "unknown"
-      ? (requirements.primitiveBinding?.(path) ?? "unknown")
-      : shared;
+    const shared = requirePrimitive
+      ? "unknown"
+      : (requirements.sharedValue?.(path) ?? "unknown");
+    const value =
+      shared === "unknown"
+        ? (requirements.primitiveBinding?.(path) ?? "unknown")
+        : shared;
+    if (value === "unknown") return "unknown";
+    // Even a nested stable result needs a valid read at this position.
+    // Replay does not establish initialization.
+    const read = requirements.binding(path);
+    return read === "unknown"
+      ? "unknown"
+      : read === "pending" || value === "pending"
+        ? "pending"
+        : "proven";
   }
   const plan = planEvaluation(path, context);
   if (
