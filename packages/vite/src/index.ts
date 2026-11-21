@@ -531,62 +531,71 @@ export function minchoVitePlugin(_options?: MinchoVitePluginOptions) {
       // Insert only our own adapter; never change another plugin's hooks or
       // reorder its callbacks. Each actual environment verifies the position.
       if (config.command === "serve") {
-        const configuredAliases = [...config.resolve.alias];
-        // Vite's CSS resolver uses the public alias resolver, including the
-        // configured alias order and custom resolvers. Keep the original
-        // rules intact for Vite's own absolute URL and static-file handling.
-        config.resolve.alias.unshift({
-          find: /^(?![\0/#?]|[a-z][a-z0-9+.-]*:)/i,
-          replacement: "",
-          async customResolver(input, importer, options) {
-            const entry = configuredAliases.find(({ find }) =>
-              typeof find === "string"
-                ? input === find || input.startsWith(find + "/")
-                : find.test(input)
-            );
-            const custom = entry?.customResolver;
-            const hook: unknown =
-              typeof custom === "function" ? custom : custom?.resolveId;
-            // Match Vite's native Rollup alias handling for JS config too.
-            const handler =
-              hook && typeof hook === "object" && "handler" in hook
-                ? hook.handler
-                : hook;
-            const previous =
-              typeof handler === "function"
-                ? (handler as ResolverFunction)
-                : undefined;
-            let selected: Rollup.ResolveIdResult;
-            if (entry) {
-              const mapped = input.replace(entry.find, entry.replacement);
-              if (previous)
-                selected = await previous.call(this, mapped, importer, options);
-              else {
-                selected = await this.resolve(mapped, importer, {
-                  skipSelf: true,
-                  ...options
-                });
-                if (!selected) {
-                  if (!isAbsolute(mapped))
-                    this.warn(
-                      `Unresolved relative alias for ${input}: ${mapped}`
-                    );
-                  return { id: mapped };
+        const aliases = config.resolve?.alias;
+        // Non-host/test invocations may expose only the core compiler hooks.
+        if (Array.isArray(aliases) && Object.isExtensible(aliases)) {
+          const configuredAliases = [...aliases];
+          // Vite's CSS resolver uses the public alias resolver, including the
+          // configured alias order and custom resolvers. Keep the original
+          // rules intact for Vite's own absolute URL and static-file handling.
+          aliases.unshift({
+            find: /^(?![\0/#?]|[a-z][a-z0-9+.-]*:)/i,
+            replacement: "",
+            async customResolver(input, importer, options) {
+              const entry = configuredAliases.find(({ find }) =>
+                typeof find === "string"
+                  ? input === find || input.startsWith(find + "/")
+                  : find.test(input)
+              );
+              const custom = entry?.customResolver;
+              const hook: unknown =
+                typeof custom === "function" ? custom : custom?.resolveId;
+              // Match Vite's native Rollup alias handling for JS config too.
+              const handler =
+                hook && typeof hook === "object" && "handler" in hook
+                  ? hook.handler
+                  : hook;
+              const previous =
+                typeof handler === "function"
+                  ? (handler as ResolverFunction)
+                  : undefined;
+              let selected: Rollup.ResolveIdResult;
+              if (entry) {
+                const mapped = input.replace(entry.find, entry.replacement);
+                if (previous)
+                  selected = await previous.call(
+                    this,
+                    mapped,
+                    importer,
+                    options
+                  );
+                else {
+                  selected = await this.resolve(mapped, importer, {
+                    skipSelf: true,
+                    ...options
+                  });
+                  if (!selected) {
+                    if (!isAbsolute(mapped))
+                      this.warn(
+                        `Unresolved relative alias for ${input}: ${mapped}`
+                      );
+                    return { id: mapped };
+                  }
                 }
               }
+              if (!importer?.includes(".vanilla.css")) return selected;
+              const adapter = devCssGuards.get(this.environment.name);
+              return (
+                (await adapter?.resolvePublishedAsset(
+                  this,
+                  input,
+                  importer,
+                  selected
+                )) ?? selected
+              );
             }
-            if (!importer?.includes(".vanilla.css")) return selected;
-            const adapter = devCssGuards.get(this.environment.name);
-            return (
-              (await adapter?.resolvePublishedAsset(
-                this,
-                input,
-                importer,
-                selected
-              )) ?? selected
-            );
-          }
-        });
+          });
+        }
         const hostPlugins = config.plugins;
         const capture = Array.isArray(hostPlugins)
           ? cssCaptureIndex(hostPlugins)
@@ -1531,6 +1540,7 @@ function createMinchoViteEnvironmentPlugin(
   }
 
   const assetRoute = "@mincho/asset/" + randomUUID() + "/";
+  let devAssetRouteReady = false;
   const devAssets = new WeakMap<
     PublishedStylesheet,
     { files: Set<string>; urls: Map<string, string> }
@@ -1575,6 +1585,7 @@ function createMinchoViteEnvironmentPlugin(
     importer: string,
     prior?: Rollup.ResolveIdResult
   ) {
+    if (!devAssetRouteReady) return null;
     const request = virtualCssRequest(importer);
     if (request?.representation !== "css") return null;
     const publication = cssState.publication(request.cacheId);
@@ -1932,7 +1943,11 @@ function createMinchoViteEnvironmentPlugin(
 
     configureServer(this: void, serverInstance: ViteDevServer) {
       server = serverInstance;
-      server.middlewares.use((request, response, next) => {
+      const middlewares = server.middlewares;
+      devAssetRouteReady =
+        config.command === "serve" && typeof middlewares?.use === "function";
+      if (!devAssetRouteReady) return;
+      middlewares.use((request, response, next) => {
         const path = request.url?.split("?", 1)[0];
         const prefix = config.base + assetRoute;
         if (!path?.startsWith(prefix)) return next();
