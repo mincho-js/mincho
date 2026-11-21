@@ -726,34 +726,22 @@ function createMinchoViteEnvironmentPlugin(
   const { resolverCache } = cssState;
 
   // Configuration watches are not executable imports, including absent files.
-  const packageScopeWatches = new Map<
-    string,
-    { owner: string; files: Set<string> }
-  >();
-
-  // An uncommitted replacement must not hide the last successful watches.
-  const failedPackageScopeWatches = new Map<
-    string,
-    {
-      owner: string;
-      sidecar: string;
-      files: Set<string>;
-    }
-  >();
-
-  const pendingPackageScopeWatches = new Set<{
+  type PackageScopeWatch = {
     owner: string;
     sidecar: string;
     files: Set<string>;
-  }>();
+  };
+  const packageScopeWatches = new Map<string, PackageScopeWatch>();
+  // An uncommitted replacement must not hide the last successful watches.
+  const failedPackageScopeWatches = new Map<string, PackageScopeWatch>();
+  const pendingPackageScopeWatches = new Set<PackageScopeWatch>();
 
   const clearGeneratedCssForOwner = (
     owner: string,
     preservePackageWatches = false
   ) => {
     if (!preservePackageWatches) {
-      for (const [sidecar, entry] of packageScopeWatches)
-        if (entry.owner === owner) packageScopeWatches.delete(sidecar);
+      packageScopeWatches.delete(owner);
       failedPackageScopeWatches.delete(owner);
     }
     distChunkCss.clearOwner(owner);
@@ -1043,41 +1031,31 @@ function createMinchoViteEnvironmentPlugin(
       invalidateInGraph(server.moduleGraph);
   }
 
-  function invalidatePackageScopes(
+  function packageScopeTargets(
     file: string,
-    graph?: {
-      getModuleById(id: string): EnvironmentModuleNode | undefined;
-      invalidateModule(module: EnvironmentModuleNode): void;
-    }
-  ): EnvironmentModuleNode[] {
-    const affected = new Set<EnvironmentModuleNode>();
+    graph?: Pick<DevEnvironment["moduleGraph"], "getModuleById">
+  ) {
+    const owners = new Set<string>();
+    const ids = new Set<string>();
     const normalized = normalizePath(file);
-    const scopes = [
-      ...packageScopeWatches,
-      ...Array.from(
-        failedPackageScopeWatches.values(),
-        (entry) => [entry.sidecar, entry] as const
-      ),
-      ...Array.from(
-        pendingPackageScopeWatches,
-        (entry) => [entry.sidecar, entry] as const
-      )
-    ];
-    const invalidatedOwners = new Set<string>();
-    for (const [sidecar, entry] of scopes) {
-      if (!entry.files.has(normalized)) continue;
-      if (!invalidatedOwners.has(entry.owner)) {
-        invalidatedOwners.add(entry.owner);
-        invalidateStaticCssEvalDependency(entry.owner);
-      }
-      for (const id of [entry.owner, sidecar]) {
-        const module = graph?.getModuleById(id);
-        if (!module) continue;
-        graph!.invalidateModule(module);
-        affected.add(module);
+    for (const watches of [
+      packageScopeWatches.values(),
+      failedPackageScopeWatches.values(),
+      pendingPackageScopeWatches
+    ]) {
+      for (const { owner, sidecar, files } of watches) {
+        if (!files.has(normalized)) continue;
+        owners.add(owner);
+        ids.add(owner);
+        ids.add(sidecar);
       }
     }
-    return [...affected];
+    const modules = new Set<EnvironmentModuleNode>();
+    for (const id of ids) {
+      const module = graph?.getModuleById(id);
+      if (module) modules.add(module);
+    }
+    return { owners, modules };
   }
 
   function addStaticCssEvalWatchFilesForOwner(
@@ -1186,12 +1164,12 @@ function createMinchoViteEnvironmentPlugin(
 
   function invalidateStaticCssEvalDependency(
     dependencyId: string,
-    removed = false
+    removed = false,
+    visited = new Set<string>()
   ): void {
     compilationCache?.invalidate(dependencyId);
 
     const pending = [dependencyId];
-    const visited = new Set<string>();
 
     while (pending.length) {
       const dependency = pending.pop()!;
@@ -2027,16 +2005,17 @@ function createMinchoViteEnvironmentPlugin(
         )
           return null;
 
-        let pendingPackageScope:
-          { owner: string; sidecar: string; files: Set<string> } | undefined;
-        const lastSuccessfulPackageScope = packageScopeWatches.get(id);
+        let pendingPackageScope: PackageScopeWatch | undefined;
+        const lastSuccessfulPackageScope =
+          packageScopeWatches.get(requestOwner);
         const retainFailedManifestWatches = () => {
           if (
             config.command !== "serve" ||
             !pendingPackageScope ||
             epoch !== transformEpoch ||
             ownerRequests.get(requestOwner) !== request ||
-            packageScopeWatches.get(id) !== lastSuccessfulPackageScope ||
+            packageScopeWatches.get(requestOwner) !==
+              lastSuccessfulPackageScope ||
             !cssState.isCurrentSidecar(
               moduleInfo.originalPath,
               moduleInfo.filePath
@@ -2044,9 +2023,8 @@ function createMinchoViteEnvironmentPlugin(
           )
             return;
           const files = new Set(pendingPackageScope.files);
-          for (const entry of packageScopeWatches.values())
-            if (entry.owner === requestOwner)
-              for (const file of entry.files) files.delete(file);
+          for (const file of lastSuccessfulPackageScope?.files ?? [])
+            files.delete(file);
           if (files.size)
             failedPackageScopeWatches.set(requestOwner, {
               ...pendingPackageScope,
@@ -2073,26 +2051,27 @@ function createMinchoViteEnvironmentPlugin(
 
           if (!current()) return null;
 
-          const packageFiles = new Set<string>();
-          pendingPackageScope = {
-            owner: requestOwner,
-            sidecar: id,
-            files: packageFiles
-          };
-          pendingPackageScopeWatches.add(pendingPackageScope);
+          if (config.command === "serve") {
+            pendingPackageScope = {
+              owner: requestOwner,
+              sidecar: id,
+              files: new Set()
+            };
+            pendingPackageScopeWatches.add(pendingPackageScope);
+          }
           for (const file of watchFiles) {
             if (extractedCssFileFilter(file)) {
               continue;
             }
 
             if (
-              config.command === "serve" &&
+              pendingPackageScope &&
               normalizePath(file).endsWith("/package.json")
             ) {
               // Vite promotes transform addWatchFile entries into imports. A
               // missing package boundary must be watched, never resolved as JS.
               server.watcher.add(file);
-              packageFiles.add(normalizePath(file));
+              pendingPackageScope.files.add(normalizePath(file));
               continue;
             }
 
@@ -2258,17 +2237,13 @@ function createMinchoViteEnvironmentPlugin(
               )
             );
 
-            // CSS publication retires every previous sidecar for this owner.
-            // Retire its configuration subscriptions at the same successful
-            // boundary; failed replacements must preserve the old watches.
-            for (const [sidecar, entry] of packageScopeWatches)
-              if (entry.owner === moduleInfo.originalPath)
-                packageScopeWatches.delete(sidecar);
-            failedPackageScopeWatches.delete(requestOwner);
-            packageScopeWatches.set(id, {
-              owner: moduleInfo.originalPath,
-              files: packageFiles
-            });
+            if (pendingPackageScope) {
+              // A successful replacement retires this owner's earlier watches.
+              // Even an empty dev receipt distinguishes a later successful commit
+              // from an older request failing during outer input validation.
+              failedPackageScopeWatches.delete(requestOwner);
+              packageScopeWatches.set(requestOwner, pendingPackageScope);
+            }
 
             if (
               config.command === "build" &&
@@ -2875,25 +2850,34 @@ function createMinchoViteEnvironmentPlugin(
       return [
         ...new Set([
           ...context.modules,
-          ...invalidatePackageScopes(context.file, this.environment.moduleGraph)
+          ...packageScopeTargets(context.file, this.environment.moduleGraph)
+            .modules
         ])
       ];
     },
 
     watchChange(id, change?: { event: "create" | "update" | "delete" }) {
       const fileId = normalizeStaticCssEvalFileId(id, rootRealpath);
-      invalidatePackageScopes(
-        id,
+      const graph =
         this.environment?.mode === "dev"
           ? this.environment.moduleGraph
-          : undefined
-      );
+          : undefined;
+      const { owners, modules } = packageScopeTargets(id, graph);
 
-      // The watcher already invalidates this revision. Its first provider read
-      // and transform must not invalidate owners that now use the fresh input.
+      // watchChange runs with HMR off too. With HMR on, requests may read the
+      // new manifest before hotUpdate runs, so this hook owns the generation change.
       observedProviderSources.delete(fileId);
       observedTransformInputs.delete(fileId);
-      invalidateStaticCssEvalDependency(fileId, change?.event === "delete");
+      // A manifest can also reach a watched owner through a regular import.
+      const visited = new Set<string>();
+      invalidateStaticCssEvalDependency(
+        fileId,
+        change?.event === "delete",
+        visited
+      );
+      for (const owner of owners)
+        invalidateStaticCssEvalDependency(owner, false, visited);
+      for (const module of modules) graph?.invalidateModule(module);
       runtimeOptimizations.clear();
       forgetRuntimeModule(id);
     },
@@ -3171,6 +3155,13 @@ if (import.meta.vitest) {
   // Simplified Plugin interface with only what we need
   interface Plugin {
     name: string;
+    watchChange?: (
+      this: {
+        environment: { mode: "dev"; moduleGraph: ViteDevServer["moduleGraph"] };
+      },
+      file: string,
+      change: { event: "update" }
+    ) => void;
     hotUpdate?: (
       this: { environment: { moduleGraph: ViteDevServer["moduleGraph"] } },
       context: { file: string; modules: Module[] }
@@ -3972,11 +3963,19 @@ if (import.meta.vitest) {
     }
 
     return {
-      hotUpdate(file: string) {
+      watchChange(file: string) {
+        if (!server) throw new Error("Expected a server graph");
+        plugin.watchChange?.call(
+          { environment: { mode: "dev", moduleGraph: server.moduleGraph } },
+          file,
+          { event: "update" }
+        );
+      },
+      hotUpdate(file: string, modules: Module[] = []) {
         if (!server) throw new Error("Expected a server graph");
         return plugin.hotUpdate?.call(
           { environment: { moduleGraph: server.moduleGraph } },
-          { file, modules: [] }
+          { file, modules }
         );
       },
       async buildStart() {
@@ -8782,6 +8781,9 @@ if (import.meta.vitest) {
 
     it("does not retain library CSS sidecar behavior between watch builds", async () => {
       const integrationModule = await import("@mincho-js/integration");
+      const manifest = normalizePath(
+        join(viteConsumerRootPath, "package.json")
+      );
       vi.spyOn(integrationModule, "babelTransformSource")
         .mockResolvedValueOnce({
           code: 'import "extracted_watch-first.css.ts";\nexport const entry = true;',
@@ -8796,7 +8798,7 @@ if (import.meta.vitest) {
           ...({
             cssScopeOrigins: [],
             source: "compiled source",
-            watchFiles: []
+            watchFiles: [manifest]
           } as Awaited<ReturnType<typeof compile>>),
           cssScopeOrigins: [{ fileScope: { filePath }, origin: filePath }]
         })
@@ -8835,6 +8837,7 @@ if (import.meta.vitest) {
         firstFixture.extractedSource
       );
 
+      expect(harness.watchFiles).toContain(manifest);
       const firstChunk: OutputBundleItem = {
         code: "export const first = true;",
         facadeModuleId: viteConsumerEntryPath,
@@ -10295,7 +10298,18 @@ if (import.meta.vitest) {
 
     it("retires replaced sidecar package watches but preserves them after failure", async () => {
       const integrationModule = await import("@mincho-js/integration");
-      const manifest = join(viteConsumerRootPath, "package.json");
+      const { tmpdir } = await import("node:os");
+      const { onTestFinished } = await import("vitest");
+      const root = await fs.promises.mkdtemp(
+        join(tmpdir(), "mincho-watch-event-")
+      );
+      onTestFinished(() =>
+        fs.promises.rm(root, { recursive: true, force: true })
+      );
+      const manifest = normalizePath(join(root, "package.json"));
+      const before = '{"name":"before"}';
+      const after = '{"name":"after"}';
+      await fs.promises.writeFile(manifest, before);
       let revision = 0;
       let failedAttempt = false;
       const newManifest = normalizePath(
@@ -10310,7 +10324,7 @@ if (import.meta.vitest) {
       vi.spyOn(integrationModule, "compile").mockImplementation(
         async () =>
           ({
-            source: "compiled source",
+            source: await fs.promises.readFile(manifest, "utf8"),
             watchFiles: failedAttempt ? [manifest, newManifest] : [manifest],
             cssScopeOrigins: []
           }) as Awaited<ReturnType<typeof compile>>
@@ -10318,31 +10332,65 @@ if (import.meta.vitest) {
       const registry = vi
         .spyOn(integrationModule, "processDefineRulesPresetRegistryFile")
         .mockResolvedValue(createRegistryResult("export const value=true;"));
-      const getModuleById = vi.fn((_id: string) => ({}));
+      const getModuleById = vi.fn((id: string) => ({ id }));
       const invalidateModule = vi.fn();
       const harness = await createViteHarness({
         configOverrides: { command: "serve", mode: "development" },
         pluginOptions: { cache: false },
         server: { moduleGraph: { getModuleById, invalidateModule } }
       });
-      const started = createDeferred<void>();
-      const complete =
-        createDeferred<ReturnType<typeof createRegistryResult>>();
-      registry.mockImplementationOnce(async () => {
-        started.resolve();
-        return complete.promise;
-      });
       const first = await createExtractedCssFixture(harness);
-      const pending = harness.transform(
-        first.extractedId,
-        first.extractedSource
-      );
-      await started.promise;
-      harness.hotUpdate(manifest);
-      complete.resolve(createRegistryResult("export const stale=true;"));
-      await expect(pending).rejects.toThrow(
+      const pendingRead = () => {
+        const started = createDeferred<string>();
+        const finish = createDeferred<void>();
+        registry.mockImplementationOnce(
+          async ({
+            source
+          }: Parameters<typeof processDefineRulesPresetRegistryFile>[0]) => {
+            started.resolve(source);
+            await finish.promise;
+            return createRegistryResult(`export default ${source};`);
+          }
+        );
+        const result = harness.transform(
+          first.extractedId,
+          first.extractedSource
+        );
+        return {
+          started: started.promise,
+          finish: () => finish.resolve(),
+          result
+        };
+      };
+
+      const stale = pendingRead();
+      expect(await stale.started).toBe(before);
+      await fs.promises.writeFile(manifest, after);
+      harness.watchChange(manifest);
+      stale.finish();
+      await expect(stale.result).rejects.toThrow(
         /publication inputs changed.*retry/i
       );
+
+      // Another watchChange hook can still be waiting while this request
+      // reads the edited manifest. hotUpdate belongs to the same file event.
+      const fresh = pendingRead();
+      expect(await fresh.started).toBe(after);
+      invalidateModule.mockClear();
+      const imported = { id: "/also-imports-package-json.js" };
+      const targets = harness.hotUpdate(manifest, [imported]);
+      fresh.finish();
+      expect(await fresh.result).toContain(after);
+      expect(targets).toEqual([
+        imported,
+        { id: viteConsumerEntryPath },
+        { id: first.extractedId }
+      ]);
+      expect(invalidateModule).not.toHaveBeenCalled();
+      const afterUpdate = pendingRead();
+      expect(await afterUpdate.started).toBe(after);
+      afterUpdate.finish();
+      expect(await afterUpdate.result).toContain(after);
 
       let latest!: Awaited<ReturnType<typeof createExtractedCssFixture>>;
       for (; revision < 3; revision++) {
@@ -10351,7 +10399,7 @@ if (import.meta.vitest) {
       }
       getModuleById.mockClear();
       invalidateModule.mockClear();
-      harness.hotUpdate(manifest);
+      harness.watchChange(manifest);
       expect(getModuleById.mock.calls.map(([id]: [string]) => id)).toEqual([
         viteConsumerEntryPath,
         latest.extractedId
@@ -10365,14 +10413,14 @@ if (import.meta.vitest) {
       await harness.transform(failed.extractedId, failed.extractedSource);
       getModuleById.mockClear();
       invalidateModule.mockClear();
-      harness.hotUpdate(manifest);
+      harness.watchChange(manifest);
       expect(getModuleById.mock.calls.map(([id]: [string]) => id)).toEqual([
         viteConsumerEntryPath,
         latest.extractedId
       ]);
       expect(invalidateModule).toHaveBeenCalledTimes(2);
       getModuleById.mockClear();
-      harness.hotUpdate(newManifest);
+      harness.watchChange(newManifest);
       expect(getModuleById.mock.calls.map(([id]: [string]) => id)).toEqual([
         viteConsumerEntryPath,
         failed.extractedId
@@ -10382,7 +10430,7 @@ if (import.meta.vitest) {
       const recovered = await createExtractedCssFixture(harness);
       await harness.transform(recovered.extractedId, recovered.extractedSource);
       getModuleById.mockClear();
-      harness.hotUpdate(newManifest);
+      harness.watchChange(newManifest);
       expect(getModuleById).not.toHaveBeenCalled();
     });
 
@@ -10472,7 +10520,7 @@ if (import.meta.vitest) {
           });
           if (ordering === "watch event first" && holdsPublication(result)) {
             invalidated = true;
-            harness.hotUpdate(manifest);
+            harness.watchChange(manifest);
           }
           return result;
         });
