@@ -1,4 +1,3 @@
-import type { ProgramScope } from "../types.js";
 import { types as t } from "@babel/core";
 import type { SidecarSafetyState } from "./sidecarSafety.js";
 import {
@@ -94,22 +93,17 @@ function isSidecarSafeStatement(
 
   if (t.isVariableDeclaration(statement)) {
     const program = state.scope.getProgramParent().path;
-    const graph = (state.scope.getProgramParent() as ProgramScope).minchoData
-      ?.extractCalls?.arrayMapIntrinsics;
-    const environment = program.isProgram()
-      ? patternSelectionEnvironment(program, {
-          requireReplaySafety: true,
-          nativeArrayIteration:
-            (graph?.iterationIntact ?? graph?.intact) !== false,
-          standardPrototypeAbsence:
-            (graph?.prototypeAbsenceIntact ?? graph?.intact) !== false,
-          prototypeMutationKeys: graph?.prototypeMutationKeys
-        })
-      : {
-          nativeArrayIteration: false,
-          standardPrototypeAbsence: false,
-          requireReplaySafety: true
-        };
+    const environment =
+      program.isProgram() &&
+      statement.declarations.some(
+        (declaration) => !t.isIdentifier(declaration.id)
+      )
+        ? patternSelectionEnvironment(program, state.analysis?.environment)
+        : {
+            nativeArrayIteration: false,
+            standardPrototypeAbsence: false,
+            requireReplaySafety: true
+          };
     return statement.declarations.every(
       (declaration) =>
         everyPatternNodeExpression(

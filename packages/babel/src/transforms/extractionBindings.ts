@@ -2,7 +2,10 @@ import { hasCapturedPatternOwner } from "./extractionPublication.js";
 import { types as t } from "@babel/core";
 import type { NodePath } from "@babel/core";
 import type { Binding } from "@babel/traverse";
-import { getConfidentlyExecutedBranches } from "../jsxCssProp/sidecarSafety.js";
+import {
+  createReplayAnalysis,
+  type ReplayAnalysis
+} from "../extractionCalls/replayAnalysis.js";
 import type { ProgramScope } from "../types.js";
 
 interface ExtractionBindings {
@@ -103,12 +106,11 @@ function recordReferences(
 
 function visitExecutedReferences(
   path: NodePath<t.Node>,
+  analysis: ReplayAnalysis,
   executedBranches: Pick<Map<t.Node, readonly string[]>, "set">,
   visit: (reference: NodePath<t.Identifier | t.JSXIdentifier>) => void
 ): void {
-  const branches = path.isExpression()
-    ? getConfidentlyExecutedBranches(path)
-    : undefined;
+  const branches = analysis.branches.branches(path);
 
   if (branches) {
     executedBranches.set(
@@ -116,7 +118,7 @@ function visitExecutedReferences(
       branches.map((branch) => String(branch.key))
     );
     for (const branch of branches)
-      visitExecutedReferences(branch, executedBranches, visit);
+      visitExecutedReferences(branch, analysis, executedBranches, visit);
 
     return;
   }
@@ -125,7 +127,7 @@ function visitExecutedReferences(
 
   path.traverse({
     "ConditionalExpression|LogicalExpression"(inner) {
-      visitExecutedReferences(inner, executedBranches, visit);
+      visitExecutedReferences(inner, analysis, executedBranches, visit);
       inner.skip();
     },
     ReferencedIdentifier: visit
@@ -134,7 +136,8 @@ function visitExecutedReferences(
 
 export function planExtractionBindings(
   path: NodePath<t.Node>,
-  completed: ReadonlySet<t.Node> = new Set()
+  completed: ReadonlySet<t.Node> = new Set(),
+  analysis = createReplayAnalysis(path.scope)
 ) {
   const program = path.scope.getProgramParent() as ProgramScope;
   const visited = new Set<t.Node>();
@@ -188,6 +191,7 @@ export function planExtractionBindings(
 
     visitExecutedReferences(
       patternOwner ? binding.path : root,
+      analysis,
       branches,
       (reference) => {
         const dependency = reference.scope.getBinding(reference.node.name);
@@ -204,7 +208,7 @@ export function planExtractionBindings(
     )
       declarations.push({ binding, root });
   };
-  visitExecutedReferences(path, branches, (reference) => {
+  visitExecutedReferences(path, analysis, branches, (reference) => {
     const binding = reference.scope.getBinding(reference.node.name);
 
     if (binding && !isInside(binding.path, path)) collect(binding);
@@ -219,8 +223,14 @@ export function isExtractedReference(path: NodePath<t.Node>): boolean {
 }
 
 /** Validate a future sidecar owner without committing names or declarations. */
-export function hasExtractableBindings(path: NodePath<t.Node>): boolean {
-  return planExtractionBindings(path).runtimeBinding === undefined;
+export function hasExtractableBindings(
+  path: NodePath<t.Node>,
+  analysis?: ReplayAnalysis
+): boolean {
+  return (
+    planExtractionBindings(path, undefined, analysis).runtimeBinding ===
+    undefined
+  );
 }
 
 /** Collect declarations by lexical binding, retaining nested locals in their owner. */

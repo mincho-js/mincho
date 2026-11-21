@@ -62,7 +62,8 @@ export interface MutationOriginOptions {
   /** Conservative shared identity for import bindings and validated loaders. */
   moduleOriginIdentity?: object;
   /** Exact defaults excluded by the caller's existing pattern-selection proof. */
-  skippedPatternDefaults?: ReadonlySet<t.AssignmentPattern>;
+  skippedPatternDefaults?: Pick<ReadonlySet<t.AssignmentPattern>, "has">;
+  branchResult?: (path: NodePath<t.Node>) => NodePath<t.Expression> | undefined;
   callResultProof?: (
     path: NodePath<t.CallExpression | t.OptionalCallExpression>
   ) => CallResultProof | undefined;
@@ -247,7 +248,11 @@ class ObjectReferences {
       ];
 
     const next = new Set(seen).add(path.node);
-    const selected = this.selectedBranches?.get(path.node);
+    const selected =
+      this.selectedBranches?.get(path.node) ??
+      (path.isConditionalExpression() || path.isLogicalExpression()
+        ? this.originOptions.branchResult?.(path)
+        : undefined);
 
     if (selected) return this.resolve(selected, next);
     if (

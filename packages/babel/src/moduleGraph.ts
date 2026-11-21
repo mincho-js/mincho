@@ -2370,10 +2370,9 @@ export function createModuleGraph(
   }
   function mathIntrinsicSnapshot() {
     // Include externally registered owner ASTs and any transforms since load.
-    for (const module of modules.values())
-      mathEnvironment.observe(module.program);
+    const programs = [...modules.values()].map((module) => module.program);
     return {
-      ...mathEnvironment.snapshot(),
+      ...mathEnvironment.snapshot(programs),
       fingerprint: intrinsicSourceFingerprint()
     };
   }
@@ -2388,13 +2387,11 @@ export function createModuleGraph(
 
   /** One synchronous observation batch; never reused across calls or AST edits. */
   function combinedIntrinsicSnapshot() {
-    for (const module of modules.values()) {
-      mathEnvironment.observe(module.program);
-      arrayMapEnvironment.observe(module.program);
-    }
+    const programs = [...modules.values()].map((module) => module.program);
+    for (const program of programs) arrayMapEnvironment.observe(program);
     const fingerprint = intrinsicSourceFingerprint();
     return {
-      math: { ...mathEnvironment.snapshot(), fingerprint },
+      math: { ...mathEnvironment.snapshot(programs), fingerprint },
       arrayMap: { ...arrayMapEnvironment.snapshot(), fingerprint }
     };
   }

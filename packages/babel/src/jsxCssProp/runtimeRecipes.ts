@@ -1,14 +1,15 @@
+import {
+  everyReplayPattern as everyPatternExpression,
+  createReplayAnalysis,
+  type ReplayAnalysis
+} from "../extractionCalls/replayAnalysis.js";
 import { requireCapturedPatternOwner } from "../transforms/extractionPublication.js";
 import type { ProgramScope } from "../types.js";
-import {
-  arrayMapResultProof,
-  arrayIncludesResultProof
-} from "../extractionCalls/arrayMapResult.js";
+import { arrayIncludesResultProof } from "../extractionCalls/arrayMapResult.js";
 import { types as t, type NodePath } from "@babel/core";
 import { addNamespace } from "@babel/helper-module-imports";
 import type { Binding } from "@babel/traverse";
 import {
-  isProvenPrimitiveImport,
   getModuleReference,
   isProvenModuleDataRead,
   staticMemberName
@@ -19,14 +20,11 @@ import {
   markBuildEvaluation,
   retainRuntimeInvocation
 } from "../extractionCalls/index.js";
-import { sourceRecipeInvocationResult } from "../extractionCalls/authoringCallSite.js";
 import {
   mathResultProof,
-  mathNamespaceOwnReadProof,
   mathReferenceProof,
   mathBindingIdentityProof
 } from "../extractionCalls/mathResult.js";
-import { compiledRecipeResultProof } from "../extractionCalls/compiledRecipeResult.js";
 import { recipeRuntimeFactories } from "../optimizations/recipeFactories.js";
 import { hasDynamicScope } from "../optimizations/dynamicScope.js";
 import {
@@ -48,63 +46,7 @@ import {
 import { registerImportMethod } from "../utils.js";
 import { analyzeCssPropSidecarHoistability } from "./modeAnalysis.js";
 import { cssPropImportSource } from "./options.js";
-import {
-  everyPatternExpression as everyLocalPatternExpression,
-  collectSkippedPatternDefaults as collectLocalSkippedPatternDefaults
-} from "./patternExpressions.js";
-import {
-  getConfidentlyExecutedBranches,
-  isSidecarSafeCssRuleExpression
-} from "./sidecarSafety.js";
-
-/** Loaded-graph revocation and the helper's fresh local observation both apply. */
-function everyPatternExpression(
-  ...args: Parameters<typeof everyLocalPatternExpression>
-): boolean {
-  const [pattern, predicate, selected, skippedDefault, environment] = args;
-  const graph = (pattern.scope.getProgramParent() as ProgramScope).minchoData
-    ?.extractCalls?.arrayMapIntrinsics;
-  const declarator = pattern.parentPath;
-  const initializer = declarator?.isVariableDeclarator()
-    ? declarator.get("init")
-    : undefined;
-  return everyLocalPatternExpression(
-    pattern,
-    predicate,
-    selected,
-    skippedDefault,
-    {
-      requireReplaySafety: true,
-      canReadPrimitiveImport: isProvenPrimitiveImport,
-      canReplayIteration: environment?.canReplayIteration,
-      canReplayOwnRead: (source, operation) =>
-        (source === selected &&
-          !!initializer?.isExpression() &&
-          initializer.node === selected &&
-          mathNamespaceOwnReadProof(initializer)) ||
-        !!environment?.canReplayOwnRead?.(source, operation),
-      prototypeMutationKeys: graph?.prototypeMutationKeys,
-      nativeArrayIteration:
-        environment?.nativeArrayIteration !== false &&
-        (graph?.iterationIntact ?? graph?.intact) !== false,
-      standardPrototypeAbsence:
-        environment?.standardPrototypeAbsence !== false &&
-        (graph?.prototypeAbsenceIntact ?? graph?.intact) !== false
-    }
-  );
-}
-
-function collectSkippedPatternDefaults(program: NodePath<t.Program>) {
-  const graph = (program.scope as ProgramScope).minchoData?.extractCalls
-    ?.arrayMapIntrinsics;
-  return collectLocalSkippedPatternDefaults(program, {
-    canReadPrimitiveImport: isProvenPrimitiveImport,
-    prototypeMutationKeys: graph?.prototypeMutationKeys,
-    nativeArrayIteration: (graph?.iterationIntact ?? graph?.intact) !== false,
-    standardPrototypeAbsence:
-      (graph?.prototypeAbsenceIntact ?? graph?.intact) !== false
-  });
-}
+import { isSidecarSafeCssRuleExpression } from "./sidecarSafety.js";
 
 const runtimeCxBindings = new WeakMap<t.Program, Map<string, t.Identifier>>();
 // Classification avoids repeated JSX lowering. Invocation ownership is a
@@ -432,7 +374,8 @@ function visitClassValue(
 
 function isStaticPatternValue(
   value: NodePath<t.Node | null | undefined>,
-  seenValues = new Set<t.Node>()
+  seenValues = new Set<t.Node>(),
+  analysis = createReplayAnalysis(value.scope)
 ): boolean {
   if (!value.isExpression()) return false;
   const expression = unwrapCxArgument(value);
@@ -443,10 +386,12 @@ function isStaticPatternValue(
     expression.isConditionalExpression() ||
     expression.isLogicalExpression()
   ) {
-    const branches = getConfidentlyExecutedBranches(expression);
+    const branches = analysis.branches.branches(expression);
     return (
       !!branches &&
-      branches.every((branch) => isStaticPatternValue(branch, following))
+      branches.every((branch) =>
+        isStaticPatternValue(branch, following, analysis)
+      )
     );
   }
 
@@ -455,10 +400,10 @@ function isStaticPatternValue(
     if (source?.constant && source.path.isVariableDeclarator()) {
       const initializer = source.path.get("init");
       return (
-        isStaticPatternValue(initializer, following) &&
-        everyPatternExpression(
+        isStaticPatternValue(initializer, following, analysis) &&
+        analysis.everyPattern(
           source.path.get("id"),
-          (item) => isStaticPatternValue(item, following),
+          (item) => isStaticPatternValue(item, following, analysis),
           initializer.node
         )
       );
@@ -470,6 +415,7 @@ function isStaticPatternValue(
     path: expression,
     state: {
       scope: expression.scope,
+      analysis,
       visiting: new Set(),
       localNames: new Set()
     }
@@ -687,17 +633,11 @@ function analyzeFactoryValueMutation(
   const opaqueCalls = new Set<t.CallExpression>();
   containsStaticFactory(init, new Set(), opaqueCalls);
 
+  const analysis = createReplayAnalysis(program.scope);
   const mutationOptions = {
     opaqueCalls,
-    callResultProof: (
-      call: NodePath<t.CallExpression | t.OptionalCallExpression>
-    ) =>
-      compiledRecipeResultProof(call) ??
-      sourceRecipeInvocationResult(call) ??
-      mathResultProof(call) ??
-      arrayMapResultProof(call) ??
-      arrayIncludesResultProof(call),
-    skippedPatternDefaults: collectSkippedPatternDefaults(program),
+    callResultProof: analysis.jsxResult,
+    skippedPatternDefaults: analysis.skippedDefaults,
     isReadOnlyCall(
       call: NodePath<
         t.CallExpression | t.OptionalCallExpression | t.NewExpression
@@ -938,19 +878,31 @@ function prepareCxArgument(
 }
 
 function isStaticCall(path: NodePath<t.CallExpression>) {
-  if (hasRuntimeLocalBinding(path) || hasRuntimeCalls(path.get("arguments")))
+  const analysis = createReplayAnalysis(path.scope);
+  if (
+    hasRuntimeLocalBinding(path, analysis) ||
+    hasRuntimeCalls(path.get("arguments"), analysis)
+  )
     return false;
   // Receipts belong only to this root and this unchanged AST snapshot.
   // Never cache or share them with another candidate call.
   const unmodifiedBindings = new Set<Binding>();
-  if (hasMutableStyleInputs(path, path.get("arguments"), unmodifiedBindings))
+  if (
+    hasMutableStyleInputs(
+      path,
+      path.get("arguments"),
+      unmodifiedBindings,
+      analysis
+    )
+  )
     return false;
   return (
     analyzeCssPropSidecarHoistability({
       expression: path.node,
       path,
       scope: path.scope,
-      unmodifiedBindings
+      unmodifiedBindings,
+      analysis
     }).kind === "hoistable"
   );
 }
@@ -958,18 +910,17 @@ function isStaticCall(path: NodePath<t.CallExpression>) {
 function hasMutableStyleInputs(
   path: NodePath<t.Expression>,
   inputs: readonly NodePath[],
-  unmodifiedBindings?: Set<Binding>
+  unmodifiedBindings?: Set<Binding>,
+  analysis = createReplayAnalysis(path.scope)
 ): boolean {
   const program = path.scope.getProgramParent().path;
   if (!program.isProgram()) return true;
 
   const inspected = new Set<Binding>();
-  const selectedBranches = new Map<t.Node, NodePath<t.Expression>>();
   const inspect = (value: NodePath): void => {
     if (value.isExpression()) {
-      const branches = getConfidentlyExecutedBranches(value);
+      const branches = analysis.branches.branches(value);
       if (branches) {
-        selectedBranches.set(value.node, branches[branches.length - 1]);
         branches.forEach(inspect);
         return;
       }
@@ -993,7 +944,7 @@ function hasMutableStyleInputs(
       if (binding.path.isVariableDeclarator()) {
         const init = binding.path.get("init");
         if (init.isExpression()) inspect(init);
-        everyPatternExpression(
+        analysis.everyPattern(
           binding.path.get("id"),
           (expression) => {
             if (expression.node) inspect(expression as NodePath<t.Node>);
@@ -1010,10 +961,9 @@ function hasMutableStyleInputs(
     value.traverse({
       "ConditionalExpression|LogicalExpression"(inner) {
         if (!inner.isExpression()) return;
-        const branches = getConfidentlyExecutedBranches(inner);
+        const branches = analysis.branches.branches(inner);
         if (!branches) return;
 
-        selectedBranches.set(inner.node, branches[branches.length - 1]);
         branches.forEach(inspect);
         inner.skip();
       },
@@ -1023,23 +973,16 @@ function hasMutableStyleInputs(
 
   inputs.forEach(inspect);
 
-  const skippedPatternDefaults = collectSkippedPatternDefaults(program);
+  const skippedPatternDefaults = analysis.skippedDefaults;
   return [...inspected].some((binding) => {
     if (mathBindingIdentityProof(binding)) {
       unmodifiedBindings?.add(binding);
       return false;
     }
     const mutated = hasStaticCssEvalBindingMutation(program, binding, {
-      selectedBranches,
+      branchResult: analysis.branches.result,
       skippedPatternDefaults,
-      callResultProof: (
-        call: NodePath<t.CallExpression | t.OptionalCallExpression>
-      ) =>
-        compiledRecipeResultProof(call) ??
-        sourceRecipeInvocationResult(call) ??
-        mathResultProof(call) ??
-        arrayMapResultProof(call) ??
-        arrayIncludesResultProof(call),
+      callResultProof: analysis.jsxResult,
       // The factory consumes a style value. Nested argument helpers can still
       // mutate their inputs, so their calls retain the ordinary escape checks.
       isReadOnlyCall: (call) =>
@@ -1079,20 +1022,16 @@ function isReadOnlyArgumentCall(
     );
 }
 
-function hasRuntimeCalls(inputs: readonly NodePath[]): boolean {
-  const program = inputs[0]?.scope.getProgramParent().path;
+function hasRuntimeCalls(
+  inputs: readonly NodePath[],
+  analysis?: ReplayAnalysis
+): boolean {
+  if (!inputs.length) return false;
+  const replay = analysis ?? createReplayAnalysis(inputs[0].scope);
   const originOptions = {
-    callResultProof: (
-      call: NodePath<t.CallExpression | t.OptionalCallExpression>
-    ) =>
-      compiledRecipeResultProof(call) ??
-      sourceRecipeInvocationResult(call) ??
-      mathResultProof(call) ??
-      arrayMapResultProof(call) ??
-      arrayIncludesResultProof(call),
-    skippedPatternDefaults: program?.isProgram()
-      ? collectSkippedPatternDefaults(program)
-      : undefined
+    callResultProof: replay.jsxResult,
+    skippedPatternDefaults: replay.skippedDefaults,
+    branchResult: replay.branches.result
   };
   const hasImportedValueOrigin = (
     path: NodePath<t.Node>,
@@ -1286,7 +1225,7 @@ function hasRuntimeCalls(inputs: readonly NodePath[]): boolean {
       if (
         (initializer.isExpression() &&
           patternReadsImport(pattern, initializer)) ||
-        !everyPatternExpression(
+        !replay.everyPattern(
           pattern,
           (expression) =>
             !expression.isExpression() ||
@@ -1351,7 +1290,7 @@ function hasRuntimeCalls(inputs: readonly NodePath[]): boolean {
       return true;
 
     if (argument.isExpression()) {
-      const branches = getConfidentlyExecutedBranches(argument);
+      const branches = replay.branches.branches(argument);
       if (branches)
         return branches.some((branch) => containsRuntimeCall(branch, use));
     }
@@ -1395,7 +1334,7 @@ function hasRuntimeCalls(inputs: readonly NodePath[]): boolean {
       },
       "ConditionalExpression|LogicalExpression"(inner) {
         if (!inner.isExpression()) return;
-        const branches = getConfidentlyExecutedBranches(inner);
+        const branches = replay.branches.branches(inner);
         if (!branches) return;
 
         found ||= branches.some((branch) => containsRuntimeCall(branch, use));
@@ -1424,7 +1363,7 @@ function hasRuntimeCalls(inputs: readonly NodePath[]): boolean {
   ): boolean => {
     if (!value.isExpression() || seen.has(value.node)) return false;
     const next = new Set(seen).add(value.node);
-    const branches = getConfidentlyExecutedBranches(value);
+    const branches = replay.branches.branches(value);
     if (branches)
       return branches.some((branch) => hasCoercionCallback(branch, next));
 
@@ -1605,14 +1544,15 @@ function isStaticRuleBranch(
 
 function hasRuntimeLocalBinding(
   path: NodePath,
+  analysis = createReplayAnalysis(path.scope),
   seen = new Set<t.Node>(),
   candidates: readonly NodePath[] = [path]
 ): boolean {
   if (path.isExpression()) {
-    const branches = getConfidentlyExecutedBranches(path);
+    const branches = analysis.branches.branches(path);
     if (branches)
       return branches.some((branch) =>
-        hasRuntimeLocalBinding(branch, seen, candidates)
+        hasRuntimeLocalBinding(branch, analysis, seen, candidates)
       );
   }
 
@@ -1635,16 +1575,21 @@ function hasRuntimeLocalBinding(
       init: NodePath<t.Node | null | undefined>
     ): boolean => {
       if (!init.isExpression()) return false;
-      if (binding.scope.getFunctionParent() && hasImmediateRuntimeCall(init))
+      if (
+        binding.scope.getFunctionParent() &&
+        hasImmediateRuntimeCall(init, analysis)
+      )
         return true;
-      if (init.evaluate().confident) return false;
 
-      return hasRuntimeLocalBinding(init, seen, [...candidates, init]);
+      return hasRuntimeLocalBinding(init, analysis, seen, [
+        ...candidates,
+        init
+      ]);
     };
 
     // A confident initializer does not account for expressions in its pattern.
     runtime ||=
-      !everyPatternExpression(
+      !analysis.everyPattern(
         binding.path.get("id"),
         (expression) => !isRuntimeInitializer(expression),
         binding.path.node.init
@@ -1655,11 +1600,11 @@ function hasRuntimeLocalBinding(
   path.traverse({
     "ConditionalExpression|LogicalExpression"(inner) {
       if (!inner.isExpression()) return;
-      const branches = getConfidentlyExecutedBranches(inner);
+      const branches = analysis.branches.branches(inner);
       if (!branches) return;
 
       runtime ||= branches.some((branch) =>
-        hasRuntimeLocalBinding(branch, seen, candidates)
+        hasRuntimeLocalBinding(branch, analysis, seen, candidates)
       );
       inner.skip();
       if (runtime) inner.stop();
@@ -1669,45 +1614,27 @@ function hasRuntimeLocalBinding(
   return runtime;
 }
 
-function hasImmediateRuntimeCall(path: NodePath<t.Expression>): boolean {
-  if (path.isFunction()) return false;
-  const branches = getConfidentlyExecutedBranches(path);
-  if (branches) return branches.some(hasImmediateRuntimeCall);
-
-  let called = false;
-  const found = (call: NodePath) => {
-    // Babel can fold a surrounding sequence or void expression while ignoring
-    // calls it executes. Inspect each call, including arguments of folded calls.
-    if (call.isCallExpression() && call.evaluate().confident) return;
-    called = true;
-    call.stop();
-  };
-
+/** Inspect possibly executed operands, including computed method keys. Deferred
+ * captures and statements after an unconditional return do not run here. */
+function hasImmediateRuntimeCall(
+  path: NodePath<t.Node>,
+  analysis: ReplayAnalysis
+): boolean {
+  if (path.isCallExpression()) return !analysis.closedMathCall(path);
   if (
-    path.isCallExpression() ||
     path.isOptionalCallExpression() ||
-    path.isNewExpression()
+    path.isNewExpression() ||
+    path.isTaggedTemplateExpression()
   )
-    found(path);
-  if (called) return true;
-
-  path.traverse({
-    Function(inner) {
-      inner.skip();
-    },
-    "ConditionalExpression|LogicalExpression"(inner) {
-      if (!inner.isExpression()) return;
-      const branches = getConfidentlyExecutedBranches(inner);
-      if (!branches) return;
-      called = branches.some(hasImmediateRuntimeCall);
-      inner.skip();
-      if (called) inner.stop();
-    },
-    CallExpression: found,
-    OptionalCallExpression: found,
-    NewExpression: found
-  });
-  return called;
+    return true;
+  return analysis.branches
+    .plan(path)
+    .steps.some(
+      (step) =>
+        step.kind === "apply-decorator" ||
+        (step.kind === "evaluate" &&
+          hasImmediateRuntimeCall(step.operand.path, analysis))
+    );
 }
 
 function lowerStaticFactory(path: NodePath<t.Node>) {

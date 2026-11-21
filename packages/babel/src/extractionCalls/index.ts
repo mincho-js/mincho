@@ -1,3 +1,4 @@
+import { createReplayAnalysis, type ReplayAnalysis } from "./replayAnalysis.js";
 import {
   capturedAuthoringOwner,
   type CapturedAuthoringOwner
@@ -14,23 +15,16 @@ import {
   isStaticCssEvalRequireCallExpression,
   getStaticCssEvalLiteralRequireImportPath
 } from "../staticCssEval/cjsBindings.js";
-import {
-  arrayMapResultProof,
-  arrayIncludesResultProof
-} from "./arrayMapResult.js";
 import { type NodePath, types as t } from "@babel/core";
 export { markBuildEvaluation } from "./evaluation.js";
 import {
   getExtractionModuleReference,
-  isProvenPrimitiveImport,
   getModuleReference,
   type ModuleReference,
   type ExtractionReferenceRole
 } from "../commonjs/bindings.js";
 import type { PluginState, ProgramScope } from "../types.js";
 import { proveAuthoringCallSite } from "./authoringCallSite.js";
-import { mathResultProof, mathNamespaceOwnReadProof } from "./mathResult.js";
-import { compiledRecipeResultProof } from "./compiledRecipeResult.js";
 import { analyzeExtractCalls } from "./analysis.js";
 import { builtInExtractionCalls, isBuiltInExtractionCall } from "./builtins.js";
 import {
@@ -50,67 +44,10 @@ import {
 } from "../transforms/extractionBindings.js";
 import type { Binding } from "@babel/traverse";
 import {
-  everyPatternExpression as everyLocalPatternExpression,
-  collectSkippedPatternDefaults as collectLocalSkippedPatternDefaults
-} from "../jsxCssProp/patternExpressions.js";
-import {
-  planEvaluation,
   buildEvaluationOwner,
-  isProvablyUnexecuted,
-  proveEvaluationSteps,
-  proveInitializedBindingValue,
-  proveStableEvaluationValue,
   type EvaluationProof,
   type EvaluationRequirements
 } from "./evaluation.js";
-
-/** Loaded-graph revocation and the helper's fresh local observation both apply. */
-function everyPatternExpression(
-  ...args: Parameters<typeof everyLocalPatternExpression>
-): boolean {
-  const [pattern, predicate, selected, skippedDefault, environment] = args;
-  const graph = (pattern.scope.getProgramParent() as ProgramScope).minchoData
-    ?.extractCalls?.arrayMapIntrinsics;
-  const declarator = pattern.parentPath;
-  const initializer = declarator?.isVariableDeclarator()
-    ? declarator.get("init")
-    : undefined;
-  return everyLocalPatternExpression(
-    pattern,
-    predicate,
-    selected,
-    skippedDefault,
-    {
-      requireReplaySafety: true,
-      canReadPrimitiveImport: isProvenPrimitiveImport,
-      canReplayIteration: environment?.canReplayIteration,
-      canReplayOwnRead: (source, operation) =>
-        (source === selected &&
-          !!initializer?.isExpression() &&
-          mathNamespaceOwnReadProof(initializer)) ||
-        !!environment?.canReplayOwnRead?.(source, operation),
-      prototypeMutationKeys: graph?.prototypeMutationKeys,
-      nativeArrayIteration:
-        environment?.nativeArrayIteration !== false &&
-        (graph?.iterationIntact ?? graph?.intact) !== false,
-      standardPrototypeAbsence:
-        environment?.standardPrototypeAbsence !== false &&
-        (graph?.prototypeAbsenceIntact ?? graph?.intact) !== false
-    }
-  );
-}
-
-function collectSkippedPatternDefaults(program: NodePath<t.Program>) {
-  const graph = (program.scope as ProgramScope).minchoData?.extractCalls
-    ?.arrayMapIntrinsics;
-  return collectLocalSkippedPatternDefaults(program, {
-    canReadPrimitiveImport: isProvenPrimitiveImport,
-    prototypeMutationKeys: graph?.prototypeMutationKeys,
-    nativeArrayIteration: (graph?.iterationIntact ?? graph?.intact) !== false,
-    standardPrototypeAbsence:
-      (graph?.prototypeAbsenceIntact ?? graph?.intact) !== false
-  });
-}
 
 export function prepareExtractCalls(
   path: NodePath<t.Program>,
@@ -291,6 +228,8 @@ export function isExtractionCall(
 
 function collectArgumentEvaluation(
   argument: NodePath<t.Node>,
+  analysis: ReplayAnalysis,
+  isPublishedSidecarRead: (value: NodePath<t.Node>) => boolean,
   capturedBindings?: ReadonlySet<Binding>,
   ownsPatternRead?: (binding: Binding) => boolean
 ): {
@@ -310,7 +249,10 @@ function collectArgumentEvaluation(
     const firstVisit = !seen.has(value.node);
     seen.set(value.node, owned);
     if (firstVisit) values.push(value);
-    const plan = planEvaluation(value);
+    // The exact generated import reads an output already owned by this sidecar.
+    // Its CommonJS projection belongs to runtime, not to the replay of the read.
+    if (isPublishedSidecarRead(value)) return;
+    const plan = analysis.branches.plan(value);
     if (firstVisit && plan.kind === "unknown") unknown.push(value);
     if (owned && value.isCallExpression()) ownedCalls.add(value.node);
     if (plan.selectedBranches)
@@ -326,7 +268,7 @@ function collectArgumentEvaluation(
         if (initializer.isExpression())
           visit(initializer, capturedBindings?.has(binding) ?? false);
         if (
-          !everyPatternExpression(
+          !analysis.everyPattern(
             binding.path.get("id"),
             (expression) => {
               if (expression.node) visit(expression as NodePath<t.Node>, false);
@@ -372,6 +314,7 @@ function collectArgumentEvaluation(
 
 function isUnconditionalModuleCall(
   callee: NodePath<t.Node>,
+  analysis: ReplayAnalysis,
   replay: (value: NodePath<t.Node>) => EvaluationProof,
   sharedValue: (value: NodePath<t.Node>) => EvaluationProof,
   reference: NonNullable<EvaluationRequirements["reference"]>
@@ -385,7 +328,7 @@ function isUnconditionalModuleCall(
     // JSX has already selected this complete expression for compilation.
     // Its component's runtime placement is not the operation's build phase;
     // captured bindings must still pass the actual sidecar capture plan.
-    return hasExtractableBindings(invocation);
+    return hasExtractableBindings(invocation, analysis);
   const enclosing = callee.parentPath?.findParent(
     (parent) =>
       parent.isFunction() ||
@@ -398,7 +341,7 @@ function isUnconditionalModuleCall(
     sharedValue,
     reference,
     primitiveBinding(identifier) {
-      return proveInitializedBindingValue(
+      return analysis.branches.proveBinding(
         identifier,
         requirements,
         bindingValues,
@@ -406,7 +349,7 @@ function isUnconditionalModuleCall(
       );
     },
     binding(identifier: NodePath<t.Identifier>): EvaluationProof {
-      return proveInitializedBindingValue(
+      return analysis.branches.proveBinding(
         identifier,
         requirements,
         bindingValues
@@ -431,7 +374,7 @@ function isUnconditionalModuleCall(
     )
       continue;
 
-    const plan = planEvaluation(parent);
+    const plan = analysis.branches.plan(parent);
     if (plan.kind === "unknown") return false;
     const stepIndex = plan.steps.findIndex(
       (step) => step.kind === "evaluate" && step.operand.path === child
@@ -442,8 +385,10 @@ function isUnconditionalModuleCall(
     if (step.operand.execution !== "eager") return false;
     if (
       !insideReplayedCall &&
-      proveEvaluationSteps(plan.steps.slice(0, stepIndex), requirements) ===
-        "unknown"
+      analysis.branches.proveSteps(
+        plan.steps.slice(0, stepIndex),
+        requirements
+      ) === "unknown"
     )
       return false;
   }
@@ -623,6 +568,7 @@ function proveExtractionReference(
   registration?: { source: string; name: string }
 ): boolean {
   const { source, name } = registration ?? {};
+  const analysis = createReplayAnalysis(callee.scope);
   // No AST edits occur during a proof. Reuse plain reference resolution within
   // this query; mutation-sensitive extraction proofs remain separate below.
   const references = new WeakMap<t.Node, ModuleReference | null>();
@@ -631,7 +577,7 @@ function proveExtractionReference(
       references.set(path.node, getModuleReference(path));
     return references.get(path.node)!;
   };
-  if (isProvablyUnexecuted(callee)) return false;
+  if (analysis.branches.isUnexecuted(callee)) return false;
   const target = moduleReference(callee);
   // Literal dotted exports and bare CommonJS defaults use the same safety
   // checks as nested paths. An undotted export can share a namespace too.
@@ -695,7 +641,7 @@ function proveExtractionReference(
       hasClosedProviderInitialization(program, source);
     program.traverse({
       "CallExpression|OptionalCallExpression"(call) {
-        if (isProvablyUnexecuted(call)) return;
+        if (analysis.branches.isUnexecuted(call)) return;
         const sibling = call.get("callee") as NodePath<t.Node>;
         if (sibling.node === callee.node) return;
         if (selectedLocal) {
@@ -743,14 +689,14 @@ function proveExtractionReference(
       const specifierRequirements: EvaluationRequirements = {
         replay: () => "unknown",
         primitiveBinding: (identifier) =>
-          proveInitializedBindingValue(
+          analysis.branches.proveBinding(
             identifier,
             specifierRequirements,
             visiting,
             true
           ),
         binding: (identifier) =>
-          proveInitializedBindingValue(
+          analysis.branches.proveBinding(
             identifier,
             specifierRequirements,
             visiting
@@ -759,7 +705,7 @@ function proveExtractionReference(
       const specifier = path.get("arguments")[0];
       if (
         !specifier ||
-        proveStableEvaluationValue(specifier, specifierRequirements) !==
+        analysis.branches.proveStableValue(specifier, specifierRequirements) !==
           "proven"
       ) {
         moduleOriginsComplete = false;
@@ -864,21 +810,20 @@ function proveExtractionReference(
   // The root is accepted only after every reachable local check has completed.
   const orderChecks = new Map<t.Node, SafetyCheck>();
   const buildChecks = new Map<t.CallExpression, SafetyCheck>();
-  const isSharedValue = (value: NodePath<t.Node>): EvaluationProof => {
-    const { cssFile, imports } = (
-      callee.scope.getProgramParent() as ProgramScope
-    ).minchoData;
-    // Imports may not have scope bindings yet. Trust only the exact identifier
-    // created for this sidecar, never an unresolved identifier with that name.
-    return value.isIdentifier() &&
-      ([...imports].some(
-        ([name, identifier]) =>
-          name.startsWith(`${cssFile}:`) && identifier === value.node
-      ) ||
-        moduleReference(value)?.source === cssFile)
+  const { cssFile, imports } = (callee.scope.getProgramParent() as ProgramScope)
+    .minchoData;
+  const isPublishedSidecarRead = (value: NodePath<t.Node>): boolean =>
+    value.isIdentifier() &&
+    [...imports].some(
+      ([name, identifier]) =>
+        name.startsWith(`${cssFile}:`) && identifier === value.node
+    );
+  const isSharedValue = (value: NodePath<t.Node>): EvaluationProof =>
+    value.isIdentifier() &&
+    (isPublishedSidecarRead(value) ||
+      moduleReference(value)?.source === cssFile)
       ? "proven"
       : "unknown";
-  };
   const isReplayedValue = (value: NodePath<t.Node>): EvaluationProof => {
     const reference = value.isCallExpression() ? value.get("callee") : value;
     const checked = invocationChecks.get(reference.node);
@@ -1149,7 +1094,14 @@ function proveExtractionReference(
       call?.isCallExpression() &&
       call
         .get("arguments")
-        .flatMap((argument) => collectArgumentEvaluation(argument).values)
+        .flatMap(
+          (argument) =>
+            collectArgumentEvaluation(
+              argument,
+              analysis,
+              isPublishedSidecarRead
+            ).values
+        )
         .some((argument) => {
           const reference = moduleReference(argument);
           if (!reference) return false;
@@ -1196,12 +1148,14 @@ function proveExtractionReference(
           if (
             !isUnconditionalModuleCall(
               callee,
+              analysis,
               isReplayedValue,
               isSharedValue,
               referenceFormation
             ) ||
             !isUnconditionalModuleCall(
               sibling,
+              analysis,
               isReplayedValue,
               isSharedValue,
               referenceFormation
@@ -1262,7 +1216,7 @@ function proveExtractionReference(
     candidate: NodePath<t.Node>,
     candidateIntent: ExtractionProofIntent
   ): ExtractionProofReference | null => {
-    if (isProvablyUnexecuted(candidate)) return null;
+    if (analysis.branches.isUnexecuted(candidate)) return null;
     if (candidate.isIdentifier() && isLocalExtractionBinding(candidate)) {
       const binding = candidate.scope.getBinding(candidate.node.name);
       return binding?.constant ? { kind: "local" } : null;
@@ -1280,7 +1234,10 @@ function proveExtractionReference(
   const getCallReference = (
     candidate: NodePath<t.Node>
   ): ExtractionProofReference | null => {
-    if (isRuntimeInvocation(candidate) || isProvablyUnexecuted(candidate))
+    if (
+      isRuntimeInvocation(candidate) ||
+      analysis.branches.isUnexecuted(candidate)
+    )
       return null;
     // The root keeps its invocation/order obligations. Neighboring callee
     // uses need a safe reference, not permission to move their invocations;
@@ -1304,7 +1261,7 @@ function proveExtractionReference(
 
     argumentConsumers.add(candidate.node);
     try {
-      const bindingPlan = planExtractionBindings(call);
+      const bindingPlan = planExtractionBindings(call, undefined, analysis);
       if (bindingPlan.runtimeBinding)
         return {
           ...reference,
@@ -1369,6 +1326,8 @@ function proveExtractionReference(
       const argumentsEvaluation = call.get("arguments").map((argument) =>
         collectArgumentEvaluation(
           argument,
+          analysis,
+          isPublishedSidecarRead,
           capturedBindings,
           (binding) =>
             capturedBindings.has(binding) &&
@@ -1440,7 +1399,7 @@ function proveExtractionReference(
           hasBuildConsumer(output) ||
           isInsideExtractCallsImplementation(producer) ||
           isIgnoredExtractionCall(producer) ||
-          !hasExtractableBindings(producer) ||
+          !hasExtractableBindings(producer, analysis) ||
           isReplayedValue(producer) === "unknown"
         )
           return false;
@@ -1512,7 +1471,11 @@ function proveExtractionReference(
                 return (
                   consumer?.isCallExpression() &&
                   isRegisteredExtractionReference(consumer.get("callee")) &&
-                  planExtractionBindings(consumer).bindings.includes(output)
+                  planExtractionBindings(
+                    consumer,
+                    undefined,
+                    analysis
+                  ).bindings.includes(output)
                 );
               });
             return captured && buildOnlyBinding(output);
@@ -1625,11 +1588,7 @@ function proveExtractionReference(
                         primitivePaths
                       };
                     }
-                    const artifact =
-                      compiledRecipeResultProof(value) ??
-                      mathResultProof(value) ??
-                      arrayMapResultProof(value) ??
-                      arrayIncludesResultProof(value);
+                    const artifact = analysis.artifactResult(value);
                     if (artifact) return artifact;
                     if (!value.isCallExpression()) return;
                     const sourceResult = sourceInvocationResultProof(
@@ -1763,8 +1722,7 @@ function proveExtractionReference(
                       ? { kind: "primitive" }
                       : { kind: "build-owned", identity: value.node };
                   },
-                  skippedPatternDefaults:
-                    collectSkippedPatternDefaults(program),
+                  skippedPatternDefaults: analysis.skippedDefaults,
                   isReadOnlyCall(consumer) {
                     // The call need not be readonly when its entire input graph
                     // moves with it. Every consumer must prove that ownership;

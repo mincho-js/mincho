@@ -974,6 +974,55 @@ describe("configured JSX callable values", () => {
       expect(code).not.toContain("getStyles(");
     });
 
+    it.each([false, true])(
+      "keeps a skipped initializer and selected recipe effects in their execution frame (prefix %s)",
+      (prefix) => {
+        const recipe = rules({
+          variants: { size: { 4: { padding: 4 }, 12: { padding: 12 } } }
+        });
+        const { code, result } = babelTransform(
+          `
+        import {recipe} from "./theme.css.js";
+        import {tick, readSize} from "./values.js";
+        if (false) { var enabled = true; }
+        export const Box = () => <div css={recipe({size: ${prefix ? "(tick(), enabled)" : "enabled"} ? 0 : readSize()})} />;
+      `,
+          { jsxCssProp, optimize: { pureFunctions: false } }
+        );
+        const events: string[] = [];
+        const modules = {
+          "@mincho-js/css": { mincho$ },
+          "@mincho-js/css/classname": { cx },
+          "custom-preset": { css },
+          "./theme.css.js": { recipe },
+          "./values.js": {
+            tick() {
+              events.push("tick");
+            },
+            readSize() {
+              const first = !events.includes("read");
+              events.push("read");
+              return first ? 4 : 12;
+            }
+          }
+        };
+        const sidecar = executeModule(result[1], modules);
+        const runtime = executeModule(code, {
+          ...modules,
+          [result[0]]: sidecar
+        });
+        const Box = runtime.Box as () => { props: { className: string } };
+        expect(events).toEqual([]);
+        expect([Box().props.className, Box().props.className]).toEqual([
+          recipe({ size: 4 }),
+          recipe({ size: 12 })
+        ]);
+        expect(events).toEqual(
+          prefix ? ["tick", "read", "tick", "read"] : ["read", "read"]
+        );
+      }
+    );
+
     it.each([
       ["selected alias", "const selected = false ? other : input;", "selected"],
       ["unknown branch", "", "enabled ? input : { padding: 4 }"]

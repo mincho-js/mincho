@@ -1,4 +1,4 @@
-import { planEvaluation } from "../extractionCalls/evaluation.js";
+import { isProvablyUnexecuted } from "../extractionCalls/evaluation.js";
 import type { NodePath } from "@babel/core";
 import { types as t } from "@babel/core";
 import { createJsxAttributeString } from "./attributeValue.js";
@@ -346,7 +346,7 @@ function analyzeOpeningElement(
     ? cssAttributePath.get("value")
     : undefined;
   const preparedRuntimeClassValue =
-    isInProvenUnexecutedBranch(openingElementPath) ||
+    isProvablyUnexecuted(openingElementPath) ||
     (jsxCssPropImportSource(state.opts.jsxCssProp) !== cssModuleName &&
       valuePath?.isJSXExpressionContainer() &&
       prepareRuntimeClassValue(valuePath.get("expression")));
@@ -589,20 +589,3 @@ function getCssExpression(
 }
 
 export { getDynamicCssVariableRule } from "./dynamicCssVariableAnalysis.js";
-
-/** Syntax lowering only: this grants no sidecar evaluation or runtime proof. */
-function isInProvenUnexecutedBranch(path: NodePath<t.Node>): boolean {
-  let child = path;
-  for (let parent = child.parentPath; parent; parent = child.parentPath) {
-    if (parent.isFunction()) return false;
-    if (
-      (parent.isConditionalExpression() || parent.isLogicalExpression()) &&
-      planEvaluation(parent).unexecutedBranches?.some(
-        (branch) => branch.node === child.node
-      )
-    )
-      return true;
-    child = parent;
-  }
-  return false;
-}

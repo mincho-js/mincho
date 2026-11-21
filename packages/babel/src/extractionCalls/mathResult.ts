@@ -12,11 +12,10 @@ export function mathResultProof(
     ?.extractCalls?.mathIntrinsics;
   if (!graph?.intact || !program.isProgram()) return;
   // No positive AST-identity cache: lowerers can introduce mutations after the
-  // completed graph snapshot. Recheck this exact consumer program each time.
+  // completed graph snapshot. The matching intrinsic query validates its program.
   const environment = createMathIntrinsicEnvironment({
     bindIntact: graph.bindIntact
   });
-  environment.observe(program);
   if (environment.provesPrimitiveResult(call)) return { kind: "primitive" };
 }
 
@@ -29,7 +28,6 @@ export function mathReferenceProof(path: NodePath<t.Node>) {
   const environment = createMathIntrinsicEnvironment({
     bindIntact: graph.bindIntact
   });
-  environment.observe(program);
   return environment.referenceIdentity(path);
 }
 
@@ -56,6 +54,5 @@ export function mathNamespaceOwnReadProof(path: NodePath<t.Node>): boolean {
   const environment = createMathIntrinsicEnvironment({
     bindIntact: graph?.bindIntact
   });
-  environment.observe(program);
   return environment.referenceIdentity(path)?.kind === "namespace";
 }
