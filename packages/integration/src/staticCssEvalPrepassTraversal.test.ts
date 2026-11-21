@@ -121,6 +121,7 @@ it.each([
     "/src/archive.ts#old/tokens.tsx",
     undefined
   ],
+  ["/src/archive.ts#old/tokens.tsx", undefined, undefined],
   ["/tokens.tsx?theme=/dark.js#preview", undefined, undefined],
   [
     "/tokens.tsx?theme=/dark.js#preview",

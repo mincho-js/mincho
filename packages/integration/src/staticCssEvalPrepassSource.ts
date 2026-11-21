@@ -120,10 +120,10 @@ export function createLoadedModule(
   // Keep the provider's physical path regardless of the parser's choice.
   const realpath = loadedSource.realpath ?? options.resolution?.realpath;
   const loaderFilename = loadedSource.resolvedFile;
-  const loaderEchoesVirtualId =
-    loaderFilename === id &&
+  const virtualId =
     (loadedSource.sourceKind ?? options.resolution?.sourceKind) ===
-      "provider-virtual";
+    "provider-virtual";
+  const loaderEchoesVirtualId = loaderFilename === id && virtualId;
   // Loader evidence describes the text actually parsed. A resolver's physical
   // filename is the fallback before treating the graph ID as logical syntax.
   const syntaxSource =
@@ -141,7 +141,12 @@ export function createLoadedModule(
             internalHasStaticCssEvalSyntaxFilename(realpath, true)
           ? undefined
           : internalHasStaticCssEvalSyntaxFilename(id)
-            ? { syntaxSourceId: id }
+            ? {
+                syntaxSourceId: id,
+                ...(virtualId
+                  ? {}
+                  : { syntaxSourceIdKind: "metadata-free" as const })
+              }
             : undefined;
 
   return {

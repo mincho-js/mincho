@@ -171,8 +171,8 @@ export interface ImportedStaticCssEvalLoadedModule extends StaticCssEvalProvider
   realpath?: string;
   /** Parser-facing source identifier, independent of graph and origin identity. */
   syntaxSourceId?: string;
-  /** Loader filenames use metadata-free inference; a graph ID is logical. */
-  syntaxSourceIdKind?: "loader-filename";
+  /** Explicit source descriptions beat the heuristic for metadata-free IDs. */
+  syntaxSourceIdKind?: "loader-filename" | "metadata-free";
 }
 
 export interface ImportedStaticCssEvalImportResolution extends StaticCssEvalProviderSourcePolicyDescriptor {

@@ -1001,6 +1001,17 @@ async function evaluateVanilla(
   const runtimeSession =
     runtimeRegistration && createCssScopeRuntimeSession(runtimeRegistration);
   let scopeDepth = 0;
+  let readingRegisteredExports = false;
+  const restoreRegisteredScope = () => {
+    // Restore the actual protocol stack to the original instance, not its tuple.
+    while (
+      scopeProtocol.hasFileScope() &&
+      scopeProtocol.getFileScope() !== baselineScope
+    )
+      scopeProtocol.endFileScope();
+    scopeDepth = 0;
+    return Boolean(baselineScope && !scopeProtocol.hasFileScope());
+  };
   const makeScopeFacade = (id?: string) => ({
     ...evaluationScope,
     setFileScope(...args: Parameters<typeof fileScopeApi.setFileScope>) {
@@ -1009,7 +1020,7 @@ async function evaluateVanilla(
         scopeDepth++;
         return;
       }
-      runtimeSession!.assertActive();
+      if (!readingRegisteredExports) runtimeSession!.assertActive();
       assertScopeProtocol();
       const protocol = scopeProtocol;
       const previous = protocol.hasFileScope()
@@ -1025,7 +1036,7 @@ async function evaluateVanilla(
       observedScopeInstances.add(scope);
       scopeDepth++;
       // Record only after a successful genuine scope push, not a reused object.
-      if (id) {
+      if (id && !readingRegisteredExports) {
         const data = readScopeData(scope);
         runtimeSession!.record(id, data);
         attestedScopeInstances.set(scope, {
@@ -1036,7 +1047,10 @@ async function evaluateVanilla(
     },
     endFileScope() {
       if (scopeDepth <= 0) throw new Error("Unbalanced Mincho file scope");
-      if (runtimeRegistration) assertScopeProtocol();
+      if (runtimeRegistration) {
+        if (!readingRegisteredExports) runtimeSession!.assertActive();
+        assertScopeProtocol();
+      }
       try {
         (runtimeRegistration ? scopeProtocol : evaluationScope).endFileScope();
       } finally {
@@ -1205,22 +1219,13 @@ async function evaluateVanilla(
               evaluate(exports, scopedRequire, module);
             }
           } finally {
-            // Revoke every facade synchronously, including when cleanup throws.
-            // No queued Promise callback may push a scope after this evaluation.
+            // Revoke compiler capabilities synchronously, including on failure.
+            // No queued Promise callback may push a scope after evaluation.
             runtimeSession?.close(true);
             try {
               if (runtimeRegistration) {
-                // A raw acquisition can bypass our depth counter. Restore the
-                // actual protocol stack to the original instance, not its tuple.
-                while (
-                  scopeProtocol.hasFileScope() &&
-                  scopeProtocol.getFileScope() !== baselineScope
-                )
-                  scopeProtocol.endFileScope();
-                scopeDepth = 0;
-                removedEnclosingScope = Boolean(
-                  baselineScope && !scopeProtocol.hasFileScope()
-                );
+                // A raw acquisition can bypass our depth counter.
+                removedEnclosingScope = restoreRegisteredScope();
               } else {
                 while (scopeDepth > 0) {
                   scopeDepth--;
@@ -1249,9 +1254,21 @@ async function evaluateVanilla(
             throw new Error("CSS scope runtime removed its enclosing scope");
           // Like upstream eval, read the resulting realm module once after
           // adapter teardown, while the evaluation NODE_ENV is still active.
-          if (registeredRealm)
-            registeredExports = (registeredRealm.module as typeof module)
-              .exports;
+          if (registeredRealm) {
+            // A synchronous getter can use the public scope protocol, including
+            // through a lowered literal import, with no producer recording and
+            // without reinstating the adapter or resource capture.
+            readingRegisteredExports = true;
+            try {
+              registeredExports = (registeredRealm.module as typeof module)
+                .exports;
+            } finally {
+              readingRegisteredExports = false;
+              removedEnclosingScope = restoreRegisteredScope();
+            }
+            if (removedEnclosingScope)
+              throw new Error("CSS scope runtime removed its enclosing scope");
+          }
         } finally {
           if (nodeEnv === undefined) delete process.env.NODE_ENV;
           else process.env.NODE_ENV = nodeEnv;

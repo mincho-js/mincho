@@ -985,7 +985,14 @@ async function compileUncached(options: CompileOptions) {
   const runtimeOrigins = new Map<string, string>();
   const runtimeNamespace = "mincho-css-scope-proxy";
   let hasCallerResolvers = false;
+  let childBuildOptions: BuildOptions | undefined;
+  const preservesNativeScopeImport = (args: OnResolveArgs) =>
+    childBuildOptions?.format === "esm" &&
+    (args.kind === "import-statement" || args.kind === "dynamic-import");
   const resolveRuntimeApi = (args: OnResolveArgs) => {
+    // The registered evaluator executes CommonJS scripts. Leave native ESM
+    // imports of the public API external instead of lowering them to require.
+    if (preservesNativeScopeImport(args)) return;
     // A resolution-only query uses the native external edge. Let the normal
     // resolution observer record it without creating an executable facade.
     if (args.kind === "require-resolve") return;
@@ -1014,6 +1021,7 @@ async function compileUncached(options: CompileOptions) {
   const runtimePlugin: Plugin = {
     name: "mincho:css-scope-runtime",
     setup(build) {
+      childBuildOptions = build.initialOptions;
       build.onResolve({ filter: /^mincho:css-scope-runtime:/ }, () => ({
         errors: [
           {

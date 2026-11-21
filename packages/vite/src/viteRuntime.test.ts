@@ -250,11 +250,16 @@ describe("mincho with the Vite runtime", () => {
     "early replacement",
     "early retirement",
     "early restored bytes",
-    "early republication"
+    "early republication",
+    "style PostCSS retirement",
+    "style PostCSS unchanged republication",
+    "style PostCSS bare inline retirement"
   ] as const)(
     "validates final client direct CSS after ordered Vite transforms (%s)",
     async (scope) => {
       const early = scope.startsWith("early ");
+      const stylePostCss = scope.startsWith("style PostCSS ");
+      const bareInline = scope === "style PostCSS bare inline retirement";
       const root = await createFixture({
         "src/entry.ts":
           'import { css } from "@mincho-js/css"; export const cls = css({color:"red"});',
@@ -308,6 +313,41 @@ describe("mincho with the Vite runtime", () => {
         configFile: false,
         logLevel: "silent",
         server: { host: "127.0.0.1", port: 0, watch: null },
+        ...(stylePostCss
+          ? {
+              css: {
+                postcss: {
+                  plugins: [
+                    {
+                      postcssPlugin: "pause-generated-style-capture",
+                      async OnceExit(sheet) {
+                        let pause = false;
+                        sheet.walkDecls("color", (decl) => {
+                          if (decl.value === "red") decl.value = "purple";
+                          else if (decl.value === "blue") pause = true;
+                        });
+                        if (pause) {
+                          enterPausedRequest();
+                          await resumeRequest;
+                          if (
+                            scope === "style PostCSS retirement" ||
+                            bareInline
+                          ) {
+                            sheet.walkDecls("color", (decl) => {
+                              decl.cloneAfter({
+                                prop: "background-image",
+                                value: 'url("./icon.svg")'
+                              });
+                            });
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          : {}),
         plugins: [
           {
             name: "observe-direct-css-input",
@@ -315,8 +355,11 @@ describe("mincho with the Vite runtime", () => {
             transform: {
               order: "pre",
               handler(css, id) {
-                if (id.endsWith("?direct"))
-                  expect(css).not.toContain("mincho-direct:");
+                if (
+                  id.endsWith("?direct") ||
+                  (stylePostCss && id.includes(".vanilla.css"))
+                )
+                  expect(css).not.toContain("mincho-css-load:");
               }
             }
           },
@@ -383,7 +426,13 @@ describe("mincho with the Vite runtime", () => {
       expect(request).toBeDefined();
       expect(styleRequest).toBeDefined();
       const url = new URL(request!, server.resolvedUrls!.local[0]);
-      const getCss = () => fetch(url, { headers: { Accept: "text/css" } });
+      if (bareInline) url.search = "?inline";
+      const getCss = () =>
+        fetch(url, {
+          headers: {
+            Accept: stylePostCss ? "application/javascript" : "text/css"
+          }
+        });
 
       const cold = await getCss();
       if (scope === "unverified order") {
@@ -404,14 +453,33 @@ describe("mincho with the Vite runtime", () => {
       expect(warm.status).toBe(200);
       expect(await warm.text()).toBe(prepared);
 
+      if (bareInline) {
+        const wrapper = new URL(url);
+        wrapper.search = "?url&inline";
+        const response = await fetch(wrapper);
+        expect(response.status).toBe(200);
+        const data = /data:text\/css;charset=utf-8;base64,([a-z0-9+/=]+)/i.exec(
+          await response.text()
+        )?.[1];
+        expect(data).toBeDefined();
+        const css = /^export default ("[^\n]+")/m.exec(prepared)?.[1];
+        expect(css).toBeDefined();
+        expect(Buffer.from(data!, "base64").toString("utf8")).toBe(
+          JSON.parse(css!)
+        );
+      }
+
       source = ".probe { color: blue; }";
       client.moduleGraph.invalidateModule(sidecar);
       await client.transformRequest(sidecar.url);
       const fetching = getCss();
-      if (early || scope === "in-flight retirement") {
+      if (early || stylePostCss || scope === "in-flight retirement") {
         try {
           await pausedRequest;
-          if (
+          if (scope === "style PostCSS unchanged republication") {
+            client.moduleGraph.invalidateModule(sidecar);
+            await client.transformRequest(sidecar.url);
+          } else if (
             scope === "early replacement" ||
             scope === "early restored bytes" ||
             scope === "early republication"
@@ -436,6 +504,20 @@ describe("mincho with the Vite runtime", () => {
         }
         const response = await fetching;
         const body = await response.text();
+        if (scope === "style PostCSS unchanged republication") {
+          expect(response.status, body).toBe(200);
+          expect(body).toContain("__vite__css");
+          expect(body).toContain("color: blue;");
+          return;
+        }
+        if (scope === "style PostCSS retirement" || bareInline) {
+          const fresh = await getCss();
+          const freshBody = await fresh.text();
+          expect(fresh.status, freshBody).toBe(200);
+          expect(freshBody).toContain(
+            bareInline ? 'export default ""' : '__vite__css = ""'
+          );
+        }
         if (scope === "early republication") {
           expect(response.status).toBe(200);
           expect(body).toContain("color: blue;");
@@ -1223,7 +1305,26 @@ describe("mincho with the Vite runtime", () => {
                 this.addWatchFile(join(producer, "icon.svg"));
             }
           },
-          minchoVitePlugin()
+          minchoVitePlugin(),
+          {
+            name: "probe-generated-css-url-source-literals",
+            enforce: "post",
+            transform(code, id) {
+              if (directory !== "100%" || !id.includes("mincho-extracted-css:"))
+                return;
+              const source = /import\s*["']([^"']+\.vanilla\.css)["']/.exec(
+                code
+              )?.[1];
+              if (source) {
+                const href = JSON.stringify(source + "?url");
+                return (
+                  code +
+                  `\nimport importedStylesheet from ${href}; export { importedStylesheet };\n` +
+                  `export { default as stylesheet } from ${href};`
+                );
+              }
+            }
+          }
         ]
       });
       servers.push(server);
@@ -1239,7 +1340,8 @@ describe("mincho with the Vite runtime", () => {
       expect(sidecarHref).toBeDefined();
       const sidecar = await fetch(new URL(sidecarHref!, base));
       expect(sidecar.status, sidecarHref).toBe(200);
-      const href = (await sidecar.text()).match(
+      const sidecarCode = await sidecar.text();
+      const href = sidecarCode.match(
         /import\s*["']([^"']+\.vanilla\.css(?:\?[^"']*)?)["']/
       )?.[1];
       expect(href).toBeDefined();
@@ -1258,6 +1360,24 @@ describe("mincho with the Vite runtime", () => {
         return;
       }
       expect(response.status, href).toBe(200);
+      if (directory === "100%") {
+        const literal = /import importedStylesheet from ["']([^"']+)["']/.exec(
+          sidecarCode
+        )?.[1];
+        const reexported =
+          /export \{ default as stylesheet \} from ["']([^"']+)["']/.exec(
+            sidecarCode
+          )?.[1];
+        expect(literal).toBeDefined();
+        expect(reexported).toBeDefined();
+        const literalResponse = await fetch(new URL(literal!, base));
+        const reexportResponse = await fetch(new URL(reexported!, base));
+        const literalJs = await literalResponse.text();
+        const reexportJs = await reexportResponse.text();
+        expect(literalResponse.status).toBe(200);
+        expect(reexportResponse.status, reexported).toBe(200);
+        expect(reexportJs).toBe(literalJs);
+      }
       expect(css).toMatch(
         /background-image:\s*url\(["']?data:image\/svg\+xml,[^;]*orange/
       );
@@ -1629,6 +1749,11 @@ describe("mincho with the Vite runtime", () => {
     const css = [...sidecar.importedModules].find((module) =>
       module.id?.endsWith(".vanilla.css")
     )!;
+    expect(css.id).toContain("/src/");
+    const inlineUrl = css.url + "?url&inline";
+    const warmInline = await client.transformRequest(inlineUrl);
+    expect(warmInline?.code).toMatch(/export default ["']data:text\/css/);
+    expect(warmInline?.code).toContain("red");
     const privateId = `\0mincho-virtual-css:${join(root, "src/private.vanilla.css")}`;
     expect(await client.pluginContainer.load(privateId)).toBeNull();
 
@@ -1638,11 +1763,25 @@ describe("mincho with the Vite runtime", () => {
     );
 
     expect(await client.pluginContainer.load(css.id!)).toBe("");
+    const coldInline = await client.transformRequest(inlineUrl);
+    expect(coldInline?.code).toContain(
+      'export default "data:text/css;charset=utf-8;base64,"'
+    );
+    expect(coldInline?.code).not.toContain("red");
     expect(await client.pluginContainer.load(`${css.id!}?raw`)).toBe(
       'export default "";'
     );
     expect(await client.pluginContainer.load(privateId)).toBeNull();
     expect(await client.pluginContainer.load(`${privateId}?raw`)).toBeNull();
+    const ordinaryInline = await client.transformRequest(
+      "/src/private.vanilla.css?url&inline"
+    );
+    expect(ordinaryInline?.code).toContain(
+      Buffer.from(".private { color: blue; }").toString("base64")
+    );
+    await expect(
+      client.transformRequest("/src/absent.vanilla.css?url&inline")
+    ).rejects.toThrow(/Denied ID|ENOENT|Failed to load url/);
   });
 
   it("keeps import and require package conditions distinct", async () => {

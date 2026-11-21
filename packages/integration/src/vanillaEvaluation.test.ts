@@ -1250,6 +1250,82 @@ it("isolates public fileScope facade state between registered evaluations", asyn
     );
 });
 
+it.each(["literal", "dynamic"] as const)(
+  "allows a registered exports getter to balance %s file scope acquisitions after adapter teardown",
+  async (acquisition) => {
+    const compiledInput = await compiled(`
+      const scope = ${acquisition === "literal" ? "require('@vanilla-extract/css/fileScope')" : "require(['@vanilla-extract/css','fileScope'].join('/'))"};
+      scope.setFileScope('ordinary','fixture');
+      try {
+        require('@vanilla-extract/css').globalStyle('.ordinary-getter',{color:'green'});
+      } finally {
+        scope.endFileScope();
+      }
+      let reads = 0;
+      Object.defineProperty(module,'exports',{get(){
+        if (++reads > 1) throw new Error('exports read twice');
+        scope.setFileScope('getter','ordinary');
+        try {
+          return {label:scope.getFileScope().filePath};
+        } finally {
+          scope.endFileScope();
+        }
+      }});
+    `);
+    expect(
+      validateCssScopeRuntimeOrigins(
+        compiledInput.source,
+        compiledInput.cssScopeOrigins
+      )
+    ).toBeDefined();
+    const input = {
+      ...compiledInput,
+      filePath,
+      serializeVirtualCssPath: ({ source }: { source: string }) =>
+        JSON.stringify(source)
+    };
+    const upstream = await processVanillaFile(input);
+    expect(upstream).toContain("color: green");
+    expect(upstream).toContain("export var label = 'getter';");
+    expect(await processVanillaWithExecution(input)).toBe(upstream);
+  }
+);
+
+it("restores the enclosing scope after a registered exports getter throws", async () => {
+  const compiledInput = await compiled(`
+    const scope = require(['@vanilla-extract/css','fileScope'].join('/'));
+    Object.defineProperty(module,'exports',{get(){
+      scope.setFileScope('getter','ordinary');
+      throw new Error('ordinary getter failed');
+    }});
+  `);
+  expect(
+    validateCssScopeRuntimeOrigins(
+      compiledInput.source,
+      compiledInput.cssScopeOrigins
+    )
+  ).toBeDefined();
+  const scope = createRequire(filePath)(
+    "@vanilla-extract/css/fileScope"
+  ) as typeof import("@vanilla-extract/css/fileScope");
+  const serializeVirtualCssPath = vi.fn(() => "");
+  scope.setFileScope("enclosing", "ordinary");
+  const enclosing = scope.getFileScope();
+  try {
+    await expect(
+      processVanillaWithExecution({
+        ...compiledInput,
+        filePath,
+        serializeVirtualCssPath
+      })
+    ).rejects.toThrow("ordinary getter failed");
+    expect(scope.getFileScope()).toBe(enclosing);
+    expect(serializeVirtualCssPath).not.toHaveBeenCalled();
+  } finally {
+    scope.endFileScope();
+  }
+});
+
 it("keeps upstream CSS-text fallback for unsupported adapter versions without granting artifact authority", async () => {
   vi.resetModules();
   vi.doMock("node:fs", async () => {

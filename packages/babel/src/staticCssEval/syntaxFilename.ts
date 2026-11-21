@@ -3,7 +3,11 @@ const typedVirtualSyntax = /^(?:\0?virtual:|pkg:|data:)/;
 
 /** Match the earliest extension delimiter on the final line. Each extension
  * check examines at most the five characters of a supported extension. */
-function findSyntaxSuffix(id: string, start: number): number {
+function findSyntaxSuffix(
+  id: string,
+  start: number,
+  queryOnly = false
+): number {
   let suffix = -1;
   for (let i = id.length - 1; i >= start; i--) {
     const char = id[i];
@@ -15,7 +19,7 @@ function findSyntaxSuffix(id: string, start: number): number {
     )
       break;
     if (
-      (char === "?" || char === "#") &&
+      (char === "?" || (!queryOnly && char === "#")) &&
       sourceExtension.test(id.slice(Math.max(start, i - 5), i))
     )
       suffix = i;
@@ -44,6 +48,25 @@ export function inferSyntaxFilename(id: string): string {
 export function inferLogicalSyntaxFilename(id: string): string {
   const suffix = findSyntaxSuffix(id, 0);
   return suffix === -1 ? id : id.slice(0, suffix);
+}
+
+/** With no provenance, a source extension directly before a query wins even
+ * if the query value contains slashes. Otherwise favor the actual basename;
+ * an earlier hash may be a literal directory character. Explicit loader and
+ * host IDs are needed to disambiguate a literal query-like directory or a
+ * slash-bearing fragment that itself looks like a path.
+ */
+export function inferMetadataFreeSyntaxFilename(id: string): string {
+  if (id.includes("?")) {
+    const query = findSyntaxSuffix(id, 0, true);
+    if (
+      query !== -1 &&
+      query < Math.max(id.lastIndexOf("/"), id.lastIndexOf("\\"))
+    )
+      return id.slice(0, query);
+  }
+
+  return inferSyntaxFilename(id);
 }
 
 /** Syntax recognition for provider metadata, without changing its graph identity. */

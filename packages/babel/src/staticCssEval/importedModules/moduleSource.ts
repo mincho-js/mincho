@@ -1,7 +1,11 @@
 import { types as t } from "@babel/core";
 import hash from "@emotion/hash";
 import { inferSyntaxFilename } from "../moduleCache.js";
-import { inferLogicalSyntaxFilename } from "../syntaxFilename.js";
+import {
+  hasStaticCssEvalSyntaxFilename,
+  inferLogicalSyntaxFilename,
+  inferMetadataFreeSyntaxFilename
+} from "../syntaxFilename.js";
 import { createStaticCssEvalProviderSourceMetadata } from "../boundary.js";
 import { collectStaticCssEvalCjsRequireBindings } from "../cjsBindings.js";
 import type {
@@ -106,17 +110,26 @@ export function collectModuleImportBindings(
 export function createStaticCssModuleSource(
   loadedModule: ImportedStaticCssEvalLoadedModule
 ): StaticCssModuleSource {
-  // Bundler resolution metadata may identify a different representation
-  // from the parser-facing source. A logical syntax ID is not a physical path.
+  // A loader describes the parsed representation; backing paths and graph IDs
+  // keep their independent identity. Opaque backing paths do not select syntax.
+  const { syntaxSourceId, syntaxSourceIdKind, realpath, resolvedFile, id } =
+    loadedModule;
   const syntaxFilename =
-    loadedModule.syntaxSourceId !== undefined
-      ? loadedModule.syntaxSourceIdKind === "loader-filename"
-        ? inferSyntaxFilename(loadedModule.syntaxSourceId)
-        : inferLogicalSyntaxFilename(loadedModule.syntaxSourceId)
-      : (loadedModule.realpath ??
-        (loadedModule.resolvedFile !== undefined
-          ? inferSyntaxFilename(loadedModule.resolvedFile)
-          : undefined));
+    syntaxSourceId !== undefined
+      ? syntaxSourceIdKind === "loader-filename"
+        ? inferSyntaxFilename(syntaxSourceId)
+        : syntaxSourceIdKind === "metadata-free"
+          ? inferMetadataFreeSyntaxFilename(syntaxSourceId)
+          : inferLogicalSyntaxFilename(syntaxSourceId)
+      : realpath !== undefined && hasStaticCssEvalSyntaxFilename(realpath, true)
+        ? realpath
+        : resolvedFile !== undefined &&
+            resolvedFile !== id &&
+            hasStaticCssEvalSyntaxFilename(resolvedFile)
+          ? inferSyntaxFilename(resolvedFile)
+          : loadedModule.sourceKind === "provider-virtual"
+            ? inferLogicalSyntaxFilename(id)
+            : inferMetadataFreeSyntaxFilename(id);
   return {
     resolvedFile: loadedModule.id,
     ...(syntaxFilename !== undefined ? { syntaxFilename } : {}),

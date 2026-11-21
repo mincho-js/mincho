@@ -116,6 +116,43 @@ describe("caller loaders in child compilation", () => {
     }
   );
 
+  it("preserves native ESM fileScope imports in an entry and its dependency", async () => {
+    const cacheDir = join(process.cwd(), ".cache");
+    await fs.mkdir(cacheDir, { recursive: true });
+    const root = await fs.mkdtemp(join(cacheDir, "esm-file-scope-"));
+    roots.push(root);
+    const filePath = join(root, "entry.ts");
+    await fs.writeFile(
+      join(root, "helper.ts"),
+      `import { hasFileScope } from "@vanilla-extract/css/fileScope";
+      export function dependencyHasScope() { return hasFileScope(); }`
+    );
+    const result = await compile({
+      cwd: root,
+      filePath,
+      originalPath: filePath,
+      resolverCache: new Map(),
+      contents: `
+        import { hasFileScope } from "@vanilla-extract/css/fileScope";
+        import { dependencyHasScope } from "./helper";
+        export const scoped = [hasFileScope(), dependencyHasScope()];
+      `,
+      esbuild: {
+        ...esbuild,
+        build: (options) => esbuild.build({ ...options, format: "esm" })
+      }
+    });
+    await fs.writeFile(join(root, "output.mjs"), result.source);
+    const runner = join(root, "verify.mjs");
+    await fs.writeFile(
+      runner,
+      'import { scoped } from "./output.mjs"; process.stdout.write(JSON.stringify(scoped));'
+    );
+    expect(execFileSync(process.execPath, [runner], { encoding: "utf8" })).toBe(
+      "[false,false]"
+    );
+  });
+
   it("parses sloppy CommonJS output using its emitted grammar", async () => {
     const { root } = await fixture();
     const filePath = join(root, "entry.cjs");

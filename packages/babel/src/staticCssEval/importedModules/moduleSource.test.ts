@@ -109,6 +109,25 @@ describe("imported module syntax and identity", () => {
     ).toThrow(/Missing initializer/);
   });
 
+  it.each([
+    ["/tokens.ts", "/cache/tokens.data"],
+    ["/tokens.ts", "/src/theme.js#tokens.ts"],
+    ["/tokens.ts", "/src/theme.js?literal/tokens.ts"]
+  ])("uses the supported syntax for %s backed by %s", (id, realpath) => {
+    const input = {
+      id,
+      resolvedFile: realpath,
+      realpath,
+      source: 'export const rule: {color: string} = {color: "tomato"};'
+    };
+    const record = createImportedStaticCssEvalModuleRecordWithCache(
+      input,
+      createStaticCssModuleCache()
+    );
+    expect(record).toMatchObject({ id, resolvedFile: realpath, realpath });
+    expect(record.parsedModule.cacheKey.parserOptions.typescript).toBe(true);
+  });
+
   it("keeps slash-bearing logical query and fragment values out of parser syntax", () => {
     const id = "/tokens.tsx?theme=/dark.js#preview";
     const physical = "/cache/tokens.data";
