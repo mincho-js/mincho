@@ -123,31 +123,28 @@ export function createLoadedModule(
   const virtualId =
     (loadedSource.sourceKind ?? options.resolution?.sourceKind) ===
     "provider-virtual";
-  const loaderEchoesVirtualId = loaderFilename === id && virtualId;
-  // Loader evidence describes the text actually parsed. A resolver's physical
-  // filename is the fallback before treating the graph ID as logical syntax.
+  // A repeated graph ID carries no additional syntax evidence. A distinct,
+  // recognized loader filename describes the returned text; the physical
+  // backing path remains independent and is the next syntax fallback.
   const syntaxSource =
-    loadedSource.realpath !== undefined &&
-    internalHasStaticCssEvalSyntaxFilename(loadedSource.realpath, true)
-      ? undefined
-      : loaderFilename !== undefined &&
-          !loaderEchoesVirtualId &&
-          internalHasStaticCssEvalSyntaxFilename(loaderFilename)
-        ? {
-            syntaxSourceId: loaderFilename,
-            syntaxSourceIdKind: "loader-filename" as const
-          }
-        : realpath !== undefined &&
-            internalHasStaticCssEvalSyntaxFilename(realpath, true)
-          ? undefined
-          : internalHasStaticCssEvalSyntaxFilename(id)
-            ? {
-                syntaxSourceId: id,
-                ...(virtualId
-                  ? {}
-                  : { syntaxSourceIdKind: "metadata-free" as const })
-              }
-            : undefined;
+    loaderFilename !== undefined &&
+    loaderFilename !== id &&
+    internalHasStaticCssEvalSyntaxFilename(loaderFilename)
+      ? {
+          syntaxSourceId: loaderFilename,
+          syntaxSourceIdKind: "loader-filename" as const
+        }
+      : realpath !== undefined &&
+          internalHasStaticCssEvalSyntaxFilename(realpath, true)
+        ? undefined
+        : internalHasStaticCssEvalSyntaxFilename(id)
+          ? {
+              syntaxSourceId: id,
+              ...(virtualId
+                ? {}
+                : { syntaxSourceIdKind: "metadata-free" as const })
+            }
+          : undefined;
 
   return {
     id,

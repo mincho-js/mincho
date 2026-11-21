@@ -115,6 +115,65 @@ async function readCssPropOutput(
 }
 
 describe("mincho with the Vite runtime", () => {
+  it.each([false, true])(
+    "ordinary authored CSS honors late resolved aliases (Mincho: %s)",
+    async (mincho) => {
+      const root = await createFixture({
+        "src/ordinary.css":
+          '.ordinary { background-image: url("@lateicons/logo.svg"); }',
+        "src/logo.svg":
+          '<svg xmlns="http://www.w3.org/2000/svg" fill="purple"/>',
+        "src/decoy.svg":
+          '<svg xmlns="http://www.w3.org/2000/svg" fill="orange"/>'
+      });
+      const resolveAlias = vi.fn((id: string) => id);
+      const server = await createServer({
+        root,
+        configFile: false,
+        logLevel: "silent",
+        server: { host: "127.0.0.1", port: 0, watch: null },
+        plugins: [
+          ...(mincho ? [minchoVitePlugin()] : []),
+          {
+            name: "ordinary-late-resolved-alias",
+            configResolved(config) {
+              config.resolve.alias.push(
+                {
+                  find: "@lateicons/logo.svg",
+                  replacement: normalizePath(join(root, "src/logo.svg")),
+                  customResolver: resolveAlias
+                },
+                {
+                  find: "@lateicons/logo.svg",
+                  replacement: normalizePath(join(root, "src/decoy.svg"))
+                }
+              );
+            }
+          }
+        ]
+      });
+      servers.push(server);
+      await server.listen();
+      const css = await fetch(
+        new URL("/src/ordinary.css?direct", server.resolvedUrls!.local[0]),
+        {
+          headers: { Accept: "text/css" }
+        }
+      );
+      const body = await css.text();
+      expect(css.status, body).toBe(200);
+      expect(body).toContain("data:image/svg+xml,");
+      expect(body).toContain("purple");
+      expect(body).not.toContain("orange");
+      expect(resolveAlias).toHaveBeenCalledWith(
+        normalizePath(join(root, "src/logo.svg")),
+        expect.stringContaining("/src/ordinary.css"),
+        expect.anything()
+      );
+      expect(body).not.toContain("@lateicons");
+    }
+  );
+
   it.each(["client", "ssr"] as const)(
     "validates the actual PostCSS result of origin-free dev CSS (%s)",
     async (environmentName) => {

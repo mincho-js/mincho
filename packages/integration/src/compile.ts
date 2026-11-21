@@ -748,9 +748,12 @@ function scopeLoadedDependencies(
                 return result;
               }
 
-              // esbuild defaults plugin-provided contents to JS, regardless of
-              // the extension's configured loader.
-              const loader = result.loader ?? "js";
+              // An omitted loader means JS for plugin-provided contents;
+              // an explicit "default" delegates to the configured extension.
+              const loader =
+                result.loader === "default"
+                  ? effectiveLoader(args.path, build.initialOptions.loader)
+                  : (result.loader ?? "js");
               if (!isScriptLoader(loader)) {
                 return result;
               }

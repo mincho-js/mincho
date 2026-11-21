@@ -845,7 +845,18 @@ export function collectRuntimeSourceEvidence(
             bindingsCurrent = false;
           if (
             !binding ||
-            binding.identifier !== id ||
+            (binding.identifier !== id &&
+              !(
+                binding.kind === "var" &&
+                path.isVariableDeclaration({ kind: "var" }) &&
+                binding.constantViolations.some(
+                  (violation) =>
+                    violation.isVariableDeclarator() &&
+                    violation.parentPath === path &&
+                    t.getBindingIdentifiers(violation.node.id)[name] === id &&
+                    attachedPath(violation, children)
+                )
+              )) ||
             binding.scope.getProgramParent().path.node !== program.node ||
             !attachedPath(binding.path, children)
           )

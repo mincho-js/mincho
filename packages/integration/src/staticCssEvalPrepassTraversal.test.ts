@@ -124,6 +124,11 @@ it.each([
   ["/src/archive.ts#old/tokens.tsx", undefined, undefined],
   ["/tokens.tsx?theme=/dark.js#preview", undefined, undefined],
   [
+    "/tokens.tsx?theme=/dark.js#preview.tsx",
+    "/tokens.tsx?theme=/dark.js#preview.tsx",
+    "project-source"
+  ],
+  [
     "/tokens.tsx?theme=/dark.js#preview",
     "/tokens.tsx?theme=/dark.js#preview",
     "provider-virtual"
@@ -183,6 +188,26 @@ it.each([
     "virtual:tokens",
     "/src/backing.js",
     { resolvedFile: "/src/generated.tsx", sourceKind: "provider-virtual" }
+  ],
+  [
+    "independent loader name with a differently typed backing path",
+    "/src/token.tsx",
+    "/src/resolver.js",
+    {
+      resolvedFile: "/src/generated.tsx",
+      realpath: "/src/backing.js",
+      sourceKind: "provider-virtual"
+    }
+  ],
+  [
+    "graph ID echo with actual loader physical path",
+    "/src/token.js",
+    "/src/resolver.js",
+    {
+      resolvedFile: "/src/token.js",
+      realpath: "/src/actual.tsx",
+      sourceKind: "project-source"
+    }
   ],
   [
     "loader physical path",

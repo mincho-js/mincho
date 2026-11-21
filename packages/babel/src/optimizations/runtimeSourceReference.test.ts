@@ -264,6 +264,21 @@ describe("current writes versus cached constant binding authority", () => {
     expect(program.scope.getBinding("key")!.constant).toBe(false);
     expect(collectRuntimeSourceEvidence(program).bindingsCurrent).toBe(true);
   });
+
+  it.each(["var count; var count;", "var count = 1, count = 2;"])(
+    "keeps a redeclaration known to Babel current: %s",
+    (source) => {
+      const program = programOf(source);
+      const binding = program.scope.getBinding("count");
+      expect(binding?.kind).toBe("var");
+      expect(binding?.constant).toBe(false);
+      expect(collectRuntimeSourceEvidence(program).bindingsCurrent).toBe(true);
+      const statement = programOf("var count = 3;").node.body[0]!;
+      program.node.body.push(statement);
+      expect(collectRuntimeSourceEvidence(program).bindingsCurrent).toBe(false);
+      expect(program.scope.getBinding("count")).toBe(binding);
+    }
+  );
 });
 
 it("withdraws cached declaration kind after an in-place const to let edit", () => {

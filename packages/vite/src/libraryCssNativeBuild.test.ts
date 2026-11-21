@@ -857,6 +857,74 @@ function insertUnexpectedCssCapturePredecessor(): Plugin {
   };
 }
 
+it.each([false, true])(
+  "publishes from a physical hash directory only for origin-independent CSS (resource: %s)",
+  async (resource) => {
+    const producer = "node_modules/published/hash#dir/index.mjs";
+    const root = await fixture({
+      "node_modules/published/package.json":
+        '{"name":"published","type":"module"}',
+      [producer]: `
+        import { style } from "@vanilla-extract/css";
+        import { setFileScope, endFileScope } from "@vanilla-extract/css/fileScope";
+        import { setFileScope as begin, endFileScope as end } from "@vanilla-extract/css/fileScope";
+        setFileScope("src/first.css.ts", "published");
+        export const first = style({
+          color: "red",
+          ${resource ? 'backgroundImage: "url(./icon.svg)"' : ""}
+        });
+        endFileScope();
+        begin("src/second.css.ts", "published");
+        export const second = style({ color: "blue" });
+        end();
+      `,
+      "node_modules/published/hash#dir/icon.svg":
+        '<svg xmlns="http://www.w3.org/2000/svg"/>',
+      "app/package.json": '{"name":"consumer","type":"module"}',
+      "app/entry.js": `
+        import { css } from "@mincho-js/css";
+        import { first, second } from "../${producer}";
+        export const classes = css({
+          selectors: { ["&." + first]: { padding: 1 }, ["&." + second]: { margin: 1 } }
+        });
+      `
+    });
+    const output = build({
+      root: join(root, "app"),
+      configFile: false,
+      logLevel: "silent",
+      plugins: [minchoVitePlugin({ appCss: { mode: "native" } })],
+      build: {
+        write: false,
+        cssMinify: false,
+        minify: false,
+        rollupOptions: {
+          input: join(root, "app/entry.js"),
+          preserveEntrySignatures: "strict"
+        }
+      }
+    });
+    if (resource) {
+      await expect(output).rejects.toThrow(
+        /Native CSS cannot represent a physical producer directory/
+      );
+      return;
+    }
+    const result = await output;
+    const css = (Array.isArray(result) ? result : [result])
+      .flatMap((entry) => ("output" in entry ? entry.output : []))
+      .filter(
+        (asset): asset is Rollup.OutputAsset =>
+          asset.type === "asset" && asset.fileName.endsWith(".css")
+      )
+      .map((asset) => String(asset.source))
+      .join("\n");
+    expect(css).toContain("color: red");
+    expect(css).toContain("color: blue");
+  },
+  20_000
+);
+
 it.each([
   ["native", "index.mjs", false],
   ["dist-chunk", "index.mjs", false],

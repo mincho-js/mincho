@@ -534,18 +534,21 @@ export function minchoVitePlugin(_options?: MinchoVitePluginOptions) {
         const aliases = config.resolve?.alias;
         // Non-host/test invocations may expose only the core compiler hooks.
         if (Array.isArray(aliases) && Object.isExtensible(aliases)) {
-          const configuredAliases = [...aliases];
           // Vite's CSS resolver uses the public alias resolver, including the
           // configured alias order and custom resolvers. Keep the original
           // rules intact for Vite's own absolute URL and static-file handling.
-          aliases.unshift({
+          const bridge: (typeof aliases)[number] = {
             find: /^(?![\0/#?]|[a-z][a-z0-9+.-]*:)/i,
             replacement: "",
             async customResolver(input, importer, options) {
-              const entry = configuredAliases.find(({ find }) =>
-                typeof find === "string"
-                  ? input === find || input.startsWith(find + "/")
-                  : find.test(input)
+              // Later configResolved hooks can append entries to this list.
+              // Keep native first-match order without recursing into ourselves.
+              const entry = aliases.find(
+                (entry) =>
+                  entry !== bridge &&
+                  (typeof entry.find === "string"
+                    ? input === entry.find || input.startsWith(entry.find + "/")
+                    : entry.find.test(input))
               );
               const custom = entry?.customResolver;
               const hook: unknown =
@@ -594,7 +597,8 @@ export function minchoVitePlugin(_options?: MinchoVitePluginOptions) {
                 )) ?? selected
               );
             }
-          });
+          };
+          aliases.unshift(bridge);
         }
         const hostPlugins = config.plugins;
         const capture = Array.isArray(hostPlugins)
@@ -2600,7 +2604,21 @@ function createMinchoViteEnvironmentPlugin(
 
               hasGeneratedVirtualCss = true;
 
-              if (observedOrigin === undefined) {
+              const origin =
+                observedOrigin === undefined
+                  ? undefined
+                  : normalizePath(observedOrigin);
+              const directory =
+                origin === undefined ? "" : normalizePath(dirname(origin));
+              const cannotUsePhysicalDirectory = /[?#]/.test(directory);
+              if (cannotUsePhysicalDirectory && !isOriginIndependentCss(source))
+                throw new Error(
+                  "[mincho] Native CSS cannot represent a physical producer directory containing '?' or '#'."
+                );
+
+              // An unrepresentable physical directory can publish only
+              // origin-independent text through the existing guarded cache.
+              if (origin === undefined || cannotUsePhysicalDirectory) {
                 if (
                   this.environment &&
                   !(this.environment.mode === "dev"
@@ -2610,7 +2628,10 @@ function createMinchoViteEnvironmentPlugin(
                   throw new Error(
                     "[mincho] Cannot validate origin-free native CSS: unsupported Vite CSS capture ordering."
                   );
-                if (!isOriginIndependentCss(source))
+                if (
+                  !cannotUsePhysicalDirectory &&
+                  !isOriginIndependentCss(source)
+                )
                   throw new Error(
                     "[mincho] Missing CSS scope provenance: native CSS contains relative-resource-capable or unsupported syntax."
                   );
@@ -2619,7 +2640,8 @@ function createMinchoViteEnvironmentPlugin(
                     JSON.stringify([
                       normalizePath(moduleInfo.originalPath),
                       fileScope.packageName || undefined,
-                      fileScope.filePath
+                      fileScope.filePath,
+                      ...(cannotUsePhysicalDirectory ? [origin] : [])
                     ])
                   )
                   .digest("hex");
@@ -2635,7 +2657,6 @@ function createMinchoViteEnvironmentPlugin(
                 return `import ${JSON.stringify(virtualCssImportPrefix + cssFileId)};`;
               }
 
-              const origin = normalizePath(observedOrigin);
               // One published producer may contain several preserved scopes.
               // Keep its directory for URL resolution, but key each stylesheet
               // independently of content and of the current number of scopes.
@@ -2651,11 +2672,6 @@ function createMinchoViteEnvironmentPlugin(
               // A literal delimiter in a basename is not a module query.
               // Encode only the generated name; Vite still resolves assets
               // from the real publisher directory.
-              const directory = normalizePath(dirname(origin));
-              if (/[?#]/.test(directory))
-                throw new Error(
-                  "[mincho] Native CSS cannot represent a physical producer directory containing '?' or '#'."
-                );
               const idOrigin = /[%?#]/.test(posix.basename(origin))
                 ? `${directory}/mincho-producer-${createHash("sha256").update(origin).digest("hex")}`
                 : origin;

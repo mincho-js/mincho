@@ -153,6 +153,113 @@ describe("caller loaders in child compilation", () => {
     );
   });
 
+  it.each([
+    ["tokens.js", "default"],
+    ["tokens.mjs", "default"],
+    ["tokens.tsx", "default"],
+    ["tokens.js", "js"],
+    ["tokens.js", undefined]
+  ] as const)(
+    "records the physical CSS producer for caller-loaded %s with loader %s",
+    async (filename, loader) => {
+      const cacheDir = join(process.cwd(), ".cache");
+      await fs.mkdir(cacheDir, { recursive: true });
+      const root = await fs.realpath(
+        await fs.mkdtemp(join(cacheDir, "default-script-loader-"))
+      );
+      roots.push(root);
+      await fs.writeFile(
+        join(root, "package.json"),
+        '{"name":"default-script-loader"}'
+      );
+      const filePath = join(root, "entry.ts");
+      const dependency = join(root, filename);
+      await fs.writeFile(dependency, "// Supplied by the loader.");
+      const result = await compile({
+        cwd: root,
+        filePath,
+        originalPath: filePath,
+        resolverCache: new Map(),
+        contents: `export { token } from "./${filename}";`,
+        plugins: [
+          {
+            name: "load-scoped-token",
+            setup(build) {
+              build.onLoad({ filter: /tokens\.(?:m?js|tsx)$/ }, () => ({
+                contents: `
+                  import {globalStyle} from "@vanilla-extract/css";
+                  import {setFileScope,endFileScope} from "@vanilla-extract/css/fileScope";
+                  setFileScope(${JSON.stringify(filename)}, "default-script-loader");
+                  globalStyle(".loader-token",{color:"green"});
+                  endFileScope();
+                  export const token${filename.endsWith(".tsx") ? ": string" : ""} = "ready";
+                `,
+                loader
+              }));
+            }
+          }
+        ]
+      });
+      const serializeCssArtifact = vi.fn(() => "");
+      const evaluated = await processDefineRulesPresetRegistryFile({
+        filePath,
+        ...result,
+        serializeCssArtifact
+      });
+      expect(evaluated.source).toContain("export var token = 'ready';");
+      expect(serializeCssArtifact).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          origin: dependency,
+          cssObjs: [
+            {
+              type: "global",
+              selector: ".loader-token",
+              rule: { color: "green" }
+            }
+          ]
+        })
+      );
+    }
+  );
+
+  it("keeps a caller-loaded CSS resource with an effective non-script loader untouched", async () => {
+    const { root } = await fixture();
+    const filePath = join(root, "entry.ts");
+    const dependency = join(root, "resource.css");
+    await fs.writeFile(dependency, "unused disk contents");
+    const loader = { ".css": "text" } as const;
+    const payload = ".ordinary { color: green; }";
+    const result = await compile({
+      cwd: root,
+      filePath,
+      originalPath: filePath,
+      resolverCache: new Map(),
+      contents: 'export {default as text} from "./resource.css";',
+      loader,
+      plugins: [
+        {
+          name: "load-css-as-text",
+          setup(build) {
+            build.onLoad({ filter: /resource\.css$/ }, () => ({
+              loader: "default",
+              contents: payload
+            }));
+          }
+        }
+      ]
+    });
+    const module = { exports: {} as { text?: string } };
+    runInNewContext(result.source, {
+      module,
+      exports: module.exports,
+      require: () => vanillaFileScope
+    });
+    expect(module.exports.text).toBe(payload);
+    expect(result.cssScopeOrigins).not.toContainEqual(
+      expect.objectContaining({ origin: dependency })
+    );
+  });
+
   it("parses sloppy CommonJS output using its emitted grammar", async () => {
     const { root } = await fixture();
     const filePath = join(root, "entry.cjs");
