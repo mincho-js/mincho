@@ -21,7 +21,7 @@ import {
 import type { StaticCssApiPolicy } from "../staticCssEval/policy.js";
 import { STATIC_CSS_API_POLICIES } from "../staticCssEval/policy.js";
 import { resolveSameFileStaticCssEvalExpression } from "../staticCssEval/sameFile.js";
-import type { PluginState } from "../types.js";
+import type { PluginState, ProgramScope } from "../types.js";
 import {
   classifyCssPropValue,
   containsArraySpreadElement,
@@ -52,6 +52,7 @@ import {
 } from "./metadata.js";
 import {
   analyzeCssPropSidecarHoistability,
+  hasUnprovenSidecarBinding,
   getSidecarCssRuleClassification
 } from "./modeAnalysis.js";
 import {
@@ -106,6 +107,11 @@ export function evaluateCssPropPartialEvalPolicy(options: {
   const result = reducePartialEvalExpression({
     expression: options.expression,
     context: createPartialEvalContext({
+      nativeArrayIteration: (() => {
+        const snapshot = (options.programPath.scope as ProgramScope).minchoData
+          ?.extractCalls?.arrayMapIntrinsics;
+        return snapshot?.iterationIntact ?? snapshot?.intact;
+      })(),
       owner: createCssPropPartialEvalOwner({
         expression: options.expression,
         ownerFile: options.ownerFile
@@ -621,6 +627,7 @@ export function getCssPropSidecarHoistabilityRoute(options: {
 
   if (
     hoistability.kind === "unsafe" &&
+    !hasUnprovenSidecarBinding(hoistability) &&
     shouldRouteUnsafeSidecarCallThroughAstStatic(
       options.partialEvalResult,
       options.scope

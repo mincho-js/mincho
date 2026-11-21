@@ -1,6 +1,13 @@
 import { types as t } from "@babel/core";
 import type { NodePath } from "@babel/core";
 import { unwrapTransparentCssRuleExpression } from "../staticCssEval/candidates.js";
+import { analyzeAliasedStaticCssEvalBindingMutation } from "../staticCssEval/sameFile/mutationAliases.js";
+import {
+  createReplayAnalysis,
+  type ReplayAnalysis
+} from "../extractionCalls/replayAnalysis.js";
+import { mathBindingIdentityProof } from "../extractionCalls/mathResult.js";
+import { patternSelectionEnvironment } from "./patternExpressions.js";
 import { isSidecarSafeFunctionLike } from "./sidecarFunctionSafety.js";
 import {
   hasSidecarBranch,
@@ -27,15 +34,25 @@ const buildTimeSafeGlobalNames = new Set([
 
 export type SidecarSafetyState = {
   readonly scope: AnalysisScope;
+  readonly onUnprovenBinding?: () => void;
+  readonly unmodifiedBindings?: ReadonlySet<SidecarBinding>;
   readonly visiting: ReadonlySet<SidecarBinding>;
   readonly localNames: ReadonlySet<string>;
+  readonly analysis?: ReplayAnalysis;
 };
 
 export function isSidecarSafeCssRuleExpression(options: {
   readonly expression: t.Expression;
   readonly rawExpression?: t.Expression;
+  readonly path?: NodePath<t.Expression>;
   readonly state: SidecarSafetyState;
 }): boolean {
+  const scope = options.path?.scope ?? options.state.scope;
+  const state = {
+    ...options.state,
+    scope,
+    analysis: options.state.analysis ?? createReplayAnalysis(scope)
+  };
   const expression = unwrapTransparentCssRuleExpression(options.expression);
   const rawExpression = options.rawExpression
     ? unwrapTransparentCssRuleExpression(options.rawExpression)
@@ -46,13 +63,13 @@ export function isSidecarSafeCssRuleExpression(options: {
     !isSidecarSafePreservedRawCssRuleExpression(
       rawExpression,
       expression,
-      options.state
+      state
     )
   ) {
     return false;
   }
 
-  return isSidecarSafeCssRuleExpressionNode(expression, options.state);
+  return isSidecarSafeCssRuleExpressionNode(expression, state);
 }
 
 function isSidecarSafeCssRuleExpressionNode(
@@ -65,7 +82,7 @@ function isSidecarSafeCssRuleExpressionNode(
       isSidecarSafeExpression(expression.callee, state) &&
       expression.arguments.every((argument) =>
         t.isSpreadElement(argument)
-          ? isSidecarSafeExpression(argument.argument, state)
+          ? isSidecarSafeIterableSpread(argument.argument, state)
           : t.isExpression(argument) && isSidecarSafeExpression(argument, state)
       )
     );
@@ -93,7 +110,7 @@ function isSidecarSafeCssRuleExpressionNode(
     );
   }
 
-  return true;
+  return isSidecarSafeExpression(expression, state);
 }
 
 function isSidecarSafePreservedRawCssRuleExpression(
@@ -158,6 +175,17 @@ function isSidecarSafeExpression(
     ? expression
     : unwrapTransparentCssRuleExpression(expression);
 
+  const executedBranches = t.isSuper(unwrappedExpression)
+    ? undefined
+    : t.isConditionalExpression(unwrappedExpression) ||
+        t.isLogicalExpression(unwrappedExpression)
+      ? state.analysis?.branches.branchesForNode(unwrappedExpression)
+      : undefined;
+  if (executedBranches)
+    return executedBranches.every((branch) =>
+      isSidecarSafeExpressionPath(branch, state)
+    );
+
   if (t.isIdentifier(unwrappedExpression)) {
     return isSidecarSafeIdentifier(unwrappedExpression, state);
   }
@@ -194,7 +222,7 @@ function isSidecarSafeExpression(
       isSidecarSafeExpression(unwrappedExpression.callee, state) &&
       unwrappedExpression.arguments.every((argument) =>
         t.isSpreadElement(argument)
-          ? isSidecarSafeExpression(argument.argument, state)
+          ? isSidecarSafeIterableSpread(argument.argument, state)
           : t.isExpression(argument) && isSidecarSafeExpression(argument, state)
       )
     );
@@ -211,7 +239,7 @@ function isSidecarSafeExpression(
       }
 
       return t.isSpreadElement(element)
-        ? isSidecarSafeExpression(element.argument, state)
+        ? isSidecarSafeIterableSpread(element.argument, state)
         : isSidecarSafeExpression(element, state);
     });
   }
@@ -285,6 +313,19 @@ function isSidecarSafeObjectExpression(
   });
 }
 
+/** Array/call spread replays iterator protocol even without any default. */
+function isSidecarSafeIterableSpread(
+  argument: t.Expression,
+  state: SidecarSafetyState
+): boolean {
+  const program = state.scope.getProgramParent().path;
+  if (!program.isProgram()) return false;
+  return (
+    patternSelectionEnvironment(program, state.analysis?.environment)
+      .nativeArrayIteration && isSidecarSafeExpression(argument, state)
+  );
+}
+
 function isSidecarSafeArrayExpression(
   expression: t.ArrayExpression,
   state: SidecarSafetyState
@@ -295,7 +336,7 @@ function isSidecarSafeArrayExpression(
     }
 
     return t.isSpreadElement(element)
-      ? isSidecarSafeExpression(element.argument, state)
+      ? isSidecarSafeIterableSpread(element.argument, state)
       : isSidecarSafeExpression(element, state);
   });
 }
@@ -346,15 +387,76 @@ function isSidecarSafeBinding(
 
   if (binding.path.isVariableDeclarator()) {
     const declaration = binding.path.parentPath;
+    const initializer = binding.path.get("init");
+    const program = binding.scope.getProgramParent().path;
+    const analysis = state.analysis!;
+    // A partial evaluator deopt is not permission to replay an unproven value.
+    // Function bodies retain their separate capture/parameter safety analysis;
+    // checking the function as data here would mistake its own calls for escapes.
+    if (
+      !initializer.isFunction() &&
+      !state.unmodifiedBindings?.has(binding) &&
+      !mathBindingIdentityProof(binding)
+    ) {
+      if (!program.isProgram()) return false;
+      const mutation = analyzeAliasedStaticCssEvalBindingMutation(
+        program,
+        binding,
+        {
+          branchResult: analysis.branches.result,
+          skippedPatternDefaults: analysis.skippedDefaults,
+          callResultProof: analysis.jsxResult
+        }
+      );
+      if (mutation.kind !== "proved-unmodified") {
+        state.onUnprovenBinding?.();
+        return false;
+      }
+    }
 
     return (
       declaration.isVariableDeclaration({ kind: "const" }) &&
       binding.constant &&
       Boolean(binding.path.node.init) &&
       t.isExpression(binding.path.node.init) &&
-      isSidecarSafeExpression(binding.path.node.init, nextState)
+      analysis.everyPattern(
+        binding.path.get("id"),
+        (expression) => isSidecarSafeExpressionPath(expression, nextState),
+        binding.path.node.init
+      ) &&
+      isSidecarSafeExpressionPath(binding.path.get("init"), nextState)
     );
   }
 
   return false;
+}
+
+function isSidecarSafeExpressionPath(
+  path: NodePath<t.Node | null | undefined>,
+  state: SidecarSafetyState
+): boolean {
+  if (!path.isExpression()) return false;
+  if (
+    path.isTSAsExpression() ||
+    path.isTSTypeAssertion() ||
+    path.isTSNonNullExpression() ||
+    path.isTSSatisfiesExpression() ||
+    path.isTypeCastExpression() ||
+    path.isParenthesizedExpression()
+  )
+    return isSidecarSafeExpressionPath(
+      path.get("expression") as NodePath<t.Expression>,
+      state
+    );
+
+  if (path.isBinaryExpression())
+    return (
+      isSidecarSafeExpressionPath(path.get("left"), state) &&
+      isSidecarSafeExpressionPath(path.get("right"), state)
+    );
+  if (path.isSequenceExpression())
+    return path
+      .get("expressions")
+      .every((item) => isSidecarSafeExpressionPath(item, state));
+  return isSidecarSafeExpression(path.node, { ...state, scope: path.scope });
 }

@@ -5,6 +5,7 @@ import {
   createArrayMapIntrinsicEnvironment,
   observePatternRealm
 } from "./arrayMapIntrinsic.js";
+import { analyzeAliasedStaticCssEvalBindingMutation } from "../staticCssEval/sameFile/mutationAliases.js";
 
 function source(text: string, sourceType: "script" | "module" = "script") {
   let program!: NodePath<t.Program>;
@@ -103,6 +104,40 @@ describe("native identity array map contract", () => {
     env.observe(program);
     expect(env.provesNativeIncludes(call)).toBe(false);
   });
+  it.each([
+    [
+      "const style={color:'red'}; [style].includes(style);",
+      "proved-unmodified"
+    ],
+    [
+      "const style={color:'red'}; [style].includes((style.color='blue',style));",
+      "may-mutate"
+    ],
+    [
+      "const style={color:'red'}; [(style.color='blue',style)].includes(style);",
+      "may-mutate"
+    ],
+    [
+      "const style={color:'red'}; [style].includes(style,{valueOf(){style.color='blue';return 0}});",
+      "may-mutate"
+    ]
+  ])("keeps includes evaluation effects distinct: %s", (text, expected) => {
+    const { program } = source(text);
+    const env = createArrayMapIntrinsicEnvironment();
+    env.observe(program);
+    expect(
+      analyzeAliasedStaticCssEvalBindingMutation(
+        program,
+        program.scope.getBinding("style")!,
+        {
+          callResultProof: (call) =>
+            env.provesNativeIncludes(call)
+              ? { kind: "primitive", readOnlyInvocation: "array-includes" }
+              : undefined
+        }
+      ).kind
+    ).toBe(expected);
+  });
   it("withdraws after a later source and after an AST transform", () => {
     const first = source("[1].map(x=>x)");
     const env = createArrayMapIntrinsicEnvironment();
@@ -126,6 +161,49 @@ describe("native identity array map contract", () => {
     );
     expect(next.provesNativeMap(first.call)).toBe(false);
   });
+  it.each([
+    ["const style=[1,2].map(x=>x);", "proved-unmodified"],
+    [
+      "function make(){return [{color:'red'}].map(x=>x)} const style=make(); const other=make(); other[0].color='blue';",
+      "proved-unmodified"
+    ],
+    ["const style=[,1,,].map(x=>x);", "proved-unmodified"],
+    [
+      "const style={color:'red'}; [style].map(x=>x)[0].color='blue';",
+      "may-mutate"
+    ],
+    [
+      "const style={color:'red'}; const other={color:'green'}; [other].map(x=>x)[0].color='blue';",
+      "proved-unmodified"
+    ],
+    [
+      "const style={color:'red'}; [style].map(x=>{x.color='blue';return x});",
+      "may-mutate"
+    ],
+    [
+      "const style={color:'red'}; const holder={get value(){style.color='blue';return style}}; [holder.value].map(x=>x);",
+      "may-mutate"
+    ]
+  ])(
+    "keeps container allocation separate from element aliases: %s",
+    (text, expected) => {
+      const { program } = source(text);
+      const env = createArrayMapIntrinsicEnvironment();
+      env.observe(program);
+      expect(
+        analyzeAliasedStaticCssEvalBindingMutation(
+          program,
+          program.scope.getBinding("style")!,
+          {
+            callResultProof: (call) =>
+              env.provesNativeMap(call)
+                ? { kind: "identity-array-map" }
+                : undefined
+          }
+        ).kind
+      ).toBe(expected);
+    }
+  );
 });
 
 describe("global this intrinsic observations", () => {
@@ -493,7 +571,6 @@ it("stops scanning later programs once all pattern authority is irreversibly rev
     scan.mockRestore();
   }
 });
-
 it.each([
   "const {constructor:A}=[];",
   "let A;({constructor:A}=[]);",
@@ -867,6 +944,8 @@ it.each([
   ["globalThis.document.defaultView;", false],
   ["const doc=document; doc['default'+'View'];", false],
   ["const {defaultView}=document;", false],
+  ["const {document: doc}=globalThis; doc.defaultView;", false],
+  ["const {document: doc}=globalThis; doc.querySelector('x');", true],
   ["document[unknown];", false],
   ["document.querySelector('x');", true],
   ["function shadow(document){return document.defaultView}", true],

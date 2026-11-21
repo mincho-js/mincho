@@ -130,6 +130,7 @@ export class RuntimeOptimizations {
         options.babel?.privateRecipes,
         options.babel?.privateRecipes ? result.result[0] : undefined,
         options.babel?.compilationContext,
+        options.babel?.parserOpts?.plugins,
         result.staticCssEval?.dependencyFiles
       ]);
 
@@ -278,6 +279,7 @@ export class RuntimeOptimizations {
           filename: options.filename,
           source: result.code,
           parserCache: options.babel?.compilationCache?.parser,
+          parserPlugins: options.babel?.parserOpts?.plugins,
           pureFunctions: optimize?.pureFunctions,
           staticRecipes: optimize?.staticRecipes,
           styledComponents: optimize?.styledComponents,
@@ -477,6 +479,7 @@ export class RuntimeOptimizations {
       ast: analysis.ast,
       filename: options.filename,
       source: result.code,
+      parserPlugins: options.babel?.parserOpts?.plugins,
       replacements,
       expressions: analysis.expressions,
       finiteCalls,

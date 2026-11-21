@@ -1,7 +1,12 @@
+import { createRequire } from "node:module";
+import {
+  createViteClientIntrinsicObserver,
+  matchesViteClientSource
+} from "./staticCssEvalSourceProvider.js";
 import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer as createTcpServer, type AddressInfo } from "node:net";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import {
   build,
   createServer,
@@ -47,8 +52,7 @@ async function createFixture(files: Record<string, string>) {
 async function createFixtureServer(
   root: string,
   plugins: Plugin[],
-  watch = false,
-  optimizeCommonJs = false
+  watch = false
 ) {
   const server = await createServer({
     root,
@@ -67,10 +71,7 @@ async function createFixtureServer(
           }
         : null
     },
-    optimizeDeps: {
-      noDiscovery: !optimizeCommonJs,
-      include: optimizeCommonJs ? ["@mincho-js/css"] : []
-    },
+    optimizeDeps: { noDiscovery: true },
     plugins
   });
 
@@ -646,6 +647,186 @@ describe("mincho with the Vite runtime", () => {
     }
   );
 
+  it.each(["client", "ssr"] as const)(
+    "checks imported iterator default safety (%s)",
+    async (environment) => {
+      for (const mutated of [false, true]) {
+        const root = await createFixture({
+          "src/entry.tsx":
+            "import {getStyles} from './theme.css.js';import {readSize} from './runtime';export const Box=()=>{const [size=readSize()]=[4];return <div css={getStyles(size)}/>}",
+          "src/theme.css.js":
+            "export function getStyles(size){return {padding:size}}",
+          "src/runtime.ts":
+            (mutated
+              ? "const original=Array.prototype[Symbol.iterator];Array.prototype[Symbol.iterator]=function*(){if(this.length===1&&this[0]===4)yield undefined;else yield* original.call(this)};"
+              : "") +
+            "export function readSize(){throw new Error('ITERATOR_DEFAULT_MUST_NOT_RUN_DURING_BUILD')}"
+        });
+        const server = await createFixtureServer(root, [
+          minchoVitePlugin({ jsxCssProp: true })
+        ]);
+        if (!mutated)
+          expect(
+            (await readCssPropOutput(server.environments[environment]!)).css
+          ).toContain("padding: 4px;");
+        else {
+          const error = await readCssPropOutput(
+            server.environments[environment]!
+          ).then(
+            () => undefined,
+            (error: unknown) => error
+          );
+          expect(error).toBeDefined();
+          expect(String(error)).not.toContain(
+            "ITERATOR_DEFAULT_MUST_NOT_RUN_DURING_BUILD"
+          );
+          expect(String(error)).toMatch(
+            /Cannot statically|Cannot safely|Unsupported|Cannot extract/
+          );
+        }
+      }
+    }
+  );
+
+  it.each(["client", "ssr"] as const)(
+    "observes actual CSS runtime effects before JSX defaults (%s)",
+    async (environment) => {
+      for (const mutated of [false, true]) {
+        const root = await createFixture({
+          "src/entry.tsx":
+            "import './plain.css';import {getStyles} from './theme.css.js';import {readSize} from './runtime';export const Box=()=>{const [size=readSize()]=[4];return <div css={getStyles(size)}/>}",
+          "src/plain.css": ".contrast{color:red}",
+          "src/theme.css.js":
+            "export function getStyles(size){return {padding:size}}",
+          "src/runtime.ts":
+            "export function readSize(){throw new Error('CSS_DEFAULT_MUST_NOT_RUN_DURING_BUILD')}"
+        });
+        const server = await createFixtureServer(root, [
+          minchoVitePlugin({ jsxCssProp: true }),
+          {
+            name: "opaque-css-runtime-effect",
+            enforce: "post",
+            transform(code, id) {
+              if (mutated && id.endsWith("/plain.css"))
+                return (
+                  code +
+                  "\nArray.prototype[Symbol.iterator]=function*(){yield undefined};"
+                );
+            }
+          }
+        ]);
+        if (!mutated)
+          expect(
+            (await readCssPropOutput(server.environments[environment]!)).css
+          ).toContain("padding: 4px;");
+        else {
+          const error = await readCssPropOutput(
+            server.environments[environment]!
+          ).then(
+            () => undefined,
+            (error: unknown) => error
+          );
+          expect(error).toBeDefined();
+          expect(String(error)).not.toContain(
+            "CSS_DEFAULT_MUST_NOT_RUN_DURING_BUILD"
+          );
+          expect(String(error)).toMatch(
+            /Cannot statically|Cannot safely|Unsupported|Cannot extract/
+          );
+        }
+      }
+    }
+  );
+
+  it.each(["client", "ssr"])(
+    "watches package boundary creation, edits and deletion without runtime imports (%s)",
+    async (environment) => {
+      const root = await createFixture({
+        "package.json": '{"name":"scope-parent"}',
+        "src/entry.tsx": [
+          'import metadata from "../package.json";',
+          "export const packageName = metadata.name;",
+          'export const App = () => <div css={{ color: "red" }} />;'
+        ].join("\n")
+      });
+      let resolveReady!: () => void;
+      const ready = new Promise<void>((resolve) => {
+        resolveReady = resolve;
+      });
+      let completedUpdates = 0;
+      const server = await createFixtureServer(
+        root,
+        [
+          minchoVitePlugin({ jsxCssProp: true }),
+          {
+            name: "observe-package-scope-updates",
+            configureServer(server) {
+              server.watcher.once("ready", resolveReady);
+            },
+            config() {
+              return {
+                server: {
+                  hotUpdateEnvironments: async (server, hmr) => {
+                    await Promise.all(
+                      Object.values(server.environments).map(hmr)
+                    );
+                    completedUpdates++;
+                  }
+                }
+              };
+            }
+          }
+        ],
+        true
+      );
+      await ready;
+      const client = server.environments[environment]!;
+      const manifest = normalizePath(join(root, "src/package.json"));
+      const read = async (
+        packageName = "scope-parent",
+        scopePath = "src/entry.tsx"
+      ) => {
+        const output = await readCssPropOutput(client);
+        expect(output.css).toContain("color: red;");
+        // A real source import still belongs to Vite's executable graph.
+        expect(output.code).toContain("/package.json");
+        const owner = await client.moduleGraph.getModuleByUrl("/src/entry.tsx");
+        const sidecar = [...owner!.importedModules].find((module) =>
+          module.id?.startsWith("\0mincho-extracted-css:")
+        )!;
+        expect(
+          [...sidecar.importedModules].map((module) => module.id)
+        ).not.toContain(manifest);
+        const origin = normalizePath(join(root, "src/entry.tsx"));
+        const scopeIdentity = createHash("sha256")
+          .update(JSON.stringify([packageName, scopePath, origin]))
+          .digest("hex");
+        expect(
+          [...sidecar.importedModules].map((module) => module.id)
+        ).toContain(`${origin}.mincho-scope-${scopeIdentity}.vanilla.css`);
+        return output.css;
+      };
+      const initial = await read();
+      const change = async (name?: string) => {
+        const before = completedUpdates;
+        if (name) await writeFile(manifest, JSON.stringify({ name }));
+        else await rm(manifest);
+        await vi.waitFor(
+          () => expect(completedUpdates).toBeGreaterThan(before),
+          {
+            timeout: 5_000
+          }
+        );
+        return name ? read(name, "entry.tsx") : read();
+      };
+      const added = await change("scope-added");
+      expect(added).not.toBe(initial);
+      const edited = await change("scope-edited");
+      expect(edited).not.toBe(added);
+      expect(await change()).toBe(initial);
+    }
+  );
+
   it.each([
     ["client", true],
     ["client", false],
@@ -732,85 +913,6 @@ describe("mincho with the Vite runtime", () => {
       await write('{"name":"scope-first"}');
       expect((await readCssPropOutput(environment)).css).toBe(initial.css);
       expect(await assertPhysicalCssProducer("scope-first")).toBe(initialCssId);
-    }
-  );
-
-  it.each(["client", "ssr"])(
-    "watches package boundary creation, edits and deletion without runtime imports (%s)",
-    async (environment) => {
-      const root = await createFixture({
-        "package.json": '{"name":"scope-parent"}',
-        "src/entry.tsx": [
-          'import metadata from "../package.json";',
-          "export const packageName = metadata.name;",
-          'export const App = () => <div css={{ color: "red" }} />;'
-        ].join("\n")
-      });
-      let resolveReady!: () => void;
-      const ready = new Promise<void>((resolve) => {
-        resolveReady = resolve;
-      });
-      let completedUpdates = 0;
-      const server = await createFixtureServer(
-        root,
-        [
-          minchoVitePlugin({ jsxCssProp: true }),
-          {
-            name: "observe-package-scope-updates",
-            configureServer(server) {
-              server.watcher.once("ready", resolveReady);
-            },
-            config() {
-              return {
-                server: {
-                  hotUpdateEnvironments: async (server, hmr) => {
-                    await Promise.all(
-                      Object.values(server.environments).map(hmr)
-                    );
-                    completedUpdates++;
-                  }
-                }
-              };
-            }
-          }
-        ],
-        true
-      );
-      await ready;
-      const client = server.environments[environment]!;
-      const manifest = normalizePath(join(root, "src/package.json"));
-      const read = async () => {
-        const output = await readCssPropOutput(client);
-        expect(output.css).toContain("color: red;");
-        // A real source import still belongs to Vite's executable graph.
-        expect(output.code).toContain("/package.json");
-        const owner = await client.moduleGraph.getModuleByUrl("/src/entry.tsx");
-        const sidecar = [...owner!.importedModules].find((module) =>
-          module.id?.startsWith("\0mincho-extracted-css:")
-        )!;
-        expect(
-          [...sidecar.importedModules].map((module) => module.id)
-        ).not.toContain(manifest);
-        return output.css;
-      };
-      const initial = await read();
-      const change = async (name?: string) => {
-        const before = completedUpdates;
-        if (name) await writeFile(manifest, JSON.stringify({ name }));
-        else await rm(manifest);
-        await vi.waitFor(
-          () => expect(completedUpdates).toBeGreaterThan(before),
-          {
-            timeout: 5_000
-          }
-        );
-        return read();
-      };
-      const added = await change("scope-added");
-      expect(added).not.toBe(initial);
-      const edited = await change("scope-edited");
-      expect(edited).not.toBe(added);
-      expect(await change()).toBe(initial);
     }
   );
 
@@ -1838,6 +1940,30 @@ describe("mincho with the Vite runtime", () => {
           : 'export { defineStyle, makeRecipe } from "./alternate";'
       );
 
+      // The old parameterized helper is no longer reachable from a registered
+      // factory. It must not silently keep stale protection after the re-export
+      // changes, even when the entry only imports its unrelated static style.
+      await expect(
+        server.environments.client!.transformRequest(`/src/helper.${extension}`)
+      ).rejects.toThrow(/captures runtime binding rule/);
+      await update(
+        `src/implementation.${extension}`,
+        extension === "cjs"
+          ? `const { recipe } = require("@vanilla-extract/recipes");
+              function makeRecipe(options) { return recipe(options); }
+              exports.makeRecipe = makeRecipe;
+              exports.localClassName = makeRecipe({ base: { color: "orchid" } })();`
+          : `import { recipe } from "@vanilla-extract/recipes";
+              export function makeRecipe(options) { return recipe(options); }
+              export const localClassName = makeRecipe({ base: { color: "orchid" } })();`
+      );
+      await update(
+        `src/helper.${extension}`,
+        extension === "cjs"
+          ? 'const { style } = require("@vanilla-extract/css"); exports.unrelated = style({ outlineStyle: "dotted" });'
+          : 'import { style } from "@vanilla-extract/css"; export const unrelated = style({ outlineStyle: "dotted" });'
+      );
+
       const alternate = await readCssPropOutput(
         server.environments.client!,
         `/src/entry.${extension}`
@@ -1876,12 +2002,10 @@ describe("mincho with the Vite runtime", () => {
             : source
       });
 
-      const server = await createFixtureServer(
-        root,
-        [minchoVitePlugin(), ...(vanilla ? vanillaExtractPlugin() : [])],
-        false,
-        extension === "cjs"
-      );
+      const server = await createFixtureServer(root, [
+        minchoVitePlugin(),
+        ...(vanilla ? vanillaExtractPlugin() : [])
+      ]);
 
       for (const environment of [
         server.environments.client!,
@@ -1907,12 +2031,14 @@ describe("mincho with the Vite runtime", () => {
           );
 
           const runtime = [...owner!.importedModules].find((module) =>
-            module.id?.includes("/.vite/deps/")
+            /vanilla-extract[-_/]dynamic/.test(module.id ?? "")
           );
 
-          const optimized = await environment.transformRequest(runtime!.url);
+          expect(runtime).toBeDefined();
+          const native = await environment.transformRequest(runtime!.url);
 
-          expect(optimized?.code).toMatch(/export\s+(default|\{)/);
+          expect(native?.code).toMatch(/export\s+(default|\{)/);
+          expect(native?.code).toContain("assignInlineVars");
         }
       }
 
@@ -2259,5 +2385,207 @@ describe("mincho with the Vite runtime", () => {
       (await readCssPropOutput(server.environments.client!)).css
     ).toContain("color: green;");
     expect(nestedTransforms).toBeGreaterThan(0);
+  });
+});
+
+const physicalBytes = vi.hoisted(() => ({ changed: false }));
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  return {
+    ...actual,
+    readFileSync: (...args: Parameters<typeof actual.readFileSync>) => {
+      const value = actual.readFileSync(...args);
+      return physicalBytes.changed &&
+        String(args[0]).endsWith("/dist/client/client.mjs") &&
+        typeof value === "string"
+        ? value + "\nArray.prototype[0] = 9;"
+        : value;
+    }
+  };
+});
+
+const clientRequire = createRequire(join(process.cwd(), "package.json"));
+const client = join(
+  dirname(clientRequire.resolve("vite/package.json")),
+  "dist/client/client.mjs"
+);
+
+afterEach(() => {
+  physicalBytes.changed = false;
+});
+describe("owned Vite client pattern-effect observation", () => {
+  it.each([
+    "clean",
+    "pre-loader",
+    "normal-loader",
+    "post-loader",
+    "tail-loader",
+    "post-mutation",
+    "source-bytes"
+  ] as const)(
+    "preserves loader precedence and validates final source: %s",
+    async (scenario) => {
+      const baseline = await readFile(client, "utf8");
+      physicalBytes.changed = scenario === "source-bytes";
+      const root = await mkdtemp(join("/var/tmp", "mincho-client-contract-"));
+      roots.push(root);
+      const observers = new Map<
+        string,
+        ReturnType<typeof createViteClientIntrinsicObserver>
+      >();
+      const core: Plugin = {
+        name: "test-core",
+        enforce: "pre",
+        applyToEnvironment(environment) {
+          const observer = createViteClientIntrinsicObserver();
+          observers.set(environment.name, observer);
+          return [core, observer.issuer];
+        }
+      };
+      const load = (id: string) =>
+        id === client && scenario.endsWith("loader") ? baseline : undefined;
+      const user: Plugin = {
+        name: "test-user",
+        ...(scenario === "pre-loader"
+          ? { enforce: "pre" as const }
+          : scenario === "post-loader"
+            ? { enforce: "post" as const }
+            : {}),
+        load:
+          scenario === "tail-loader" ? { order: "post", handler: load } : load,
+        transform: {
+          order: "post",
+          handler(source, id) {
+            if (id === client && scenario === "post-mutation")
+              return (
+                source +
+                "\nArray.prototype[Symbol.iterator] = function* () { yield 9; };"
+              );
+          }
+        }
+      };
+      const server = await createServer({
+        root,
+        configFile: false,
+        logLevel: "silent",
+        server: { middlewareMode: true, watch: null },
+        optimizeDeps: { noDiscovery: true },
+        plugins: [core, user]
+      });
+      servers.push(server);
+      const environment = server.environments.client!;
+      const result = await environment.transformRequest("/@vite/client");
+      expect(result).toBeTruthy();
+      let validateSsr: (() => boolean) | undefined;
+      if (scenario === "clean") {
+        const ssr = server.environments.ssr!;
+        await ssr.moduleGraph.ensureEntryFromUrl(client);
+        const loaded = await ssr.pluginContainer.load(client);
+        const original = typeof loaded === "string" ? loaded : loaded?.code;
+        expect(original).toBe(baseline);
+        const transformed = await ssr.pluginContainer.transform(
+          original!,
+          client
+        );
+        const ssrSource = transformed?.code ?? original!;
+        const ssrReceipt = await observers
+          .get("ssr")!
+          .validate(client, ssrSource, async (specifier, importer) => {
+            const resolved = await ssr.pluginContainer.resolveId(
+              specifier,
+              importer
+            );
+            return resolved && !resolved.external ? resolved.id : undefined;
+          });
+        // Inspect the complete SSR plugin view before its execution wrapper;
+        // the same literal-only comparison applies in this environment.
+        expect(ssrReceipt).toBeDefined();
+        expect(ssrReceipt!.validate(ssrSource)).toBe(true);
+        validateSsr = () => ssrReceipt!.validate(ssrSource);
+      }
+      const observer = observers.get("client")!;
+      const receipt = await observer.validate(
+        client,
+        result!.code,
+        async (specifier, importer) => {
+          const resolved = await environment.pluginContainer.resolveId(
+            specifier,
+            importer
+          );
+          return resolved && !resolved.external ? resolved.id : undefined;
+        }
+      );
+      if (scenario === "clean") {
+        expect(receipt).toBeDefined();
+        expect(receipt!.validate(result!.code)).toBe(true);
+        physicalBytes.changed = true;
+        expect(receipt!.validate(result!.code)).toBe(false);
+        physicalBytes.changed = false;
+        expect(
+          receipt!.validate(result!.code + "\nArray.prototype[0] = 9;")
+        ).toBe(false);
+        const benignFile = join(root, "benign.js");
+        await writeFile(benignFile, "export const value = 2;");
+        // Dispatch this benign edit to one environment, as Vite does for its
+        // environment-scoped hook. Other environments retain their receipts.
+        const watch = observer.issuer.watchChange;
+        if (typeof watch === "function")
+          watch.call({} as never, benignFile, { event: "update" });
+        expect(receipt!.validate(result!.code)).toBe(false);
+        expect(validateSsr!()).toBe(true);
+        const node = environment.moduleGraph.getModuleById(client)!;
+        environment.moduleGraph.invalidateModule(node);
+        const refreshed = await environment.transformRequest("/@vite/client");
+        const nextReceipt = await observer.validate(
+          client,
+          refreshed!.code,
+          async (specifier, importer) => {
+            const resolved = await environment.pluginContainer.resolveId(
+              specifier,
+              importer
+            );
+            return resolved && !resolved.external ? resolved.id : undefined;
+          }
+        );
+        expect(nextReceipt).toBeDefined();
+        expect(nextReceipt!.key).not.toBe(receipt!.key);
+        expect(nextReceipt!.validate(refreshed!.code)).toBe(true);
+        expect(receipt!.validate(result!.code)).toBe(false);
+        expect(validateSsr!()).toBe(true);
+      } else expect(receipt).toBeUndefined();
+      expect(
+        environment.plugins.filter((plugin) => plugin === core)
+      ).toHaveLength(1);
+    }
+  );
+  it("permits only literal config replacements and exact env import rewriting", () => {
+    const original = 'import "@vite/env"; const base = __BASE__;';
+    expect(
+      matchesViteClientSource(
+        original,
+        'import "/@vite/env"; const base = "/";',
+        "/@vite/env"
+      )
+    ).toBe(true);
+    for (const expression of [
+      "mutate()",
+      "({ get value() { return 1; } })",
+      "__DEFINES__"
+    ]) {
+      expect(
+        matchesViteClientSource(
+          original,
+          `import "/@vite/env"; const base = ${expression};`,
+          "/@vite/env"
+        )
+      ).toBe(false);
+    }
+    expect(
+      matchesViteClientSource(
+        original,
+        'import "other"; const base = "/";',
+        "/@vite/env"
+      )
+    ).toBe(false);
   });
 });

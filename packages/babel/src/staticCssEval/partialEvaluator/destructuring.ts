@@ -1,3 +1,4 @@
+import { hasObservableArrayMapMutation } from "../../optimizations/arrayMapIntrinsic.js";
 import { types as t } from "@babel/core";
 import type { Binding } from "@babel/traverse";
 import type { SameFileDeclarationKind } from "../sameFile/types.js";
@@ -11,6 +12,7 @@ export interface PartialEvalBindingSource {
   readonly declarationKind: SameFileDeclarationKind;
   readonly init: t.Expression;
   readonly memberPath: readonly string[];
+  readonly arrayIterationOffsets?: readonly number[];
 }
 
 type DestructuredPattern =
@@ -18,7 +20,11 @@ type DestructuredPattern =
 
 export function getDestructuredBindingSource(
   binding: Binding,
-  bindingName: string
+  bindingName: string,
+  environment?: {
+    readonly nativeArrayIteration?: boolean;
+    readonly deferArrayReceiverCheck?: boolean;
+  }
 ): PartialEvalBindingSource | null {
   const declaratorPath = binding.path.isVariableDeclarator()
     ? binding.path
@@ -44,6 +50,16 @@ export function getDestructuredBindingSource(
   }
 
   const memberPath = getDestructuredMemberPath(pattern, bindingName);
+  const arrayIterationOffsets = getArrayIterationOffsets(pattern, bindingName);
+  if (arrayIterationOffsets.length) {
+    const program = binding.scope.getProgramParent().path;
+    if (
+      environment?.nativeArrayIteration === false ||
+      !program.isProgram() ||
+      hasObservableArrayMapMutation(program, "iteration")
+    )
+      return null;
+  }
   const declarationKind = declarationPath.node.kind;
 
   if (
@@ -55,16 +71,30 @@ export function getDestructuredBindingSource(
     return null;
   }
 
-  return { declarationKind, init, memberPath };
+  // Non-reducer callers may only consume an indexed path once its receivers
+  // are demonstrably arrays. The reducer checks again after reducing aliases.
+  if (
+    arrayIterationOffsets.length &&
+    !environment?.deferArrayReceiverCheck &&
+    !resolveStaticMemberPath(init, memberPath, arrayIterationOffsets)
+  )
+    return null;
+  return { declarationKind, init, memberPath, arrayIterationOffsets };
 }
 
 export function resolveStaticMemberPath(
   expression: t.Expression,
-  memberPath: readonly string[]
+  memberPath: readonly string[],
+  arrayIterationOffsets: readonly number[] = []
 ): t.Expression | null {
   let currentExpression: t.Expression | null = expression;
 
-  for (const memberName of memberPath) {
+  for (const [offset, memberName] of memberPath.entries()) {
+    if (
+      arrayIterationOffsets.includes(offset) &&
+      !t.isArrayExpression(currentExpression)
+    )
+      return null;
     if (t.isObjectExpression(currentExpression)) {
       currentExpression = getStaticObjectMemberValue(
         currentExpression,
@@ -176,4 +206,37 @@ function getPatternPropertyName(property: t.ObjectProperty): string | null {
   return property.computed && !t.isStringLiteral(property.key)
     ? null
     : getStaticObjectPropertyName(property.key);
+}
+
+/** Preserve iteration operations separately from ordinary property access. */
+function getArrayIterationOffsets(
+  pattern: DestructuredPattern,
+  bindingName: string,
+  depth = 0
+): number[] {
+  if (t.isArrayPattern(pattern)) {
+    for (const element of pattern.elements) {
+      if (
+        !isDestructuredPattern(element) ||
+        !getDestructuredMemberPath(element, bindingName)
+      )
+        continue;
+      return [
+        depth,
+        ...getArrayIterationOffsets(element, bindingName, depth + 1)
+      ];
+    }
+  }
+  if (t.isObjectPattern(pattern)) {
+    for (const property of pattern.properties) {
+      if (
+        !t.isObjectProperty(property) ||
+        !isDestructuredPattern(property.value) ||
+        !getDestructuredMemberPath(property.value, bindingName)
+      )
+        continue;
+      return getArrayIterationOffsets(property.value, bindingName, depth + 1);
+    }
+  }
+  return [];
 }

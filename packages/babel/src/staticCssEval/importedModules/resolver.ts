@@ -4,12 +4,17 @@ import {
   createStaticCssEvalProviderSourceMetadata,
   enforceStaticCssEvalProviderSourcePolicy
 } from "../boundary.js";
-import { isStaticCssEvalLiteralRequireCallExpression } from "../cjsBindings.js";
+import {
+  getStaticCssEvalLiteralRequireImportPath,
+  isStaticCssEvalRequireCallExpression,
+  isStaticCssEvalLiteralRequireCallExpression
+} from "../cjsBindings.js";
 import { containsStaticCssEvalRequireCallExpression } from "../cjsRequireAnalysis.js";
 import { createStaticCssEvalCjsReexportRequestParts } from "../cjsResolver.js";
 import {
   createStaticCssEvalCjsDynamicRequireUnsupportedDiagnostic,
   createStaticCssEvalCjsUnsupportedDiagnostic,
+  createStaticCssEvalImportCycleKey,
   createStaticCssEvalPartialNamespaceFailureDiagnostic,
   createStaticCssEvalProviderSourceUnsupportedDiagnostic,
   createStaticCssEvalUnresolvedExportDiagnostic,
@@ -24,6 +29,10 @@ import {
   createStaticCssModuleCache
 } from "../moduleCache.js";
 import { getStaticCssEvalConstBindingInitExpression } from "../sameFile.js";
+import type {
+  MutationOriginOptions,
+  CallResultProof
+} from "../sameFile/mutationAliases.js";
 import type { StaticCssEvalCjsRequireSource } from "../cjsBindings.js";
 import type {
   ExportMapEntry,
@@ -93,6 +102,7 @@ import {
   createUnsupportedExportEntryDiagnostic,
   getCjsModuleUnsupportedEntry,
   getStaticExportEntryCjsRequireSource,
+  formatStaticCssEvalResolutionFrame,
   markResolutionDependenciesContributed,
   markResolutionDependencyInspected,
   resolveStaticExportMapEntry,
@@ -102,6 +112,7 @@ import {
 export class ImportedStaticCssEvalResolver {
   readonly #modules = new Map<string, ImportedStaticCssEvalLoadedModule>();
   readonly #records = new Map<string, ImportedStaticCssEvalModuleRecord>();
+  readonly #sourceFiles = new Map<string, string>();
   readonly #parseFailures = new Map<string, string>();
   readonly #importResolutions = new Map<
     string,
@@ -112,19 +123,35 @@ export class ImportedStaticCssEvalResolver {
   readonly #mutatedModules = new Map<string, Map<string, string>>();
   readonly #bindingMutations = new Map<string, boolean>();
   #indexedDirectImports = false;
+  // Provider-backed modules may share exported objects through reexports.
+  // Deliberately overapproximate identity rather than assume fresh results.
+  readonly #moduleOriginIdentity = {};
+  readonly #moduleOrigins = new WeakMap<
+    ImportedStaticCssEvalModuleRecord,
+    MutationOriginOptions
+  >();
 
   constructor(options: ImportedStaticCssEvalResolverOptions) {
     this.#moduleCache = options.moduleCache ?? createStaticCssModuleCache();
 
     for (const loadedModule of options.modules) {
       this.#modules.set(loadedModule.id, loadedModule);
+      if (loadedModule.resolvedFile !== undefined)
+        this.#sourceFiles.set(loadedModule.id, loadedModule.resolvedFile);
     }
 
     for (const moduleRecord of options.moduleRecords ?? []) {
       this.#records.set(moduleRecord.id, moduleRecord);
+      if (moduleRecord.resolvedFile !== undefined)
+        this.#sourceFiles.set(moduleRecord.id, moduleRecord.resolvedFile);
     }
 
     for (const resolution of options.importResolutions) {
+      if (
+        resolution.resolvedFile !== undefined &&
+        !this.#sourceFiles.has(resolution.resolvedId)
+      )
+        this.#sourceFiles.set(resolution.resolvedId, resolution.resolvedFile);
       this.#importResolutions.set(
         createImportResolutionKey(
           resolution.importerId,
@@ -153,6 +180,7 @@ export class ImportedStaticCssEvalResolver {
 
     const owner = createQueryOwnerLocation(query);
     const state = createResolutionState(owner);
+    state.sourceFiles = this.#sourceFiles;
     const importBinding = ownerRecord.imports.get(query.bindingName);
     const cjsBinding = ownerRecord.cjsImports.get(query.bindingName);
     const requestResult = importBinding
@@ -333,7 +361,11 @@ export class ImportedStaticCssEvalResolver {
         const mutationKey = JSON.stringify([id, name]);
         let hasMutation = this.#bindingMutations.get(mutationKey);
         if (hasMutation === undefined) {
-          hasMutation = hasImportedStaticCssBindingMutation(record, name);
+          hasMutation = hasImportedStaticCssBindingMutation(
+            record,
+            name,
+            this.#moduleOriginOptions(record)
+          );
           this.#bindingMutations.set(mutationKey, hasMutation);
         }
         if (!hasMutation) continue;
@@ -353,6 +385,58 @@ export class ImportedStaticCssEvalResolver {
     }
     this.#mutatedModules.set(key, mutated);
     return mutated;
+  }
+
+  #moduleOriginOptions(
+    record: ImportedStaticCssEvalModuleRecord
+  ): MutationOriginOptions {
+    const cached = this.#moduleOrigins.get(record);
+    if (cached) return cached;
+    const proofs = new Map<t.CallExpression, CallResultProof>();
+    let complete = true;
+    record.programPath.traverse({
+      CallExpression: (path) => {
+        if (!isStaticCssEvalRequireCallExpression(path.node, path.scope))
+          return;
+        const importPath = getStaticCssEvalLiteralRequireImportPath(
+          path.node,
+          path.scope
+        );
+        if (importPath === null) {
+          complete = false;
+          return;
+        }
+        const request = createCjsResolutionRequest(
+          {
+            importerId: record.id,
+            bindingName: "",
+            memberPath: [],
+            expressionStart: 0,
+            expressionEnd: 0
+          },
+          { kind: "cjs-module", localName: "", importPath, propertyPath: [] }
+        ).request;
+        const state = createResolutionState({ file: record.id });
+        const imported = this.#resolveProviderImport(
+          request,
+          state.owner,
+          state
+        );
+        if (imported.kind !== "resolved") {
+          complete = false;
+          return;
+        }
+        // Provenance only: all module objects may alias; writes/escapes still
+        // require analysis. An unresolved loader could return any of them.
+        proofs.set(path.node, {
+          kind: "module-origin",
+          identity: this.#moduleOriginIdentity
+        });
+      }
+    });
+    const options = complete ? { callResultProofs: proofs } : {};
+    this.#moduleOrigins.set(record, options);
+    return options;
   }
 
   #resolveProviderImport(
@@ -1380,7 +1464,24 @@ export class ImportedStaticCssEvalResolver {
     });
 
     if (!cycleResult.ok) {
-      return cycleResult;
+      const nextKey = createStaticCssEvalImportCycleKey(next);
+      const cycleStart = state.stack.findIndex(
+        (frame) => createStaticCssEvalImportCycleKey(frame) === nextKey
+      );
+      // Detect cycles with graph IDs; format their diagnostic from structured
+      // frames so a fragment in a host ID cannot be mistaken for an export.
+      return {
+        ...cycleResult,
+        diagnostic: {
+          ...cycleResult.diagnostic,
+          importChain: [...state.stack.slice(cycleStart), next].map((frame) =>
+            formatStaticCssEvalResolutionFrame({
+              ...frame,
+              file: state.sourceFiles?.get(frame.file) ?? frame.file
+            })
+          )
+        }
+      };
     }
 
     return guardStaticCssEvalResolutionDepth({

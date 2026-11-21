@@ -6,5 +6,9 @@ declare module "@babel/helper-module-imports" {
     source: string,
     opts?: { nameHint?: string }
   ): t.Identifier;
+  export function addNamespace(
+    path: NodePath<Node>,
+    source: string
+  ): t.Identifier;
   export function addSideEffect(path: NodePath<Node>, source: string): void;
 }

@@ -30,7 +30,11 @@ export function collectAssignmentExpressionOperations(options: {
   readonly state: StaticCssEvalCjsExportState;
   readonly topLevel: boolean;
 }): StaticCssEvalCjsExportMapOperation[] {
-  const target = getCjsAssignmentTarget(options.expression.left, options.scope);
+  const target = getCjsAssignmentTarget(
+    options.expression.left,
+    options.scope,
+    options.state.exportsBinding
+  );
 
   if (target.kind === "not-cjs") {
     return [];

@@ -14,13 +14,26 @@ export function registerImportMethod(
   methodName: string,
   moduleName: string = "@mincho-js/css"
 ) {
+  const program = path.scope.getProgramParent() as ProgramScope;
   const imports =
-    (path.scope.getProgramParent() as ProgramScope).minchoData.imports ||
-    ((path.scope.getProgramParent() as ProgramScope).minchoData.imports =
-      new Map());
+    program.minchoData.imports || (program.minchoData.imports = new Map());
 
   if (!imports.has(`${moduleName}:${methodName}`)) {
     const id = addNamed(path, methodName, moduleName);
+    // JSX lowering can inspect a cloned use before its final scope crawl.
+    // Register the actual inserted declaration so every use resolves through
+    // Babel's lexical binding rules, including shadowing and later mutation.
+    const programPath = program.path;
+    invariant(
+      programPath.isProgram(),
+      "Expected a program for generated imports."
+    );
+    for (const declaration of programPath.get("body")) {
+      if (t.getOuterBindingIdentifiers(declaration.node)[id.name]) {
+        program.registerDeclaration(declaration);
+        break;
+      }
+    }
     imports.set(`${moduleName}:${methodName}`, id);
 
     return id;

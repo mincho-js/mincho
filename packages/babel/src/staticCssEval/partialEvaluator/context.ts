@@ -56,6 +56,7 @@ export interface PartialEvalContext {
   readonly limits: PartialEvalLimits;
   readonly state: PartialEvalState;
   readonly metadata: PartialEvalMetadata;
+  readonly nativeArrayIteration?: boolean;
 }
 
 export interface CreatePartialEvalContextOptions {
@@ -64,6 +65,7 @@ export interface CreatePartialEvalContextOptions {
   readonly limits?: Partial<PartialEvalLimits>;
   readonly state?: Partial<PartialEvalState>;
   readonly metadata?: PartialEvalMetadata;
+  readonly nativeArrayIteration?: boolean;
 }
 
 export interface PartialEvalOptions {
@@ -90,6 +92,7 @@ export function createPartialEvalContext(
       nodeCount: options.state?.nodeCount ?? 0,
       bindingStack: bindingStack.map(clonePartialEvalBindingFrame)
     },
+    nativeArrayIteration: options.nativeArrayIteration,
     metadata: options.metadata ?? createPartialEvalMetadata()
   };
 }

@@ -1402,7 +1402,8 @@ describe("minchoBabelPlugin", () => {
     expect(code).not.toContain(" css=");
     expect(code).not.toContain("_cx(");
     expect(code).not.toContain('from "@mincho-js/css"');
-    expect(code.match(/<div className="base" \/>/g) ?? []).toHaveLength(2);
+    expect(code.match(/<div className="base" \/>/g) ?? []).toHaveLength(1);
+    expect(code).toContain('<div className={"base"} />');
     expect(code).toContain('<div className="" />');
     expect(code).toContain('<div className=" " />');
     expect(code).toContain('<div className="base active" />');
@@ -1435,6 +1436,29 @@ describe("minchoBabelPlugin", () => {
     expect(code).toContain("className={_cx(null)}");
     expect(code).toContain("className={_cx(undefined)}");
   });
+
+  it.each([
+    'import { css } from "@mincho-js/css"; const shared = css({ display: "block" });',
+    "const shared = readClassName();"
+  ])(
+    "preserves shared class values across consecutive JSX consumers: %s",
+    (declaration) => {
+      const { code } = babelTransform(
+        `${declaration}
+      export function App() {
+        return <>
+          <div css={shared} />
+          <ForwardingComponent css={shared} />
+          <div css={shared} />
+        </>;
+      }`,
+        { jsxCssProp: true }
+      );
+
+      expect(code).not.toContain(" css=");
+      expect(code.match(/className=\{_cx\(shared\)\}/g)).toHaveLength(3);
+    }
+  );
 
   it("keeps mixed literal class-value jsx css props in direct and cx modes", () => {
     const { result, code } = babelTransform(

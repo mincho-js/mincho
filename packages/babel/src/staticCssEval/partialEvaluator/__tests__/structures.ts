@@ -15,6 +15,64 @@ export function registerPartialEvalStructureTests(
   const { describe, expect, it } = vitest;
 
   describe("partial evaluator same-file member object array spread reducer", () => {
+    it.each(["01", "00", "1.0"])(
+      "does not alias array property %s to an index",
+      (key) => {
+        const results = reduceFixture(
+          `capture([4, 8][${JSON.stringify(key)}]); capture([4, 8]["1"]);`
+        );
+        expectFixtureDeoptResult(results, 0);
+        expectNumericLiteralExpression(
+          expectFixtureConfidentExpression(results, 1),
+          8
+        );
+      }
+    );
+
+    it.each([
+      '({ ["__proto__"]: 4 }).__proto__',
+      '({ ["__" + "proto__"]: 4 }).__proto__',
+      '({ __proto__: null, ["__proto__"]: 4 }).__proto__',
+      '({ ["__proto__"]: 4, __proto__: null }).__proto__',
+      '({ ...{ ["__proto__"]: 4 } }).__proto__',
+      "({ __proto__: { size: 4 } }).size",
+      "({ __proto__: { size: 12 }, size: 4 }).size",
+      "({ size: 4, __proto__: { size: 12 } }).size"
+    ])(
+      "preserves own property and explicit prototype selection: %s",
+      (value) => {
+        expectNumericLiteralExpression(
+          expectFixtureConfidentExpression(
+            reduceFixture(`capture(${value});`),
+            0
+          ),
+          4
+        );
+      }
+    );
+
+    it("preserves shorthand own __proto__ when reducing the property value", () => {
+      const result = reduceFixture(
+        "const __proto__ = 4; capture(({ __proto__ }).__proto__);"
+      );
+      expectNumericLiteralExpression(
+        expectFixtureConfidentExpression(result, 0),
+        4
+      );
+    });
+
+    it.each([
+      "({ __proto__: null }).__proto__",
+      '({ "__proto__": null }).__proto__',
+      "({ ...{ __proto__: { size: 4 } } }).size",
+      "({ __proto__: { get size() { return 4; } } }).size"
+    ])(
+      "does not select a prototype setter or copied inherited property: %s",
+      (value) => {
+        expectFixtureDeoptResult(reduceFixture(`capture(${value});`), 0);
+      }
+    );
+
     it("reduces same-file const object and static nested member paths", () => {
       const results = reduceFixture(`
         const tokens = {
@@ -131,6 +189,41 @@ export function registerPartialEvalStructureTests(
       expect(t.isIdentifier(deopt.fallbackExpression)).toBe(true);
       expect(deopt.diagnostic.bindingName).toBe("props");
       expect(deopt.diagnostic.memberPath).toEqual(["color"]);
+    });
+
+    it("preserves hard alias diagnostics without accepting a reduced mutated value", () => {
+      const results = reduceFixture(`
+        const entry = cycleA;
+        const cycleA = cycleB;
+        const cycleB = cycleA;
+        const original = { color: "red" };
+        const alias = original;
+        alias.color = "blue";
+        capture(entry);
+        capture(original);
+        capture(alias);
+      `);
+      const cycle = expectFixtureDeoptResult(results, 0);
+      expect(cycle.reason).toBe("cycle-detected");
+      expect(cycle.diagnostic.bindingName).toBe("cycleA");
+      expect(expectFixtureDeoptResult(results, 1).reason).toBe(
+        "mutated-binding"
+      );
+      expect(expectFixtureDeoptResult(results, 2).reason).toBe(
+        "mutated-binding"
+      );
+    });
+
+    it("does not mislabel an unsupported initializer as a proven mutation", () => {
+      const results = reduceFixture(`
+        function read(props) {
+          const value = props.makeRule();
+          capture(value);
+        }
+      `);
+      const result = expectFixtureDeoptResult(results, 0);
+      expect(result.reason).toBe("unsupported-call-expression");
+      expect(result.confident).toBe(false);
     });
 
     it("deopts alias cycle and binding depth limit", () => {

@@ -22,29 +22,36 @@ import {
   type InternalStaticCssEvalMetadataLike as StaticCssEvalMetadata,
   type InternalStaticCssEvalSourceResolution as StaticCssEvalSourceResolution,
   babelTransformSource,
+  internalPreparationGraph as PreparationGraph,
   internalCollectStaticCssEvalDependencyIds as collectStaticCssEvalDependencyIds,
   compile,
   internalCreateStaticCssEvalSourceIdentity as createStaticCssEvalSourceIdentity,
   internalGetStaticCssEvalRealpathOrResolvedPath as getRealpathOrResolvedPath,
   internalGetScriptLoader as getScriptLoader,
+  internalEffectiveLoader as effectiveLoader,
   internalMinchoProjectEngine,
   internalNormalizeStaticCssEvalFileId as normalizeStaticCssEvalFileId,
   processDefineRulesPresetRegistryFile,
   runDefineRulesPresetRegistryStep
 } from "@mincho-js/integration";
 import { vanillaExtractPlugin } from "@vanilla-extract/esbuild-plugin";
+import { cssFileFilter } from "@vanilla-extract/integration";
 import {
+  build as nativeBuild,
   type Plugin as EsbuildPlugin,
   type OnLoadResult,
+  type OnLoadArgs,
   type Loader,
   type PluginBuild,
   type ResolveResult
 } from "esbuild";
-import type { BuildOptions } from "esbuild";
+import type { BuildOptions, ResolveOptions } from "esbuild";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import {
   dirname,
+  isAbsolute,
   join,
   relative,
   resolve as resolvePath,
@@ -62,6 +69,7 @@ import {
   createEsbuildStaticCssEvalSourceProvider,
   createStaticCssEvalResolveResult,
   getWatchableStaticCssEvalDependencyFiles,
+  parseEsbuildStaticCssEvalLoadId,
   resolveStaticCssEvalImportFromFileSystem,
   stripStaticCssEvalQuery
 } from "./staticCssEvalSourceProvider.js";
@@ -130,7 +138,7 @@ export interface MinchoEsbuildPluginOptions {
   bundleSize?: BabelOptions["bundleSize"];
   optimize?: BabelOptions["optimize"];
   includeNodeModulesPattern?: RegExp;
-  jsxCssProp?: boolean;
+  jsxCssProp?: BabelOptions["jsxCssProp"];
 
   /** Additional build-time calls; local files are relative to absWorkingDir. */
   extractCalls?: BabelOptions["extractCalls"];
@@ -165,6 +173,165 @@ export function minchoEsbuildPlugin(
   return createMinchoEsbuildPlugin(options);
 }
 
+type RuntimeLoader = Parameters<PluginBuild["onLoad"]>[1];
+
+function getMinchoScriptLoader(path: string, loaders: BuildOptions["loader"]) {
+  return path.endsWith(".css.ts") ? undefined : getScriptLoader(path, loaders);
+}
+
+function getOwnedRuntimeLoader(
+  build: PluginBuild,
+  callback: RuntimeLoader,
+  args: OnLoadArgs,
+  ownsDirectSlot: boolean,
+  knownDecliningLoader?: RuntimeLoader
+): RuntimeLoader | undefined {
+  const registration = getBuildTransaction(build.initialOptions)?.loaders?.get(
+    callback
+  );
+  if (!registration) return ownsDirectSlot ? callback : undefined;
+  // The transaction observer sees actual callback order and preserves its host
+  // wrapper. esbuild uses Go regexes, so JS cannot safely replay arbitrary
+  // filters. An earlier handler in this namespace remains opaque unless its
+  // exact callback is known to decline this input.
+  return registration.preceding.some(
+    ({ namespace, callback: earlier }) =>
+      earlier !== knownDecliningLoader &&
+      (!namespace || namespace === args.namespace)
+  )
+    ? undefined
+    : registration.load;
+}
+
+/** The native plugin and consumer analysis invoke the same registered handler. */
+class NativeCssRuntimeBridge {
+  private load?: RuntimeLoader;
+  private hostLoad?: RuntimeLoader;
+  private scriptLoad?: RuntimeLoader;
+  private pending = new Map<string, Promise<OnLoadResult | null | undefined>>();
+  private active = new AsyncLocalStorage<ReadonlySet<string>>();
+  private generation = 0;
+  private knownScriptDeclines = true;
+
+  constructor(
+    private readonly context: string,
+    private readonly selectLoad: (
+      args: OnLoadArgs,
+      callback: RuntimeLoader,
+      scriptLoad?: RuntimeLoader
+    ) => RuntimeLoader | undefined
+  ) {}
+
+  begin() {
+    this.generation++;
+    this.pending.clear();
+  }
+
+  register(load: RuntimeLoader) {
+    this.load = load;
+
+    return (this.hostLoad = (args: OnLoadArgs) => this.loadShared(args));
+  }
+
+  registerScriptLoader(load: RuntimeLoader) {
+    this.scriptLoad = load;
+  }
+
+  recordNativeLoader(options: Parameters<PluginBuild["onLoad"]>[0]) {
+    if (
+      (!options.namespace || options.namespace === "file") &&
+      (options.filter.source !== cssFileFilter.source ||
+        options.filter.flags !== cssFileFilter.flags)
+    )
+      this.knownScriptDeclines = false;
+  }
+
+  declinesScript(args: OnLoadArgs) {
+    return (
+      args.namespace === "file" &&
+      this.knownScriptDeclines &&
+      !cssFileFilter.test(args.path)
+    );
+  }
+
+  private async loadShared(args: OnLoadArgs) {
+    const key = JSON.stringify([
+      args.namespace,
+      args.path,
+      args.suffix,
+      args.with
+    ]);
+    if (this.active.getStore()?.has(key)) return { watchFiles: [args.path] };
+
+    const cached = this.pending.get(key);
+    if (cached) return cached;
+    const active = new Set(this.active.getStore());
+    active.add(key);
+    const pending = this.active.run(active, async () => this.load?.(args));
+    this.pending.set(key, pending);
+
+    try {
+      const loaded = await pending;
+      if (
+        (loaded?.contents === undefined || loaded.errors?.length) &&
+        this.pending.get(key) === pending
+      )
+        this.pending.delete(key);
+
+      return loaded;
+    } catch (error) {
+      if (this.pending.get(key) === pending) this.pending.delete(key);
+      throw error;
+    }
+  }
+
+  async source(id: string) {
+    const { path, namespace, suffix } = parseEsbuildStaticCssEvalLoadId(id);
+    if (namespace !== "file" || !cssFileFilter.test(path)) return undefined;
+    const generation = this.generation;
+    let loaded: OnLoadResult | null | undefined;
+    const args: OnLoadArgs = {
+      path,
+      namespace,
+      suffix,
+      with: {},
+      pluginData: undefined
+    };
+    const load =
+      this.hostLoad && this.selectLoad(args, this.hostLoad, this.scriptLoad);
+    if (!load) return { watchFiles: [path] };
+
+    try {
+      loaded = await load(args);
+    } catch {
+      return { watchFiles: [path] };
+    }
+    const watchFiles = [
+      ...new Set([path, ...(loaded?.watchFiles ?? [])])
+    ].sort();
+
+    if (
+      generation !== this.generation ||
+      loaded?.errors?.length ||
+      loaded?.contents === undefined
+    )
+      return { watchFiles };
+
+    const source =
+      typeof loaded.contents === "string"
+        ? loaded.contents
+        : Buffer.from(loaded.contents).toString("utf8");
+    const sourceHash = createHash("sha256").update(source).digest("hex");
+
+    return {
+      source,
+      sourceHash,
+      watchFiles,
+      version: JSON.stringify(["esbuild", this.context, id, sourceHash])
+    };
+  }
+}
+
 function createMinchoEsbuildPlugin(
   {
     includeNodeModulesPattern,
@@ -178,13 +345,16 @@ function createMinchoEsbuildPlugin(
     jsxCssProp,
     extractCalls,
     experimental
-  }: MinchoEsbuildPluginOptions,
+  }: MinchoEsbuildPluginOptions = {},
+  getRuntimeBridge?: (build: PluginBuild) => NativeCssRuntimeBridge,
+  ownsNativeTail?: (build: PluginBuild, args: OnLoadArgs) => boolean,
   nativeCss = false
 ): EsbuildPlugin {
-  return {
+  const plugin: EsbuildPlugin = {
     name: "mincho-js-esbuild",
 
     setup(build) {
+      const runtimeBridge = getRuntimeBridge?.(build);
       const mode = optimizationModeForBuild(
         build.initialOptions,
         optimizationMode
@@ -228,6 +398,9 @@ function createMinchoEsbuildPlugin(
       execution.compilationCache = compilationCache;
 
       const runtimeOptimizations = new InternalRuntimeOptimizations();
+      const scriptOwners = new AsyncLocalStorage<ReadonlySet<string>>();
+      const preparationGraph = new PreparationGraph();
+      build.onStart(() => runtimeBridge?.begin());
       const preparedScripts = new Map<
         string,
         ReturnType<typeof prepareUncachedScript>
@@ -235,7 +408,11 @@ function createMinchoEsbuildPlugin(
 
       const sidecarOwners = new Map<
         string,
-        { path: string; mainFilePath: string }
+        {
+          path: string;
+          mainFilePath: string;
+          parserPlugins?: BabelTransformResult["parserPlugins"];
+        }
       >();
 
       const sidecarLoads = new Map<string, Promise<OnLoadResult>>();
@@ -246,6 +423,7 @@ function createMinchoEsbuildPlugin(
         compilationCache?.clear();
         runtimeOptimizations.clear();
         preparedScripts.clear();
+        preparationGraph.clear();
         sidecarOwners.clear();
         sidecarLoads.clear();
       });
@@ -308,6 +486,26 @@ function createMinchoEsbuildPlugin(
       const staticCssEvalResolutionCache: StaticCssEvalResolutionCache =
         new Map();
 
+      const nativeAssetResolutions = new Map<string, string>();
+      const resolutionKey = (specifier: string, options: ResolveOptions) =>
+        JSON.stringify([
+          specifier,
+          options.importer,
+          options.namespace ?? "file",
+          options.kind,
+          options.resolveDir
+        ]);
+      const resolutionEvidence = (result: ResolveResult) =>
+        result.pluginData === undefined && !result.errors.length
+          ? JSON.stringify([
+              result.path,
+              result.namespace || "file",
+              result.suffix,
+              result.external,
+              result.sideEffects
+            ])
+          : undefined;
+
       const staticCssEvalLoadedSourceCache: StaticCssEvalLoadedSourceCache =
         new Map();
 
@@ -323,6 +521,7 @@ function createMinchoEsbuildPlugin(
         compilationCache?.begin();
         runtimeOptimizations.clear();
         preparedScripts.clear();
+        preparationGraph.clear();
         sidecarOwners.clear();
         sidecarLoads.clear();
         assets.beginBuild();
@@ -360,8 +559,10 @@ function createMinchoEsbuildPlugin(
         resolvers.clear();
         resolverCache.clear();
         staticCssEvalResolutionCache.clear();
+        nativeAssetResolutions.clear();
         staticCssEvalLoadedSourceCache.clear();
         preparedScripts.clear();
+        preparationGraph.clear();
         sidecarOwners.clear();
         sidecarLoads.clear();
         runtimeOptimizations.clear();
@@ -403,6 +604,7 @@ function createMinchoEsbuildPlugin(
         pluginData: { path: string; mainFilePath: string }
       ): Promise<OnLoadResult> {
         const resolverContents = resolvers.get(pluginData.path)!;
+        const parserPlugins = sidecarOwners.get(path)?.parserPlugins;
         const assetWatchFiles = new Set<string>();
         const assetBridge = assets.createCompileBridge(assetWatchFiles);
         const {
@@ -417,6 +619,7 @@ function createMinchoEsbuildPlugin(
           externals: [],
           cwd: build.initialOptions.absWorkingDir,
           loader: assets.getCompileLoaders(),
+          alias: build.initialOptions.alias,
           plugins: [assetBridge.plugin],
           cacheBridge: assetBridge.cacheBridge,
           cache: compilationCache,
@@ -429,7 +632,8 @@ function createMinchoEsbuildPlugin(
                   .readFile(filePath)
                   .then((bytes) => bytes.toString("utf8"))
             : undefined,
-          resolverCache
+          resolverCache,
+          ...(parserPlugins ? { parserPlugins } : {})
         });
 
         const cssImports = new Map<string, NativeCssImport>();
@@ -543,8 +747,9 @@ function createMinchoEsbuildPlugin(
       );
 
       async function prepareScript(path: string) {
-        const loader = getScriptLoader(path, build.initialOptions.loader);
-        if (!loader || path.endsWith(".css.ts")) return;
+        if (scriptOwners.getStore()?.has(path)) return;
+        const loader = getMinchoScriptLoader(path, build.initialOptions.loader);
+        if (!loader) return;
 
         if (
           path.includes("node_modules") ||
@@ -569,13 +774,18 @@ function createMinchoEsbuildPlugin(
 
         const key = path + "\0" + source;
         const cached = preparedScripts.get(key);
-        if (cached) return cached;
+        const owner = [...(scriptOwners.getStore() ?? [])].at(-1);
+        if (cached) return preparationGraph.wait(owner, path, () => cached);
 
-        const pending = prepareUncachedScript(path, source, loader);
+        const owners = new Set(scriptOwners.getStore());
+        owners.add(path);
+        const pending = scriptOwners.run(owners, () =>
+          prepareUncachedScript(path, source, loader)
+        );
         preparedScripts.set(key, pending);
 
         try {
-          return await pending;
+          return await preparationGraph.wait(owner, path, () => pending);
         } catch (error) {
           preparedScripts.delete(key);
 
@@ -588,8 +798,22 @@ function createMinchoEsbuildPlugin(
         source: string,
         loader: NonNullable<ReturnType<typeof getScriptLoader>>
       ) {
+        const ownerGeneration = jsxGuardGeneration;
+        const ownerSourceHash = createHash("sha256")
+          .update(source)
+          .digest("hex");
         const provider = createEsbuildStaticCssEvalSourceProvider({
-          build,
+          build: {
+            ...build,
+            async resolve(specifier, options = {}) {
+              const result = await build.resolve(specifier, options);
+              const evidence = resolutionEvidence(result);
+              const key = resolutionKey(specifier, options);
+              if (evidence) nativeAssetResolutions.set(key, evidence);
+              else nativeAssetResolutions.delete(key);
+              return result;
+            }
+          },
           ownerId: path,
           ownerSource: source,
           assets,
@@ -624,6 +848,337 @@ function createMinchoEsbuildPlugin(
             },
             compilationCache,
             staticCssEvalSourceProvider: provider,
+            consumerRuntimeSource: async (
+              id: string,
+              request?: Parameters<
+                NonNullable<BabelOptions["consumerRuntimeSource"]>
+              >[1]
+            ) => {
+              const host = parseEsbuildStaticCssEvalLoadId(id);
+              if (request?.purpose === "intrinsic-owner") {
+                const hostOptions = build.initialOptions;
+                // Additional veto observation under the standard-intrinsics
+                // model, NOT proof of the final Babel output or a complete
+                // execution graph. Native discovery reads nearest/extended
+                // tsconfigs under the host's stable-build-input assumption;
+                // esbuild does not expose that configuration closure here.
+                if (
+                  host.namespace !== "file" ||
+                  host.suffix ||
+                  !isAbsolute(host.path) ||
+                  host.path !== path ||
+                  hostOptions.inject?.length ||
+                  !getOwnedRuntimeLoader(
+                    build,
+                    loadScript,
+                    {
+                      path,
+                      namespace: "file",
+                      suffix: "",
+                      with: {},
+                      pluginData: undefined
+                    },
+                    hostOptions.plugins?.[0] === plugin
+                  )
+                )
+                  return undefined;
+                const unavailable = { watchFiles: [path], authoringId: path };
+                if (
+                  request.sourceHash !== ownerSourceHash ||
+                  ownerGeneration !== jsxGuardGeneration
+                )
+                  return unavailable;
+                try {
+                  // Never reuse a native view across requests/cache validation.
+                  // No user plugins, injection, bundling, execution or writes.
+                  const view = await nativeBuild({
+                    absWorkingDir: hostOptions.absWorkingDir,
+                    entryPoints: [path],
+                    bundle: false,
+                    write: false,
+                    metafile: true,
+                    format: "esm",
+                    treeShaking: false,
+                    logLevel: "silent",
+                    platform: hostOptions.platform,
+                    target: hostOptions.target,
+                    supported: hostOptions.supported,
+                    define: hostOptions.define,
+                    tsconfig: hostOptions.tsconfig,
+                    tsconfigRaw: hostOptions.tsconfigRaw,
+                    jsx: hostOptions.jsx,
+                    jsxFactory: hostOptions.jsxFactory,
+                    jsxFragment: hostOptions.jsxFragment,
+                    jsxImportSource: hostOptions.jsxImportSource,
+                    jsxDev: hostOptions.jsxDev,
+                    jsxSideEffects: hostOptions.jsxSideEffects,
+                    plugins: [
+                      {
+                        name: "mincho-intrinsic-owner-observation",
+                        setup(native) {
+                          native.onLoad(
+                            { filter: /.*/, namespace: "file" },
+                            (args) =>
+                              args.path === path
+                                ? {
+                                    contents: source,
+                                    loader,
+                                    resolveDir: dirname(path)
+                                  }
+                                : {
+                                    errors: [
+                                      {
+                                        text: "Unexpected native owner observation input"
+                                      }
+                                    ]
+                                  }
+                          );
+                        }
+                      }
+                    ]
+                  });
+                  if (
+                    ownerGeneration !== jsxGuardGeneration ||
+                    view.outputFiles?.length !== 1
+                  )
+                    return unavailable;
+                  const observedSource = view.outputFiles[0]!.text;
+                  const sourceHash = createHash("sha256")
+                    .update(observedSource)
+                    .digest("hex");
+                  return {
+                    source: observedSource,
+                    sourceHash,
+                    authoringId: path,
+                    watchFiles: [path],
+                    version: JSON.stringify([
+                      "esbuild-intrinsic-owner-veto/v1",
+                      path,
+                      ownerSourceHash,
+                      sourceHash
+                    ])
+                  };
+                } catch {
+                  return unavailable;
+                }
+              }
+              const sidecarOwner =
+                host.namespace === "extracted-css" || host.namespace === "file"
+                  ? sidecarOwners.get(host.path)?.mainFilePath
+                  : undefined;
+              if (sidecarOwner) {
+                if (scriptOwners.getStore()?.has(sidecarOwner))
+                  return {
+                    watchFiles: [sidecarOwner],
+                    authoringId: sidecarOwner
+                  };
+
+                const loaded = await loadSidecar(host.path);
+                const watchFiles = [
+                  ...new Set([sidecarOwner, ...(loaded.watchFiles ?? [])])
+                ];
+                if (
+                  loaded.errors?.length ||
+                  typeof loaded.contents !== "string"
+                )
+                  return { watchFiles, authoringId: sidecarOwner };
+
+                const sourceHash = createHash("sha256")
+                  .update(loaded.contents)
+                  .digest("hex");
+
+                return {
+                  source: loaded.contents,
+                  sourceHash,
+                  authoringId: sidecarOwner,
+                  watchFiles,
+                  version: JSON.stringify(["esbuild-sidecar", id, sourceHash])
+                };
+              }
+
+              if (host.namespace !== "file") return undefined;
+              const file = host.path;
+              const scriptLoader = getMinchoScriptLoader(
+                file,
+                build.initialOptions.loader
+              );
+              // Match actual onLoad order: our script handler precedes native
+              // CSS, including scripts whose names also match cssFileFilter.
+              // Observe its owned output below rather than a later handler.
+              if (!scriptLoader) {
+                const native = await runtimeBridge?.source(id);
+                if (native !== undefined) return native;
+
+                const loader = effectiveLoader(
+                  file,
+                  build.initialOptions.loader
+                );
+                const args: OnLoadArgs = {
+                  path: file,
+                  namespace: "file",
+                  suffix: host.suffix,
+                  pluginData: undefined,
+                  with: {}
+                };
+                // This is the core loader's non-JS contract, not a filename
+                // whitelist: both the complete callback order and effective
+                // loader must prove that no plugin can substitute JavaScript.
+                const ownedHead = getOwnedRuntimeLoader(
+                  build,
+                  loadScript,
+                  args,
+                  build.initialOptions.plugins?.[0] === plugin
+                );
+                const registeredTail = getBuildTransaction(
+                  build.initialOptions
+                )?.loaders?.get(loadScript)?.nativeFileFallback;
+                const ownedTail =
+                  (registeredTail && runtimeBridge?.declinesScript(args)) ||
+                  build.initialOptions.plugins?.at(-1) === plugin ||
+                  ownsNativeTail?.(build, args);
+                if (
+                  isAbsolute(file) &&
+                  !host.suffix &&
+                  ownedHead &&
+                  ownedTail &&
+                  request?.purpose === "intrinsic-effects" &&
+                  request.attributes === "none" &&
+                  (loader === "css" || loader === "local-css")
+                ) {
+                  const importer = parseEsbuildStaticCssEvalLoadId(
+                    request.importerId
+                  );
+                  if (importer.namespace !== "file" || importer.suffix)
+                    return { watchFiles: [file] };
+                  const resolveOptions: ResolveOptions = {
+                    importer: importer.path,
+                    namespace: "file",
+                    kind:
+                      request.resolutionMode === "require"
+                        ? "require-call"
+                        : "import-statement",
+                    resolveDir: dirname(importer.path)
+                  };
+                  const key = resolutionKey(request.specifier, resolveOptions);
+                  const original = nativeAssetResolutions.get(key);
+                  if (!original) return { watchFiles: [file] };
+                  const resolved = await build.resolve(
+                    request.specifier,
+                    resolveOptions
+                  );
+                  const observed = resolutionEvidence(resolved);
+                  if (
+                    !observed ||
+                    observed !== original ||
+                    resolved.external ||
+                    (resolved.namespace && resolved.namespace !== "file") ||
+                    resolved.suffix ||
+                    stripStaticCssEvalQuery(resolved.path) !== resolved.path ||
+                    (await getRealpathOrResolvedPath(resolved.path)) !==
+                      (await getRealpathOrResolvedPath(file))
+                  )
+                    return { watchFiles: [file] };
+                  const bytes = transaction
+                    ? await transaction.snapshot.readFile(file)
+                    : compilationCache?.hasActiveInputs
+                      ? await compilationCache.readFile(file)
+                      : await fs.promises.readFile(file);
+                  const sourceHash = createHash("sha256")
+                    .update(bytes)
+                    .digest("hex");
+                  return {
+                    watchFiles: [file],
+                    authoringId: file,
+                    intrinsicEffects: {
+                      kind: "native-css" as const,
+                      loader,
+                      sourceHash,
+                      version: JSON.stringify([
+                        "esbuild-native-css/v1",
+                        id,
+                        loader,
+                        sourceHash,
+                        original
+                      ])
+                    }
+                  };
+                }
+
+                // A separately installed host plugin has no callable load API.
+                // Never substitute authoring text for an unavailable CSS view.
+                if (cssFileFilter.test(file)) return { watchFiles: [file] };
+              }
+              if (!isAbsolute(file)) return undefined;
+              if (!scriptLoader)
+                return request?.purpose === "intrinsic-effects"
+                  ? { watchFiles: [file] }
+                  : undefined;
+              if (
+                scriptOwners.getStore()?.has(file) ||
+                scriptLoadStack.getStore()?.has(file)
+              )
+                return { watchFiles: [file], authoringId: file };
+
+              const args: OnLoadArgs = {
+                path: file,
+                namespace: "file",
+                suffix: host.suffix,
+                pluginData: undefined,
+                with: {}
+              };
+              // esbuild exposes no API to replay earlier onLoad callbacks.
+              // Ordinary plugin builds can only prove our first slot, while
+              // buildWithMincho records the actual registration order.
+              const ownedLoad = getOwnedRuntimeLoader(
+                build,
+                loadScript,
+                args,
+                build.initialOptions.plugins?.[0] === plugin
+              );
+              if (!ownedLoad) return { watchFiles: [file], authoringId: file };
+
+              const generation = jsxGuardGeneration;
+              const loaded = await ownedLoad(args);
+              if (!loaded) {
+                const registration = getBuildTransaction(
+                  build.initialOptions
+                )?.loaders?.get(loadScript);
+                const nativeFallback =
+                  registration?.nativeFileFallback &&
+                  runtimeBridge?.declinesScript(args);
+                const finalPlugin =
+                  build.initialOptions.plugins?.at(-1) === plugin;
+                return nativeFallback ||
+                  finalPlugin ||
+                  ownsNativeTail?.(build, args)
+                  ? undefined
+                  : { watchFiles: [file], authoringId: file };
+              }
+              const watchFiles = [
+                ...new Set([file, ...(loaded.watchFiles ?? [])])
+              ];
+              if (
+                generation !== jsxGuardGeneration ||
+                loaded.errors?.length ||
+                typeof loaded.contents !== "string"
+              )
+                return { watchFiles, authoringId: file };
+              const sourceHash = createHash("sha256")
+                .update(loaded.contents)
+                .digest("hex");
+              return {
+                source: loaded.contents,
+                sourceHash,
+                authoringId: file,
+                watchFiles,
+                version: JSON.stringify([
+                  "esbuild-script",
+                  id,
+                  mode,
+                  sourceHash
+                ])
+              };
+            },
             staticCssEvalProjectEngine,
             ...(diagnostics.enabled ? { diagnostics: true } : {})
           },
@@ -648,7 +1203,10 @@ function createMinchoEsbuildPlugin(
           resolvers.set(file, cssExtract);
           sidecarOwners.set(join(path, "..", file), {
             path: file,
-            mainFilePath: path
+            mainFilePath: path,
+            ...(result.parserPlugins
+              ? { parserPlugins: result.parserPlugins }
+              : {})
           });
           resolverCache.delete(path);
         }
@@ -656,7 +1214,21 @@ function createMinchoEsbuildPlugin(
         return { result, options, provider, loader };
       }
 
-      build.onLoad({ filter: /.*/, namespace: "file" }, async (args) => {
+      const scriptLoadStack = new AsyncLocalStorage<Set<string>>();
+      async function loadScript(
+        args: OnLoadArgs
+      ): Promise<OnLoadResult | undefined> {
+        const active = scriptLoadStack.getStore();
+        if (active?.has(args.path)) return;
+        return scriptLoadStack.run(
+          new Set([...(active ?? []), args.path]),
+          () => loadUncachedScript(args)
+        );
+      }
+
+      async function loadUncachedScript(
+        args: OnLoadArgs
+      ): Promise<OnLoadResult | undefined> {
         if (args.with?.type === "json" || args.with?.type === "bytes") return;
 
         const loadGeneration = jsxGuardGeneration;
@@ -737,16 +1309,66 @@ function createMinchoEsbuildPlugin(
             args.path
           )
         };
-      });
+      }
+
+      runtimeBridge?.registerScriptLoader(loadScript);
+      build.onLoad({ filter: /.*/, namespace: "file" }, loadScript);
     }
   };
+  return plugin;
 }
 
 export const minchoEsbuildPlugins = (
   options: MinchoEsbuildPluginOptions = {}
-) => [
-  createMinchoEsbuildPlugin(options, true),
-  {
+) => {
+  const bridges = new WeakMap<BuildOptions, NativeCssRuntimeBridge>();
+  const getRuntimeBridge = (build: PluginBuild): NativeCssRuntimeBridge => {
+    let bridge = bridges.get(build.initialOptions);
+    if (!bridge) {
+      bridge = new NativeCssRuntimeBridge(
+        JSON.stringify({
+          root: build.initialOptions.absWorkingDir ?? process.cwd(),
+          identifiers: internalResolveIdentifiers(
+            optimizationModeForBuild(
+              build.initialOptions,
+              options.optimizationMode
+            ),
+            options.identifiers
+          ),
+          externals: ["@mincho-js/transform-to-vanilla"]
+        }),
+        (args, callback, scriptLoad) => {
+          const scriptDeclines = !getMinchoScriptLoader(
+            args.path,
+            build.initialOptions.loader
+          );
+          return getOwnedRuntimeLoader(
+            build,
+            callback,
+            args,
+            scriptDeclines &&
+              build.initialOptions.plugins?.[0] === scriptPlugin &&
+              build.initialOptions.plugins?.[1] === nativePlugin,
+            scriptDeclines ? scriptLoad : undefined
+          );
+        }
+      );
+      bridges.set(build.initialOptions, bridge);
+    }
+
+    return bridge;
+  };
+
+  const scriptPlugin = createMinchoEsbuildPlugin(
+    options,
+    getRuntimeBridge,
+    (build, args) =>
+      build.initialOptions.plugins?.at(-2) === scriptPlugin &&
+      build.initialOptions.plugins.at(-1) === nativePlugin &&
+      getRuntimeBridge(build).declinesScript(args),
+    true
+  );
+  const nativePlugin: EsbuildPlugin = {
     name: vanillaExtractPlugin().name,
     setup(build: PluginBuild) {
       const cssRequest = Symbol("Mincho CSS request");
@@ -797,11 +1419,23 @@ export const minchoEsbuildPlugins = (
             };
           });
         },
-        onLoad(options, nativeLoad) {
-          build.onLoad(options, async (args) => {
+        onLoad(loadOptions, callback) {
+          const bridge = getRuntimeBridge(build);
+          bridge.recordNativeLoader(loadOptions);
+          // The transaction identifies the native producer by the exact
+          // registered callback. Do not wrap that handler to load virtual CSS.
+          if (
+            loadOptions.namespace === undefined &&
+            loadOptions.filter.source === cssFileFilter.source &&
+            loadOptions.filter.flags === cssFileFilter.flags
+          ) {
+            build.onLoad(loadOptions, bridge.register(callback));
+            return;
+          }
+          build.onLoad(loadOptions, async (args) => {
             const resolveDir: string | undefined = args.pluginData?.[cssLoad];
-            if (!resolveDir) return nativeLoad(args);
-            const result = await nativeLoad({
+            if (!resolveDir) return callback(args);
+            const result = await callback({
               ...args,
               pluginData: args.pluginData.native,
               suffix: args.pluginData.suffix
@@ -813,8 +1447,9 @@ export const minchoEsbuildPlugins = (
         }
       });
     }
-  }
-];
+  };
+  return [scriptPlugin, nativePlugin];
+};
 
 // == Tests ====================================================================
 // Ignore errors when compiling to CommonJS.
@@ -834,6 +1469,106 @@ if (import.meta.vitest) {
   // eslint-disable-next-line @typescript-eslint/ban-ts-comment
   // @ts-ignore error TS1343: The 'import.meta' meta-property is only allowed when the '--module' option is 'es2020', 'es2022', 'esnext', 'system', 'node16', or 'nodenext'.
   const { afterEach, beforeAll, describe, expect, it, vi } = import.meta.vitest;
+
+  describe("native CSS consumer runtime source", () => {
+    it("shares the actual native handler result with the normal host load", async () => {
+      const bridge = new NativeCssRuntimeBridge("test", (_args, load) => load);
+      const handler = vi.fn(() => ({
+        contents: 'export const theme = "class_red";',
+        loader: "js" as const,
+        watchFiles: ["/theme.css.ts", "/tokens.ts"]
+      }));
+      const hostLoad = bridge.register(handler);
+      bridge.begin();
+      const source = await bridge.source("/theme.css.ts");
+      const host = await hostLoad({
+        path: "/theme.css.ts",
+        namespace: "file",
+        suffix: "",
+        with: {},
+        pluginData: undefined
+      });
+
+      expect(source).toMatchObject({
+        source: host?.contents,
+        watchFiles: ["/theme.css.ts", "/tokens.ts"]
+      });
+      expect(source?.sourceHash).toBe(
+        createHash("sha256").update(String(host?.contents)).digest("hex")
+      );
+      expect(handler).toHaveBeenCalledTimes(1);
+    });
+
+    it("refreshes serialized source after a transitive dependency rebuild", async () => {
+      const bridge = new NativeCssRuntimeBridge("test", (_args, load) => load);
+      let token = "red";
+      const handler = vi.fn(() => ({
+        contents: `export const theme = ${JSON.stringify(token)};`,
+        watchFiles: ["/tokens.ts"]
+      }));
+      bridge.register(handler);
+      bridge.begin();
+      const red = await bridge.source("/theme.css.ts?client");
+      token = "blue";
+      bridge.begin();
+      const blue = await bridge.source("/theme.css.ts?client");
+
+      expect(red?.source).toContain("red");
+      expect(blue?.source).toContain("blue");
+      expect(blue?.sourceHash).not.toBe(red?.sourceHash);
+      expect(blue?.version).not.toBe(red?.version);
+      expect(blue?.watchFiles).toContain("/tokens.ts");
+      expect(handler).toHaveBeenCalledTimes(2);
+      bridge.begin();
+      expect((await bridge.source("/theme.css.ts?client"))?.version).toBe(
+        blue?.version
+      );
+      expect(handler).toHaveBeenCalledTimes(3);
+    });
+
+    it("does not await a recursive CSS load or retain its unavailable result", async () => {
+      const bridge = new NativeCssRuntimeBridge("test", (_args, load) => load);
+      let inner: Awaited<ReturnType<NativeCssRuntimeBridge["source"]>>;
+      const handler = vi.fn(async () => {
+        inner = await bridge.source("/theme.css.ts");
+
+        return {
+          contents: 'export const theme = "ready";',
+          watchFiles: ["/tokens.ts"]
+        };
+      });
+      bridge.register(handler);
+      const result = await bridge.source("/theme.css.ts");
+
+      expect(inner).toEqual({ watchFiles: ["/theme.css.ts"] });
+      expect(result?.source).toContain("ready");
+      expect(handler).toHaveBeenCalledTimes(1);
+    });
+
+    it("preserves failure watches and retries instead of caching a negative surface", async () => {
+      const bridge = new NativeCssRuntimeBridge("test", (_args, load) => load);
+      const handler = vi
+        .fn<Parameters<PluginBuild["onLoad"]>[1]>()
+        .mockReturnValueOnce({
+          watchFiles: ["/missing.ts"],
+          errors: [{ text: "missing" }]
+        })
+        .mockReturnValueOnce({
+          contents: "export const theme = 1;",
+          watchFiles: ["/missing.ts"]
+        });
+      bridge.register(handler);
+
+      expect(await bridge.source("/theme.css.ts")).toEqual({
+        watchFiles: ["/missing.ts", "/theme.css.ts"]
+      });
+      expect(await bridge.source("/theme.css.ts")).toMatchObject({
+        source: "export const theme = 1;"
+      });
+      expect(handler).toHaveBeenCalledTimes(2);
+      expect(await bridge.source("/ordinary.ts")).toBeUndefined();
+    });
+  });
 
   // Test the emitted capability/source relationship, not merely an added field.
   async function expectedScopeRuntime(source: string, origin: string) {
@@ -1033,7 +1768,8 @@ if (import.meta.vitest) {
         absWorkingDir,
         minify,
         loader,
-        outdir
+        outdir,
+        plugins: [plugin]
       },
 
       async resolve(path: string, options?: { importer?: string }) {

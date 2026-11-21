@@ -1,8 +1,14 @@
+import {
+  hasNativeCssIntrinsicEffects,
+  hasValidatedPatternIntrinsicEffects
+} from "./staticCssEvalSource.js";
 import { join, resolve } from "node:path";
 import { restoreTransform, snapshotTransform } from "./transformSnapshot.js";
 import type {
+  BabelOptions,
   BabelTransformResult,
   BabelTransformSourceOptions,
+  ConsumerRuntimeSource,
   StaticCssEvalLoadedSource,
   StaticCssEvalSourceProvider
 } from "./babel.js";
@@ -28,10 +34,32 @@ type Observation =
       digest: string;
       policy: string;
       files: string[];
+    }
+  | {
+      kind: "consumer-runtime";
+      args: Parameters<NonNullable<BabelOptions["consumerRuntimeSource"]>>;
+      digest: string;
+      files: string[];
     };
 
 function digest(value: unknown): string {
   return cacheDigest(JSON.stringify(value) ?? "undefined");
+}
+
+function runtimeDigest(value: ConsumerRuntimeSource | undefined): string {
+  return digest(
+    value && {
+      ...value,
+      validatedPatternIntrinsicEffects:
+        hasValidatedPatternIntrinsicEffects(value),
+      // Observe actual emitted bytes even if a host reuses its declared version.
+      sourceHash:
+        typeof value.source === "string"
+          ? cacheDigest(value.source)
+          : undefined,
+      watchFiles: [...new Set(value.watchFiles)].sort()
+    }
+  );
 }
 
 export function cachedTransform(
@@ -58,6 +86,7 @@ async function transformWithInputs(
     compilationCache: _cache,
     staticCssEvalSourceProvider: provider,
     staticCssEvalProjectEngine: engine,
+    consumerRuntimeSource,
     ...babel
   } = options.babel ?? {};
 
@@ -131,6 +160,7 @@ async function transformWithInputs(
     options.inputSourceMap,
     options.commonJsToEsm,
     babel,
+    consumerRuntimeSource ? "consumer-runtime/v1" : undefined,
     process.env.NODE_ENV,
     process.env.BABEL_ENV
   ])}`;
@@ -141,6 +171,7 @@ async function transformWithInputs(
       const observations: Observation[] = [];
       const loads = new Map<string, StaticCssEvalLoadedSource | null>();
       const aliases = new Map<string, string[]>();
+      const runtimeInputs = new Map<string, string | null>();
       let cacheable = true;
       const observingProvider: StaticCssEvalSourceProvider | undefined =
         provider && {
@@ -201,12 +232,49 @@ async function transformWithInputs(
           }
         };
 
+      const observingRuntimeSource: BabelOptions["consumerRuntimeSource"] =
+        consumerRuntimeSource &&
+        (async (...args) => {
+          try {
+            const value = await consumerRuntimeSource(...args);
+            const files = [...new Set(value?.watchFiles ?? [])].sort();
+            // An owned but unavailable surface is not a stable negative result.
+            if (
+              value &&
+              typeof value.source !== "string" &&
+              !hasNativeCssIntrinsicEffects(value)
+            )
+              cacheable = false;
+
+            observations.push({
+              kind: "consumer-runtime",
+              args,
+              digest: runtimeDigest(value),
+              files
+            });
+
+            try {
+              for (const [file, fingerprint] of await cache.fingerprint(files))
+                runtimeInputs.set(file, fingerprint);
+            } catch {
+              cacheable = false;
+            }
+
+            return value;
+          } catch (error) {
+            cacheable = false;
+
+            throw error;
+          }
+        });
+
       const result = await transform(
         {
           ...options,
           babel: {
             ...options.babel,
-            staticCssEvalSourceProvider: observingProvider
+            staticCssEvalSourceProvider: observingProvider,
+            consumerRuntimeSource: observingRuntimeSource
           }
         },
         true
@@ -215,7 +283,8 @@ async function transformWithInputs(
       const files = [
         options.filename,
         ...(result.staticCssEval?.dependencyFiles ?? []),
-        ...configurations.keys()
+        ...configurations.keys(),
+        ...runtimeInputs.keys()
       ];
 
       const { result: snapshot, modules } = snapshotTransform(result);
@@ -226,9 +295,13 @@ async function transformWithInputs(
         cache
       );
 
-      const semanticFiles = witnesses.map(({ file }) => file);
+      const semanticFiles = witnesses
+        .map(({ file }) => file)
+        .filter((file) => !runtimeInputs.has(file));
       const hardInputs = new Map(
-        [...configurations].filter(([file]) => !semanticFiles.includes(file))
+        [...configurations, ...runtimeInputs].filter(
+          ([file]) => runtimeInputs.has(file) || !semanticFiles.includes(file)
+        )
       );
 
       return {
@@ -265,6 +338,20 @@ async function transformWithInputs(
           : provider;
 
       for (const observation of observations) {
+        if (observation.kind === "consumer-runtime") {
+          if (!consumerRuntimeSource) return false;
+          const value = await consumerRuntimeSource(...observation.args);
+          if (
+            (value &&
+              typeof value.source !== "string" &&
+              !hasNativeCssIntrinsicEffects(value)) ||
+            runtimeDigest(value) !== observation.digest
+          )
+            return false;
+          // Runtime exports never borrow an authoring-source semantic witness.
+          continue;
+        }
+
         if (!currentProvider) return false;
 
         const value =

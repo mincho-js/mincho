@@ -1,3 +1,4 @@
+import type { ReplayAnalysis } from "../extractionCalls/replayAnalysis.js";
 import { types as t } from "@babel/core";
 import type { NodePath } from "@babel/core";
 import {
@@ -16,10 +17,22 @@ type AnalysisScope = NodePath<t.JSXOpeningElement>["scope"];
 
 type AnalysisBinding = NonNullable<ReturnType<AnalysisScope["getBinding"]>>;
 
+// Internal evidence belongs to this exact analysis result. Keep the public
+// classification shape stable, and do not reuse it across AST transformations.
+const unprovenBindingResults = new WeakSet<CssPropSidecarHoistability>();
+export function hasUnprovenSidecarBinding(
+  result: CssPropSidecarHoistability
+): boolean {
+  return unprovenBindingResults.has(result);
+}
+
 export function analyzeCssPropSidecarHoistability(options: {
   readonly expression: t.Expression;
+  readonly path?: NodePath<t.Expression>;
   readonly reducedExpression?: t.Expression;
   readonly scope: AnalysisScope;
+  readonly analysis?: ReplayAnalysis;
+  readonly unmodifiedBindings?: ReadonlySet<AnalysisBinding>;
 }): CssPropSidecarHoistability {
   const reducedExpression = options.reducedExpression ?? options.expression;
   const reducedCssValueClassification = getSidecarCssRuleClassification(
@@ -56,21 +69,29 @@ export function analyzeCssPropSidecarHoistability(options: {
     return { kind: "not-candidate" };
   }
 
+  let unprovenBinding = false;
   const safe = isSidecarSafeCssRuleExpression({
     expression: reducedCssValueClassification
       ? reducedExpression
       : options.expression,
     rawExpression: options.expression,
+    path: options.path,
     state: {
       scope: options.scope,
+      analysis: options.analysis,
+      onUnprovenBinding: () => {
+        unprovenBinding = true;
+      },
+      unmodifiedBindings: options.unmodifiedBindings,
       visiting: new Set(),
       localNames: new Set()
     }
   });
 
-  return safe
-    ? { kind: "hoistable", cssValueClassification }
-    : { kind: "unsafe" };
+  if (safe) return { kind: "hoistable", cssValueClassification };
+  const result = { kind: "unsafe" } as const;
+  if (unprovenBinding) unprovenBindingResults.add(result);
+  return result;
 }
 
 function getPreservedRawArraySpreadCssRuleClassification(options: {
