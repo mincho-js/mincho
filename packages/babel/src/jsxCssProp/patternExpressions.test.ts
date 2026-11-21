@@ -909,14 +909,74 @@ it("does not inherit exact iteration authority into nested unknown receivers", (
   ).toBe(false);
 });
 
+it.each(["{value = fallback()}", "{...rest}", "[value = fallback()]"])(
+  "uses only the exact initializer wrapper for replay of %s",
+  (pattern) => {
+    transformSync(`const ${pattern} = (factory());`, {
+      configFile: false,
+      babelrc: false,
+      parserOpts: { createParenthesizedExpressions: true },
+      plugins: [
+        (): PluginObj => ({
+          visitor: {
+            VariableDeclarator(path) {
+              const { id, init } = path.node;
+              if (!t.isParenthesizedExpression(init))
+                throw new Error("Expected a preserved initializer wrapper");
+              for (const receipt of [init, init.expression]) {
+                const authority = (source: t.Expression) => source === receipt;
+                const environment: PatternSelectionEnvironment = {
+                  nativeArrayIteration: true,
+                  requireReplaySafety: true,
+                  canReplayIteration: authority,
+                  canReplayOwnRead: authority
+                };
+                const skipped = vi.fn();
+                const evaluated = vi.fn(() => true);
+                expect(
+                  everyPatternNodeExpression(
+                    id,
+                    evaluated,
+                    init,
+                    true,
+                    "",
+                    skipped,
+                    environment
+                  )
+                ).toBe(receipt === init);
+                expect(
+                  everyPatternExpression(
+                    path.get("id"),
+                    () => true,
+                    init,
+                    skipped,
+                    environment
+                  )
+                ).toBe(receipt === init);
+                expect(skipped).not.toHaveBeenCalled();
+                if (receipt === init && pattern.includes("fallback"))
+                  expect(evaluated).toHaveBeenCalledTimes(1);
+              }
+            }
+          }
+        })
+      ]
+    });
+  }
+);
+
 describe("closed local native array receiver aliases", () => {
   it.each([
     ["const array=[4];const[value=fallback()]=array", true],
     ["const array=[4];const alias=array;const[value=fallback()]=alias", true],
-    ["const array=[4];var alias=array;const[value]=array", false],
+    ["const array=[4];const[value=fallback()]=array", false, "script"],
+    ["const array=[4];const alias=array;const[value]=alias", false, "script"],
+    ["const array=[4];let alias=array;const[value]=array", false, "script"],
+    ["const array=[4];var alias=array;const[value]=array", false, "script"],
     [
       "function local(){const array=[4];var alias=array;const[value]=array}",
-      true
+      true,
+      "script"
     ],
     ["const array=[4];let alias=array;const[value]=array", true],
     ["const array=[4];array[0]=9;const[value]=array", false],
@@ -931,11 +991,11 @@ describe("closed local native array receiver aliases", () => {
     ]
   ] as const)(
     "checks identity without selecting values: %s",
-    (source, expected) => {
+    (source, expected, sourceType: "module" | "script" = "module") => {
       let result: boolean | undefined;
       const skipped = vi.fn();
       transformSync(source, {
-        sourceType: "script",
+        sourceType,
         configFile: false,
         babelrc: false,
         plugins: [

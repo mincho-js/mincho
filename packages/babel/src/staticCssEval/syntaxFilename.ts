@@ -37,6 +37,15 @@ export function inferSyntaxFilename(id: string): string {
   return suffix === -1 ? id : id.slice(0, suffix);
 }
 
+/** An explicit logical ID can have a slash or a source-like basename inside
+ * its host suffix. Prefer the extension before the first recognized delimiter;
+ * physical paths and metadata-free guesses use their existing precedence.
+ */
+export function inferLogicalSyntaxFilename(id: string): string {
+  const suffix = findSyntaxSuffix(id, 0);
+  return suffix === -1 ? id : id.slice(0, suffix);
+}
+
 /** Syntax recognition for provider metadata, without changing its graph identity. */
 export function hasStaticCssEvalSyntaxFilename(
   id: string,

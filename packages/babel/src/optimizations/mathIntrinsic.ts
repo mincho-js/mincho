@@ -255,6 +255,9 @@ function methodOrigin(
       (callee.isMemberExpression() || callee.isOptionalMemberExpression()) &&
       memberName(callee) === "bind" &&
       args.length >= 1 &&
+      !call.node.arguments.some((argument) =>
+        t.isArgumentPlaceholder(argument)
+      ) &&
       namespaceOrigin(args[0])
     ) {
       const origin = methodOrigin(
@@ -833,6 +836,7 @@ function observeBindMutation(
     ["Object", "Reflect", "Function", "eval", ...globalAliases].some((name) =>
       evidence.writesScriptGlobal(name)
     ) ||
+    evidence.hasGlobalEval ||
     hasDynamicScope(program)
   )
     return true;
@@ -1049,6 +1053,12 @@ export function createMathIntrinsicEnvironment(
       }
     },
     provesPrimitiveResult(call) {
+      if (
+        call.node.arguments.some((argument) =>
+          t.isArgumentPlaceholder(argument)
+        )
+      )
+        return false;
       const name = methodOrigin(call.get("callee"));
       if (!name) return false;
       const program = call.scope.getProgramParent().path;

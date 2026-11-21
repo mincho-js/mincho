@@ -109,6 +109,35 @@ describe("imported module syntax and identity", () => {
     ).toThrow(/Missing initializer/);
   });
 
+  it("keeps slash-bearing logical query and fragment values out of parser syntax", () => {
+    const id = "/tokens.tsx?theme=/dark.js#preview";
+    const physical = "/cache/tokens.data";
+    const input = {
+      id,
+      syntaxSourceId: id,
+      resolvedFile: physical,
+      realpath: physical,
+      source: "export const view: unknown = <div />;"
+    };
+    expect(createStaticCssModuleSource(input)).toMatchObject({
+      resolvedFile: id,
+      syntaxFilename: "/tokens.tsx"
+    });
+    const record = createImportedStaticCssEvalModuleRecordWithCache(
+      input,
+      createStaticCssModuleCache()
+    );
+    expect(record).toMatchObject({
+      id,
+      resolvedFile: physical,
+      realpath: physical
+    });
+    expect(record.parsedModule.cacheKey.parserOptions).toMatchObject({
+      typescript: true,
+      jsx: true
+    });
+  });
+
   it("defaults syntax inference to the module identity without physical metadata", () => {
     const record = createImportedStaticCssEvalModuleRecordWithCache(
       {

@@ -869,3 +869,47 @@ it("keeps object pattern label names out of lexical reference discovery", () => 
     }
   });
 });
+
+it("indexes emitted reads as unbound through a type-only declaration", () => {
+  traverse(
+    parseSync("declare const Shared: object; observe(Shared);", {
+      configFile: false,
+      babelrc: false,
+      parserOpts: { plugins: ["typescript"] }
+    })!,
+    {
+      Program(program) {
+        const evidence = collectRuntimeSourceEvidence(program);
+        expect(evidence.bindingsCurrent).toBe(true);
+        expect(evidence.usesUnboundName("Shared")).toBe(true);
+        expect(
+          evidence.references(program.scope.getBinding("Shared")!)
+        ).toHaveLength(0);
+      }
+    }
+  );
+});
+
+it("chooses the nearest emitted outer binding rather than an erased local", () => {
+  traverse(
+    parseSync(
+      "const Shared=1; function read(){declare const Shared: object; observe(Shared);}",
+      {
+        configFile: false,
+        babelrc: false,
+        parserOpts: { plugins: ["typescript"] }
+      }
+    )!,
+    {
+      Program(program) {
+        const evidence = collectRuntimeSourceEvidence(program);
+        const binding = program.scope.getBinding("Shared")!;
+        expect(evidence.bindingsCurrent).toBe(true);
+        expect(evidence.usesUnboundName("Shared")).toBe(false);
+        const [reference] = evidence.references(binding);
+        expect(reference?.node.name).toBe("Shared");
+        expect(reference && hasRuntimeBinding(reference, "Shared")).toBe(true);
+      }
+    }
+  );
+});

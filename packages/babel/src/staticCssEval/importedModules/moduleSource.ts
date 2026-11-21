@@ -1,6 +1,7 @@
 import { types as t } from "@babel/core";
 import hash from "@emotion/hash";
 import { inferSyntaxFilename } from "../moduleCache.js";
+import { inferLogicalSyntaxFilename } from "../syntaxFilename.js";
 import { createStaticCssEvalProviderSourceMetadata } from "../boundary.js";
 import { collectStaticCssEvalCjsRequireBindings } from "../cjsBindings.js";
 import type {
@@ -109,7 +110,7 @@ export function createStaticCssModuleSource(
   // from the parser-facing source. A logical syntax ID is not a physical path.
   const syntaxFilename =
     loadedModule.syntaxSourceId !== undefined
-      ? inferSyntaxFilename(loadedModule.syntaxSourceId)
+      ? inferLogicalSyntaxFilename(loadedModule.syntaxSourceId)
       : (loadedModule.realpath ??
         (loadedModule.resolvedFile !== undefined
           ? inferSyntaxFilename(loadedModule.resolvedFile)

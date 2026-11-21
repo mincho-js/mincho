@@ -1063,3 +1063,27 @@ it.each([
     expect(env.snapshot().iterationIntact).toBe(expected);
   }
 );
+
+it.each([
+  ["[1].includes(?)", false],
+  ["[1].includes(1)", true]
+] as const)(
+  "distinguishes partial application from evaluation: %s",
+  (code, expected) => {
+    let call!: NodePath<t.CallExpression>;
+    traverse(
+      parseSync(code, {
+        configFile: false,
+        babelrc: false,
+        parserOpts: { plugins: ["partialApplication"] }
+      })!,
+      {
+        CallExpression(path) {
+          call = path;
+        }
+      }
+    );
+    const environment = createArrayMapIntrinsicEnvironment();
+    expect(environment.provesNativeIncludes(call)).toBe(expected);
+  }
+);

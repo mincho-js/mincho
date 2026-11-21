@@ -1,4 +1,5 @@
 import { types as t, type NodePath } from "@babel/core";
+import { isRuntimeSourceReference } from "../optimizations/runtimeSourceReference.js";
 
 /** Binding writes are not all Babel referenced identifiers (notably `x =`). */
 export function isWriteTarget(path: NodePath<t.Identifier>): boolean {
@@ -160,7 +161,10 @@ export function isClosedFreshAllocationFactory(
         }
       },
       Identifier(reference) {
-        if (!reference.isReferencedIdentifier() && !isWriteTarget(reference))
+        if (
+          !isRuntimeSourceReference(reference) ||
+          (!reference.isReferencedIdentifier() && !isWriteTarget(reference))
+        )
           return;
         // Even a lexically bound arguments/eval is outside this initial subset.
         if (["arguments", "eval"].includes(reference.node.name)) {

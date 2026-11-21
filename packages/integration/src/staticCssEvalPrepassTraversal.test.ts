@@ -73,6 +73,7 @@ it.each([
   ["virtual:tokens", true, "/cache/tokens.data"],
   ["/src/theme#dark.ts", false, "/cache/tokens.data"],
   ["/src/theme.ts?variant=dark", false, "/cache/tokens.data"],
+  ["/src/theme.tsx?theme=/dark.js#preview", false, "/cache/tokens.data"],
   ["/src/loader-overrides.js", true, "/cache/archive.js#tokens.ts"]
 ] as const)(
   "evaluates TypeScript for graph ID %s (loader evidence %s, backing path %s)",

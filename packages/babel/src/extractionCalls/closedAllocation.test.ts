@@ -18,7 +18,8 @@ describe("closed returned allocation ownership", () => {
   it.each([
     `function factory(config) { return {css: style => style.color, cx: (...classes) => classes.join(" ")}; }`,
     `const factory = () => ({nested: [{color: "red"}], callback: value => {const local = value; return local;}});`,
-    `const factory = () => value => value;`
+    `const factory = () => value => value;`,
+    `const palette = {red: "red"}; const factory = () => ({make: (color: keyof typeof palette): keyof typeof palette => color});`
   ])("proves only the freshly allocated initial graph: %s", (source) =>
     expect(proves(source)).toBe(true)
   );
@@ -26,6 +27,7 @@ describe("closed returned allocation ownership", () => {
     `const shared={}; function factory() {return shared;}`,
     `const shared={}; function factory() {return {value: shared};}`,
     `const shared={}; function factory() {return {read: () => shared};}`,
+    `const palette = {red: "red"}; const factory = () => ({make: (color: keyof typeof palette) => palette[color]});`,
     `function factory(config) {return {read: () => config};}`,
     `function factory() {return {get value(){return {};}};}`,
     `function factory() {return {...{color:"red"}};}`,

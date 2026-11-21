@@ -1014,3 +1014,52 @@ it.each(["script", "module"] as const)(
     }
   }
 );
+
+it.each([
+  ["Math.max(?)", false],
+  ["Math.max.bind(Math, ?)(1)", false],
+  ["Math.max(...values)", true],
+  ["Math.max.bind(Math, 2)(1)", true]
+] as const)(
+  "requires completed invocation syntax for numeric result proof: %s",
+  (code, expected) => {
+    let invocation!: NodePath<t.CallExpression>;
+    traverse(
+      parseSync(code, {
+        configFile: false,
+        babelrc: false,
+        parserOpts: { plugins: ["partialApplication"] }
+      })!,
+      {
+        CallExpression(path) {
+          if (path.parentPath.isExpressionStatement()) invocation = path;
+        }
+      }
+    );
+    const environment = createMathIntrinsicEnvironment();
+    expect(environment.provesPrimitiveResult(invocation)).toBe(expected);
+  }
+);
+
+it.each([
+  ["const alias = eval; void alias;", false],
+  ["const eval=()=>1; const alias=eval; void alias;", true]
+] as const)(
+  "uses current ambient callable evidence for bind authority: %s",
+  (code, expected) => {
+    const environment = createMathIntrinsicEnvironment();
+    environment.observe(source(code).program);
+    expect(environment.snapshot().bindIntact).toBe(expected);
+  }
+);
+
+it("observes a sibling lexical alias read through an erased declaration", () => {
+  const first = source("const Shared=Math;");
+  const second = source(
+    "declare const Shared: object; const sample=Shared; Math.max(1,2);"
+  );
+  const environment = createMathIntrinsicEnvironment();
+  environment.observe(first.program);
+  environment.observe(second.program);
+  expect(environment.provesPrimitiveResult(second.call)).toBe(false);
+});

@@ -543,12 +543,38 @@ export async function processVanillaWithExecution(
       );
 
     let nativeOptions = options;
-    const ownership =
+    const runtimeOwnership =
       registeredRequire && options.serializeVirtualCssPath
         ? proveCssScopeOwnership(options.source, {
             cssScopeOrigins: options.cssScopeOrigins ?? []
           })
         : undefined;
+    const staticProgram =
+      !runtimeRegistration &&
+      options.staticStyles &&
+      options.serializeVirtualCssPath
+        ? readStaticStyleProgram(options.source)
+        : undefined;
+    const matchesStaticScope = (scope: FileScope) =>
+      staticProgram !== undefined &&
+      scope.filePath === staticProgram.scope.filePath &&
+      (scope.packageName || undefined) ===
+        (staticProgram.scope.packageName || undefined);
+    const staticModules =
+      staticProgram &&
+      options.cssScopeOrigins?.some(
+        ({ fileScope, runtime }) => !runtime && matchesStaticScope(fileScope)
+      )
+        ? staticStyleModules(staticProgram, options.filePath)
+        : undefined;
+    const ownership =
+      runtimeOwnership ??
+      (staticModules
+        ? {
+            modules: staticModules,
+            cssScopeOrigins: options.cssScopeOrigins ?? []
+          }
+        : undefined);
     if (ownership && options.serializeVirtualCssPath) {
       const source = options.source;
       const serialize = options.serializeVirtualCssPath;
@@ -604,8 +630,11 @@ export async function processVanillaWithExecution(
         verify = async () => {
           if (
             options.source !== source ||
-            validateCssScopeRuntimeOrigins(source, options.cssScopeOrigins)
-              ?.key !== ownership.registrationKey ||
+            (runtimeOwnership &&
+              validateCssScopeRuntimeOrigins(source, options.cssScopeOrigins)
+                ?.key !== runtimeOwnership.registrationKey) ||
+            (staticProgram &&
+              !staticStyleModules(staticProgram, options.filePath)) ||
             [...resolutions].some(
               ([name, path]) =>
                 require.resolve(name) !== path ||
@@ -632,11 +661,22 @@ export async function processVanillaWithExecution(
             // Upstream calls the serializer after synchronous evaluation.
             // Validate once before any serializer can mutate output directories.
             await (validated ??= validate());
-            const origin = resolveCssScopeOrigin(
+            if (runtimeOwnership) {
+              const origin = resolveCssScopeOrigin(
+                args.fileScope,
+                ownership.cssScopeOrigins
+              );
+              return serialize({ ...args, origin });
+            }
+
+            // The exact static program emits one scope. A mismatched upstream
+            // callback cannot claim its origin, even with caller metadata.
+            if (!matchesStaticScope(args.fileScope)) return serialize(args);
+            const origin = findCssScopeOrigin(
               args.fileScope,
               ownership.cssScopeOrigins
             );
-            return serialize({ ...args, origin });
+            return serialize(origin ? { ...args, origin } : args);
           }
         };
       }
@@ -1054,6 +1094,7 @@ async function evaluateVanilla(
     id: filePath,
     require: scopedRequire
   };
+  let registeredExports = module.exports;
 
   try {
     await measureCompilationPhase(
@@ -1129,9 +1170,9 @@ async function evaluateVanilla(
                 runtimeFactory
               );
               script.runInContext(realm);
-              // As in upstream eval, honor assignment to the script's module
-              // as well as assignment to module.exports.
-              module.exports = (realm.module as typeof module).exports;
+              // As in upstream eval, read the resulting realm module once,
+              // including replacements. Its exports need not be writable.
+              registeredExports = (realm.module as typeof module).exports;
             } else if (!cachedData || !context) {
               const evalCode = ownRequire("eval") as (
                 source: string,
@@ -1288,7 +1329,7 @@ async function evaluateVanilla(
 
     return serializeVanillaModule(
       [],
-      module.exports,
+      runtimeRegistration ? registeredExports : module.exports,
       unused.length ? new RegExp(`(${unused.join("|")})\\s`, "g") : null
     );
   };

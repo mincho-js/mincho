@@ -1057,6 +1057,137 @@ it.each(["same", "src/theme$$$dark.css.ts"])(
   }
 );
 
+it("uses the exact static program origin in native CSS-text fallback", async () => {
+  vi.resetModules();
+  vi.doMock("node:fs", async () => {
+    const original = await vi.importActual<typeof import("node:fs")>("node:fs");
+    return {
+      ...original,
+      readFileSync: (...args: Parameters<typeof original.readFileSync>) => {
+        const value = original.readFileSync(...args);
+        if (
+          typeof value !== "string" ||
+          !String(args[0]).includes("vanilla-extract-integration") ||
+          !String(args[0]).endsWith("package.json")
+        )
+          return value;
+        return JSON.stringify({
+          ...JSON.parse(value),
+          version: "0.0.0-unvalidated"
+        });
+      }
+    };
+  });
+  try {
+    const freshCompiler = await import("./compile.js");
+    const freshEvaluator = await import("./vanillaEvaluation.js");
+    const { readStaticStyleProgram } = await import("./staticStyles.js");
+    const compiled = await freshCompiler.compile({
+      filePath,
+      originalPath: filePath,
+      contents: `import {style} from '@vanilla-extract/css';
+        export const box=style({backgroundImage:'url("./logo.svg")'});`,
+      resolverCache: new Map(),
+      staticStyles: true
+    });
+    const program = readStaticStyleProgram(compiled.source);
+    expect(program).toBeDefined();
+    expect(compiled.cssScopeOrigins).toEqual([
+      { fileScope: program!.scope, origin: filePath }
+    ]);
+    const native = vi.fn((_value: { source: string; origin?: string }) => "");
+    const options = {
+      ...compiled,
+      filePath,
+      staticStyles: true,
+      serializeVirtualCssPath: native
+    };
+    await freshEvaluator.processVanillaWithExecution(options);
+    expect(native).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        fileScope: program!.scope,
+        origin: filePath,
+        source: expect.stringContaining("./logo.svg")
+      })
+    );
+    native.mockClear();
+    await freshEvaluator.processVanillaWithExecution({
+      ...options,
+      cssScopeOrigins: []
+    });
+    expect(native).toHaveBeenCalledTimes(1);
+    expect(native.mock.calls[0]![0].origin).toBeUndefined();
+
+    native.mockClear();
+    await freshEvaluator.processVanillaWithExecution({
+      ...options,
+      source: compiled.source + "\n// additional source text"
+    });
+    expect(native).toHaveBeenCalledTimes(1);
+    expect(native.mock.calls[0]![0].origin).toBeUndefined();
+
+    native.mockClear();
+    await expect(
+      freshEvaluator.processVanillaWithExecution({
+        ...options,
+        cssScopeOrigins: [
+          ...compiled.cssScopeOrigins,
+          { fileScope: program!.scope, origin: filePath + ".another" }
+        ]
+      })
+    ).rejects.toThrow("Ambiguous CSS file scope");
+    expect(native).not.toHaveBeenCalled();
+
+    await expect(
+      freshEvaluator.processVanillaWithExecution({
+        ...options,
+        serializeCssArtifact: () => ""
+      })
+    ).rejects.toThrow("requires the validated @vanilla-extract/integration");
+  } finally {
+    vi.doUnmock("node:fs");
+    vi.resetModules();
+  }
+});
+
+it.each(["read-only", "replace module", "single getter"] as const)(
+  "serializes ordinary CommonJS exports (%s) without a write-back",
+  async (mode) => {
+    const compiledInput = await compiled(`
+      require('@vanilla-extract/css').globalStyle('.ordinary-exports',{color:'red'});
+      ${
+        mode === "read-only"
+          ? "Object.defineProperty(module,'exports',{value:{label:'ordinary'},writable:false});"
+          : mode === "replace module"
+            ? "Object.freeze(module); module={exports:{label:'ordinary'}};"
+            : "let reads=0; Object.defineProperty(module,'exports',{get(){if(++reads>1)throw new Error('exports read twice');return {label:'ordinary'};}});"
+      }
+    `);
+    const input = { ...compiledInput, filePath };
+    const upstreamCss: string[] = [];
+    const registeredCss: string[] = [];
+    const upstream = await processVanillaFile({
+      ...input,
+      serializeVirtualCssPath(value) {
+        upstreamCss.push(value.source);
+        return "";
+      }
+    });
+    const registered = await processVanillaWithExecution({
+      ...input,
+      serializeVirtualCssPath(value) {
+        registeredCss.push(value.source);
+        return "";
+      }
+    });
+    expect(upstreamCss).toHaveLength(1);
+    expect(upstreamCss[0]).toContain("red");
+    expect(registeredCss).toEqual(upstreamCss);
+    expect(registered).toBe(upstream);
+    expect(registered).toMatch(/export var label = ['"]ordinary['"]/);
+  }
+);
+
 it("keeps upstream CSS-text fallback for unsupported adapter versions without granting artifact authority", async () => {
   vi.resetModules();
   vi.doMock("node:fs", async () => {

@@ -1088,7 +1088,7 @@ export function isDenseArrayIncludesCall(
     !path.isCallExpression() ||
     path.node.optional ||
     path.node.arguments.length !== 1 ||
-    t.isSpreadElement(path.node.arguments[0])
+    !t.isExpression(path.node.arguments[0])
   )
     return false;
   const callee = path.get("callee");

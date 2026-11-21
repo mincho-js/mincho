@@ -218,6 +218,13 @@ function hasLocalArrayReceiver(
   );
   let budget = 64;
   const checked = new Set<t.Node>();
+  // A classic script's other scripts can observe its top-level lexical
+  // bindings too, even when they aren't properties of the global object.
+  const confined = (binding: Binding) =>
+    !(
+      binding.scope.path.isProgram() &&
+      binding.scope.path.node.sourceType === "script"
+    );
   const origin = (
     name: string,
     use: NodePath<t.VariableDeclarator>
@@ -226,6 +233,7 @@ function hasLocalArrayReceiver(
     const binding = use.scope.getBinding(name);
     if (
       !binding?.constant ||
+      !confined(binding) ||
       !binding.path.isVariableDeclarator() ||
       !binding.path.get("id").isIdentifier()
     )
@@ -270,13 +278,7 @@ function hasLocalArrayReceiver(
   const closedUses = (declaration: NodePath<t.VariableDeclarator>): boolean => {
     if (--budget < 0 || !t.isIdentifier(declaration.node.id)) return false;
     const binding = declaration.scope.getBinding(declaration.node.id.name);
-    if (
-      !binding?.constant ||
-      (binding.kind === "var" &&
-        binding.scope.path.isProgram() &&
-        binding.scope.path.node.sourceType === "script")
-    )
-      return false;
+    if (!binding?.constant || !confined(binding)) return false;
     for (const reference of references(binding)) {
       const next = reference.parentPath;
       if (
@@ -418,6 +420,8 @@ export function everyPatternNodeExpression(
   } = { version: 0 }
 ): boolean {
   const version = effects.version;
+  // Unwrapping exposes syntax for selection, not the node identity a caller
+  // checked for replay of observable operations.
   const value = selected && unwrapTransparentCssRuleExpression(selected);
   // This exact root allocation is not reachable by the computed key before
   // binding begins. Nested literal aliases do not inherit this read authority.
@@ -486,7 +490,7 @@ export function everyPatternNodeExpression(
       effects.version++;
       return visit(pattern.left, "left", null);
     }
-    return visit(pattern.left, "left", defaulted ? pattern.right : value);
+    return visit(pattern.left, "left", defaulted ? pattern.right : selected);
   }
 
   const allowsAbsence = (member: string | null) =>
@@ -528,7 +532,10 @@ export function everyPatternNodeExpression(
         if (
           environment.requireReplaySafety &&
           !(effects.version === version && value && hasOnlyOwnData(value)) &&
-          !(value && environment.canReplayOwnRead?.(value, { kind: "rest" }))
+          !(
+            selected &&
+            environment.canReplayOwnRead?.(selected, { kind: "rest" })
+          )
         )
           return false;
         effects.version++; // CopyDataProperties may invoke getters.
@@ -557,8 +564,8 @@ export function everyPatternNodeExpression(
         selectedValue === null &&
         !inertOwnRead &&
         !(
-          value &&
-          environment.canReplayOwnRead?.(value, { kind: "get", key: member })
+          selected &&
+          environment.canReplayOwnRead?.(selected, { kind: "get", key: member })
         )
       )
         return false;
@@ -571,7 +578,7 @@ export function everyPatternNodeExpression(
     if (
       environment.requireReplaySafety &&
       (!environment.nativeArrayIteration ||
-        (!indexed && !(value && environment.canReplayIteration?.(value))))
+        (!indexed && !(selected && environment.canReplayIteration?.(selected))))
     )
       return false;
     // A native realm does not make an arbitrary receiver use Array iteration.
@@ -580,7 +587,7 @@ export function everyPatternNodeExpression(
     // This invalidates later sibling selection, independently of replay authority.
     if (!indexed) effects.version++;
     const exactIteration =
-      !!value && environment.canReplayIteration?.(value) === true;
+      !!selected && environment.canReplayIteration?.(selected) === true;
     const spread =
       t.isArrayExpression(value) &&
       value.elements.some((element) => t.isSpreadElement(element));

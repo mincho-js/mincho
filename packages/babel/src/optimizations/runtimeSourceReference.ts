@@ -311,16 +311,31 @@ export function isPossibleGlobalThis(
   return false;
 }
 
+/** Resolve emitted declarations, rather than type-only Babel binding shadows. */
+function resolveRuntimeBinding(
+  candidate: Binding | undefined,
+  name: string,
+  isCurrent: (binding: Binding) => boolean
+): Binding | undefined {
+  for (
+    let binding = candidate;
+    binding;
+    binding = binding.scope.parent?.getBinding(name)
+  ) {
+    if (!isCurrent(binding)) return;
+    if (isRuntimeSourceReference(binding.path)) return binding;
+  }
+}
+
 /** Ambient/type-only declarations are not emitted runtime shadows. */
 export function hasRuntimeBinding(
   path: NodePath<t.Node>,
   name: string
 ): boolean {
-  const binding = path.scope.getBinding(name);
   return (
-    !!binding &&
-    attachedPath(binding.path) &&
-    isRuntimeSourceReference(binding.path)
+    resolveRuntimeBinding(path.scope.getBinding(name), name, (binding) =>
+      attachedPath(binding.path)
+    ) !== undefined
   );
 }
 
@@ -384,8 +399,11 @@ export function hasLocalRuntimeShadow(
   path: NodePath<t.Node>,
   name: string
 ): boolean {
-  if (!hasRuntimeBinding(path, name)) return false;
-  const binding = path.scope.getBinding(name);
+  const binding = resolveRuntimeBinding(
+    path.scope.getBinding(name),
+    name,
+    (candidate) => attachedPath(candidate.path)
+  );
   return !!binding && !isPossibleScriptGlobalBinding(binding);
 }
 
@@ -609,14 +627,20 @@ export function collectRuntimeSourceEvidence(
     path: NodePath<t.Identifier | t.JSXIdentifier>,
     used: boolean
   ): void => {
-    const binding = path.scope.getBinding(path.node.name);
-    if (
-      binding &&
-      (binding.scope.getProgramParent().path.node !== program.node ||
-        !attachedPath(binding.path, children))
-    )
-      bindingsCurrent = false;
-    if (!used || binding?.identifier === path.node) return;
+    const name = path.node.name;
+    const candidate = path.scope.getBinding(name);
+    const isCurrent = (binding: Binding) => {
+      const current =
+        binding.scope.getProgramParent().path.node === program.node &&
+        attachedPath(binding.path, children);
+      if (!current) bindingsCurrent = false;
+      return current;
+    };
+    if (!used || candidate?.identifier === path.node) {
+      if (candidate) isCurrent(candidate);
+      return;
+    }
+    const binding = resolveRuntimeBinding(candidate, name, isCurrent);
     if (!binding) {
       unboundNames.add(path.node.name);
       return;
