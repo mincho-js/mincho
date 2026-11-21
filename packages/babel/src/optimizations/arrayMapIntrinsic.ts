@@ -517,11 +517,12 @@ function unexecutedPatternObservations(
       const keys = callee.get("object");
       if (!keys.isCallExpression() || keys.node.arguments.length !== 1) return;
       const method = keys.get("callee");
+      if (!method.isMemberExpression() || name(method) !== "keys") return;
+      const object = method.get("object");
       if (
-        !method.isMemberExpression() ||
-        name(method) !== "keys" ||
-        !method.get("object").isIdentifier({ name: "Object" }) ||
-        hasRuntimeBinding(method, "Object")
+        !object.isIdentifier({ name: "Object" }) ||
+        hasRuntimeBinding(object, "Object") ||
+        evidence.mayHaveUnmodeledShadow(object.scope, "Object")
       )
         return;
       let input: NodePath<t.Node> = keys.get("arguments")[0];

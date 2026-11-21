@@ -115,6 +115,7 @@ export type EvaluationStep =
   | { kind: "evaluate"; operand: Operand }
   | { kind: "coerce"; path: NodePath<t.Node> }
   | { kind: "observe"; path: NodePath<t.Node> }
+  | { kind: "abrupt"; path: NodePath<t.Node> }
   | { kind: "apply-decorator"; path: NodePath<t.Decorator> };
 
 type ReturnCompletion = "normal" | "possible-return" | "return";
@@ -460,6 +461,10 @@ export function planEvaluation(
     if (["+", "-", "~"].includes(path.node.operator))
       steps.push(coerce(path.get("argument")));
     if (plan.operation === "observation") steps.push(observe());
+    if (path.node.operator === "throw") {
+      steps.push({ kind: "abrupt", path });
+      plan.result = { kind: "unknown" };
+    }
   } else if (path.isBinaryExpression({ operator: "|>" })) {
     // Parser extensions may encode an arbitrary invocation as a binary node.
     // Its normal return value is not constrained to a primitive.
@@ -476,6 +481,22 @@ export function planEvaluation(
       steps.push(observe());
     } else if (!["===", "!=="].includes(path.node.operator)) {
       steps.push(...plan.operands.map((value) => coerce(value.path)));
+      const { operator, left, right } = path.node;
+      const dividend = t.isExpression(left)
+        ? unwrapTransparentCssRuleExpression(left)
+        : left;
+      const divisor = unwrapTransparentCssRuleExpression(right);
+      // A coercion receipt does not make BigInt division or remainder by zero
+      // complete. This bounded check inspects only literal operands.
+      if (
+        (operator === "/" || operator === "%") &&
+        t.isBigIntLiteral(dividend) &&
+        t.isBigIntLiteral(divisor) &&
+        /^(?:0[xob])?0+$/i.test(divisor.value.replaceAll("_", ""))
+      ) {
+        steps.push({ kind: "abrupt", path });
+        plan.result = { kind: "unknown" };
+      }
     }
   } else if (
     path.isAssignmentExpression() &&
@@ -611,6 +632,9 @@ export function proveEvaluationSteps(
       // The generated invocation is not the source expression evaluated above.
       // Even replay evidence for that expression cannot discharge application.
       return "unknown";
+    } else if (step.kind === "abrupt") {
+      // The operands can complete normally while this operation cannot.
+      return "unknown";
     } else if (step.kind === "observe") {
       proof = requirements.observe?.(step.path) ?? "unknown";
     } else if (step.kind === "coerce") {
@@ -736,8 +760,17 @@ function proveStableEvaluationValueUncached(
     context,
     requirePrimitive
   );
-  if (path.isIdentifier()) return result;
   if (result === "unknown") return "unknown";
+  // A stable value cannot discharge the binding's read at this position. In
+  // particular a replay receipt does not establish initialization.
+  if (path.isIdentifier()) {
+    const read = requirements.binding(path);
+    return read === "unknown"
+      ? "unknown"
+      : read === "pending" || result === "pending"
+        ? "pending"
+        : "proven";
+  }
   // Result evidence cannot schedule work. Replay the admitted expression
   // once, in source order, rather than replaying selected nested operands first.
   const order = proveEvaluationOrder(path, requirements, allowReplay, context);
@@ -962,7 +995,10 @@ function closedConditionExpression(
   if (isSupportedStaticCssPrimitiveLiteral(path.node))
     return t.cloneNode(path.node);
   if (
-    !(path.isUnaryExpression() && path.node.operator !== "delete") &&
+    !(
+      path.isUnaryExpression() &&
+      !["delete", "throw"].includes(path.node.operator)
+    ) &&
     !(
       path.isBinaryExpression() &&
       !["|>", "in", "instanceof"].includes(path.node.operator)

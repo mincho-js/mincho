@@ -1,3 +1,4 @@
+import { runInNewContext } from "node:vm";
 import { parseSync, traverse, types as t, type NodePath } from "@babel/core";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -358,6 +359,31 @@ describe("unexecuted empty-own-key observations", () => {
         for (const program of order) env.observe(program);
         expect(env.snapshot().iterationIntact).toBe(intact);
       }
+    }
+  );
+  it.each([
+    ["sloppy Annex B shadow", "", "Object", 1],
+    ["strict block-local shadow", '"use strict";', "Object", 0],
+    ["unrelated Annex B shadow", "", "Other", 0],
+    ["native empty keys", "", undefined, 0]
+  ] as const)(
+    "tracks callback reachability with %s",
+    (_case, directive, binding, visits) => {
+      const local = binding
+        ? `{ function ${binding}() {} ${binding}.keys = () => ["entry"]; }`
+        : "";
+      const text = `(function() {
+        ${directive}
+        ${local}
+        Object.keys({}).forEach(() => observe(globalThis));
+      })();`;
+      // The callback only calls a no-op observer. No intrinsics are modified.
+      const observe = vi.fn();
+      runInNewContext(text, { observe });
+      expect(observe).toHaveBeenCalledTimes(visits);
+      expect(observePatternRealm(source(text).program).iteration).toBe(
+        visits === 0
+      );
     }
   );
   it("withdraws all skipped-body effect assumptions after a later native-method overwrite", () => {

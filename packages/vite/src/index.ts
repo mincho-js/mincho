@@ -444,12 +444,23 @@ export function minchoVitePlugin(_options?: MinchoVitePluginOptions) {
 
   const devCssGuards = new Map<
     string,
-    ReturnType<typeof createMinchoViteEnvironmentPlugin>["processedCssGuard"]
+    Pick<
+      ReturnType<typeof createMinchoViteEnvironmentPlugin>,
+      "processedCssGuard" | "directCssGuard"
+    >
   >();
   const devCssGuard = {
     name: "mincho-dev-origin-free-css",
     applyToEnvironment(environment) {
-      return devCssGuards.get(environment.name) ?? false;
+      return devCssGuards.get(environment.name)?.processedCssGuard ?? false;
+    }
+  } satisfies Plugin;
+  const devDirectCssGuard = {
+    name: "mincho-dev-final-direct-css",
+    applyToEnvironment(environment) {
+      return environment.config.consumer === "client"
+        ? (devCssGuards.get(environment.name)?.directCssGuard ?? false)
+        : false;
     }
   } satisfies Plugin;
 
@@ -509,8 +520,10 @@ export function minchoVitePlugin(_options?: MinchoVitePluginOptions) {
           capture >= 0 &&
           Object.isExtensible(hostPlugins) &&
           !hostPlugins.includes(devCssGuard)
-        )
+        ) {
           (hostPlugins as Plugin[]).splice(capture, 0, devCssGuard);
+          (hostPlugins as Plugin[]).push(devDirectCssGuard);
+        }
       }
       await plugin.configResolved(resolvedConfig);
     },
@@ -529,14 +542,17 @@ export function minchoVitePlugin(_options?: MinchoVitePluginOptions) {
     async applyToEnvironment(environment) {
       // Providers may resolve different CSS in client and SSR environments.
       // Extraction, dependency, and virtual CSS state belong to one environment.
-      const { plugin: environmentPlugin, processedCssGuard } =
-        createMinchoViteEnvironmentPlugin(
-          _options,
-          diagnostics.fork(environment.name),
-          environment.name,
-          sharedAnalysis,
-          environment.config.consumer
-        );
+      const {
+        plugin: environmentPlugin,
+        processedCssGuard,
+        directCssGuard
+      } = createMinchoViteEnvironmentPlugin(
+        _options,
+        diagnostics.fork(environment.name),
+        environment.name,
+        sharedAnalysis,
+        environment.config.consumer
+      );
 
       await environmentPlugin.configResolved({
         ...config,
@@ -547,7 +563,10 @@ export function minchoVitePlugin(_options?: MinchoVitePluginOptions) {
       else pendingServerPlugins.add(environmentPlugin);
 
       if (config.command === "serve")
-        devCssGuards.set(environment.name, processedCssGuard);
+        devCssGuards.set(environment.name, {
+          processedCssGuard,
+          directCssGuard
+        });
 
       return environmentPlugin;
     }
@@ -1362,18 +1381,67 @@ function createMinchoViteEnvironmentPlugin(
     };
   }
 
+  function originFreeStylePublication(id: string) {
+    const request = virtualCssRequest(id);
+    if (request?.representation !== "css") return undefined;
+    const publication = cssState.publication(request.cacheId);
+    return publication?.origin === null ? publication : undefined;
+  }
+
+  // Vite's direct CSS flag. Unlike style JavaScript, ?direct remains CSS
+  // through every later Vite transform and supplies the native HTTP response.
+  const isDirectStyleRequest = (id: string) => /[?&]direct\b/.test(id);
+  // Vite reuses its transform context across the ordered hooks of one request.
+  // Carry the exact early publication, even if it retires before the tail.
+  const directPublications = new WeakMap<
+    Rollup.TransformPluginContext,
+    { id: string; publication: PublishedStylesheet }
+  >();
+  const directCssGuard = {
+    name: "mincho-validate-final-direct-css",
+    transform: {
+      order: "post",
+      handler(this: Rollup.TransformPluginContext, code: string, id: string) {
+        if (!isDirectStyleRequest(id)) return;
+        const receipt = directPublications.get(this);
+        if (!receipt) {
+          if (originFreeStylePublication(id))
+            throw new Error(
+              "[mincho] Cannot validate final origin-free direct CSS: unsupported Vite transform context."
+            );
+          return;
+        }
+        directPublications.delete(this);
+        if (receipt.id !== id)
+          throw new Error(
+            "[mincho] Generated direct stylesheet request changed during host processing."
+          );
+        finishCssView(receipt.publication, "style", id, code, []);
+      }
+    }
+  } satisfies Plugin;
+
   let buildProcessedCssGuardReady = false;
   const processedCssGuard = {
     name: "mincho-validate-origin-free-css",
-    transform(code: string, id: string) {
-      const request = virtualCssRequest(id);
-      const publication = request && cssState.publication(request.cacheId);
+    transform(this: Rollup.TransformPluginContext, code: string, id: string) {
+      const publication = originFreeStylePublication(id);
+      if (!publication) return;
+      const environment = this.environment;
+      const clientDirect =
+        environment?.mode === "dev" &&
+        environment.config.consumer === "client" &&
+        isDirectStyleRequest(id);
       if (
-        publication &&
-        request?.representation === "css" &&
-        publication.origin === null
+        clientDirect &&
+        environment.pluginContainer.getSortedPlugins?.("transform").at(-1) !==
+          directCssGuard
       )
-        finishCssView(publication, "style", id, code, []);
+        throw new Error(
+          "[mincho] Cannot validate final origin-free direct CSS: unsupported Vite transform order."
+        );
+      finishCssView(publication, "style", id, code, []);
+      if (clientDirect) directPublications.set(this, { id, publication });
     }
   } satisfies Plugin;
 
@@ -3017,7 +3085,7 @@ function createMinchoViteEnvironmentPlugin(
     return runRequest(id, "load-request", () => load.call(this, id));
   };
 
-  return { plugin, processedCssGuard };
+  return { plugin, processedCssGuard, directCssGuard };
 }
 
 let collectDefineRulesPresetViteRegistrySource:

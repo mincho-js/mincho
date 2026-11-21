@@ -240,6 +240,176 @@ describe("mincho with the Vite runtime", () => {
     }
   );
 
+  it.each([
+    "origin-free",
+    "attributed",
+    "unverified order",
+    "in-flight retirement"
+  ] as const)(
+    "validates final client direct CSS after ordered Vite transforms (%s)",
+    async (scope) => {
+      const root = await createFixture({
+        "src/entry.ts":
+          'import { css } from "@mincho-js/css"; export const cls = css({color:"red"});',
+        "src/icon.svg": '<svg xmlns="http://www.w3.org/2000/svg"/>'
+      });
+      const integration = await import("@mincho-js/integration");
+      const compile = vi.spyOn(integration, "compile").mockResolvedValue({
+        source: "compiled source",
+        watchFiles: [],
+        cssScopeOrigins: []
+      } as Awaited<ReturnType<typeof integration.compile>>);
+      let source = ".probe { color: red; }";
+      let styleRequest: string | undefined;
+      let enterPostTransform!: () => void;
+      let releasePostTransform!: () => void;
+      const inPostTransform = new Promise<void>((resolve) => {
+        enterPostTransform = resolve;
+      });
+      const resumePostTransform = new Promise<void>((resolve) => {
+        releasePostTransform = resolve;
+      });
+      const registry = vi
+        .spyOn(integration, "processDefineRulesPresetRegistryFile")
+        .mockImplementation(async ({ serializeVirtualCssPath }) => {
+          const cssImport = await serializeVirtualCssPath!({
+            fileName: "logical.css.ts",
+            fileScope: { filePath: "logical.css.ts" },
+            ...(scope === "attributed"
+              ? { origin: normalizePath(join(root, "src/entry.ts")) }
+              : {}),
+            source
+          });
+          styleRequest = /import "([^"]+)";/.exec(cssImport)?.[1];
+          return {
+            source: cssImport,
+            ancestorStyleSpecifiers: [],
+            registrySession: {
+              instances: [],
+              nextRegistrationIndex: 0,
+              nextRegistrationIndexByFileScope: {}
+            }
+          };
+        });
+      onTestFinished(() => {
+        compile.mockRestore();
+        registry.mockRestore();
+      });
+
+      const server = await createServer({
+        root,
+        configFile: false,
+        logLevel: "silent",
+        server: { host: "127.0.0.1", port: 0, watch: null },
+        plugins: [
+          minchoVitePlugin(),
+          {
+            name: "late-direct-css-probe",
+            configResolved(config) {
+              if (scope !== "unverified order") return;
+              // Simulate a later host extension appending a transform after
+              // Mincho has inserted its own default tail.
+              (config.plugins as Plugin[]).push({
+                name: "extra-host-tail",
+                transform: { order: "post", handler() {} }
+              });
+            },
+            transform: {
+              order: "post",
+              async handler(css, id) {
+                if (!/\.vanilla\.css\?direct(?:&|$)/.test(id)) return;
+                if (
+                  scope === "in-flight retirement" &&
+                  css.includes("color: blue;")
+                ) {
+                  enterPostTransform();
+                  await resumePostTransform;
+                }
+                return css.includes("color: blue;")
+                  ? css +
+                      '\n.local-icon { background-image: url("./icon.svg"); }'
+                  : css.replace("color: red;", "color: purple;");
+              }
+            }
+          }
+        ]
+      });
+      servers.push(server);
+      await server.listen();
+      const client = server.environments.client!;
+      await readCssPropOutput(client, "/src/entry.ts");
+      const owner = (await client.moduleGraph.getModuleByUrl("/src/entry.ts"))!;
+      const sidecar = [...owner.importedModules].find((module) =>
+        module.id?.startsWith("\0mincho-extracted-css:")
+      )!;
+      const code = (await client.transformRequest(sidecar.url))?.code;
+      const request = code?.match(
+        /import\s*["']([^"']+\.vanilla\.css(?:\?[^"']*)?)["']/
+      )?.[1];
+      expect(request).toBeDefined();
+      expect(styleRequest).toBeDefined();
+      const url = new URL(request!, server.resolvedUrls!.local[0]);
+      const getCss = () => fetch(url, { headers: { Accept: "text/css" } });
+
+      const cold = await getCss();
+      if (scope === "unverified order") {
+        expect(cold.status).toBe(500);
+        expect(await cold.text()).toMatch(
+          /Cannot validate final origin-free direct CSS.*unsupported Vite transform order/
+        );
+        // The regular style module still goes through our usual capture check.
+        expect(
+          (await client.transformRequest(styleRequest + "?import"))?.code
+        ).toContain("color: red;");
+        return;
+      }
+      expect(cold.status).toBe(200);
+      const prepared = await cold.text();
+      expect(prepared).toContain("color: purple;");
+      const warm = await getCss();
+      expect(warm.status).toBe(200);
+      expect(await warm.text()).toBe(prepared);
+
+      source = ".probe { color: blue; }";
+      client.moduleGraph.invalidateModule(sidecar);
+      await client.transformRequest(sidecar.url);
+      const fetching = getCss();
+      if (scope === "in-flight retirement") {
+        try {
+          await inPostTransform;
+          await client.pluginContainer.transform(
+            "export {};",
+            normalizePath(join(root, "src/entry.ts"))
+          );
+        } finally {
+          releasePostTransform();
+        }
+        const response = await fetching;
+        const body = await response.text();
+        expect(response.status, body).toBe(500);
+        expect(body).toMatch(
+          /Generated stylesheet changed during host processing/
+        );
+        return;
+      }
+      const response = await fetching;
+      const body = await response.text();
+      if (scope === "origin-free") {
+        expect(response.status, body).toBe(500);
+        expect(body).toMatch(
+          /processed an origin-free stylesheet.*physical origin/i
+        );
+      } else {
+        expect(response.status).toBe(200);
+        expect(body).toContain('url("./icon.svg")');
+        expect(url.pathname).toMatch(/^\/src\//);
+      }
+      const wrapped = await client.transformRequest(styleRequest + "?import");
+      expect(wrapped?.code).toContain("color: blue;");
+      expect(wrapped?.code).not.toContain("./icon.svg");
+    }
+  );
+
   it.each(["ssr", "rsc", "rsc-attributed"] as const)(
     "serves an origin-free stylesheet from its publishing %s environment",
     async (publisherName) => {

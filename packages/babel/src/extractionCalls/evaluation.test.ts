@@ -1,5 +1,10 @@
 import { hasPrimitiveInvocationResult } from "./primitiveInvocation.js";
-import { transformSync, type NodePath, types as t } from "@babel/core";
+import {
+  transformSync,
+  type NodePath,
+  type TransformOptions,
+  types as t
+} from "@babel/core";
 import { describe, expect, it } from "vitest";
 import {
   planEvaluation,
@@ -14,12 +19,14 @@ import {
 
 function expression<T>(
   source: string,
-  inspect: (path: NodePath<t.Expression>) => T
+  inspect: (path: NodePath<t.Expression>) => T,
+  parserOpts?: TransformOptions["parserOpts"]
 ): T {
   let result: T | undefined;
   transformSync(`const value = ${source};`, {
     configFile: false,
     babelrc: false,
+    parserOpts,
     plugins: [
       () => ({
         visitor: {
@@ -186,6 +193,7 @@ describe("extraction evaluation contracts", () => {
       expect(
         proveStableEvaluationValue(path, {
           ...requirements,
+          binding: (value) => (value === path ? "proven" : "unknown"),
           sharedValue: (value) => (value === path ? "proven" : "unknown")
         })
       ).toBe("proven");
@@ -1185,3 +1193,83 @@ it("keeps the entire test on the execution path when only its normal result is k
     expect(calls).toEqual(["record()", "kept()"]);
   });
 });
+
+it.each([
+  ["1n / 0n", false],
+  ["1n % 0x0n", false],
+  ["1 / 2", true],
+  ["1 / 0", true],
+  ['"rule-" + 2', true]
+] as const)(
+  "requires completion after operand coercion before later replay: %s",
+  (first, completes) => {
+    expression(`(${first}, later())`, (path) => {
+      const requested: string[] = [];
+      const requirements = {
+        replay(value: NodePath<t.Node>) {
+          requested.push(value.toString());
+          return "proven" as const;
+        },
+        binding: () => "unknown" as const
+      };
+      expect(proveEvaluationOrder(path, requirements)).toBe(
+        completes ? "proven" : "unknown"
+      );
+      expect(requested).toEqual(completes ? ["later()"] : []);
+      requested.length = 0;
+
+      // Even an explicit operand coercion receipt cannot prove the operator.
+      expect(
+        proveEvaluationOrder(path, {
+          ...requirements,
+          coerce: () => "proven"
+        })
+      ).toBe(completes ? "proven" : "unknown");
+      expect(requested).toEqual(completes ? ["later()"] : []);
+    });
+  }
+);
+
+it("keeps throw-expression operand evaluation but withholds later replay", () => {
+  expression(
+    "(throw first(), later())",
+    (path) => {
+      const requested: string[] = [];
+      expect(
+        proveEvaluationOrder(path, {
+          replay(value) {
+            requested.push(value.toString());
+            return "proven";
+          },
+          binding: () => "unknown"
+        })
+      ).toBe("unknown");
+      expect(requested).toEqual(["first()"]);
+    },
+    { plugins: ["throwExpressions"] }
+  );
+});
+
+it.each([
+  ["unknown", "proven", "unknown"],
+  ["proven", "unknown", "unknown"],
+  ["pending", "proven", "pending"],
+  ["proven", "pending", "pending"],
+  ["proven", "proven", "proven"]
+] as const)(
+  "requires identifier read safety (%s) and stable value evidence (%s)",
+  (read, result, expected) => {
+    expression("token", (path) => {
+      for (const valueFact of ["primitiveBinding", "sharedValue"] as const) {
+        expect(
+          proveStableEvaluationValue(path, {
+            // Owning replay is not proof that the identifier can be read.
+            replay: () => "proven",
+            binding: () => read,
+            [valueFact]: () => result
+          })
+        ).toBe(expected);
+      }
+    });
+  }
+);
