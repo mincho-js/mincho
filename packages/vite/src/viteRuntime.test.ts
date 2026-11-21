@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { createServer as createTcpServer, type AddressInfo } from "node:net";
 import { join } from "node:path";
 import {
   build,
@@ -1019,9 +1020,31 @@ describe("mincho with the Vite runtime", () => {
     }
   );
 
-  it.each(["icons", "100%", "literal%20dir"])(
-    "serves native CSS and its sibling SVG from the %s producer directory",
-    async (directory) => {
+  it.each([
+    ["icons", false],
+    ["100%", false],
+    ["literal%20dir", false],
+    ["literal%20dir", true],
+    ["aliased%20dir", false],
+    ["mixed%20dir", false]
+  ] as const)(
+    "serves native CSS and its sibling SVG from %s (server.origin: %s)",
+    async (directory, configuredOrigin) => {
+      let origin = "";
+      let countInline = false;
+      let inlineCalls = 0;
+      let port = 0;
+      if (configuredOrigin) {
+        const reservation = createTcpServer();
+        await new Promise<void>((resolve) =>
+          reservation.listen(0, "127.0.0.1", resolve)
+        );
+        port = (reservation.address() as AddressInfo).port;
+        await new Promise<void>((resolve, reject) =>
+          reservation.close((error) => (error ? reject(error) : resolve()))
+        );
+        origin = "http://127.0.0.1:" + port;
+      }
       const root = await createFixture({
         "src/icon.svg": '<svg xmlns="http://www.w3.org/2000/svg" fill="blue"/>'
       });
@@ -1035,25 +1058,121 @@ describe("mincho with the Vite runtime", () => {
       }
       const producer = join(root, "src", directory);
       await mkdir(producer);
+      const fragmentAsset =
+        directory === "mixed%20dir"
+          ? "icon.svg"
+          : directory === "100%"
+            ? "icon.svg?no-inline"
+            : "fragment.svg";
       await writeFile(
         join(producer, "producer.ts"),
-        `import { css } from "@mincho-js/css"; export const cls = css({ backgroundImage: 'url("./icon.svg")', maskImage: 'url("./icon.svg?no-inline")' });`
+        `import { css } from "@mincho-js/css"; export const cls = css({ backgroundImage: 'url("./icon.svg")', maskImage: 'url("./icon.svg?no-inline")', clipPath: 'url("./${fragmentAsset}#shape")' });`
       );
       await writeFile(
         join(producer, "icon.svg"),
-        '<svg xmlns="http://www.w3.org/2000/svg" fill="orange"/>'
+        '<svg xmlns="http://www.w3.org/2000/svg" id="shape" fill="orange"/>'
       );
+      await writeFile(
+        join(producer, "fragment.svg"),
+        '<svg xmlns="http://www.w3.org/2000/svg"><path id="shape"/></svg>'
+      );
+      if (directory === "aliased%20dir") {
+        await writeFile(
+          join(producer, "chosen.svg"),
+          '<svg xmlns="http://www.w3.org/2000/svg" fill="green"/>'
+        );
+      }
       const server = await createServer({
         root,
-        base: "/preview%20assets/",
+        resolve:
+          directory === "aliased%20dir"
+            ? {
+                alias: [
+                  {
+                    find: "./icon.svg?no-inline",
+                    replacement: join(producer, "chosen.svg?no-inline")
+                  }
+                ]
+              }
+            : undefined,
+        base:
+          directory === "literal%20dir" ? "/preview/" : "/preview%20assets/",
         configFile: false,
         logLevel: "silent",
-        server: { host: "127.0.0.1", port: 0, watch: null },
-        plugins: [minchoVitePlugin()]
+        build:
+          directory === "100%"
+            ? {
+                assetsInlineLimit(file) {
+                  if (countInline && file === join(producer, "icon.svg"))
+                    inlineCalls++;
+                  return true;
+                }
+              }
+            : undefined,
+        server: {
+          host: "127.0.0.1",
+          port,
+          strictPort: configuredOrigin,
+          preTransformRequests: false,
+          origin: origin || undefined,
+          watch: null
+        },
+        css: {
+          postcss: {
+            plugins: [
+              {
+                postcssPlugin: "add-browser-urls-after-native-resolution",
+                Once(sheet) {
+                  if (directory !== "literal%20dir") return;
+                  sheet.walkDecls("mask-image", (decl) => {
+                    if (decl.value.includes("./icon.svg?no-inline"))
+                      decl.cloneAfter({
+                        prop: "--original-input",
+                        value: "yes"
+                      });
+                  });
+                },
+                OnceExit(sheet) {
+                  if (directory !== "literal%20dir") return;
+                  const path = "/preview/src/literal%20dir/icon.svg";
+                  sheet.walkDecls("mask-image", (declaration) => {
+                    declaration.cloneAfter({
+                      prop: "--from-origin",
+                      value: `url("${origin}${path}")`
+                    });
+                    declaration.cloneAfter({
+                      prop: "--from-root",
+                      value: `url("${path}")`
+                    });
+                    const href =
+                      declaration.value.match(/url\(["']?([^"')]+)/)?.[1];
+                    const mirror = new URL(path, origin);
+                    mirror.search = new URL(href!, origin).search;
+                    declaration.cloneAfter({
+                      prop: "--from-mirror",
+                      value: `url("${mirror.href}")`
+                    });
+                  });
+                }
+              }
+            ]
+          }
+        },
+        plugins: [
+          {
+            name: "watch-unrelated-asset",
+            transform(_code, id) {
+              if (id.includes(".vanilla.css"))
+                this.addWatchFile(join(producer, "icon.svg"));
+            }
+          },
+          minchoVitePlugin()
+        ]
       });
       servers.push(server);
       await server.listen();
       const base = server.resolvedUrls!.local[0];
+      origin = new URL(base!).origin;
       const ownerUrl = `src/${directory}/producer.ts`;
       const owner = await fetch(new URL(encodeURI(ownerUrl), base));
       expect(owner.status).toBe(200);
@@ -1067,10 +1186,20 @@ describe("mincho with the Vite runtime", () => {
         /import\s*["']([^"']+\.vanilla\.css(?:\?[^"']*)?)["']/
       )?.[1];
       expect(href).toBeDefined();
+      countInline = true;
       const response = await fetch(new URL(href!, base), {
         headers: { Accept: "text/css" }
       });
       const css = await response.text();
+      countInline = false;
+      if (directory === "100%") expect(inlineCalls).toBe(1);
+      if (directory === "mixed%20dir") {
+        expect(response.status).toBe(500);
+        expect(css).toContain(
+          "Vite cannot distinguish inline and fragment SVG uses"
+        );
+        return;
+      }
       expect(response.status, href).toBe(200);
       expect(css).toMatch(
         /background-image:\s*url\(["']?data:image\/svg\+xml,[^;]*orange/
@@ -1081,7 +1210,54 @@ describe("mincho with the Vite runtime", () => {
       expect(external).toBeDefined();
       const asset = await fetch(new URL(external!, response.url));
       expect(asset.status, external).toBe(200);
-      expect(await asset.text()).toContain('fill="orange"');
+      expect(await asset.text()).toContain(
+        directory === "aliased%20dir" ? 'fill="green"' : 'fill="orange"'
+      );
+      const clipped = css.match(/clip-path:\s*url\(["']?([^"')]+)/)?.[1];
+      expect(clipped).toMatch(/#shape$/);
+      expect(
+        await (await fetch(new URL(clipped!, response.url))).text()
+      ).toContain('id="shape"');
+      if (directory === "literal%20dir") {
+        expect(css).toMatch(/--original-input:\s*yes/);
+        for (const property of [
+          "--from-origin",
+          "--from-root",
+          "--from-mirror"
+        ]) {
+          const href = css.match(
+            new RegExp(property + ":\\s*url\\([\"']?([^\"')]+)")
+          )?.[1];
+          const input = "/preview/src/literal%20dir/icon.svg";
+          const expected = property === "--from-root" ? input : origin + input;
+          expect(href).toBe(
+            expected + (property === "--from-mirror" ? "?no-inline" : "")
+          );
+          const network = await fetch(new URL(href!, response.url));
+          expect(network.status).toBe(200);
+          expect(await network.text(), property).toContain('fill="blue"');
+        }
+      }
+      const ssr = server.environments.ssr!;
+      await readCssPropOutput(ssr, "/" + ownerUrl);
+      const ssrOwner = (await ssr.moduleGraph.getModuleByUrl("/" + ownerUrl))!;
+      const ssrSidecar = [...ssrOwner.importedModules].find((child) =>
+        child.id?.startsWith("\0mincho-extracted-css:")
+      )!;
+      const sheet = [...ssrSidecar.importedModules].find((child) =>
+        child.id?.includes(".vanilla.css")
+      )!;
+      const ssrCss = (
+        await ssr.pluginContainer.transform(
+          (await ssr.pluginContainer.load(sheet.id!)) as string,
+          sheet.id! + "?direct"
+        )
+      ).code;
+      const ssrHref = ssrCss.match(/mask-image:\s*url\(["']?([^"')]+)/)?.[1];
+      expect(ssrHref).toBeDefined();
+      expect(await (await fetch(new URL(ssrHref!, base))).text()).toContain(
+        directory === "aliased%20dir" ? 'fill="green"' : 'fill="orange"'
+      );
       const styleModule = await fetch(new URL(href!, base));
       expect(styleModule.status).toBe(200);
       expect(await styleModule.text()).toContain(external!);

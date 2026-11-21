@@ -1,7 +1,6 @@
 import { parseSync } from "@babel/core";
 import {
   parse as parseCss,
-  generate as generateCss,
   walk as walkCss,
   lexer as cssLexer
 } from "css-tree";
@@ -55,7 +54,7 @@ import MagicString from "magic-string";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, randomUUID } from "node:crypto";
 import * as fs from "node:fs";
-import { dirname, join, posix, resolve } from "node:path";
+import { dirname, isAbsolute, join, posix, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import type {
   DevEnvironment,
@@ -369,7 +368,7 @@ function isViteInlineRequest(id: string): boolean {
   return /[?&]inline\b/.test(id);
 }
 
-function viteInlineCssResult(code: string): string | undefined {
+function viteStringModuleValue(code: string): string | undefined {
   try {
     const body = parseSync(code, {
       babelrc: false,
@@ -448,7 +447,10 @@ export function minchoVitePlugin(_options?: MinchoVitePluginOptions) {
     string,
     Pick<
       ReturnType<typeof createMinchoViteEnvironmentPlugin>,
-      "processedCssGuard" | "directCssGuard" | "captureDirectCss"
+      | "processedCssGuard"
+      | "directCssGuard"
+      | "captureDirectCss"
+      | "resolvePublishedAsset"
     >
   >();
   const devCssGuard = {
@@ -528,6 +530,53 @@ export function minchoVitePlugin(_options?: MinchoVitePluginOptions) {
       // Insert only our own adapter; never change another plugin's hooks or
       // reorder its callbacks. Each actual environment verifies the position.
       if (config.command === "serve") {
+        const configuredAliases = [...config.resolve.alias];
+        // Vite's CSS resolver uses the public alias resolver, including the
+        // configured alias order and custom resolvers. Keep the original
+        // rules intact for Vite's own absolute URL and static-file handling.
+        config.resolve.alias.unshift({
+          find: /^(?![\0/#?]|[a-z][a-z0-9+.-]*:)/i,
+          replacement: "",
+          async customResolver(input, importer, options) {
+            const entry = configuredAliases.find(({ find }) =>
+              typeof find === "string"
+                ? input === find || input.startsWith(find + "/")
+                : find.test(input)
+            );
+            const custom = entry?.customResolver;
+            const previous =
+              typeof custom === "function" ? custom : custom?.resolveId;
+            let selected: Rollup.ResolveIdResult;
+            if (entry) {
+              const mapped = input.replace(entry.find, entry.replacement);
+              if (previous)
+                selected = await previous.call(this, mapped, importer, options);
+              else {
+                selected = await this.resolve(mapped, importer, {
+                  skipSelf: true,
+                  ...options
+                });
+                if (!selected) {
+                  if (!isAbsolute(mapped))
+                    this.warn(
+                      `Unresolved relative alias for ${input}: ${mapped}`
+                    );
+                  return { id: mapped };
+                }
+              }
+            }
+            if (!importer?.includes(".vanilla.css")) return selected;
+            const adapter = devCssGuards.get(this.environment.name);
+            return (
+              (await adapter?.resolvePublishedAsset(
+                this,
+                input,
+                importer,
+                selected
+              )) ?? selected
+            );
+          }
+        });
         const hostPlugins = config.plugins;
         const capture = Array.isArray(hostPlugins)
           ? cssCaptureIndex(hostPlugins)
@@ -563,6 +612,7 @@ export function minchoVitePlugin(_options?: MinchoVitePluginOptions) {
         plugin: environmentPlugin,
         processedCssGuard,
         captureDirectCss,
+        resolvePublishedAsset,
         directCssGuard
       } = createMinchoViteEnvironmentPlugin(
         _options,
@@ -584,6 +634,7 @@ export function minchoVitePlugin(_options?: MinchoVitePluginOptions) {
         devCssGuards.set(environment.name, {
           processedCssGuard,
           captureDirectCss,
+          resolvePublishedAsset,
           directCssGuard
         });
 
@@ -992,7 +1043,9 @@ function createMinchoViteEnvironmentPlugin(
       publication,
       usage,
       hostId,
-      usage === "data" && code !== undefined ? viteInlineCssResult(code) : code,
+      usage === "data" && code !== undefined
+        ? viteStringModuleValue(code)
+        : code,
       [...files]
     );
   }
@@ -1018,7 +1071,6 @@ function createMinchoViteEnvironmentPlugin(
     const request = virtualCssRequest(id);
     const cacheOnly = request?.physicalPath.startsWith(unattributedCssPrefix);
     if (
-      ssrCssRoute &&
       request &&
       !cacheOnly &&
       cssState.publication(request.cacheId) === undefined
@@ -1448,16 +1500,15 @@ function createMinchoViteEnvironmentPlugin(
   function encodeDevFileUrl(
     url: string,
     paths: ReadonlySet<string>,
-    base: string,
-    hostBase = base
+    base: string
   ) {
-    if (!url.startsWith(hostBase)) return;
-    const path = url.slice(hostBase.length).split(/[?#]/, 1)[0]!;
+    if (!url.startsWith(base)) return;
+    const path = url.slice(base.length).split(/[?#]/, 1)[0]!;
     if (paths.has(path))
       return (
         base +
         path.replaceAll("%", "%25") +
-        url.slice(hostBase.length + path.length)
+        url.slice(base.length + path.length)
       );
   }
 
@@ -1469,65 +1520,143 @@ function createMinchoViteEnvironmentPlugin(
       };
   }
 
-  function encodeDevAssetUrls(
-    ctx: Rollup.TransformPluginContext,
-    code: string,
-    id: string,
-    publication: PublishedStylesheet
-  ) {
-    if (
-      !publication.origin ||
-      !dirname(publication.origin).includes("%") ||
-      !code.includes("%") ||
-      ctx.environment?.mode !== "dev"
-    )
-      return;
-    // Before vite:css-post captures these bytes, Vite 7 holds the files from
-    // this transform in the same set vite:css-analysis uses for file-only nodes.
-    const inputs = (ctx as { _addedImports?: ReadonlySet<string> })
-      ._addedImports;
-    if (!inputs?.size) return;
-    const paths = new Set<string>();
-    const origin = config.server.origin ?? "";
-    const mount = config.base.replace(/\/$/, "");
-    // Native asset URLs use decodedBase; module import URLs use base.
-    const hostBase = origin + decodeURI(mount);
-    const base = origin + mount;
-    const root = normalizePath(config.root).replace(/\/$/, "") + "/";
-    for (const input of inputs) {
-      const file = normalizePath(input).split(/[?#]/, 1)[0]!;
-      const path = file.startsWith(root)
-        ? "/" + file.slice(root.length)
-        : posix.join("/@fs", file);
-      if (path.includes("%")) paths.add(path);
-    }
-    if (!paths.size) return;
-    let edited: MagicString | undefined;
-    let ast: ReturnType<typeof parseCss>;
-    try {
-      ast = parseCss(code, { positions: true, parseCustomProperty: true });
-    } catch {
-      return; // Preserve native output for syntax css-tree cannot represent.
-    }
+  const assetRoute = "@mincho/asset/" + randomUUID() + "/";
+  const devAssets = new WeakMap<
+    PublishedStylesheet,
+    { files: Set<string>; urls: Map<string, string> }
+  >();
+  const authoredAssets = new WeakMap<
+    PublishedStylesheet,
+    Map<string, Set<string>>
+  >();
+  function authoredAssetSpecifiers(publication: PublishedStylesheet) {
+    const cached = authoredAssets.get(publication);
+    if (cached) return cached;
+    const specifiers = new Map<string, Set<string>>();
+    const ast = parseCss(publication.source, { parseCustomProperty: true });
     walkCss(ast, function (node) {
       if (
+        node.type !== "Url" &&
         !(
-          node.type === "Url" ||
-          (node.type === "String" &&
-            /^(?:-webkit-)?image-set$/i.test(this.function?.name ?? ""))
-        ) ||
-        !node.loc
+          node.type === "String" &&
+          /^(?:-webkit-)?image-set$/i.test(this.function?.name ?? "")
+        )
       )
         return;
-      const encoded = encodeDevFileUrl(node.value, paths, base, hostBase);
-      if (!encoded) return;
-      (edited ??= new MagicString(code)).update(
-        node.loc.start.offset,
-        node.loc.end.offset,
-        generateCss({ ...node, value: encoded })
-      );
+      if (/^(?:[/#?]|[a-z][a-z0-9+.-]*:)/i.test(node.value)) return;
+      let decoded: string;
+      try {
+        decoded = decodeURI(node.value);
+      } catch {
+        return;
+      }
+      const path = decoded.split("#", 1)[0]!;
+      const fragments = specifiers.get(path) ?? new Set<string>();
+      fragments.add(decoded.slice(path.length));
+      specifiers.set(path, fragments);
     });
-    return renderDevUrlEdits(edited, id);
+    authoredAssets.set(publication, specifiers);
+    return specifiers;
+  }
+
+  async function resolvePublishedAsset(
+    ctx: Rollup.PluginContext,
+    specifier: string,
+    importer: string,
+    prior?: Rollup.ResolveIdResult
+  ) {
+    const request = virtualCssRequest(importer);
+    if (request?.representation !== "css") return null;
+    const publication = cssState.publication(request.cacheId);
+    if (!publication?.origin || !dirname(publication.origin).includes("%"))
+      return null;
+    const fragments = authoredAssetSpecifiers(publication).get(specifier);
+    if (!fragments) return null;
+    // This callback is in Vite's CSS resolver, after PostCSS Once hooks.
+    // Delegate the actual input to that resolver before issuing a browser URL.
+    const result =
+      prior ?? (await ctx.resolve(specifier, importer, { skipSelf: true }));
+    const selected = typeof result === "string" ? { id: result } : result;
+    if (!selected || selected.external) return selected;
+    const file = selected.id.split(/[?#]/, 1)[0]!;
+    const root = normalizePath(config.root).replace(/\/$/, "") + "/";
+    if (
+      !isAbsolute(file) ||
+      !(file.startsWith(root) ? file.slice(root.length) : file).includes("%")
+    )
+      return selected;
+    const host = server?.environments[environment];
+    if (!host) return selected;
+    const suffix = selected.id.slice(file.length);
+    const assetId =
+      file + "?url" + (suffix.startsWith("?") ? "&" + suffix.slice(1) : suffix);
+    const nativeUrl = async (id: string) => {
+      const loaded = await host.pluginContainer.load(id);
+      const module = typeof loaded === "string" ? loaded : loaded?.code;
+      return module && viteStringModuleValue(module);
+    };
+    let assets = devAssets.get(publication);
+    if (!assets) {
+      assets = { files: new Set(), urls: new Map() };
+      devAssets.set(publication, assets);
+    }
+    assets.files.add(file);
+    const inlineSelection = () => {
+      if (
+        typeof host.config.build.assetsInlineLimit !== "function" ||
+        isViteInlineRequest(selected.id)
+      )
+        return selected;
+      // The host has already called the user's sizing callback for this file.
+      return {
+        ...selected,
+        id: selected.id + (suffix ? "&inline" : "?inline")
+      };
+    };
+    let url = await nativeUrl(assetId);
+    if (url?.startsWith("data:")) {
+      const fragment = [...fragments].find(Boolean);
+      if (!fragment || !file.endsWith(".svg")) return inlineSelection();
+      // Vite removes the fragment before resolveId, yet its SVG inliner
+      // considers it. Preserve its choice when that input is unambiguous.
+      url = await nativeUrl(selected.id + fragment);
+      if (url?.startsWith("data:")) return inlineSelection();
+      if (fragments.has(""))
+        throw new Error(
+          "[mincho] Vite cannot distinguish inline and fragment SVG uses of this CSS asset in a percent directory. Use ?no-inline on the fragment reference."
+        );
+    }
+    const nativeBase = (config.server.origin ?? "") + config.base;
+    if (!url?.startsWith(nativeBase))
+      throw new Error(
+        "[mincho] Vite did not supply a local URL for a generated CSS asset."
+      );
+    const path = url.split(/[?#]/, 1)[0]!;
+    const physicalPath = file.startsWith(root)
+      ? "/" + file.slice(root.length)
+      : posix.join("/@fs", file);
+    if (path !== nativeBase.replace(/\/$/, "") + encodeURI(physicalPath))
+      throw new Error(
+        "[mincho] Vite's asset URL does not identify the resolved CSS asset."
+      );
+    if (cssState.publication(publication.id) !== publication)
+      throw new Error(
+        "[mincho] Generated stylesheet changed during host processing."
+      );
+    const sheet = attributedCssRouteKey(publication.id);
+    attributedCssRoutes.set(sheet, publication.id);
+    const key = createHash("sha256").update(path).digest("hex");
+    assets.urls.set(key, path);
+    // This is a registered external asset, so its virtual ID has no SVG
+    // extension. Vite appends the actual CSS fragment after this resolver.
+    return (
+      root +
+      assetRoute +
+      sheet +
+      "/" +
+      key +
+      url.slice(path.length).split("#", 1)[0]
+    );
   }
 
   // Vite 7's import analysis prints the filesystem ID verbatim. Encode the
@@ -1618,8 +1747,11 @@ function createMinchoViteEnvironmentPlugin(
         directPublications.get(this)?.publication ??
         cssState.publication(request.cacheId);
       if (!publication) return;
-      if (publication.origin !== null)
-        return encodeDevAssetUrls(this, code, id, publication);
+      if (publication.origin !== null) {
+        for (const file of devAssets.get(publication)?.files ?? [])
+          this.addWatchFile(file);
+        return;
+      }
       const environment = this.environment;
       const clientDirect =
         environment?.mode === "dev" &&
@@ -1790,6 +1922,31 @@ function createMinchoViteEnvironmentPlugin(
 
     configureServer(this: void, serverInstance: ViteDevServer) {
       server = serverInstance;
+      server.middlewares.use((request, response, next) => {
+        const path = request.url?.split("?", 1)[0];
+        const prefix = config.base + assetRoute;
+        if (!path?.startsWith(prefix)) return next();
+        const [sheet, key, ...extra] = path.slice(prefix.length).split("/");
+        const id = sheet && attributedCssRoutes.get(sheet);
+        const publication = id && cssState.publication(id);
+        const asset =
+          publication &&
+          key &&
+          !extra.length &&
+          devAssets.get(publication)?.urls.get(key);
+        if (!asset || !/^(?:GET|HEAD)$/.test(request.method ?? "")) {
+          response.statusCode = 404;
+          response.end();
+          return;
+        }
+        response.statusCode = 307;
+        response.setHeader("Cache-Control", "no-store");
+        response.setHeader(
+          "Location",
+          asset + (request.url?.slice(path.length) ?? "")
+        );
+        response.end();
+      });
       if (!ssrCssRoute) return;
       const publisher = server.environments[environment];
       server.middlewares.use(async (request, response, next) => {
@@ -3292,7 +3449,13 @@ function createMinchoViteEnvironmentPlugin(
     return runRequest(id, "load-request", () => load.call(this, id));
   };
 
-  return { plugin, processedCssGuard, directCssGuard, captureDirectCss };
+  return {
+    plugin,
+    processedCssGuard,
+    directCssGuard,
+    captureDirectCss,
+    resolvePublishedAsset
+  };
 }
 
 let collectDefineRulesPresetViteRegistrySource:
