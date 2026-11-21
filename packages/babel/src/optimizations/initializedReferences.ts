@@ -1,7 +1,7 @@
 import type { NodePath, types as t } from "@babel/core";
 
 /** A completed declaration must dominate the read in the same execution scope. */
-function initializedBefore(
+export function initializedBefore(
   declaration: NodePath<t.VariableDeclarator>,
   reference: NodePath<t.Node>
 ): boolean {
@@ -25,14 +25,15 @@ function initializedBefore(
 
   if (use.isFunction() || use.isClass()) return false;
 
-  return (
-    statement.inList &&
-    use.inList &&
-    statement.listKey === use.listKey &&
-    typeof statement.key === "number" &&
-    typeof use.key === "number" &&
-    statement.key < use.key
-  );
+  if (!statement.inList || !use.inList || statement.listKey !== use.listKey)
+    return false;
+  const body: readonly t.Node[] = container.node.body;
+  const currentIndex = (path: NodePath<t.Node>) =>
+    typeof path.key === "number" && body[path.key] === path.node
+      ? path.key
+      : body.indexOf(path.node);
+  const declarationIndex = currentIndex(statement);
+  return declarationIndex >= 0 && declarationIndex < currentIndex(use);
 }
 
 /**

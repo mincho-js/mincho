@@ -16,7 +16,7 @@ try {
     const load = (id) => (mode === "import" ? import(id) : require(id));
     const integration = await load("@mincho-js/integration");
     const registry = await load("@mincho-js/css/defineRules/registry");
-    const { source } = await integration.compile({
+    const { source, cssScopeOrigins } = await integration.compile({
       filePath,
       originalPath: filePath,
       contents,
@@ -50,6 +50,7 @@ try {
                 integration.runDefineRulesPresetRegistryStep(() =>
                   integration.processDefineRulesPresetRegistryFile({
                     source,
+                    cssScopeOrigins,
                     filePath,
                     serializeVirtualCssPath: ({ source: text }) => {
                       registry.getActiveDefineRulesRegistrySession()
@@ -94,12 +95,24 @@ try {
             .builds.flatMap((build) => build.events);
           const count = (phase) =>
             events.filter((event) => event.phase === phase).length;
+          // Registered scope receipts use the internal evaluator even in fresh
+          // mode: both executions are measured, without pooling or result reuse.
           assert.equal(
             count("vm-evaluate"),
-            evaluation !== "fresh" ? (evaluationResults ? 1 : 2) : 0
+            evaluation === "fresh" ? 2 : evaluationResults ? 1 : 2
           );
+          if (evaluation === "fresh") {
+            assert.deepEqual(
+              events
+                .filter((event) => event.phase.startsWith("vm-"))
+                .map((event) => event.phase),
+              ["vm-evaluate", "vm-evaluate"]
+            );
+          }
+          // Registered cache hits retain Script bytecode, never a realm.
+          assert.equal(count("vm-context-reuse"), 0);
           assert.equal(
-            count("vm-context-reuse"),
+            count("vm-script-hit"),
             evaluation !== "fresh" && !evaluationResults ? 1 : 0
           );
           assert.equal(

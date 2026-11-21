@@ -210,6 +210,7 @@ export function createStaticStyleSource(input: {
   rootPath: string;
   packageName: string;
   filePath: string;
+  scopeFilePath?: string;
 }): string | undefined {
   if (Buffer.byteLength(input.contents) > 1024 * 1024) return;
 
@@ -239,10 +240,9 @@ export function createStaticStyleSource(input: {
     const program: StaticStyleProgram = {
       version: 1,
       scope: {
-        filePath: relative(input.rootPath, input.originalPath).replace(
-          /\\/g,
-          "/"
-        ),
+        filePath:
+          input.scopeFilePath ??
+          relative(input.rootPath, input.originalPath).replace(/\\/g, "/"),
         packageName: input.packageName
       },
       modules: [],

@@ -1340,7 +1340,7 @@ export class ImportedStaticCssEvalResolver {
       diagnostic: createStaticCssEvalUnresolvedExportDiagnostic(
         {
           owner: state.owner,
-          dependency: { file: record.id },
+          dependency: { file: record.resolvedFile ?? record.id },
           importPath: request.specifier,
           exportName: request.exportName,
           memberPath: request.memberPath,

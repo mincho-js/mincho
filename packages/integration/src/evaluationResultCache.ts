@@ -1,3 +1,7 @@
+import {
+  snapshotCssScopeOrigins,
+  validateCssScopeRuntimeOrigins
+} from "./fileScopeRuntime.js";
 import { createRequire } from "node:module";
 import { readdir } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
@@ -17,6 +21,7 @@ import {
   evaluationEnvironment,
   processVanillaWithExecution,
   replayVanillaEvaluation,
+  registeredEvaluationRequire,
   type SerializedVanillaEvaluation,
   type VanillaOptions
 } from "./vanillaEvaluation.js";
@@ -59,12 +64,21 @@ export async function processCachedEvaluation<T>(
   session: DefineRulesRegistrySession,
   consume: (source: string) => T | Promise<T>
 ): Promise<T> {
+  options = {
+    ...options,
+    cssScopeOrigins: snapshotCssScopeOrigins(options.cssScopeOrigins)
+  };
+  const runtimeRegistration = validateCssScopeRuntimeOrigins(
+    options.source,
+    options.cssScopeOrigins
+  );
   const execution = currentCompilationExecution();
   const cache = execution?.compilationCache;
 
   const fresh = () => processVanillaWithExecution(options, consume);
 
   if (
+    (options.serializeCssArtifact && !options.cssScopeOrigins) ||
     !cache ||
     !cache.evaluationResults ||
     !execution?.cacheEnabled ||
@@ -73,17 +87,29 @@ export async function processCachedEvaluation<T>(
   )
     return fresh();
 
+  // Never enter owned proof or cache replay for a foreign adapter copy.
+  if (
+    runtimeRegistration &&
+    !registeredEvaluationRequire(
+      options.filePath,
+      !options.serializeCssArtifact
+    )
+  )
+    return fresh();
   return cache.withInputs(async () => {
-    const staticProgram = options.staticStyles
-      ? readStaticStyleProgram(options.source)
-      : undefined;
+    const staticProgram =
+      options.staticStyles && !runtimeRegistration
+        ? readStaticStyleProgram(options.source)
+        : undefined;
 
     const staticModules =
       staticProgram && staticStyleModules(staticProgram, options.filePath);
 
     const proof = staticModules
       ? { reusable: true, modules: staticModules }
-      : proveReusableEvaluation(options.source, cache.parser);
+      : proveReusableEvaluation(options.source, cache.parser, {
+          cssScopeOrigins: options.cssScopeOrigins ?? []
+        });
 
     if (!proof) {
       recordCompilationDiagnostic("evaluation-result-bypass", {
@@ -151,11 +177,19 @@ export async function processCachedEvaluation<T>(
       return fresh();
     }
 
-    const key = `evaluation-result-v4:${cacheDigest(
+    const key = `evaluation-result-v10-registered-script:${cacheDigest(
       JSON.stringify([
         options.serializeCssArtifact ? "css-ir-resources-v4" : "css-text",
         options.cssSourceFile,
         options.cssSourceRoot,
+        runtimeRegistration?.key,
+        options.cssScopeOrigins?.map(({ fileScope, origin }) => ({
+          fileScope: {
+            filePath: fileScope.filePath,
+            packageName: fileScope.packageName || undefined
+          },
+          origin
+        })),
         identity,
         options.source,
         options.filePath,

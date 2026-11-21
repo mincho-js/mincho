@@ -154,6 +154,7 @@ export type {
   ImportedStaticCssEvalModuleRecord as InternalImportedStaticCssEvalModuleRecord
 } from "./staticCssEval/importedModules.js";
 export { STATIC_CSS_EVAL_LIMITS as internalStaticCssEvalLimits } from "./staticCssEval/types.js";
+export { hasStaticCssEvalSyntaxFilename as internalHasStaticCssEvalSyntaxFilename } from "./staticCssEval/syntaxFilename.js";
 export { styledComponentPlugin as minchoStyledComponentPlugin } from "./styled.js";
 export {
   canBypassJsxRuntimeGuards as internalCanBypassJsxRuntimeGuards,
@@ -217,3 +218,6 @@ export {
   recipeFactoryKind as internalRecipeFactoryKind,
   decodeRecipePayload as internalDecodeRecipePayload
 } from "./optimizations/recipeFactories.js";
+
+/** @internal Ignore erased type syntax when observing emitted-source effects. */
+export { isRuntimeSourceReference as internalIsRuntimeSourceReference } from "./optimizations/runtimeSourceReference.js";

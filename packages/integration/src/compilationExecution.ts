@@ -8,7 +8,10 @@ import {
   type BabelTransformResult,
   type StaticCssEvalSourceProvider
 } from "./babel.js";
-import type { ScopedDependencyOptions } from "./compile.js";
+import type {
+  ScopedDependencyOptions,
+  ScopedDependencyResult
+} from "./compile.js";
 import { getCpuBudget, type CpuBudget } from "./cpuBudget.js";
 import { getCompilationIoPool } from "./ioPool.js";
 import {
@@ -713,8 +716,8 @@ export async function executeTransform(
 
 export async function executeScopedTransform(
   input: ScopedDependencyOptions,
-  inline: () => string
-): Promise<string> {
+  inline: () => ScopedDependencyResult
+): Promise<ScopedDependencyResult> {
   const execution = active.getStore();
   if (!execution) return inline();
 
@@ -742,7 +745,7 @@ export async function executeScopedTransform(
       );
       if (!result.ok) throw restoreWorkerError(result.error);
 
-      return result.value as string;
+      return result.value as ScopedDependencyResult;
     },
     async () => inline()
   );

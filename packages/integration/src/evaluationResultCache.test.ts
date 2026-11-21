@@ -1,3 +1,4 @@
+import { issueCssScopeRuntimeOrigins } from "./fileScopeRuntime.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -34,15 +35,13 @@ const filePath = join(
   "src/__fixtures__/evaluation-cache.css.ts"
 );
 
-async function compiled(contents: string) {
-  return (
-    await compile({
-      filePath,
-      originalPath: filePath,
-      contents,
-      resolverCache: new Map()
-    })
-  ).source;
+function compiled(contents: string) {
+  return compile({
+    filePath,
+    originalPath: filePath,
+    contents,
+    resolverCache: new Map()
+  });
 }
 
 function runtime(evaluation: "auto" | "fresh" = "auto", enabled = true) {
@@ -66,7 +65,7 @@ describe("serialized evaluation results", () => {
       modules: ["@mincho-js/css", "@mincho-js/css/rules/createRuntimeFn"]
     });
 
-    const source = await compiled(`
+    const { source, cssScopeOrigins } = await compiled(`
       import { rules } from "@mincho-js/css";
       import { createCompiledRuntimeFn } from "@mincho-js/css/rules/createRuntimeFn";
       const parent = createCompiledRuntimeFn({
@@ -84,6 +83,7 @@ describe("serialized evaluation results", () => {
             processDefineRulesPresetRegistryFile({
               source,
               filePath,
+              cssScopeOrigins,
               serializeVirtualCssPath: () => ""
             })
           )
@@ -109,21 +109,26 @@ describe("serialized evaluation results", () => {
   });
 
   it("replays raw CSS artifacts and separates IR from CSS-text cache entries", async () => {
-    const source = await compiled(
-      'import {style} from "@vanilla-extract/css"; export const box=style({color:"red"});'
-    );
+    const { source, cssScopeOrigins } = await compile({
+      filePath,
+      originalPath: filePath,
+      contents:
+        'import {style} from "@vanilla-extract/css"; export const box=style({color:"red"});',
+      resolverCache: new Map()
+    });
 
     const execution = runtime();
     const diagnostics = new CompilationDiagnostics({ console: true });
     const artifacts: VanillaCssArtifact[] = [];
 
-    const run = (deferred: boolean) =>
+    const run = (deferred: boolean, origins = cssScopeOrigins) =>
       runDefineRulesPresetRegistryStep(() =>
         diagnostics.run(filePath, "test", () =>
           execution.run(() =>
             processDefineRulesPresetRegistryFile({
               source,
               filePath,
+              cssScopeOrigins: origins,
               ...(deferred
                 ? {
                     serializeCssArtifact: (artifact: VanillaCssArtifact) => {
@@ -156,6 +161,19 @@ describe("serialized evaluation results", () => {
         .builds.flatMap((b) => b.events)
         .filter((e) => e.phase === "evaluation-result-hit")
     ).toHaveLength(1);
+    const relocated = cssScopeOrigins.map((entry) => ({
+      ...entry,
+      origin: entry.origin + ".virtual"
+    }));
+    await expect(run(true, relocated)).rejects.toThrow(
+      "Untrusted or stale compiler CSS scope runtime registration"
+    );
+    // Simulate a newly verified compiler registration for a relocated producer,
+    // rather than granting authority by mutating a previously issued receipt.
+    await run(true, issueCssScopeRuntimeOrigins(source, relocated));
+    expect(artifacts.at(-1)?.origin).toBe(relocated[0]!.origin);
+    await run(true);
+    expect(artifacts.at(-1)?.origin).toBe(cssScopeOrigins[0]!.origin);
   });
 
   it.each([
@@ -164,7 +182,7 @@ describe("serialized evaluation results", () => {
   ])(
     "replays CSS into the current serializer without executing the module again: %s",
     async (contents) => {
-      const source = await compiled(contents);
+      const { source, cssScopeOrigins } = await compiled(contents);
       const execution = runtime();
       const diagnostics = new CompilationDiagnostics({ console: true });
       const css: string[] = [];
@@ -177,6 +195,7 @@ describe("serialized evaluation results", () => {
               processDefineRulesPresetRegistryFile({
                 source,
                 filePath,
+                cssScopeOrigins,
 
                 serializeVirtualCssPath: ({ source }) => {
                   getActiveDefineRulesRegistrySession()!
@@ -218,7 +237,7 @@ describe("serialized evaluation results", () => {
   it.each(["cold", "warm"] as const)(
     "bypasses a %s result cache when compiler identity is unavailable",
     async (state) => {
-      const source = await compiled(
+      const { source, cssScopeOrigins } = await compiled(
         'import {style} from "@vanilla-extract/css"; export const box = style({color:"red"});'
       );
 
@@ -232,6 +251,7 @@ describe("serialized evaluation results", () => {
               processDefineRulesPresetRegistryFile({
                 source,
                 filePath,
+                cssScopeOrigins,
 
                 serializeVirtualCssPath: ({ source }) => {
                   css.push(source);
@@ -244,6 +264,11 @@ describe("serialized evaluation results", () => {
         );
 
       const expected = await run(runtime("fresh"));
+      // The trusted-capability fresh path now reports VM work too. Count only
+      // the requests under test, not this independent reference evaluation.
+      const referenceEvents = diagnostics
+        .snapshot()
+        .builds.flatMap((build) => build.events).length;
       if (state === "warm") await run();
 
       const identity = vi
@@ -263,7 +288,8 @@ describe("serialized evaluation results", () => {
 
       const events = diagnostics
         .snapshot()
-        .builds.flatMap((build) => build.events);
+        .builds.flatMap((build) => build.events)
+        .slice(referenceEvents);
 
       expect(
         events.filter((event) => event.phase === "evaluation-result-bypass")
@@ -299,7 +325,7 @@ describe("serialized evaluation results", () => {
   it.each(["disabled", "fresh"] as const)(
     "honors %s without changing output",
     async (mode) => {
-      const source = await compiled(
+      const { source, cssScopeOrigins } = await compiled(
         'import {style} from "@vanilla-extract/css"; export const box = style({color:"red"});'
       );
 
@@ -314,7 +340,11 @@ describe("serialized evaluation results", () => {
         runDefineRulesPresetRegistryStep(() =>
           diagnostics.run(filePath, "test", () =>
             execution.run(() =>
-              processDefineRulesPresetRegistryFile({ source, filePath })
+              processDefineRulesPresetRegistryFile({
+                source,
+                filePath,
+                cssScopeOrigins
+              })
             )
           )
         );
@@ -338,7 +368,7 @@ describe("serialized evaluation results", () => {
 
     directories.push(directory);
 
-    let source = await compiled(
+    let { source, cssScopeOrigins } = await compiled(
       'import {style} from "@vanilla-extract/css"; export const box = style({color:"red"});'
     );
 
@@ -355,7 +385,11 @@ describe("serialized evaluation results", () => {
       const result = await runDefineRulesPresetRegistryStep(() =>
         diagnostics.run(filePath, "test", () =>
           execution.run(() =>
-            processDefineRulesPresetRegistryFile({ source, filePath })
+            processDefineRulesPresetRegistryFile({
+              source,
+              filePath,
+              cssScopeOrigins
+            })
           )
         )
       );
@@ -375,7 +409,9 @@ describe("serialized evaluation results", () => {
       events.filter((event) => event.phase === "evaluation-result-hit")
     ).toHaveLength(1);
 
-    source = source.replace('"red"', '"blue"');
+    ({ source, cssScopeOrigins } = await compiled(
+      'import {style} from "@vanilla-extract/css"; export const box = style({color:"blue"});'
+    ));
 
     expect((await run()).source).not.toBe(first.source);
 
@@ -387,7 +423,7 @@ describe("serialized evaluation results", () => {
   });
 
   it("does not publish failed serialization", async () => {
-    const source = await compiled(
+    const { source, cssScopeOrigins } = await compiled(
       'import {style} from "@vanilla-extract/css"; export const box = style({color:"red"});'
     );
 
@@ -402,6 +438,7 @@ describe("serialized evaluation results", () => {
             processDefineRulesPresetRegistryFile({
               source,
               filePath,
+              cssScopeOrigins,
 
               serializeVirtualCssPath() {
                 if (fail) throw new Error("serializer failed");
@@ -434,7 +471,7 @@ describe("serialized evaluation results", () => {
   });
 
   it("evaluates programs with untracked inputs on every request", async () => {
-    const source = await compiled(
+    const { source, cssScopeOrigins } = await compiled(
       'import {style} from "@vanilla-extract/css"; export const box = style({padding: Date.now() % 7});'
     );
 
@@ -445,7 +482,11 @@ describe("serialized evaluation results", () => {
       runDefineRulesPresetRegistryStep(() =>
         diagnostics.run(filePath, "test", () =>
           execution.run(() =>
-            processDefineRulesPresetRegistryFile({ source, filePath })
+            processDefineRulesPresetRegistryFile({
+              source,
+              filePath,
+              cssScopeOrigins
+            })
           )
         )
       );
@@ -464,4 +505,59 @@ describe("serialized evaluation results", () => {
       events.some((event) => event.phase === "evaluation-result-hit")
     ).toBe(false);
   });
+});
+
+it("keys, evaluates and replays one immutable origin snapshot despite serializer mutation", async () => {
+  const options = { filePath };
+  const source = `var scope=require('@vanilla-extract/css/fileScope');var css=require('@vanilla-extract/css');scope.setFileScope('first','pkg');css.globalStyle('.first',{color:'red'});scope.endFileScope();scope.setFileScope('second','pkg');css.globalStyle('.second',{color:'blue'});scope.endFileScope();`;
+  const execution = new CompilationExecution({ workers: 0 });
+  execution.compilationCache = new CompilationCache();
+  execution.compilationCache.configure(
+    { type: "memory", evaluationResults: true },
+    process.cwd(),
+    "snapshot"
+  );
+  executions.push(execution);
+  const diagnostics = new CompilationDiagnostics({ json: "unused.json" });
+  const seen: string[][] = [];
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const origins = [
+      {
+        fileScope: { filePath: "first", packageName: "pkg" },
+        origin: "/first.js"
+      },
+      {
+        fileScope: { filePath: "second", packageName: "pkg" },
+        origin: "/second.js"
+      }
+    ];
+    const values: string[] = [];
+    seen.push(values);
+    await runDefineRulesPresetRegistryStep(() =>
+      diagnostics.run(options.filePath, "snapshot", () =>
+        execution.run(() =>
+          processDefineRulesPresetRegistryFile({
+            source,
+            filePath: options.filePath,
+            cssScopeOrigins: origins,
+            serializeVirtualCssPath(artifact) {
+              values.push(artifact.origin!);
+              origins[1]!.origin = "/changed.js";
+              return "";
+            }
+          })
+        )
+      )
+    );
+  }
+  expect(seen).toEqual([
+    ["/first.js", "/second.js"],
+    ["/first.js", "/second.js"]
+  ]);
+  expect(
+    diagnostics
+      .snapshot()
+      .builds.flatMap((build) => build.events)
+      .filter((event) => event.phase === "evaluation-result-hit")
+  ).toHaveLength(1);
 });

@@ -64,3 +64,35 @@ describe("static-style package versions", () => {
     }
   );
 });
+
+it("defaults the static scope to the package-relative original path", () => {
+  manifestVersion.value = "0.2.2";
+  const source = createStaticStyleSource({
+    contents:
+      "import {css} from '@mincho-js/css';export const box=css({color:'red'});",
+    originalPath: join(process.cwd(), "src/button.css.ts"),
+    filePath: join(process.cwd(), "generated/extracted_button.css.ts"),
+    rootPath: process.cwd(),
+    packageName: "static-scope"
+  });
+  expect(readStaticStyleProgram(source!)?.scope).toEqual({
+    filePath: "src/button.css.ts",
+    packageName: "static-scope"
+  });
+});
+
+it("resolves static modules from the physical issuer, not the logical scope", () => {
+  manifestVersion.value = "0.2.2";
+  const source = createStaticStyleSource({
+    contents:
+      "import {css} from '@mincho-js/css';export const box=css({color:'red'});",
+    originalPath: join(process.cwd(), "entry.css.ts"),
+    filePath: join(process.cwd(), "entry.css.ts"),
+    scopeFilePath: "/nonexistent/logical/%2E%2E/entry%23.css.ts",
+    rootPath: process.cwd(),
+    packageName: "physical-resolution"
+  });
+  expect(readStaticStyleProgram(source!)?.scope.filePath).toBe(
+    "/nonexistent/logical/%2E%2E/entry%23.css.ts"
+  );
+});

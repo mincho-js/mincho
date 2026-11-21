@@ -1,4 +1,5 @@
 import {
+  internalHasStaticCssEvalSyntaxFilename,
   internalStaticCssEvalLimits,
   type InternalImportedStaticCssEvalImportResolution as BabelImportedStaticCssEvalImportResolution,
   type InternalImportedStaticCssEvalLoadedModule as BabelImportedStaticCssEvalLoadedModule
@@ -115,10 +116,41 @@ export function createLoadedModule(
     options.resolution
   );
 
+  // A backing filename is syntax evidence only if it describes source code.
+  // Keep the provider's physical path regardless of the parser's choice.
+  const realpath = loadedSource.realpath ?? options.resolution?.realpath;
+  const loaderFilename = loadedSource.resolvedFile;
+  const loaderEchoesVirtualId =
+    loaderFilename === id &&
+    (loadedSource.sourceKind ?? options.resolution?.sourceKind) ===
+      "provider-virtual";
+  // Loader evidence describes the text actually parsed. A resolver's physical
+  // filename is the fallback before treating the graph ID as logical syntax.
+  const syntaxSource =
+    loadedSource.realpath !== undefined &&
+    internalHasStaticCssEvalSyntaxFilename(loadedSource.realpath, true)
+      ? undefined
+      : loaderFilename !== undefined &&
+          !loaderEchoesVirtualId &&
+          internalHasStaticCssEvalSyntaxFilename(loaderFilename)
+        ? {
+            syntaxSourceId: loaderFilename,
+            syntaxSourceIdKind: "loader-filename" as const
+          }
+        : realpath !== undefined &&
+            internalHasStaticCssEvalSyntaxFilename(realpath, true)
+          ? undefined
+          : internalHasStaticCssEvalSyntaxFilename(id)
+            ? { syntaxSourceId: id }
+            : undefined;
+
   return {
     id,
+    resolvedFile:
+      loadedSource.resolvedFile ?? options.resolution?.resolvedFile ?? id,
     source: sourceText,
-    realpath: loadedSource.realpath ?? options.resolution?.realpath,
+    realpath,
+    ...syntaxSource,
     sourceHash: sourceIdentity.sourceHash,
     version: sourceIdentity.version,
     ...createLoadedModuleSourceMetadata(loadedSource, options.resolution)

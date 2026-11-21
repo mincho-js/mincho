@@ -30,7 +30,10 @@ export {
   type StaticCssEvalSourceResolution as InternalStaticCssEvalSourceResolution,
   type StaticCssEvalSourceUnsupportedReason as InternalStaticCssEvalSourceUnsupportedReason
 } from "./babel.js";
-export { compile } from "./compile.js";
+export {
+  compile,
+  currentPackageInfo as internalGetCurrentPackageInfo
+} from "./compile.js";
 export { canSkipMinchoTransform as internalCanSkipMinchoTransform } from "./transformEligibility.js";
 export {
   collectDefineRulesPackageGraph,
@@ -40,6 +43,7 @@ export {
   type DefineRulesPackageGraph,
   type DefineRulesPackageGraphArtifact
 } from "./defineRulesPackageGraph.js";
+export { serializeDefaultCssImport as internalSerializeDefaultCssImport } from "./vanillaEvaluation.js";
 export {
   getDefineRulesAncestorStyleSpecifiers,
   processDefineRulesPresetRegistryFile,
@@ -161,3 +165,8 @@ export {
 export type { ClosedAppUsageOptions } from "./closedAppUsage.js";
 
 export { optimizeCompiledRecipeSource as internalOptimizeCompiledRecipeSource } from "./compiledRecipeSource.js";
+
+export {
+  resolveCssScopeOrigin as internalResolveCssScopeOrigin,
+  type CssScopeOrigin
+} from "./fileScopeRuntime.js";

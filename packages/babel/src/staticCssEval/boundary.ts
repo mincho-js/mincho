@@ -48,6 +48,8 @@ export interface CreateStaticCssEvalDependencyMetadataOptions extends StaticCssE
 }
 
 export interface StaticCssEvalProviderSourcePolicyDescriptor {
+  /** Source file displayed in results, distinct from an internal graph variant. */
+  readonly resolvedFile?: string;
   readonly sourceKind?: StaticCssEvalSourceKind;
   readonly sourceOrigin?: StaticCssEvalSourceOrigin;
   readonly canonicalModuleId?: string;
@@ -70,6 +72,7 @@ export interface StaticCssEvalProviderSourcePolicyCheckOptions
 export interface StaticCssEvalProviderSourceMetadata {
   readonly sourceKind: StaticCssEvalSourceKind;
   readonly sourceOrigin: StaticCssEvalSourceOrigin;
+  readonly resolvedFile?: string;
   readonly canonicalModuleId?: string;
   readonly normalizedPathKey?: string;
   readonly sourceHash?: string;
@@ -100,6 +103,9 @@ export function createStaticCssEvalProviderSourceMetadata(
   return {
     sourceKind,
     sourceOrigin,
+    ...(descriptor.resolvedFile !== undefined
+      ? { resolvedFile: descriptor.resolvedFile }
+      : {}),
     ...(descriptor.canonicalModuleId !== undefined
       ? { canonicalModuleId: descriptor.canonicalModuleId }
       : {}),

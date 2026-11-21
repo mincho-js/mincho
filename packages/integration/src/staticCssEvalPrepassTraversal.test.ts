@@ -12,6 +12,219 @@ import {
   STATIC_CSS_EVAL_PREPASS_MAX_TRAVERSED_NODES
 } from "./staticCssEvalPrepass.js";
 
+import { createLoadedModule } from "./staticCssEvalPrepassSource.js";
+
+it("preserves provider syntax selection without discarding resolver metadata", () => {
+  const id = "/src/tokens.ts?variant=dark";
+  const resolvedFile = "/src/tokens.data";
+  const source = 'export const color: string = "red";';
+  const resolution = {
+    resolvedFile,
+    canonicalModuleId: id,
+    normalizedPathKey: id,
+    resolverKind: "test",
+    realpath: resolvedFile,
+    sourceKind: "provider-virtual",
+    sourceOrigin: "provider"
+  } as const;
+  expect(createLoadedModule(id, { source }, { resolution })).toMatchObject({
+    id,
+    resolvedFile,
+    realpath: resolvedFile,
+    syntaxSourceId: id,
+    source
+  });
+  const opaqueId = "tokens:theme";
+  const resolverFilename = "/src/tokens.ts";
+  expect(
+    createLoadedModule(
+      opaqueId,
+      { source },
+      {
+        resolution: {
+          ...resolution,
+          realpath: undefined,
+          resolvedFile: resolverFilename,
+          normalizedPathKey: opaqueId
+        }
+      }
+    )
+  ).toMatchObject({ id: opaqueId, resolvedFile: resolverFilename });
+  expect(
+    createLoadedModule(opaqueId, { source }, { resolution })
+  ).not.toHaveProperty("syntaxSourceId");
+
+  const loaderPath = "/src/loader.ts";
+  expect(
+    createLoadedModule(id, { source, resolvedFile: loaderPath }, { resolution })
+  ).toMatchObject({ resolvedFile: loaderPath, syntaxSourceId: loaderPath });
+  const physicalPath = "/src/loader#.ts";
+  const physical = createLoadedModule(
+    id,
+    { source, realpath: physicalPath },
+    { resolution }
+  );
+  expect(physical.realpath).toBe(physicalPath);
+  expect(physical).not.toHaveProperty("syntaxSourceId");
+});
+
+it.each([
+  ["virtual:tokens", false, "/cache/tokens.data"],
+  ["virtual:tokens", true, "/cache/tokens.data"],
+  ["/src/theme#dark.ts", false, "/cache/tokens.data"],
+  ["/src/theme.ts?variant=dark", false, "/cache/tokens.data"],
+  ["/src/theme.tsx?theme=/dark.js#preview", false, "/cache/tokens.data"],
+  ["/src/loader-overrides.js", true, "/cache/archive.js#tokens.ts"]
+] as const)(
+  "evaluates TypeScript for graph ID %s (loader evidence %s, backing path %s)",
+  async (moduleId, loaderPath, realpath) => {
+    const ownerId = "/owner.tsx";
+    const owner = 'import {rule} from "tokens"; <div css={rule} />;';
+    const expressionStart = owner.lastIndexOf("rule");
+    const result = await createStaticCssEvalPrepass(ownerId, {
+      resolve: (_importer, specifier) =>
+        specifier === "tokens"
+          ? {
+              resolvedFile: moduleId,
+              ...(loaderPath ? {} : { realpath })
+            }
+          : null,
+      load: (id) =>
+        id === ownerId
+          ? { source: owner }
+          : id === moduleId
+            ? {
+                source:
+                  'export const rule: {color: string} = {color: "tomato"};',
+                ...(loaderPath ? { realpath } : {})
+              }
+            : null
+    });
+    expect(
+      result.provider.getResolvedCssValue({
+        importerId: ownerId,
+        expressionStart,
+        expressionEnd: expressionStart + "rule".length,
+        bindingName: "rule"
+      })
+    ).toMatchObject({ kind: "resolved", value: { color: "tomato" } });
+    expect(result.result.resolvedModuleCache.get(moduleId)).toMatchObject({
+      id: moduleId,
+      realpath
+    });
+  }
+);
+
+it.each([
+  [
+    "/src/archive.ts#old/tokens.tsx",
+    "/src/archive.ts#old/tokens.tsx",
+    undefined
+  ],
+  ["/tokens.tsx?theme=/dark.js#preview", undefined, undefined],
+  [
+    "/tokens.tsx?theme=/dark.js#preview",
+    "/tokens.tsx?theme=/dark.js#preview",
+    "provider-virtual"
+  ]
+] as const)(
+  "preserves JSX syntax for %s without requiring physical metadata",
+  async (moduleId, loaderFilename, sourceKind) => {
+    const ownerId = "/owner.tsx";
+    const owner = 'import {rule} from "tokens"; <div css={rule} />;';
+    const expressionStart = owner.lastIndexOf("rule");
+    const result = await createStaticCssEvalPrepass(ownerId, {
+      resolve: (_importer, specifier) =>
+        specifier === "tokens" ? { resolvedFile: moduleId } : null,
+      load: (id) =>
+        id === ownerId
+          ? { source: owner }
+          : id === moduleId
+            ? {
+                source:
+                  'export function View() { return <span />; } export const rule: {color: string} = {color: "tomato"};',
+                ...(loaderFilename ? { resolvedFile: loaderFilename } : {}),
+                ...(sourceKind ? { sourceKind } : {})
+              }
+            : null
+    });
+
+    expect(
+      result.provider.getResolvedCssValue({
+        importerId: ownerId,
+        expressionStart,
+        expressionEnd: expressionStart + "rule".length,
+        bindingName: "rule"
+      })
+    ).toMatchObject({ kind: "resolved", value: { color: "tomato" } });
+    expect(result.result.resolvedModuleCache.get(moduleId)).toMatchObject({
+      id: moduleId,
+      resolvedFile: moduleId
+    });
+  }
+);
+
+it.each([
+  [
+    "resolver-only literal hash path",
+    "/src/theme.js#dark.tsx",
+    "/src/theme.js#dark.tsx",
+    {}
+  ],
+  [
+    "opaque backing path",
+    "/tokens.tsx?theme=/dark.js#preview",
+    "/src/backing.data",
+    {}
+  ],
+  [
+    "explicit virtual loader filename",
+    "virtual:tokens",
+    "/src/backing.js",
+    { resolvedFile: "/src/generated.tsx", sourceKind: "provider-virtual" }
+  ],
+  [
+    "loader physical path",
+    "/plain.js",
+    "/src/resolver.js",
+    { realpath: "/src/loader.js#variant.tsx" }
+  ]
+] as const)(
+  "preserves JSX syntax from %s",
+  async (_case, id, realpath, load) => {
+    const ownerId = "/owner.tsx";
+    const owner = 'import {rule} from "tokens"; <div css={rule} />;';
+    const expressionStart = owner.lastIndexOf("rule");
+    const result = await createStaticCssEvalPrepass(ownerId, {
+      resolve: (_importer, specifier) =>
+        specifier === "tokens" ? { resolvedFile: id, realpath } : null,
+      load: (file) =>
+        file === ownerId
+          ? { source: owner }
+          : file === id
+            ? {
+                ...load,
+                source:
+                  'export function View() { return <span />; } export const rule: {color: string} = {color: "tomato"};'
+              }
+            : null
+    });
+
+    expect(
+      result.provider.getResolvedCssValue({
+        importerId: ownerId,
+        expressionStart,
+        expressionEnd: expressionStart + "rule".length,
+        bindingName: "rule"
+      })
+    ).toMatchObject({ kind: "resolved", value: { color: "tomato" } });
+    expect(result.result.resolvedModuleCache.get(id)).toMatchObject({
+      id,
+      realpath: "realpath" in load ? load.realpath : realpath
+    });
+  }
+);
+
 const execute = promisify(execFile);
 
 function prepass(modules: Record<string, string>) {

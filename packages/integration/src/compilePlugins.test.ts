@@ -1,6 +1,9 @@
+import esbuild from "esbuild";
+import { processDefineRulesPresetRegistryFile } from "./defineRulesPreset.js";
 import { promises as fs } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
-import { dirname, join, relative } from "node:path";
+import { dirname, join, relative, sep } from "node:path";
 import { runInNewContext } from "node:vm";
 import * as vanillaCss from "@vanilla-extract/css";
 import * as vanillaFileScope from "@vanilla-extract/css/fileScope";
@@ -31,6 +34,256 @@ async function fixture() {
 }
 
 describe("caller loaders in child compilation", () => {
+  it.each([false, true])(
+    "retains virtual public APIs without granting artifact provenance (emits: %s)",
+    async (emits) => {
+      await fs.mkdir(join(process.cwd(), ".cache"), { recursive: true });
+      const root = await fs.mkdtemp(join(process.cwd(), ".cache/virtual-api-"));
+      roots.push(root);
+      await fs.writeFile(join(root, "package.json"), '{"name":"virtual-api"}');
+      const filePath = join(root, "entry.js");
+      const result = await compile({
+        cwd: root,
+        filePath,
+        originalPath: filePath,
+        resolverCache: new Map(),
+        contents: `export {value} from 'virtual:tokens';`,
+        plugins: [
+          {
+            name: "virtual-scope-reader",
+            setup(build) {
+              build.onResolve({ filter: /^virtual:tokens$/ }, () => ({
+                path: "tokens",
+                namespace: "virtual-tokens"
+              }));
+              build.onLoad(
+                { filter: /.*/, namespace: "virtual-tokens" },
+                () => ({
+                  contents: emits
+                    ? `import {setFileScope,endFileScope} from '@vanilla-extract/css/fileScope';import {style} from '@vanilla-extract/css';setFileScope('virtual','virtual-api');export const value=style({color:'red'});endFileScope();`
+                    : `import {hasFileScope} from '@vanilla-extract/css/fileScope';export const value=typeof hasFileScope();`,
+                  loader: "js"
+                })
+              );
+            }
+          }
+        ]
+      });
+      const serialized = vi.fn(() => "");
+      const pending = processDefineRulesPresetRegistryFile({
+        filePath,
+        source: result.source,
+        cssScopeOrigins: result.cssScopeOrigins,
+        serializeCssArtifact: serialized
+      });
+      if (emits)
+        await expect(pending).rejects.toThrow("Missing CSS scope provenance");
+      else expect((await pending).source).toContain("boolean");
+      expect(serialized).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each(["assert", "with"] as const)(
+    "preserves caller-selected ESM import %s syntax in the emitted child bytes",
+    async (keyword) => {
+      const { root } = await fixture();
+      const filePath = join(root, "entry.ts");
+      let emittedSource = "";
+      const result = await compile({
+        cwd: root,
+        filePath,
+        originalPath: filePath,
+        resolverCache: new Map(),
+        externals: ["./theme.json"],
+        contents: `import theme from "./theme.json" ${keyword} { type: "json" }; export const color = theme.color;`,
+        esbuild: {
+          ...esbuild,
+          async build(options) {
+            const output = await esbuild.build({
+              ...options,
+              format: "esm",
+              supported: { "import-assertions": true }
+            });
+            emittedSource = output.outputFiles?.[0]?.text ?? "";
+            return output;
+          }
+        }
+      });
+      expect(emittedSource).toContain(
+        `from "./theme.json" ${keyword} { type: "json" };`
+      );
+      expect(result.source).toBe(emittedSource);
+    }
+  );
+
+  it("parses sloppy CommonJS output using its emitted grammar", async () => {
+    const { root } = await fixture();
+    const filePath = join(root, "entry.cjs");
+    const result = await compile({
+      cwd: root,
+      filePath,
+      originalPath: filePath,
+      resolverCache: new Map(),
+      contents: `with ({answer:42}) { module.exports.answer=answer; }`
+    });
+    const module = { exports: {} as { answer?: number } };
+    runInNewContext(result.source, {
+      module,
+      exports: module.exports,
+      require: () => vanillaFileScope
+    });
+    expect(module.exports.answer).toBe(42);
+  });
+
+  it("preserves caller fileScope resolver selection in direct execution", async () => {
+    const { root } = await fixture();
+    const selected = vi.fn();
+    const result = await compile({
+      cwd: root,
+      filePath: join(root, "entry.js"),
+      originalPath: join(root, "entry.js"),
+      resolverCache: new Map(),
+      contents: `const scope=require('@vanilla-extract/css/fileScope');export const selected=scope.getFileScope().filePath;`,
+      plugins: [
+        {
+          name: "caller-file-scope",
+          setup(build) {
+            build.onResolve(
+              { filter: /^@vanilla-extract\/css\/fileScope$/ },
+              () => {
+                selected();
+                return { path: "caller-owned-scope", external: true };
+              }
+            );
+          }
+        }
+      ]
+    });
+    const module = { exports: {} as { selected: string } };
+    runInNewContext(result.source, {
+      module,
+      exports: module.exports,
+      require(id: string) {
+        if (id === "caller-owned-scope")
+          return { getFileScope: () => ({ filePath: "caller-selected" }) };
+        throw new Error("Unexpected " + id);
+      }
+    });
+    expect(selected).toHaveBeenCalledOnce();
+    expect(module.exports.selected).toBe("caller-selected");
+  });
+
+  it("does not grant artifact authority to a caller-overridden fileScope API", async () => {
+    await fs.mkdir(join(process.cwd(), ".cache"), { recursive: true });
+    const root = await fs.mkdtemp(
+      join(process.cwd(), ".cache/override-scope-")
+    );
+    roots.push(root);
+    await fs.writeFile(join(root, "package.json"), '{"name":"scope-override"}');
+    const alternate = join(root, "alternate-scope.cjs");
+    await fs.writeFile(
+      alternate,
+      'module.exports = require("@vanilla-extract/css/fileScope");'
+    );
+    const filePath = join(root, "entry.js");
+    const selected = vi.fn();
+    const result = await compile({
+      cwd: root,
+      filePath,
+      originalPath: filePath,
+      resolverCache: new Map(),
+      contents: `const scope=require('@vanilla-extract/css/fileScope');const {style}=require('@vanilla-extract/css');scope.setFileScope('custom.css.ts','custom');exports.cls=style({color:'red'});scope.endFileScope();`,
+      plugins: [
+        {
+          name: "caller-file-scope",
+          setup(build) {
+            build.onResolve(
+              { filter: /^@vanilla-extract\/css\/fileScope$/ },
+              () => {
+                selected();
+                return { path: alternate, external: true };
+              }
+            );
+          }
+        }
+      ]
+    });
+    const artifact = vi.fn(() => "");
+    await expect(
+      processDefineRulesPresetRegistryFile({
+        filePath,
+        source: result.source,
+        cssScopeOrigins: result.cssScopeOrigins,
+        serializeCssArtifact: artifact
+      })
+    ).rejects.toThrow("Missing CSS scope provenance");
+    expect(selected).toHaveBeenCalledOnce();
+    expect(artifact).not.toHaveBeenCalled();
+  });
+
+  it("loads generated dependencies outside a named package", async () => {
+    const { root } = await fixture();
+    const generated = await fs.mkdtemp(join(tmpdir(), "mincho-generated-"));
+    roots.push(generated);
+    const dependency = join(generated, "tokens.ts");
+    await fs.writeFile(
+      join(root, "color.ts"),
+      'export const color = "royalblue";'
+    );
+
+    const compiled = await compile({
+      cwd: root,
+      filePath: join(root, "entry.ts"),
+      originalPath: join(root, "entry.ts"),
+      contents: 'export { value } from "virtual:tokens";',
+      // Control the absence contract instead of inheriting /tmp's ancestors.
+      readPackageFile: async (path) =>
+        path === join(root, "package.json")
+          ? fs.readFile(path, "utf8")
+          : undefined,
+      resolverCache: new Map(),
+      plugins: [
+        {
+          name: "generated-tokens",
+          setup(build) {
+            build.onResolve({ filter: /^virtual:tokens$/ }, () => ({
+              path: dependency,
+              namespace: "file"
+            }));
+            build.onLoad({ filter: /tokens\.ts$/ }, () => ({
+              contents:
+                'import { color } from "./color.ts"; export const value: string = color;',
+              loader: "ts",
+              resolveDir: root
+            }));
+          }
+        }
+      ]
+    });
+    const module = { exports: {} as { value: string } };
+    runInNewContext(compiled.source, {
+      module,
+      exports: module.exports,
+      require(id: string) {
+        if (id === "@vanilla-extract/css/fileScope") return vanillaFileScope;
+        throw new Error(`Unexpected dependency: ${id}`);
+      }
+    });
+
+    expect(module.exports.value).toBe("royalblue");
+    expect(compiled.source).toContain(
+      JSON.stringify(
+        relative(root, dependency)
+          .split(sep)
+          .map((segment) =>
+            segment === ".." ? "%2E%2E" : encodeURIComponent(segment)
+          )
+          .join("/")
+      )
+    );
+    expect(vanillaFileScope.hasFileScope()).toBe(false);
+  });
+
   it.each(["tsx", undefined] as const)(
     "scopes and transforms caller contents with loader %s",
     async (loader) => {
@@ -50,6 +303,7 @@ describe("caller loaders in child compilation", () => {
       ${loader ? 'export const view = <div title="loaded" />;' : ""}`;
 
       const compiled = await compile({
+        cwd: root,
         filePath: join(root, "entry.tsx"),
         originalPath: join(root, "entry.tsx"),
         contents: 'export { Box } from "./dependency.custom";',
@@ -84,7 +338,7 @@ describe("caller loaders in child compilation", () => {
       });
 
       expect(compiled.source).toContain(
-        JSON.stringify(relative(process.cwd(), dependency))
+        JSON.stringify(relative(root, dependency))
       );
       expect(compiled.source).toContain("$$styled");
       expect(compiled.source).toContain('var color = "red"');
@@ -111,6 +365,7 @@ describe("caller loaders in child compilation", () => {
     async ({ namespace, loader, contents }) => {
       const { root, dependency } = await fixture();
       const compiled = await compile({
+        cwd: root,
         filePath: join(root, "entry.tsx"),
         originalPath: join(root, "entry.tsx"),
         contents: 'export { default } from "./dependency.custom";',
@@ -135,8 +390,11 @@ describe("caller loaders in child compilation", () => {
       expect(compiled.source).toContain(
         namespace === "file" ? contents : "virtual contents"
       );
+      expect(
+        compiled.cssScopeOrigins.some((entry) => entry.origin === dependency)
+      ).toBe(false);
       expect(compiled.source).not.toContain(
-        JSON.stringify(relative(process.cwd(), dependency))
+        JSON.stringify(relative(root, dependency))
       );
     }
   );
@@ -416,4 +674,123 @@ describe("CommonJS dependencies in child compilation", () => {
     expect(evaluate(compiled.source).exports.value).toBe("ok");
     expect(compiled.source).not.toContain("missing-type-package");
   });
+});
+
+it("keeps public fileScope require.resolve external without an unused facade", async () => {
+  const { root } = await fixture();
+  const result = await compile({
+    esbuild: {
+      ...esbuild,
+      build: async (options) => {
+        const result = await esbuild.build(options);
+        expect(result.warnings).toEqual([]);
+        return result;
+      }
+    },
+    cwd: root,
+    filePath: join(root, "entry.css.js"),
+    originalPath: join(root, "entry.js"),
+    contents: `module.exports.path=require.resolve('@vanilla-extract/css/fileScope');`,
+    resolverCache: new Map()
+  });
+  const resolve = vi.fn(() => "official-path");
+  const requireModule = vi.fn((name) =>
+    name === "@vanilla-extract/css/fileScope" ? vanillaFileScope : undefined
+  );
+  const module = { exports: {} as { path?: string } };
+  runInNewContext(result.source, {
+    module,
+    exports: module.exports,
+    require: Object.assign(requireModule, { resolve })
+  });
+  expect(module.exports.path).toBe("official-path");
+  expect(resolve).toHaveBeenCalledWith("@vanilla-extract/css/fileScope");
+  // This source contains no CSS authoring, so the compiler needs no wrapper.
+  expect(requireModule).not.toHaveBeenCalled();
+});
+
+it.each([true, false])(
+  "retains producer attribution when a caller externalizes the unchanged official API (explicit path: %s)",
+  async (explicitPath) => {
+    await fs.mkdir(join(process.cwd(), ".cache"), { recursive: true });
+    const root = await fs.mkdtemp(
+      join(process.cwd(), ".cache/external-scope-")
+    );
+    roots.push(root);
+    await fs.writeFile(join(root, "package.json"), '{"name":"external-scope"}');
+    const filePath = join(root, "entry.js");
+    const observed = vi.fn();
+    const result = await compile({
+      cwd: root,
+      filePath,
+      originalPath: filePath,
+      contents: `import {style} from '@vanilla-extract/css';export const value=style({color:'red'});`,
+      resolverCache: new Map(),
+      plugins: [
+        {
+          name: "public-external",
+          setup(build) {
+            build.onResolve(
+              { filter: /^@vanilla-extract\/css\/fileScope$/ },
+              (args) => {
+                observed(args.importer);
+                return {
+                  ...(explicitPath ? { path: args.path } : {}),
+                  external: true
+                };
+              }
+            );
+          }
+        }
+      ]
+    });
+    const artifacts: Array<{ origin: string }> = [];
+    await processDefineRulesPresetRegistryFile({
+      filePath,
+      source: result.source,
+      cssScopeOrigins: result.cssScopeOrigins,
+      serializeCssArtifact(artifact) {
+        artifacts.push(artifact);
+        return "";
+      }
+    });
+    expect(observed).toHaveBeenCalledTimes(1);
+    expect(artifacts).toHaveLength(1);
+    expect(artifacts[0]!.origin).toBe(filePath);
+  }
+);
+
+it("accepts emitted CommonJS top-level return without weakening capability checks", async () => {
+  const { root } = await fixture();
+  const filePath = join(root, "entry.cjs");
+  const result = await compile({
+    cwd: root,
+    filePath,
+    originalPath: filePath,
+    contents: "exports.answer=42; return; exports.answer=0;",
+    resolverCache: new Map(),
+    plugins: [
+      {
+        name: "preserve-return",
+        setup(build) {
+          build.initialOptions.banner = { js: "if (false) return;" };
+        }
+      }
+    ]
+  });
+  // Let Node apply its CommonJS wrapper in a separate process: an early
+  // return may leave that process's file-scope stack open.
+  const cacheDir = join(process.cwd(), ".cache");
+  await fs.mkdir(cacheDir, { recursive: true });
+  const outputDir = await fs.mkdtemp(join(cacheDir, "commonjs-return-"));
+  roots.push(outputDir);
+  const runnerPath = join(outputDir, "verify.cjs");
+  await fs.writeFile(join(outputDir, "compile-output.cjs"), result.source);
+  await fs.writeFile(
+    runnerPath,
+    'process.stdout.write(JSON.stringify(require("./compile-output.cjs").answer));'
+  );
+  expect(
+    execFileSync(process.execPath, [runnerPath], { encoding: "utf8" })
+  ).toBe("42");
 });
