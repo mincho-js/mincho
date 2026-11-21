@@ -491,9 +491,12 @@ describe("native esbuild assets", () => {
         [`${folder}/button.ts`]: `import { css } from "@mincho-js/css"; export const button = css({ backgroundImage: 'url("./icon.svg")' });`,
         [`${folder}/icon.svg`]: svg
       });
+      const loader: NonNullable<BuildOptions["loader"]> = {
+        ".svg": "file"
+      };
       const buildContext = await context(
         buildOptions(root, {
-          loader: { ".svg": "file" },
+          loader,
           plugins: minchoEsbuildPlugins({
             cache: { type: "memory" },
             diagnostics: { json: "diagnostics.json" }
