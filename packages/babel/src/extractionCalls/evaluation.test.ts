@@ -1168,3 +1168,20 @@ it.each([
     });
   }
 );
+
+it("keeps the entire test on the execution path when only its normal result is known", () => {
+  expression("(record(), false) ? unused() : kept()", (path) => {
+    expect(
+      planEvaluation(path).selectedBranches?.map((branch) => branch.toString())
+    ).toEqual(["record(), false", "kept()"]);
+    const calls: string[] = [];
+    proveEvaluationOrder(path, {
+      binding: () => "proven",
+      replay: (value) => {
+        if (value.isCallExpression()) calls.push(value.toString());
+        return value.isCallExpression() ? "proven" : "unknown";
+      }
+    });
+    expect(calls).toEqual(["record()", "kept()"]);
+  });
+});

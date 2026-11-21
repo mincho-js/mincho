@@ -25,6 +25,11 @@ export interface PatternSelectionEnvironment {
     operation: PatternOwnReadOperation
   ) => boolean;
   /** Standard Array iteration, including inherited IteratorClose, remains valid in observed sources. */
+  /** A caller may share a fresh observation within a single replay decision. */
+  readonly localRealm?: {
+    program: NodePath<t.Program>;
+    observation: PatternRealmObservation;
+  };
   readonly nativeArrayIteration: boolean;
   /** Compiler relocation also needs the same destructuring operations, not only safe defaults. */
   readonly requireReplaySafety?: boolean;
@@ -38,10 +43,22 @@ export function patternSelectionEnvironment(
   program: NodePath<t.Program>,
   observed?: PatternSelectionEnvironment
 ): PatternSelectionEnvironment {
-  return combinePatternEnvironment(observed, observePatternRealm(program));
+  return combinePatternEnvironment(
+    observed,
+    localObservation(program, observed)
+  );
 }
 
 type PatternRealmObservation = ReturnType<typeof observePatternRealm>;
+function localObservation(
+  program: NodePath<t.Program>,
+  environment?: PatternSelectionEnvironment
+) {
+  return environment?.localRealm?.program === program
+    ? environment.localRealm.observation
+    : observePatternRealm(program);
+}
+
 function combinePatternEnvironment(
   observed: PatternSelectionEnvironment | undefined,
   local: PatternRealmObservation
@@ -116,7 +133,9 @@ export function everyPatternExpression(
   if (!pattern.node || pattern.isIdentifier())
     return !bindingMayInvokeSetter || environment?.requireReplaySafety !== true;
   const program = pattern.scope.getProgramParent().path;
-  const local = program.isProgram() ? observePatternRealm(program) : undefined;
+  const local = program.isProgram()
+    ? localObservation(program, environment)
+    : undefined;
   if (
     selected &&
     t.isIdentifier(selected) &&
@@ -772,7 +791,7 @@ export function collectSkippedPatternDefaults(
   observedEnvironment?: PatternSelectionEnvironment
 ): ReadonlySet<t.AssignmentPattern> {
   const skipped = new Set<t.AssignmentPattern>();
-  const local = observePatternRealm(program);
+  const local = localObservation(program, observedEnvironment);
   const environment = combinePatternEnvironment(observedEnvironment, local);
   program.traverse({
     VariableDeclarator(declaration) {

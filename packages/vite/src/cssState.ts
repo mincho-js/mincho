@@ -19,10 +19,19 @@ type CssModuleData =
       originalPath: string;
     };
 
+/** The serializer supplies the real emitter, even when the generated name is opaque. */
+export interface PublishedStylesheet {
+  readonly id: string;
+  readonly environment: string;
+  readonly hostId: string;
+  readonly origin: string | null;
+  readonly source: string;
+}
+
 /** Generated CSS and its ownership belong to one Vite environment. */
 export class ViteCssState {
   readonly resolverCache = new Map<string, string>();
-  private readonly css = new Map<string, string>();
+  private readonly css = new Map<string, PublishedStylesheet>();
   // Empty responses clear CSS already imported by an in-flight HMR update. Keep
   // only recent retired IDs; they must not grow with the lifetime of the server.
   private readonly retiredCss = new Set<string>();
@@ -42,7 +51,13 @@ export class ViteCssState {
   ) {}
 
   getCss(id: string): string | undefined {
-    return this.css.get(id) ?? (this.retiredCss.has(id) ? "" : undefined);
+    return (
+      this.css.get(id)?.source ?? (this.retiredCss.has(id) ? "" : undefined)
+    );
+  }
+
+  publication(id: string): PublishedStylesheet | undefined {
+    return this.css.get(id);
   }
 
   hasCss(id: string): boolean {
@@ -121,24 +136,11 @@ export class ViteCssState {
     return contents;
   }
 
-  setVirtualCssForSidecar(
-    cssPath: string,
-    virtualCssId: string,
-    source: string
-  ): void {
-    const ids = this.cssPathToVirtualCssIds.get(cssPath) ?? new Set<string>();
-    ids.add(virtualCssId);
-    this.cssPathToVirtualCssIds.set(cssPath, ids);
-    this.authorizedVirtualCssIds.add(virtualCssId);
-    this.css.set(virtualCssId, source);
-    this.retiredCss.delete(virtualCssId);
-  }
-
   /** Publish validated output without invalidating CSS merely because a sidecar was renamed. */
   commitVirtualCssForSidecar(
     ownerId: string,
     cssPath: string,
-    entries: ReadonlyMap<string, string>
+    entries: ReadonlyMap<string, PublishedStylesheet>
   ): { changed: number; unchanged: number; removed: number } {
     const previousIds = new Set<string>();
     const paths = this.ownerToCssPaths.get(ownerId) ?? new Set([cssPath]);
@@ -152,14 +154,20 @@ export class ViteCssState {
     let removed = 0;
     this.cssPathToVirtualCssIds.set(cssPath, new Set(entries.keys()));
 
-    for (const [id, source] of entries) {
-      if (this.css.get(id) === source) unchanged++;
+    for (const [id, publication] of entries) {
+      const previous = this.css.get(id);
+      if (
+        previous?.source === publication.source &&
+        previous.origin === publication.origin &&
+        previous.hostId === publication.hostId
+      )
+        unchanged++;
       else {
         changed++;
         this.effects.invalidateModule(id);
       }
 
-      this.css.set(id, source);
+      this.css.set(id, publication);
       this.retiredCss.delete(id);
       this.authorizedVirtualCssIds.add(id);
     }

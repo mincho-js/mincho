@@ -793,6 +793,8 @@ describe("mincho with the Vite runtime", () => {
 
   it.each([
     "palette",
+    "attributed palette",
+    "republication",
     "embedded SVG",
     "explicit inline SVG",
     "network path",
@@ -800,7 +802,9 @@ describe("mincho with the Vite runtime", () => {
   ] as const)(
     "preserves generated stylesheet delivery and dependencies (%s)",
     async (kind) => {
-      const source =
+      const changesPalette =
+        kind === "palette" || kind === "attributed palette";
+      let source =
         kind === "embedded SVG" || kind === "percent basename"
           ? '.probe { color: red; background-image: url("./image.svg"); }'
           : kind === "explicit inline SVG"
@@ -855,13 +859,14 @@ describe("mincho with the Vite runtime", () => {
         compile.mockRestore();
         registry.mockRestore();
       });
+      let republish: (() => Promise<void>) | undefined;
       const server = await createServer({
         root,
         configFile: false,
         logLevel: "silent",
         server: { host: "127.0.0.1", port: 0, watch: null },
         plugins: [minchoVitePlugin()],
-        ...(kind === "palette"
+        ...(changesPalette || kind === "republication"
           ? {
               css: {
                 postcss: {
@@ -869,6 +874,12 @@ describe("mincho with the Vite runtime", () => {
                     {
                       postcssPlugin: "observed-palette",
                       async Once(css, { result }) {
+                        if (!changesPalette) {
+                          const publish = republish;
+                          republish = undefined;
+                          await publish?.();
+                          return;
+                        }
                         const color = await readFile(palette, "utf8");
                         result.messages.push({
                           type: "dependency",
@@ -891,6 +902,30 @@ describe("mincho with the Vite runtime", () => {
       const origin = server.resolvedUrls!.local[0];
       const ssr = server.environments.ssr!;
       const client = server.environments.client!;
+      if (kind === "republication") {
+        await readCssPropOutput(client, "/src/entry.ts");
+        const owner =
+          (await client.moduleGraph.getModuleByUrl("/src/entry.ts"))!;
+        const sidecar = [...owner.importedModules].find((module) =>
+          module.id?.startsWith("\0mincho-extracted-css:")
+        )!;
+        republish = async () => {
+          source = ".probe { color: blue; }";
+          client.moduleGraph.invalidateModule(sidecar);
+          await client.transformRequest(sidecar.url);
+        };
+        await expect(
+          client.transformRequest(request + "?url&inline")
+        ).rejects.toThrow("changed during host processing");
+        const fresh =
+          (await client.transformRequest(request + "?url&inline=1"))?.code ??
+          "";
+        expect(decodeURIComponent(fresh)).toContain("color: blue");
+        expect(
+          (await client.transformRequest(request + "?raw"))?.code
+        ).toContain(JSON.stringify(source));
+        return;
+      }
       if (kind === "network path") {
         await readCssPropOutput(ssr, "/src/entry.ts");
         const plain = (await server.ssrLoadModule(request + "?url"))
@@ -945,15 +980,15 @@ describe("mincho with the Vite runtime", () => {
         if (!data) throw new Error(`Expected inline URL wrapper: ${code}`);
         return fromUri(JSON.parse(data));
       };
-      const from = kind === "palette" ? "color: red" : "orange";
-      const to = kind === "palette" ? "color: blue" : "purple";
+      const from = changesPalette ? "color: red" : "orange";
+      const to = changesPalette ? "color: blue" : "purple";
       expect(await ssrCss()).toContain(from);
       expect(await clientCss()).toContain(from);
       expect((await server.ssrLoadModule(raw)).default).toBe(source);
-      const changed = kind === "palette" ? palette : image;
+      const changed = changesPalette ? palette : image;
       await writeFile(
         changed,
-        kind === "palette"
+        changesPalette
           ? "blue"
           : '<svg xmlns="http://www.w3.org/2000/svg"><path fill="purple"/></svg>'
       );
@@ -966,7 +1001,7 @@ describe("mincho with the Vite runtime", () => {
         { timeout: 1800 }
       );
       expect((await server.ssrLoadModule(raw)).default).toBe(source);
-      if (kind === "palette") {
+      if (changesPalette) {
         const plain = (await server.ssrLoadModule(request + "?url"))
           .default as string;
         const response = await fetch(new URL(plain, origin), {

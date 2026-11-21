@@ -1,3 +1,4 @@
+import { branchEvaluationFacts } from "../extractionCalls/evaluation.js";
 import {
   collectRuntimeSourceEvidence,
   createRealmSourceEvidence,
@@ -631,7 +632,10 @@ function unexecutedPatternObservations(
  * targets is not evidence of intrinsic mutation, nor certified pure or fresh.
  * Explicit protected capability acquisition, mutation and escape withdraw it.
  */
-export function observePatternRealm(program: NodePath<t.Program>): {
+export function observePatternRealm(
+  program: NodePath<t.Program>,
+  branches = branchEvaluationFacts(program)
+): {
   iteration: boolean;
   keys: string[] | null;
   bindingsCurrent: boolean;
@@ -641,7 +645,7 @@ export function observePatternRealm(program: NodePath<t.Program>): {
 } {
   const evidence = collectRuntimeSourceEvidence(program);
   return {
-    ...observeFreshPatternRealm(program, evidence),
+    ...observeFreshPatternRealm(program, evidence, undefined, branches),
     bindingsCurrent: evidence.bindingsCurrent,
     hasGlobalEval: evidence.hasGlobalEval,
     references: evidence.references,
@@ -651,7 +655,8 @@ export function observePatternRealm(program: NodePath<t.Program>): {
 function observeFreshPatternRealm(
   program: NodePath<t.Program>,
   evidence: RuntimeSourceEvidence,
-  shared?: SharedPatternRealm
+  shared?: SharedPatternRealm,
+  branches = branchEvaluationFacts(program)
 ): { iteration: boolean; keys: string[] | null } {
   if (!evidence.bindingsCurrent || writesArrayRealmGlobal(evidence))
     return { iteration: false, keys: null };
@@ -913,7 +918,7 @@ function observeFreshPatternRealm(
       if (hasProtectedPatternRead(path)) revoke();
     },
     enter(path) {
-      if (skipped.has(path.node)) path.skip();
+      if (skipped.has(path.node) || branches.excludesChild(path)) path.skip();
     },
     ThisExpression(path) {
       if (

@@ -141,6 +141,11 @@ export interface EvaluationPlan {
 // Closed conditions and syntax plans are independent of caller proof callbacks.
 // Keep them within one analysis so later AST changes cannot reuse stale facts.
 interface EvaluationContext {
+  bindingsCurrent?: () => boolean;
+  callCondition?: (
+    call: NodePath<t.CallExpression>
+  ) => { value: unknown } | undefined;
+  outcomes: WeakMap<NodePath<t.Expression>, BranchOutcome | null>;
   plans: WeakMap<NodePath<t.Node>, EvaluationPlan>;
   conditions: WeakMap<NodePath<t.Node>, { value: unknown } | null>;
   closedOrder: WeakMap<NodePath<t.Node>, Map<boolean, EvaluationProof>>;
@@ -149,6 +154,7 @@ interface EvaluationContext {
 
 function createEvaluationContext(): EvaluationContext {
   return {
+    outcomes: new WeakMap(),
     plans: new WeakMap(),
     conditions: new WeakMap(),
     closedOrder: new WeakMap(),
@@ -228,24 +234,24 @@ export function planEvaluation(
     const test = (
       path.isLogicalExpression() ? path.get("left") : path.get("test")
     ) as NodePath<t.Expression>;
-    const condition = primitiveCondition(test, context);
+    const condition = normalBranchOutcome(test, context);
     let selected: NodePath<t.Node>[] | undefined;
     if (condition) {
       if (path.isLogicalExpression()) {
         const readsRight =
           path.node.operator === "&&"
-            ? Boolean(condition.value)
+            ? condition.truthy
             : path.node.operator === "||"
-              ? !condition.value
-              : condition.value == null;
+              ? !condition.truthy
+              : condition.nullish;
         selected = readsRight ? [test, path.get("right")] : [test];
         plan.unexecutedBranches = readsRight ? [] : [path.get("right")];
       } else {
         const branch = path.get(
-          condition.value ? "consequent" : "alternate"
+          condition.truthy ? "consequent" : "alternate"
         ) as NodePath<t.Node | null>;
         const excluded = path.get(
-          condition.value ? "alternate" : "consequent"
+          condition.truthy ? "alternate" : "consequent"
         ) as NodePath<t.Node | null>;
         selected = [test, ...(branch.node ? [branch as NodePath<t.Node>] : [])];
         plan.unexecutedBranches = excluded.node
@@ -854,21 +860,17 @@ function initializationDominatesRead(
   return false;
 }
 
-/** A binding read needs initialization and a stable value, not only const syntax. */
-export function proveInitializedBindingValue(
+function initializedConstDeclaration(
   identifier: NodePath<t.Identifier>,
-  requirements: EvaluationRequirements,
-  visiting: Set<t.Node>,
-  requirePrimitive = false
-): EvaluationProof {
+  bindingsCurrent: () => boolean
+): NodePath<t.VariableDeclarator> | undefined {
   const candidate = identifier.scope.getBinding(identifier.node.name);
-  if (!candidate?.path.isVariableDeclarator()) return "unknown";
-  const program = identifier.scope.getProgramParent().path;
   if (
-    !program.isProgram() ||
-    !collectRuntimeSourceEvidence(program).bindingsCurrent
+    candidate?.kind !== "const" ||
+    !candidate.path.isVariableDeclarator() ||
+    !bindingsCurrent()
   )
-    return "unknown";
+    return;
   // Traversal can refresh scope metadata and statement positions. Read all
   // authority after the current-source observation, not before it.
   const binding = identifier.scope.getBinding(identifier.node.name);
@@ -882,25 +884,47 @@ export function proveInitializedBindingValue(
     binding.path.node.end == null ||
     identifier.node.start == null ||
     binding.path.node.end > identifier.node.start ||
-    !initializationDominatesRead(binding.path, identifier) ||
-    visiting.has(binding.path.node)
+    !initializationDominatesRead(binding.path, identifier)
   )
-    return "unknown";
-  const initializer = binding.path.get("init");
+    return;
+  return binding.path;
+}
+
+/** A binding read needs initialization and a stable value, not only const syntax. */
+export function proveInitializedBindingValue(
+  identifier: NodePath<t.Identifier>,
+  requirements: EvaluationRequirements,
+  visiting: Set<t.Node>,
+  requirePrimitive = false,
+  context = createEvaluationContext()
+): EvaluationProof {
+  const declaration = initializedConstDeclaration(
+    identifier,
+    context.bindingsCurrent ??
+      (() => {
+        const program = identifier.scope.getProgramParent().path;
+        return (
+          program.isProgram() &&
+          collectRuntimeSourceEvidence(program).bindingsCurrent
+        );
+      })
+  );
+  if (!declaration || visiting.has(declaration.node)) return "unknown";
+  const initializer = declaration.get("init");
   if (!initializer.isExpression()) return "unknown";
-  visiting.add(binding.path.node);
+  visiting.add(declaration.node);
   try {
     return requirePrimitive
       ? proveStableEvaluationValueUncached(
           initializer,
           requirements,
-          createEvaluationContext(),
+          context,
           true,
           true
         )
-      : proveStableEvaluationValue(initializer, requirements);
+      : proveStableEvaluationValue(initializer, requirements, context);
   } finally {
-    visiting.delete(binding.path.node);
+    visiting.delete(declaration.node);
   }
 }
 
@@ -1010,11 +1034,148 @@ function primitiveCondition(
   }
 }
 
+type BranchOutcome = { truthy: boolean; nullish: boolean };
+
+/** Facts about a normal result never discharge evaluation of the test itself. */
+function normalBranchOutcome(
+  path: NodePath<t.Expression>,
+  context: EvaluationContext
+): BranchOutcome | undefined {
+  if (context.outcomes.has(path))
+    return context.outcomes.get(path) ?? undefined;
+  let outcome: BranchOutcome | undefined;
+  if (path.isSequenceExpression()) {
+    outcome = normalBranchOutcome(path.get("expressions").at(-1)!, context);
+  } else if (isTransparentCssRuleWrapperExpression(path.node)) {
+    outcome = normalBranchOutcome(
+      path.get("expression") as NodePath<t.Expression>,
+      context
+    );
+  } else if (
+    path.isObjectExpression() ||
+    path.isArrayExpression() ||
+    path.isFunction()
+  ) {
+    outcome = { truthy: true, nullish: false };
+  } else if (path.isUnaryExpression({ operator: "void" })) {
+    outcome = { truthy: false, nullish: true };
+  } else if (path.isConditionalExpression() || path.isLogicalExpression()) {
+    const selected = planEvaluation(path, context).selectedBranches?.at(-1);
+    if (selected) outcome = normalBranchOutcome(selected, context);
+  } else {
+    const declaration =
+      path.isIdentifier() && context.bindingsCurrent
+        ? initializedConstDeclaration(path, context.bindingsCurrent)
+        : undefined;
+    const initializer = declaration?.get("init");
+    const result = initializer?.isExpression()
+      ? primitiveCondition(initializer, context)
+      : path.isCallExpression()
+        ? context.callCondition?.(path)
+        : primitiveCondition(path, context);
+    if (result)
+      outcome = {
+        truthy: Boolean(result.value),
+        nullish: result.value == null
+      };
+  }
+  context.outcomes.set(path, outcome ?? null);
+  return outcome;
+}
+
+/** Scope this index to one unchanged AST analysis. The result path alone is
+ * sufficient for alias selection, but replay must keep all selected operands.
+ */
+export function branchEvaluationFacts(
+  program: NodePath<t.Program>,
+  callCondition?: EvaluationContext["callCondition"]
+) {
+  const context = createEvaluationContext();
+  context.callCondition = callCondition;
+  let current: boolean | undefined;
+  context.bindingsCurrent = () =>
+    (current ??= collectRuntimeSourceEvidence(program).bindingsCurrent);
+  const paths = new WeakMap<t.Node, NodePath<t.Node>>();
+  let indexed = false;
+  function branches(path: NodePath<t.Node>) {
+    if (path.isConditionalExpression() || path.isLogicalExpression()) {
+      paths.set(path.node, path);
+      return planEvaluation(path, context).selectedBranches;
+    }
+  }
+  return {
+    plan(path: NodePath<t.Node>) {
+      return planEvaluation(path, context);
+    },
+    branches,
+    result(path: NodePath<t.Node>) {
+      return branches(path)?.at(-1);
+    },
+    // Only a node-only JSX visitor needs a path index. Do not evaluate
+    // other conditions merely because their paths were indexed.
+    branchesForNode(node: t.ConditionalExpression | t.LogicalExpression) {
+      if (!paths.has(node) && !indexed) {
+        indexed = true;
+        program.traverse({
+          "ConditionalExpression|LogicalExpression"(branch) {
+            paths.set(branch.node, branch);
+          }
+        });
+      }
+      const path = paths.get(node);
+      return path && branches(path);
+    },
+    excludesChild(child: NodePath<t.Node>) {
+      const parent = child.parentPath;
+      return (
+        !!parent &&
+        (parent.isIfStatement() ||
+          parent.isConditionalExpression() ||
+          parent.isLogicalExpression()) &&
+        planEvaluation(parent, context).unexecutedBranches?.some(
+          (branch) => branch.node === child.node
+        )
+      );
+    },
+    isUnexecuted(path: NodePath<t.Node>) {
+      return isProvablyUnexecuted(path, context);
+    },
+    proveBinding(
+      identifier: NodePath<t.Identifier>,
+      requirements: EvaluationRequirements,
+      visiting: Set<t.Node>,
+      requirePrimitive = false
+    ) {
+      return proveInitializedBindingValue(
+        identifier,
+        requirements,
+        visiting,
+        requirePrimitive,
+        context
+      );
+    },
+    proveStableValue(
+      path: NodePath<t.Node>,
+      requirements: EvaluationRequirements
+    ) {
+      return proveStableEvaluationValue(path, requirements, context);
+    },
+    proveSteps(
+      steps: readonly EvaluationStep[],
+      requirements: EvaluationRequirements
+    ) {
+      return proveEvaluationSteps(steps, requirements, true, context);
+    }
+  };
+}
+
 /** A deferred body is not dead code; only an excluded branch supplies evidence. */
-export function isProvablyUnexecuted(path: NodePath<t.Node>): boolean {
+export function isProvablyUnexecuted(
+  path: NodePath<t.Node>,
+  context = createEvaluationContext()
+): boolean {
   let child = path;
   let excluded = false;
-  const context = createEvaluationContext();
   for (let parent = path.parentPath; parent; parent = parent.parentPath) {
     if (parent.isFunction() || parent.isClass()) return excluded;
     if (
@@ -1023,9 +1184,16 @@ export function isProvablyUnexecuted(path: NodePath<t.Node>): boolean {
       parent.isLogicalExpression()
     ) {
       const plan = planEvaluation(parent, context);
-      excluded ||= Boolean(
+      if (
         plan.unexecutedBranches?.some((branch) => branch.node === child.node)
-      );
+      ) {
+        // Dropping a required candidate needs a closed predicate. A normal
+        // outcome alone only selects operands when replay retains that predicate.
+        const test = (
+          parent.isLogicalExpression() ? parent.get("left") : parent.get("test")
+        ) as NodePath<t.Expression>;
+        excluded ||= !!primitiveCondition(test, context);
+      }
     }
     child = parent;
   }

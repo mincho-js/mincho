@@ -27,7 +27,7 @@ it.each(
   )
 )(
   "revalidates Vite CSS with $name cache in $mode",
-  async ({ mode, cache, persistent }) => {
+  async ({ mode, name: nameOfCache, cache, persistent }) => {
     const parent = join(process.cwd(), ".cache");
     await mkdir(parent, { recursive: true });
 
@@ -44,8 +44,11 @@ it.each(
       'import { css } from "@mincho-js/css"; import { color } from "./token"; export const className = css({ color });'
     );
 
+    const hostPalette = mode === "production" && nameOfCache === "filesystem";
+    if (hostPalette) await writeFile(join(root, "palette.txt"), "red");
     const script = `
     import { build } from "vite";
+    import { readFile } from "node:fs/promises";
     import { minchoVitePlugin } from ${JSON.stringify(pathToFileURL(join(process.cwd(), "dist/esm/index.mjs")).href)};
     const root = process.argv[1];
     const result = await build({
@@ -54,6 +57,15 @@ it.each(
       mode: ${JSON.stringify(mode)},
       logLevel: "silent",
       cacheDir: root + "/compiler-cache",
+      css: ${hostPalette} ? { postcss: { plugins: [{
+        postcssPlugin: "fixture-palette",
+        async Once(styles, {result}) {
+          const file = root + "/palette.txt";
+          const color = await readFile(file, "utf8");
+          result.messages.push({type:"dependency", file, plugin:"fixture-palette"});
+          styles.walkDecls("color", decl => { if (decl.value === "red") decl.value = color; });
+        }
+      }] } } : undefined,
       plugins: [minchoVitePlugin({
         cache: ${JSON.stringify(cache)},
         diagnostics: { json: "reports/build.json" },
@@ -97,6 +109,15 @@ it.each(
     expect(warm.files.find(([name]) => name.endsWith(".css"))?.[1]).toContain(
       "color: red"
     );
+
+    if (hostPalette) {
+      await writeFile(join(root, "palette.txt"), "purple");
+      const paletteOnly = await run();
+      expect(paletteOnly.hit).toBe(true);
+      expect(
+        paletteOnly.files.find(([name]) => name.endsWith(".css"))?.[1]
+      ).toContain("color: purple");
+    }
 
     await writeFile(join(root, "token.ts"), 'export const color = "blue";');
 

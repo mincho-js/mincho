@@ -64,6 +64,7 @@ import type {
   ViteDevServer
 } from "vite";
 import {
+  type PublishedStylesheet,
   ViteCssState,
   customNormalize,
   extractedSidecarIdPrefix,
@@ -896,68 +897,94 @@ function createMinchoViteEnvironmentPlugin(
     };
   }
 
-  function publishedCss(id: string): string | undefined {
-    return cssState.isAuthorizedVirtualCss(id)
-      ? cssState.getCss(id)
-      : undefined;
-  }
-
-  async function preparePublishedDevCss(
-    publisher: DevEnvironment,
-    id: string,
-    representation: "direct" | "inline"
-  ): Promise<string | undefined> {
-    const source = publishedCss(id);
-    if (source === undefined) return undefined;
-    const cssRequest = virtualCssRequest(id);
-    if (!cssRequest) return undefined;
-    const cacheOnly = cssRequest.physicalPath.startsWith(unattributedCssPrefix);
-    if (cacheOnly && !isOriginIndependentCss(source))
+  // Views are request-local. A watch-only PostCSS/asset change can replace
+  // the final bytes without changing any published source or logical ID.
+  function finishCssView<Usage extends "style" | "http" | "data">(
+    publication: PublishedStylesheet,
+    usage: Usage,
+    hostId: string,
+    css: string | undefined,
+    watchFiles: readonly string[]
+  ) {
+    if (cssState.publication(publication.id) !== publication)
       throw new Error(
-        "[mincho] Cannot process a cached stylesheet without a physical origin."
+        "[mincho] Generated stylesheet changed during host processing."
       );
-    const request = `${cacheOnly ? id : cssRequest.physicalPath}?${representation}`;
-    // Only run the publishing environment's Vite CSS/PostCSS transform on
-    // already published bytes. Never use file loading or SSR's JS wrapper.
-    await publisher.moduleGraph.ensureEntryFromUrl(request);
-    const { code } = await publisher.pluginContainer.transform(source, request);
-    if (cacheOnly)
-      return validatePreparedCacheOnlyCss(id, source, code, representation);
-    if (publishedCss(id) !== source) return undefined;
-    // The opaque HTTP path has a different directory. Vite must already
-    // have rebased local resources using the original physical stylesheet ID.
     if (
-      representation !== "direct" ||
-      !hasSelfContainedCssResources(code, true)
+      publication.origin === null &&
+      (css === undefined || !isOriginIndependentCss(css))
     )
-      throw new Error(
-        "[mincho] Vite left a stylesheet resource relative to its physical directory; cannot serve it from an SSR URL."
-      );
-    return code;
-  }
-
-  function validatePreparedCacheOnlyCss(
-    id: string,
-    source: string,
-    code: string | undefined,
-    representation: "direct" | "inline"
-  ): string | undefined {
-    if (publishedCss(id) !== source) return undefined;
-    const css =
-      representation === "inline" && code !== undefined
-        ? viteInlineCssResult(code)
-        : code;
-    return requireOriginIndependentProcessedCss(css);
-  }
-
-  function requireOriginIndependentProcessedCss(
-    css: string | undefined
-  ): string {
-    if (css === undefined || !isOriginIndependentCss(css))
       throw new Error(
         "[mincho] Vite processed an origin-free stylesheet into CSS that requires a physical origin."
       );
-    return css;
+    if (
+      css === undefined ||
+      (usage !== "style" &&
+        publication.origin !== null &&
+        !hasSelfContainedCssResources(css, usage === "http"))
+    )
+      throw new Error(
+        usage === "http"
+          ? "[mincho] Vite left a stylesheet resource relative to its physical directory; cannot serve it from an SSR URL."
+          : "[mincho] Cannot inline generated stylesheet URL: Vite left a base-dependent CSS resource or unsupported syntax. Use ?url to keep the stylesheet's physical URL base."
+      );
+    return { publication, usage, hostId, css, watchFiles };
+  }
+
+  async function prepareCssView<Usage extends "http" | "data">(
+    publication: PublishedStylesheet,
+    usage: Usage,
+    host: DevEnvironment | ((id: string) => Promise<string | undefined>)
+  ) {
+    const hostId =
+      publication.hostId + (usage === "http" ? "?direct" : "?inline");
+    let code: string | undefined;
+    const files = new Set<string>();
+    if (typeof host !== "function") {
+      const publisher = host;
+      if (publisher.name !== publication.environment)
+        throw new Error(
+          "[mincho] Generated CSS requested from a different Vite environment."
+        );
+      await publisher.moduleGraph.ensureEntryFromUrl(hostId);
+      let source: string | undefined = publication.source;
+      if (usage === "data" && publication.origin !== null) {
+        const loaded = await publisher.pluginContainer.load(hostId);
+        source = typeof loaded === "string" ? loaded : loaded?.code;
+      }
+      if (source !== undefined)
+        code = (await publisher.pluginContainer.transform(source, hostId)).code;
+      for (const dep of publisher.moduleGraph.getModuleById(hostId)
+        ?.importedModules ?? []) {
+        if (dep.type === "asset" && dep.file)
+          files.add(dep.file.split(/[?#]/, 1)[0]);
+      }
+    } else {
+      code = await host(hostId);
+    }
+    return finishCssView(
+      publication,
+      usage,
+      hostId,
+      usage === "data" && code !== undefined ? viteInlineCssResult(code) : code,
+      [...files]
+    );
+  }
+
+  function inlineUrlModule(
+    view: Awaited<ReturnType<typeof prepareCssView<"data">>>,
+    linkHostView: boolean
+  ) {
+    const url =
+      view.publication.origin === null
+        ? `data:text/css;charset=utf-8;base64,${Buffer.from(view.css, "utf8").toString("base64")}`
+        : `data:text/css;charset=utf-8,${encodeURIComponent(view.css)}`;
+    const exported = `export default ${JSON.stringify(url)};`;
+    // Rollup owns file watches on the canonical child. Retain the
+    // module edge and verify the snapshot when both modules execute.
+    if (!linkHostView) return exported;
+    const child = virtualCssImportPrefix + view.hostId;
+    return `import css from ${JSON.stringify(child)}; if (css !== ${JSON.stringify(view.css)}) throw new Error("[mincho] Generated inline CSS changed before validation; reload or use ?url."); ${exported}`;
   }
 
   function invalidateViteModule(id: string): void {
@@ -968,7 +995,7 @@ function createMinchoViteEnvironmentPlugin(
       ssrCssRoute &&
       request &&
       !cacheOnly &&
-      publishedCss(request.cacheId) === undefined
+      cssState.publication(request.cacheId) === undefined
     )
       attributedCssRoutes.delete(attributedCssRouteKey(request.cacheId));
     const fileId = cacheOnly
@@ -1362,12 +1389,13 @@ function createMinchoViteEnvironmentPlugin(
     name: "mincho-validate-origin-free-css",
     transform(code: string, id: string) {
       const request = virtualCssRequest(id);
+      const publication = request && cssState.publication(request.cacheId);
       if (
+        publication &&
         request?.representation === "css" &&
-        request.physicalPath.startsWith(unattributedCssPrefix) &&
-        publishedCss(request.cacheId) !== undefined
+        publication.origin === null
       )
-        requireOriginIndependentProcessedCss(code);
+        finishCssView(publication, "style", id, code, []);
     }
   } satisfies Plugin;
 
@@ -1541,17 +1569,16 @@ function createMinchoViteEnvironmentPlugin(
             if (value !== undefined) response.setHeader(name, value);
           }
           response.setHeader("Cache-Control", "no-store");
-          const css =
-            id !== undefined && /^(?:GET|HEAD)$/.test(request.method ?? "")
-              ? await preparePublishedDevCss(publisher, id, "direct")
-              : undefined;
-          if (css === undefined) {
+          const publication =
+            id === undefined ? undefined : cssState.publication(id);
+          if (!publication || !/^(?:GET|HEAD)$/.test(request.method ?? "")) {
             response.statusCode = 404;
             response.end();
             return;
           }
+          const view = await prepareCssView(publication, "http", publisher);
           response.setHeader("Content-Type", "text/css; charset=utf-8");
-          response.end(request.method === "HEAD" ? undefined : css);
+          response.end(request.method === "HEAD" ? undefined : view.css);
         } catch (error) {
           next(error);
         }
@@ -1791,98 +1818,61 @@ function createMinchoViteEnvironmentPlugin(
         // Vite owns URL modules. Its build CSS loader imports transform-only
         // CSS, which returns through this same physical identity and cache.
         if (representation === "url") {
-          const cacheOnly = physicalPath.startsWith(unattributedCssPrefix);
+          const publication = cssState.publication(virtualCssId);
           const inline = isViteInlineRequest(id);
-          const attributedSsrUrl =
+          if (inline && publication) {
+            if (this.environment?.mode === "dev") {
+              // Vite stores load-hook watch inputs on the existing wrapper
+              // node and transfers them to its transform's import analysis.
+              await this.environment.moduleGraph.ensureEntryFromUrl(id);
+              const view = await prepareCssView(
+                publication,
+                "data",
+                this.environment
+              );
+              for (const file of view.watchFiles) this.addWatchFile(file);
+              return inlineUrlModule(view, false);
+            }
+            // Rollup compares the load result before reusing a cached transform.
+            // Keep the prepared bytes in that comparison on every rebuild.
+            if (config.command !== "build") return null;
+            const view = await prepareCssView(
+              publication,
+              "data",
+              async (hostId) =>
+                (await this.load({ id: hostId })).code ?? undefined
+            );
+            return inlineUrlModule(view, true);
+          }
+          const cacheOnly = publication
+            ? publication.origin === null
+            : physicalPath.startsWith(unattributedCssPrefix);
+          if (
             !inline &&
             !cacheOnly &&
-            !!ssrCssRoute &&
+            ssrCssRoute &&
             config.command === "serve" &&
-            this.environment?.mode === "dev";
-          if (attributedSsrUrl) {
-            if (publishedCss(virtualCssId) === undefined) return null;
+            this.environment?.mode === "dev"
+          ) {
+            if (!publication) return null;
             const key = attributedCssRouteKey(virtualCssId);
             attributedCssRoutes.set(key, virtualCssId);
-            const url = `${config.server?.origin ?? ""}${ssrCssRoutePrefix()}${key}`;
-            return `export default ${JSON.stringify(url)};`;
+            return `export default ${JSON.stringify(`${config.server?.origin ?? ""}${ssrCssRoutePrefix()}${key}`)};`;
           }
-          if (!inline && (!cacheOnly || config.command !== "serve"))
+          if (
+            !cacheOnly ||
+            cssState.getCss(virtualCssId) === undefined ||
+            (!inline && config.command !== "serve")
+          )
             return null;
-          const css = cssState.getCss(virtualCssId);
-          if (css === undefined) return null;
-          if (cacheOnly) {
-            // Keep ordinary URL imports HTTP-addressable through Vite's
-            // wrapped virtual ID. Only the explicit inline variant is data.
-            const publicPath = ssrCssRoute
-              ? ssrCssRoutePrefix() +
-                physicalPath.slice(unattributedCssPrefix.length)
-              : `${config.base ?? "/"}@id/${virtualCssId.replace("\0", "__x00__")}?direct`;
-            let inlineCss = css;
-            if (inline && publishedCss(virtualCssId) !== undefined) {
-              let processed: string | undefined;
-              if (this.environment?.mode === "dev") {
-                processed = await preparePublishedDevCss(
-                  this.environment,
-                  virtualCssId,
-                  "inline"
-                );
-              } else if (config.command === "build") {
-                if (!isOriginIndependentCss(css))
-                  throw new Error(
-                    "[mincho] Cannot process a cached stylesheet without a physical origin."
-                  );
-                const loaded = await this.load({
-                  id: `${virtualCssId}?inline`
-                });
-                processed = validatePreparedCacheOnlyCss(
-                  virtualCssId,
-                  css,
-                  loaded.code ?? undefined,
-                  "inline"
-                );
-              }
-              if (processed === undefined) return null;
-              inlineCss = processed;
-            }
-            const url = inline
-              ? `data:text/css;charset=utf-8;base64,${Buffer.from(inlineCss, "utf8").toString("base64")}`
-              : `${config.server?.origin ?? ""}${publicPath}`;
-            return `export default ${JSON.stringify(url)};`;
-          }
-          const environment = this.environment;
-          const inlineId = `${physicalPath}?inline`;
-          let inlineCode: string | undefined;
-          if (environment?.mode === "dev") {
-            await environment.moduleGraph.ensureEntryFromUrl(inlineId);
-            const loaded = await environment.pluginContainer.load(inlineId);
-            const inlineSource =
-              typeof loaded === "string" ? loaded : loaded?.code;
-            if (inlineSource !== undefined) {
-              const transformed = await environment.pluginContainer.transform(
-                inlineSource,
-                inlineId
-              );
-              inlineCode = transformed?.code ?? inlineSource;
-            }
-          } else if (config.command === "build") {
-            // Avoid Vite's combined URL/inline loader: it emits a marker for
-            // a transform-only child whose inline CSS is never recorded.
-            const loaded = await this.load({ id: inlineId });
-            inlineCode = loaded.code ?? undefined;
-          }
-          const dataCss =
-            inlineCode === undefined
-              ? undefined
-              : viteInlineCssResult(inlineCode);
-          if (dataCss === undefined || !hasSelfContainedCssResources(dataCss))
-            throw new Error(
-              "[mincho] Cannot inline generated stylesheet URL: Vite left a base-dependent CSS resource or unsupported syntax. Use ?url to keep the stylesheet's physical URL base."
-            );
-          const url = `data:text/css;charset=utf-8,${encodeURIComponent(dataCss)}`;
-          // Link the actual inline view as a dependency for asset/HMR changes.
-          // A changed view must be revalidated, never encoded with stale proof.
-          const request = `${virtualCssImportPrefix}${inlineId}`;
-          return `import css from ${JSON.stringify(request)}; if (css !== ${JSON.stringify(dataCss)}) throw new Error("[mincho] Generated inline CSS changed before validation; reload or use ?url."); export default ${JSON.stringify(url)};`;
+          const publicPath = ssrCssRoute
+            ? ssrCssRoutePrefix() +
+              physicalPath.slice(unattributedCssPrefix.length)
+            : `${config.base ?? "/"}@id/${virtualCssId.replace("\0", "__x00__")}?direct`;
+          const url = inline
+            ? "data:text/css;charset=utf-8;base64,"
+            : `${config.server?.origin ?? ""}${publicPath}`;
+          return `export default ${JSON.stringify(url)};`;
         }
         // The cache holds CSS text, while Vite's raw requests load a JS string
         // module and skip the CSS transforms that handle other request flags.
@@ -1954,39 +1944,7 @@ function createMinchoViteEnvironmentPlugin(
     ) {
       const generatedCss = cssState.hasCss(virtualCssCacheId(id) ?? id);
       cssSharing.record(id, code, generatedCss);
-      if (generatedCss) {
-        const request = virtualCssRequest(id);
-        if (
-          this.environment?.mode === "dev" &&
-          request &&
-          publishedCss(request.cacheId) !== undefined &&
-          isViteInlineRequest(id)
-        ) {
-          const wrapper = request.representation === "url";
-          const cacheOnly = request.physicalPath.startsWith(
-            unattributedCssPrefix
-          );
-          const canonicalId = `${cacheOnly ? request.cacheId : request.physicalPath}?inline`;
-          if (wrapper || id === canonicalId) {
-            const view =
-              this.environment.moduleGraph.getModuleById(canonicalId);
-            // Vite has already discovered these file-only dependencies while
-            // preparing the inline bytes. URL wrappers need hard invalidation
-            // to refresh the embedded snapshot, not just updated import URLs.
-            // Register in transform: the client node may not exist at load.
-            for (const dependency of view?.importedModules ?? []) {
-              if (dependency.type !== "asset" || !dependency.file) continue;
-              const file = dependency.file.split(/[?#]/, 1)[0];
-              // Vite reports the physical file change (no ?inline suffix).
-              // Add that edge to the view too, so an attributed wrapper's
-              // runtime verification observes the updated canonical result.
-              if (file && (wrapper || file !== dependency.file))
-                this.addWatchFile(file);
-            }
-          }
-        }
-        return;
-      }
+      if (generatedCss) return;
 
       const sidecarPath = ownedExtractedSidecarPath(id);
       if (id.startsWith("\0") && sidecarPath === undefined) return;
@@ -2101,7 +2059,7 @@ function createMinchoViteEnvironmentPlugin(
         try {
           resolverCache.delete(moduleInfo.originalPath);
 
-          const nextCss = new Map<string, string>();
+          const nextCss = new Map<string, PublishedStylesheet>();
           const nextArtifacts = distChunkCss.transaction();
 
           const { source, watchFiles, cssScopeOrigins } = await tracedCompile({
@@ -2210,7 +2168,14 @@ function createMinchoViteEnvironmentPlugin(
                   )
                   .digest("hex");
                 const cssFileId = `${unattributedCssPrefix}${identity}${virtualExt}`;
-                nextCss.set(`${virtualCssIdPrefix}${cssFileId}`, source);
+                const id = virtualCssIdPrefix + cssFileId;
+                nextCss.set(id, {
+                  id,
+                  source,
+                  environment,
+                  hostId: id,
+                  origin: null
+                });
                 return `import ${JSON.stringify(virtualCssImportPrefix + cssFileId)};`;
               }
 
@@ -2241,7 +2206,13 @@ function createMinchoViteEnvironmentPlugin(
               const cssFileId = `${idOrigin}.mincho-scope-${scopeIdentity}${virtualExt}`;
               const virtualCssId = `${virtualCssIdPrefix}${cssFileId}`;
 
-              nextCss.set(virtualCssId, source);
+              nextCss.set(virtualCssId, {
+                id: virtualCssId,
+                source,
+                environment,
+                hostId: cssFileId,
+                origin
+              });
 
               return `import ${JSON.stringify(virtualCssImportPrefix + cssFileId)};`;
             }
