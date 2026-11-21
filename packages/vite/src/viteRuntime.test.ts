@@ -795,6 +795,7 @@ describe("mincho with the Vite runtime", () => {
     "palette",
     "attributed palette",
     "republication",
+    "HTTP republication",
     "embedded SVG",
     "explicit inline SVG",
     "network path",
@@ -804,6 +805,8 @@ describe("mincho with the Vite runtime", () => {
     async (kind) => {
       const changesPalette =
         kind === "palette" || kind === "attributed palette";
+      const republishes =
+        kind === "republication" || kind === "HTTP republication";
       let source =
         kind === "embedded SVG" || kind === "percent basename"
           ? '.probe { color: red; background-image: url("./image.svg"); }'
@@ -866,7 +869,7 @@ describe("mincho with the Vite runtime", () => {
         logLevel: "silent",
         server: { host: "127.0.0.1", port: 0, watch: null },
         plugins: [minchoVitePlugin()],
-        ...(changesPalette || kind === "republication"
+        ...(changesPalette || republishes
           ? {
               css: {
                 postcss: {
@@ -902,27 +905,46 @@ describe("mincho with the Vite runtime", () => {
       const origin = server.resolvedUrls!.local[0];
       const ssr = server.environments.ssr!;
       const client = server.environments.client!;
-      if (kind === "republication") {
-        await readCssPropOutput(client, "/src/entry.ts");
+      const republishSidecar = async (publisher: typeof client) => {
         const owner =
-          (await client.moduleGraph.getModuleByUrl("/src/entry.ts"))!;
+          (await publisher.moduleGraph.getModuleByUrl("/src/entry.ts"))!;
         const sidecar = [...owner.importedModules].find((module) =>
           module.id?.startsWith("\0mincho-extracted-css:")
         )!;
+        publisher.moduleGraph.invalidateModule(sidecar);
+        await publisher.transformRequest(sidecar.url);
+      };
+      if (republishes) {
+        const http = kind === "HTTP republication";
+        const publisher = http ? ssr : client;
+        await readCssPropOutput(publisher, "/src/entry.ts");
+        const url =
+          http && (await server.ssrLoadModule(request + "?url")).default;
+        const read = async (attempt: number) => {
+          if (http) {
+            const response = await fetch(new URL(url, origin), {
+              headers: { Accept: "text/css" }
+            });
+            const css = await response.text();
+            if (!response.ok) throw new Error(css);
+            return css;
+          }
+          const result = await client.transformRequest(
+            request + "?url&inline=" + attempt
+          );
+          return decodeURIComponent(result!.code);
+        };
+        republish = () => republishSidecar(publisher);
+        expect(await read(1)).toContain("color: red");
+        expect(republish).toBeUndefined();
         republish = async () => {
           source = ".probe { color: blue; }";
-          client.moduleGraph.invalidateModule(sidecar);
-          await client.transformRequest(sidecar.url);
+          await republishSidecar(publisher);
         };
-        await expect(
-          client.transformRequest(request + "?url&inline")
-        ).rejects.toThrow("changed during host processing");
-        const fresh =
-          (await client.transformRequest(request + "?url&inline=1"))?.code ??
-          "";
-        expect(decodeURIComponent(fresh)).toContain("color: blue");
+        await expect(read(2)).rejects.toThrow("changed during host processing");
+        expect(await read(3)).toContain("color: blue");
         expect(
-          (await client.transformRequest(request + "?raw"))?.code
+          (await publisher.transformRequest(request + "?raw"))?.code
         ).toContain(JSON.stringify(source));
         return;
       }
@@ -985,6 +1007,12 @@ describe("mincho with the Vite runtime", () => {
       expect(await ssrCss()).toContain(from);
       expect(await clientCss()).toContain(from);
       expect((await server.ssrLoadModule(raw)).default).toBe(source);
+      if (kind === "attributed palette") {
+        await republishSidecar(ssr);
+        await republishSidecar(client);
+        expect(await ssrCss()).toContain(from);
+        expect(await clientCss()).toContain(from);
+      }
       const changed = changesPalette ? palette : image;
       await writeFile(
         changed,

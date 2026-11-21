@@ -28,10 +28,13 @@ export interface PublishedStylesheet {
   readonly source: string;
 }
 
+type OwnedStylesheet = PublishedStylesheet & { readonly ownerId: string };
+
 /** Generated CSS and its ownership belong to one Vite environment. */
 export class ViteCssState {
   readonly resolverCache = new Map<string, string>();
-  private readonly css = new Map<string, PublishedStylesheet>();
+  // Most recent publisher first. Different owners may emit the same physical scope.
+  private readonly css = new Map<string, OwnedStylesheet[]>();
   // Empty responses clear CSS already imported by an in-flight HMR update. Keep
   // only recent retired IDs; they must not grow with the lifetime of the server.
   private readonly retiredCss = new Set<string>();
@@ -39,7 +42,10 @@ export class ViteCssState {
   private readonly currentSidecars = new Map<string, string>();
   private readonly moduleData = new Map<string, CssModuleData>();
   private readonly ownerToCssPaths = new Map<string, Set<string>>();
-  private readonly cssPathToVirtualCssIds = new Map<string, Set<string>>();
+  private readonly sidecarOutputs = new Map<
+    string,
+    { ownerId: string; ids: ReadonlySet<string> }
+  >();
   private readonly authorizedVirtualCssIds = new Set<string>();
 
   constructor(
@@ -52,12 +58,12 @@ export class ViteCssState {
 
   getCss(id: string): string | undefined {
     return (
-      this.css.get(id)?.source ?? (this.retiredCss.has(id) ? "" : undefined)
+      this.publication(id)?.source ?? (this.retiredCss.has(id) ? "" : undefined)
     );
   }
 
   publication(id: string): PublishedStylesheet | undefined {
-    return this.css.get(id);
+    return this.css.get(id)?.[0];
   }
 
   hasCss(id: string): boolean {
@@ -146,28 +152,35 @@ export class ViteCssState {
     const paths = this.ownerToCssPaths.get(ownerId) ?? new Set([cssPath]);
 
     for (const path of paths)
-      for (const id of this.cssPathToVirtualCssIds.get(path) ?? [])
+      for (const id of this.sidecarOutputs.get(path)?.ids ?? [])
         previousIds.add(id);
 
     let changed = 0;
     let unchanged = 0;
     let removed = 0;
-    this.cssPathToVirtualCssIds.set(cssPath, new Set(entries.keys()));
+    this.sidecarOutputs.set(cssPath, { ownerId, ids: new Set(entries.keys()) });
 
     for (const [id, publication] of entries) {
-      const previous = this.css.get(id);
+      const publishers = this.css.get(id) ?? [];
+      const previous = publishers[0];
       if (
-        previous?.source === publication.source &&
+        previous?.ownerId === ownerId &&
+        previous.id === publication.id &&
+        previous.environment === publication.environment &&
+        previous.source === publication.source &&
         previous.origin === publication.origin &&
         previous.hostId === publication.hostId
       )
         unchanged++;
       else {
+        this.css.set(id, [
+          { ...publication, ownerId },
+          ...publishers.filter((record) => record.ownerId !== ownerId)
+        ]);
         changed++;
         this.effects.invalidateModule(id);
       }
 
-      this.css.set(id, publication);
       this.retiredCss.delete(id);
       this.authorizedVirtualCssIds.add(id);
     }
@@ -175,7 +188,7 @@ export class ViteCssState {
     for (const path of paths) {
       if (path === cssPath) continue;
 
-      this.cssPathToVirtualCssIds.delete(path);
+      this.sidecarOutputs.delete(path);
       this.sidecars.delete(path);
       this.resolverCache.delete(path);
       this.moduleData.delete(path);
@@ -190,40 +203,45 @@ export class ViteCssState {
     this.ownerToCssPaths.set(ownerId, new Set([cssPath]));
 
     for (const id of previousIds) {
-      if (
-        entries.has(id) ||
-        [...this.cssPathToVirtualCssIds.values()].some((ids) => ids.has(id))
-      )
-        continue;
-
-      removed++;
-      this.retireCss(id);
-      this.authorizedVirtualCssIds.delete(id);
-      this.effects.invalidateModule(id);
+      if (entries.has(id)) continue;
+      const change = this.withdrawPublication(id, ownerId);
+      if (change === "changed") changed++;
+      if (change === "removed") removed++;
     }
 
     return { changed, unchanged, removed };
   }
 
-  clearVirtualCssForSidecar(cssPath: string, invalidateModules = true): void {
-    const ids = this.cssPathToVirtualCssIds.get(cssPath);
-    if (!ids) return;
+  private withdrawPublication(
+    id: string,
+    ownerId: string,
+    invalidateModules = true
+  ) {
+    const publishers = this.css.get(id);
+    if (!publishers) return;
+    const index = publishers.findIndex((record) => record.ownerId === ownerId);
+    if (index < 0) return;
+    publishers.splice(index, 1);
+    if (index !== 0) return;
 
-    for (const id of ids) {
-      if (
-        [...this.cssPathToVirtualCssIds].some(
-          ([path, otherIds]) => path !== cssPath && otherIds.has(id)
-        )
-      )
-        continue;
-
+    if (publishers[0]) {
+      // Restoring an earlier owner's bytes starts a new publication, even
+      // when a request still holds that owner's original record.
+      publishers[0] = { ...publishers[0] };
+    } else {
       this.retireCss(id);
       this.authorizedVirtualCssIds.delete(id);
-
-      if (invalidateModules) this.effects.invalidateModule(id);
     }
+    if (invalidateModules) this.effects.invalidateModule(id);
+    return publishers.length ? "changed" : "removed";
+  }
 
-    this.cssPathToVirtualCssIds.delete(cssPath);
+  clearVirtualCssForSidecar(cssPath: string, invalidateModules = true): void {
+    const outputs = this.sidecarOutputs.get(cssPath);
+    if (!outputs) return;
+    for (const id of outputs.ids)
+      this.withdrawPublication(id, outputs.ownerId, invalidateModules);
+    this.sidecarOutputs.delete(cssPath);
   }
 
   clearGeneratedCssForOwner(ownerId: string): void {
