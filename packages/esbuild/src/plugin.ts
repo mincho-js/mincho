@@ -14,6 +14,7 @@ import {
   internalRebindSymbolicTokenArtifact,
   internalResolveOptimizationOptions,
   internalResolveIdentifiers,
+  internalSerializeDefaultCssImport,
   type MinchoIdentifiers,
   type OptimizationMode,
   type BabelTransformResult,
@@ -40,8 +41,15 @@ import {
   type ResolveResult
 } from "esbuild";
 import type { BuildOptions } from "esbuild";
+import { createHash } from "node:crypto";
 import * as fs from "node:fs";
-import { dirname, join, resolve as resolvePath } from "node:path";
+import {
+  dirname,
+  join,
+  relative,
+  resolve as resolvePath,
+  sep
+} from "node:path";
 import { EsbuildAssets } from "./assets.js";
 import {
   getBuildTransaction,
@@ -58,6 +66,36 @@ import {
   stripStaticCssEvalQuery
 } from "./staticCssEvalSourceProvider.js";
 import { appendInlineSourceMap } from "./inlineSourceMap.js";
+
+const sidecarCssImports = Symbol("Mincho sidecar CSS imports");
+type NativeCssImport = {
+  specifier: string;
+  resolveDir: string;
+  suffix: string;
+};
+
+function nativeCssSerializer(
+  imports: Map<string, NativeCssImport>,
+  root: string
+): NonNullable<
+  Parameters<
+    typeof processDefineRulesPresetRegistryFile
+  >[0]["serializeVirtualCssPath"]
+> {
+  return ({ fileName, source, origin }) =>
+    internalSerializeDefaultCssImport(fileName, source, (specifier) => {
+      if (!origin) return specifier;
+      const resolveDir = dirname(origin);
+      const directory = relative(root, resolveDir).split(sep).join("/");
+      // One logical name and CSS text may have several physical URL bases.
+      const key = createHash("sha256")
+        .update(JSON.stringify([directory, specifier]))
+        .digest("hex");
+      const request = `mincho-css-import:${key}`;
+      imports.set(request, { specifier, resolveDir, suffix: `#mincho-${key}` });
+      return request;
+    });
+}
 
 const integrationHelpers = {
   babelTransformSource,
@@ -121,19 +159,28 @@ export interface MinchoEsbuildPluginOptions {
  * This plugin integrates Mincho.js styling with ESBuild's build process,
  * enabling zero-runtime CSS-in-JS with type safety.
  */
-export function minchoEsbuildPlugin({
-  includeNodeModulesPattern,
-  diagnostics: diagnosticsOptions,
-  cache: cacheOptions,
-  execution: executionOptions,
-  optimize: optimizationOverrides,
-  bundleSize,
-  optimizationMode,
-  identifiers,
-  jsxCssProp,
-  extractCalls,
-  experimental
-}: MinchoEsbuildPluginOptions = {}): EsbuildPlugin {
+export function minchoEsbuildPlugin(
+  options: MinchoEsbuildPluginOptions = {}
+): EsbuildPlugin {
+  return createMinchoEsbuildPlugin(options);
+}
+
+function createMinchoEsbuildPlugin(
+  {
+    includeNodeModulesPattern,
+    diagnostics: diagnosticsOptions,
+    cache: cacheOptions,
+    execution: executionOptions,
+    optimize: optimizationOverrides,
+    bundleSize,
+    optimizationMode,
+    identifiers,
+    jsxCssProp,
+    extractCalls,
+    experimental
+  }: MinchoEsbuildPluginOptions,
+  nativeCss = false
+): EsbuildPlugin {
   return {
     name: "mincho-js-esbuild",
 
@@ -385,6 +432,8 @@ export function minchoEsbuildPlugin({
           resolverCache
         });
 
+        const cssImports = new Map<string, NativeCssImport>();
+
         try {
           const {
             ancestorStyleSpecifiers,
@@ -397,6 +446,12 @@ export function minchoEsbuildPlugin({
               cssScopeOrigins,
               filePath: path,
               outputCss: undefined,
+              ...(nativeCss && {
+                serializeVirtualCssPath: nativeCssSerializer(
+                  cssImports,
+                  build.initialOptions.absWorkingDir ?? process.cwd()
+                )
+              }),
               identOption: internalResolveIdentifiers(mode, identifiers)
             })
           );
@@ -425,16 +480,17 @@ export function minchoEsbuildPlugin({
 
           return {
             contents,
-            ...(symbolicTokens
-              ? {
-                  pluginData: {
-                    symbolicTokens: internalRebindSymbolicTokenArtifact(
-                      symbolicTokens,
-                      contents
-                    )
-                  }
-                }
-              : {}),
+            ...((cssImports.size || symbolicTokens) && {
+              pluginData: {
+                ...(cssImports.size && { [sidecarCssImports]: cssImports }),
+                ...(symbolicTokens && {
+                  symbolicTokens: internalRebindSymbolicTokenArtifact(
+                    symbolicTokens,
+                    contents
+                  )
+                })
+              }
+            }),
             loader: "js",
             resolveDir: dirname(path),
             watchFiles: [...new Set([...watchFiles, ...assetWatchFiles])]
@@ -689,10 +745,29 @@ export function minchoEsbuildPlugin({
 export const minchoEsbuildPlugins = (
   options: MinchoEsbuildPluginOptions = {}
 ) => [
-  minchoEsbuildPlugin(options),
+  createMinchoEsbuildPlugin(options, true),
   {
     name: vanillaExtractPlugin().name,
     setup(build: PluginBuild) {
+      const cssRequest = Symbol("Mincho CSS request");
+      const cssLoad = Symbol("Mincho native CSS load");
+      build.onResolve(
+        { filter: /^mincho-css-import:/, namespace: "extracted-css" },
+        (args) => {
+          const css: NativeCssImport | undefined = args.pluginData?.[
+            sidecarCssImports
+          ]?.get(args.path);
+          if (!css) return;
+          return build.resolve(css.specifier, {
+            kind: args.kind,
+            importer: args.importer,
+            namespace: args.namespace,
+            resolveDir: args.resolveDir,
+            with: args.with,
+            pluginData: { ...args.pluginData, [cssRequest]: css }
+          });
+        }
+      );
       return vanillaExtractPlugin({
         externals: ["@mincho-js/transform-to-vanilla"],
         identifiers: internalResolveIdentifiers(
@@ -702,7 +777,41 @@ export const minchoEsbuildPlugins = (
           ),
           options.identifiers
         )
-      }).setup(build);
+      }).setup({
+        ...build,
+        onResolve(options, nativeResolve) {
+          build.onResolve(options, async (args) => {
+            const result = await nativeResolve(args);
+            const css: NativeCssImport | undefined =
+              args.pluginData?.[cssRequest];
+            if (css?.specifier !== args.path) return result;
+            if (!result?.path || result.external) return result;
+            return {
+              ...result,
+              suffix: (result.suffix ?? "") + css.suffix,
+              pluginData: {
+                [cssLoad]: css.resolveDir,
+                native: result.pluginData,
+                suffix: result.suffix ?? ""
+              }
+            };
+          });
+        },
+        onLoad(options, nativeLoad) {
+          build.onLoad(options, async (args) => {
+            const resolveDir: string | undefined = args.pluginData?.[cssLoad];
+            if (!resolveDir) return nativeLoad(args);
+            const result = await nativeLoad({
+              ...args,
+              pluginData: args.pluginData.native,
+              suffix: args.pluginData.suffix
+            });
+            return result?.loader === "css"
+              ? { ...result, resolveDir }
+              : result;
+          });
+        }
+      });
     }
   }
 ];

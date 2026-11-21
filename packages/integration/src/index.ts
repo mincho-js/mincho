@@ -43,6 +43,7 @@ export {
   type DefineRulesPackageGraph,
   type DefineRulesPackageGraphArtifact
 } from "./defineRulesPackageGraph.js";
+export { serializeDefaultCssImport as internalSerializeDefaultCssImport } from "./vanillaEvaluation.js";
 export {
   getDefineRulesAncestorStyleSpecifiers,
   processDefineRulesPresetRegistryFile,

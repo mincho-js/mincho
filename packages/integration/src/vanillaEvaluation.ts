@@ -369,8 +369,13 @@ function sameScopeOrigin(
   );
 }
 
-async function serializeDefaultCssImport(fileName: string, source: string) {
-  const specifier = `${fileName}?source=${await serializeCss(source)}`;
+export async function serializeDefaultCssImport(
+  fileName: string,
+  source: string,
+  mapSpecifier?: (specifier: string) => string
+) {
+  const cssId = `${fileName}?source=${await serializeCss(source)}`;
+  const specifier = mapSpecifier ? mapSpecifier(cssId) : cssId;
   // Match upstream bytes for ordinary names; encode the entire specifier
   // otherwise, including names that need an apostrophe or backslash escaped.
   const simple =

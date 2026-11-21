@@ -476,6 +476,74 @@ describe("static recipe bundles", () => {
 });
 
 describe("native esbuild assets", () => {
+  it.each(["plain", "with space"])(
+    "resolves a literal sibling SVG from %s on cold evaluation and replay",
+    async (folder) => {
+      const svg =
+        '<svg xmlns="http://www.w3.org/2000/svg"><circle r="4"/></svg>';
+      const nativeSvg =
+        '<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0h4"/></svg>';
+      const root = await fixture({
+        "package.json": '{"name":"css-origin-fixture"}',
+        "entry.tsx": `import "./native%20styles/theme.css"; export { button } from "./${folder}/button";`,
+        "native%20styles/theme.css.ts": `import { globalStyle } from "@vanilla-extract/css"; globalStyle("body", { backgroundImage: 'url("./icon.svg")' });`,
+        "native%20styles/icon.svg": nativeSvg,
+        [`${folder}/button.ts`]: `import { css } from "@mincho-js/css"; export const button = css({ backgroundImage: 'url("./icon.svg")' });`,
+        [`${folder}/icon.svg`]: svg
+      });
+      const buildContext = await context(
+        buildOptions(root, {
+          loader: { ".svg": "file" },
+          plugins: minchoEsbuildPlugins({
+            cache: { type: "memory" },
+            diagnostics: { json: "diagnostics.json" }
+          })
+        })
+      );
+
+      try {
+        for (const replay of [false, true]) {
+          const result = await buildContext.rebuild();
+          const images = result.outputFiles!.filter((file) =>
+            file.path.endsWith(".svg")
+          );
+          expect(images.map((file) => file.text).sort()).toEqual(
+            [svg, nativeSvg].sort()
+          );
+          const url = (bytes: string) => {
+            const file = images.find((image) => image.text === bytes)!;
+            return `url("./${relative(join(root, "out"), file.path)}")`;
+          };
+          const css = outputText(result, ".css");
+          const rule = /\.([\w-]+) \{\s*background-image: ([^;]+);\s*\}/.exec(
+            css
+          );
+          expect(rule?.[2]).toBe(url(svg));
+          expect(outputText(result, ".js")).toContain(JSON.stringify(rule![1]));
+          expect(css).toContain(
+            `body {\n  background-image: ${url(nativeSvg)};\n}`
+          );
+          expect(
+            Object.keys(result.metafile!.inputs).some((id) =>
+              id.startsWith(
+                `vanilla-extract-css-ns:${encodeURIComponent(folder)}/button.ts.vanilla.css?source=`
+              )
+            )
+          ).toBe(true);
+          const report = JSON.parse(
+            await fs.readFile(join(root, "diagnostics.json"), "utf8")
+          );
+          const events: { phase: string }[] = report.builds.at(-1).events;
+          expect(
+            events.some((event) => event.phase === "evaluation-result-hit")
+          ).toBe(replay);
+        }
+      } finally {
+        await buildContext.dispose();
+      }
+    }
+  );
+
   it("replays CSS-only assets on unchanged cached builds", async () => {
     const root = await fixture({
       "entry.tsx":
