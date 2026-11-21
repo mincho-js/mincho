@@ -857,12 +857,15 @@ function insertUnexpectedCssCapturePredecessor(): Plugin {
   };
 }
 
+const publishedPackageDirectory = "node_modules/published";
+
 it.each([false, true])(
   "publishes from a physical hash directory only for origin-independent CSS (resource: %s)",
   async (resource) => {
-    const producer = "node_modules/published/hash#dir/index.mjs";
+    const producerDirectory = `${publishedPackageDirectory}/hash#dir`;
+    const producer = `${producerDirectory}/index.mjs`;
     const root = await fixture({
-      "node_modules/published/package.json":
+      [`${publishedPackageDirectory}/package.json`]:
         '{"name":"published","type":"module"}',
       [producer]: `
         import { style } from "@vanilla-extract/css";
@@ -878,7 +881,7 @@ it.each([false, true])(
         export const second = style({ color: "blue" });
         end();
       `,
-      "node_modules/published/hash#dir/icon.svg":
+      [`${producerDirectory}/icon.svg`]:
         '<svg xmlns="http://www.w3.org/2000/svg"/>',
       "app/package.json": '{"name":"consumer","type":"module"}',
       "app/entry.js": `
@@ -935,7 +938,6 @@ it.each([
 ] as const)(
   "keeps multiple preserved scopes from one producer and stable replacements (%s, %s, quoted: %s)",
   async (mode, fileName, quoted) => {
-    const publishedPackageDirectory = "node_modules/published";
     const producerDirectory = quoted
       ? `${publishedPackageDirectory}/quoted"dir`
       : publishedPackageDirectory;

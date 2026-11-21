@@ -227,7 +227,9 @@ describe("caller loaders in child compilation", () => {
     const filePath = join(root, "entry.ts");
     const dependency = join(root, "resource.css");
     await fs.writeFile(dependency, "unused disk contents");
-    const loader = { ".css": "text" } as const;
+    const loader: NonNullable<esbuild.BuildOptions["loader"]> = {
+      ".css": "text"
+    };
     const payload = ".ordinary { color: green; }";
     const result = await compile({
       cwd: root,
@@ -240,8 +242,9 @@ describe("caller loaders in child compilation", () => {
         {
           name: "load-css-as-text",
           setup(build) {
+            const loader: esbuild.Loader = "default";
             build.onLoad({ filter: /resource\.css$/ }, () => ({
-              loader: "default",
+              loader,
               contents: payload
             }));
           }
