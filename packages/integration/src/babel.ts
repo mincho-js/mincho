@@ -12,7 +12,9 @@ import { extname } from "node:path";
 import { jsxSyntaxPluginPath, typescriptPresetPath } from "./babelPreset.js";
 import {
   type BabelFileResult,
+  type NodePath,
   type TransformOptions,
+  loadPartialConfigAsync,
   parseAsync,
   traverse,
   types as t,
@@ -22,11 +24,13 @@ import {
 import {
   type InternalImportedStaticCssEvalModuleRecord as ImportedStaticCssEvalModuleRecord,
   type MinchoStaticCssEvalMetadata,
+  type MinchoBabelFileMetadata,
   type PluginOptions,
   type MinchoCompilationMetadata,
   type InternalRuntimeCandidates,
   type InternalPreparedExtractCalls,
   internalCollectRuntimeCandidates,
+  internalGetStaticCssEvalLiteralRequireImportPath,
   internalParseModuleProgram,
   internalNormalizeTypeScriptCommonJs,
   minchoBabelPlugin,
@@ -35,7 +39,11 @@ import {
   internalAnalyzePureFunctions,
   internalJsxCssPropExtractCalls
 } from "@mincho-js/babel";
-import { inferCommonJsSourceType, transformCommonJsToEsm } from "./commonJs.js";
+import {
+  applyInferredCommonJsSourceType,
+  inferCommonJsSourceType,
+  transformCommonJsToEsm
+} from "./commonJs.js";
 import {
   prepareExtractCalls,
   retainRuntimeSourceDependencies
@@ -188,6 +196,7 @@ export interface StaticCssEvalSourceProvider {
 
 /** @internal An AST-observed edge, not a filename-only intrinsic assertion. */
 export type IntrinsicEffectRequest =
+  | { purpose: "commonjs-runtime-order"; targetId: string }
   | {
       /** Existing eligible runtime view, for intrinsic observation only. */
       purpose: "intrinsic-runtime";
@@ -211,6 +220,7 @@ export type ConsumerRuntimeSource =
       source: string;
       sourceHash: string;
       version: string;
+      eagerRuntimeModuleIds?: readonly string[];
       intrinsicEffects?: never;
       /** Trusted host callback bound to exact final bytes and current generation.
        * Only pattern-realm observation; not map/Math/value/purity authority. */
@@ -353,6 +363,8 @@ export type BabelTransformResult = {
 export interface BabelTransformSourceOptions {
   /** @internal Vite browser and SSR modules require an ESM surface. */
   commonJsToEsm?: boolean;
+  /** @internal This host's runtime source can include live, process-local observations. */
+  keepRuntimeSourceInProcess?: boolean;
   filename: string;
 
   /** Project root used to resolve root-relative extractCalls registrations. */
@@ -642,6 +654,7 @@ export async function transformSourceUncached(
   const observedStaticCssEvalMetadata = createEmptyStaticCssEvalMetadata();
   const extractCallsDependencies = new Set<string>();
   const options: PluginOptions = {
+    ...(commonJsToEsm ? { stageCommonJsRuntimeRequests: true } : {}),
     result: ["", ""],
     diagnostics,
     jsxCssProp,
@@ -653,13 +666,271 @@ export async function transformSourceUncached(
 
   let result: BabelFileResult;
   let commonJsTransformed = false;
+  let stagedWithGenerator = false;
+  let observedGeneratorOverride = false;
+  const optionalCommonJsSites = (metadata: unknown) =>
+    (metadata as Pick<MinchoBabelFileMetadata, "minchoOptionalCommonJsSites">)
+      ?.minchoOptionalCommonJsSites;
+  const hasGeneratorOverride = (options: unknown) => {
+    const effective = options as
+      | {
+          plugins?: readonly unknown[];
+          presets?: readonly { plugins?: readonly unknown[] }[];
+        }
+      | undefined;
+    return [
+      ...(effective?.plugins ?? []),
+      ...(effective?.presets ?? []).flatMap((preset) => preset.plugins ?? [])
+    ].some(
+      (plugin) =>
+        plugin !== null &&
+        typeof plugin === "object" &&
+        "generatorOverride" in plugin &&
+        typeof plugin.generatorOverride === "function"
+    );
+  };
   let preparedProgram:
     ReturnType<typeof internalParseModuleProgram> | undefined;
   let preparedWithBabel = false;
+  let configuredAst: t.File | undefined;
+  let preparedSyntax: t.Program | undefined;
+  const importExportSurface = (program: t.Program): t.Statement[] => {
+    const surface: t.Statement[] = [];
+    for (const statement of program.body) {
+      // Whole type declarations have no runtime edge. Unlike an erased
+      // inline TypeScript re-export, an inline import can retain side effects.
+      if (
+        t.isImportDeclaration(statement) ||
+        t.isTSImportEqualsDeclaration(statement)
+      ) {
+        if (statement.importKind !== "type") surface.push(statement);
+        continue;
+      }
+
+      if (t.isExportAllDeclaration(statement)) {
+        if (statement.exportKind !== "type") surface.push(statement);
+        continue;
+      }
+
+      if (t.isExportNamedDeclaration(statement)) {
+        if (statement.exportKind === "type") continue;
+        if (statement.source != null) {
+          // This loader installs the TS transform in the actual Babel pass.
+          // A syntax-only parser option is not proof of specifier erasure.
+          if (
+            (loader === "ts" || loader === "tsx") &&
+            statement.specifiers.length > 0
+          ) {
+            const specifiers = statement.specifiers.filter(
+              (specifier) =>
+                !t.isExportSpecifier(specifier) ||
+                specifier.exportKind !== "type"
+            );
+            if (!specifiers.length) continue;
+            if (specifiers.length !== statement.specifiers.length) {
+              surface.push({ ...statement, specifiers });
+              continue;
+            }
+          }
+          surface.push(statement);
+          continue;
+        }
+        // A local value export can select a same-file extractCalls binding
+        // without changing any imported module or executable initializer.
+        if (
+          extractCalls !== undefined &&
+          statement.specifiers.some(
+            (specifier) =>
+              t.isExportSpecifier(specifier) && specifier.exportKind !== "type"
+          )
+        )
+          surface.push(statement);
+        continue;
+      }
+
+      if (t.isTSExportAssignment(statement)) surface.push(statement);
+    }
+    return surface;
+  };
+  const scopedProgram = (program: t.Program) => {
+    // Babel pre hooks can mutate binding declarations on the AST without
+    // updating the live scope. Read a fresh, separate scope for this check.
+    let snapshot: t.Program;
+    try {
+      // Local extraction identities include the parser's exact source ranges,
+      // which Babel's cloneNode does not keep. Copy the Program only, not the
+      // parser's File tokens or its live scope.
+      snapshot = structuredClone(program);
+    } catch {
+      // Custom AST metadata can forbid a structural clone. Keep Babel's
+      // scope-only fallback; unproved source locations will still deopt.
+      snapshot = t.cloneNode(program);
+    }
+    let current: NodePath<t.Program> | undefined;
+    traverse(t.file(snapshot), {
+      Program(path) {
+        current = path;
+        path.stop();
+      }
+    });
+    return current;
+  };
+  const requireSurface = (program: NodePath<t.Program>) => {
+    const specifiers: string[] = [];
+    program.traverse({
+      CallExpression(call) {
+        const specifier = internalGetStaticCssEvalLiteralRequireImportPath(
+          call.node,
+          call.scope
+        );
+        if (specifier?.startsWith("./") || specifier?.startsWith("../"))
+          specifiers.push(specifier);
+      }
+    });
+    return specifiers;
+  };
+  const sameSpecifiers = (a: readonly string[], b: readonly string[]) =>
+    a.length === b.length && a.every((value, i) => value === b[i]);
+  let preparedRequires: string[] | undefined;
+  let refreshedConfiguration:
+    | {
+        program: t.Program;
+        specifiers: string[];
+        prepass:
+          Awaited<ReturnType<typeof createStaticCssEvalPrepass>> | undefined;
+        extraction: InternalPreparedExtractCalls | undefined;
+      }
+    | undefined;
+  const canRefreshConfiguredValues = Boolean(
+    jsxCssProp && prepassSourceProvider && !staticCssEvalProvider
+  );
+  // Registered factories use their own graph, regardless of how JSX values
+  // are supplied.
+  const canPrepareConfiguredChanges =
+    canRefreshConfiguredValues ||
+    (extractCalls !== undefined && prepassSourceProvider !== undefined);
+  let hasConfiguredChanges = Boolean(
+    babelCoreOptions.plugins?.length ||
+    babelCoreOptions.presets?.length ||
+    babelCoreOptions.configFile ||
+    babelCoreOptions.babelrc === true ||
+    babelCoreOptions.extends
+  );
+  const sameNodes = (left: readonly t.Node[], right: readonly t.Node[]) =>
+    left.length === right.length &&
+    left.every((node, index) => t.isNodesEquivalent(node, right[index]!));
   let parserPlugins = babelCoreOptions.parserOpts?.plugins;
 
+  const prepareCalls = (
+    registrations: NonNullable<typeof extractCalls>,
+    program: NodePath<t.Program> | undefined
+  ) =>
+    prepareExtractCalls(
+      {
+        extractCalls: registrations,
+        root,
+        filename: path,
+        source,
+        program,
+        parserCache: compilationCache?.parser,
+        parserPlugins,
+        jsx: loader === "jsx" || loader === "tsx"
+      },
+      prepassSourceProvider,
+      consumerRuntimeSource
+    );
+
+  const hasTypeScriptCommonJsSyntax = (program: t.Program) =>
+    program.body.some(
+      (node) =>
+        t.isTSImportEqualsDeclaration(node) || t.isTSExportAssignment(node)
+    );
+  type ConfiguredPreFile = NonNullable<
+    Parameters<typeof internalNormalizeTypeScriptCommonJs>[1]
+  > & { path: NodePath<t.Program> };
+
+  async function refreshConfiguredInputs(file: ConfiguredPreFile) {
+    const program = file.path;
+    if (
+      !configuredAst ||
+      !preparedSyntax ||
+      !preparedRequires ||
+      !prepassSourceProvider
+    )
+      return;
+
+    const importExportsChanged = !sameNodes(
+      importExportSurface(preparedSyntax),
+      importExportSurface(program.node)
+    );
+    // Observe exactly the syntax in the host's final pre hook, without
+    // invoking the caller's Babel pipeline a second time.
+    const current = scopedProgram(program.node);
+    if (!current) return;
+    const specifiers = requireSurface(current);
+    if (!importExportsChanged && sameSpecifiers(preparedRequires, specifiers))
+      return;
+    // The first Program visitor applies the same inference to the live AST.
+    // Verify the fully inferred snapshot, not a pre-inference sourceType.
+    if (babelCoreOptions.sourceType === undefined)
+      applyInferredCommonJsSourceType(current);
+    // Preserve the authored snapshot for the final freshness check. Prepare
+    // using the same TypeScript CommonJS surface as the initial analysis.
+    let analysis = current;
+    if (hasTypeScriptCommonJsSyntax(current.node)) {
+      const normalized = scopedProgram(current.node);
+      if (!normalized) return;
+      internalNormalizeTypeScriptCommonJs(normalized, file);
+      analysis = normalized;
+    }
+    const prepass = canRefreshConfiguredValues
+      ? await measureCompilationPhase("static-prepass", () =>
+          createStaticCssEvalPrepass(
+            path,
+            prepassSourceProvider,
+            compilationCache?.parser,
+            analysis,
+            "values",
+            parserPlugins,
+            undefined,
+            hasLocalPattern(analysis) ? { consumerRuntimeSource } : undefined
+          )
+        )
+      : undefined;
+    let extraction: InternalPreparedExtractCalls | undefined;
+    if (extractCalls !== undefined) {
+      try {
+        extraction = await prepareCalls(extractCalls, analysis);
+      } catch (error) {
+        if (!(error instanceof InternalExtractCallsError)) throw error;
+        for (const file of error.dependencies)
+          extractCallsDependencies.add(file);
+      }
+    }
+
+    for (const file of staticCssEvalPrepass?.result.dependencyFiles ?? [])
+      extractCallsDependencies.add(file);
+    for (const file of prepass?.result.dependencyFiles ?? [])
+      extractCallsDependencies.add(file);
+    for (const file of extraction?.dependencies ?? [])
+      extractCallsDependencies.add(file);
+
+    // Neither result is usable until the Program visitor confirms this is
+    // still the exact post-hook tree that both analyses observed.
+    refreshedConfiguration = {
+      program: current.node,
+      specifiers,
+      prepass,
+      extraction
+    };
+  }
+
   try {
-    const transformOptions: TransformOptions = {
+    const collectRuntimeCandidates =
+      optimize?.runtimeCodegen === true ||
+      optimize?.staticRecipes !== false ||
+      optimize?.styledComponents !== false;
+    let transformOptions: TransformOptions = {
       sourceType: "unambiguous",
       ...babelCoreOptions,
       filename: path,
@@ -671,6 +942,81 @@ export async function transformSourceUncached(
         ...(Array.isArray(babelCoreOptions.plugins)
           ? babelCoreOptions.plugins
           : []),
+        {
+          visitor: {
+            Program(program: NodePath<t.Program>) {
+              if (!preparedSyntax) return;
+
+              // A prepared fold can read local syntax as well as imported
+              // bindings. Compare the executed Program, not only its edges.
+              if (
+                options.preparedPureFunctions &&
+                (!sameNodes(preparedSyntax.body, program.node.body) ||
+                  !sameNodes(
+                    preparedSyntax.directives,
+                    program.node.directives
+                  ))
+              )
+                options.preparedPureFunctions = {
+                  replacements: [],
+                  dependencies: options.preparedPureFunctions.dependencies,
+                  diagnostics: []
+                };
+
+              if (!configuredAst) return;
+              const importExportsChanged = !sameNodes(
+                importExportSurface(preparedSyntax),
+                importExportSurface(program.node)
+              );
+              const current = preparedRequires
+                ? scopedProgram(program.node)
+                : undefined;
+              const currentRequires = current ? requireSurface(current) : [];
+              const requiresChanged =
+                preparedRequires !== undefined &&
+                !sameSpecifiers(preparedRequires, currentRequires);
+              if (!importExportsChanged && !requiresChanged) return;
+              const refreshed =
+                refreshedConfiguration &&
+                sameSpecifiers(
+                  refreshedConfiguration.specifiers,
+                  currentRequires
+                ) &&
+                t.isNodesEquivalent(
+                  refreshedConfiguration.program,
+                  program.node
+                )
+                  ? refreshedConfiguration
+                  : undefined;
+              if (!staticCssEvalProvider) {
+                if (refreshed?.prepass) {
+                  staticCssEvalPrepass = refreshed.prepass;
+                  options.staticCssEvalProvider =
+                    createObservingStaticCssEvalProvider(
+                      refreshed.prepass.provider,
+                      observedStaticCssEvalMetadata
+                    );
+                  observedStaticCssEvalMetadata.diagnostics.push(
+                    ...refreshed.prepass.diagnostics
+                  );
+                } else delete options.staticCssEvalProvider;
+              }
+              const veto = {
+                intact: false,
+                revision: 0,
+                fingerprint: "configured-import-export-changed"
+              };
+              options.preparedExtractCalls = mergeIntrinsicObservations(
+                refreshed?.extraction,
+                {
+                  arrayMapIntrinsics: { ...veto, prototypeMutationKeys: null },
+                  mathIntrinsics: { ...veto, bindIntact: false }
+                },
+                options.preparedExtractCalls?.dependencies ?? []
+              );
+            }
+          }
+        },
         minchoStyledComponentPlugin(),
         [minchoBabelPlugin(), options],
         {
@@ -699,10 +1045,7 @@ export async function transformSourceUncached(
           : [])
       ],
       sourceMaps,
-      ast:
-        optimize?.runtimeCodegen === true ||
-        optimize?.staticRecipes !== false ||
-        optimize?.styledComponents !== false,
+      ast: collectRuntimeCandidates || commonJsToEsm,
       ...(inputSourceMap !== undefined ? { inputSourceMap } : {})
     };
 
@@ -724,12 +1067,41 @@ export async function transformSourceUncached(
 
       if (!ast) return false;
 
-      traverse(ast, {
+      configuredAst = ast;
+      observedGeneratorOverride = hasGeneratorOverride(configuredOptions);
+
+      // Babel has already expanded the first-pass plugin list for this file.
+      // Use its real pre hooks, including from auto-discovered configuration,
+      // without reloading the configuration or executing any author hooks.
+      if (canPrepareConfiguredChanges && !hasConfiguredChanges)
+        hasConfiguredChanges =
+          configuredOptions.plugins?.some(
+            (plugin) =>
+              typeof plugin === "object" &&
+              plugin !== null &&
+              "pre" in plugin &&
+              typeof plugin.pre === "function"
+          ) ?? false;
+
+      let analysisAst = ast;
+      if (hasTypeScriptCommonJsSyntax(ast.program)) {
+        try {
+          // Keep source offsets for analysis. Parser tokens can hold functions
+          // and only the original File needs them for Babel's hooks and emit.
+          const { tokens: _tokens, ...preparationFile } = ast;
+          analysisAst = structuredClone(preparationFile);
+        } catch {
+          analysisAst = ast;
+        }
+      }
+
+      traverse(analysisAst, {
         Program(program) {
-          internalNormalizeTypeScriptCommonJs(program, {
-            opts: configuredOptions,
-            ast
-          });
+          if (analysisAst !== ast)
+            internalNormalizeTypeScriptCommonJs(program, {
+              opts: configuredOptions,
+              ast: analysisAst
+            });
           preparedProgram = program;
           preparedWithBabel = true;
           program.stop();
@@ -784,24 +1156,11 @@ export async function transformSourceUncached(
         }
       }
 
-      const prepareCalls = () =>
-        prepareExtractCalls(
-          {
-            extractCalls,
-            root,
-            filename: path,
-            source,
-            program: preparedProgram,
-            parserCache: compilationCache?.parser,
-            parserPlugins,
-            jsx: loader === "jsx" || loader === "tsx"
-          },
-          prepassSourceProvider,
-          consumerRuntimeSource
-        );
-
       try {
-        options.preparedExtractCalls = await prepareCalls();
+        options.preparedExtractCalls = await prepareCalls(
+          extractCalls,
+          preparedProgram
+        );
       } catch (error) {
         // A dependency can need configured syntax even when the owner does not.
         if (
@@ -812,7 +1171,10 @@ export async function transformSourceUncached(
         )
           throw error;
 
-        options.preparedExtractCalls = await prepareCalls();
+        options.preparedExtractCalls = await prepareCalls(
+          extractCalls,
+          preparedProgram
+        );
       }
 
       for (const file of options.preparedExtractCalls.dependencies)
@@ -894,6 +1256,108 @@ export async function transformSourceUncached(
       );
     }
 
+    const rawSyntax = configuredAst?.program ?? preparedProgram?.node;
+    // transformFromAst clones its input by default; if the caller disables
+    // that behavior, keep an independent reference for the freshness check.
+    preparedSyntax =
+      rawSyntax && transformOptions.cloneInputAst === false
+        ? t.cloneNode(rawSyntax)
+        : rawSyntax;
+
+    let resolvedAuthorConfig:
+      Awaited<ReturnType<typeof loadPartialConfigAsync>> | undefined;
+    if (
+      canPrepareConfiguredChanges &&
+      hasConfiguredChanges &&
+      configuredAst &&
+      preparedSyntax
+    ) {
+      const prepared = scopedProgram(preparedSyntax);
+      if (prepared) {
+        preparedRequires = requireSurface(prepared);
+        // Resolve the final pass once. Babel's partial ConfigItems retain
+        // file and explicit preset order while disabling further discovery.
+        // With all items in one list, reverse preset expansion places this
+        // hook after the effective direct and preset-provided pre hooks.
+        const configured = await loadPartialConfigAsync(transformOptions);
+        resolvedAuthorConfig = configured;
+        if (configured) {
+          transformOptions = {
+            ...configured.options,
+            presets: [
+              () => ({
+                plugins: [
+                  {
+                    pre(file: ConfiguredPreFile) {
+                      return refreshConfiguredInputs(file);
+                    },
+                    visitor: {}
+                  }
+                ]
+              }),
+              ...(configured.options.presets ?? [])
+            ]
+          };
+        }
+      }
+    }
+
+    if (
+      commonJsToEsm &&
+      (hasConfiguredChanges || observedGeneratorOverride || !configuredAst)
+    ) {
+      const configured =
+        resolvedAuthorConfig ??
+        (await loadPartialConfigAsync(transformOptions));
+      if (
+        configured &&
+        (hasConfiguredChanges ||
+          observedGeneratorOverride ||
+          configured.hasFilesystemConfig() ||
+          // Programmatic env/overrides can add effective items without
+          // supplying a top-level plugin or enabling a config file.
+          (configured.options.plugins?.length ?? 0) >
+            (transformOptions.plugins?.length ?? 0) ||
+          (configured.options.presets?.length ?? 0) >
+            (transformOptions.presets?.length ?? 0))
+      ) {
+        // Create only our own final pass separately: the author's resolved
+        // presets retain their pass layout, and this post runs after all of
+        // their visitors and posts. Only record the effective generator here;
+        // its output and map are authoritative, including any new readers.
+        const tailOptions: TransformOptions & { passPerPreset: true } = {
+          babelrc: false,
+          configFile: false,
+          passPerPreset: true,
+          presets: [
+            () => ({
+              plugins: [
+                {
+                  post(file: { metadata: unknown; opts: TransformOptions }) {
+                    const sites = optionalCommonJsSites(file.metadata);
+                    stagedWithGenerator =
+                      !!sites?.length && hasGeneratorOverride(file.opts);
+                  },
+                  visitor: {}
+                }
+              ]
+            })
+          ]
+        };
+        const tail = await loadPartialConfigAsync(tailOptions);
+        const preset = tail?.options.presets?.[0];
+        if (preset) {
+          const authored = resolvedAuthorConfig
+            ? transformOptions
+            : configured.options;
+          transformOptions = {
+            ...authored,
+            presets: [...(authored.presets ?? []), preset]
+          };
+        }
+      }
+    }
+
     const transformed = await measureCompilationPhase("babel", () =>
       preparedProgram &&
       (preparedWithBabel ||
@@ -902,7 +1366,7 @@ export async function transformSourceUncached(
           (!babelCoreOptions.sourceType ||
             babelCoreOptions.sourceType === "unambiguous")))
         ? transformFromAstAsync(
-            preparedProgram.parent as t.File,
+            configuredAst ?? (preparedProgram.parent as t.File),
             source,
             transformOptions
           )
@@ -915,11 +1379,37 @@ export async function transformSourceUncached(
     result = transformed;
 
     if (commonJsToEsm) {
+      const optionalSites = optionalCommonJsSites(transformed.metadata);
+      // This AST still uses author-input coordinates. Babel exposes the
+      // effective upstream map (including a consumed inline comment) through
+      // its generator options, rather than the first-pass output map.
+      const upstreamInputMap = (
+        transformed as BabelFileResult & {
+          options?: {
+            generatorOpts?: {
+              inputSourceMap?: TransformOptions["inputSourceMap"];
+            };
+          };
+        }
+      ).options?.generatorOpts?.inputSourceMap;
       const normalized = await transformCommonJsToEsm({
         filename: path,
         source: transformed.code,
         cache: compilationCache,
-        collectRuntimeCandidates: transformOptions.ast === true,
+        collectRuntimeCandidates,
+        ...(transformed.ast && optionalSites?.length
+          ? {
+              stagedSites: {
+                ast: transformed.ast,
+                originalSource: source,
+                originalMap:
+                  upstreamInputMap ?? transformOptions.inputSourceMap,
+                sites: optionalSites,
+                runtimeSource: consumerRuntimeSource,
+                reconcileGeneratedCode: stagedWithGenerator
+              }
+            }
+          : {}),
         provider: prepassSourceProvider,
         dependencies: extractCallsDependencies,
         sidecar: options.result[0],

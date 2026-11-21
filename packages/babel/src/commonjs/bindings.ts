@@ -894,6 +894,14 @@ export function getModuleReference(
   return resolveModuleReference(path, seen);
 }
 
+/** Attribute an observable native runtime use to its lexical module origin.
+ * This does not prove namespace integrity and must only retain authored work. */
+export function getModuleRuntimeDemandOrigin(
+  path: NodePath<t.Node>
+): ModuleReference | null {
+  return resolveModuleReference(path, new Set(), undefined, undefined, false);
+}
+
 /** Primitive plus accessor-free read evidence for one emitted named ESM import.
  * Neither registration nor source identity alone establishes this contract. */
 export function isProvenPrimitiveImport(binding: Binding): boolean {

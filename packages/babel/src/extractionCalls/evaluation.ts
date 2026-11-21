@@ -3,6 +3,7 @@ import {
   isRuntimeSourceReference
 } from "../optimizations/runtimeSourceReference.js";
 import { isWriteTarget } from "./closedAllocation.js";
+import { isWriteTarget as isReferenceWriteTarget } from "../commonjs/bindings.js";
 import { traverse, type NodePath, types as t } from "@babel/core";
 import {
   isTransparentCssRuleWrapperExpression,
@@ -113,8 +114,29 @@ type Operand = {
 
 export type EvaluationStep =
   | { kind: "evaluate"; operand: Operand }
-  | { kind: "coerce"; path: NodePath<t.Node> }
-  | { kind: "observe"; path: NodePath<t.Node> }
+  | {
+      kind: "coerce";
+      path: NodePath<t.Node>;
+      propertyKey?: {
+        after: NodePath<t.Node>;
+        requiresObject?: NodePath<t.Node>;
+        receiver?: NodePath<t.Expression>;
+      };
+      valueConversion?: {
+        after: NodePath<t.Expression>;
+        hint: "default" | "number";
+      };
+    }
+  | {
+      kind: "observe";
+      path: NodePath<t.Node>;
+      sourceDelivery?: {
+        after: NodePath<t.Expression>;
+        kind: "sync-iterator" | "async-iterator" | "binding-pattern";
+        pattern?: NodePath<t.Node>;
+      };
+      copyMembers?: { after: NodePath<t.Expression> };
+    }
   | { kind: "abrupt"; path: NodePath<t.Node> }
   | { kind: "apply-decorator"; path: NodePath<t.Decorator> };
 
@@ -186,6 +208,201 @@ function children(path: NodePath<t.Node>): NodePath<t.Node>[] {
 }
 
 /**
+ * A definition converts immediately after evaluating its key; `in` after
+ * both operands; a computed read after its receiver and key. An assignment
+ * separately observes PutValue after the RHS; compound assignments also do
+ * GetValue before the RHS. Reference formation alone does neither.
+ */
+export function propertyKeyStep(
+  path: NodePath<t.Node>
+): Extract<EvaluationStep, { kind: "coerce" }> | undefined {
+  if (
+    (path.isObjectMethod() || path.isObjectProperty()) &&
+    path.node.computed &&
+    path.parentPath.isObjectExpression()
+  ) {
+    const key = path.get("key") as NodePath<t.Node>;
+    return { kind: "coerce", path: key, propertyKey: { after: key } };
+  }
+  if (path.isBinaryExpression({ operator: "in" })) {
+    const right = path.get("right");
+    return {
+      kind: "coerce",
+      path: path.get("left"),
+      propertyKey: { after: right, requiresObject: right }
+    };
+  }
+  // Only an actual consuming operation should convert a member key.
+  if (
+    path.isAssignmentExpression() &&
+    !logicalAssignmentOperator(path.node.operator)
+  )
+    return computedMemberKey(path.get("left"), path.get("right"));
+  if (path.isUpdateExpression())
+    return computedMemberKey(path.get("argument"), path.get("argument"));
+  if (path.isMemberExpression() || path.isOptionalMemberExpression()) {
+    let wrapped: NodePath<t.Node> = path;
+    let consumer = wrapped.parentPath;
+    while (
+      consumer?.isExpression() &&
+      isTransparentCssRuleWrapperExpression(consumer.node) &&
+      consumer.node.expression === wrapped.node
+    ) {
+      wrapped = consumer;
+      consumer = wrapped.parentPath;
+    }
+    const readsOrDeletes =
+      (consumer?.isAssignmentExpression() &&
+        consumer.node.left === wrapped.node &&
+        consumer.node.operator !== "=") ||
+      consumer?.isUpdateExpression() ||
+      consumer?.isUnaryExpression({ operator: "delete" });
+    if (!isReferenceWriteTarget(path) || readsOrDeletes)
+      return computedMemberKey(path);
+  }
+}
+
+function computedMemberKey(
+  path: NodePath<t.Node>,
+  after?: NodePath<t.Node>
+): Extract<EvaluationStep, { kind: "coerce" }> | undefined {
+  while (
+    path.isExpression() &&
+    isTransparentCssRuleWrapperExpression(path.node)
+  )
+    path = path.get("expression") as NodePath<t.Node>;
+  if (
+    (!path.isMemberExpression() && !path.isOptionalMemberExpression()) ||
+    !path.node.computed
+  )
+    return;
+  const member: NodePath<t.MemberExpression | t.OptionalMemberExpression> =
+    path;
+  const property = member.get("property");
+  const receiver = member.get("object");
+  if (receiver.isExpression())
+    return {
+      kind: "coerce",
+      path: property,
+      propertyKey: { after: after ?? property, receiver }
+    };
+}
+
+// Apply the compound operator to the earlier GetValue and the now evaluated
+// RHS, before forming the eventual write. Logical assignments only select
+// and store a value; they never run this conversion.
+export function storedValueConversionSteps(
+  path: NodePath<t.Node>
+): Extract<EvaluationStep, { kind: "coerce" }>[] | undefined {
+  if (path.isUpdateExpression()) {
+    const argument = path.get("argument");
+    return [
+      {
+        kind: "coerce",
+        path: argument,
+        valueConversion: { after: argument, hint: "number" }
+      }
+    ];
+  }
+  if (
+    !path.isAssignmentExpression() ||
+    ["=", "&&=", "||=", "??="].includes(path.node.operator)
+  )
+    return;
+  const right = path.get("right");
+  const hint = path.node.operator === "+=" ? "default" : "number";
+  return [path.get("left"), right].map((value) => ({
+    kind: "coerce",
+    path: value,
+    valueConversion: { after: right, hint }
+  }));
+}
+
+export function patternObservesDelivery(pattern: t.Node): boolean {
+  if (t.isArrayPattern(pattern)) return true;
+  if (t.isObjectPattern(pattern))
+    return pattern.properties.some(
+      (property) =>
+        (!t.isRestElement(property) && property.computed) ||
+        patternObservesDelivery(
+          t.isRestElement(property) ? property.argument : property.value
+        )
+    );
+  if (t.isAssignmentPattern(pattern))
+    return patternObservesDelivery(pattern.left);
+  if (t.isRestElement(pattern))
+    return patternObservesDelivery(pattern.argument);
+  return false;
+}
+
+/** A default changes the delivered value, not the reads of its target. */
+export function bindingPatternReadsSource(pattern: t.Node): boolean {
+  return t.isAssignmentPattern(pattern)
+    ? bindingPatternReadsSource(pattern.left)
+    : t.isArrayPattern(pattern) || t.isObjectPattern(pattern);
+}
+
+export function sourceDeliveryStep(
+  path: NodePath<t.Node>
+): Extract<EvaluationStep, { kind: "observe" }> | undefined {
+  if (path.isSpreadElement() && path.parentPath.isArrayExpression())
+    return {
+      kind: "observe",
+      path,
+      sourceDelivery: { after: path.get("argument"), kind: "sync-iterator" }
+    };
+  const pattern = path.isVariableDeclarator()
+    ? path.get("id")
+    : path.isAssignmentExpression()
+      ? path.get("left")
+      : undefined;
+  // Object binding reads its selected own properties even when the local
+  // destination is never referenced. Nested iterator demand is independent.
+  if (pattern && bindingPatternReadsSource(pattern.node)) {
+    const value = path.isVariableDeclarator()
+      ? path.get("init")
+      : path.isAssignmentExpression()
+        ? path.get("right")
+        : undefined;
+    if (value?.isExpression())
+      return {
+        kind: "observe",
+        path: pattern,
+        sourceDelivery: { after: value, kind: "binding-pattern", pattern }
+      };
+  }
+  if (path.isForOfStatement()) {
+    const left = path.get("left");
+    const target = left.isVariableDeclaration()
+      ? left.get("declarations")[0]?.get("id")
+      : left;
+    return {
+      kind: "observe",
+      path,
+      sourceDelivery: {
+        after: path.get("right"),
+        kind: path.node.await ? "async-iterator" : "sync-iterator",
+        ...(target && bindingPatternReadsSource(target.node)
+          ? { pattern: target }
+          : {})
+      }
+    };
+  }
+}
+
+/** CopyDataProperties reads enumerable own accessors after its source. */
+export function objectSpreadStep(
+  path: NodePath<t.Node>
+): Extract<EvaluationStep, { kind: "observe" }> | undefined {
+  if (path.isSpreadElement() && path.parentPath.isObjectExpression())
+    return {
+      kind: "observe",
+      path,
+      copyMembers: { after: path.get("argument") }
+    };
+}
+
+/**
  * Describe evaluation once for both owner discovery and order proofs. Captured
  * references are dependencies of a function value, not eager body execution.
  */
@@ -239,12 +456,7 @@ export function planEvaluation(
     let selected: NodePath<t.Node>[] | undefined;
     if (condition) {
       if (path.isLogicalExpression()) {
-        const readsRight =
-          path.node.operator === "&&"
-            ? condition.truthy
-            : path.node.operator === "||"
-              ? !condition.truthy
-              : condition.nullish;
+        const readsRight = selectsLogicalRight(path.node.operator, condition);
         selected = readsRight ? [test, path.get("right")] : [test];
         plan.unexecutedBranches = readsRight ? [] : [path.get("right")];
       } else {
@@ -353,7 +565,7 @@ export function planEvaluation(
     }
     steps = plan.operands.flatMap((value) =>
       value.path.key === "key"
-        ? [evaluate(value), coerce(value.path)]
+        ? [evaluate(value), propertyKeyStep(path) ?? coerce(value.path)]
         : [evaluate(value)]
     );
     steps.push(...applications);
@@ -405,7 +617,7 @@ export function planEvaluation(
       .map((child) => operand(child));
     steps = plan.operands.flatMap((value) =>
       value.path.key === "key"
-        ? [evaluate(value), coerce(value.path)]
+        ? [evaluate(value), propertyKeyStep(path) ?? coerce(value.path)]
         : [evaluate(value)]
     );
   } else if (path.isMemberExpression() || path.isOptionalMemberExpression()) {
@@ -426,7 +638,7 @@ export function planEvaluation(
     ];
     steps = plan.operands.flatMap((value) =>
       value.path.key === "property"
-        ? [evaluate(value), coerce(value.path)]
+        ? [evaluate(value), propertyKeyStep(path) ?? coerce(value.path)]
         : [evaluate(value)]
     );
     steps.push(observe());
@@ -460,6 +672,10 @@ export function planEvaluation(
     steps = plan.operands.map(evaluate);
     if (["+", "-", "~"].includes(path.node.operator))
       steps.push(coerce(path.get("argument")));
+    if (path.node.operator === "delete") {
+      const key = computedMemberKey(path.get("argument"));
+      if (key) steps.push(key);
+    }
     if (plan.operation === "observation") steps.push(observe());
     if (
       path.node.operator === "throw" ||
@@ -484,6 +700,8 @@ export function planEvaluation(
     // Both operand values are evaluated before numeric/string coercion begins.
     if (["in", "instanceof"].includes(path.node.operator)) {
       plan.operation = "observation";
+      const propertyKey = propertyKeyStep(path);
+      if (propertyKey) steps.push(propertyKey);
       steps.push(observe());
     } else if (!["===", "!=="].includes(path.node.operator)) {
       steps.push(...plan.operands.map((value) => coerce(value.path)));
@@ -515,7 +733,10 @@ export function planEvaluation(
     ];
     steps = [
       evaluate(plan.operands[0]),
-      { kind: "observe", path: path.get("left") }
+      sourceDeliveryStep(path) ?? {
+        kind: "observe",
+        path: path.get("left")
+      }
     ];
   } else if (path.isAssignmentExpression() || path.isUpdateExpression()) {
     plan.operation = "observation";
@@ -536,8 +757,32 @@ export function planEvaluation(
     steps = [...plan.operands.map(evaluate), observe()];
     // Compound assignment reads the old value before evaluating its RHS.
     // Forming a reference alone does not prove that GetValue is inert.
-    if (path.isAssignmentExpression() && path.node.operator !== "=")
-      steps.splice(1, 0, { kind: "observe", path: path.get("left") });
+    if (path.isAssignmentExpression()) {
+      if (path.node.operator !== "=") {
+        const left = path.get("left");
+        const keyRead = computedMemberKey(left);
+        steps.splice(1, 0, ...(keyRead ? [keyRead] : []), {
+          kind: "observe",
+          path: left
+        });
+      }
+      const conversions = storedValueConversionSteps(path);
+      if (conversions) steps.splice(steps.length - 1, 0, ...conversions);
+      const keyWrite = propertyKeyStep(path);
+      if (keyWrite) steps.splice(steps.length - 1, 0, keyWrite);
+    } else {
+      const argument = path.get("argument");
+      const keyRead = computedMemberKey(argument);
+      const keyWrite = propertyKeyStep(path);
+      steps.splice(
+        1,
+        0,
+        ...(keyRead ? [keyRead] : []),
+        { kind: "observe", path: argument },
+        ...(storedValueConversionSteps(path) ?? []),
+        ...(keyWrite ? [keyWrite] : [])
+      );
+    }
   } else if (path.isIdentifier()) {
     plan.operation = "binding";
   } else if (
@@ -552,6 +797,25 @@ export function planEvaluation(
         ...value,
         execution: value.path.listKey === "arguments" ? "possible" : "eager"
       }));
+  } else if (path.isVariableDeclarator() && sourceDeliveryStep(path)) {
+    plan.operation = "observation";
+    const iteration = sourceDeliveryStep(path)!;
+    const value = operand(iteration.sourceDelivery!.after);
+    const target = operand(path.get("id"), "reference", "possible");
+    plan.operands = [value, target];
+    steps = [evaluate(value), iteration, evaluate(target)];
+  } else if (path.isForOfStatement()) {
+    const right = operand(path.get("right"));
+    const left = operand(path.get("left"), "reference", "possible");
+    const body = operand(path.get("body"), "value", "possible");
+    plan.operation = "observation";
+    plan.operands = [right, left, body];
+    steps = [
+      evaluate(right),
+      sourceDeliveryStep(path)!,
+      evaluate(left),
+      evaluate(body)
+    ];
   } else if (
     path.isSpreadElement() ||
     path.isAwaitExpression() ||
@@ -584,7 +848,9 @@ export function planEvaluation(
 
   plan.steps = steps ?? plan.operands.map(evaluate);
   if (!steps && (plan.operation === "observation" || plan.operation === "call"))
-    plan.steps.push(observe());
+    plan.steps.push(
+      sourceDeliveryStep(path) ?? objectSpreadStep(path) ?? observe()
+    );
   context.plans.set(path, plan);
   return plan;
 }
@@ -1079,6 +1345,30 @@ function primitiveCondition(
 
 type BranchOutcome = { truthy: boolean; nullish: boolean };
 
+function selectsLogicalRight(
+  operator: t.LogicalExpression["operator"],
+  value: BranchOutcome
+): boolean {
+  return operator === "&&"
+    ? value.truthy
+    : operator === "||"
+      ? !value.truthy
+      : value.nullish;
+}
+
+export function logicalAssignmentOperator(
+  operator: t.AssignmentExpression["operator"]
+): t.LogicalExpression["operator"] | undefined {
+  switch (operator) {
+    case "&&=":
+      return "&&";
+    case "||=":
+      return "||";
+    case "??=":
+      return "??";
+  }
+}
+
 /** Facts about a normal result never discharge evaluation of the test itself. */
 function normalBranchOutcome(
   path: NodePath<t.Expression>,
@@ -1147,6 +1437,23 @@ export function branchEvaluationFacts(
     }
   }
   return {
+    initializedConst(path: NodePath<t.Identifier>) {
+      const init = initializedConstDeclaration(
+        path,
+        context.bindingsCurrent!
+      )?.get("init");
+      return init?.isExpression() ? init : undefined;
+    },
+    valueNullish(path: NodePath<t.Expression>) {
+      return normalBranchOutcome(path, context)?.nullish;
+    },
+    logicalAssignmentWrite(
+      operator: t.LogicalExpression["operator"],
+      readValue: NodePath<t.Expression>
+    ) {
+      const value = normalBranchOutcome(readValue, context);
+      return value ? selectsLogicalRight(operator, value) : undefined;
+    },
     plan(path: NodePath<t.Node>) {
       return planEvaluation(path, context);
     },

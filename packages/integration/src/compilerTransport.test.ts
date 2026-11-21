@@ -113,6 +113,31 @@ function execution(cache = true) {
 }
 
 describe("worker source transport", () => {
+  it("chooses the in-process transform when requested by the host", async () => {
+    const runtime = execution();
+    const admit = vi.spyOn(runtime, "cpu");
+    const expected = {
+      code: "export const value = 1;",
+      result: ["", ""] as [string, string]
+    };
+    const inline = vi.fn(async () => expected);
+
+    const result = await runtime.run(() =>
+      executeTransform(
+        {
+          filename: "/virtual/ordinary.ts",
+          source: expected.code,
+          keepRuntimeSourceInProcess: true
+        },
+        inline
+      )
+    );
+
+    expect(result).toBe(expected);
+    expect(inline).toHaveBeenCalledOnce();
+    expect(admit).not.toHaveBeenCalled();
+  });
+
   it("retains effective parser plugins through worker result snapshots", async () => {
     const runtime = execution();
     const pool: CompilerPool = { run: (job) => runCompilerJob(job) };

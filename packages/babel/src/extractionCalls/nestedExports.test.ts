@@ -88,6 +88,44 @@ describe("nested preset extraction exports", () => {
   };
 
   it.each([
+    ["captured first", 'const color = "red", marker = report();', false],
+    ["captured last", 'const marker = report(), color = "red";', false],
+    [
+      "independent declaration",
+      'const color = "red"; const marker = report();',
+      true
+    ],
+    ["inert sibling", 'const color = "red", marker = 1;', true]
+  ] as const)(
+    "does not replay a sibling initializer in the sidecar: %s",
+    (_case, declarations, extracts) => {
+      const source = `import { system } from "test-preset";
+        import { report } from "./runtime";
+        ${declarations}
+        export { marker };
+        export const cls = system.css(color);`;
+      const { code, result } = babelTransform(source, { extractCalls });
+      const report = vi.fn(() => 1);
+      const modules = {
+        "test-preset": { system: { css: (color: string) => `class:${color}` } },
+        "./runtime": { report }
+      };
+      const sidecar = executeModule(result[1], modules);
+      expect(report).not.toHaveBeenCalled();
+      expect(executeModule(code, { ...modules, [result[0]]: sidecar })).toEqual(
+        {
+          cls: "class:red",
+          marker: 1
+        }
+      );
+      expect(report).toHaveBeenCalledTimes(
+        declarations.includes("report()") ? 1 : 0
+      );
+      expect(result[1].includes("system.css")).toBe(extracts);
+    }
+  );
+
+  it.each([
     ['let color = "red"; color = "blue";', "blue", false],
     ['if (false) { var color = "red"; }', "fallback", false],
     ['for (; false;) { var color = "red"; }', "fallback", false],

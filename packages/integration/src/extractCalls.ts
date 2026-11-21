@@ -104,6 +104,7 @@ export function retainRuntimeSourceDependencies(
     // a virtual authoringId absent from emitted edges remain the host's watch/
     // version responsibility, just like any other erased transform input.
     if (
+      request?.purpose === "commonjs-runtime-order" ||
       request?.purpose === "intrinsic-effects" ||
       request?.purpose === "intrinsic-owner" ||
       request?.purpose === "intrinsic-runtime"

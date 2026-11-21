@@ -52,6 +52,11 @@ const numericMethods = new Set([
   "tanh",
   "trunc"
 ]);
+/** Exact branch folding additionally requires literal numeric arguments and a verified realm. */
+export function isDeterministicNumericMathMethod(name: string): boolean {
+  return name !== "random" && numericMethods.has(name);
+}
+
 const numericConstants = new Set([
   "E",
   "LN10",
@@ -1042,7 +1047,11 @@ export interface MathIntrinsicEnvironment {
   /** Changes on every newly loaded source and on irreversible invalidation. */
   readonly revision: number;
   observe(program: NodePath<t.Program>): void;
-  snapshot(): { intact: boolean; bindIntact: boolean; revision: number };
+  snapshot(batch?: readonly NodePath<t.Program>[]): {
+    intact: boolean;
+    bindIntact: boolean;
+    revision: number;
+  };
   referenceIdentity(path: NodePath<t.Node>): MathReferenceIdentity | undefined;
   provesPrimitiveResult(
     call: NodePath<t.CallExpression | t.OptionalCallExpression>
@@ -1056,6 +1065,12 @@ export function createMathIntrinsicEnvironment(
   let revision = 0;
   let invalidated = false;
   let bindInvalidated = initial.bindIntact === false;
+  function register(program: NodePath<t.Program>) {
+    if (!programs.has(program)) {
+      programs.add(program);
+      revision++;
+    }
+  }
   function validate(evidenceFor = createRealmSourceEvidence(programs)) {
     // AST transforms can introduce writes after registration. Do not cache a
     // positive result by Program identity, or by the first queried call.
@@ -1093,47 +1108,64 @@ export function createMathIntrinsicEnvironment(
       return revision;
     },
     observe(program) {
-      if (!programs.has(program)) {
-        programs.add(program);
-        revision++;
-      }
+      register(program);
       validate();
     },
-    snapshot() {
+    snapshot(batch) {
+      // This call observes one current realm after every member is registered.
+      // A later snapshot must inspect those programs again after possible edits.
+      for (const program of batch ?? []) register(program);
       return { intact: validate(), bindIntact: !bindInvalidated, revision };
     },
     referenceIdentity(path) {
       const program = path.scope.getProgramParent().path;
       if (!program.isProgram()) return;
-      if (!programs.has(program)) {
-        programs.add(program);
-        revision++;
-      }
+      register(program);
+      // Identify a shape candidate before collecting whole-program evidence.
+      // Only the subsequent exact lexical check authorizes the receipt.
+      const namespaceCandidate = namespaceOrigin(path);
+      const methodCandidate = namespaceCandidate
+        ? undefined
+        : methodOrigin(path);
+      const bindCandidate =
+        !namespaceCandidate &&
+        !methodCandidate &&
+        (path.isMemberExpression() || path.isOptionalMemberExpression()) &&
+        memberName(path) === "bind"
+          ? (
+              path as NodePath<t.MemberExpression | t.OptionalMemberExpression>
+            ).get("object")
+          : undefined;
+      if (
+        !namespaceCandidate &&
+        !methodCandidate &&
+        (!bindCandidate || !methodOrigin(bindCandidate))
+      )
+        return;
       const evidenceFor = createRealmSourceEvidence(programs);
       if (!validate(evidenceFor)) return;
       const shadow = evidenceFor(program).mayHaveUnmodeledShadow;
-      if (namespaceOrigin(path, shadow))
-        return { kind: "namespace", dependencies: [] };
-      const origin = methodOrigin(path, shadow);
-      if (origin && (!origin.bound || !bindInvalidated))
-        return {
-          kind: "method",
-          dependencies: methodDependencies(path, shadow)
-        };
+      if (namespaceCandidate)
+        return namespaceOrigin(path, shadow)
+          ? { kind: "namespace", dependencies: [] }
+          : undefined;
+      if (methodCandidate) {
+        const origin = methodOrigin(path, shadow);
+        return origin && (!origin.bound || !bindInvalidated)
+          ? { kind: "method", dependencies: methodDependencies(path, shadow) }
+          : undefined;
+      }
       if (
+        bindCandidate &&
         !bindInvalidated &&
         (path.isMemberExpression() || path.isOptionalMemberExpression()) &&
-        memberName(path, shadow) === "bind"
-      ) {
-        const object = (
-          path as NodePath<t.MemberExpression | t.OptionalMemberExpression>
-        ).get("object");
-        if (methodOrigin(object, shadow))
-          return {
-            kind: "bind",
-            dependencies: methodDependencies(object, shadow)
-          };
-      }
+        memberName(path, shadow) === "bind" &&
+        methodOrigin(bindCandidate, shadow)
+      )
+        return {
+          kind: "bind",
+          dependencies: methodDependencies(bindCandidate, shadow)
+        };
     },
     provesPrimitiveResult(call) {
       if (
@@ -1143,15 +1175,10 @@ export function createMathIntrinsicEnvironment(
       )
         return false;
       const callee = call.get("callee");
-      // Keep the cheap shape prefilter for unrelated calls; only the fresh
-      // lexical observation below can authorize a native result.
       if (!methodOrigin(callee)) return false;
       const program = call.scope.getProgramParent().path;
       if (!program.isProgram()) return false;
-      if (!programs.has(program)) {
-        programs.add(program);
-        revision++;
-      }
+      register(program);
       const evidenceFor = createRealmSourceEvidence(programs);
       if (!validate(evidenceFor)) return false;
       const name = methodOrigin(

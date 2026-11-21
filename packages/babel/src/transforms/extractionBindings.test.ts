@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { transformSync, types as t } from "@babel/core";
 import type { PluginObj } from "@babel/core";
+import { transformSync as compileModule } from "esbuild";
 import { minchoBabelPlugin } from "../index.js";
 import type { PluginOptions } from "../types.js";
 
@@ -56,7 +57,9 @@ function extract(source: string) {
   return {
     source: result?.code,
     sidecar: options.result[1],
-    values: run((rule: unknown) => rule)
+    artifact: options.result[0],
+    exports,
+    values: run((rule: unknown) => rule) as unknown[]
   };
 }
 
@@ -323,5 +326,69 @@ describe("extracted lexical bindings", () => {
     `);
 
     expect(result.values).toEqual([{ color: "red" }, { color: "blue" }]);
+  });
+});
+
+describe("normal module var capture at a known initializer", () => {
+  const declaration = 'var rule = { color: "red" };';
+  const input = 'import { css } from "@mincho-js/css";';
+  const use = "export const cls = css(rule);";
+  it.each([
+    ["direct", declaration],
+    ["selected consequent", `if (true) { ${declaration} }`],
+    ["selected alternate", `if (false) {} else { ${declaration} }`]
+  ])("extracts red CSS from the %s module initializer", (_name, init) => {
+    const result = extract(`${input} ${init} ${use}`);
+    expect(result.values).toEqual([{ color: "red" }]);
+    expect(result.source).not.toContain("cls = css(");
+  });
+
+  it("preserves initializer order and unrelated runtime effects", () => {
+    const result = extract(`
+      ${input}
+      const trace = [];
+      trace.push("before");
+      const leading = { color: "red" };
+      if (true) { var rule = { ...leading, padding: 4 }; }
+      trace.push("after");
+      const selected = { ...rule, margin: 8 };
+      export const cls = css(selected);
+      export { trace };
+    `);
+    expect(result.values).toEqual([{ color: "red", padding: 4, margin: 8 }]);
+    expect(result.sidecar).not.toContain("trace");
+    const artifact = Object.fromEntries(
+      result.exports.map((name, i) => [name, result.values[i]])
+    );
+    const app = { exports: {} };
+    new Function(
+      "module",
+      "exports",
+      "require",
+      compileModule(result.source!, { format: "cjs" }).code
+    )(app, app.exports, (specifier: string) => {
+      expect(specifier).toBe(result.artifact);
+      return artifact;
+    });
+    expect(app.exports).toMatchObject({
+      trace: ["before", "after"],
+      cls: { color: "red", padding: 4, margin: 8 }
+    });
+  });
+
+  it.each([
+    ["unknown condition", `if (active) { ${declaration} } ${use}`],
+    ["dead condition", `if (false) { ${declaration} } ${use}`],
+    ["effectful test", `if ((observe(), true)) { ${declaration} } ${use}`],
+    ["preceding statement", `if (true) { observe(); ${declaration} } ${use}`],
+    [
+      "compound declaration",
+      `if (true) { var rule = { color: "red" }, sibling = observe(); } ${use}`
+    ],
+    ["use before initialization", `${use} if (true) { ${declaration} }`]
+  ])("does not capture an unproved %s", (_name, source) => {
+    expect(() => extract(`${input} ${source}`)).toThrow(
+      /captures runtime binding rule/
+    );
   });
 });

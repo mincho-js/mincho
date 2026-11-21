@@ -63,7 +63,7 @@ describe("minchoBabelPlugin", () => {
     }
   );
 
-  it("css before a spread lowers explicit css before post-spread className", () => {
+  it("css before a spread captures explicit css before post-spread className", () => {
     const source = `
         const styleA = "style-a";
         const props = {
@@ -90,7 +90,9 @@ describe("minchoBabelPlugin", () => {
     expect(code).not.toContain("(() =>");
     expect(code).toContain("className: _minchoClassName");
     expect(code).toContain("..._minchoRest");
-    expect(code).toContain("const _minchoCssClassName = _cx(styleA)");
+    expect(code).toMatch(
+      /const _minchoCssClassName = styleA;\s+const _minchoProps = \{/
+    );
     expect(code).toContain(
       "className={_cx(_minchoCssClassName, _minchoClassName)}"
     );
@@ -1104,7 +1106,9 @@ describe("minchoBabelPlugin", () => {
     expect(code).not.toContain(" css=");
     expect(code).toContain("css: _minchoCssProp");
     expect(code).toContain("..._minchoRest");
-    expect(code).toContain("const _minchoCssClassName = _cx(styleA)");
+    expect(code).toMatch(
+      /const _minchoCssClassName = styleA;\s+const _minchoProps = \{/
+    );
     expect(code).toContain(
       "className={_cx(_minchoCssClassName, _minchoClassName)}"
     );

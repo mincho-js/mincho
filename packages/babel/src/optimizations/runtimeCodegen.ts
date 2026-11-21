@@ -1,22 +1,36 @@
 import { types as t, type NodePath } from "@babel/core";
+import { isBuiltin } from "node:module";
 import {
   getModuleReference,
+  getModuleRuntimeDemandOrigin,
+  isProvenModuleDataRead,
   type ModuleReference
 } from "../commonjs/bindings.js";
-import type { ProgramScope } from "../types.js";
+import type { MinchoBabelFileMetadata, ProgramScope } from "../types.js";
 import { hasDynamicScope } from "./dynamicScope.js";
+import { closedRuntimeString } from "./runtimeSourceReference.js";
 import { builtInExtractionCalls } from "../extractionCalls/builtins.js";
+import { isProvablyUnexecuted } from "../extractionCalls/evaluation.js";
 import { getStaticCssEvalLiteralRequireImportPath } from "../staticCssEval/cjsBindings.js";
+import { getCjsAssignmentTarget } from "../staticCssEval/cjsExportTargets.js";
+
+export interface OriginalModuleRequests {
+  statements?: ReadonlySet<t.Statement>;
+  requires: ReadonlyMap<t.CallExpression, number>;
+}
 
 /** Authoring imports already evaluated in the sidecar need no client runtime. */
 export function removeUnusedExtractedImports(
-  program: NodePath<t.Program>
+  program: NodePath<t.Program>,
+  originalModuleRequests?: OriginalModuleRequests,
+  optionalSites?: MinchoBabelFileMetadata["minchoOptionalCommonJsSites"]
 ): void {
   const data = (program.scope as ProgramScope).minchoData;
   if (!data || hasDynamicScope(program)) return;
 
   const extracted = new Set(data.nodes);
   if (!extracted.size) return;
+  const extractedBindings = new Set(data.bindings.map(({ node }) => node));
 
   program.scope.crawl();
   const candidates: {
@@ -24,10 +38,13 @@ export function removeUnusedExtractedImports(
     reference: ModuleReference;
     names: readonly string[];
     initializesSource: boolean;
+    requests: t.CallExpression[];
+    originalOrder?: number;
   }[] = [];
   for (const path of program.get("body")) {
     if (!path.isVariableDeclaration() || !extracted.has(path.node)) continue;
     for (const declaration of path.get("declarations")) {
+      if (!extractedBindings.has(declaration.node)) continue;
       const init = declaration.get("init");
       if (!init.isExpression()) continue;
       const reference = getModuleReference(init);
@@ -37,17 +54,29 @@ export function removeUnusedExtractedImports(
         : undefined;
       if (!names) continue;
 
-      let initializesSource = false;
+      const requests: t.CallExpression[] = [];
+      let originalOrder: number | undefined;
       const collectRequire = (call: NodePath<t.CallExpression>) => {
         if (
-          getStaticCssEvalLiteralRequireImportPath(call.node, call.scope) ===
+          getStaticCssEvalLiteralRequireImportPath(call.node, call.scope) !==
           reference.source
         )
-          initializesSource = true;
+          return;
+        requests.push(call.node);
+        const order = originalModuleRequests?.requires.get(call.node);
+        if (order !== undefined)
+          originalOrder = Math.min(originalOrder ?? order, order);
       };
       if (init.isCallExpression()) collectRequire(init);
       init.traverse({ CallExpression: collectRequire });
-      candidates.push({ declaration, reference, names, initializesSource });
+      candidates.push({
+        declaration,
+        reference,
+        names,
+        initializesSource: requests.length > 0,
+        requests,
+        originalOrder
+      });
     }
   }
 
@@ -112,10 +141,96 @@ export function removeUnusedExtractedImports(
   } while (changed);
 
   const runtimeRequires = new Set<string>();
+  const authoredRequireSources = new Map<string, number>();
+  const liveImportedUses: {
+    source: string;
+    position?: number;
+    kind: "call" | "publication" | "access";
+  }[] = [];
+  const liveImportedUse = (
+    use: NodePath,
+    kind: "call" | "publication" | "access",
+    site: NodePath
+  ) => {
+    const reference =
+      kind === "access"
+        ? getModuleRuntimeDemandOrigin(use)
+        : getModuleReference(use);
+    if (
+      reference?.kind === "require" &&
+      !reference.unsafe &&
+      (reference.source.startsWith("./") ||
+        reference.source.startsWith("../") ||
+        // Native execution has no staged host dependency graph for a bare
+        // requested package. Its actual later invocation can observe init.
+        (!optionalSites &&
+          kind === "call" &&
+          /^(?:@[^/]+\/)?[A-Za-z0-9][^\s:]*$/.test(reference.source) &&
+          !isBuiltin(reference.source))) &&
+      !isProvablyUnexecuted(site)
+    )
+      liveImportedUses.push({
+        source: reference.source,
+        position: kind === "publication" ? undefined : statementPosition(site),
+        kind
+      });
+  };
+  const statementPosition = (path: NodePath): number | undefined => {
+    if (path.getFunctionParent()) return;
+    const statement = path.getStatementParent();
+    if (statement?.parentPath === program && typeof statement.key === "number")
+      return statement.key;
+  };
   let unknownRuntimeRequire = false;
+  const liveOriginal: {
+    node: t.CallExpression;
+    source: string;
+    order: number;
+    deferred: boolean;
+  }[] = [];
+  let lastOriginalRuntimeRequire = -1;
+  let deferredOriginalRuntimeRequire = false;
   program.traverse({
     enter(path) {
       if (removed.has(path.node)) path.skip();
+    },
+    "CallExpression|OptionalCallExpression|NewExpression"(path) {
+      if (
+        !path.isCallExpression() &&
+        !path.isOptionalCallExpression() &&
+        (optionalSites || !path.isNewExpression())
+      )
+        return;
+      const call: NodePath<
+        t.CallExpression | t.OptionalCallExpression | t.NewExpression
+      > = path;
+      liveImportedUse(call.get("callee"), "call", path);
+    },
+    "MemberExpression|OptionalMemberExpression"(path) {
+      // Observable child accessors require native CommonJS order. The staged
+      // ESM normalizer has a separate runtime-graph demand policy and does not
+      // support accessor-dependent module initialization.
+      if (
+        optionalSites ||
+        (!path.isMemberExpression() && !path.isOptionalMemberExpression())
+      )
+        return;
+      const parent = path.parentPath;
+      if (parent.isUnaryExpression({ operator: "delete" })) return;
+      const writes =
+        (parent.isAssignmentExpression() && path.key === "left") ||
+        parent.isUpdateExpression();
+      if (!writes && isProvenModuleDataRead(path)) return;
+      // Both getting and storing the selected child property can invoke
+      // ordinary accessors. A read-only descriptor proof is not a write
+      // proof, and evaluating an assignment does not require a getter first.
+      liveImportedUse(path, "access", path);
+    },
+    AssignmentExpression(path) {
+      if (path.node.operator !== "=") return;
+      const target = getCjsAssignmentTarget(path.node.left, path.scope);
+      if (target.kind === "property" || target.kind === "module-replacement")
+        liveImportedUse(path.get("right"), "publication", path);
     },
     ReferencedIdentifier(path) {
       if (
@@ -130,15 +245,120 @@ export function removeUnusedExtractedImports(
           : null;
       // Escaped loaders and dynamic specifiers can request any source, so their
       // surviving uses still require the original initialization order.
-      if (source === null) unknownRuntimeRequire = true;
-      else runtimeRequires.add(source);
+      if (source === null) {
+        unknownRuntimeRequire = true;
+      } else {
+        runtimeRequires.add(source);
+        const order = call.isCallExpression()
+          ? originalModuleRequests?.requires.get(call.node)
+          : undefined;
+        if (order !== undefined && !isProvablyUnexecuted(call)) {
+          authoredRequireSources.set(
+            source,
+            Math.min(authoredRequireSources.get(source) ?? order, order)
+          );
+          lastOriginalRuntimeRequire = Math.max(
+            lastOriginalRuntimeRequire,
+            order
+          );
+          const deferred = Boolean(call.getFunctionParent());
+          if (deferred) deferredOriginalRuntimeRequire = true;
+          if (optionalSites && call.isCallExpression())
+            liveOriginal.push({ node: call.node, source, order, deferred });
+        }
+      }
     }
   });
 
-  for (const { declaration, reference, initializesSource } of candidates) {
-    const retainInitialization =
-      initializesSource &&
-      (unknownRuntimeRequire || runtimeRequires.has(reference.source));
+  const sourcePlans = candidates.map((candidate) => {
+    const { declaration, reference, originalOrder } = candidate;
+    const position = statementPosition(declaration);
+    // An earlier module load does not finish work reached through a later
+    // invocation of its exported function. Keep the authored initialization
+    // where the later live consumer may observe it. A merely loaded child
+    // (or a known earlier call) does not add later demand.
+    const deferredChildUse =
+      originalOrder !== undefined &&
+      liveImportedUses.some((use) => {
+        const childOrder = authoredRequireSources.get(use.source);
+        return (
+          childOrder !== undefined &&
+          // The normalizer already stages a later authored child load against
+          // the emitted runtime graph. The new accessor case covers the gap
+          // for children originally loaded earlier; do not turn a later
+          // optional site into an eagerly required binding before generation.
+          (use.kind !== "access" || childOrder < originalOrder) &&
+          (use.position === undefined ||
+            position === undefined ||
+            use.position >= position)
+        );
+      });
+    const required =
+      unknownRuntimeRequire ||
+      runtimeRequires.has(reference.source) ||
+      deferredChildUse;
+    const later =
+      originalOrder !== undefined &&
+      (deferredOriginalRuntimeRequire ||
+        lastOriginalRuntimeRequire > originalOrder);
+    return { ...candidate, required, later };
+  });
+  const stagedSources = new Set(
+    sourcePlans.flatMap(
+      ({
+        declaration,
+        reference,
+        initializesSource,
+        originalOrder,
+        required,
+        later
+      }) =>
+        optionalSites &&
+        initializesSource &&
+        originalOrder !== undefined &&
+        (required || later) &&
+        removed.has(declaration.node)
+          ? [reference.source]
+          : []
+    )
+  );
+  for (const {
+    declaration,
+    reference,
+    initializesSource,
+    requests,
+    originalOrder,
+    required,
+    later
+  } of sourcePlans) {
+    const retainInitialization = initializesSource && (required || later);
+    const stageAlias =
+      !initializesSource && stagedSources.has(reference.source);
+    if (
+      optionalSites &&
+      removed.has(declaration.node) &&
+      (stageAlias ||
+        (initializesSource &&
+          originalOrder !== undefined &&
+          !required &&
+          later))
+    ) {
+      // Defer a proved dead alias whose original load remains visible during
+      // generation. The one configured generator may add a reader of a name.
+      optionalSites.push({
+        declaration: declaration.node,
+        stagedShape: t.cloneNode(declaration.node),
+        requests,
+        source: reference.source,
+        later:
+          originalOrder === undefined
+            ? []
+            : liveOriginal.filter(
+                (entry) => !entry.deferred && entry.order > originalOrder
+              )
+      });
+      continue;
+    }
     if (removed.has(declaration.node) && !retainInitialization) {
       declaration.remove();
       continue;
@@ -152,7 +372,9 @@ export function removeUnusedExtractedImports(
   // Removing a destructured authoring binding can make its namespace import
   // unused. Recompute references after pruning, independent of statement order.
   program.scope.crawl();
-  for (const path of program.get("body")) {
+  const body = program.get("body");
+  const emptied = new Set<t.ImportDeclaration>();
+  for (const path of body) {
     if (!path.isImportDeclaration() || !extracted.has(path.node)) continue;
 
     const names = Object.hasOwn(builtInExtractionCalls, path.node.source.value)
@@ -179,8 +401,211 @@ export function removeUnusedExtractedImports(
       !path.node.specifiers.length &&
       !data.effectImports?.has(path.node.source.value)
     )
-      path.remove();
+      emptied.add(path.node);
   }
+  if (!emptied.size) return;
+
+  // Later surviving imports and value re-exports still evaluate this source.
+  // Keep its first equivalent request in that case, not an extra request for
+  // a source that is no longer used at runtime.
+  const request = (
+    node:
+      t.ImportDeclaration | t.ExportNamedDeclaration | t.ExportAllDeclaration
+  ) => {
+    const attributes = node.attributes ?? node.assertions ?? [];
+    const entries = attributes.map(({ key, value }) =>
+      JSON.stringify([t.isIdentifier(key) ? key.name : key.value, value.value])
+    );
+    return JSON.stringify([
+      node.source?.value,
+      t.isImportDeclaration(node) ? (node.phase ?? null) : null,
+      entries.sort()
+    ]);
+  };
+  const laterRequests = new Map<string, number>();
+  const isValueReexport = (
+    node: t.Statement
+  ): node is t.ExportNamedDeclaration | t.ExportAllDeclaration =>
+    (t.isExportAllDeclaration(node) || t.isExportNamedDeclaration(node)) &&
+    node.source != null &&
+    node.exportKind !== "type" &&
+    (!t.isExportNamedDeclaration(node) ||
+      !node.specifiers.length ||
+      node.specifiers.some(
+        (specifier) =>
+          !t.isExportSpecifier(specifier) || specifier.exportKind !== "type"
+      ));
+  const isValueImport = (node: t.ImportDeclaration) =>
+    node.importKind !== "type" &&
+    node.importKind !== "typeof" &&
+    (!node.specifiers.length ||
+      node.specifiers.some(
+        (specifier) =>
+          !t.isImportSpecifier(specifier) ||
+          (specifier.importKind !== "type" && specifier.importKind !== "typeof")
+      ));
+  const generated = new Set(
+    [...data.imports.values()].map((identifier) => identifier.name)
+  );
+  const carriesRuntimeRequest = (node: t.ImportDeclaration) =>
+    isValueImport(node) &&
+    (!node.specifiers.length ||
+      node.specifiers.some(
+        (specifier) =>
+          (!t.isImportSpecifier(specifier) ||
+            (specifier.importKind !== "type" &&
+              specifier.importKind !== "typeof")) &&
+          (!generated.has(specifier.local.name) ||
+            program.scope.getBinding(specifier.local.name)?.referenced)
+      ));
+  let lastAuthoredStaticRequest = -1;
+  body.forEach(({ node }, index) => {
+    if (
+      isValueReexport(node) ||
+      (t.isImportDeclaration(node) &&
+        !emptied.has(node) &&
+        carriesRuntimeRequest(node))
+    ) {
+      laterRequests.set(request(node), index);
+      if (originalModuleRequests?.statements?.has(node))
+        lastAuthoredStaticRequest = index;
+    }
+  });
+  const firstOrdinarySources = new Set(
+    [...emptied]
+      .filter(
+        (node) =>
+          node.phase == null && !(node.attributes ?? node.assertions)?.length
+      )
+      .map((node) => node.source.value)
+  );
+  const dynamicRequests = new Set<string>();
+  if (firstOrdinarySources.size) {
+    const evaluatesToUndefined = (path: NodePath<t.Node>, node: t.Node) =>
+      (t.isIdentifier(node, { name: "undefined" }) &&
+        !path.scope.getBinding("undefined")) ||
+      // This only classifies the request made on normal completion:
+      // the authored operand still runs at its original dynamic import.
+      t.isUnaryExpression(node, { operator: "void" });
+    const hasEmptyOptions = (
+      path: NodePath<t.Node>,
+      node: t.Node | null | undefined
+    ) => {
+      if (node == null || evaluatesToUndefined(path, node)) return true;
+      if (t.isIdentifier(node)) {
+        const binding = path.scope.getBinding(node.name);
+        const declaration = binding?.path;
+        if (
+          binding?.kind !== "const" ||
+          !binding.constant ||
+          binding.scope !== program.scope ||
+          !declaration?.isVariableDeclarator() ||
+          declaration.parentPath.parentPath !== program ||
+          declaration.node.end == null ||
+          node.start == null ||
+          declaration.node.end > node.start ||
+          binding.referencePaths.length !== 1 ||
+          binding.referencePaths[0]?.node !== node ||
+          !t.isObjectExpression(declaration.node.init)
+        )
+          return false;
+        // A single read of a fresh, unaliased object leaves no path to change
+        // these attributes. Keep the authored evaluation and TDZ at import().
+        return hasEmptyOptions(declaration, declaration.node.init);
+      }
+      if (!t.isObjectExpression(node)) return false;
+      if (node.properties.length === 0) return true;
+      const [property] = node.properties;
+      return (
+        node.properties.length === 1 &&
+        t.isObjectProperty(property) &&
+        !property.computed &&
+        (t.isIdentifier(property.key, { name: "with" }) ||
+          t.isStringLiteral(property.key, { value: "with" })) &&
+        (evaluatesToUndefined(path, property.value) ||
+          (t.isObjectExpression(property.value) &&
+            property.value.properties.length === 0))
+      );
+    };
+    const immutableRequestName = (source: NodePath<t.Node> | undefined) => {
+      if (!source?.isIdentifier())
+        return source ? closedRuntimeString(source) : undefined;
+      const binding = source.scope.getBinding(source.node.name);
+      const declaration = binding?.path;
+      if (
+        binding?.kind !== "const" ||
+        !binding.constant ||
+        binding.scope !== program.scope ||
+        !declaration?.isVariableDeclarator() ||
+        !declaration.get("id").isIdentifier() ||
+        declaration.parentPath.parentPath !== program ||
+        declaration.node.end == null ||
+        source.node.start == null ||
+        declaration.node.end > source.node.start
+      )
+        return;
+      // A deferred use can run before initialization in a cycle. That is not
+      // a successful request; after a successful read this immutable value
+      // determines the target, without moving the read or its TDZ.
+      const initializer = declaration.get("init");
+      if (initializer.isExpression() && !initializer.isIdentifier())
+        return closedRuntimeString(initializer);
+    };
+    const retainDynamicRequest = (
+      path: NodePath<t.Node>,
+      source: NodePath<t.Node> | undefined
+    ) => {
+      if (isProvablyUnexecuted(path)) return;
+      const value = immutableRequestName(source);
+      if (value !== undefined && firstOrdinarySources.has(value))
+        dynamicRequests.add(JSON.stringify([value, null, []]));
+    };
+    program.traverse({
+      CallExpression(path) {
+        if (!t.isImport(path.node.callee)) return;
+        const [source] = path.get("arguments");
+        if (
+          path.node.arguments.length <= 2 &&
+          hasEmptyOptions(path, path.node.arguments[1])
+        )
+          retainDynamicRequest(path, source);
+      },
+      ImportExpression(path) {
+        if (path.node.phase == null && hasEmptyOptions(path, path.node.options))
+          retainDynamicRequest(path, path.get("source"));
+      }
+    });
+  }
+  const seen = new Set<string>();
+  body.forEach((path, index) => {
+    const node = path.node;
+    if (isValueReexport(node)) {
+      seen.add(request(node));
+      return;
+    }
+    if (!t.isImportDeclaration(node)) return;
+    const key = request(node);
+    const isValue = isValueImport(node);
+    if (
+      emptied.has(node) &&
+      (!isValue ||
+        seen.has(key) ||
+        (!dynamicRequests.has(key) &&
+          (laterRequests.get(key) ?? -1) <= index &&
+          // In the non-codegen profile an unclassified later authored
+          // dependency can still initialize this module via an alias or
+          // through its own dependencies. Keep the original first request.
+          !(
+            originalModuleRequests?.statements?.has(node) &&
+            lastAuthoredStaticRequest > index
+          )))
+    ) {
+      path.remove();
+      return;
+    }
+    if (emptied.has(node) ? isValue : carriesRuntimeRequest(node))
+      seen.add(key);
+  });
 }
 
 /** Generated bindings have no user-requested module effects. Never infer ownership by name. */

@@ -33,11 +33,13 @@ import {
   resolvedImportPlugin
 } from "./compileResolution.js";
 import {
+  loadPartialConfig,
   parseSync,
   traverse,
   types as t,
   transformSync,
   type NodePath,
+  type PluginObj,
   type TransformOptions
 } from "@babel/core";
 import {
@@ -217,9 +219,41 @@ export function transformScopedDependency({
     packageName
   });
 
-  const transformed = transformSync(source, {
+  const pluginName = (
+    plugin: NonNullable<CompileOptions["parserPlugins"]>[number]
+  ) => (typeof plugin === "string" ? plugin : plugin[0]);
+  const sharedSyntax = parserPlugins?.filter((plugin) => {
+    const name = pluginName(plugin);
+    // The plain TypeScript preset deliberately removes JSX (angle brackets
+    // are type assertions here). A late fallback must not restore it from
+    // the TSX owner. Other loaders and child Babel options stay unchanged.
+    return (
+      name !== "flow" &&
+      name !== "typescript" &&
+      (loader !== "ts" || name !== "jsx")
+    );
+  });
+  const dependencySyntax = (): PluginObj => ({
+    visitor: {},
+    manipulateOptions(_options, parser) {
+      // The inherited list describes the owner. A child selects its language
+      // via its own loader and Babel config. Share only missing syntax flags,
+      // without replacing the child's parserOpts or re-running its hooks.
+      const local = (parser.plugins ??= []);
+      const syntaxFamily = (name: string) =>
+        name === "decorators-legacy" ? "decorators" : name;
+      const names = new Set(local.map(pluginName).map(syntaxFamily));
+      for (const syntax of sharedSyntax ?? []) {
+        const name = syntaxFamily(pluginName(syntax));
+        if (!names.has(name)) {
+          local.push(syntax);
+          names.add(name);
+        }
+      }
+    }
+  });
+  const options: TransformOptions = {
     filename: filePath,
-    ...(parserPlugins ? { parserOpts: { plugins: [...parserPlugins] } } : {}),
     plugins: [
       ...(loader === "jsx" || loader === "tsx" ? [jsxSyntaxPluginPath] : []),
       minchoStyledComponentPlugin()
@@ -235,7 +269,25 @@ export function transformScopedDependency({
         : [],
     sourceMaps: false,
     ast: true
-  })!;
+  };
+  const configured = sharedSyntax?.length
+    ? loadPartialConfig(options)
+    : undefined;
+  // An appended raw preset gets a final independent pass. The resolved child
+  // ConfigItems keep their original passes and hooks; their parser choices
+  // have run before the fallback contributes any missing shared syntax.
+  const finalOptions: TransformOptions & { passPerPreset?: boolean } =
+    configured
+      ? {
+          ...configured.options,
+          passPerPreset: true,
+          presets: [
+            ...(configured.options.presets ?? []),
+            () => ({ plugins: [dependencySyntax] })
+          ]
+        }
+      : options;
+  const transformed = transformSync(source, finalOptions)!;
   const cssScopeOrigins: CssScopeOrigin[] = [];
   try {
     recordTransformedCssScopes(

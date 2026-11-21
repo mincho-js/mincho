@@ -65,6 +65,7 @@ export function createClassNameExpression(
     classNameAttribute: t.JSXAttribute | null;
     preAggregateClassNameExpression?: t.Expression;
     postAggregateClassNameExpression?: t.Expression;
+    stageRawClassValue?: boolean;
   }
 ): t.Expression {
   const cssClassNameExpressions = createCssClassNameExpressions(
@@ -90,6 +91,14 @@ export function createClassNameExpression(
       path.scope.getProgramParent() as ProgramScope
     );
   }
+
+  if (
+    normalizedElement.stageRawClassValue &&
+    normalizedElement.cssValueClassification === "class-value"
+  )
+    return cssClassNameExpressions.length === 1
+      ? cssClassNameExpressions[0]!
+      : t.arrayExpression(cssClassNameExpressions);
 
   if (
     !normalizedElement.preAggregateClassNameExpression &&

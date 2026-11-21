@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { hasValidatedPatternIntrinsicEffects } from "./staticCssEvalSource.js";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -786,6 +786,10 @@ describe("Babel transform cache", () => {
   });
 
   it("reuses results with fresh ASTs and revalidates virtual modules and reexports", async () => {
+    // The cache observes Babel's cwd. Other integration fixtures can create
+    // outputs in the workspace, which is not an input to this virtual test.
+    const cwd = await mkdtemp(join(tmpdir(), "mincho-transform-cache-cwd-"));
+    onTestFinished(() => rm(cwd, { recursive: true, force: true }));
     let color = "red";
     const provider: StaticCssEvalSourceProvider = {
       resolve: (_importer, source) => ({ id: source }),
@@ -810,6 +814,7 @@ describe("Babel transform cache", () => {
           source:
             'import { styles } from "barrel"; export const App = () => <div css={styles} />;',
           babel: {
+            cwd,
             jsxCssProp: true,
             compilationCache: cache,
             staticCssEvalSourceProvider: provider,

@@ -110,10 +110,11 @@ async function compileWithInputs(
   }
 
   const cwd = options.cwd ?? process.cwd();
-  // Older entries only proved physical file contents, not how imports selected
-  // those files. They must not survive the resolution-manifest boundary.
+  // Keep the sidecar cache namespace, but invalidate artifacts parsed before
+  // child files selected their own Babel language.
   const key = `compile-v11-css-origins:${cacheDigest(
     JSON.stringify([
+      "child-syntax-v3",
       options.originalPath,
       options.filePath,
       options.contents,

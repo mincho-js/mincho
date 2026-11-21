@@ -1,3 +1,4 @@
+import type { ReplayAnalysis } from "../extractionCalls/replayAnalysis.js";
 import { types as t } from "@babel/core";
 import type { NodePath } from "@babel/core";
 import {
@@ -30,6 +31,7 @@ export function analyzeCssPropSidecarHoistability(options: {
   readonly path?: NodePath<t.Expression>;
   readonly reducedExpression?: t.Expression;
   readonly scope: AnalysisScope;
+  readonly analysis?: ReplayAnalysis;
   readonly unmodifiedBindings?: ReadonlySet<AnalysisBinding>;
 }): CssPropSidecarHoistability {
   const reducedExpression = options.reducedExpression ?? options.expression;
@@ -76,6 +78,7 @@ export function analyzeCssPropSidecarHoistability(options: {
     path: options.path,
     state: {
       scope: options.scope,
+      analysis: options.analysis,
       onUnprovenBinding: () => {
         unprovenBinding = true;
       },

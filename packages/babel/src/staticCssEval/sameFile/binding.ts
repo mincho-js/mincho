@@ -140,6 +140,31 @@ export function resolveSameFileBindingExpression(
     return { kind: "not-candidate" };
   }
 
+  // A bare value alias has no new rule authority. If the existing terminal
+  // binding analysis declines the producer, leave the alias to the same
+  // runtime class path as a direct reference.
+  if (
+    mutationProof.kind === "unknown" &&
+    mutationProof.reason === "unsupported-origin" &&
+    options.memberPath.length === 0 &&
+    t.isIdentifier(unwrappedInit) &&
+    initReference?.kind === "supported"
+  ) {
+    const binding = options.binding.scope.getBinding(initReference.bindingName);
+    if (
+      binding &&
+      getStaticCssEvalBindingDeclarationKind(binding) === "const"
+    ) {
+      const terminal = resolveSameFileBindingExpression({
+        ...options,
+        binding,
+        bindingName: initReference.bindingName,
+        stack: nextStack
+      });
+      if (terminal.kind === "not-candidate") return terminal;
+    }
+  }
+
   // Let the existing alias stack produce its precise cycle and import chain.
   // Unknown is not evidence of a write, nor permission to statically resolve.
   if (

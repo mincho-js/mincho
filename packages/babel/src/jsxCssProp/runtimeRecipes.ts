@@ -1,14 +1,19 @@
-import { requireCapturedPatternOwner } from "../transforms/extractionPublication.js";
-import type { ProgramScope } from "../types.js";
 import {
-  arrayMapResultProof,
-  arrayIncludesResultProof
-} from "../extractionCalls/arrayMapResult.js";
+  everyReplayPattern as everyPatternExpression,
+  createReplayAnalysis,
+  type ReplayAnalysis
+} from "../extractionCalls/replayAnalysis.js";
+import {
+  requireCapturedPatternOwner,
+  unwrapExtractionExpression as unwrapCxArgument
+} from "../transforms/extractionPublication.js";
+import type { ProgramScope } from "../types.js";
+import { isProvablyUnexecuted } from "../extractionCalls/evaluation.js";
+import { arrayIncludesResultProof } from "../extractionCalls/arrayMapResult.js";
 import { types as t, type NodePath } from "@babel/core";
 import { addNamespace } from "@babel/helper-module-imports";
 import type { Binding } from "@babel/traverse";
 import {
-  isProvenPrimitiveImport,
   getModuleReference,
   isProvenModuleDataRead,
   staticMemberName
@@ -19,16 +24,15 @@ import {
   markBuildEvaluation,
   retainRuntimeInvocation
 } from "../extractionCalls/index.js";
-import { sourceRecipeInvocationResult } from "../extractionCalls/authoringCallSite.js";
 import {
   mathResultProof,
-  mathNamespaceOwnReadProof,
   mathReferenceProof,
   mathBindingIdentityProof
 } from "../extractionCalls/mathResult.js";
-import { compiledRecipeResultProof } from "../extractionCalls/compiledRecipeResult.js";
 import { recipeRuntimeFactories } from "../optimizations/recipeFactories.js";
 import { hasDynamicScope } from "../optimizations/dynamicScope.js";
+import { collectRuntimeSourceEvidence } from "../optimizations/runtimeSourceReference.js";
+import { isSupportedStaticCssPrimitiveLiteral } from "../staticCssEval/sameFile/primitives.js";
 import {
   getDestructuredBindingSource,
   resolveStaticMemberPath
@@ -48,63 +52,7 @@ import {
 import { registerImportMethod } from "../utils.js";
 import { analyzeCssPropSidecarHoistability } from "./modeAnalysis.js";
 import { cssPropImportSource } from "./options.js";
-import {
-  everyPatternExpression as everyLocalPatternExpression,
-  collectSkippedPatternDefaults as collectLocalSkippedPatternDefaults
-} from "./patternExpressions.js";
-import {
-  getConfidentlyExecutedBranches,
-  isSidecarSafeCssRuleExpression
-} from "./sidecarSafety.js";
-
-/** Loaded-graph revocation and the helper's fresh local observation both apply. */
-function everyPatternExpression(
-  ...args: Parameters<typeof everyLocalPatternExpression>
-): boolean {
-  const [pattern, predicate, selected, skippedDefault, environment] = args;
-  const graph = (pattern.scope.getProgramParent() as ProgramScope).minchoData
-    ?.extractCalls?.arrayMapIntrinsics;
-  const declarator = pattern.parentPath;
-  const initializer = declarator?.isVariableDeclarator()
-    ? declarator.get("init")
-    : undefined;
-  return everyLocalPatternExpression(
-    pattern,
-    predicate,
-    selected,
-    skippedDefault,
-    {
-      requireReplaySafety: true,
-      canReadPrimitiveImport: isProvenPrimitiveImport,
-      canReplayIteration: environment?.canReplayIteration,
-      canReplayOwnRead: (source, operation) =>
-        (source === selected &&
-          !!initializer?.isExpression() &&
-          initializer.node === selected &&
-          mathNamespaceOwnReadProof(initializer)) ||
-        !!environment?.canReplayOwnRead?.(source, operation),
-      prototypeMutationKeys: graph?.prototypeMutationKeys,
-      nativeArrayIteration:
-        environment?.nativeArrayIteration !== false &&
-        (graph?.iterationIntact ?? graph?.intact) !== false,
-      standardPrototypeAbsence:
-        environment?.standardPrototypeAbsence !== false &&
-        (graph?.prototypeAbsenceIntact ?? graph?.intact) !== false
-    }
-  );
-}
-
-function collectSkippedPatternDefaults(program: NodePath<t.Program>) {
-  const graph = (program.scope as ProgramScope).minchoData?.extractCalls
-    ?.arrayMapIntrinsics;
-  return collectLocalSkippedPatternDefaults(program, {
-    canReadPrimitiveImport: isProvenPrimitiveImport,
-    prototypeMutationKeys: graph?.prototypeMutationKeys,
-    nativeArrayIteration: (graph?.iterationIntact ?? graph?.intact) !== false,
-    standardPrototypeAbsence:
-      (graph?.prototypeAbsenceIntact ?? graph?.intact) !== false
-  });
-}
+import { isSidecarSafeCssRuleExpression } from "./sidecarSafety.js";
 
 const runtimeCxBindings = new WeakMap<t.Program, Map<string, t.Identifier>>();
 // Classification avoids repeated JSX lowering. Invocation ownership is a
@@ -126,10 +74,15 @@ export function captureRuntimeClassCallables(program: NodePath<t.Program>) {
     CallExpression(call) {
       if (call.node.extra?.minchoEvaluationOwner !== "runtime") return;
       const callee = call.get("callee");
-      if (!callee.isExpression()) return;
+      // Replacing a namespace member would detach its receiver. The
+      // registration identifies the export, not independence from its this.
+      // A CommonJS binding also must retain its original require condition;
+      // the runtime capture below is emitted with an ESM import.
+      if (!callee.isExpression() || !unwrapCxArgument(callee).isIdentifier())
+        return;
       const reference = getModuleReference(callee);
       if (
-        reference &&
+        reference?.kind === "import" &&
         reference.source === cssPropImportSource(call.scope) &&
         reference.members.length === 1 &&
         reference.members[0] === "cx" &&
@@ -153,18 +106,37 @@ function visitCssValue(path: NodePath<t.Node>, prepare: boolean): boolean {
   }
 
   const elements = value.get("elements");
-  let hasCallable = false;
+  const callables: NodePath<t.Expression>[] = [];
+  let hasTemplate = false;
   const supported = elements.every((element) => {
     if (!element.isExpression()) return false;
 
     const callable = visitCssValue(element, false);
-    hasCallable ||= callable;
-    return callable || isStaticClassBranch(element);
+    if (callable) {
+      callables.push(element);
+      return true;
+    }
+    if (isStaticClassBranch(element)) return true;
+    // The result of an authored template is a string even when an
+    // interpolation is dynamic. Preserve its evaluation in the array.
+    if (!unwrapCxArgument(element).isTemplateLiteral()) return false;
+    hasTemplate = true;
+    return true;
   });
 
   // Keep complete style arrays in their existing atomic compilation path.
   // Only the JSX consumer is visited; shared array initializers stay intact.
-  if (!supported || !hasCallable) return false;
+  if (!supported || callables.length === 0) return false;
+  if (
+    hasTemplate &&
+    !callables.every(
+      (element) =>
+        element.isCallExpression() &&
+        isImportedCssFactory(getModuleReference(element.get("callee"))) &&
+        !isStaticCall(element)
+    )
+  )
+    return false;
 
   if (prepare) {
     for (const element of elements) {
@@ -181,18 +153,36 @@ function visitCssValue(path: NodePath<t.Node>, prepare: boolean): boolean {
   return true;
 }
 
+function isImportedCssFactory(
+  reference: ReturnType<typeof getModuleReference>
+): boolean {
+  return Boolean(
+    reference &&
+    !reference.unsafe &&
+    reference.members.length > 0 &&
+    /\.css(?:\.[cm]?[jt]sx?)?(?:\?.*)?$/.test(reference.source)
+  );
+}
+
+type FactoryResultTest = false | true | "nullish-then-truthy";
+
 function visitClassValue(
   path: NodePath<t.Node>,
   seen: Set<t.Node>,
   prepare: boolean,
   consumer: NodePath<t.Node> = path,
-  allowStyleBranches = false
+  allowStyleBranches = false,
+  captureTruthyFactoryResult: FactoryResultTest = false
 ): boolean {
   if (preparedClassValues.has(path.node)) return true;
   if (seen.has(path.node)) return false;
   const next = new Set(seen).add(path.node);
 
-  if (allowStyleBranches && hasStaticRuleBranchShape(path)) {
+  if (
+    allowStyleBranches &&
+    !isStaticClassBranch(path) &&
+    hasStaticRuleBranchShape(path)
+  ) {
     if (prepare) {
       if (
         path.isExpression() &&
@@ -368,19 +358,14 @@ function visitClassValue(
       return true;
     }
 
-    const importedOrExtracted = Boolean(
-      (reference &&
-        !reference.unsafe &&
-        reference.members.length > 0 &&
-        /\.css(?:\.[cm]?[jt]sx?)?(?:\?.*)?$/.test(reference.source)) ||
-      isExtractedResult(callee, next)
-    );
+    const importedOrExtracted =
+      isImportedCssFactory(reference) || isExtractedResult(callee, next);
 
     if (!importedOrExtracted) return false;
     if (!prepare) return true;
 
     if (isStaticCall(path)) {
-      lowerStaticFactory(consumer);
+      lowerStaticFactory(consumer, captureTruthyFactoryResult);
       preparedClassValues.add(consumer.node);
     } else {
       retainRuntimeInvocation(path.node);
@@ -394,6 +379,18 @@ function visitClassValue(
   if (path.isConditionalExpression()) {
     const consequent = path.get("consequent");
     const alternate = path.get("alternate");
+    const consequentDead = isProvablyUnexecuted(consequent);
+    const alternateDead = isProvablyUnexecuted(alternate);
+    if (consequentDead || alternateDead) {
+      if (consequentDead && alternateDead) return false;
+      // An unreachable value cannot make the selected value a mixed class
+      // branch, or trigger a diagnostic. Leave the authored test in place.
+      const selected = consequentDead ? alternate : consequent;
+      return (
+        isStaticClassBranch(selected) ||
+        visitClassValue(selected, next, prepare, selected, allowStyleBranches)
+      );
+    }
     const consequentClass = visitClassValue(consequent, next, false);
     const alternateClass = visitClassValue(alternate, next, false);
     const allowBranches =
@@ -414,7 +411,6 @@ function visitClassValue(
     if (supported && prepare) {
       if (consequentValue)
         visitClassValue(consequent, next, true, consequent, true);
-
       if (alternateValue)
         visitClassValue(alternate, next, true, alternate, true);
     }
@@ -423,6 +419,14 @@ function visitClassValue(
   }
 
   if (path.isLogicalExpression({ operator: "&&" })) {
+    const left = path.get("left");
+    if (isLiteralFalsyOperand(left)) {
+      if (prepare) {
+        path.replaceWith(t.cloneNode(left.node));
+        preparedClassValues.add(path.node);
+      }
+      return true;
+    }
     const right = path.get("right");
     return visitClassValue(right, next, prepare, right, allowStyleBranches);
   }
@@ -432,7 +436,8 @@ function visitClassValue(
 
 function isStaticPatternValue(
   value: NodePath<t.Node | null | undefined>,
-  seenValues = new Set<t.Node>()
+  seenValues = new Set<t.Node>(),
+  analysis = createReplayAnalysis(value.scope)
 ): boolean {
   if (!value.isExpression()) return false;
   const expression = unwrapCxArgument(value);
@@ -443,10 +448,12 @@ function isStaticPatternValue(
     expression.isConditionalExpression() ||
     expression.isLogicalExpression()
   ) {
-    const branches = getConfidentlyExecutedBranches(expression);
+    const branches = analysis.branches.branches(expression);
     return (
       !!branches &&
-      branches.every((branch) => isStaticPatternValue(branch, following))
+      branches.every((branch) =>
+        isStaticPatternValue(branch, following, analysis)
+      )
     );
   }
 
@@ -455,10 +462,10 @@ function isStaticPatternValue(
     if (source?.constant && source.path.isVariableDeclarator()) {
       const initializer = source.path.get("init");
       return (
-        isStaticPatternValue(initializer, following) &&
-        everyPatternExpression(
+        isStaticPatternValue(initializer, following, analysis) &&
+        analysis.everyPattern(
           source.path.get("id"),
-          (item) => isStaticPatternValue(item, following),
+          (item) => isStaticPatternValue(item, following, analysis),
           initializer.node
         )
       );
@@ -470,6 +477,7 @@ function isStaticPatternValue(
     path: expression,
     state: {
       scope: expression.scope,
+      analysis,
       visiting: new Set(),
       localNames: new Set()
     }
@@ -481,21 +489,36 @@ function requirePatternOwnerChain(
 ): void {
   const owners: NodePath<t.VariableDeclarator>[] = [];
   const seen = new Set<t.Node>();
-  let current: NodePath<t.VariableDeclarator> | undefined = declaration;
-  while (current && !seen.has(current.node)) {
+  let current = declaration;
+  const isFactorySelection = (path: NodePath<t.Node>) =>
+    path.isConditionalExpression() ||
+    path.isLogicalExpression({ operator: "&&" });
+
+  while (true) {
+    if (seen.has(current.node)) return;
     seen.add(current.node);
     owners.push(current);
     const init: NodePath<t.Expression | null | undefined> = current.get("init");
-    const binding: Binding | undefined = init.isIdentifier()
-      ? init.scope.getBinding(init.node.name)
-      : undefined;
-    current =
-      binding?.constant && binding.path.isVariableDeclarator()
-        ? binding.path
-        : undefined;
+    if (!init.isExpression()) return;
+    let selected = unwrapCxArgument(init);
+    if (isFactorySelection(selected)) {
+      const analysis = createReplayAnalysis(selected.scope);
+      while (isFactorySelection(selected)) {
+        const result = analysis.branches.result(selected);
+        if (!result?.isExpression()) return;
+        selected = unwrapCxArgument(result);
+      }
+    }
+    // Register the actual declarators (including the authored predicate),
+    // not a detached copy of the selected call.
+    if (selected.isCallExpression()) break;
+    if (!selected.isIdentifier()) return;
+    const binding: Binding | undefined = selected.scope.getBinding(
+      selected.node.name
+    );
+    if (!binding?.constant || !binding.path.isVariableDeclarator()) return;
+    current = binding.path;
   }
-  // A literal class-string container is runtime data, not an authoring producer.
-  if (!owners[owners.length - 1]?.get("init").isCallExpression()) return;
   const firstPattern = owners.findIndex(
     (owner) => !t.isIdentifier(owner.node.id)
   );
@@ -536,6 +559,16 @@ function sharedFactoryValueKind(
     return "conditional";
 
   return undefined;
+}
+
+function isLiteralFalsyOperand(path: NodePath<t.Expression>): boolean {
+  const value = unwrapCxArgument(path);
+  return (
+    value.isBooleanLiteral({ value: false }) ||
+    value.isNullLiteral() ||
+    value.isNumericLiteral({ value: 0 }) ||
+    value.isStringLiteral({ value: "" })
+  );
 }
 
 function containsStaticFactory(
@@ -580,16 +613,21 @@ function containsStaticFactory(
     );
   }
   if (path.isConditionalExpression()) {
-    const consequent = containsStaticFactory(
-      path.get("consequent"),
-      next,
-      calls
-    );
-    const alternate = containsStaticFactory(path.get("alternate"), next, calls);
-    return consequent || alternate;
+    const consequent = path.get("consequent");
+    const alternate = path.get("alternate");
+    const consequentFactory =
+      !isProvablyUnexecuted(consequent) &&
+      containsStaticFactory(consequent, next, calls);
+    const alternateFactory =
+      !isProvablyUnexecuted(alternate) &&
+      containsStaticFactory(alternate, next, calls);
+    return consequentFactory || alternateFactory;
   }
   if (path.isLogicalExpression({ operator: "&&" })) {
-    return containsStaticFactory(path.get("right"), next, calls);
+    return (
+      !isLiteralFalsyOperand(path.get("left")) &&
+      containsStaticFactory(path.get("right"), next, calls)
+    );
   }
   if (hasStaticRuleBranchShape(path)) return true;
   if (
@@ -687,17 +725,11 @@ function analyzeFactoryValueMutation(
   const opaqueCalls = new Set<t.CallExpression>();
   containsStaticFactory(init, new Set(), opaqueCalls);
 
+  const analysis = createReplayAnalysis(program.scope);
   const mutationOptions = {
     opaqueCalls,
-    callResultProof: (
-      call: NodePath<t.CallExpression | t.OptionalCallExpression>
-    ) =>
-      compiledRecipeResultProof(call) ??
-      sourceRecipeInvocationResult(call) ??
-      mathResultProof(call) ??
-      arrayMapResultProof(call) ??
-      arrayIncludesResultProof(call),
-    skippedPatternDefaults: collectSkippedPatternDefaults(program),
+    callResultProof: analysis.jsxResult,
+    skippedPatternDefaults: analysis.skippedDefaults,
     isReadOnlyCall(
       call: NodePath<
         t.CallExpression | t.OptionalCallExpression | t.NewExpression
@@ -823,10 +855,15 @@ function prepareSharedFactoryClass(
   }
 
   const sharedClass = bindingScope.generateUidIdentifier("cssClass");
-  bindingScope.push({ id: t.cloneNode(sharedClass), kind: "let" });
+  bindingScope.push({
+    id: t.cloneNode(sharedClass),
+    kind: "let",
+    unique: true
+  });
   sharedFactoryClasses.set(declaration.node, sharedClass);
 
   const prepareBranch = (branch: NodePath<t.Node>): void => {
+    if (isProvablyUnexecuted(branch)) return;
     if (
       branch.isTSAsExpression() ||
       branch.isTSTypeAssertion() ||
@@ -841,9 +878,14 @@ function prepareSharedFactoryClass(
     } else if (branch.isLogicalExpression({ operator: "&&" })) {
       prepareBranch(branch.get("right"));
     } else if (branch.isExpression() && containsStaticFactory(branch)) {
-      const original = t.cloneNode(branch.node);
+      const authored = branch.node;
+      const original = t.cloneNode(authored);
 
       visitClassValue(branch, new Set(), true, branch, true);
+
+      // An unchanged runtime class (such as a configured cx call) already
+      // supplies the authored result; only a rewritten branch needs a companion.
+      if (branch.node === authored) return;
 
       branch.replaceWith(
         t.sequenceExpression([
@@ -872,23 +914,45 @@ function prepareSharedFactoryClass(
   return sharedClass;
 }
 
-function unwrapCxArgument(
-  path: NodePath<t.Expression>
-): NodePath<t.Expression> {
-  while (
-    path.isTSAsExpression() ||
-    path.isTSTypeAssertion() ||
-    path.isTSNonNullExpression() ||
-    path.isTSSatisfiesExpression() ||
-    path.isParenthesizedExpression()
+function prepareTruthyScalarFactory(
+  path: NodePath<t.Node>,
+  seen: Set<t.Node>
+): boolean {
+  if (
+    !path.isCallExpression() ||
+    isProvablyUnexecuted(path) ||
+    !isStaticCall(path)
   )
-    path = path.get("expression") as NodePath<t.Expression>;
-  return path;
+    return false;
+  const authored = path.node;
+  visitClassValue(path, seen, true, path, false, true);
+  return path.isExpression() && path.node !== authored;
+}
+
+function selectTruthyScalarClass(
+  path: NodePath<t.LogicalExpression>,
+  operator: "||" | "??"
+): void {
+  path.replaceWith(
+    t.inherits(
+      t.memberExpression(
+        t.logicalExpression(
+          operator,
+          path.node.left,
+          t.arrayExpression([path.node.right])
+        ),
+        t.numericLiteral(0),
+        true
+      ),
+      path.node
+    )
+  );
 }
 
 function prepareCxArgument(
   path: NodePath<t.Node | null>,
-  seen: Set<t.Node>
+  seen: Set<t.Node>,
+  spreadOperand = false
 ): void {
   if (!path.node || seen.has(path.node)) return;
   const next = new Set(seen).add(path.node);
@@ -896,7 +960,7 @@ function prepareCxArgument(
   if (path.isExpression()) {
     const unwrapped = unwrapCxArgument(path);
     if (unwrapped !== path) {
-      prepareCxArgument(unwrapped, next);
+      prepareCxArgument(unwrapped, next, spreadOperand);
       return;
     }
   }
@@ -905,13 +969,156 @@ function prepareCxArgument(
     for (const element of path.get("elements"))
       prepareCxArgument(element, next);
   } else if (path.isSpreadElement()) {
-    prepareCxArgument(path.get("argument"), next);
+    // A spread must receive the authored iterable; only its known array
+    // elements can be lowered as scalar class values.
+    prepareCxArgument(path.get("argument"), next, true);
   } else if (path.isConditionalExpression()) {
-    prepareCxArgument(path.get("consequent"), next);
-    prepareCxArgument(path.get("alternate"), next);
+    prepareCxArgument(path.get("consequent"), next, spreadOperand);
+    prepareCxArgument(path.get("alternate"), next, spreadOperand);
   } else if (path.isLogicalExpression()) {
-    if (path.node.operator !== "&&") prepareCxArgument(path.get("left"), next);
-    prepareCxArgument(path.get("right"), next);
+    if (path.node.operator === "||" && !spreadOperand) {
+      const left = unwrapCxArgument(path.get("left"));
+      if (
+        left === path.get("left") &&
+        left.isLogicalExpression({ operator: "||" })
+      ) {
+        // Group the scalar chain to the right so each tested value uses the
+        // same authored-truthiness lowering and the later operands stay lazy.
+        path.replaceWith(
+          t.inherits(
+            t.logicalExpression(
+              "||",
+              left.node.left,
+              t.inheritsComments(
+                t.logicalExpression("||", left.node.right, path.node.right),
+                left.node
+              )
+            ),
+            path.node
+          )
+        );
+        prepareCxArgument(path, next);
+        return;
+      }
+      if (left.isLogicalExpression({ operator: "??" })) {
+        const supplied = unwrapCxArgument(left.get("left"));
+        const otherwise = unwrapCxArgument(left.get("right"));
+        if (
+          supplied.isCallExpression() &&
+          otherwise.isCallExpression() &&
+          [supplied, otherwise].every(
+            (factory) =>
+              !isProvablyUnexecuted(factory) &&
+              isStaticCall(factory) &&
+              visitClassValue(factory, next, false)
+          )
+        ) {
+          // Both branches are statically compilable, but only the selected
+          // factory may run. Capture the entire authored nullish selection
+          // once before applying the ordinary scalar class/truthiness receipt.
+          lowerStaticFactory(left, true);
+          preparedClassValues.add(left.node);
+          prepareCxArgument(path.get("right"), next);
+          selectTruthyScalarClass(path, "??");
+          return;
+        }
+        // Keep actual spreads on the iterable path above. The scalar default
+        // runs only for the nullish arm, with authored truthiness kept separate
+        // from the compiled class (including an empty compiled class).
+        if (
+          supplied.isCallExpression() &&
+          (otherwise.isStringLiteral() || otherwise.isCallExpression()) &&
+          !isProvablyUnexecuted(supplied) &&
+          isStaticCall(supplied)
+        ) {
+          const authored = supplied.node;
+          visitClassValue(
+            supplied,
+            next,
+            true,
+            supplied,
+            false,
+            "nullish-then-truthy"
+          );
+          if (supplied.isExpression() && supplied.node !== authored) {
+            prepareCxArgument(path.get("right"), next);
+            const defaultValue = otherwise.isStringLiteral()
+              ? otherwise.node.value
+                ? t.arrayExpression([left.node.right])
+                : t.nullLiteral()
+              : (() => {
+                  // Evaluate the authored fallback expression as an argument,
+                  // not inside a generated scope. Box its truthy result once.
+                  const value = path.scope.generateUidIdentifier("cssDefault");
+                  return t.callExpression(
+                    t.arrowFunctionExpression(
+                      [value],
+                      t.conditionalExpression(
+                        t.cloneNode(value),
+                        t.arrayExpression([t.cloneNode(value)]),
+                        t.nullLiteral()
+                      )
+                    ),
+                    [left.node.right]
+                  );
+                })();
+            const preferred = t.memberExpression(
+              t.logicalExpression(
+                "??",
+                left.node.left,
+                t.arrayExpression([defaultValue])
+              ),
+              t.numericLiteral(0),
+              true
+            );
+            path.replaceWith(
+              t.inherits(
+                t.memberExpression(
+                  t.logicalExpression(
+                    "??",
+                    preferred,
+                    t.arrayExpression([path.node.right])
+                  ),
+                  t.numericLiteral(0),
+                  true
+                ),
+                path.node
+              )
+            );
+            return;
+          }
+        }
+      }
+      if (left.isConditionalExpression()) {
+        const consequent = unwrapCxArgument(left.get("consequent"));
+        const alternate = unwrapCxArgument(left.get("alternate"));
+        // Keep the authored predicate and false arm. The selected factory
+        // uses the same boxed truthiness receipt as a guarded scalar call.
+        const factory = alternate.isBooleanLiteral({ value: false })
+          ? consequent
+          : consequent.isBooleanLiteral({ value: false })
+            ? alternate
+            : undefined;
+        if (factory && prepareTruthyScalarFactory(factory, next)) {
+          prepareCxArgument(path.get("right"), next);
+          selectTruthyScalarClass(path, "||");
+          return;
+        }
+      }
+      const guarded = left.isLogicalExpression({ operator: "&&" });
+      const factory = guarded ? unwrapCxArgument(left.get("right")) : left;
+      const prepared = prepareTruthyScalarFactory(factory, next);
+      if (!prepared)
+        // Keep values that control the branch; known literal array elements
+        // may still lower without changing the array's truthiness.
+        prepareCxArgument(left, next, true);
+      prepareCxArgument(path.get("right"), next);
+      if (prepared) selectTruthyScalarClass(path, guarded ? "||" : "??");
+      return;
+    }
+    if (path.node.operator !== "&&")
+      prepareCxArgument(path.get("left"), next, spreadOperand);
+    prepareCxArgument(path.get("right"), next, spreadOperand);
   } else if (path.isIdentifier()) {
     const binding = path.scope.getBinding(path.node.name);
     const initializer =
@@ -928,29 +1135,41 @@ function prepareCxArgument(
         binding?.path.isVariableDeclarator() &&
         !hasNonCssReferences(binding.path, new Set(), true)
       )
-        prepareCxArgument(init, next);
-    } else {
+        prepareCxArgument(init, next, spreadOperand);
+    } else if (!spreadOperand) {
       visitClassValue(path, seen, true);
     }
-  } else if (path.isExpression()) {
+  } else if (!spreadOperand && path.isExpression()) {
     visitClassValue(path, seen, true);
   }
 }
 
 function isStaticCall(path: NodePath<t.CallExpression>) {
-  if (hasRuntimeLocalBinding(path) || hasRuntimeCalls(path.get("arguments")))
+  const analysis = createReplayAnalysis(path.scope);
+  if (
+    hasRuntimeLocalBinding(path, analysis) ||
+    hasRuntimeCalls(path.get("arguments"), analysis)
+  )
     return false;
   // Receipts belong only to this root and this unchanged AST snapshot.
   // Never cache or share them with another candidate call.
   const unmodifiedBindings = new Set<Binding>();
-  if (hasMutableStyleInputs(path, path.get("arguments"), unmodifiedBindings))
+  if (
+    hasMutableStyleInputs(
+      path,
+      path.get("arguments"),
+      unmodifiedBindings,
+      analysis
+    )
+  )
     return false;
   return (
     analyzeCssPropSidecarHoistability({
       expression: path.node,
       path,
       scope: path.scope,
-      unmodifiedBindings
+      unmodifiedBindings,
+      analysis
     }).kind === "hoistable"
   );
 }
@@ -958,18 +1177,17 @@ function isStaticCall(path: NodePath<t.CallExpression>) {
 function hasMutableStyleInputs(
   path: NodePath<t.Expression>,
   inputs: readonly NodePath[],
-  unmodifiedBindings?: Set<Binding>
+  unmodifiedBindings?: Set<Binding>,
+  analysis = createReplayAnalysis(path.scope)
 ): boolean {
   const program = path.scope.getProgramParent().path;
   if (!program.isProgram()) return true;
 
   const inspected = new Set<Binding>();
-  const selectedBranches = new Map<t.Node, NodePath<t.Expression>>();
   const inspect = (value: NodePath): void => {
     if (value.isExpression()) {
-      const branches = getConfidentlyExecutedBranches(value);
+      const branches = analysis.branches.branches(value);
       if (branches) {
-        selectedBranches.set(value.node, branches[branches.length - 1]);
         branches.forEach(inspect);
         return;
       }
@@ -993,7 +1211,7 @@ function hasMutableStyleInputs(
       if (binding.path.isVariableDeclarator()) {
         const init = binding.path.get("init");
         if (init.isExpression()) inspect(init);
-        everyPatternExpression(
+        analysis.everyPattern(
           binding.path.get("id"),
           (expression) => {
             if (expression.node) inspect(expression as NodePath<t.Node>);
@@ -1010,10 +1228,9 @@ function hasMutableStyleInputs(
     value.traverse({
       "ConditionalExpression|LogicalExpression"(inner) {
         if (!inner.isExpression()) return;
-        const branches = getConfidentlyExecutedBranches(inner);
+        const branches = analysis.branches.branches(inner);
         if (!branches) return;
 
-        selectedBranches.set(inner.node, branches[branches.length - 1]);
         branches.forEach(inspect);
         inner.skip();
       },
@@ -1023,27 +1240,140 @@ function hasMutableStyleInputs(
 
   inputs.forEach(inspect);
 
-  const skippedPatternDefaults = collectSkippedPatternDefaults(program);
+  const delivery = path.isCallExpression() ? path.get("arguments") : inputs;
+  const inside = (use: NodePath, owner: NodePath) =>
+    use.node === owner.node ||
+    Boolean(use.findParent((parent) => parent.node === owner.node));
+  const selected = (use: NodePath) =>
+    delivery.some((argument) => inside(use, argument));
+
+  let sourceEvidence:
+    ReturnType<typeof collectRuntimeSourceEvidence> | undefined;
+  const canIsolateSelectedInput = (
+    binding: Binding,
+    seen = new Set<Binding>()
+  ): boolean => {
+    if (seen.has(binding)) return false;
+    const declaration = binding.path;
+    const init = declaration.isVariableDeclarator()
+      ? declaration.get("init")
+      : undefined;
+    if (
+      init?.isExpression() &&
+      isSupportedStaticCssPrimitiveLiteral(unwrapCxArgument(init).node)
+    )
+      return true;
+
+    const evidence = (sourceEvidence ??= collectRuntimeSourceEvidence(program));
+    if (
+      !evidence.bindingsCurrent ||
+      evidence.hasGlobalEval ||
+      evidence.isExported(binding)
+    )
+      return false;
+
+    const callStatement = path.getStatementParent();
+    const usesBeforeSelectedCall = (use: NodePath) => {
+      const statement = use.getStatementParent();
+      if (!statement || !callStatement || typeof statement.key !== "number")
+        return false;
+      const readerFrame = use.getFunctionParent();
+      // A repeated statement list can observe a previous activation's write
+      // when the binding itself was allocated outside that region.
+      for (
+        let owner: NodePath | null = statement.parentPath;
+        owner;
+        owner = owner.parentPath
+      )
+        if (
+          (owner.isLoop() || owner.isFunction()) &&
+          !inside(declaration, owner)
+        )
+          return false;
+
+      for (
+        let group: NodePath | null = callStatement;
+        group;
+        group = group.parentPath
+      ) {
+        if (
+          group.isFunction() &&
+          group !== readerFrame &&
+          !group.parentPath.isVariableDeclarator()
+        )
+          return false;
+        if (group.parentPath === statement.parentPath)
+          return typeof group.key === "number" && statement.key < group.key;
+      }
+      return false;
+    };
+    const next = new Set(seen).add(binding);
+    const ownPrimitiveFields =
+      init?.isObjectExpression() &&
+      init.node.properties.every(
+        (property) =>
+          t.isObjectProperty(property) &&
+          !property.computed &&
+          !isObjectPrototypeSetter(property) &&
+          t.isExpression(property.value) &&
+          isSupportedStaticCssPrimitiveLiteral(property.value)
+      );
+    return evidence.references(binding).every((use) => {
+      if (selected(use) || isProvablyUnexecuted(use)) return true;
+      const parent = use.parentPath;
+      if (!parent) return false;
+      const producer = use.findParent(
+        (owner) => owner.isVariableDeclarator() || owner.isFunction()
+      );
+      if (producer?.isVariableDeclarator() && producer !== declaration) {
+        const names = Object.keys(t.getBindingIdentifiers(producer.node.id));
+        // Projection or alias construction used only by the selected input
+        // graph is not a separate application observer.
+        if (
+          names.length > 0 &&
+          names.every((name) => {
+            const target = producer.scope.getBinding(name);
+            return (
+              !!target &&
+              target.constant &&
+              inspected.has(target) &&
+              canIsolateSelectedInput(target, next)
+            );
+          })
+        )
+          return true;
+      }
+      if (!usesBeforeSelectedCall(use)) return false;
+      // Before delivery, copying an own primitive-only record cannot publish
+      // an alias of the delivered object or any of its fields.
+      if (!ownPrimitiveFields) return false;
+      if (parent.isSpreadElement() && parent.parentPath.isObjectExpression())
+        return true;
+      if (parent.isMemberExpression() && use.key === "object")
+        return !parent.node.computed;
+      return (
+        parent.isCallExpression() &&
+        parent.get("callee").matchesPattern("Object.keys") &&
+        !parent.scope.getBinding("Object")
+      );
+    });
+  };
+
+  const skippedPatternDefaults = analysis.skippedDefaults;
   return [...inspected].some((binding) => {
     if (mathBindingIdentityProof(binding)) {
       unmodifiedBindings?.add(binding);
       return false;
     }
     const mutated = hasStaticCssEvalBindingMutation(program, binding, {
-      selectedBranches,
+      branchResult: analysis.branches.result,
       skippedPatternDefaults,
-      callResultProof: (
-        call: NodePath<t.CallExpression | t.OptionalCallExpression>
-      ) =>
-        compiledRecipeResultProof(call) ??
-        sourceRecipeInvocationResult(call) ??
-        mathResultProof(call) ??
-        arrayMapResultProof(call) ??
-        arrayIncludesResultProof(call),
+      callResultProof: analysis.jsxResult,
       // The factory consumes a style value. Nested argument helpers can still
       // mutate their inputs, so their calls retain the ordinary escape checks.
       isReadOnlyCall: (call) =>
-        call.node === path.node || isReadOnlyArgumentCall(call)
+        (call.node === path.node && canIsolateSelectedInput(binding)) ||
+        isReadOnlyArgumentCall(call)
     });
     if (!mutated) unmodifiedBindings?.add(binding);
     return mutated;
@@ -1079,20 +1409,16 @@ function isReadOnlyArgumentCall(
     );
 }
 
-function hasRuntimeCalls(inputs: readonly NodePath[]): boolean {
-  const program = inputs[0]?.scope.getProgramParent().path;
+function hasRuntimeCalls(
+  inputs: readonly NodePath[],
+  analysis?: ReplayAnalysis
+): boolean {
+  if (!inputs.length) return false;
+  const replay = analysis ?? createReplayAnalysis(inputs[0].scope);
   const originOptions = {
-    callResultProof: (
-      call: NodePath<t.CallExpression | t.OptionalCallExpression>
-    ) =>
-      compiledRecipeResultProof(call) ??
-      sourceRecipeInvocationResult(call) ??
-      mathResultProof(call) ??
-      arrayMapResultProof(call) ??
-      arrayIncludesResultProof(call),
-    skippedPatternDefaults: program?.isProgram()
-      ? collectSkippedPatternDefaults(program)
-      : undefined
+    callResultProof: replay.jsxResult,
+    skippedPatternDefaults: replay.skippedDefaults,
+    branchResult: replay.branches.result
   };
   const hasImportedValueOrigin = (
     path: NodePath<t.Node>,
@@ -1111,6 +1437,13 @@ function hasRuntimeCalls(inputs: readonly NodePath[]): boolean {
   const inspectedHelpers = new Set<Binding>();
   const inspectedArgumentValues = new Set<Binding>();
   type ReferenceUse = "execution" | "argument-value";
+  const skipsOptionalRead = (path: NodePath): boolean => {
+    if (!path.isOptionalMemberExpression({ optional: true })) return false;
+    const receiver = path.get("object");
+    return (
+      receiver.isExpression() && replay.branches.valueNullish(receiver) === true
+    );
+  };
   const isImportedRead = (path: NodePath): boolean => {
     // Spreading consumes properties or an iterator just as an explicit member
     // access consumes a property. Merely referring to an import does neither.
@@ -1156,12 +1489,17 @@ function hasRuntimeCalls(inputs: readonly NodePath[]): boolean {
     if (value.isMemberExpression() || value.isOptionalMemberExpression()) {
       const access: NodePath<t.MemberExpression | t.OptionalMemberExpression> =
         value;
+      if (skipsOptionalRead(access)) return false;
       const property = access.get("property");
       const evaluated = access.node.computed ? property.evaluate() : null;
       const member =
         !access.node.computed && property.isIdentifier()
           ? property.node.name
-          : evaluated?.confident
+          : evaluated?.confident &&
+              (evaluated.value == null ||
+                ["string", "number", "bigint", "boolean", "symbol"].includes(
+                  typeof evaluated.value
+                ))
             ? String(evaluated.value)
             : null;
       return isRuntimeGlobal(access.get("object"), [member, ...members], seen);
@@ -1286,7 +1624,7 @@ function hasRuntimeCalls(inputs: readonly NodePath[]): boolean {
       if (
         (initializer.isExpression() &&
           patternReadsImport(pattern, initializer)) ||
-        !everyPatternExpression(
+        !replay.everyPattern(
           pattern,
           (expression) =>
             !expression.isExpression() ||
@@ -1340,10 +1678,43 @@ function hasRuntimeCalls(inputs: readonly NodePath[]): boolean {
       .some((argument) => containsRuntimeCall(argument, "argument-value"));
   };
 
+  // Constructing a local callable is not executing it. Only skip a nested
+  // immutable arrow binding that is provably neither called nor exposed.
+  // Leave all other function bodies to the existing conservative classifier.
+  let hasDynamicHelperScope: boolean | undefined;
+  const isDormantLocalHelper = (arrow: NodePath<t.ArrowFunctionExpression>) => {
+    const declaration = arrow.parentPath;
+    if (
+      arrow.key !== "init" ||
+      !declaration.isVariableDeclarator() ||
+      !declaration.getFunctionParent()
+    )
+      return false;
+
+    const id = declaration.get("id");
+    if (!id.isIdentifier()) return false;
+    const binding = id.scope.getBinding(id.node.name);
+    if (
+      binding?.kind !== "const" ||
+      binding.path !== declaration ||
+      !binding.constant ||
+      binding.referenced
+    )
+      return false;
+
+    const program = declaration.scope.getProgramParent().path;
+    return (
+      program.isProgram() &&
+      !(hasDynamicHelperScope ??= hasDynamicScope(program))
+    );
+  };
+
   const containsRuntimeCall = (
     argument: NodePath,
     use: ReferenceUse = "execution"
   ): boolean => {
+    if (argument.isOptionalMemberExpression() && skipsOptionalRead(argument))
+      return containsRuntimeCall(argument.get("object"), use);
     if (
       argument.isReferencedIdentifier() &&
       containsHelperRuntime(argument, use)
@@ -1351,7 +1722,7 @@ function hasRuntimeCalls(inputs: readonly NodePath[]): boolean {
       return true;
 
     if (argument.isExpression()) {
-      const branches = getConfidentlyExecutedBranches(argument);
+      const branches = replay.branches.branches(argument);
       if (branches)
         return branches.some((branch) => containsRuntimeCall(branch, use));
     }
@@ -1373,6 +1744,9 @@ function hasRuntimeCalls(inputs: readonly NodePath[]): boolean {
       if (found) candidate.stop();
     };
     argument.traverse({
+      ArrowFunctionExpression(inner) {
+        if (isDormantLocalHelper(inner)) inner.skip();
+      },
       AssignmentPattern(inner) {
         if (originOptions.skippedPatternDefaults?.has(inner.node)) {
           // The default is unexecuted, but nested patterns and computed keys
@@ -1395,7 +1769,7 @@ function hasRuntimeCalls(inputs: readonly NodePath[]): boolean {
       },
       "ConditionalExpression|LogicalExpression"(inner) {
         if (!inner.isExpression()) return;
-        const branches = getConfidentlyExecutedBranches(inner);
+        const branches = replay.branches.branches(inner);
         if (!branches) return;
 
         found ||= branches.some((branch) => containsRuntimeCall(branch, use));
@@ -1409,7 +1783,15 @@ function hasRuntimeCalls(inputs: readonly NodePath[]): boolean {
       BinaryExpression: visit,
       TemplateLiteral: visit,
       MemberExpression: visit,
-      OptionalMemberExpression: visit,
+      OptionalMemberExpression(inner) {
+        if (!skipsOptionalRead(inner)) {
+          visit(inner);
+          return;
+        }
+        found ||= containsRuntimeCall(inner.get("object"), use);
+        inner.skip();
+        if (found) inner.stop();
+      },
       ObjectProperty: visit,
       ObjectMethod: visit,
       SpreadElement: visit
@@ -1424,7 +1806,7 @@ function hasRuntimeCalls(inputs: readonly NodePath[]): boolean {
   ): boolean => {
     if (!value.isExpression() || seen.has(value.node)) return false;
     const next = new Set(seen).add(value.node);
-    const branches = getConfidentlyExecutedBranches(value);
+    const branches = replay.branches.branches(value);
     if (branches)
       return branches.some((branch) => hasCoercionCallback(branch, next));
 
@@ -1605,14 +1987,15 @@ function isStaticRuleBranch(
 
 function hasRuntimeLocalBinding(
   path: NodePath,
+  analysis = createReplayAnalysis(path.scope),
   seen = new Set<t.Node>(),
   candidates: readonly NodePath[] = [path]
 ): boolean {
   if (path.isExpression()) {
-    const branches = getConfidentlyExecutedBranches(path);
+    const branches = analysis.branches.branches(path);
     if (branches)
       return branches.some((branch) =>
-        hasRuntimeLocalBinding(branch, seen, candidates)
+        hasRuntimeLocalBinding(branch, analysis, seen, candidates)
       );
   }
 
@@ -1635,16 +2018,21 @@ function hasRuntimeLocalBinding(
       init: NodePath<t.Node | null | undefined>
     ): boolean => {
       if (!init.isExpression()) return false;
-      if (binding.scope.getFunctionParent() && hasImmediateRuntimeCall(init))
+      if (
+        binding.scope.getFunctionParent() &&
+        hasImmediateRuntimeCall(init, analysis)
+      )
         return true;
-      if (init.evaluate().confident) return false;
 
-      return hasRuntimeLocalBinding(init, seen, [...candidates, init]);
+      return hasRuntimeLocalBinding(init, analysis, seen, [
+        ...candidates,
+        init
+      ]);
     };
 
     // A confident initializer does not account for expressions in its pattern.
     runtime ||=
-      !everyPatternExpression(
+      !analysis.everyPattern(
         binding.path.get("id"),
         (expression) => !isRuntimeInitializer(expression),
         binding.path.node.init
@@ -1655,11 +2043,11 @@ function hasRuntimeLocalBinding(
   path.traverse({
     "ConditionalExpression|LogicalExpression"(inner) {
       if (!inner.isExpression()) return;
-      const branches = getConfidentlyExecutedBranches(inner);
+      const branches = analysis.branches.branches(inner);
       if (!branches) return;
 
       runtime ||= branches.some((branch) =>
-        hasRuntimeLocalBinding(branch, seen, candidates)
+        hasRuntimeLocalBinding(branch, analysis, seen, candidates)
       );
       inner.skip();
       if (runtime) inner.stop();
@@ -1669,48 +2057,33 @@ function hasRuntimeLocalBinding(
   return runtime;
 }
 
-function hasImmediateRuntimeCall(path: NodePath<t.Expression>): boolean {
-  if (path.isFunction()) return false;
-  const branches = getConfidentlyExecutedBranches(path);
-  if (branches) return branches.some(hasImmediateRuntimeCall);
-
-  let called = false;
-  const found = (call: NodePath) => {
-    // Babel can fold a surrounding sequence or void expression while ignoring
-    // calls it executes. Inspect each call, including arguments of folded calls.
-    if (call.isCallExpression() && call.evaluate().confident) return;
-    called = true;
-    call.stop();
-  };
-
+/** Inspect possibly executed operands, including computed method keys. Deferred
+ * captures and statements after an unconditional return do not run here. */
+function hasImmediateRuntimeCall(
+  path: NodePath<t.Node>,
+  analysis: ReplayAnalysis
+): boolean {
+  if (path.isCallExpression()) return !analysis.closedMathCall(path);
   if (
-    path.isCallExpression() ||
     path.isOptionalCallExpression() ||
-    path.isNewExpression()
+    path.isNewExpression() ||
+    path.isTaggedTemplateExpression()
   )
-    found(path);
-  if (called) return true;
-
-  path.traverse({
-    Function(inner) {
-      inner.skip();
-    },
-    "ConditionalExpression|LogicalExpression"(inner) {
-      if (!inner.isExpression()) return;
-      const branches = getConfidentlyExecutedBranches(inner);
-      if (!branches) return;
-      called = branches.some(hasImmediateRuntimeCall);
-      inner.skip();
-      if (called) inner.stop();
-    },
-    CallExpression: found,
-    OptionalCallExpression: found,
-    NewExpression: found
-  });
-  return called;
+    return true;
+  return analysis.branches
+    .plan(path)
+    .steps.some(
+      (step) =>
+        step.kind === "apply-decorator" ||
+        (step.kind === "evaluate" &&
+          hasImmediateRuntimeCall(step.operand.path, analysis))
+    );
 }
 
-function lowerStaticFactory(path: NodePath<t.Node>) {
+function lowerStaticFactory(
+  path: NodePath<t.Node>,
+  captureTruthyResult: FactoryResultTest = false
+) {
   if (!path.isExpression()) {
     throw path.buildCodeFrameError("Expected a static CSS factory expression.");
   }
@@ -1735,6 +2108,37 @@ function lowerStaticFactory(path: NodePath<t.Node>) {
     )
   );
 
+  const compiled = t.conditionalExpression(
+    classValue,
+    value,
+    t.callExpression(css, [value])
+  );
+  const truthyValue = captureTruthyResult
+    ? t.conditionalExpression(
+        value,
+        t.arrayExpression([compiled]),
+        t.nullLiteral()
+      )
+    : compiled;
+  // Nullish must select the authored default; a defined but falsy value
+  // bypasses that default and can still select the enclosing || fallback.
+  // The existing boxed truthy value preserves an empty compiled class.
+  const result =
+    captureTruthyResult === "nullish-then-truthy"
+      ? t.conditionalExpression(
+          t.logicalExpression(
+            "||",
+            t.binaryExpression("===", value, t.nullLiteral()),
+            t.binaryExpression(
+              "===",
+              value,
+              t.unaryExpression("void", t.numericLiteral(0))
+            )
+          ),
+          t.nullLiteral(),
+          t.arrayExpression([truthyValue])
+        )
+      : truthyValue;
   path.replaceWith(
     markBuildEvaluation(
       t.callExpression(marker, [
@@ -1744,13 +2148,7 @@ function lowerStaticFactory(path: NodePath<t.Node>) {
             t.variableDeclaration("const", [
               t.variableDeclarator(value, t.cloneNode(path.node))
             ]),
-            t.returnStatement(
-              t.conditionalExpression(
-                classValue,
-                value,
-                t.callExpression(css, [value])
-              )
-            )
+            t.returnStatement(result)
           ])
         )
       ])
@@ -1947,6 +2345,13 @@ function isStaticClassBranch(path: NodePath<t.Node>): boolean {
     path.isParenthesizedExpression()
   )
     return isStaticClassBranch(path.get("expression") as NodePath<t.Node>);
+
+  if (path.isArrayExpression())
+    return path
+      .get("elements")
+      .every(
+        (element) => element.isExpression() && isStaticClassBranch(element)
+      );
 
   return (
     path.isStringLiteral() ||

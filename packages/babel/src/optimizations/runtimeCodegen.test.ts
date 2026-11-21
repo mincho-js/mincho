@@ -6,6 +6,10 @@ import {
   types as t
 } from "@babel/core";
 import { describe, expect, it } from "vitest";
+import { mkdir, mkdtemp, writeFile, rm } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { optimizeRuntimeCodegen } from "./runtimeCodegen.js";
 import { pruneRecipeMetadata } from "./recipeMetadata.js";
 import { babelTransform } from "../testUtils/plugin.js";
@@ -119,6 +123,458 @@ describe("runtime code generation", () => {
     expect(code).not.toMatch(/\{\s*css\b/);
   });
 
+  it.each([
+    ["named", 'export { cx } from "@mincho-js/css";', true],
+    ["star", 'export * from "@mincho-js/css";', true],
+    [
+      "native package alias re-export",
+      'export { cx } from "#css-alias";',
+      true
+    ],
+    [
+      "Babel pre-authored CSS import and native alias",
+      'export { cx } from "#css-alias";',
+      true,
+      true
+    ],
+    [
+      "native package alias import",
+      'import { cx } from "#css-alias"; export { cx };',
+      true
+    ],
+    [
+      "later value import",
+      'import { cx } from "@mincho-js/css"; export { cx };',
+      true
+    ],
+    [
+      "type only",
+      'export type { CSSProperties } from "@mincho-js/css";',
+      false
+    ],
+    [
+      "deferred dynamic import",
+      'export const load = () => import("@mincho-js/css");',
+      true
+    ],
+    [
+      "deferred dynamic import with a closed string expression",
+      'export const load = () => import("@mincho-js/" + "css");',
+      true
+    ],
+    [
+      "deferred dynamic import with an immutable closed string",
+      'const request = "@mincho-js/" + "css"; export const load = () => import(request);',
+      true
+    ],
+    [
+      "dead deferred dynamic import with a closed string expression",
+      'export const load = () => false && import("@mincho-js/" + "css");',
+      false
+    ],
+    [
+      "different closed string request",
+      'export const load = () => import("./" + "observe.mjs");',
+      false
+    ],
+    [
+      "dynamic import with unescaped constant empty attributes",
+      'const options = {with:{}}; export const load = () => import("@mincho-js/css", options);',
+      true
+    ],
+    [
+      "dynamic import with a separately referenced options object",
+      'const options = {with:{}}; options.with = {}; export const load = () => import("@mincho-js/css", options);',
+      false
+    ],
+    [
+      "dynamic import with empty options",
+      'export const load = () => import("@mincho-js/css", {});',
+      true
+    ],
+    [
+      "dynamic import with empty attributes",
+      'export const load = () => import("@mincho-js/css", { with: {} });',
+      true
+    ],
+    [
+      "dynamic import with undefined attributes",
+      'export const load = () => import("@mincho-js/css", { with: void 0 });',
+      true
+    ],
+    [
+      "dynamic import with shadowed undefined attributes",
+      'export const load = (undefined) => import("@mincho-js/css", { with: undefined });',
+      false
+    ],
+    [
+      "dynamic import with effect-free nonzero void options",
+      'export const load = () => import("@mincho-js/css", void 1);',
+      true
+    ],
+    [
+      "dynamic import with void zero options",
+      'export const load = () => import("@mincho-js/css", void 0);',
+      true
+    ],
+    [
+      "dynamic import with unbound undefined options",
+      'export const load = () => import("@mincho-js/css", undefined);',
+      true
+    ],
+    [
+      "dynamic import with shadowed undefined options",
+      'export const load = (undefined) => import("@mincho-js/css", undefined);',
+      false
+    ],
+    [
+      "dead dynamic import",
+      'export const load = () => false && import("@mincho-js/css");',
+      false
+    ],
+    [
+      "different dynamic import",
+      'export const load = () => import("./observe.mjs");',
+      false
+    ],
+    ["standalone observer after CSS (unknown runtime graph)", "", true],
+    [
+      "transitive namespace re-export with omitted runtimeCodegen",
+      'export * as runtime from "./barrel.mjs";',
+      true,
+      undefined,
+      true
+    ],
+    [
+      "no following request with omitted runtimeCodegen",
+      "",
+      false,
+      undefined,
+      true
+    ],
+    ["no following authored runtime request", "", false]
+  ] as const)(
+    "preserves ESM initialization with a %s request remaining",
+    async (
+      _label,
+      later,
+      hasRuntimeRequest,
+      preAddsImport?: true,
+      omitRuntimeCodegen?: true
+    ) => {
+      const observe = 'import { observed } from "./observe.mjs";';
+      const input = `${hasRuntimeRequest ? "" : observe}
+        ${preAddsImport ? "" : 'import { css } from "@mincho-js/css";'}
+        ${hasRuntimeRequest ? observe : ""}
+        export const className = css({ color: "red" });
+        export { observed }; ${later}`;
+      const { code, result } = preAddsImport
+        ? (() => {
+            const options = {
+              result: ["", ""] as [string, string],
+              optimize: { runtimeCodegen: false, pureFunctions: false }
+            };
+            const transformed = transformSync(input, {
+              filename: "test.mjs",
+              configFile: false,
+              babelrc: false,
+              plugins: [
+                {
+                  pre(file) {
+                    file.path.unshiftContainer(
+                      "body",
+                      template.statement.ast(
+                        'import { css } from "@mincho-js/css";'
+                      )
+                    );
+                    file.path.scope.crawl();
+                  }
+                },
+                [minchoBabelPlugin(), options]
+              ]
+            });
+            return { code: transformed!.code!, result: options.result };
+          })()
+        : babelTransform(input, {
+            optimize: omitRuntimeCodegen
+              ? { pureFunctions: false }
+              : { runtimeCodegen: false }
+          });
+      const root = await mkdtemp(join(tmpdir(), "mincho-esm-init-"));
+      try {
+        await writeFile(
+          join(root, "package.json"),
+          '{"name":"@mincho-js/css","type":"module","exports":"./css.mjs","imports":{"#css-alias":"./css.mjs"}}'
+        );
+        await writeFile(
+          join(root, "css.mjs"),
+          'globalThis.trace.push("css-package"); export const css = () => "red-class"; export const cx = () => "";'
+        );
+        await writeFile(
+          join(root, "observe.mjs"),
+          'export const observed = globalThis.trace.includes("css-package"); globalThis.trace.push("observe");'
+        );
+        await writeFile(
+          join(root, "barrel.mjs"),
+          'import "@mincho-js/css"; export const hasRuntime = true;'
+        );
+        const imported = code.match(
+          /import\s*\{\s*([\w$]+)\s+as\s+[\w$]+\s*\}\s*from/
+        );
+        expect(imported, code).toBeTruthy();
+        await writeFile(
+          join(root, "sidecar.mjs"),
+          `export const ${imported![1]} = "red-class";`
+        );
+        await writeFile(
+          join(root, "entry.mjs"),
+          code.replace(result[0], "./sidecar.mjs")
+        );
+        const run = spawnSync(
+          process.execPath,
+          [
+            "--input-type=module",
+            "-e",
+            'globalThis.trace = []; const {observed, className} = await import("./entry.mjs"); console.log(JSON.stringify({trace: globalThis.trace, observed, className}));'
+          ],
+          {
+            cwd: root,
+            env: { ...process.env, NODE_OPTIONS: "" },
+            encoding: "utf8"
+          }
+        );
+        expect(run.status, run.stderr).toBe(0);
+        expect(JSON.parse(run.stdout)).toEqual({
+          trace: hasRuntimeRequest ? ["css-package", "observe"] : ["observe"],
+          observed: hasRuntimeRequest,
+          className: "red-class"
+        });
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    }
+  );
+
+  it.each([
+    ["not called", true, false, false],
+    ["returns normally", true, true, false],
+    ["throws at the authored call", true, true, true],
+    ["dead request", false, true, false],
+    ["with value not called", true, false, false, true],
+    ["with value returns normally", true, true, false, true],
+    ["with value throws at the authored call", true, true, true, true],
+    ["with value dead request", false, true, false, true]
+  ] as const)(
+    "preserves eager module order with effectful void options: %s",
+    async (_label, live, invoke, throws, nested?: true) => {
+      const { code, result } = babelTransform(
+        `
+        import { css } from "@mincho-js/css";
+        export const className = css({ color: "red" });
+        globalThis.trace.push("observe");
+        function observeOptions() {
+          globalThis.trace.push("options");
+          ${throws ? 'throw new Error("ordinary options failure");' : "return 7;"}
+        }
+        export const load = () => ${live ? "" : "false && "}
+          import("@mincho-js/css", ${nested ? "{ with: void observeOptions() }" : "void observeOptions()"});
+      `,
+        { optimize: { runtimeCodegen: false } }
+      );
+      const root = await mkdtemp(join(tmpdir(), "mincho-esm-init-"));
+      try {
+        await writeFile(
+          join(root, "package.json"),
+          '{"name":"@mincho-js/css","type":"module","exports":"./css.mjs"}'
+        );
+        await writeFile(
+          join(root, "css.mjs"),
+          'globalThis.trace.push("css-package"); export const css = () => "red-class";'
+        );
+        const output = code.match(
+          /import\s*\{\s*([\w$]+)\s+as\s+[\w$]+\s*\}\s*from/
+        );
+        expect(output, code).toBeTruthy();
+        await writeFile(
+          join(root, "sidecar.mjs"),
+          `export const ${output![1]} = "red-class";`
+        );
+        await writeFile(
+          join(root, "entry.mjs"),
+          code.replace(result[0], "./sidecar.mjs")
+        );
+        const run = spawnSync(
+          process.execPath,
+          [
+            "--input-type=module",
+            "-e",
+            `
+          globalThis.trace = [];
+          const app = await import("./entry.mjs");
+          const initial = [...globalThis.trace];
+          let error;
+          if (${invoke}) {
+            try { await app.load(); } catch (caught) { error = caught.message; }
+          }
+          console.log(JSON.stringify({ className: app.className, initial, error, trace: globalThis.trace }));
+        `
+          ],
+          {
+            cwd: root,
+            env: { ...process.env, NODE_OPTIONS: "" },
+            encoding: "utf8"
+          }
+        );
+        expect(run.status, run.stderr).toBe(0);
+        const initial = live ? ["css-package", "observe"] : ["observe"];
+        expect(JSON.parse(run.stdout)).toEqual({
+          className: "red-class",
+          initial,
+          ...(throws ? { error: "ordinary options failure" } : {}),
+          trace: invoke && live ? [...initial, "options"] : initial
+        });
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    }
+  );
+
+  it.each([
+    [
+      "split",
+      'const { css } = require("@mincho-js/css"); const unrelated = require("@vanilla-extract/css"); const size = 4;'
+    ],
+    [
+      "compound",
+      'const { css } = require("@mincho-js/css"), unrelated = require("@vanilla-extract/css"), size = 4;'
+    ]
+  ])(
+    "preserves unrelated CommonJS initialization in a %s declaration",
+    (_name, declarations) => {
+      const { code, result } = babelTransform(
+        `
+      observe("before");
+      ${declarations}
+      observe("after");
+      exports.first = css({ padding: size, color: "red" });
+      exports.second = css({ padding: size, color: "blue" });
+    `,
+        {},
+        { sourceType: "script" }
+      );
+      expect(result[1]).toContain('require("@mincho-js/css")');
+      expect(result[1]).not.toContain("@vanilla-extract/css");
+      expect(result[1].match(/const size = 4;/g)).toHaveLength(1);
+      const sidecar = Object.fromEntries(
+        [...result[1].matchAll(/export var (\S+) = css/g)].map(([_, name]) => [
+          name,
+          name
+        ])
+      );
+      expect(Object.keys(sidecar)).toHaveLength(2);
+      const trace: string[] = [];
+      const runtime = {};
+      new Function("require", "exports", "observe", code)(
+        (id: string) => {
+          if (id === result[0]) return sidecar;
+          trace.push(id);
+          return {};
+        },
+        runtime,
+        (event: string) => void trace.push(event)
+      );
+      // A later authored runtime dependency may load the original CSS module.
+      // Keep the original request (not the unrelated sibling in the sidecar).
+      expect(trace).toEqual([
+        "before",
+        "@mincho-js/css",
+        "@vanilla-extract/css",
+        "after"
+      ]);
+      expect(runtime).toEqual({
+        first: expect.any(String),
+        second: expect.any(String)
+      });
+    }
+  );
+
+  it.each([
+    [
+      "split",
+      'const { css } = require("@mincho-js/css"); const rule = { color: shade };'
+    ],
+    [
+      "compound",
+      'const { css } = require("@mincho-js/css"), rule = { color: shade };'
+    ]
+  ])(
+    "executes a late-selected %s declarator after all transitive dependencies",
+    (_name, declaration) => {
+      const { result } = babelTransform(`
+      const base = "red";
+      const shade = base;
+      ${declaration}
+      export const first = css({ color: "blue" });
+      export const second = css(rule);
+    `);
+      const colors: string[] = [];
+      // Exports do not participate in the sidecar's initialization order.
+      new Function("require", result[1].replaceAll("export var ", "var "))(
+        (id: string) => {
+          expect(id).toBe("@mincho-js/css");
+          return {
+            css: (style: { color: string }) => colors.push(style.color)
+          };
+        }
+      );
+      expect(colors).toEqual(["blue", "red"]);
+    }
+  );
+
+  it.each([
+    ["blue", 'changed = (palette.color = "blue"),'],
+    ["red", ""]
+  ])("reads %s from the exact owned compound initializer", (color, write) => {
+    const { code, result } = babelTransform(
+      `const palette = { color: "red" },
+        ${write}
+        unused = observe(),
+        { css } = require("@mincho-js/css");
+        exports.result = css({ color: palette.color });`,
+      {},
+      { sourceType: "script" }
+    );
+    const events: string[] = [];
+    const sidecarExports: Record<string, string> = {};
+    new Function(
+      "require",
+      "out",
+      result[1].replace(/export var ([$\w]+) = /g, "var $1 = out.$1 = ")
+    )((name: string) => {
+      expect(name).toBe("@mincho-js/css");
+      events.push("require");
+      return {
+        css(value: { color: string }) {
+          events.push(value.color);
+          return value.color;
+        }
+      };
+    }, sidecarExports);
+    expect(events).toEqual(["require", color]);
+    expect(result[1]).not.toContain("observe()");
+    const runtime: { result?: string } = {};
+    new Function("require", "exports", "observe", code)(
+      (name: string) => {
+        expect(name).toBe(result[0]);
+        return sidecarExports;
+      },
+      runtime,
+      () => events.push("runtime only")
+    );
+    expect(runtime.result).toBe(color);
+    expect(events).toEqual(["require", color, "runtime only"]);
+  });
+
   it("does not change rest exclusions or unused imports without extraction ownership", () => {
     const { code } = babelTransform(`
       const { css, ...runtime } = require("@mincho-js/css");
@@ -181,6 +637,344 @@ describe("runtime code generation", () => {
 
       expect(events).toEqual(["initialize", "observe"]);
       expect(code).not.toContain("alias");
+    }
+  );
+
+  it.each([
+    [false, "split"],
+    [true, "split"],
+    [false, "compound"],
+    [true, "compound"],
+    [false, "observer first, opaque export"],
+    [true, "observer first, opaque export"],
+    [false, "observer first, known boolean export"],
+    [true, "observer first, known boolean export"]
+  ] as const)(
+    "keeps authored runtime initialization for codegen=%s (%s)",
+    async (runtimeCodegen, shape) => {
+      const loader = 'css = require("@mincho-js/css").css';
+      const observer = 'observed = require("./observe.cjs")';
+      const observerFirst = shape.startsWith("observer first");
+      const scalarObserved = shape.endsWith("known boolean export");
+      const original = `${
+        shape === "compound"
+          ? `const ${loader}, ${observer};`
+          : observerFirst
+            ? `const ${observer}; const ${loader};`
+            : `const ${loader}; const ${observer};`
+      }
+      exports.className = css({ color: "red" }); exports.observed = ${scalarObserved ? "!!observed" : "observed"};`;
+      const { code, result } = babelTransform(
+        original,
+        { optimize: { runtimeCodegen } },
+        { sourceType: "script" }
+      );
+      const root = await mkdtemp(join(tmpdir(), "mincho-cjs-init-"));
+      try {
+        await writeFile(
+          join(root, "package.json"),
+          '{"name":"@mincho-js/css","type":"commonjs","exports":"./css.cjs"}'
+        );
+        await writeFile(
+          join(root, "css.cjs"),
+          'globalThis.trace.push("css-package"); exports.css = () => "red-class";'
+        );
+        await writeFile(
+          join(root, "observe.cjs"),
+          `globalThis.trace.push("observe"); ${observerFirst ? "" : 'require("@mincho-js/css");'} module.exports = globalThis.trace[0] === "css-package";`
+        );
+        const names = [
+          ...result[1].matchAll(/export\s+(?:const|let|var)\s+([\w$]+)/g)
+        ].map((match) => match[1]);
+        expect(names).not.toHaveLength(0);
+        await writeFile(
+          join(root, "sidecar.cjs"),
+          names.map((name) => `exports.${name} = "red-class";`).join("\n")
+        );
+        await writeFile(
+          join(root, "entry.cjs"),
+          code.replace(result[0], "./sidecar.cjs")
+        );
+        const run = spawnSync(
+          process.execPath,
+          [
+            "-e",
+            'globalThis.trace = []; const app = require("./entry.cjs"); console.log(JSON.stringify({ trace: globalThis.trace, ...app }));'
+          ],
+          {
+            cwd: root,
+            env: { ...process.env, NODE_OPTIONS: "" },
+            encoding: "utf8"
+          }
+        );
+        expect(run.status, run.stderr).toBe(0);
+        if (observerFirst && !scalarObserved) {
+          // The compiler has no child export shape here. Native initializes the
+          // package after loading this child; preserve the original slot even
+          // when this particular fixture's actual export turns out to be data.
+          await writeFile(join(root, "native.cjs"), original);
+          const native = spawnSync(
+            process.execPath,
+            [
+              "-e",
+              'globalThis.trace = []; const app = require("./native.cjs"); console.log(JSON.stringify({ trace: globalThis.trace, ...app }));'
+            ],
+            {
+              cwd: root,
+              env: { ...process.env, NODE_OPTIONS: "" },
+              encoding: "utf8"
+            }
+          );
+          expect(native.status, native.stderr).toBe(0);
+          expect(JSON.parse(run.stdout)).toEqual(JSON.parse(native.stdout));
+        }
+        expect(JSON.parse(run.stdout)).toEqual({
+          trace: observerFirst
+            ? scalarObserved
+              ? ["observe"]
+              : ["observe", "css-package"]
+            : ["css-package", "observe"],
+          observed: !observerFirst,
+          className: "red-class"
+        });
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    }
+  );
+
+  it.each([
+    [
+      "constant",
+      'const request="@vanilla-extract/css"; export const load=()=>import(request);',
+      true
+    ],
+    ["literal", 'export const load=()=>import("@vanilla-extract/css");', true],
+    ["no demand", "", false]
+  ] as const)(
+    "preserves early ESM initialization for a %s dynamic request",
+    async (_name, demand, retains) => {
+      const source = `import {style} from "@vanilla-extract/css";
+        export const cls=style({color:"red"}); globalThis.trace.push("app"); ${demand}`;
+      const { code, result } = babelTransform(source, {
+        optimize: { runtimeCodegen: false, pureFunctions: false }
+      });
+      const root = await mkdtemp(
+        join(tmpdir(), "mincho-constant-dynamic-init-")
+      );
+      try {
+        await writeFile(
+          join(root, "package.json"),
+          '{"name":"@vanilla-extract/css","type":"module","exports":"./css.mjs"}'
+        );
+        await writeFile(
+          join(root, "css.mjs"),
+          'globalThis.trace.push("css-package"); export const style=rule=>"class-"+rule.color; export const marker="css";'
+        );
+        const exports = [
+          ...result[1].matchAll(/export\s+(?:const|let|var)\s+([\w$]+)/g)
+        ];
+        expect(exports).not.toHaveLength(0);
+        await writeFile(
+          join(root, "sidecar.mjs"),
+          exports
+            .map((item) => `export const ${item[1]}="class-red";`)
+            .join("\n")
+        );
+        await writeFile(
+          join(root, "app.mjs"),
+          code.replace(result[0], "./sidecar.mjs")
+        );
+        await writeFile(join(root, "native.mjs"), source);
+        const run = (entry: string) => {
+          const output = spawnSync(
+            process.execPath,
+            [
+              "--input-type=module",
+              "-e",
+              `globalThis.trace=[]; const app=await import("./${entry}"); const before=trace.slice();
+              const marker=(await app.load?.())?.marker;
+              console.log(JSON.stringify({before,after:trace,marker,cls:app.cls}));`
+            ],
+            {
+              cwd: root,
+              encoding: "utf8",
+              env: { ...process.env, NODE_OPTIONS: "" }
+            }
+          );
+          expect(output.status, output.stderr).toBe(0);
+          return JSON.parse(output.stdout);
+        };
+        if (retains) {
+          expect(run("app.mjs")).toEqual(run("native.mjs"));
+          expect(run("app.mjs")).toEqual({
+            before: ["css-package", "app"],
+            after: ["css-package", "app"],
+            marker: "css",
+            cls: "class-red"
+          });
+        } else {
+          expect(run("app.mjs")).toEqual({
+            before: ["app"],
+            after: ["app"],
+            cls: "class-red"
+          });
+        }
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    }
+  );
+
+  it.each([
+    "later",
+    "earlier",
+    "exported",
+    "getter read",
+    "setter write",
+    "package call",
+    "constructor",
+    "never"
+  ] as const)(
+    "distinguishes child loading from the time of its actual consumption: %s",
+    async (invocation) => {
+      const load =
+        invocation === "package call"
+          ? 'const { observe } = require("observer-package");'
+          : invocation === "constructor"
+            ? 'const { Observer } = require("./observe.cjs");'
+            : 'const observe = require("./observe.cjs");';
+      const author = 'const { css } = require("@mincho-js/css");';
+      const use = "exports.observed = observe();";
+      const source = [
+        load,
+        invocation === "earlier" ? use : "",
+        author,
+        'exports.className = css({ color: "red" });',
+        invocation === "later" || invocation === "package call" ? use : "",
+        invocation === "constructor"
+          ? "exports.observed = new Observer().ready;"
+          : "",
+        invocation === "exported" ? "exports.load = observe;" : "",
+        invocation === "getter read"
+          ? "exports.observed = !!observe.ready;"
+          : "",
+        invocation === "setter write"
+          ? "observe.ready = true; exports.observed = globalThis.setterObserved;"
+          : ""
+      ].join("\n");
+      const { code, result } = babelTransform(
+        source,
+        { optimize: { runtimeCodegen: false } },
+        { sourceType: "script" }
+      );
+      expect(result[1]).toContain("red");
+      expect(code.includes('require("@mincho-js/css")')).toBe(
+        invocation === "later" ||
+          invocation === "exported" ||
+          invocation === "getter read" ||
+          invocation === "setter write" ||
+          invocation === "package call" ||
+          invocation === "constructor"
+      );
+      const root = await mkdtemp(join(tmpdir(), "mincho-called-child-init-"));
+      try {
+        await writeFile(
+          join(root, "package.json"),
+          '{"name":"@mincho-js/css","type":"commonjs","exports":"./css.cjs"}'
+        );
+        await writeFile(
+          join(root, "css.cjs"),
+          'globalThis.trace.push("css-package"); exports.css=()=>"red-class";'
+        );
+        await writeFile(
+          join(root, "observe.cjs"),
+          invocation === "getter read"
+            ? 'globalThis.trace.push("loaded-child"); module.exports={get ready(){const initialized=globalThis.trace.includes("css-package");globalThis.trace.push("getter");require("@mincho-js/css");return initialized;}};'
+            : invocation === "setter write"
+              ? 'globalThis.trace.push("loaded-child"); module.exports={set ready(value){globalThis.setterObserved=globalThis.trace.includes("css-package")&&value;globalThis.trace.push("setter");require("@mincho-js/css");}};'
+              : invocation === "constructor"
+                ? 'globalThis.trace.push("loaded-child"); exports.Observer=class { constructor(){ this.ready=globalThis.trace.includes("css-package"); globalThis.trace.push("construct"); require("@mincho-js/css"); } };'
+                : 'globalThis.trace.push("loaded-child"); module.exports=()=>{const ready=globalThis.trace.includes("css-package"); globalThis.trace.push("call-child"); require("@mincho-js/css"); return ready;};'
+        );
+        const packagePath = join(root, "fixtures", "observer-package");
+        if (invocation === "package call") {
+          await mkdir(packagePath, { recursive: true });
+          await writeFile(
+            join(packagePath, "package.json"),
+            '{"name":"observer-package","main":"index.cjs"}'
+          );
+          await writeFile(
+            join(packagePath, "index.cjs"),
+            'exports.observe=require("../../observe.cjs");'
+          );
+        }
+        const names = [
+          ...result[1].matchAll(/export\s+(?:const|let|var)\s+([\w$]+)/g)
+        ].map((match) => match[1]);
+        expect(names).not.toHaveLength(0);
+        await writeFile(
+          join(root, "sidecar.cjs"),
+          names.map((name) => `exports.${name}="red-class";`).join("\n")
+        );
+        await writeFile(
+          join(root, "entry.cjs"),
+          code.replace(result[0], "./sidecar.cjs")
+        );
+        await writeFile(join(root, "native.cjs"), source);
+        const run = (file: string) => {
+          const result = spawnSync(
+            process.execPath,
+            [
+              "-e",
+              `globalThis.trace=[]; const app=require("./${file}"); if (app.load) app.observed=app.load(); console.log(JSON.stringify({trace:globalThis.trace,...app}));`
+            ],
+            {
+              cwd: root,
+              env: {
+                ...process.env,
+                NODE_OPTIONS: "",
+                NODE_PATH: join(root, "fixtures")
+              },
+              encoding: "utf8"
+            }
+          );
+          expect(result.status, result.stderr).toBe(0);
+          return JSON.parse(result.stdout);
+        };
+        if (invocation === "never") {
+          expect(run("entry.cjs")).toEqual({
+            trace: ["loaded-child"],
+            className: "red-class"
+          });
+        } else {
+          const compiled = run("entry.cjs");
+          expect(compiled).toEqual(run("native.cjs"));
+          if (
+            invocation === "getter read" ||
+            invocation === "setter write" ||
+            invocation === "package call" ||
+            invocation === "constructor"
+          )
+            expect(compiled).toEqual({
+              trace: [
+                "loaded-child",
+                "css-package",
+                invocation === "getter read"
+                  ? "getter"
+                  : invocation === "setter write"
+                    ? "setter"
+                    : invocation === "package call"
+                      ? "call-child"
+                      : "construct"
+              ],
+              observed: true,
+              className: "red-class"
+            });
+        }
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
     }
   );
 

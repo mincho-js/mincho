@@ -60,6 +60,7 @@ import { createHash, randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import { dirname, isAbsolute, join, posix, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { isDeepStrictEqual } from "node:util";
 import type {
   Alias,
   DevEnvironment,
@@ -447,6 +448,30 @@ function actualTransformOrder(
 // This host resolver is deliberately absent from child JS authoring lookups.
 const nativeCssAssetAliases = new WeakSet<Alias>();
 
+function matchesResolveAlias(source: string, find: Alias["find"]): boolean {
+  return typeof find === "string"
+    ? source === find || source.startsWith(`${find}/`)
+    : new RegExp(find).test(source);
+}
+
+/** Static module requests execute before the child body, including re-exports. */
+function getEagerModuleRequests(source: string): string[] {
+  return (
+    parseSync(source, {
+      configFile: false,
+      babelrc: false,
+      sourceType: "module"
+    })?.program.body ?? []
+  ).flatMap((statement) =>
+    (statement.type === "ImportDeclaration" ||
+      statement.type === "ExportNamedDeclaration" ||
+      statement.type === "ExportAllDeclaration") &&
+    statement.source
+      ? [statement.source.value]
+      : []
+  );
+}
+
 export function minchoVitePlugin(_options?: MinchoVitePluginOptions) {
   validateAppCssOptions(_options?.appCss);
 
@@ -818,7 +843,8 @@ function createMinchoViteEnvironmentPlugin(
       execution.run(() =>
         compile({
           ...options,
-          parserPlugins: _options?.babel?.parserOpts?.plugins,
+          parserPlugins:
+            options.parserPlugins ?? _options?.babel?.parserOpts?.plugins,
           dependencyGraph: compilerOptimizations().dependencyGraph,
           staticStyles: compilerOptimizations().staticStyles,
           cache: compilationCache
@@ -2757,38 +2783,46 @@ function createMinchoViteEnvironmentPlugin(
 
             return resolved;
           };
-          const resolvedCssSourceResult = cssSource
-            ? await resolveAuthoringSource(cssSource, moduleInfo.originalPath)
-            : null;
-          const resolvedCssSource =
-            resolvedCssSourceResult &&
-            !resolvedCssSourceResult.external &&
-            !resolvedCssSourceResult.id.includes("\0")
-              ? {
-                  ...resolvedCssSourceResult,
-                  id: normalizeStaticCssEvalFileId(resolvedCssSourceResult.id)
-                }
-              : resolvedCssSourceResult;
+          // Only the actual sidecar entry import needs the JSX authoring
+          // preset. A built-in CSS call need not resolve that unrelated source.
+          const resolveEntryCssSource = async () => {
+            const resolvedCssSourceResult = cssSource
+              ? await resolveAuthoringSource(cssSource, moduleInfo.originalPath)
+              : null;
+            const resolvedCssSource =
+              resolvedCssSourceResult &&
+              !resolvedCssSourceResult.external &&
+              !resolvedCssSourceResult.id.includes("\0")
+                ? {
+                    ...resolvedCssSourceResult,
+                    id: normalizeStaticCssEvalFileId(resolvedCssSourceResult.id)
+                  }
+                : resolvedCssSourceResult;
 
-          if (
-            resolvedCssSource &&
-            !resolvedCssSource.external &&
-            (!isAbsolute(resolvedCssSource.id) ||
-              resolvedCssSource.id.includes("\0") ||
-              !fs
-                .statSync(resolvedCssSource.id, { throwIfNoEntry: false })
-                ?.isFile())
-          ) {
-            throw new Error(
-              `jsxCssProp.importSource ${JSON.stringify(cssSource)} must resolve to a physical module file. Virtual modules are not supported as a CSS authoring source.`
-            );
-          }
+            if (
+              resolvedCssSource &&
+              !resolvedCssSource.external &&
+              (!isAbsolute(resolvedCssSource.id) ||
+                resolvedCssSource.id.includes("\0") ||
+                !fs
+                  .statSync(resolvedCssSource.id, { throwIfNoEntry: false })
+                  ?.isFile())
+            ) {
+              throw new Error(
+                `jsxCssProp.importSource ${JSON.stringify(cssSource)} must resolve to a physical module file. Virtual modules are not supported as a CSS authoring source.`
+              );
+            }
+            return resolvedCssSource;
+          };
+          let entryCssSource:
+            ReturnType<typeof resolveEntryCssSource> | undefined;
 
           const { source, watchFiles, cssScopeOrigins } = await tracedCompile({
             filePath: moduleInfo.filePath,
             cwd: config.root,
             originalPath: moduleInfo.originalPath,
             contents: code,
+            parserPlugins: moduleInfo.parserPlugins,
             resolverCache,
             plugins:
               cssSource || aliases.length > 0
@@ -2806,17 +2840,15 @@ function createMinchoViteEnvironmentPlugin(
                         build.onResolve({ filter: /.*/ }, async (args) => {
                           // Vite aliases may be ordered, regular expressions, or
                           // custom resolvers; esbuild's alias map cannot represent them.
-                          const isEntryCssSource =
-                            args.path === cssSource &&
+                          const isEntry =
                             normalizePath(args.importer) ===
-                              normalizePath(entryPath);
+                            normalizePath(entryPath);
+                          const isEntryCssSource =
+                            isEntry && args.path === cssSource;
                           const matches =
                             isEntryCssSource ||
                             aliases.some(({ find }) =>
-                              typeof find === "string"
-                                ? args.path === find ||
-                                  args.path.startsWith(`${find}/`)
-                                : new RegExp(find).test(args.path)
+                              matchesResolveAlias(args.path, find)
                             );
 
                           if (!matches) return;
@@ -2825,10 +2857,13 @@ function createMinchoViteEnvironmentPlugin(
                           // target. A require of that source keeps its conditions.
                           const resolved =
                             isEntryCssSource && args.kind === "import-statement"
-                              ? resolvedCssSource
+                              ? await (entryCssSource ??=
+                                  resolveEntryCssSource())
                               : await resolveAuthoringSource(
                                   args.path,
-                                  args.importer || moduleInfo.originalPath,
+                                  isEntry || !args.importer
+                                    ? moduleInfo.originalPath
+                                    : args.importer,
                                   {
                                     ...(args.kind === "require-call"
                                       ? {
@@ -3253,6 +3288,7 @@ function createMinchoViteEnvironmentPlugin(
             : "legacy",
           staticCssEvalProjectEngine,
           consumerRuntimeSource: async (moduleId, request) => {
+            const orderOnly = request?.purpose === "commonjs-runtime-order";
             // This host does not provide a final owner view before its own
             // transform finishes. Decline the capability, rather than turn
             // recursive owner loading into an explicit unavailable receipt.
@@ -3311,7 +3347,7 @@ function createMinchoViteEnvironmentPlugin(
               // returns every module's watches in the environment. Rollup's
               // build API does not expose those per-module transform inputs;
               // retain its conservative watch set until it can attribute them.
-              if (this.environment?.mode !== "dev")
+              if (!orderOnly && this.environment?.mode !== "dev")
                 for (const file of this.getWatchFiles?.() ?? [])
                   watchFiles.add(file);
 
@@ -3322,8 +3358,9 @@ function createMinchoViteEnvironmentPlugin(
                 if (!node || seen.has(node)) return;
                 seen.add(node);
                 if (node.file) watchFiles.add(node.file);
-                for (const dependency of node.importedModules)
-                  visit(dependency);
+                if (!orderOnly || node.id === moduleId)
+                  for (const dependency of node.importedModules)
+                    visit(dependency);
               };
               if (this.environment?.mode === "dev")
                 visit(this.environment.moduleGraph.getModuleById(moduleId));
@@ -3362,6 +3399,13 @@ function createMinchoViteEnvironmentPlugin(
                   consumerRuntimeStack.run(next, async () => {
                     if (this.environment?.mode !== "dev")
                       return this.load({ id: moduleId });
+                    if (orderOnly) {
+                      const graph = this.environment.moduleGraph;
+                      const existing = graph.getModuleById(moduleId);
+                      const requested =
+                        existing ?? (await graph.ensureEntryFromUrl(moduleId));
+                      return this.environment.transformRequest(requested.url);
+                    }
                     if (this.environment.config.consumer !== "server") {
                       // Vite attaches load-hook watches to an existing node.
                       // Establish it before a cold transformRequest so those
@@ -3397,6 +3441,170 @@ function createMinchoViteEnvironmentPlugin(
               const sourceHash = createHash("sha256")
                 .update(source)
                 .digest("hex");
+
+              if (
+                request?.purpose === "commonjs-runtime-order" &&
+                this.environment?.mode !== "dev"
+              ) {
+                // A memoized load does not wait for the child's resolver back
+                // edges. Ask the existing host resolver only about static
+                // requests; only the exact internal target can prove demand.
+                const targetId = request.targetId;
+                const requests = getEagerModuleRequests(source);
+                // Do not re-resolve other normalized edges while their
+                // transforms may be waiting for this owner. Relative edges
+                // and ordinary configured aliases still need the actual
+                // child importer to establish the exact canonical target.
+                const candidates = new Set([
+                  ...(requests.includes(targetId) ? [targetId] : []),
+                  ...requests.filter((specifier) => {
+                    if (
+                      specifier === fileId ||
+                      specifier === moduleId ||
+                      specifier.includes("\0")
+                    )
+                      return false;
+                    if (
+                      specifier.startsWith("./") ||
+                      specifier.startsWith("../")
+                    )
+                      return true;
+                    const absolute = isAbsolute(specifier);
+                    if (
+                      (!absolute && specifier.includes(":")) ||
+                      ownedExtractedSidecarPath(specifier)
+                    )
+                      return false;
+                    const alias = config.resolve.alias.find(({ find }) =>
+                      matchesResolveAlias(specifier, find)
+                    );
+                    if (
+                      !alias ||
+                      alias.customResolver ||
+                      nativeCssAssetAliases.has(alias)
+                    )
+                      return false;
+                    // This is a negative active-edge check only: even a
+                    // matching alias must be verified by the host below.
+                    const replacement = specifier.replace(
+                      typeof alias.find === "string"
+                        ? alias.find
+                        : new RegExp(alias.find),
+                      alias.replacement
+                    );
+                    const proposed = normalizePath(
+                      replacement.startsWith(".")
+                        ? resolve(dirname(moduleId), replacement)
+                        : replacement
+                    );
+                    // An absolute alias may reach the native resolver only
+                    // for the already-known target, not another active edge.
+                    return (
+                      proposed !== fileId &&
+                      proposed !== moduleId &&
+                      (!absolute || proposed === targetId)
+                    );
+                  })
+                ]);
+                let eager = false;
+                for (const specifier of candidates) {
+                  const dependency = await this.resolve(specifier, moduleId, {
+                    skipSelf: true
+                  });
+                  if (dependency?.id === targetId && !dependency.external) {
+                    eager = true;
+                    break;
+                  }
+                  if (!current()) break;
+                }
+                if (
+                  !current() ||
+                  this.getModuleInfo?.(moduleId)?.code !== source
+                )
+                  return { watchFiles: collectWatches(), authoringId };
+                const eagerRuntimeModuleIds = eager ? [targetId] : [];
+                return {
+                  source,
+                  sourceHash,
+                  authoringId,
+                  version: JSON.stringify([
+                    key,
+                    sourceHash,
+                    eagerRuntimeModuleIds
+                  ]),
+                  eagerRuntimeModuleIds,
+                  watchFiles: collectWatches()
+                };
+              }
+
+              if (
+                request?.purpose === "commonjs-runtime-order" &&
+                this.environment?.mode === "dev"
+              ) {
+                const imports =
+                  loaded && "deps" in loaded && Array.isArray(loaded.deps)
+                    ? loaded.deps
+                    : getEagerModuleRequests(source);
+                const graph = this.environment.moduleGraph;
+                const child = graph.getModuleById(moduleId);
+                const generation = child?.lastInvalidationTimestamp;
+                const target = graph.getModuleById(request.targetId);
+                let eager = false;
+                if (
+                  target?.id === request.targetId &&
+                  child?.importedModules.has(target)
+                ) {
+                  const pathname = (url: string) => url.split(/[?#]/, 1)[0];
+                  const targetPath = pathname(target.url);
+                  const clientBase =
+                    this.environment.config.consumer === "client"
+                      ? config.base
+                      : "/";
+                  // Only client import-analysis prefixes base. Match the
+                  // known graph target first and let Vite canonicalize its
+                  // transport query before accepting exact node membership.
+                  for (const specifier of imports) {
+                    const url =
+                      clientBase !== "/" &&
+                      clientBase.startsWith("/") &&
+                      specifier.startsWith(clientBase)
+                        ? specifier.slice(clientBase.length - 1)
+                        : specifier;
+                    if (
+                      pathname(url) === targetPath &&
+                      (await graph.getModuleByUrl(url)) === target
+                    ) {
+                      eager = true;
+                      break;
+                    }
+                  }
+                }
+                if (
+                  !current() ||
+                  !child ||
+                  graph.getModuleById(moduleId) !== child ||
+                  child.lastInvalidationTimestamp !== generation ||
+                  child.transformResult?.code !== source ||
+                  (eager &&
+                    (graph.getModuleById(request.targetId) !== target ||
+                      !target ||
+                      !child.importedModules.has(target)))
+                )
+                  return { watchFiles: collectWatches(), authoringId };
+                const eagerRuntimeModuleIds = eager ? [request.targetId] : [];
+                return {
+                  source,
+                  sourceHash,
+                  authoringId,
+                  version: JSON.stringify([
+                    key,
+                    sourceHash,
+                    eagerRuntimeModuleIds
+                  ]),
+                  eagerRuntimeModuleIds,
+                  watchFiles: collectWatches()
+                };
+              }
 
               const intrinsicReceipt = await intrinsicObserver?.validate(
                 moduleId,
@@ -3489,6 +3697,11 @@ function createMinchoViteEnvironmentPlugin(
                 filename: fileId,
                 root: rootRealpath,
                 commonJsToEsm: true,
+                // The dev observer can return a live closure. Run this
+                // transform in its owner's process before any IPC dispatch.
+                keepRuntimeSourceInProcess:
+                  this.environment?.mode === "dev" &&
+                  intrinsicObserver !== undefined,
                 source: code,
                 loader: getScriptLoader(fileId) ?? "js",
                 babel: diagnostics.enabled
@@ -3525,7 +3738,11 @@ function createMinchoViteEnvironmentPlugin(
           if (
             server &&
             cssState.hasSidecar(resolvedCssPath) &&
-            cssState.getSidecar(resolvedCssPath) !== cssExtract
+            (cssState.getSidecar(resolvedCssPath) !== cssExtract ||
+              !isDeepStrictEqual(
+                cssState.getSidecarParserPlugins(resolvedCssPath),
+                transformResult.parserPlugins
+              ))
           ) {
             const { moduleGraph } = server;
 
@@ -3541,7 +3758,12 @@ function createMinchoViteEnvironmentPlugin(
             }
           }
 
-          cssState.registerSidecar(fileId, resolvedCssPath, cssExtract);
+          cssState.registerSidecar(
+            fileId,
+            resolvedCssPath,
+            cssExtract,
+            transformResult.parserPlugins
+          );
         }
 
         rememberRuntimeModule(id, transformResult.code);

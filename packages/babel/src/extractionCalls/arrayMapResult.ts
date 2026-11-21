@@ -11,7 +11,6 @@ export function arrayMapResultProof(
     ?.extractCalls?.arrayMapIntrinsics;
   if (!graph?.intact || !program.isProgram()) return;
   const environment = createArrayMapIntrinsicEnvironment();
-  environment.observe(program);
   if (environment.provesNativeMap(call)) return { kind: "identity-array-map" };
 }
 
@@ -24,7 +23,6 @@ export function arrayIncludesResultProof(
     ?.extractCalls?.arrayMapIntrinsics;
   if (!graph?.intact || !program.isProgram()) return;
   const environment = createArrayMapIntrinsicEnvironment();
-  environment.observe(program);
   if (environment.provesNativeIncludes(call))
     return { kind: "primitive", readOnlyInvocation: "array-includes" };
 }

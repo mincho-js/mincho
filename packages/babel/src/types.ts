@@ -23,6 +23,8 @@ export interface MinchoCompilationMetadata {
 
 export interface PluginOptions {
   diagnostics?: boolean;
+  /** @internal Hand optional authored runtime requests to the host normalizer. */
+  stageCommonJsRuntimeRequests?: boolean;
   result: [string, string];
 
   /** Additional build-time calls; local files are relative to the Babel root. */
@@ -81,6 +83,14 @@ export interface MinchoStaticCssEvalMetadata {
 }
 
 export interface MinchoBabelFileMetadata {
+  /** Worker-local exact AST nodes; never serialized as host proof. */
+  minchoOptionalCommonJsSites?: {
+    declaration: t.VariableDeclarator;
+    stagedShape: t.VariableDeclarator;
+    requests: t.CallExpression[];
+    source: string;
+    later: { node: t.CallExpression; source: string }[];
+  }[];
   minchoCompilation?: MinchoCompilationMetadata;
   minchoStaticCssEval?: MinchoStaticCssEvalMetadata;
   minchoDefineRulesCxConditions?: DefineRulesCxConditionsMetadata;

@@ -1,5 +1,5 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import type { BabelOptions } from "@mincho-js/integration";
 import { build, createServer, type InlineConfig } from "vite";
 import { expect, it, vi } from "vitest";
@@ -25,7 +25,10 @@ vi.mock("@mincho-js/integration", async (original) => {
         receipts.set(
           options.filename,
           await options.babel?.consumerRuntimeSource?.(
-            options.filename.replace("owner-", "runtime-")
+            join(
+              dirname(options.filename),
+              basename(options.filename).replace(/^owner-/, "runtime-")
+            )
           )
         );
       }
@@ -34,11 +37,19 @@ vi.mock("@mincho-js/integration", async (original) => {
   };
 });
 
-it.each(["client", "ssr", "build"])(
-  "retains %s runtime host watches for erased imports with module scope where available",
-  async (environmentName) => {
+it.each([
+  ["client", false],
+  ["ssr", false],
+  ["build", false],
+  ["client", true]
+] as const)(
+  "retains %s runtime host watches for erased imports (owner-like directory: %s)",
+  async (environmentName, ownerLikeDirectory) => {
     await mkdir(join(process.cwd(), ".cache"), { recursive: true });
-    const root = await mkdtemp(join(process.cwd(), ".cache/runtime-watches-"));
+    const directoryPrefix = ownerLikeDirectory
+      ? "owner-runtime-watches-"
+      : "runtime-watches-";
+    const root = await mkdtemp(join(process.cwd(), ".cache", directoryPrefix));
     for (const name of ["a", "b"]) {
       for (const [file, source] of Object.entries({
         [`owner-${name}.ts`]: "/* receipt-owner */ export const owner = true;",

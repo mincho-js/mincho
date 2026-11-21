@@ -444,7 +444,10 @@ export async function loadViteTransformedModuleSource(
 
     const transformed = await devEnvironment.pluginContainer.transform(
       source,
-      id
+      id,
+      typeof loaded === "object" && loaded?.map != null
+        ? { inMap: loaded.map }
+        : undefined
     );
 
     const sourceText = transformed?.code ?? source;

@@ -1,4 +1,5 @@
-import { planEvaluation } from "../extractionCalls/evaluation.js";
+import { isProvablyUnexecuted } from "../extractionCalls/evaluation.js";
+import { unwrapTransparentCssRuleExpression } from "../staticCssEval/candidates.js";
 import type { NodePath } from "@babel/core";
 import { types as t } from "@babel/core";
 import { createJsxAttributeString } from "./attributeValue.js";
@@ -133,7 +134,7 @@ export function preprocessJsxCssProp(
       if (
         normalizedElement.hasSpreadBeforeCss ||
         normalizedElement.hasSpreadAfterCss ||
-        requiresClassValueStaging(normalizedElement)
+        requiresClassValueStaging(openingElementPath, normalizedElement)
       ) {
         transformSpreadAggregatedCssProp(openingElementPath, normalizedElement);
         transformed = true;
@@ -345,12 +346,19 @@ function analyzeOpeningElement(
   const valuePath = cssAttributePath?.isJSXAttribute()
     ? cssAttributePath.get("value")
     : undefined;
+  const unreachable = isProvablyUnexecuted(openingElementPath);
   const preparedRuntimeClassValue =
-    isInProvenUnexecutedBranch(openingElementPath) ||
+    unreachable ||
     (jsxCssPropImportSource(state.opts.jsxCssProp) !== cssModuleName &&
       valuePath?.isJSXExpressionContainer() &&
       prepareRuntimeClassValue(valuePath.get("expression")));
-  const rawCssExpression = getCssExpression(openingElementPath, cssAttribute);
+  const authoredCssExpression = getCssExpression(
+    openingElementPath,
+    cssAttribute
+  );
+  const rawCssExpression = unreachable
+    ? t.stringLiteral("")
+    : authoredCssExpression;
 
   if (preparedRuntimeClassValue)
     return {
@@ -371,15 +379,38 @@ function analyzeOpeningElement(
       hasSpreadAfterCss
     };
 
+  // A complete custom rule on the right of && is a guarded style choice,
+  // not the unconditional rule left by value-only partial evaluation.
+  let cssExpression = rawCssExpression;
+  if (
+    jsxCssPropImportSource(state.opts.jsxCssProp) !== cssModuleName &&
+    t.isLogicalExpression(rawCssExpression, { operator: "&&" })
+  ) {
+    const guardedRule = unwrapTransparentCssRuleExpression(
+      rawCssExpression.right
+    );
+    if (
+      t.isObjectExpression(guardedRule) &&
+      isStaticCssShapeExpression(guardedRule)
+    )
+      cssExpression = t.inherits(
+        t.conditionalExpression(
+          rawCssExpression.left,
+          guardedRule,
+          t.booleanLiteral(false)
+        ),
+        rawCssExpression
+      );
+  }
   prepareRuntimeCssImports(
-    rawCssExpression,
+    cssExpression,
     openingElementPath.scope,
     getStaticCssEvalOwnerFile(state),
     state.opts.staticCssEvalProvider,
     (result) => registerStaticCssEvalResultMetadata(state, result)
   );
   const partialEvalResult = evaluateCssPropPartialEvalPolicy({
-    expression: rawCssExpression,
+    expression: cssExpression,
     ownerFile: getStaticCssEvalOwnerFile(state),
     programPath,
     scope: openingElementPath.scope
@@ -589,20 +620,3 @@ function getCssExpression(
 }
 
 export { getDynamicCssVariableRule } from "./dynamicCssVariableAnalysis.js";
-
-/** Syntax lowering only: this grants no sidecar evaluation or runtime proof. */
-function isInProvenUnexecutedBranch(path: NodePath<t.Node>): boolean {
-  let child = path;
-  for (let parent = child.parentPath; parent; parent = child.parentPath) {
-    if (parent.isFunction()) return false;
-    if (
-      (parent.isConditionalExpression() || parent.isLogicalExpression()) &&
-      planEvaluation(parent).unexecutedBranches?.some(
-        (branch) => branch.node === child.node
-      )
-    )
-      return true;
-    child = parent;
-  }
-  return false;
-}

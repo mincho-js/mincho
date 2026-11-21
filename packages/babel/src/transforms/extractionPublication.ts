@@ -39,16 +39,46 @@ export function requiresExtractionPublication(
   return obligations.get(program.minchoData)?.has(call) === true;
 }
 
+/** Type-only wrappers do not change the exact initializer's execution. */
+export function unwrapExtractionExpression(
+  path: NodePath<t.Expression>,
+  wrappers?: t.Expression[]
+): NodePath<t.Expression> {
+  while (
+    path.isTSAsExpression() ||
+    path.isTSTypeAssertion() ||
+    path.isTSNonNullExpression() ||
+    path.isTSSatisfiesExpression() ||
+    path.isParenthesizedExpression()
+  ) {
+    wrappers?.push(path.node);
+    path = path.get("expression") as NodePath<t.Expression>;
+  }
+  return path;
+}
+
 /** A declaration-level opt-out applies to its direct call initializer too. */
 export function isIgnoredExtractionCall(
   path: NodePath<t.CallExpression>
 ): boolean {
-  const owners: t.Node[] = [path.node, path.parent];
+  let parent = path.parentPath;
+  const owners: t.Node[] = [path.node];
+  while (
+    parent.isTSAsExpression() ||
+    parent.isTSTypeAssertion() ||
+    parent.isTSNonNullExpression() ||
+    parent.isTSSatisfiesExpression() ||
+    parent.isParenthesizedExpression()
+  ) {
+    owners.push(parent.node);
+    parent = parent.parentPath!;
+  }
+  owners.push(parent.node);
   if (
-    path.parentPath.isVariableDeclarator() &&
-    path.parentPath.parentPath.isVariableDeclaration()
+    parent.isVariableDeclarator() &&
+    parent.parentPath.isVariableDeclaration()
   )
-    owners.push(path.parentPath.parentPath.node);
+    owners.push(parent.parentPath.node);
   return owners.some((owner) =>
     owner.leadingComments?.some(
       (comment) => comment.value.trim() === "mincho-js-ignore"
@@ -75,6 +105,8 @@ const capturedOwners = new WeakMap<
       path: NodePath<t.VariableDeclarator>;
       id: t.VariableDeclarator["id"];
       init: t.Expression;
+      value: t.Expression;
+      wrappers: readonly t.Expression[];
       parent: t.Node;
       container: t.Program | t.BlockStatement;
       pattern: boolean;
@@ -112,14 +144,16 @@ function requireCapturedOwner(
   const init = path.get("init");
   if (!init.isExpression() || (!pattern && !init.isCallExpression()))
     throw path.buildCodeFrameError("Missing captured authoring initializer.");
+  const wrappers: t.Expression[] = [];
+  const value = pattern ? unwrapExtractionExpression(init, wrappers) : init;
   let calls = capturedOwnerCalls.get(state);
   if (!calls) capturedOwnerCalls.set(state, (calls = new Set()));
-  if (init.isCallExpression()) {
-    if (isIgnoredExtractionCall(init))
-      throw init.buildCodeFrameError(
+  if (value.isCallExpression()) {
+    if (isIgnoredExtractionCall(value))
+      throw value.buildCodeFrameError(
         "Ignored authoring initializer cannot enter a required build group."
       );
-    calls.add(init.node);
+    calls.add(value.node);
   }
   let owners = capturedOwners.get(state);
   if (!owners) capturedOwners.set(state, (owners = new Map()));
@@ -134,6 +168,8 @@ function requireCapturedOwner(
       path,
       id: path.node.id,
       init: init.node,
+      value: value.node,
+      wrappers,
       parent: path.parent,
       container: body,
       pattern,
@@ -164,6 +200,25 @@ export function finishCapturedAuthoringOwners(
         const index = receipt.container.body.indexOf(node as t.Statement);
         return index >= 0 && index <= position;
       });
+    const hasOriginalValue = () => {
+      const init = owner.get("init");
+      if (!init.isExpression()) return false;
+      if (!receipt.pattern) return init.node === receipt.init;
+
+      // Babel can erase type syntax before publication. The surviving
+      // wrappers must be the same nodes in the same order, and the operand
+      // must still be the exact original producer/value.
+      const surviving: t.Expression[] = [];
+      if (unwrapExtractionExpression(init, surviving).node !== receipt.value)
+        return false;
+      let from = 0;
+      for (const wrapper of surviving) {
+        const index = receipt.wrappers.indexOf(wrapper, from);
+        if (index < 0) return false;
+        from = index + 1;
+      }
+      return true;
+    };
     if (
       moved ||
       position < 0 ||
@@ -174,7 +229,7 @@ export function finishCapturedAuthoringOwners(
       owner.parentPath.parentPath?.node !== receipt.container ||
       (!receipt.pattern && !owner.parentPath.parentPath?.isProgram()) ||
       owner.node.id !== receipt.id ||
-      owner.node.init !== receipt.init ||
+      !hasOriginalValue() ||
       (!receipt.pattern && owner.get("id").isIdentifier() === false) ||
       !state.nodes.some(
         (statement) =>

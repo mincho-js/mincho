@@ -5,7 +5,10 @@ import {
 } from "./extractionPublication.js";
 import { NodePath, types as t } from "@babel/core";
 import type { ProgramScope } from "../types.js";
-import { collectExtractionBindings } from "./extractionBindings.js";
+import {
+  collectExtractionBindings,
+  recordExtractionInitializer
+} from "./extractionBindings.js";
 import { getNearestIdentifier, registerImportMethod } from "../utils.js";
 import {
   isExtractionCall,
@@ -85,11 +88,11 @@ export function transformCallExpression(path: NodePath<t.CallExpression>) {
 
   // Creates an alias for the imported identifier
   // because other transforms use the imported ident as reference
-  programParent.minchoData.nodes.push(
-    t.variableDeclaration("var", [
-      t.variableDeclarator(importedIdentifier, identifier)
-    ])
-  );
+  const alias = t.variableDeclaration("var", [
+    t.variableDeclarator(importedIdentifier, identifier)
+  ]);
+  programParent.minchoData.nodes.push(alias);
+  recordExtractionInitializer(path, alias);
   const publishedCall = path.node;
   path.replaceWith(importedIdentifier);
   completeExtractionPublication(programParent, publishedCall);

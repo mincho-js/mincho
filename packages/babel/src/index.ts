@@ -7,7 +7,7 @@ import {
   analyzePureFunctions,
   applyPureFunctions
 } from "./optimizations/pureFunctions.js";
-import { type PluginObj } from "@babel/core";
+import { type PluginObj, types as t } from "@babel/core";
 import {
   analyzeDefineRulesCxConditionsCallExpression,
   defineRulesCxConditionsOptimizationMetadataKey,
@@ -27,7 +27,8 @@ import { normalizeTypeScriptCommonJs } from "./commonjs/modules.js";
 import {
   optimizeRuntimeCodegen,
   removeUnusedExtractedImports,
-  removeUnusedGeneratedImports
+  removeUnusedGeneratedImports,
+  type OriginalModuleRequests
 } from "./optimizations/runtimeCodegen.js";
 import { pruneRecipeMetadata } from "./optimizations/recipeMetadata.js";
 import { lowerLayoutJsx } from "./optimizations/layoutJsx.js";
@@ -39,6 +40,10 @@ import {
 
 export function minchoBabelPlugin(): PluginObj<PluginState> {
   const started = new WeakMap<PluginState, number>();
+  const originalModuleRequests = new WeakMap<
+    PluginState,
+    OriginalModuleRequests
+  >();
 
   return {
     name: "mincho-babel-plugin",
@@ -46,8 +51,24 @@ export function minchoBabelPlugin(): PluginObj<PluginState> {
       Program: {
         enter(path, state) {
           if (state.opts.diagnostics) started.set(state, performance.now());
-
           normalizeTypeScriptCommonJs(path, state.file);
+
+          // After configured pre hooks and input normalization, but before
+          // Mincho introduces CSS-sidecar requests, record exact input nodes.
+          const requires = new Map<t.CallExpression, number>();
+          t.traverseFast(path.node, (node) => {
+            if (
+              t.isCallExpression(node) &&
+              t.isIdentifier(node.callee, { name: "require" })
+            )
+              requires.set(node, requires.size);
+          });
+          const statements =
+            state.opts.optimize?.runtimeCodegen !== true
+              ? new Set(path.node.body)
+              : undefined;
+          if (statements || requires.size)
+            originalModuleRequests.set(state, { statements, requires });
 
           if (isDefineRulesCxConditionsEnabled(state)) {
             state.file.metadata[
@@ -103,7 +124,14 @@ export function minchoBabelPlugin(): PluginObj<PluginState> {
             pruneRecipeMetadata(path);
           }
 
-          removeUnusedExtractedImports(path);
+          const optionalSites = state.opts.stageCommonJsRuntimeRequests
+            ? (state.file.metadata.minchoOptionalCommonJsSites = [])
+            : undefined;
+          removeUnusedExtractedImports(
+            path,
+            originalModuleRequests.get(state),
+            optionalSites
+          );
           removeUnusedJsxCssPropCssModuleImports(path);
           removeUnusedGeneratedImports(path);
           compactRecipes(path, {

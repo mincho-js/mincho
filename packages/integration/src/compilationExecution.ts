@@ -620,7 +620,12 @@ export async function executeTransform(
   inline: () => Promise<BabelTransformResult>
 ): Promise<BabelTransformResult> {
   const execution = active.getStore();
-  if (!execution || providerRequest.getStore()) return inline();
+  if (
+    !execution ||
+    providerRequest.getStore() ||
+    options.keepRuntimeSourceInProcess
+  )
+    return inline();
 
   const {
     compilationCache,

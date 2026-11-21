@@ -13,6 +13,7 @@ import { dirname, resolve } from "node:path";
 import {
   build,
   createServer,
+  normalizePath,
   type HMRPayload,
   type Plugin,
   type Rollup
@@ -80,6 +81,202 @@ async function fixture(importSource = "test-preset") {
     ]
   };
 }
+
+it.each([
+  [false, "none", false],
+  [false, "noop", false],
+  [false, "explicit", false],
+  [false, "auto", false],
+  [true, "explicit", false],
+  [true, "noop", true],
+  [true, "explicit", true]
+] as const)(
+  "extracts configured factory calls with JSX CSS %s and %s Babel hook, synchronous values=%s",
+  async (jsxCssProp, mode, synchronousValues) => {
+    const options = await fixture();
+    const { root } = options;
+    const entry = resolve(root, synchronousValues ? "entry.tsx" : "entry.ts");
+    const config = resolve(root, "babel.config.cjs");
+    const calls = resolve(root, "pre-count");
+    const appendImport = mode === "explicit" || mode === "auto";
+    await Promise.all([
+      writeFile(
+        entry,
+        'import { make } from "./preset.ts"; export const className = make({ color: "red" });' +
+          (synchronousValues
+            ? 'import { rule } from "./rule.ts"; export const Box = () => <div css={rule} />;'
+            : "")
+      ),
+      ...(synchronousValues
+        ? [
+            writeFile(
+              resolve(root, "rule.ts"),
+              'export const rule = { color: "blue" };'
+            )
+          ]
+        : []),
+      writeFile(
+        resolve(root, "preset.ts"),
+        'import { style } from "@vanilla-extract/css"; export function make(rule) { return style(rule); }'
+      ),
+      writeFile(
+        resolve(root, "effects.js"),
+        "globalThis.__minchoExistingBuildEffect = true;"
+      ),
+      ...(mode === "none"
+        ? []
+        : [
+            writeFile(
+              config,
+              `const { appendFileSync } = require("node:fs");
+              module.exports = { plugins: [({ types: t }) => ({
+                pre(file) {
+                  if (file.opts.filename !== ${JSON.stringify(entry)}) return;
+                  appendFileSync(${JSON.stringify(calls)}, "pre");
+                  if (${appendImport}) file.ast.program.body.unshift(
+                    t.importDeclaration([], t.stringLiteral("./effects.js"))
+                  );
+                },
+                visitor: {}
+              })] };`
+            )
+          ])
+    ]);
+
+    const result = await build({
+      ...options,
+      plugins: [
+        minchoVitePlugin({
+          jsxCssProp,
+          extractCalls: { "./preset.ts": ["make"] },
+          babel: {
+            cwd: root,
+            babelrc: false,
+            staticCssEvalProvider: synchronousValues
+              ? {
+                  getResolvedCssValue(query) {
+                    return query.bindingName === "rule"
+                      ? {
+                          kind: "resolved",
+                          value: { color: "green" },
+                          dependencies: []
+                        }
+                      : { kind: "not-candidate" };
+                  }
+                }
+              : undefined,
+            ...(mode === "auto"
+              ? {}
+              : { configFile: mode === "none" ? false : config })
+          }
+        }),
+        vanillaExtractPlugin()
+      ],
+      build: {
+        write: false,
+        minify: false,
+        cssMinify: false,
+        cssCodeSplit: true,
+        lib: { entry, formats: ["es"] },
+        rollupOptions: {
+          external: (id) => id === "react" || id.startsWith("@mincho-js/react/")
+        }
+      }
+    });
+    const outputs = (Array.isArray(result) ? result : [result]).flatMap(
+      (item) => ("output" in item ? item.output : [])
+    );
+    const css = outputs
+      .flatMap((item) =>
+        item.type === "asset" && item.fileName.endsWith(".css")
+          ? [String(item.source)]
+          : []
+      )
+      .join("\n");
+    const js = outputs
+      .flatMap((item) => (item.type === "chunk" ? [item.code] : []))
+      .join("\n");
+    const className = /\.([\w-]+)\s*\{\s*color: red;/.exec(css)?.[1];
+    expect(className).toBeDefined();
+    expect(js).toContain(JSON.stringify(className));
+    expect(js).not.toMatch(/className\s*=\s*make\(/);
+    expect(js.includes("__minchoExistingBuildEffect")).toBe(appendImport);
+    if (mode !== "none") expect(await readFile(calls, "utf8")).toBe("pre");
+    if (synchronousValues) {
+      const syncClass = /\.([\w-]+)\s*\{\s*color: green;/.exec(css)?.[1];
+      expect(syncClass).toBeDefined();
+      expect(js).toContain(JSON.stringify(syncClass));
+      expect(css).not.toContain("color: blue;");
+    }
+  }
+);
+
+it.each(["builtin", "configured-unrelated", "configured-used"] as const)(
+  "builds %s CSS without resolving an unused JSX preset",
+  async (kind) => {
+    const options = await fixture();
+    const { root } = options;
+    const calls: string[] = [];
+    const usesPreset = kind === "configured-used";
+    const entry = resolve(root, usesPreset ? "entry.tsx" : "legacy.ts");
+    await writeFile(
+      resolve(root, "preset.ts"),
+      `import { defineRules } from "@mincho-js/css";
+       export const { css, cx, rules } = defineRules({ properties: { color: true } });`
+    );
+    await writeFile(
+      entry,
+      usesPreset
+        ? 'export const App = () => <div css={{ color: "blue" }} />;'
+        : 'import { css } from "@mincho-js/css"; export const style = css({ color: "blue" });'
+    );
+    const preset: Plugin = {
+      name: "entry-specific-preset",
+      resolveId(id, importer) {
+        if (id !== "test-preset") return;
+        calls.push(importer ?? "");
+        if (importer?.endsWith("legacy.ts"))
+          throw new Error("Legacy entry cannot resolve the unused JSX preset");
+        return resolve(root, "preset.ts");
+      }
+    };
+    const result = await build({
+      root,
+      configFile: false,
+      logLevel: "silent",
+      esbuild: { jsx: "transform", jsxFactory: "jsx" },
+      plugins: [
+        preset,
+        minchoVitePlugin(
+          kind === "builtin"
+            ? {}
+            : { jsxCssProp: { importSource: "test-preset" } }
+        ),
+        vanillaExtractPlugin()
+      ],
+      build: {
+        write: false,
+        minify: false,
+        cssCodeSplit: true,
+        lib: { entry, formats: ["es"] }
+      }
+    });
+    const css = (Array.isArray(result) ? result : [result])
+      .flatMap((bundle) => ("output" in bundle ? bundle.output : []))
+      .flatMap((file) =>
+        file.type === "asset" && file.fileName.endsWith(".css")
+          ? [String(file.source)]
+          : []
+      )
+      .join("\n");
+    expect(css).toContain("color: blue");
+    if (usesPreset)
+      expect(calls.some((importer) => importer.endsWith("entry.tsx"))).toBe(
+        true
+      );
+    else expect(calls).toEqual([]);
+  }
+);
 
 async function separateOwnerFixture(
   distChunk: boolean,
@@ -249,9 +446,14 @@ describe("configured JSX css source", () => {
     }
   );
 
-  it.each([false, true])(
-    "evaluates configured decorator dependencies in authoring sidecars (dependency graph: %s)",
-    async (dependencyGraph) => {
+  it.each([
+    [false, "top-level"],
+    [true, "top-level"],
+    [false, "overrides"],
+    [true, "overrides"]
+  ] as const)(
+    "evaluates configured decorator dependencies in authoring sidecars (dependency graph: %s, Babel configuration: %s)",
+    async (dependencyGraph, configuration) => {
       const options = await fixture();
       await writeFile(
         resolve(options.root, "palette.ts"),
@@ -275,17 +477,23 @@ describe("configured JSX css source", () => {
         resolve(options.root, "entry.tsx"),
         'export const Button = () => <button css={{ color: "theme" }} />;'
       );
+      const parserOpts = {
+        plugins: [
+          ["decorators", { decoratorsBeforeExport: false }]
+        ] satisfies NonNullable<
+          import("@babel/core").TransformOptions["parserOpts"]
+        >["plugins"]
+      };
       const result = await build({
         ...options,
         plugins: [
           minchoVitePlugin({
             jsxCssProp: { importSource: "test-preset" },
             optimize: { dependencyGraph },
-            babel: {
-              parserOpts: {
-                plugins: [["decorators", { decoratorsBeforeExport: false }]]
-              }
-            }
+            babel:
+              configuration === "overrides"
+                ? { overrides: [{ test: /\.tsx?$/, parserOpts }] }
+                : { parserOpts }
           }),
           vanillaExtractPlugin()
         ],
@@ -1744,6 +1952,7 @@ export const css = (rule) => nativeCss([first, second, rule]);`
       `
       import {rules} from "./preset";
       export function getStyles() { return {px: 3}; }
+      export function getEmptyStyles() { return {}; }
       export const recipe = rules({
         base: {bg: "blue"},
         variants: {tone: {square: {borderRadius: 0}, rounded: {borderRadius: "4px"}}}
@@ -1754,11 +1963,12 @@ export const css = (rule) => nativeCss([first, second, rule]);`
       resolve(options.root, "entry.tsx"),
       `
       import {cx} from "test-preset";
-      import {getStyles, recipe} from "./theme.css";
+      import {getStyles, getEmptyStyles, recipe} from "./theme.css";
       export const Static = () => <div css={getStyles()} />;
       export const Recipe = ({tone}) => <button css={recipe({tone})} />;
       export const Dynamic = ({active, tone}) => <button css={cx("external", active && recipe({tone}))} />;
       export const DynamicArray = ({active, tone}) => <button css={cx(["external", active && recipe({tone})])} />;
+      export const Or = ({base, fallback}) => <div css={cx(base, getEmptyStyles() || fallback())} />;
     `
     );
     const result = await build({
@@ -1798,7 +2008,12 @@ export const css = (rule) => nativeCss([first, second, rule]);`
 
     const exports: Record<
       string,
-      (props?: { active?: boolean; tone?: "rounded" | "square" }) => {
+      (props?: {
+        active?: boolean;
+        tone?: "rounded" | "square";
+        base?: string;
+        fallback?: () => string;
+      }) => {
         props: { className: string };
       }
     > = {};
@@ -1846,8 +2061,13 @@ export const css = (rule) => nativeCss([first, second, rule]);`
         "external"
       );
     }
+    const fallback = vi.fn(() => "fallback");
+    expect(exports.Or!({ base: "external", fallback }).props.className).toBe(
+      "external"
+    );
+    expect(fallback).not.toHaveBeenCalled();
     expect(runtime).not.toMatch(
-      /\bdefineRules\s*\(|compileCSSRule|__mincho__|__recipe__|getStyles|static token values/
+      /\bdefineRules\s*\(|compileCSSRule|__mincho__|__recipe__|getStyles|getEmptyStyles|static token values/
     );
   });
 
@@ -1915,4 +2135,119 @@ export const css = (rule) => nativeCss([first, second, rule]);`
       await server.close();
     }
   });
+});
+
+it("resolves a registered authoring alias from its component importer", async () => {
+  const options = await fixture();
+  const entry = resolve(options.root, "entry.tsx");
+  const red = resolve(options.root, "red-preset.ts");
+  const blue = resolve(options.root, "blue-preset.ts");
+  const redTone = resolve(options.root, "red-tone.ts");
+  const blueTone = resolve(options.root, "blue-tone.ts");
+  await Promise.all([
+    writeFile(redTone, 'export const tone = "#a91225";'),
+    writeFile(blueTone, 'export const tone = "#1625bc";')
+  ]);
+  for (const file of [red, blue]) {
+    await writeFile(
+      file,
+      `
+      import { style } from "@vanilla-extract/css";
+      import { tone } from "registered-tone";
+      export { tone };
+      export function make() { return style({ color: tone }); }
+    `
+    );
+  }
+  const requests: string[] = [];
+  const transitiveRequests: string[] = [];
+  const resolveOptions = {
+    alias: [
+      {
+        find: "registered-preset",
+        replacement: red,
+        customResolver(_target: string, importer?: string) {
+          if (importer) requests.push(normalizePath(importer));
+          return {
+            id:
+              importer && normalizePath(importer) === normalizePath(entry)
+                ? red
+                : blue
+          };
+        }
+      },
+      {
+        find: "registered-tone",
+        replacement: redTone,
+        customResolver(_target: string, importer?: string) {
+          if (importer) transitiveRequests.push(normalizePath(importer));
+          return {
+            id:
+              importer && normalizePath(importer) === normalizePath(red)
+                ? redTone
+                : blueTone
+          };
+        }
+      }
+    ]
+  };
+  const config = {
+    ...options,
+    resolve: resolveOptions,
+    build: {
+      write: false,
+      minify: false as const,
+      cssCodeSplit: true,
+      lib: { entry, formats: ["es" as const] }
+    }
+  };
+  await writeFile(entry, 'export { tone } from "registered-preset";');
+  const native = await build({ ...config, plugins: [vanillaExtractPlugin()] });
+  const readOutputs = (value: typeof native) =>
+    (Array.isArray(value) ? value : [value]).flatMap((item) =>
+      "output" in item ? item.output : []
+    );
+  expect(
+    readOutputs(native).some(
+      (item) => item.type === "chunk" && item.code.includes("#a91225")
+    )
+  ).toBe(true);
+  expect(requests).toContain(normalizePath(entry));
+  requests.length = 0;
+  transitiveRequests.length = 0;
+  await writeFile(
+    entry,
+    'import { make } from "registered-preset"; export const cls = make();'
+  );
+  const compiled = await build({
+    ...config,
+    plugins: [
+      minchoVitePlugin({
+        extractCalls: {
+          "./red-preset.ts": ["make"],
+          "./blue-preset.ts": ["make"]
+        }
+      }),
+      vanillaExtractPlugin()
+    ]
+  });
+  const outputs = readOutputs(compiled);
+  const css = outputs
+    .flatMap((item) =>
+      item.type === "asset" && item.fileName.endsWith(".css")
+        ? [String(item.source)]
+        : []
+    )
+    .join("\n");
+  expect(css).toContain("color: #a91225");
+  expect(css).not.toContain("#1625bc");
+  const cssClass = css.match(/\.([\w-]+)\s*\{\s*color: #a91225/)?.[1];
+  expect(cssClass).toBeTruthy();
+  const javascript = outputs
+    .flatMap((item) => (item.type === "chunk" ? [item.code] : []))
+    .join("\n");
+  expect(javascript).toContain(cssClass);
+  expect(requests).toContain(normalizePath(entry));
+  expect(transitiveRequests).toContain(normalizePath(red));
+  expect(transitiveRequests).not.toContain(normalizePath(entry));
 });

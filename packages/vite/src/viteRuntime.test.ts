@@ -1,6 +1,10 @@
+import { spawnSync } from "node:child_process";
+import { types as t, type PluginObj } from "@babel/core";
+import { pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
 import {
   createViteClientIntrinsicObserver,
+  loadViteTransformedModuleSource,
   matchesViteClientSource
 } from "./staticCssEvalSourceProvider.js";
 import { createHash } from "node:crypto";
@@ -22,6 +26,65 @@ import {
 import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { vanillaExtractPlugin } from "@vanilla-extract/vite-plugin";
 import { minchoVitePlugin } from "./index.js";
+
+it.each(["map from custom load", "string custom load"])(
+  "reads the same SSR JavaScript after a %s",
+  async (kind) => {
+    const withMap = kind === "map from custom load";
+    const source = 'export const shade = "original";';
+    const root = await createFixture({ "src/shade.js": source });
+    const file = normalizePath(join(root, "src/shade.js"));
+    const expected = withMap ? "blue" : "red";
+    const server = await createFixtureServer(root, [
+      {
+        name: "ordinary-ssr-load-map",
+        load(id) {
+          if (id !== file) return;
+          if (!withMap) return source;
+          return {
+            code: source,
+            map: {
+              version: 3,
+              names: [],
+              mappings: "AAAA",
+              sources: ["author-token.js"],
+              sourcesContent: [source]
+            }
+          };
+        },
+        transform(code, id) {
+          if (id !== file) return;
+          const map = this.getCombinedSourcemap();
+          const authored = map.sources.some((source) =>
+            source.endsWith("author-token.js")
+          );
+          return {
+            code: code.replace("original", authored ? "blue" : "red"),
+            map: JSON.stringify(map)
+          };
+        }
+      }
+    ]);
+    const ssr = server.environments.ssr!;
+    expect((await server.ssrLoadModule("/src/shade.js")).shade).toBe(expected);
+    const runtime = await ssr.transformRequest("/src/shade.js");
+    const runtimeMap = runtime?.map;
+    expect(
+      !!runtimeMap &&
+        "sources" in runtimeMap &&
+        runtimeMap.sources.some((source) => source.endsWith("author-token.js"))
+    ).toBe(withMap);
+
+    // No mocked host: this runs the same Vite plugin load/transform callbacks
+    // while preserving ESM for the compiler instead of SSR rewriting.
+    const input = await loadViteTransformedModuleSource(
+      file,
+      {} as Parameters<typeof loadViteTransformedModuleSource>[1],
+      ssr
+    );
+    expect(input?.source).toBe(`export const shade = "${expected}";`);
+  }
+);
 
 const roots: string[] = [];
 const servers: ViteDevServer[] = [];
@@ -52,10 +115,12 @@ async function createFixture(files: Record<string, string>) {
 async function createFixtureServer(
   root: string,
   plugins: Plugin[],
-  watch = false
+  watch = false,
+  base = "/"
 ) {
   const server = await createServer({
     root,
+    base,
     configFile: false,
     logLevel: "silent",
     server: {
@@ -114,6 +179,681 @@ async function readCssPropOutput(
       .join("\n")
   };
 }
+
+const cjsInitializationSource =
+  'const init=require("./init.cjs"); const {css}=require("@mincho-js/css"); const ref=require("./later.cjs"); exports.className=css({color:"red"}); exports.read=()=>[init.ready&&ref.ok,globalThis.__minchoRuntimeOrder];';
+const cjsRuntimeDependentSource =
+  'const m=require("./marker.cjs"); const {cx}=require("@mincho-js/css"); exports.ok=m.marker&&typeof cx==="function";';
+
+async function commonJsInitializationFixture(
+  reciprocal = false,
+  dependencies = 0,
+  edge?: "import" | "named" | "star" | "dynamic",
+  relative:
+    boolean | "alias" | "absolute-alias" | "other-absolute-alias" = false,
+  includeFirstChild = false
+) {
+  const extra = Array.from(
+    { length: dependencies },
+    (_, index) => `extra${index}`
+  );
+  const laterSource =
+    extra.map((name) => `const ${name}=require("./${name}.cjs"); `).join("") +
+    cjsRuntimeDependentSource.replace(
+      "exports.ok=m.marker",
+      `exports.ok=${extra
+        .map((name) => `${name}.ready`)
+        .concat("m.marker")
+        .join("&&")}`
+    );
+  const source = includeFirstChild
+    ? cjsInitializationSource
+        .replace(
+          `const ref=require("./later.cjs");`,
+          `const first=require("./first.cjs"); const ref=require("./later.cjs");`
+        )
+        .replace("init.ready&&ref.ok", "init.ready&&first.ok&&ref.ok")
+    : cjsInitializationSource;
+  const root = await createFixture({
+    ...(includeFirstChild
+      ? {
+          "src/first.cjs": `const m=require("./marker.cjs"); exports.ok=m.marker;`
+        }
+      : {}),
+    ...Object.fromEntries(
+      extra.map((name) => [`src/${name}.cjs`, "exports.ready=true;"])
+    ),
+    "package.json": '{"type":"module"}',
+    "src/main.cjs": source,
+    "src/init.cjs": "globalThis.__minchoRuntimeOrder=[]; exports.ready=true;",
+    "src/later.cjs": reciprocal
+      ? 'const {css}=require("@mincho-js/css"); const back=require("./main.cjs"); exports.className=css({color:"blue"}); exports.ok=()=>typeof back.read==="function";'
+      : edge
+        ? 'const m=require("./marker.cjs"); exports.ok=m.marker;'
+        : laterSource,
+    "src/unrelated.mjs": "export const ready = true;",
+    "src/marker.cjs":
+      'globalThis.__minchoRuntimeOrder??=[]; globalThis.__minchoRuntimeOrder.push("observer"); exports.marker=true;',
+    "src/mincho-compat.cjs":
+      'const ve=require("@vanilla-extract/css"); globalThis.__minchoRuntimeOrder??=[]; globalThis.__minchoRuntimeOrder.push("css-package"); exports.css=ve.style; exports.cx=(...v)=>v.join(" ");'
+  });
+  const main = join(root, "src/main.cjs");
+  const later = join(root, "src/later.cjs");
+  const calls = new Map<string, number>();
+  const observer: Plugin = {
+    name: "ordinary-cjs-transform-count",
+    config() {
+      return {
+        resolve: {
+          alias: [
+            {
+              find: /^@mincho-js\/css$/,
+              replacement: join(root, "src/mincho-compat.cjs")
+            },
+            ...(relative === "alias"
+              ? [
+                  {
+                    find: "css-runtime",
+                    replacement: join(root, "src/mincho-compat.cjs")
+                  }
+                ]
+              : []),
+            ...(relative === "absolute-alias" ||
+            relative === "other-absolute-alias"
+              ? [
+                  {
+                    find: join(root, "src/runtime-alias.cjs"),
+                    replacement: join(
+                      root,
+                      relative === "absolute-alias"
+                        ? "src/mincho-compat.cjs"
+                        : "src/unrelated.mjs"
+                    )
+                  }
+                ]
+              : [])
+          ]
+        }
+      };
+    },
+    transform(_source, file) {
+      const path = normalizePath(file);
+      const label =
+        path === main
+          ? "main"
+          : path === later
+            ? "later"
+            : path === join(root, "src/first.cjs")
+              ? "first"
+              : null;
+      if (label === null) return;
+      const key = `${this.environment.name}:${label}`;
+      calls.set(key, (calls.get(key) ?? 0) + 1);
+    }
+  };
+  const plugins = [observer, minchoVitePlugin()];
+  if (edge) {
+    plugins.push({
+      name: "ordinary-static-module-edge",
+      enforce: "post",
+      transform(source, id) {
+        if (normalizePath(id) !== later) return;
+        const target = JSON.stringify(
+          relative === "alias"
+            ? "css-runtime"
+            : relative === "absolute-alias" ||
+                relative === "other-absolute-alias"
+              ? join(root, "src/runtime-alias.cjs")
+              : relative
+                ? "./mincho-compat.cjs"
+                : join(root, "src/mincho-compat.cjs")
+        );
+        const request =
+          edge === "dynamic"
+            ? `export const lazy = () => import(${target});`
+            : edge === "named"
+              ? `export { cx as exportedCx } from ${target};`
+              : edge === "star"
+                ? `export * from ${target};`
+                : `import ${target};`;
+        return { code: `${source}\n${request}`, map: null };
+      }
+    });
+  }
+  return { root, later, laterSource, main, calls, plugins, source };
+}
+
+it.each([
+  ["ordinary", "/", 0],
+  ["non-root base", "/demo/", 0],
+  ["many eager dependencies", "/", 17]
+] as const)(
+  "retains first authored CommonJS initialization in cold Vite client and SSR: %s",
+  async (_fixture, base, extra) => {
+    const { root, later, laterSource, calls, plugins } =
+      await commonJsInitializationFixture(false, extra);
+    const server = await createFixtureServer(root, plugins, false, base);
+    const environments = [
+      server.environments.client!,
+      server.environments.ssr!
+    ];
+    const expectOrder = async (environment: DevEnvironment, keep: boolean) => {
+      const response = await environment.transformRequest("/src/main.cjs");
+      const code = response?.code ?? "";
+      const request = code.indexOf("/src/mincho-compat.cjs");
+      expect(code.indexOf("/src/later.cjs")).toBeGreaterThanOrEqual(0);
+      if (keep) {
+        expect(request).toBeGreaterThanOrEqual(0);
+        expect(request).toBeLessThan(code.indexOf("/src/later.cjs"));
+      } else expect(request).toBe(-1);
+      const map = response?.map;
+      expect(map && "sourcesContent" in map && map.sourcesContent).toContain(
+        cjsInitializationSource
+      );
+    };
+    for (const environment of environments) {
+      expect(
+        await environment.moduleGraph.getModuleByUrl("/src/later.cjs")
+      ).toBeUndefined();
+      await expectOrder(environment, true);
+    }
+    const app = await server.ssrLoadModule("/src/main.cjs");
+    expect(app.className).toEqual(expect.any(String));
+    expect(app.read()).toEqual([true, ["css-package", "observer"]]);
+    expect(calls.get("client:later")).toBe(1);
+    expect(calls.get("ssr:later")).toBe(1);
+
+    await writeFile(
+      later,
+      'const m=require("./marker.cjs"); exports.ok=m.marker;'
+    );
+    for (const environment of environments)
+      environment.moduleGraph.onFileChange(later);
+    for (const environment of environments)
+      await expectOrder(environment, false);
+
+    await writeFile(later, laterSource);
+    for (const environment of environments)
+      environment.moduleGraph.onFileChange(later);
+    for (const environment of environments)
+      await expectOrder(environment, true);
+  }
+);
+
+it.each([
+  ["import", false],
+  ["named", false],
+  ["star", false],
+  ["dynamic", false],
+  ["import", true],
+  ["named", true],
+  ["dynamic", true],
+  ["import", "alias"],
+  ["named", "alias"],
+  ["dynamic", "alias"],
+  ["import", "absolute-alias"],
+  ["dynamic", "absolute-alias"],
+  ["import", "other-absolute-alias"]
+] as const)(
+  "retains only an eager host module request in cold client and built SSR: %s (relative=%s)",
+  async (edge, relative) => {
+    const { root, main, calls, plugins } = await commonJsInitializationFixture(
+      false,
+      0,
+      edge,
+      relative
+    );
+    const server = await createFixtureServer(root, plugins);
+    const client = server.environments.client!;
+    const original = await client.transformRequest("/src/main.cjs");
+    const code = original?.code ?? "";
+    const before = code.indexOf("/src/mincho-compat.cjs");
+    const child = code.indexOf("/src/later.cjs");
+    expect(child).toBeGreaterThanOrEqual(0);
+    const eager = edge !== "dynamic" && relative !== "other-absolute-alias";
+    if (!eager) expect(before).toBe(-1);
+    else {
+      expect(before).toBeGreaterThanOrEqual(0);
+      expect(before).toBeLessThan(child);
+    }
+    const map = original?.map;
+    expect(map && "sourcesContent" in map && map.sourcesContent).toContain(
+      cjsInitializationSource
+    );
+    expect(calls.get("client:later")).toBe(1);
+
+    const out = join(root, "out");
+    await build({
+      root,
+      configFile: false,
+      logLevel: "silent",
+      plugins,
+      build: {
+        ssr: main,
+        outDir: out,
+        rollupOptions: { output: { entryFileNames: "app.mjs" } }
+      }
+    });
+    const runtime = spawnSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "-e",
+        `const app = await import(${JSON.stringify(pathToFileURL(join(out, "app.mjs")).href)});
+         console.log(JSON.stringify({ className: app.className, read: app.read() }));`
+      ],
+      { encoding: "utf8" }
+    );
+    expect(runtime.status, runtime.stderr).toBe(0);
+    expect(JSON.parse(runtime.stdout)).toEqual({
+      className: expect.any(String),
+      read: [true, eager ? ["css-package", "observer"] : ["observer"]]
+    });
+  }
+);
+
+it.each(["import", "dynamic"] as const)(
+  "keeps each staged authored require only for its own live demand: %s",
+  async (edge) => {
+    const { root, main, source, calls, plugins } =
+      await commonJsInitializationFixture(false, 0, edge);
+    await writeFile(
+      main,
+      source
+        .replace(
+          'const ref=require("./later.cjs");',
+          'const {style}=require("@vanilla-extract/css"); const ref=require("./later.cjs");'
+        )
+        .replace(
+          "exports.read=",
+          "exports.extra=style({padding:4}); exports.read="
+        )
+    );
+    const server = await createFixtureServer(root, plugins);
+    const client =
+      await server.environments.client!.transformRequest("/src/main.cjs");
+    const code = client?.code ?? "";
+    const peer = code.indexOf("/src/later.cjs");
+    const css = code.indexOf("/src/mincho-compat.cjs");
+    expect(peer).toBeGreaterThanOrEqual(0);
+    if (edge === "import") {
+      expect(css).toBeGreaterThanOrEqual(0);
+      expect(css).toBeLessThan(peer);
+    } else expect(css).toBe(-1);
+    expect(calls.get("client:later")).toBe(1);
+
+    const out = join(root, "out");
+    await build({
+      root,
+      configFile: false,
+      logLevel: "silent",
+      plugins,
+      build: {
+        ssr: main,
+        outDir: out,
+        rollupOptions: { output: { entryFileNames: "app.mjs" } }
+      }
+    });
+    const runtime = spawnSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "-e",
+        `const app = await import(${JSON.stringify(pathToFileURL(join(out, "app.mjs")).href)});
+       console.log(JSON.stringify({ style: app.className, extra: app.extra, read: app.read() }));`
+      ],
+      { encoding: "utf8" }
+    );
+    expect(runtime.status, runtime.stderr).toBe(0);
+    expect(JSON.parse(runtime.stdout)).toEqual({
+      style: expect.any(String),
+      extra: expect.any(String),
+      read: [
+        true,
+        edge === "import" ? ["css-package", "observer"] : ["observer"]
+      ]
+    });
+    expect(calls.get("ssr:later")).toBe(1);
+  }
+);
+
+it.each([false, true])(
+  "keeps automatically configured CommonJS generator output and original demand (demand=%s)",
+  async (demand) => {
+    const { root, main, later, plugins, source } =
+      await commonJsInitializationFixture();
+    await writeFile(
+      main,
+      source + ` /* authored-marker */ exports.marker="before";`
+    );
+    if (!demand)
+      await writeFile(
+        later,
+        `const m=require("./marker.cjs"); exports.ok=m.marker;`
+      );
+    await writeFile(
+      join(root, "babel.config.cjs"),
+      `let posts = 0, generated = 0;
+       const owner = ${JSON.stringify(main)};
+       const posted = new WeakSet();
+       module.exports = { passPerPreset: true, presets: [() => ({
+         plugins: [() => ({
+           post(file) {
+             if (file.opts.filename !== owner) return;
+             if (++posts !== 1 || posted.has(file.ast))
+               throw new Error("author post must run once for the owner");
+             posted.add(file.ast);
+           },
+           generatorOverride(ast, options, input, generate) {
+             const output = generate(ast, options, input);
+             if (!posted.has(ast)) return output;
+             if (posts !== 1 || ++generated !== 1)
+               throw new Error("generate once on the actual posted owner AST");
+             return { ...output, code: output.code.replace('"before"', '"later!"') };
+           },
+           visitor: {}
+         })]
+       })] };`
+    );
+    const cwd = vi.spyOn(process, "cwd").mockReturnValue(root);
+    const out = join(root, "out");
+    try {
+      await build({
+        root,
+        configFile: false,
+        logLevel: "silent",
+        plugins,
+        build: {
+          ssr: main,
+          outDir: out,
+          rollupOptions: { output: { entryFileNames: "app.mjs" } }
+        }
+      });
+    } finally {
+      cwd.mockRestore();
+    }
+    const runtime = spawnSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "-e",
+        `const app = await import(${JSON.stringify(pathToFileURL(join(out, "app.mjs")).href)});
+         console.log(JSON.stringify({ className: app.className, marker: app.marker, read: app.read() }));`
+      ],
+      { encoding: "utf8" }
+    );
+    expect(runtime.status, runtime.stderr).toBe(0);
+    expect(JSON.parse(runtime.stdout)).toEqual({
+      className: expect.any(String),
+      marker: "later!",
+      read: [true, demand ? ["css-package", "observer"] : ["observer"]]
+    });
+  }
+);
+
+it.each([
+  ["unchanged", false],
+  ["retargeted", false],
+  ["retargeted", true],
+  ["replaced", true],
+  ["removed", false]
+] as const)(
+  "respects an authored %s CommonJS request after Babel post (generator=%s)",
+  async (edit, configuredGenerator) => {
+    const { root, main, later, plugins } =
+      await commonJsInitializationFixture();
+    await writeFile(
+      later,
+      `const m=require("./marker.cjs"); exports.ok=m.marker;`
+    );
+    await writeFile(
+      join(root, "src/instrument.cjs"),
+      `globalThis.__minchoRuntimeOrder.push("instrument"); exports.valid=true;`
+    );
+    const authored = new WeakSet<t.File>();
+    const post = vi.fn();
+    const generated = vi.fn();
+    plugins.pop();
+    plugins.push(
+      minchoVitePlugin({
+        babel: {
+          plugins: [
+            () => ({
+              post(file: Parameters<NonNullable<PluginObj["post"]>>[0]) {
+                if (file.opts.filename !== main) return;
+                post();
+                authored.add(file.ast);
+                for (const statement of file.ast.program.body) {
+                  if (!t.isVariableDeclaration(statement)) continue;
+                  const index = statement.declarations.findIndex(
+                    ({ init }) =>
+                      t.isCallExpression(init) &&
+                      t.isIdentifier(init.callee, { name: "require" }) &&
+                      t.isStringLiteral(init.arguments[0], {
+                        value: "@mincho-js/css"
+                      })
+                  );
+                  if (index < 0) continue;
+                  if (edit === "removed") {
+                    statement.declarations.splice(index, 1);
+                    if (!statement.declarations.length)
+                      file.ast.program.body = file.ast.program.body.filter(
+                        (node) => node !== statement
+                      );
+                  } else if (edit === "retargeted") {
+                    const init = statement.declarations[index]!.init;
+                    if (!t.isCallExpression(init))
+                      throw new Error("Expected the original call");
+                    const specifier = init.arguments[0];
+                    if (!t.isStringLiteral(specifier))
+                      throw new Error("Expected the original request");
+                    specifier.value = "./instrument.cjs";
+                  } else if (edit === "replaced") {
+                    statement.declarations[index] = t.variableDeclarator(
+                      t.identifier("instrumentation"),
+                      t.callExpression(t.identifier("require"), [
+                        t.stringLiteral("./instrument.cjs")
+                      ])
+                    );
+                  }
+                  return;
+                }
+                throw new Error("Expected the staged authored request in post");
+              },
+              ...(configuredGenerator
+                ? {
+                    generatorOverride(
+                      ast: t.File,
+                      options: unknown,
+                      input: string,
+                      generate: (
+                        ast: t.File,
+                        options: unknown,
+                        input: string
+                      ) => { code: string }
+                    ) {
+                      if (authored.has(ast)) generated();
+                      return generate(ast, options, input);
+                    }
+                  }
+                : {}),
+              visitor: {}
+            })
+          ]
+        }
+      })
+    );
+    const out = join(root, "out");
+    await build({
+      root,
+      configFile: false,
+      logLevel: "silent",
+      plugins,
+      build: {
+        ssr: main,
+        outDir: out,
+        rollupOptions: { output: { entryFileNames: "app.mjs" } }
+      }
+    });
+    const runtime = spawnSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "-e",
+        `const app = await import(${JSON.stringify(pathToFileURL(join(out, "app.mjs")).href)});
+         console.log(JSON.stringify({ className: app.className, read: app.read() }));`
+      ],
+      { encoding: "utf8" }
+    );
+    expect(runtime.status, runtime.stderr).toBe(0);
+    expect(JSON.parse(runtime.stdout)).toEqual({
+      className: expect.any(String),
+      read: [
+        true,
+        edit === "retargeted" || edit === "replaced"
+          ? ["instrument", "observer"]
+          : ["observer"]
+      ]
+    });
+    expect(post).toHaveBeenCalledOnce();
+    expect(generated).toHaveBeenCalledTimes(configuredGenerator ? 1 : 0);
+  }
+);
+
+it("retains order when the second live CommonJS child proves eager runtime use", async () => {
+  const { root, main, later, calls, plugins, source } =
+    await commonJsInitializationFixture(false, 0, undefined, false, true);
+  const server = await createFixtureServer(root, plugins);
+  for (const name of ["client", "ssr"] as const) {
+    const environment = server.environments[name]!;
+    const response = await environment.transformRequest("/src/main.cjs");
+    const code = response?.code ?? "";
+    const target = code.indexOf("/src/mincho-compat.cjs");
+    expect(target).toBeGreaterThanOrEqual(0);
+    expect(target).toBeLessThan(code.indexOf("/src/first.cjs"));
+    expect(code.indexOf("/src/first.cjs")).toBeLessThan(
+      code.indexOf("/src/later.cjs")
+    );
+    const map = response?.map;
+    expect(map && "sourcesContent" in map && map.sourcesContent).toContain(
+      source
+    );
+    expect(calls.get(`${name}:first`)).toBe(1);
+    expect(calls.get(`${name}:later`)).toBe(1);
+  }
+  const dev = await server.ssrLoadModule("/src/main.cjs");
+  expect(dev.className).toEqual(expect.any(String));
+  expect(dev.read()).toEqual([true, ["css-package", "observer"]]);
+
+  const out = join(root, "out");
+  await build({
+    root,
+    configFile: false,
+    logLevel: "silent",
+    plugins,
+    build: {
+      ssr: main,
+      outDir: out,
+      rollupOptions: { output: { entryFileNames: "app.mjs" } }
+    }
+  });
+  const runtime = spawnSync(
+    process.execPath,
+    [
+      "--input-type=module",
+      "-e",
+      `const app = await import(${JSON.stringify(pathToFileURL(join(out, "app.mjs")).href)});
+       console.log(JSON.stringify({ className: app.className, read: app.read() }));`
+    ],
+    { encoding: "utf8" }
+  );
+  expect(runtime.status, runtime.stderr).toBe(0);
+  expect(JSON.parse(runtime.stdout)).toEqual({
+    className: expect.any(String),
+    read: [true, ["css-package", "observer"]]
+  });
+  expect(calls.get("ssr:first")).toBe(2);
+  expect(calls.get("ssr:later")).toBe(2);
+
+  await writeFile(later, "exports.ok=true;");
+  for (const name of ["client", "ssr"] as const) {
+    const environment = server.environments[name]!;
+    environment.moduleGraph.onFileChange(later);
+    const response = await environment.transformRequest("/src/main.cjs");
+    expect(response?.code).toContain("/src/first.cjs");
+    expect(response?.code).toContain("/src/later.cjs");
+    expect(response?.code).not.toContain("/src/mincho-compat.cjs");
+  }
+});
+
+it.each([false, true])(
+  "finishes reciprocal CommonJS runtime preparation without duplicate transforms (build=%s)",
+  async (production) => {
+    const { root, main, later, calls, plugins } =
+      await commonJsInitializationFixture(true);
+    if (production) {
+      await build({
+        root,
+        configFile: false,
+        logLevel: "silent",
+        plugins,
+        build: {
+          ssr: main,
+          write: false,
+          rollupOptions: { input: { main, later } }
+        }
+      });
+      expect([...calls.values()]).toEqual([1, 1]);
+    } else {
+      const server = await createFixtureServer(root, plugins);
+      for (const environment of [
+        server.environments.client!,
+        server.environments.ssr!
+      ]) {
+        const outputs = await Promise.all([
+          environment.transformRequest("/src/main.cjs"),
+          environment.transformRequest("/src/later.cjs")
+        ]);
+        expect(
+          outputs.every((output) => typeof output?.code === "string")
+        ).toBe(true);
+        expect(calls.get(`${environment.name}:main`)).toBe(1);
+        expect(calls.get(`${environment.name}:later`)).toBe(1);
+      }
+    }
+  }
+);
+
+it("retains the first CommonJS initialization in a Vite SSR production bundle", async () => {
+  const { root, main, calls, plugins } = await commonJsInitializationFixture();
+  const out = join(root, "out");
+  await build({
+    root,
+    configFile: false,
+    logLevel: "silent",
+    plugins,
+    build: {
+      ssr: main,
+      outDir: out,
+      rollupOptions: { output: { format: "es", entryFileNames: "app.mjs" } }
+    }
+  });
+  const run = spawnSync(
+    process.execPath,
+    [
+      "--input-type=module",
+      "-e",
+      `const app = await import(${JSON.stringify(pathToFileURL(join(out, "app.mjs")).href)}); console.log(JSON.stringify({className:app.className, trace:app.read()}));`
+    ],
+    { cwd: root, env: process.env, encoding: "utf8" }
+  );
+  expect(run.status, run.stderr).toBe(0);
+  expect(JSON.parse(run.stdout)).toEqual({
+    className: expect.any(String),
+    trace: [true, ["css-package", "observer"]]
+  });
+  expect([...calls.values()]).toEqual([1, 1]);
+});
 
 describe("mincho with the Vite runtime", () => {
   it.each([false, true])(

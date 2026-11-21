@@ -1,6 +1,10 @@
 import { prepareModuleSourceFixture } from "../testUtils/moduleSourceFixture.js";
 import { prepareSerializedRecipeProvider } from "../testUtils/serializedRecipeProvider.js";
-import { transformSync } from "esbuild";
+import { build, type Loader, transformSync } from "esbuild";
+import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { spawnSync } from "node:child_process";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { css, defineRules, mincho$, rules } from "@mincho-js/css";
 import { cx } from "@mincho-js/css/classname";
@@ -99,6 +103,1046 @@ describe("configured JSX callable values", () => {
 
       expect(Box().props.className).toBe(expected);
       expect(runtime.events).toEqual(expectedEvents);
+    }
+  );
+
+  it.each([
+    ["single await", "async function", false, "await"],
+    ["compound await", "async function", true, "await"],
+    ["compound yield", "function*", true, "yield"]
+  ] as const)(
+    "stages a runtime CSS class at its direct %s initializer",
+    async (_name, declaration, compound, suspend) => {
+      const { code } = babelTransform(
+        `
+      export const events = [];
+      function mark(event, value) { events.push(event); return value; }
+      function before(readLast) {
+        try { readLast(); } catch (error) {
+          if (!(error instanceof ReferenceError)) throw error;
+          return mark('first', 1);
+        }
+        throw new Error('lost TDZ');
+      }
+      export ${declaration} Box(cls) {
+        const ${compound ? "first = before(() => last), " : ""}element =
+          <div css={cls} className={(cls = 'changed', mark('class', 'base'))}>
+            {${suspend} mark('child', 'content')}
+          </div>${compound ? ", last = mark('last', 2)" : ""};
+        return element;
+      }
+      `,
+        { jsxCssProp }
+      );
+      const runtime = executeModule(code, {
+        "@mincho-js/css/classname": { cx }
+      });
+      type Element = { props: { className: string } };
+      const expectedEvents = [...(compound ? ["first"] : []), "class", "child"];
+      let element: Element;
+      if (suspend === "yield") {
+        const Box = runtime.Box as (
+          cls: string
+        ) => Generator<string, Element, string>;
+        const iterator = Box("selected");
+        expect(iterator.next()).toEqual({ done: false, value: "content" });
+        expect(runtime.events).toEqual(expectedEvents);
+        const result = iterator.next("content");
+        expect(result.done).toBe(true);
+        element = result.value as Element;
+      } else {
+        const Box = runtime.Box as (cls: string) => Promise<Element>;
+        element = await Box("selected");
+      }
+
+      expect(element.props.className).toBe("base selected");
+      expect(runtime.events).toEqual(
+        compound ? [...expectedEvents, "last"] : expectedEvents
+      );
+    }
+  );
+
+  it("keeps compound exported JSX bindings public and staging bindings private", () => {
+    const { code } = babelTransform(
+      `import { cx } from "custom-preset";
+      import { active, before, after, child } from "./helpers.js";
+      export const first = before(), element = <div css={cx(active && "selected")} className={after()}>
+        {await child()}
+      </div>, last = before();`,
+      { jsxCssProp, extractCalls: { "custom-preset": ["css", "cx"] } }
+    );
+    const loader: Loader = "jsx";
+    const emitted = transformSync(code, { loader, format: "esm" }).code;
+    const exports = emitted
+      .match(/export \{([^}]+)\}/)?.[1]
+      .split(",")
+      .map((name) => name.trim());
+    expect(exports).toEqual(["element", "first", "last"]);
+    expect(emitted).toMatch(
+      /before\(\)[\s\S]*_minchoCssClassName = [\s\S]*after\(\)[\s\S]*await child\(\)[\s\S]*before\(\)/
+    );
+  });
+
+  it("keeps nested JSX await on its async arrow, lazy and private per call", async () => {
+    const { code, result } = babelTransform(
+      `
+      export const calls = [];
+      const tags = { get Widget() { calls.push('type'); return 'widget'; } };
+      function mark(event, value) { calls.push(event); return value; }
+      export const Box = async (show, cls, child) => show &&
+        <tags.Widget data-before={mark('before:' + cls, true)}
+          css={cls} data-middle={mark('middle:' + cls, true)}
+          className={(cls = 'changed', mark('class', 'base'))}>
+          {await mark('child', child())}
+        </tags.Widget>;
+      `,
+      { jsxCssProp }
+    );
+    expect(result[1]).toBe("");
+    const runtime = executeModule(code, { "@mincho-js/css/classname": { cx } });
+    type Result = { type: string; props: { className: string } };
+    const Box = runtime.Box as (
+      show: boolean,
+      cls: string,
+      child: () => Promise<string>
+    ) => Promise<false | Result>;
+    const child = vi.fn();
+    expect(await Box(false, "unused", child)).toBe(false);
+    expect(child).not.toHaveBeenCalled();
+    expect(runtime.calls).toEqual([]);
+
+    let release!: (value: string) => void;
+    const firstChild = new Promise<string>((resolve) => {
+      release = resolve;
+    });
+    const first = Box(true, "first", () => firstChild);
+    const second = Box(true, "second", async () => "content");
+    expect(await second).toMatchObject({
+      type: "widget",
+      props: { className: "base second" }
+    });
+    release("content");
+    expect(await first).toMatchObject({
+      type: "widget",
+      props: { className: "base first" }
+    });
+    expect(runtime.calls).toEqual([
+      "type",
+      "before:first",
+      "middle:first",
+      "class",
+      "child",
+      "type",
+      "before:second",
+      "middle:second",
+      "class",
+      "child"
+    ]);
+  });
+
+  it("keeps nested JSX yield on its conditional generator return", () => {
+    const { code } = babelTransform(
+      `
+      export const calls = [];
+      function mark(event, value) { calls.push(event); return value; }
+      export function* Box(show, cls) {
+        return show ? <div css={cls} key={mark('key','stable')}
+          className={(cls = 'changed', mark('class','base'))}>
+          {yield mark('child', 'pause')}
+        </div> : null;
+      }
+      `,
+      { jsxCssProp }
+    );
+    const runtime = executeModule(code, { "@mincho-js/css/classname": { cx } });
+    type Result = { props: { className: string; key: string } };
+    const Box = runtime.Box as (
+      show: boolean,
+      cls: string
+    ) => Generator<string, Result | null, string>;
+    expect(Box(false, "unused").next()).toEqual({ done: true, value: null });
+    expect(runtime.calls).toEqual([]);
+    const iterator = Box(true, "selected");
+    expect(iterator.next()).toEqual({ done: false, value: "pause" });
+    expect(runtime.calls).toEqual(["key", "class", "child"]);
+    expect(iterator.next("content")).toMatchObject({
+      done: true,
+      value: { props: { className: "base selected", key: "stable" } }
+    });
+  });
+
+  it("keeps top-level nested JSX await at its module branch", () => {
+    const { code } = babelTransform(
+      `import { cx } from "custom-preset";
+      import { active, show, after, child } from "./helpers.js";
+      export const element = show && <div css={cx(active && "selected")} className={after()}>
+        {await child()}
+      </div>;`,
+      { jsxCssProp, extractCalls: { "custom-preset": ["css", "cx"] } }
+    );
+    const loader: Loader = "jsx";
+    const emitted = transformSync(code, { loader, format: "esm" }).code;
+    expect(emitted).toMatch(/let _minchoCssClassName/);
+    expect(emitted).toMatch(
+      /show && \(_minchoCssClassName = [\s\S]*after\(\)[\s\S]*await child\(\)/
+    );
+    expect(emitted.match(/export \{([^}]+)\}/)?.[1].trim()).toBe("element");
+  });
+
+  it.each([false, true])(
+    "keeps awaited JSX within its module loop header with active=%s",
+    (active) => {
+      const { code, result } = babelTransform(
+        `const report = [];
+        const show = ${active};
+        const cls = "selected";
+        const base = "base";
+        async function child() { report.push("child"); return "value"; }
+        for (; show && <div css={cls} className={base}>{await child()}</div>;) {
+          report.push("body");
+          break;
+        }
+        console.log(JSON.stringify(report));`,
+        { jsxCssProp: true, optimize: { pureFunctions: false } }
+      );
+      expect(result[1]).toBe("");
+      const loader: Loader = "jsx";
+      const emitted = transformSync(code, {
+        loader,
+        format: "esm",
+        jsxFactory: "jsx"
+      }).code.replace(
+        /import \{ cx as (\w+) \} from ['"]@mincho-js\/css\/classname['"];/,
+        "const $1 = (...args) => args.filter(Boolean).join(' ');"
+      );
+      const runtime = spawnSync(
+        process.execPath,
+        [
+          "--input-type=module",
+          "-e",
+          "const jsx = (type, props) => ({type, props});\n" + emitted
+        ],
+        { encoding: "utf8", env: { ...process.env, NODE_OPTIONS: "" } }
+      );
+      expect(runtime.status, runtime.stderr).toBe(0);
+      expect(JSON.parse(runtime.stdout)).toEqual(
+        active ? ["child", "body"] : []
+      );
+    }
+  );
+
+  it.each([
+    ["ternary", false],
+    ["ternary", true],
+    ["logical", false],
+    ["logical", true],
+    ["asserted logical", false],
+    ["asserted logical", true]
+  ] as const)(
+    "selects the custom style-only CSS %s branch before intervening JSX attributes: %s",
+    (kind, active) => {
+      const selection =
+        kind === "ternary"
+          ? "choose() ? { padding: 12 } : { padding: 4 }"
+          : kind === "asserted logical"
+            ? "choose() && ({ padding: 12 } as const)"
+            : "choose() && { padding: 12 }";
+      const authored = `export function Box(active, events) {
+           const choose = () => { events.push("choose"); return active; };
+           return <div css={${selection}}
+             data-mid={(events.push("middle"), active = !active, "middle")}
+             className={(events.push("class"), "base")} />;
+         }`;
+      const native = executeModule(authored, {}).Box as (
+        active: boolean,
+        events: string[]
+      ) => { props: { css: false | { padding: number } } };
+      const nativeEvents: string[] = [];
+      expect(native(active, nativeEvents).props.css).toEqual(
+        active ? { padding: 12 } : kind === "ternary" ? { padding: 4 } : false
+      );
+      expect(nativeEvents).toEqual(["choose", "middle", "class"]);
+      const { code, result } = babelTransform(authored, { jsxCssProp });
+      const definition = defineRules({ properties: { padding: [4, 12] } });
+      const configuredCss = vi.fn(definition.css);
+      const modules = {
+        "custom-preset": { css: configuredCss },
+        "@mincho-js/css/classname": { cx }
+      };
+      const sidecar = executeModule(result[1], modules);
+      expect(configuredCss.mock.calls).toEqual([
+        [{ padding: 12 }],
+        ...(kind === "ternary" ? [[{ padding: 4 }]] : [])
+      ]);
+      const { Box } = executeModule(code, {
+        ...modules,
+        [result[0]]: sidecar
+      }) as {
+        Box(
+          active: boolean,
+          events: string[]
+        ): {
+          props: { className: string; "data-mid": string };
+        };
+      };
+      const events: string[] = [];
+      const props = Box(active, events).props;
+      const selectedClass = active
+        ? configuredCss.mock.results[0]!.value
+        : kind === "ternary"
+          ? configuredCss.mock.results[1]!.value
+          : "";
+      expect(props.className).toBe(cx("base", selectedClass));
+      expect(props["data-mid"]).toBe("middle");
+      expect(events).toEqual(["choose", "middle", "class"]);
+      expect(configuredCss).toHaveBeenCalledTimes(kind === "ternary" ? 2 : 1);
+    }
+  );
+
+  it.each([false, true])(
+    "retains awaited JSX catch defaults in the visible enclosing scope: supplied=%s",
+    (supplied) => {
+      const { code, result } = babelTransform(
+        `export {};
+          const events = [];
+          const child = async () => { events.push("child"); return "value"; };
+          const cls = "a";
+          try {
+            throw ${supplied ? '{ view: { props: { className: "provided" } } }' : "{}"};
+          } catch ({ view = <div css={cls} className="base">{await child()}</div> }) {
+            events.push("catch");
+            console.log(JSON.stringify({ events, value: view.props.className }));
+          }`,
+        { jsxCssProp: true }
+      );
+      expect(result[1]).toBe("");
+      const loader: Loader = "tsx";
+      const emitted = transformSync(code, {
+        loader,
+        format: "esm",
+        jsxFactory: "jsx"
+      }).code.replace(
+        /import \{ cx as (\w+) \} from ['"]@mincho-js\/css\/classname['"];/,
+        "const $1 = (...args) => args.filter(Boolean).join(' ');"
+      );
+      const runtime = spawnSync(
+        process.execPath,
+        [
+          "--input-type=module",
+          "-e",
+          "const jsx = (type, props) => ({type, props});\n" + emitted
+        ],
+        { encoding: "utf8", env: { ...process.env, NODE_OPTIONS: "" } }
+      );
+      expect(runtime.status, runtime.stderr).toBe(0);
+      const observed = JSON.parse(runtime.stdout);
+      expect(observed.events).toEqual(
+        supplied ? ["catch"] : ["child", "catch"]
+      );
+      expect(observed.value.split(/\s+/).sort()).toEqual(
+        supplied ? ["provided"] : ["a", "base"]
+      );
+    }
+  );
+
+  it.each([
+    ["neither", false, false],
+    ["leading", true, false],
+    ["trailing", false, true],
+    ["both", true, true]
+  ] as const)(
+    "reads the original CSS class reference and merges it after later props: %s spread",
+    (_name, hasLeading, hasTrailing) => {
+      const { code, result } = babelTransform(
+        `export function Box(cls, events, mutate) {
+          const leading = {
+            get title() { events.push("leading"); return "label"; },
+            get className() { events.push("leading class"); return "pre"; }
+          };
+          const trailing = {
+            get id() { events.push("trailing"); return "after"; },
+            get className() { events.push("trailing class"); return "post"; }
+          };
+          return <div ${hasLeading ? "{...leading}" : ""} css={cls}
+            className={(events.push("class"), mutate ? cls.push("late") : cls = ["other"], "base")}
+            ${hasTrailing ? "{...trailing}" : ""} />;
+        }`,
+        { jsxCssProp: true, optimize: { pureFunctions: false } }
+      );
+      expect(result[1]).toBe("");
+      const { Box } = executeModule(code, {
+        "@mincho-js/css/classname": { cx }
+      }) as {
+        Box(
+          input: string[],
+          events: string[],
+          mutate: boolean
+        ): {
+          props: { className: string; title?: string; id?: string };
+        };
+      };
+      for (const mutate of [true, false]) {
+        const input = ["selected"];
+        const events: string[] = [];
+        const props = Box(input, events, mutate).props;
+        expect(props.className.split(/\s+/).sort()).toEqual(
+          [
+            ...(hasLeading ? ["pre"] : []),
+            hasTrailing ? "post" : "base",
+            "selected",
+            ...(mutate ? ["late"] : [])
+          ].sort()
+        );
+        if (hasLeading) expect(props.title).toBe("label");
+        if (hasTrailing) expect(props.id).toBe("after");
+        expect(input).toEqual(mutate ? ["selected", "late"] : ["selected"]);
+        expect(events).toEqual([
+          ...(hasLeading ? ["leading", "leading class"] : []),
+          "class",
+          ...(hasTrailing ? ["trailing", "trailing class"] : [])
+        ]);
+      }
+    }
+  );
+
+  it.each(["mutate", "reassign"] as const)(
+    "keeps an ordinary class reference through a later attribute: %s",
+    (action) => {
+      const { code } = babelTransform(
+        `export function Box(initial) {
+          let cls = initial;
+          return <div css={cls} className={(
+            ${action === "mutate" ? 'cls.push("late")' : 'cls = ["other"]'},
+            "base"
+          )} />;
+        }`,
+        { jsxCssProp: true, optimize: { pureFunctions: false } }
+      );
+      const runtime = executeModule(code, {
+        "@mincho-js/css/classname": { cx }
+      });
+      const Box = runtime.Box as (input: string[]) => {
+        props: { className: string };
+      };
+      expect(Box(["selected"]).props.className.split(/\s+/).sort()).toEqual(
+        action === "mutate"
+          ? ["base", "late", "selected"]
+          : ["base", "selected"]
+      );
+    }
+  );
+
+  it.each(["mutate", "reassign"] as const)(
+    "stages a raw flat class before trailing spreads, then merges it: %s",
+    (mode) => {
+      const { code, result } = babelTransform(
+        `export function Box(cls, events) {
+          const leading = { get className() { events.push("leading"); return "pre"; } };
+          const trailing = {
+            get title() {
+              events.push("title");
+              ${mode === "mutate" ? 'cls.push("late");' : 'cls = ["other"];'}
+              return "label";
+            },
+            get className() { events.push("trailing class"); return "post"; }
+          };
+          return <div {...leading} css={cls} {...trailing} />;
+        }`,
+        { jsxCssProp: true }
+      );
+      expect(result[1]).toBe("");
+      const { Box } = executeModule(code, {
+        "@mincho-js/css/classname": { cx }
+      }) as {
+        Box(
+          cls: string[],
+          events: string[]
+        ): {
+          props: { className: string; title: string };
+        };
+      };
+      const input = ["initial"];
+      const events: string[] = [];
+      expect(Box(input, events).props).toMatchObject({
+        className:
+          mode === "mutate" ? "pre initial late post" : "pre initial post",
+        title: "label"
+      });
+      expect(input).toEqual(
+        mode === "mutate" ? ["initial", "late"] : ["initial"]
+      );
+      expect(events).toEqual(["leading", "title", "trailing class"]);
+    }
+  );
+
+  it.each([
+    ["invoked writer", "rule.color = 'blue'", true, true],
+    ["uninvoked writer", "rule.color = 'blue'", false, false],
+    ["invoked reader", "rule.color", true, false]
+  ] as const)(
+    "checks effects of captured style arguments in a returned local callback: %s",
+    (_name, callback, invoked, rejects) => {
+      const compile = () =>
+        babelTransform(
+          `const style = { color: "red" };
+           const make = rule => () => { ${callback}; };
+           const apply = make(style);
+           const selected = apply;
+           ${invoked ? "selected();" : ""}
+           export const observed = style.color;
+           export const Box = () => <div css={style} />;`,
+          { jsxCssProp: true }
+        );
+      if (rejects) {
+        expect(compile).toThrow(/same-file binding "style" is mutated/);
+        return;
+      }
+
+      const { code, result } = compile();
+      const css = vi.fn(({ color }: { color: string }) => `css-${color}`);
+      const sidecar = executeModule(result[1], { "@mincho-js/css": { css } });
+      expect(css.mock.calls).toEqual([[{ color: "red" }]]);
+      const runtime = executeModule(code, { [result[0]]: sidecar }) as {
+        observed: string;
+        Box(): { props: { className: string } };
+      };
+      expect(runtime.observed).toBe("red");
+      expect(runtime.Box().props.className).toBe("css-red");
+    }
+  );
+
+  it.each([
+    ["direct", "", "cls"],
+    ["alias chain", "const first = cls; const alias = first;", "alias"]
+  ] as const)(
+    "keeps an opaque runtime class with a stable %s binding",
+    (_name, aliases, binding) => {
+      const { code, result } = babelTransform(
+        `export function Box(readClass) {
+        const cls = readClass();
+        ${aliases}
+        return <div css={${binding}} />;
+      }`,
+        { jsxCssProp: true }
+      );
+      expect(result[1]).toBe("");
+      const { Box } = executeModule(code, {
+        "@mincho-js/css/classname": { cx }
+      }) as {
+        Box(read: () => string): { props: { className: string } };
+      };
+      const read = vi.fn(() => "runtime-class");
+      expect(Box(read).props.className).toBe("runtime-class");
+      expect(read).toHaveBeenCalledOnce();
+    }
+  );
+
+  it.each([
+    [
+      "invoked setter",
+      "style",
+      "set active(value) { rule.color = value; }",
+      'holder.active = "blue";',
+      true
+    ],
+    [
+      "uninvoked setter",
+      "style",
+      "set active(value) { rule.color = value; }",
+      "",
+      false
+    ],
+    [
+      "unrelated setter",
+      "other",
+      "set active(value) { rule.color = value; }",
+      'holder.active = "blue";',
+      false
+    ],
+    [
+      "invoked method",
+      "style",
+      "paint(value) { rule.color = value; }",
+      'holder.paint("blue");',
+      true
+    ],
+    [
+      "uninvoked method",
+      "style",
+      "paint(value) { rule.color = value; }",
+      "",
+      false
+    ],
+    [
+      "unrelated method",
+      "other",
+      "paint(value) { rule.color = value; }",
+      'holder.paint("blue");',
+      false
+    ],
+    [
+      "later data property replaces method",
+      "style",
+      "paint(value) { rule.color = value; }, paint: () => undefined",
+      'holder.paint("blue");',
+      false
+    ]
+  ] as const)(
+    "checks effects on the exact captured style in a returned helper: %s",
+    (_name, capture, member, effect, rejects) => {
+      const compile = () =>
+        babelTransform(
+          `const style = { color: "red" }, other = { color: "green" };
+           const wrap = rule => ({ ${member} });
+           const holder = wrap(${capture});
+           ${effect}
+           export const observed = style.color;
+           export const Box = () => <div css={style} />;`,
+          { jsxCssProp: true }
+        );
+      if (rejects) {
+        expect(compile).toThrow(/same-file binding "style" is mutated/);
+        return;
+      }
+      const { code, result } = compile();
+      const css = vi.fn(({ color }: { color: string }) => `css-${color}`);
+      const sidecar = executeModule(result[1], { "@mincho-js/css": { css } });
+      expect(css.mock.calls).toEqual([[{ color: "red" }]]);
+      const runtime = executeModule(code, { [result[0]]: sidecar }) as {
+        observed: string;
+        Box(): { props: { className: string } };
+      };
+      expect(runtime.observed).toBe("red");
+      expect(runtime.Box().props.className).toBe("css-red");
+    }
+  );
+
+  it.each(
+    (
+      [
+        ["direct", "", true],
+        ["taken", "show && ", true],
+        ["untaken", "show && ", false]
+      ] as const
+    ).flatMap(([name, prefix, chosen]) =>
+      ([false, true] as const).map((directEval) => ({
+        name,
+        prefix,
+        chosen,
+        directEval
+      }))
+    )
+  )(
+    "keeps synchronous JSX initializer effects in the authored activation ($name, eval=$directEval)",
+    ({ prefix, chosen, directEval }) => {
+      const classExpression = directEval
+        ? `eval(${JSON.stringify("var observed = 1; events.push('class'); 'base'")})`
+        : '(events.push("class"), "base")';
+      const { code, result } = babelTransform(
+        `module.exports = function Box(cls, events, show) {
+          const element = ${prefix}<div css={cls}
+            data-mid={(events.push("middle"), "mid")}
+            className={${classExpression}} />;
+          return { observed: typeof observed, props: element ? element.props : null };
+        };`,
+        { jsxCssProp: true },
+        { sourceType: "script" }
+      );
+      expect(result[1]).toBe("");
+      const Box = executeModule(code, {
+        "@mincho-js/css/classname": { cx }
+      }) as unknown as (
+        cls: string[],
+        events: string[],
+        show: boolean
+      ) => {
+        observed: string;
+        props: { className: string; "data-mid": string };
+      };
+      const events: string[] = [];
+      expect(Box(["selected"], events, chosen)).toEqual({
+        observed: chosen && directEval ? "number" : "undefined",
+        props: chosen ? { className: "base selected", "data-mid": "mid" } : null
+      });
+      expect(events).toEqual(chosen ? ["middle", "class"] : []);
+    }
+  );
+
+  it("reads a flat CSS class in its original TDZ before any trailing lookup", () => {
+    const { code, result } = babelTransform(
+      `export function Box(initial, trailing) {
+         const render = () => <div css={cls} {...trailing} />;
+         const value = render();
+         let cls = initial;
+         return value;
+       }`,
+      { jsxCssProp: true }
+    );
+    expect(result[1]).toBe("");
+    const { Box } = executeModule(code, {
+      "@mincho-js/css/classname": { cx }
+    }) as { Box(initial: string[], trailing: { title: string }): unknown };
+    const title = vi.fn(() => "label");
+    expect(() =>
+      Box(["initial"], {
+        get title() {
+          return title();
+        }
+      })
+    ).toThrow(ReferenceError);
+    expect(title).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["bare sync", false, false],
+    ["bare await", false, true],
+    ["braced sync", true, false],
+    ["braced await", true, true]
+  ] as const)(
+    "keeps a staged JSX element in an attribute: %s",
+    async (_name, braced, suspends) => {
+      const element = `<div css={cls} key={mark("key", "stable")}
+        className={(cls = "changed", mark("class", "base"))}>
+        {${suspends ? "await " : ""}mark("child", "content")}
+      </div>`;
+      const { code } = babelTransform(
+        `export const calls = [];
+        const Root = () => null;
+        const mark = (event, value) => { calls.push(event); return value; };
+        export const Box = ${suspends ? "async " : ""}(cls) =>
+          <Root slot=${braced ? "{" + element + "}" : element} />;`,
+        { jsxCssProp }
+      );
+      const runtime = executeModule(code, {
+        "@mincho-js/css/classname": { cx }
+      });
+      type Element = {
+        props: { slot: { props: { className: string; key: string } } };
+      };
+      const Box = runtime.Box as (cls: string) => Element | Promise<Element>;
+      expect((await Box("selected")).props.slot.props).toMatchObject({
+        className: "base selected",
+        key: "stable"
+      });
+      expect(runtime.calls).toEqual(["key", "class", "child"]);
+    }
+  );
+
+  it.each([false, true])(
+    "preserves an ordinary configured cx package export condition require=%s",
+    async (requireKind) => {
+      const root = await mkdtemp(join(tmpdir(), "mincho-cx-conditions-"));
+      try {
+        await writeFile(
+          join(root, "package.json"),
+          '{"name":"custom-preset","exports":{"import":"./import.mjs","require":"./require.cjs"}}'
+        );
+        await writeFile(
+          join(root, "import.mjs"),
+          'export const cx = (value) => "esm-" + value;'
+        );
+        await writeFile(
+          join(root, "require.cjs"),
+          'exports.cx = (value) => "cjs-" + value;'
+        );
+        const source =
+          (requireKind
+            ? 'const { cx } = require("custom-preset");'
+            : 'import { cx } from "custom-preset";') +
+          "export const Box=(cls)=> <span css={cx(cls)} />;";
+        const { code, result } = babelTransform(source, {
+          jsxCssProp,
+          extractCalls: { "custom-preset": ["css", "cx"] }
+        });
+        const bundle = (
+          contents: string,
+          sourcefile: string,
+          loader: Loader,
+          external: string[]
+        ) =>
+          build({
+            stdin: { contents, resolveDir: root, sourcefile, loader },
+            jsxFactory: "jsx",
+            bundle: true,
+            write: false,
+            platform: "node",
+            format: "cjs",
+            external
+          });
+        const loaded = await bundle(code, "fixture.jsx", "jsx", [
+          "@mincho-js/css/classname",
+          "@mincho-js/css",
+          ...(result[0] ? [result[0]] : [])
+        ]);
+        const module = { exports: {} };
+        const isolated = await bundle(result[1], "emitted.ts", "ts", [
+          "@mincho-js/css"
+        ]);
+        const sidecar = { exports: {} };
+        new Function(
+          "require",
+          "module",
+          "exports",
+          isolated.outputFiles[0]!.text
+        )(
+          (name: string) => {
+            expect(name).toBe("@mincho-js/css");
+            return { mincho$ };
+          },
+          sidecar,
+          sidecar.exports
+        );
+        new Function(
+          "require",
+          "module",
+          "exports",
+          "jsx",
+          loaded.outputFiles[0]!.text
+        )(
+          (name: string) =>
+            name === "@mincho-js/css/classname"
+              ? { cx }
+              : name === result[0]
+                ? sidecar.exports
+                : { mincho$ },
+          module,
+          module.exports,
+          (_type: unknown, props: unknown) => props
+        );
+        const Box = (
+          module.exports as { Box: (cls: string) => { className: string } }
+        ).Box;
+        expect(Box("class").className).toBe(
+          (requireKind ? "cjs-" : "esm-") + "class"
+        );
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    }
+  );
+
+  it.each(["preset.cx", 'preset["cx"]'])(
+    "keeps the receiver of a configured runtime %s call",
+    (callee) => {
+      const { code, result } = babelTransform(
+        `import * as preset from "custom-preset";
+        export const Box = (cls) => <div css={${callee}(cls)} />;`,
+        { jsxCssProp, extractCalls: { "custom-preset": ["css", "cx"] } }
+      );
+      const preset = {
+        theme: "theme",
+        cx(this: { theme: string } | undefined, cls: string) {
+          return this ? this.theme + " " + cls : "detached";
+        }
+      };
+      const modules = {
+        "@mincho-js/css": { mincho$ },
+        "@mincho-js/css/classname": { cx },
+        "custom-preset": preset
+      };
+      const sidecar = executeModule(result[1], modules);
+      const runtime = executeModule(code, { ...modules, [result[0]]: sidecar });
+      const Box = runtime.Box as (cls: string) => {
+        props: { className: string };
+      };
+      expect(Box("selected").props.className).toBe(preset.cx("selected"));
+    }
+  );
+
+  it.each(["false", "true", "active"])(
+    "preserves selected JSX CSS for the %s short-circuit operand",
+    (left) => {
+      const { code, result } = babelTransform(
+        `import { makeStyle } from "./colors.css.ts";
+         export const Box = (active) => <div css={${left} && makeStyle()} />;`,
+        { jsxCssProp, optimize: { pureFunctions: false } }
+      );
+      const makeStyle = vi.fn(() => ({ color: "red" }));
+      const toClass = vi.fn((rule: { color: string }) => rule.color + "-class");
+      const modules = {
+        "./colors.css.ts": { makeStyle },
+        "custom-preset": { css: toClass },
+        "@mincho-js/css": { mincho$: <T>(callback: () => T) => callback() },
+        "@mincho-js/css/classname": { cx }
+      };
+      const sidecar = executeModule(result[1], modules);
+      const runtime = executeModule(code, { ...modules, [result[0]]: sidecar });
+      const Box = runtime.Box as (active: boolean) => {
+        props: { className: string };
+      };
+      expect(Box(false).props.className).toBe(
+        left === "true" ? "red-class" : ""
+      );
+      expect(Box(true).props.className).toBe(
+        left === "false" ? "" : "red-class"
+      );
+      expect(makeStyle).toHaveBeenCalledTimes(left === "false" ? 0 : 1);
+      expect(toClass).toHaveBeenCalledTimes(left === "false" ? 0 : 1);
+    }
+  );
+
+  it.each([
+    ["class array", '["external"]', "external"],
+    ["empty class array", "[]", ""],
+    ["style object", "{ padding: 4 }", "4-class"]
+  ] as const)(
+    "keeps an ordinary %s fallback in its own CSS mode",
+    (kind, fallback, inactive) => {
+      const authored = `import {getStyles} from "./theme.css.js";
+         export const Box = active => <div css={active ? getStyles() : ${fallback}} className="base" />;`;
+      const { code, result } = babelTransform(authored, {
+        jsxCssProp,
+        optimize: { pureFunctions: false }
+      });
+      const getStyles = vi.fn(() => ({ padding: 12 }));
+      const native = executeModule(authored, {
+        "./theme.css.js": { getStyles }
+      }).Box as (active: boolean) => { props: { css: unknown } };
+      const raw = native(false).props.css;
+      if (kind === "style object") expect(raw).toEqual({ padding: 4 });
+      else expect(cx(raw as string[])).toBe(inactive);
+      expect(getStyles).not.toHaveBeenCalled();
+      const toClass = vi.fn((rule: { padding: number }) => {
+        if (typeof rule.padding !== "number")
+          throw new Error("the preset accepts only actual style rules");
+        return `${rule.padding}-class`;
+      });
+      const modules = {
+        "./theme.css.js": { getStyles },
+        "custom-preset": { css: toClass },
+        "@mincho-js/css": { mincho$: <T>(callback: () => T) => callback() },
+        "@mincho-js/css/classname": { cx }
+      };
+      const sidecar = executeModule(result[1], modules);
+      const Box = executeModule(code, { ...modules, [result[0]]: sidecar })
+        .Box as (active: boolean) => { props: { className: string } };
+      expect(Box(true).props.className).toBe("base 12-class");
+      expect(Box(false).props.className).toBe(cx("base", inactive));
+      expect(getStyles).toHaveBeenCalledOnce();
+      expect(toClass.mock.calls).toContainEqual([{ padding: 12 }]);
+      expect(toClass).toHaveBeenCalledTimes(kind === "style object" ? 2 : 1);
+    }
+  );
+
+  it.each(["true", "false"] as const)(
+    "does not evaluate a dead ordinary stylesheet factory in a direct JSX ternary (%s)",
+    (condition) => {
+      const options = {
+        jsxCssProp,
+        optimize: { pureFunctions: false }
+      };
+      const selected =
+        condition === "true"
+          ? 'true ? "base" : getStyles(size)'
+          : 'false ? getStyles(size) : "base"';
+      const { code, result } = babelTransform(
+        `import { getStyles } from "./styles.css.ts";
+          export const App = (size) => <div css={${selected}} />;`,
+        options
+      );
+      const getStyles = vi.fn((size: number) => ({ padding: size }));
+      const modules = {
+        "./styles.css.ts": { getStyles },
+        "@mincho-js/css": { mincho$ },
+        "@mincho-js/css/classname": { cx },
+        "custom-preset": { css }
+      };
+      const sidecar = executeModule(result[1], modules);
+      const runtime = executeModule(code, { ...modules, [result[0]]: sidecar });
+      const App = runtime.App as (size: number) => {
+        props: { className: string };
+      };
+      expect(App(4).props.className).toBe("base");
+      expect(getStyles).not.toHaveBeenCalled();
+      expect(result[1]).not.toContain("getStyles");
+    }
+  );
+
+  it.each(["direct rest", "named rest", "direct ordinary"] as const)(
+    "keeps JSX await staging local to the authored parameter list (%s)",
+    async (mode) => {
+      const run = (take: boolean) => {
+        const operand = `${take} && <div css={styleA} className="base" data-child={await load()} />`;
+        return mode === "named rest"
+          ? `const render = async (...args) => ${operand}; export const output = render("arg");`
+          : `export const output = (async (${mode === "direct rest" ? "...args" : ""}) => ${operand})("arg");`;
+      };
+      for (const take of [false, true]) {
+        const load = vi.fn(async () => "child");
+        const { code, result } = babelTransform(
+          `import { load } from "./fixture"; const styleA = "style-a"; ${run(take)}`,
+          { jsxCssProp, optimize: { pureFunctions: false } }
+        );
+        const modules = {
+          "./fixture": { load },
+          "@mincho-js/css/classname": { cx },
+          "custom-preset": { css: vi.fn() }
+        };
+        const sidecar = executeModule(result[1], modules);
+        const runtime = executeModule(code, {
+          ...modules,
+          [result[0]]: sidecar
+        });
+        if (!take) {
+          expect(await runtime.output).toBe(false);
+          expect(load).not.toHaveBeenCalled();
+        } else {
+          expect(await runtime.output).toMatchObject({
+            props: { className: cx("base", "style-a"), "data-child": "child" }
+          });
+          expect(load).toHaveBeenCalledTimes(1);
+        }
+      }
+    }
+  );
+
+  it.each(["computed object", "computed class", "deferred method"])(
+    "keeps suspension in its authored JSX scope: %s",
+    async (form) => {
+      const operand =
+        form === "computed class"
+          ? "class { [await getKey()]() {} }"
+          : form === "computed object"
+            ? "{ [await getKey()]() {} }"
+            : "{ async ordinary() { return await getKey(); } }";
+      const { code } = babelTransform(
+        `export const calls = [];
+         function className() { calls.push("class"); return "base"; }
+         export const Box = async (show, cls, getKey) => show &&
+           <div css={cls} className={className()} data-value={${operand}} />;`,
+        { jsxCssProp }
+      );
+      const runtime = executeModule(code, {
+        "@mincho-js/css/classname": { cx }
+      });
+      type Element = { props: { className: string; "data-value": object } };
+      const Box = runtime.Box as (
+        show: boolean,
+        cls: string,
+        key: () => Promise<string>
+      ) => Promise<false | Element>;
+      const getKey = vi.fn(async () => {
+        (runtime.calls as string[]).push("key");
+        return "selected-key";
+      });
+      expect(await Box(false, "selected", getKey)).toBe(false);
+      expect(runtime.calls).toEqual([]);
+      const element = (await Box(true, "selected", getKey)) as Element;
+      expect(element.props.className).toBe("base selected");
+      const data = element.props["data-value"];
+      if (form === "deferred method") {
+        expect(runtime.calls).toEqual(["class"]);
+        expect(getKey).not.toHaveBeenCalled();
+        await (data as { ordinary: () => Promise<string> }).ordinary();
+      } else {
+        const target =
+          typeof data === "function"
+            ? (data as { prototype: object }).prototype
+            : data;
+        expect(Object.getOwnPropertyNames(target)).toContain("selected-key");
+      }
+      expect(runtime.calls).toEqual(["class", "key"]);
+      expect(getKey).toHaveBeenCalledOnce();
     }
   );
 
@@ -584,6 +1628,53 @@ describe("configured JSX callable values", () => {
     expect(proofs).toEqual([true, false]);
   });
 
+  it.each([
+    ["null?.[{ toString: null, valueOf: null }]", undefined],
+    ['null?.["value"]', undefined],
+    ['({ value: 4 })?.["value"]', 4]
+  ])(
+    "does not convert an unselected configured factory argument key: %s",
+    (argument, expected) => {
+      const authored = `
+      import {getStyles} from "./theme.css.js";
+      export const Box = () => <div css={getStyles(${argument})} />;
+    `;
+      const getStyles = vi.fn((value: number | undefined) => ({
+        padding: value ?? 12
+      }));
+      const cssFor = vi.fn(
+        (rule: { padding: number }) => `padding-${rule.padding}`
+      );
+      const modules = {
+        "@mincho-js/css": { mincho$ },
+        "@mincho-js/css/classname": { cx },
+        "custom-preset": { css: cssFor },
+        "./theme.css.js": { getStyles }
+      };
+      const native = executeModule(authored, modules).Box as () => {
+        props: { css: { padding: number } };
+      };
+      expect(native().props.css.padding).toBe(expected ?? 12);
+      expect(getStyles).toHaveBeenCalledExactlyOnceWith(expected);
+      getStyles.mockClear();
+
+      const { code, result } = babelTransform(authored, {
+        jsxCssProp,
+        optimize: { pureFunctions: false }
+      });
+      const sidecar = executeModule(result[1], modules);
+      const rendered = executeModule(code, { ...modules, [result[0]]: sidecar })
+        .Box as () => { props: { className: string; css?: unknown } };
+      const props = rendered().props;
+      expect(cssFor.mock.results[0]?.value).toEqual(expect.any(String));
+      expect(props).toEqual({ className: cssFor.mock.results[0]?.value });
+      expect(getStyles).toHaveBeenCalledExactlyOnceWith(expected);
+      expect(cssFor).toHaveBeenCalledExactlyOnceWith({
+        padding: expected ?? 12
+      });
+    }
+  );
+
   it("evaluates ordinary static CSS-file factories through the selected definition", () => {
     const style = { padding: 12 };
     const getStyles = vi.fn(() => style);
@@ -911,6 +2002,77 @@ describe("configured JSX callable values", () => {
   );
 
   it.each([
+    ["shared runtime observation", "input.padding", true, true],
+    [
+      "shared opaque reader has no proof of purity",
+      "input.padding",
+      false,
+      true
+    ],
+    ["isolated value", "-1", true, false],
+    ["observable primitive", "input", false, false]
+  ] as const)(
+    "moves configured style arguments only when application reads stay independent: %s",
+    (description, observation, mutate, rejected) => {
+      const primitive = description === "observable primitive";
+      const getStyles = vi.fn((input: number | { padding: number }) => {
+        if (typeof input === "number") return { padding: input };
+        if (mutate) input.padding = 12;
+        return { padding: input.padding };
+      });
+      const authored = `
+        import { getStyles } from "./theme.css.js";
+        export const Box = () => {
+          const input = ${primitive ? "4" : "{ padding: 4 }"};
+          const element = <div css={getStyles(input)} />;
+          return { element, observed: ${observation} };
+        };
+      `;
+      const providers = { "./theme.css.js": { getStyles } };
+      const native = executeModule(authored, providers);
+      const nativeBox = native.Box as () => {
+        element: { props: { css: { padding: number } } };
+        observed: number;
+      };
+      const expected = nativeBox();
+      expect(expected.observed).toBe(
+        observation === "-1" ? -1 : mutate ? 12 : 4
+      );
+      const padding = mutate ? 12 : 4;
+      expect(expected.element.props.css.padding).toBe(padding);
+      getStyles.mockClear();
+
+      const { code, result } = babelTransform(authored, {
+        jsxCssProp,
+        optimize: { pureFunctions: false }
+      });
+      const modules = {
+        ...providers,
+        "@mincho-js/css": { mincho$ },
+        "@mincho-js/css/classname": { cx },
+        "custom-preset": { css }
+      };
+      if (rejected) {
+        expect(() => executeModule(result[1], modules)).toThrow(
+          /runtime calls only to compiled Mincho or Vanilla Extract recipes/
+        );
+        expect(getStyles).not.toHaveBeenCalled();
+      } else {
+        const sidecar = executeModule(result[1], modules);
+        const app = executeModule(code, { ...modules, [result[0]]: sidecar });
+        const Box = app.Box as () => {
+          element: { props: { className: string } };
+          observed: number;
+        };
+        const actual = Box();
+        expect(actual.observed).toBe(expected.observed);
+        expect(actual.element.props.className).toBe(Object.values(sidecar)[0]);
+        expect(getStyles).toHaveBeenCalledTimes(1);
+      }
+    }
+  );
+
+  it.each([
     "const input = { padding: 4 };",
     "const input = { padding: 4 }; const copy = { ...input }; copy.padding = 12;",
     "const input = { padding: 4 }; const keys = Object.keys(input);"
@@ -973,6 +2135,55 @@ describe("configured JSX callable values", () => {
       expect(getStyles).toHaveBeenCalledExactlyOnceWith({ padding: 4 });
       expect(code).not.toContain("getStyles(");
     });
+
+    it.each([false, true])(
+      "keeps a skipped initializer and selected recipe effects in their execution frame (prefix %s)",
+      (prefix) => {
+        const recipe = rules({
+          variants: { size: { 4: { padding: 4 }, 12: { padding: 12 } } }
+        });
+        const { code, result } = babelTransform(
+          `
+        import {recipe} from "./theme.css.js";
+        import {tick, readSize} from "./values.js";
+        if (false) { var enabled = true; }
+        export const Box = () => <div css={recipe({size: ${prefix ? "(tick(), enabled)" : "enabled"} ? 0 : readSize()})} />;
+      `,
+          { jsxCssProp, optimize: { pureFunctions: false } }
+        );
+        const events: string[] = [];
+        const modules = {
+          "@mincho-js/css": { mincho$ },
+          "@mincho-js/css/classname": { cx },
+          "custom-preset": { css },
+          "./theme.css.js": { recipe },
+          "./values.js": {
+            tick() {
+              events.push("tick");
+            },
+            readSize() {
+              const first = !events.includes("read");
+              events.push("read");
+              return first ? 4 : 12;
+            }
+          }
+        };
+        const sidecar = executeModule(result[1], modules);
+        const runtime = executeModule(code, {
+          ...modules,
+          [result[0]]: sidecar
+        });
+        const Box = runtime.Box as () => { props: { className: string } };
+        expect(events).toEqual([]);
+        expect([Box().props.className, Box().props.className]).toEqual([
+          recipe({ size: 4 }),
+          recipe({ size: 12 })
+        ]);
+        expect(events).toEqual(
+          prefix ? ["tick", "read", "tick", "read"] : ["read", "read"]
+        );
+      }
+    );
 
     it.each([
       ["selected alias", "const selected = false ? other : input;", "selected"],
@@ -1246,6 +2457,75 @@ describe("configured JSX callable values", () => {
       vi.unstubAllGlobals();
     }
   });
+
+  it.each([
+    ["no nested helper", "", "4", false, 4],
+    [
+      "dormant nested helper",
+      "const readNested = () => readValue();",
+      "4",
+      false,
+      4
+    ],
+    [
+      "invoked nested helper",
+      "const readNested = () => readValue();",
+      "readNested()",
+      true,
+      12
+    ]
+  ] as const)(
+    "classifies configured factory arguments by actual local helper activation: %s",
+    (_name, nested, value, runtime, padding) => {
+      const readValue = vi.fn(() => 12);
+      const getStyles = vi.fn((padding: number) => ({ padding }));
+      const imported = {
+        "./theme.css.js": { getStyles },
+        "./measure.js": { readValue }
+      };
+      const authored = `
+        import { getStyles } from "./theme.css.js";
+        import { readValue } from "./measure.js";
+        function read() { ${nested} return ${value}; }
+        export const Box = () => <div css={getStyles(read())} />;
+      `;
+
+      const native = executeModule(authored, imported);
+      const nativeBox = native.Box as () => {
+        props: { css: { padding: number } };
+      };
+      expect(nativeBox().props.css.padding).toBe(padding);
+      expect(readValue).toHaveBeenCalledTimes(runtime ? 1 : 0);
+      expect(getStyles).toHaveBeenCalledExactlyOnceWith(padding);
+      readValue.mockClear();
+      getStyles.mockClear();
+
+      const { code, result } = babelTransform(authored, {
+        jsxCssProp,
+        optimize: { pureFunctions: false }
+      });
+      const modules = {
+        ...imported,
+        "@mincho-js/css": { mincho$ },
+        "@mincho-js/css/classname": { cx },
+        "custom-preset": { css }
+      };
+      if (runtime) {
+        expect(() => executeModule(result[1], modules)).toThrow(
+          /runtime calls only to compiled Mincho or Vanilla Extract recipes/
+        );
+        expect(getStyles).not.toHaveBeenCalled();
+      } else {
+        const sidecar = executeModule(result[1], modules);
+        const app = executeModule(code, { ...modules, [result[0]]: sidecar });
+        const Box = app.Box as () => { props: { className: string } };
+        expect(Object.values(sidecar)).toEqual([expect.any(String)]);
+        expect(Box().props.className).toBe(Object.values(sidecar)[0]);
+        expect(getStyles).toHaveBeenCalledExactlyOnceWith(4);
+      }
+      expect(readValue).not.toHaveBeenCalled();
+    }
+  );
 
   it.each([
     "function read(size = 4) { return size; }",
@@ -1860,6 +3140,77 @@ describe("configured JSX callable values", () => {
       )
     ).toThrow(/complete static style arrays/);
   });
+
+  it.each(["template", "literal", "opaque"] as const)(
+    "uses normal class merging for a recipe and a %s class-array member",
+    (kind) => {
+      const definition = defineRules({
+        properties: { padding: [4, 12], color: ["red", "blue"] }
+      });
+      const recipe = definition.rules({
+        variants: {
+          tone: { quiet: { color: "red" }, strong: { color: "blue" } }
+        }
+      });
+      const first = definition.css({ padding: 12 });
+      const last = definition.css({ padding: 4 });
+      const base = cx(first, last);
+      const variantClass = recipe({ tone: "strong" });
+      const genericJoin = cx(base, variantClass);
+      const configuredJoin = definition.cx(base, variantClass);
+      expect(genericJoin).not.toBe(configuredJoin);
+
+      const element =
+        kind === "template"
+          ? "`${readBase()}`"
+          : kind === "literal"
+            ? JSON.stringify(base)
+            : "base";
+      const authored = `
+        import {recipe} from "./theme.css.js";
+        export const Box = ({base,readBase,readTone}) =>
+          <div css={[${element},recipe({tone: readTone()})]} />;
+      `;
+      const trace: string[] = [];
+      const properties = {
+        base,
+        readBase: () => {
+          trace.push("base");
+          return base;
+        },
+        readTone: () => {
+          trace.push("tone");
+          return "strong";
+        }
+      };
+      const modules = {
+        "@mincho-js/css": { mincho$ },
+        "@mincho-js/css/classname": { cx },
+        "custom-preset": { css: definition.css, cx: definition.cx },
+        "./theme.css.js": { recipe }
+      };
+      const native = executeModule(authored, modules).Box as (
+        props: typeof properties
+      ) => { props: { css: string[] } };
+      expect(definition.cx(native(properties).props.css)).toBe(configuredJoin);
+      const expectedTrace = kind === "template" ? ["base", "tone"] : ["tone"];
+      expect(trace.splice(0)).toEqual(expectedTrace);
+
+      const { code, result } = babelTransform(authored, {
+        jsxCssProp,
+        optimize: { pureFunctions: false }
+      });
+      const sidecar = result[1] ? executeModule(result[1], modules) : {};
+      const compiled = executeModule(code, { ...modules, [result[0]]: sidecar })
+        .Box as (props: typeof properties) => { props: { className: string } };
+      expect(trace).toEqual([]);
+      expect(compiled(properties).props).toEqual({
+        className: kind === "opaque" ? genericJoin : configuredJoin
+      });
+      expect(trace).toEqual(expectedTrace);
+      expect(code.includes("recipe(")).toBe(kind === "opaque");
+    }
+  );
 
   it("preserves runtime recipe arguments inside direct class arrays", () => {
     const definition = defineRules({ properties: { padding: [4, 12] } });
@@ -3721,6 +5072,562 @@ describe("configured JSX callable values", () => {
     }
   );
 
+  it.each([
+    ["ternary", 'active ? cx("base") : false'],
+    ["logical", 'active && cx("base")'],
+    ["namespace", 'active ? preset.cx("base") : false']
+  ])(
+    "reuses an ordinary configured cx result from a %s initializer",
+    (kind, initializer) => {
+      const namespace = kind === "namespace";
+      for (const shared of [false, true]) {
+        const source = `
+        import ${namespace ? "* as preset" : "{ cx }"} from "custom-preset";
+        export function Box(active) {
+          const selected = ${initializer};
+          return {
+            ${shared ? "selected," : ""}
+            first: <div css={selected} />${shared ? ", second: <span css={selected} />" : ""}
+          };
+        }
+      `;
+        const { code, result } = babelTransform(source, { jsxCssProp });
+        let count = 0;
+        const configuredCx = vi.fn(function (
+          this: { prefix: string } | undefined,
+          value: string
+        ) {
+          return (namespace ? this?.prefix : value) + "-" + ++count;
+        });
+        const modules = {
+          "custom-preset": { css, cx: configuredCx, prefix: "base" },
+          "@mincho-js/css/classname": { cx },
+          "@mincho-js/css": { mincho$ }
+        };
+        const sidecar = executeModule(result[1], modules);
+        const runtime = executeModule(code, {
+          ...modules,
+          [result[0]]: sidecar
+        });
+        const Box = runtime.Box as (active: boolean) => {
+          selected?: string | false;
+          first: { props: { className: string } };
+          second?: { props: { className: string } };
+        };
+
+        for (const [active, selected] of [
+          [true, "base-1"],
+          [false, false],
+          [true, "base-2"]
+        ] as const) {
+          configuredCx.mockClear();
+          const rendered = Box(active);
+          expect(configuredCx.mock.calls).toEqual(active ? [["base"]] : []);
+          expect(rendered.selected).toBe(shared ? selected : undefined);
+          expect(rendered.first.props.className).toBe(selected || "");
+          if (shared)
+            expect(rendered.second?.props.className).toBe(selected || "");
+        }
+      }
+    }
+  );
+
+  it.each([
+    ["style", "default", false, false],
+    ["empty style", "default", false, false],
+    ["null", "default", false, false],
+    ["null", "", true, false],
+    ["false", "default", true, false],
+    ["style", "default", false, true],
+    ["empty style", "default", false, true],
+    ["null", "default", false, true],
+    ["null", "", true, true],
+    ["false", "default", true, true]
+  ] as const)(
+    "preserves separate authored nullish and truthy scalar cx decisions: %s %s",
+    (kind, defaultValue, usesFallback, dynamic) => {
+      const { code, result } = babelTransform(
+        `import {cx} from "custom-preset";
+         import {getStyles} from "./theme.css.js";
+         export function Box(base, fallback, readDefault) {
+           return <div css={cx(base, (getStyles() ?? ${dynamic ? "readDefault()" : JSON.stringify(defaultValue)}) || fallback())} />;
+         }`,
+        { jsxCssProp }
+      );
+      const definition = defineRules({ properties: { padding: [12] } });
+      const rule = kind === "style" ? { padding: 12 } : {};
+      const getStyles = vi.fn(() =>
+        kind === "null" ? null : kind === "false" ? false : rule
+      );
+      const configuredCss = vi.fn(definition.css);
+      const configuredCx = vi.fn(cx);
+      const modules = {
+        "custom-preset": { cx: configuredCx, css: configuredCss },
+        "@mincho-js/css/classname": { cx },
+        "@mincho-js/css": { mincho$ },
+        "./theme.css.js": { getStyles }
+      };
+      const sidecar = executeModule(result[1], modules);
+      const { Box } = executeModule(code, {
+        ...modules,
+        [result[0]]: sidecar
+      }) as {
+        Box(
+          base: string,
+          fallback: () => string,
+          readDefault: () => string
+        ): { props: { className: string } };
+      };
+      const trace: string[] = [];
+      const fallback = vi.fn(() => {
+        trace.push("fallback");
+        return "fallback";
+      });
+      const readDefault = vi.fn(() => {
+        trace.push("default");
+        return defaultValue;
+      });
+      const selected = usesFallback
+        ? "fallback"
+        : kind === "null"
+          ? defaultValue
+          : configuredCss.mock.results[0]?.value;
+      if (kind === "style" || kind === "empty style") {
+        expect(configuredCss).toHaveBeenCalledExactlyOnceWith(rule);
+        if (kind === "empty style") expect(selected).toBe("");
+        else expect(selected).toMatch(/\S/);
+      } else expect(configuredCss).not.toHaveBeenCalled();
+
+      for (const base of ["first", "second"]) {
+        expect(Box(base, fallback, readDefault).props.className).toBe(
+          cx(base, selected)
+        );
+        expect(trace.splice(0)).toEqual([
+          ...(dynamic && kind === "null" ? ["default"] : []),
+          ...(usesFallback ? ["fallback"] : [])
+        ]);
+      }
+      expect(configuredCx.mock.calls).toEqual([
+        ["first", selected],
+        ["second", selected]
+      ]);
+      expect(fallback).toHaveBeenCalledTimes(usesFallback ? 2 : 0);
+      expect(getStyles).toHaveBeenCalledOnce();
+    }
+  );
+
+  it.each([
+    ["default rule", null, { padding: 12 }, ["primary", "default"], false],
+    ["defined primary", { padding: 12 }, { padding: 12 }, ["primary"], false],
+    ["empty default", null, {}, ["primary", "default"], false],
+    ["false default", null, false, ["primary", "default"], true]
+  ] as const)(
+    "compiles only the selected static nullish factory: %s",
+    (_case, primary, otherwise, buildTrace, usesFallback) => {
+      const { code, result } = babelTransform(
+        `import {cx} from "custom-preset";
+       import {getPrimary, getDefault} from "./theme.css.js";
+       export function Box(base, fallback) {
+         return <div css={cx(base, (getPrimary() ?? getDefault()) || fallback())} />;
+       }`,
+        { jsxCssProp }
+      );
+      const trace: string[] = [];
+      const definition = defineRules({ properties: { padding: [12] } });
+      const compiled = definition.css({ padding: 12 });
+      const configuredCss = vi.fn(definition.css);
+      const modules = {
+        "custom-preset": { css: configuredCss, cx },
+        "@mincho-js/css/classname": { cx },
+        "@mincho-js/css": { mincho$ },
+        "./theme.css.js": {
+          getPrimary: () => {
+            trace.push("primary");
+            return primary;
+          },
+          getDefault: () => {
+            trace.push("default");
+            return otherwise;
+          }
+        }
+      };
+      const sidecar = executeModule(result[1], modules);
+      expect(trace.splice(0)).toEqual(buildTrace);
+      const { Box } = executeModule(code, {
+        ...modules,
+        [result[0]]: sidecar
+      }) as {
+        Box(
+          base: string,
+          fallback: () => string
+        ): { props: { className: string } };
+      };
+      const fallback = vi.fn(() => "fallback");
+      const selected = primary ?? otherwise;
+      const expected = usesFallback
+        ? "fallback"
+        : selected && "padding" in selected
+          ? compiled
+          : "";
+      for (const base of ["first", "second"])
+        expect(Box(base, fallback).props.className).toBe(cx(base, expected));
+      expect(trace).toEqual([]);
+      expect(fallback).toHaveBeenCalledTimes(usesFallback ? 2 : 0);
+      expect(configuredCss).toHaveBeenCalledTimes(usesFallback ? 0 : 1);
+    }
+  );
+
+  it.each([
+    ["||", "empty", false],
+    ["||", "falsy", true],
+    ["||", "nonempty", false],
+    ["??", "falsy", false]
+  ] as const)(
+    "selects runtime cx %s branches by the authored %s factory value",
+    (operator, kind, usesFallback) => {
+      const { code, result } = babelTransform(
+        `import { cx } from "custom-preset";
+           import { getStyles } from "./theme.css.js";
+           export function Box(base, fallback) {
+             return <div css={cx(base, getStyles() ${operator} fallback())} />;
+           }`,
+        { jsxCssProp }
+      );
+      const definition = defineRules({ properties: { padding: [12] } });
+      const rule = kind === "empty" ? {} : { padding: 12 };
+      const getStyles = vi.fn(() => (kind === "falsy" ? false : rule));
+      const configuredCss = vi.fn(definition.css);
+      const configuredCx = vi.fn(cx);
+      const modules = {
+        "custom-preset": { cx: configuredCx, css: configuredCss },
+        "@mincho-js/css/classname": { cx },
+        "@mincho-js/css": { mincho$ },
+        "./theme.css.js": { getStyles }
+      };
+      const sidecar = executeModule(result[1], modules);
+      expect(getStyles).toHaveBeenCalledOnce();
+      expect(configuredCss.mock.calls).toEqual(
+        kind === "falsy" ? [] : [[rule]]
+      );
+      const value = usesFallback
+        ? "fallback"
+        : kind === "falsy"
+          ? false
+          : configuredCss.mock.results[0]!.value;
+      if (kind === "empty") expect(value).toBe("");
+      const { Box } = executeModule(code, {
+        ...modules,
+        [result[0]]: sidecar
+      }) as {
+        Box(
+          base: string,
+          fallback: () => string
+        ): { props: { className: string } };
+      };
+      const fallback = vi.fn(() => "fallback");
+      expect(Box("base", fallback).props.className).toBe(cx("base", value));
+      expect(configuredCx).toHaveBeenCalledExactlyOnceWith("base", value);
+      expect(fallback).toHaveBeenCalledTimes(usesFallback ? 1 : 0);
+      expect(getStyles).toHaveBeenCalledOnce();
+    }
+  );
+
+  it.each([
+    ["check() && getStyles()", true, "nonempty", false],
+    ["check() && getStyles()", true, "empty", false],
+    ["check() && getStyles()", true, "falsy", true],
+    ["check() && getStyles()", false, "nonempty", true],
+    ["check() && getStyles()", 0, "nonempty", true],
+    ["check() ? getStyles() : false", true, "nonempty", false],
+    ["check() ? getStyles() : false", true, "empty", false],
+    ["check() ? getStyles() : false", true, "falsy", true],
+    ["check() ? getStyles() : false", false, "nonempty", true],
+    ["check() ? false : getStyles()", false, "nonempty", false]
+  ] as const)(
+    "selects nested guarded cx branches (%s, guard=%s, factory=%s)",
+    (branch, guard, kind, usesFallback) => {
+      const { code, result } = babelTransform(
+        `import { cx } from "custom-preset";
+           import { getStyles } from "./theme.css.js";
+           export function Box(base, check, fallback) {
+             return <div css={cx(base, (${branch}) || fallback())} />;
+           }`,
+        { jsxCssProp }
+      );
+      const definition = defineRules({ properties: { padding: [12] } });
+      const rule = kind === "empty" ? {} : { padding: 12 };
+      const getStyles = vi.fn(() => (kind === "falsy" ? false : rule));
+      const configuredCss = vi.fn(definition.css);
+      const configuredCx = vi.fn(cx);
+      const modules = {
+        "custom-preset": { cx: configuredCx, css: configuredCss },
+        "@mincho-js/css/classname": { cx },
+        "@mincho-js/css": { mincho$ },
+        "./theme.css.js": { getStyles }
+      };
+      const sidecar = executeModule(result[1], modules);
+      expect(getStyles).toHaveBeenCalledOnce();
+      expect(configuredCss.mock.calls).toEqual(
+        kind === "falsy" ? [] : [[rule]]
+      );
+      const value = usesFallback
+        ? "fallback"
+        : configuredCss.mock.results[0]!.value;
+      if (kind === "empty") expect(value).toBe("");
+      const { Box } = executeModule(code, {
+        ...modules,
+        [result[0]]: sidecar
+      }) as {
+        Box(
+          base: string,
+          check: () => boolean | number,
+          fallback: () => string
+        ): { props: { className: string } };
+      };
+      const trace: string[] = [];
+      const check = vi.fn(() => {
+        trace.push("guard");
+        return guard;
+      });
+      const fallback = vi.fn(() => {
+        trace.push("fallback");
+        return "fallback";
+      });
+      expect(Box("base", check, fallback).props.className).toBe(
+        cx("base", value)
+      );
+      expect(configuredCx).toHaveBeenCalledExactlyOnceWith("base", value);
+      expect(trace).toEqual(usesFallback ? ["guard", "fallback"] : ["guard"]);
+      expect(getStyles).toHaveBeenCalledOnce();
+    }
+  );
+
+  it.each(["rule", "empty", "middle", "last"] as const)(
+    "keeps the scalar OR chain lazy and class-valued: %s",
+    (kind) => {
+      const definition = defineRules({ properties: { padding: [12] } });
+      const rule = kind === "empty" ? {} : { padding: 12 };
+      const getStyles = vi.fn(() =>
+        kind === "rule" || kind === "empty" ? rule : false
+      );
+      const configuredCss = vi.fn(definition.css);
+      const { code, result } = babelTransform(
+        `import {cx} from "custom-preset";
+         import {getStyles} from "./theme.css.js";
+         export const Box = (middle, last) =>
+           <div css={cx("base", (getStyles() || middle()) || last())} />;`,
+        { jsxCssProp, optimize: { pureFunctions: false } }
+      );
+      const modules = {
+        "custom-preset": { cx, css: configuredCss },
+        "@mincho-js/css/classname": { cx },
+        "@mincho-js/css": { mincho$ },
+        "./theme.css.js": { getStyles }
+      };
+      const sidecar = executeModule(result[1], modules);
+      const { Box } = executeModule(code, {
+        ...modules,
+        [result[0]]: sidecar
+      }) as {
+        Box(
+          middle: () => string,
+          last: () => string
+        ): { props: { className: string } };
+      };
+      const trace: string[] = [];
+      const actual = Box(
+        () => {
+          trace.push("middle");
+          return kind === "middle" ? "middle" : "";
+        },
+        () => {
+          trace.push("last");
+          return "last";
+        }
+      );
+      expect(getStyles).toHaveBeenCalledOnce();
+      const hasRule = kind === "rule" || kind === "empty";
+      expect(configuredCss.mock.calls).toEqual(hasRule ? [[rule]] : []);
+      const expected = hasRule ? configuredCss.mock.results[0]!.value : kind;
+      expect(actual.props.className).toBe(cx("base", expected));
+      expect(trace).toEqual(
+        hasRule ? [] : kind === "middle" ? ["middle"] : ["middle", "last"]
+      );
+    }
+  );
+
+  it.each(["array", "iterable", "literal rule"] as const)(
+    "preserves runtime cx spread arguments for %s",
+    (mode) => {
+      const expression =
+        mode === "literal rule" ? "...[getRule()]" : "...getClasses()";
+      const { code, result } = babelTransform(
+        `import { cx } from "custom-preset";
+         import { getClasses, getRule } from "./theme.css.js";
+         export function Box(base, mark) {
+           return <div css={cx(mark("before", base), ${expression},
+                               mark("after", "tail"))} />;
+         }`,
+        { jsxCssProp }
+      );
+      const events: string[] = [];
+      const definition = defineRules({ properties: { padding: [12] } });
+      const rule = { padding: 12 } as const;
+      const configuredCss = vi.fn((input: typeof rule | string[]) =>
+        Array.isArray(input) ? cx(input) : definition.css(input)
+      );
+      const configuredCx = vi.fn((...args: Parameters<typeof cx>) => {
+        events.push("cx");
+        return cx(...args);
+      });
+      const getRule = vi.fn(() => rule);
+      const getClasses = vi.fn(() => {
+        events.push("get");
+        if (mode === "array") return ["wide", "left"];
+        return (function* () {
+          events.push("iterate");
+          yield "wide";
+          yield "left";
+        })();
+      });
+      const modules = {
+        "custom-preset": { cx: configuredCx, css: configuredCss },
+        "@mincho-js/css/classname": { cx },
+        "@mincho-js/css": { mincho$ },
+        "./theme.css.js": { getClasses, getRule }
+      };
+      const sidecar = executeModule(result[1], modules);
+      expect(events).toEqual([]);
+      const { Box } = executeModule(code, {
+        ...modules,
+        [result[0]]: sidecar
+      }) as {
+        Box(
+          base: string,
+          mark: (event: string, value: string) => string
+        ): {
+          props: { className: string };
+        };
+      };
+      const element = Box("base", (event, value) => {
+        events.push(event);
+        return value;
+      });
+      if (mode === "literal rule") {
+        expect(configuredCss).toHaveBeenCalledExactlyOnceWith(rule);
+        expect(getRule).toHaveBeenCalledOnce();
+        expect(getClasses).not.toHaveBeenCalled();
+        const renderedClass = configuredCss.mock.results[0]!.value;
+        expect(configuredCx).toHaveBeenCalledExactlyOnceWith(
+          "base",
+          renderedClass,
+          "tail"
+        );
+        expect(element.props.className).toBe(cx("base", renderedClass, "tail"));
+        expect(events).toEqual(["before", "after", "cx"]);
+      } else {
+        expect(configuredCss).not.toHaveBeenCalled();
+        expect(getRule).not.toHaveBeenCalled();
+        expect(getClasses).toHaveBeenCalledOnce();
+        expect(configuredCx).toHaveBeenCalledExactlyOnceWith(
+          "base",
+          "wide",
+          "left",
+          "tail"
+        );
+        expect(element.props.className).toBe("base wide left tail");
+        expect(events).toEqual([
+          "before",
+          "get",
+          ...(mode === "iterable" ? ["iterate"] : []),
+          "after",
+          "cx"
+        ]);
+      }
+    }
+  );
+
+  it.each(['true ? "base" : getStyles()', 'false ? getStyles() : "base"'])(
+    "does not build a dead factory of a shared JSX class: %s",
+    (selection) => {
+      const { code, result } = babelTransform(
+        `import { getStyles } from "./theme.css.js";
+          export function Box() {
+            const selected = ${selection};
+            return { selected, element: <div css={selected} /> };
+          }`,
+        { jsxCssProp }
+      );
+      const getStyles = vi.fn(() => ({ padding: 12 }));
+      const configuredCss = vi.fn(css);
+      const modules = {
+        "custom-preset": { css: configuredCss },
+        "@mincho-js/css/classname": { cx },
+        "@mincho-js/css": { mincho$ },
+        "./theme.css.js": { getStyles }
+      };
+      const sidecar = executeModule(result[1], modules);
+      const { Box } = executeModule(code, {
+        ...modules,
+        [result[0]]: sidecar
+      }) as {
+        Box(): { selected: string; element: { props: { className: string } } };
+      };
+      for (const frame of [Box(), Box()]) {
+        expect(frame.selected).toBe("base");
+        expect(frame.element.props.className).toBe("base");
+      }
+      expect(getStyles).not.toHaveBeenCalled();
+      expect(configuredCss).not.toHaveBeenCalled();
+    }
+  );
+
+  it("uses a runtime cx result once beside a shared extracted factory branch", () => {
+    const style = { padding: 12 };
+    const getStyles = vi.fn(() => style);
+    const configuredCss = vi.fn(css);
+    let count = 0;
+    const configuredCx = vi.fn((value: string) => value + "-" + ++count);
+    const { code, result } = babelTransform(
+      `import { cx } from "custom-preset";
+       import { getStyles } from "./theme.css.js";
+       export function Box(active) {
+         const selected = active ? cx("base") : getStyles();
+         return { selected, element: <div css={selected} /> };
+       }`,
+      { jsxCssProp }
+    );
+    const modules = {
+      "custom-preset": { css: configuredCss, cx: configuredCx },
+      "@mincho-js/css/classname": { cx },
+      "@mincho-js/css": { mincho$ },
+      "./theme.css.js": { getStyles }
+    };
+    const sidecar = executeModule(result[1], modules);
+    expect(configuredCss).toHaveBeenCalledExactlyOnceWith(style);
+    expect(getStyles).toHaveBeenCalledOnce();
+    expect(configuredCx).not.toHaveBeenCalled();
+    const styleClass = configuredCss.mock.results[0]!.value;
+    const runtime = executeModule(code, { ...modules, [result[0]]: sidecar });
+    const Box = runtime.Box as (active: boolean) => {
+      selected: string | typeof style;
+      element: { props: { className: string } };
+    };
+    getStyles.mockClear();
+    const liveClass = Box(true);
+    expect(liveClass.selected).toBe("base-1");
+    expect(liveClass.element.props.className).toBe("base-1");
+    expect(configuredCx.mock.calls).toEqual([["base"]]);
+    expect(getStyles).not.toHaveBeenCalled();
+
+    const liveStyle = Box(false);
+    expect(liveStyle.selected).toBe(style);
+    expect(liveStyle.element.props.className).toBe(styleClass);
+    expect(configuredCx).toHaveBeenCalledOnce();
+    expect(getStyles).toHaveBeenCalledOnce();
+    expect(configuredCss).toHaveBeenCalledOnce();
+  });
+
   it("projects only CSS truthy results while preserving predicate effects and falsy runtime identity", () => {
     const style = { padding: 12 };
     const getStyles = vi.fn(() => style);
@@ -3886,6 +5793,58 @@ describe("configured JSX callable values", () => {
     expect(getStyles).toHaveBeenCalledOnce();
     expect(enabled).toHaveBeenCalledOnce();
   });
+
+  it.each([false, true])(
+    "keeps shared CSS staging in a direct arrow body (rest=%s)",
+    (rest) => {
+      const style = { padding: 12 };
+      const calls: string[] = [];
+      const getStyles = vi.fn(() => {
+        calls.push("style");
+        return style;
+      });
+      const { code, result } = babelTransform(
+        `import { getStyles } from "./theme.css.js";
+       export const Box = (input) => ((${rest ? "...args" : "args"}) => {
+         const selected = args.length ? getStyles() : false;
+         return [selected, <div css={selected} />, args.length];
+       })(${rest ? "...input" : "input"});`,
+        { jsxCssProp, optimize: { pureFunctions: false } }
+      );
+      const configuredCss = vi.fn((rule: typeof style) =>
+        rule === style ? "padding-12" : "unexpected"
+      );
+      const modules = {
+        "@mincho-js/css": { mincho$ },
+        "@mincho-js/css/classname": { cx },
+        "custom-preset": { css: configuredCss },
+        "./theme.css.js": { getStyles }
+      };
+      const sidecar = executeModule(result[1], modules);
+      expect(configuredCss).toHaveBeenCalledOnce();
+      calls.length = 0;
+      getStyles.mockClear();
+      const { Box } = executeModule(code, {
+        ...modules,
+        [result[0]]: sidecar
+      }) as {
+        Box(
+          input: number[]
+        ): [unknown, { props: { className: string } }, number];
+      };
+      const [selected, element, count] = Box([1, 2]);
+      expect(selected).toBe(style);
+      expect(element.props.className).toBe("padding-12");
+      expect(count).toBe(2);
+      expect(getStyles).toHaveBeenCalledOnce();
+      expect(calls).toEqual(["style"]);
+      const [absent, empty, zero] = Box([]);
+      expect(absent).toBe(false);
+      expect(empty.props.className).toBe("");
+      expect(zero).toBe(0);
+      expect(getStyles).toHaveBeenCalledOnce();
+    }
+  );
 
   it("keeps both factory branches and resets shared classes in loop declarations", () => {
     const styles = [{ padding: 12 }, { padding: 4 }];
@@ -4802,20 +6761,24 @@ describe("owned destructuring read publication", () => {
       ).toThrow();
     }
   );
-  it("fails closed when a mandatory factory extraction is explicitly ignored", () => {
-    expect(() =>
-      babelTransform(
-        `import {getStyles} from './theme.css.js'; export const Box=()=>{/* mincho-js-ignore */const {first,second}=getStyles();return [<div css={first}/>,<div css={second}/>]}`,
-        { jsxCssProp, optimize: { pureFunctions: false } }
-      )
-    ).toThrow();
-  });
+  it.each(["getStyles()", "getStyles() as Pair"])(
+    "fails closed when a mandatory factory extraction is explicitly ignored: %s",
+    (initializer) => {
+      expect(() =>
+        babelTransform(
+          `import {getStyles} from './theme.css.js'; export const Box=()=>{/* mincho-js-ignore */const {first,second}=${initializer};return [<div css={first}/>,<div css={second}/>]}`,
+          { jsxCssProp, optimize: { pureFunctions: false } }
+        )
+      ).toThrow(/ignored/i);
+    }
+  );
 });
 describe("destructuring owner families", () => {
   beforeEach(() => setFileScope("owner-families.css.ts", "owner-families"));
   afterEach(() => endFileScope());
   it.each([
     "const [first,second]=getStyles();",
+    "const [first,second]=getStyles() as [{padding:number}, {padding:number}];",
     "const styles=getStyles();const [first,second]=styles;",
     "const [one,two]=getStyles();const first=one;const second=two;"
   ])("removes the runtime producer across %s", (declaration) => {
@@ -4836,6 +6799,44 @@ describe("destructuring owner families", () => {
     (runtime.Box as () => unknown)();
     expect(getStyles).toHaveBeenCalledTimes(1);
   });
+  it.each([false, true])(
+    "publishes an ordinary first/second CSS producer compound=%s",
+    (compound) => {
+      const source = `import {getFirst} from "./first.css.js"; import {getSecond} from "./second.css.js";
+    export const Box=()=> {
+      const size=8;
+      ${compound ? "const {first}=getFirst(), {second}=getSecond(size);" : "const {first}=getFirst(); const {second}=getSecond(size);"}
+      return [<div css={first}/>,<div css={second}/>];
+    }`;
+      const getFirst = vi.fn(() => ({ first: { padding: 4 } }));
+      const getSecond = vi.fn((n: number) => ({ second: { padding: n } }));
+      const authoredCss = vi.fn(css);
+      const { code, result } = babelTransform(source, {
+        jsxCssProp,
+        optimize: { pureFunctions: false }
+      });
+      const deps = {
+        "@mincho-js/css": { mincho$ },
+        "@mincho-js/css/classname": { cx },
+        "custom-preset": { css: authoredCss },
+        "./first.css.js": { getFirst },
+        "./second.css.js": { getSecond }
+      };
+      const sidecar = executeModule(result[1], deps);
+      const runtime = executeModule(code, { ...deps, [result[0]]: sidecar });
+      const Box = runtime.Box as () => { props: { className: string } }[];
+      expect(authoredCss.mock.calls).toEqual([
+        [{ padding: 4 }],
+        [{ padding: 8 }]
+      ]);
+      expect(Box().map((x) => x.props.className)).toEqual(
+        authoredCss.mock.results.map((r) => r.value)
+      );
+      expect(getFirst).toHaveBeenCalledTimes(1);
+      expect(getSecond).toHaveBeenCalledTimes(1);
+    }
+  );
+
   it("does not copy or delete unrelated sibling initializers", () => {
     const events: string[] = [];
     const getStyles = vi.fn(() => ({
@@ -4885,4 +6886,156 @@ describe("destructuring owner families", () => {
     expect((runtime.Box as () => unknown[])()[0]).toBe(4);
     expect(getStyles).toHaveBeenCalledExactlyOnceWith(4);
   });
+});
+
+describe("unreachable JSX CSS arms", () => {
+  it.each([false, true])(
+    "does not lower CSS operands in a dead JSX element (%s)",
+    (reachable) => {
+      const configuredCss = vi.fn(() => "compiled-padding");
+      const { code, result } = babelTransform(
+        `export const Box = () => ${reachable} && <div css={[false, {padding: 12}]} />;`,
+        { jsxCssProp, optimize: { pureFunctions: false } }
+      );
+      const modules = {
+        "custom-preset": { css: configuredCss, cx },
+        "@mincho-js/css/classname": { cx },
+        "@mincho-js/css": { mincho$ }
+      };
+      const sidecar = executeModule(result[1], modules);
+      const { Box } = executeModule(code, {
+        ...modules,
+        [result[0]]: sidecar
+      }) as {
+        Box(): false | { props: { className: string } };
+      };
+      const rendered = Box();
+      if (reachable) {
+        expect(rendered && rendered.props.className).toBe("compiled-padding");
+        expect(configuredCss).toHaveBeenCalledExactlyOnceWith({ padding: 12 });
+      } else {
+        expect(rendered).toBe(false);
+        expect(configuredCss).not.toHaveBeenCalled();
+        expect(result[1]).toBe("");
+      }
+    }
+  );
+
+  it.each(["true", "false", "active"])(
+    "classifies only reachable CSS when the condition is %s",
+    (condition) => {
+      const selection =
+        condition === "false"
+          ? 'false ? value : "base"'
+          : condition + ' ? "base" : value';
+      const source = `
+      import { getStyles } from "./theme.css.js";
+      export function Box(active) {
+        const [value] = active ? getStyles() : [{padding: 4}];
+        return <div css={${selection}} />;
+      }
+    `;
+      const transform = () =>
+        babelTransform(source, {
+          jsxCssProp,
+          optimize: { pureFunctions: false }
+        });
+      if (condition === "active") {
+        expect(transform).toThrow(
+          /Destructured CSS factory values must be statically evaluable/
+        );
+        return;
+      }
+      const { code, result } = transform();
+      const getStyles = vi.fn(() => ["purple"]);
+      const modules = {
+        "@mincho-js/css": { mincho$ },
+        "@mincho-js/css/classname": { cx },
+        "./theme.css.js": { getStyles },
+        "custom-preset": { css, cx }
+      };
+      const sidecar = executeModule(result[1], modules);
+      const runtime = executeModule(code, { ...modules, [result[0]]: sidecar });
+      const Box = runtime.Box as (active: boolean) => {
+        props: { className: string };
+      };
+      expect(Box(false).props.className).toBe("base");
+      expect(Box(true).props.className).toBe("base");
+      expect(getStyles).toHaveBeenCalledOnce();
+    }
+  );
+});
+
+describe("known JSX pattern factory selections", () => {
+  beforeEach(() =>
+    setFileScope("known-conditional.css.ts", "known-conditional-fixture")
+  );
+  afterEach(() => endFileScope());
+
+  it.each([
+    ["direct", "getStyles()"],
+    ["then", "true ? getStyles() : []"],
+    ["else", "false ? [] : getStyles()"],
+    ["nested", "true ? (false ? [] : getStyles()) : []"],
+    ["logical and", "true && getStyles()"],
+    ["mixed nested", "true && (false ? [] : getStyles())"],
+    ["selected alias", "true ? pair : []", "const pair = getStyles();"],
+    [
+      "selected reversed alias",
+      "false ? [] : alias",
+      "const pair = getStyles(); const alias = pair;"
+    ]
+  ])(
+    "publishes the selected %s pattern initializer once",
+    (_variant, init, aliases = "") => {
+      const getStyles = vi.fn(() => [{ padding: 4 }, { padding: 12 }]);
+      const unrelated = vi.fn(() => "retained");
+      const configuredCss = vi.fn(css);
+      const { code, result } = babelTransform(
+        `
+      import {getStyles} from "./theme.css.js";
+      import {unrelated} from "./runtime.js";
+      export const Box = () => {
+        ${aliases}
+        const [first, second] = ${init}, retained = unrelated();
+        return { first: <div css={first} />, second: <span css={second} />, retained };
+      };
+      `,
+        { jsxCssProp, optimize: { pureFunctions: false } }
+      );
+      const modules = {
+        "@mincho-js/css": { mincho$ },
+        "@mincho-js/css/classname": { cx },
+        "custom-preset": { css: configuredCss },
+        "./theme.css.js": { getStyles },
+        "./runtime.js": { unrelated }
+      };
+      const sidecar = executeModule(result[1], modules);
+      expect(unrelated).not.toHaveBeenCalled();
+      const runtime = executeModule(code, { ...modules, [result[0]]: sidecar });
+      const Box = runtime.Box as () => {
+        first: { props: { className: string } };
+        second: { props: { className: string } };
+        retained: string;
+      };
+      const result1 = Box();
+      const result2 = Box();
+      expect(configuredCss.mock.calls).toEqual([
+        [{ padding: 4 }],
+        [{ padding: 12 }]
+      ]);
+      for (const frame of [result1, result2]) {
+        expect(frame.retained).toBe("retained");
+        expect(frame.first.props.className).toBe(
+          configuredCss.mock.results[0].value
+        );
+        expect(frame.second.props.className).toBe(
+          configuredCss.mock.results[1].value
+        );
+      }
+      expect(getStyles).toHaveBeenCalledOnce();
+      expect(unrelated).toHaveBeenCalledTimes(2);
+      expect(code).not.toContain("getStyles(");
+    }
+  );
 });

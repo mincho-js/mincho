@@ -915,6 +915,168 @@ describe("CommonJS dependencies in child compilation", () => {
     }
   );
 
+  it.each(["flow", "typescript"] as const)(
+    "uses the child Babel config for %s instead of the owner's dialect",
+    async (dialect) => {
+      const { root } = await fixture();
+      const cwd = vi.spyOn(process, "cwd").mockReturnValue(root);
+      try {
+        const isFlow = dialect === "flow";
+        const dependency = join(root, "palette.js");
+        await fs.writeFile(
+          dependency,
+          isFlow
+            ? 'type Palette = {|color:string|}; export const palette: Palette = {color:"blue"};'
+            : 'type Palette = {color:string}; export const palette: Palette = {color:"blue"};'
+        );
+        await fs.writeFile(
+          join(root, "babel.config.cjs"),
+          `module.exports = { overrides: [{
+            test: filename => filename?.endsWith("palette.js"),
+            ${isFlow ? "" : 'parserOpts: { plugins: ["typescript"] },'}
+            plugins: [() => ({
+              ${
+                isFlow
+                  ? `manipulateOptions(_options, {plugins}) {
+                if (!plugins.some(p => (Array.isArray(p) ? p[0] : p) === "typescript"))
+                  plugins.push("flow");
+              },`
+                  : ""
+              }
+              visitor: {
+                ${isFlow ? "TypeAlias" : "TSTypeAliasDeclaration"}(path) { path.remove(); },
+                Identifier(path) { path.node.typeAnnotation = null; }
+              }
+            })]
+          }] };`
+        );
+        const filePath = join(root, "owner.tsx");
+        const compiled = await compile({
+          cwd: root,
+          filePath,
+          originalPath: filePath,
+          resolverCache: new Map(),
+          contents:
+            'import { palette } from "./palette.js"; export const value = palette.color;',
+          parserPlugins: ["jsx", isFlow ? "typescript" : "flow"]
+        });
+        expect(evaluate(compiled.source).exports.value).toBe("blue");
+        expect(compiled.watchFiles).toContain(dependency);
+      } finally {
+        cwd.mockRestore();
+      }
+    }
+  );
+
+  it.each([
+    [false, false, false],
+    [false, true, false],
+    [true, true, false],
+    [true, false, true],
+    [true, true, true]
+  ] as const)(
+    "uses child preset options before inherited decorators (own pass=%s, inherited=%s, legacy=%s)",
+    async (ownPass, inherited, legacy) => {
+      const { root } = await fixture();
+      const cwd = vi.spyOn(process, "cwd").mockReturnValue(root);
+      try {
+        const dependency = join(root, "palette.ts");
+        await fs.writeFile(
+          dependency,
+          `const seal = (value: unknown) => value;
+           ${legacy ? "@seal export" : "export @seal"} class Palette { static color = "blue"; }
+           export const value = Palette.color;`
+        );
+        await fs.writeFile(
+          join(root, "babel.config.cjs"),
+          `let invocations = 0;
+           module.exports = { overrides: [{
+            test: filename => filename?.endsWith("palette.ts"),
+            passPerPreset: ${ownPass},
+            presets: [() => ({ plugins: [() => ({
+              manipulateOptions(_options, parser) {
+                invocations++;
+                parser.plugins.push(${legacy ? '"decorators-legacy"' : '["decorators", { decoratorsBeforeExport: false }]'});
+              },
+              visitor: { ClassDeclaration(path) {
+                if (invocations !== 1) throw new Error("child parser hook must run once");
+                path.node.decorators = null;
+              } }
+            })] })]
+           }] };`
+        );
+        const filePath = join(root, "owner.tsx");
+        const compiled = await compile({
+          cwd: root,
+          filePath,
+          originalPath: filePath,
+          resolverCache: new Map(),
+          contents: 'export { value } from "./palette.ts";',
+          ...(inherited
+            ? {
+                parserPlugins: [
+                  ["decorators", { decoratorsBeforeExport: true }]
+                ]
+              }
+            : {})
+        });
+        expect(evaluate(compiled.source).exports.value).toBe("blue");
+        expect(compiled.watchFiles).toContain(dependency);
+      } finally {
+        cwd.mockRestore();
+      }
+    }
+  );
+
+  it.each(["ts", "tsx", "jsx", "js"] as const)(
+    "keeps the dependency's %s JSX mode with inherited decorator syntax",
+    async (extension) => {
+      const { root } = await fixture();
+      const cwd = vi.spyOn(process, "cwd").mockReturnValue(root);
+      try {
+        const suffix = `palette.${extension}`;
+        const dependency = join(root, suffix);
+        if (extension === "js") {
+          await fs.writeFile(
+            join(root, "babel.config.cjs"),
+            `module.exports = { overrides: [{
+              test: filename => filename?.endsWith("palette.js"),
+              parserOpts: { plugins: ["jsx"] },
+              plugins: [({ types }) => ({ visitor: {
+                JSXElement(path) { path.replaceWith(types.stringLiteral(path.node.openingElement.name.name)); }
+              } })]
+            }] };`
+          );
+        }
+        const expression =
+          extension === "ts" ? '(<const>{ color: "blue" }).color' : "<blue />";
+        await fs.writeFile(
+          dependency,
+          `const seal = value => value;
+            const React = {createElement: tag => tag};
+            export @seal class Palette { static color = ${expression}; }
+            export const value = Palette.color;`
+        );
+        const filePath = join(root, "owner.tsx");
+        const compiled = await compile({
+          cwd: root,
+          filePath,
+          originalPath: filePath,
+          resolverCache: new Map(),
+          contents: `export { value } from "./${suffix}";`,
+          parserPlugins: [
+            ...(extension === "js" ? [] : ["jsx" as const]),
+            ["decorators", { decoratorsBeforeExport: false }]
+          ]
+        });
+        expect(evaluate(compiled.source).exports.value).toBe("blue");
+        expect(compiled.watchFiles).toContain(dependency);
+      } finally {
+        cwd.mockRestore();
+      }
+    }
+  );
+
   it("reports invalid entry syntax through esbuild", async () => {
     const { root } = await fixture();
 
