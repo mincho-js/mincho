@@ -48,7 +48,7 @@ try {
             const result = await diagnostics.run(filePath, "evaluation", () =>
               execution.run(() =>
                 integration.runDefineRulesPresetRegistryStep(() =>
-                  integration.processDefineRulesPresetRegistryFile({
+                  integration.internalProcessManagedRegistryFile({
                     source,
                     cssScopeOrigins,
                     filePath,

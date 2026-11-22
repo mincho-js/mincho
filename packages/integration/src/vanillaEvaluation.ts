@@ -494,6 +494,31 @@ function compilerClassCost(filePath: string) {
   };
 }
 
+/** Evaluate through Vanilla Extract's public CommonJS module and CSS-text ABI. */
+export function processVanillaCssText(
+  options: Parameters<typeof processVanillaFile>[0]
+): Promise<string> {
+  const resourceRegistry = ownRequire(
+    "@mincho-js/css/defineRules/registry"
+  ) as {
+    beginCompilerClassCost?: (
+      cost: ReturnType<typeof compilerClassCost>
+    ) => void;
+    endCompilerClassCost?: () => void;
+  };
+  resourceRegistry.beginCompilerClassCost?.(
+    compilerClassCost(options.filePath)
+  );
+
+  try {
+    // Upstream evaluates synchronously before awaiting CSS serialization.
+    // Release the shared callback before another evaluation can start.
+    return processVanillaFile(options);
+  } finally {
+    resourceRegistry.endCompilerClassCost?.();
+  }
+}
+
 export function processVanillaWithExecution(
   options: VanillaOptions
 ): Promise<string>;
@@ -687,28 +712,7 @@ export async function processVanillaWithExecution(
       }
     }
 
-    const resourceRegistry = ownRequire(
-      "@mincho-js/css/defineRules/registry"
-    ) as {
-      beginCompilerClassCost?: (
-        cost: ReturnType<typeof compilerClassCost>
-      ) => void;
-      endCompilerClassCost?: () => void;
-    };
-    let evaluated: Promise<string>;
-    resourceRegistry.beginCompilerClassCost?.(
-      compilerClassCost(options.filePath)
-    );
-
-    try {
-      // Upstream evaluates synchronously before awaiting CSS serialization.
-      // Release the shared callback before another evaluation can start.
-      evaluated = processVanillaFile(nativeOptions);
-    } finally {
-      resourceRegistry.endCompilerClassCost?.();
-    }
-
-    return consume(await evaluated);
+    return consume(await processVanillaCssText(nativeOptions));
   };
 
   const execution = currentCompilationExecution();

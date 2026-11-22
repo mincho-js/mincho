@@ -29,7 +29,7 @@ import {
   internalGetScriptLoader as getScriptLoader,
   internalMinchoProjectEngine,
   internalNormalizeStaticCssEvalFileId as normalizeStaticCssEvalFileId,
-  processDefineRulesPresetRegistryFile,
+  internalProcessManagedRegistryFile,
   runDefineRulesPresetRegistryStep
 } from "@mincho-js/integration";
 import { vanillaExtractPlugin } from "@vanilla-extract/esbuild-plugin";
@@ -79,7 +79,7 @@ function nativeCssSerializer(
   root: string
 ): NonNullable<
   Parameters<
-    typeof processDefineRulesPresetRegistryFile
+    typeof internalProcessManagedRegistryFile
   >[0]["serializeVirtualCssPath"]
 > {
   return ({ fileName, source, origin }) =>
@@ -100,7 +100,7 @@ function nativeCssSerializer(
 const integrationHelpers = {
   babelTransformSource,
   compile,
-  processDefineRulesPresetRegistryFile,
+  processDefineRulesPresetRegistryFile: internalProcessManagedRegistryFile,
   runDefineRulesPresetRegistryStep
 };
 
@@ -288,7 +288,7 @@ function createMinchoEsbuildPlugin(
           ),
 
         processDefineRulesPresetRegistryFile: (
-          options: Parameters<typeof processDefineRulesPresetRegistryFile>[0]
+          options: Parameters<typeof internalProcessManagedRegistryFile>[0]
         ) =>
           diagnostics.run(options.filePath, "css-evaluation", () =>
             execution.run(() =>
@@ -871,7 +871,7 @@ if (import.meta.vitest) {
     };
 
   type DefineRulesPresetRegistryResult = Awaited<
-    ReturnType<typeof processDefineRulesPresetRegistryFile>
+    ReturnType<typeof internalProcessManagedRegistryFile>
   >;
 
   type DefineRulesPresetSerializationPaths = {
@@ -4446,7 +4446,7 @@ if (import.meta.vitest) {
         .spyOn(integrationHelpers, "processDefineRulesPresetRegistryFile")
         .mockImplementation(
           async (
-            options: Parameters<typeof processDefineRulesPresetRegistryFile>[0]
+            options: Parameters<typeof internalProcessManagedRegistryFile>[0]
           ) => {
             processOrder.push(`start:${options.filePath}`);
 

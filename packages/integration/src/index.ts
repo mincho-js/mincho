@@ -47,6 +47,7 @@ export { serializeDefaultCssImport as internalSerializeDefaultCssImport } from "
 export {
   getDefineRulesAncestorStyleSpecifiers,
   processDefineRulesPresetRegistryFile,
+  processManagedRegistryFile as internalProcessManagedRegistryFile,
   runDefineRulesPresetRegistryStep,
   validateDefineRulesRegistrySession,
   type DefineRulesPresetRegistryFileOptions,

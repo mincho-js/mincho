@@ -46,7 +46,7 @@ import {
   internalIsProjectLocalStaticCssEvalImportPath as isProjectLocalImportPath,
   internalIsVirtualStaticCssEvalId as isVirtualStaticCssEvalId,
   internalNormalizeStaticCssEvalFileId as normalizeStaticCssEvalFileId,
-  processDefineRulesPresetRegistryFile,
+  internalProcessManagedRegistryFile,
   runDefineRulesPresetRegistryStep
 } from "@mincho-js/integration";
 import { normalizePath } from "@rollup/pluginutils";
@@ -3523,10 +3523,10 @@ let collectDefineRulesPresetViteRegistrySource:
   ((source: string) => void) | undefined;
 
 async function processDefineRulesPresetViteFile(
-  options: Parameters<typeof processDefineRulesPresetRegistryFile>[0]
-): Promise<Awaited<ReturnType<typeof processDefineRulesPresetRegistryFile>>> {
+  options: Parameters<typeof internalProcessManagedRegistryFile>[0]
+): Promise<Awaited<ReturnType<typeof internalProcessManagedRegistryFile>>> {
   const result = await runDefineRulesPresetRegistryStep(() =>
-    processDefineRulesPresetRegistryFile(options)
+    internalProcessManagedRegistryFile(options)
   );
 
   collectDefineRulesPresetViteRegistrySource?.(result.source);
@@ -3756,7 +3756,7 @@ if (import.meta.vitest) {
     };
 
   type DefineRulesPresetRegistryResult = Awaited<
-    ReturnType<typeof processDefineRulesPresetRegistryFile>
+    ReturnType<typeof internalProcessManagedRegistryFile>
   >;
 
   type DefineRulesPresetSerializationPaths = {
@@ -5199,7 +5199,7 @@ if (import.meta.vitest) {
         } as Awaited<ReturnType<typeof compile>>);
         vi.spyOn(
           integrationModule,
-          "processDefineRulesPresetRegistryFile"
+          "internalProcessManagedRegistryFile"
         ).mockResolvedValue(createRegistryResult("export const entry = true;"));
 
         const flush = vi
@@ -5413,7 +5413,7 @@ if (import.meta.vitest) {
                 );
               else
                 vi.mocked(
-                  integrationModule.processDefineRulesPresetRegistryFile
+                  integrationModule.internalProcessManagedRegistryFile
                 ).mockRejectedValueOnce(failure);
 
               await expect(
@@ -5628,7 +5628,7 @@ if (import.meta.vitest) {
         } as unknown as Awaited<ReturnType<typeof compile>>);
 
       const registrySpy = vi
-        .spyOn(integrationModule, "processDefineRulesPresetRegistryFile")
+        .spyOn(integrationModule, "internalProcessManagedRegistryFile")
         .mockResolvedValue(
           createRegistryResult("export const local = 'local';")
         );
@@ -5704,7 +5704,7 @@ if (import.meta.vitest) {
           });
 
         const registrySpy = vi
-          .spyOn(integrationModule, "processDefineRulesPresetRegistryFile")
+          .spyOn(integrationModule, "internalProcessManagedRegistryFile")
           .mockResolvedValue(createRegistryResult("export {};"));
 
         const failure = new Error(`${failureStage} failure`);
@@ -5756,7 +5756,7 @@ if (import.meta.vitest) {
       } as unknown as Awaited<ReturnType<typeof compile>>);
       vi.spyOn(
         integrationModule,
-        "processDefineRulesPresetRegistryFile"
+        "internalProcessManagedRegistryFile"
       ).mockResolvedValue({
         ...createRegistryResult("export const local = 'local';"),
         ancestorStyleSpecifiers: ["ancestor/style.css"],
@@ -7855,10 +7855,10 @@ if (import.meta.vitest) {
       );
 
       const registrySpy = vi
-        .spyOn(integrationModule, "processDefineRulesPresetRegistryFile")
+        .spyOn(integrationModule, "internalProcessManagedRegistryFile")
         .mockImplementation(
           async (
-            options: Parameters<typeof processDefineRulesPresetRegistryFile>[0]
+            options: Parameters<typeof internalProcessManagedRegistryFile>[0]
           ) => {
             processOrder.push(`start:${options.filePath}`);
 
@@ -7973,7 +7973,7 @@ if (import.meta.vitest) {
       vi.spyOn(integrationModule, "compile").mockResolvedValue(compileResult);
 
       const registrySpy = vi
-        .spyOn(integrationModule, "processDefineRulesPresetRegistryFile")
+        .spyOn(integrationModule, "internalProcessManagedRegistryFile")
         .mockResolvedValue(
           createRegistryResult(createV5PresetBuildSource("shared_class"))
         );
@@ -8313,10 +8313,10 @@ if (import.meta.vitest) {
       );
       vi.spyOn(
         integrationModule,
-        "processDefineRulesPresetRegistryFile"
+        "internalProcessManagedRegistryFile"
       ).mockImplementation(
         async (
-          options: Parameters<typeof processDefineRulesPresetRegistryFile>[0]
+          options: Parameters<typeof internalProcessManagedRegistryFile>[0]
         ) => {
           const ancestorStyleSpecifier = [
             ...ancestorSpecifierByExtractedFileName
@@ -8640,7 +8640,7 @@ if (import.meta.vitest) {
       });
       vi.spyOn(
         integrationModule,
-        "processDefineRulesPresetRegistryFile"
+        "internalProcessManagedRegistryFile"
       ).mockResolvedValue({
         ancestorStyleSpecifiers: ["@scope/ancestor/style.css"],
         registrySession: createEmptyRegistrySession(),
@@ -8894,11 +8894,11 @@ if (import.meta.vitest) {
       );
       vi.spyOn(
         integrationModule,
-        "processDefineRulesPresetRegistryFile"
+        "internalProcessManagedRegistryFile"
       ).mockImplementation(
         async (
           options: Parameters<
-            typeof integrationModule.processDefineRulesPresetRegistryFile
+            typeof integrationModule.internalProcessManagedRegistryFile
           >[0]
         ) => {
           await options.serializeVirtualCssPath?.({
@@ -9023,11 +9023,11 @@ if (import.meta.vitest) {
         });
       vi.spyOn(
         integrationModule,
-        "processDefineRulesPresetRegistryFile"
+        "internalProcessManagedRegistryFile"
       ).mockImplementation(
         async (
           options: Parameters<
-            typeof integrationModule.processDefineRulesPresetRegistryFile
+            typeof integrationModule.internalProcessManagedRegistryFile
           >[0]
         ) => {
           await options.serializeVirtualCssPath?.({
@@ -9156,11 +9156,11 @@ if (import.meta.vitest) {
       const ancestorStyleSpecifiersByFilePath = new Map<string, string[]>();
       vi.spyOn(
         integrationModule,
-        "processDefineRulesPresetRegistryFile"
+        "internalProcessManagedRegistryFile"
       ).mockImplementation(
         async (
           options: Parameters<
-            typeof integrationModule.processDefineRulesPresetRegistryFile
+            typeof integrationModule.internalProcessManagedRegistryFile
           >[0]
         ) => {
           await options.serializeVirtualCssPath?.({
@@ -9302,11 +9302,11 @@ if (import.meta.vitest) {
           cssScopeOrigins: [{ fileScope: { filePath }, origin: filePath }]
         })
       );
-      vi.spyOn(integrationModule, "processDefineRulesPresetRegistryFile")
+      vi.spyOn(integrationModule, "internalProcessManagedRegistryFile")
         .mockImplementationOnce(
           async (
             options: Parameters<
-              typeof integrationModule.processDefineRulesPresetRegistryFile
+              typeof integrationModule.internalProcessManagedRegistryFile
             >[0]
           ) => {
             await options.serializeVirtualCssPath?.({
@@ -9417,11 +9417,11 @@ if (import.meta.vitest) {
         });
 
         const registrySpy = vi
-          .spyOn(integrationModule, "processDefineRulesPresetRegistryFile")
+          .spyOn(integrationModule, "internalProcessManagedRegistryFile")
           .mockImplementation(
             async (
               options: Parameters<
-                typeof integrationModule.processDefineRulesPresetRegistryFile
+                typeof integrationModule.internalProcessManagedRegistryFile
               >[0]
             ) => {
               await pendingRegistry;
@@ -9504,11 +9504,11 @@ if (import.meta.vitest) {
       );
       vi.spyOn(
         integrationModule,
-        "processDefineRulesPresetRegistryFile"
+        "internalProcessManagedRegistryFile"
       ).mockImplementation(
         async (
           options: Parameters<
-            typeof integrationModule.processDefineRulesPresetRegistryFile
+            typeof integrationModule.internalProcessManagedRegistryFile
           >[0]
         ) => {
           await options.serializeVirtualCssPath?.({
@@ -9601,10 +9601,10 @@ if (import.meta.vitest) {
       }));
       vi.spyOn(
         integrationModule,
-        "processDefineRulesPresetRegistryFile"
+        "internalProcessManagedRegistryFile"
       ).mockImplementation(
         async (
-          options: Parameters<typeof processDefineRulesPresetRegistryFile>[0]
+          options: Parameters<typeof internalProcessManagedRegistryFile>[0]
         ) => {
           await options.serializeVirtualCssPath?.({
             fileName: "style.css",
@@ -9787,7 +9787,7 @@ if (import.meta.vitest) {
 
       const registrySpy = vi.spyOn(
         integrationModule,
-        "processDefineRulesPresetRegistryFile"
+        "internalProcessManagedRegistryFile"
       );
 
       const harness = await createViteHarness();
@@ -9869,7 +9869,7 @@ if (import.meta.vitest) {
 
       const registrySpy = vi.spyOn(
         integrationModule,
-        "processDefineRulesPresetRegistryFile"
+        "internalProcessManagedRegistryFile"
       );
 
       const harness = await createViteHarness();
@@ -9908,7 +9908,7 @@ if (import.meta.vitest) {
       } as Awaited<ReturnType<typeof compile>>);
 
       const registrySpy = vi
-        .spyOn(integrationModule, "processDefineRulesPresetRegistryFile")
+        .spyOn(integrationModule, "internalProcessManagedRegistryFile")
         .mockRejectedValue(new Error("registry processing failure"));
 
       const harness = await createViteHarness();
@@ -9952,7 +9952,7 @@ if (import.meta.vitest) {
 
         const registrySpy = vi.spyOn(
           integrationModule,
-          "processDefineRulesPresetRegistryFile"
+          "internalProcessManagedRegistryFile"
         );
 
         const harness = await createViteHarness({
@@ -10020,7 +10020,7 @@ if (import.meta.vitest) {
 
       const registrySpy = vi.spyOn(
         integrationModule,
-        "processDefineRulesPresetRegistryFile"
+        "internalProcessManagedRegistryFile"
       );
 
       const harness = await createViteHarness({
@@ -10401,7 +10401,7 @@ if (import.meta.vitest) {
 
       const registrySpy = vi.spyOn(
         integrationModule,
-        "processDefineRulesPresetRegistryFile"
+        "internalProcessManagedRegistryFile"
       );
 
       const harness = await createViteHarness({
@@ -10636,12 +10636,12 @@ if (import.meta.vitest) {
 
       vi.spyOn(
         integrationModule,
-        "processDefineRulesPresetRegistryFile"
+        "internalProcessManagedRegistryFile"
       ).mockImplementation(
         async ({
           source,
           serializeVirtualCssPath
-        }: Parameters<typeof processDefineRulesPresetRegistryFile>[0]) => {
+        }: Parameters<typeof internalProcessManagedRegistryFile>[0]) => {
           const providerVersion = providerVersions[providerVersionIndex];
           if (providerVersion == null) {
             throw new Error(
@@ -10829,7 +10829,7 @@ if (import.meta.vitest) {
           }) as Awaited<ReturnType<typeof compile>>
       );
       const registry = vi
-        .spyOn(integrationModule, "processDefineRulesPresetRegistryFile")
+        .spyOn(integrationModule, "internalProcessManagedRegistryFile")
         .mockResolvedValue(createRegistryResult("export const value=true;"));
       const getModuleById = vi.fn((id: string) => ({ id }));
       const invalidateModule = vi.fn();
@@ -10845,7 +10845,7 @@ if (import.meta.vitest) {
         registry.mockImplementationOnce(
           async ({
             source
-          }: Parameters<typeof processDefineRulesPresetRegistryFile>[0]) => {
+          }: Parameters<typeof internalProcessManagedRegistryFile>[0]) => {
             started.resolve(source);
             await finish.promise;
             return createRegistryResult(`export default ${source};`);
@@ -10964,11 +10964,11 @@ if (import.meta.vitest) {
         let cssImport: string | undefined;
         vi.spyOn(
           integration,
-          "processDefineRulesPresetRegistryFile"
+          "internalProcessManagedRegistryFile"
         ).mockImplementation(
           async ({
             serializeVirtualCssPath
-          }: Parameters<typeof processDefineRulesPresetRegistryFile>[0]) => {
+          }: Parameters<typeof internalProcessManagedRegistryFile>[0]) => {
             cssImport = await serializeVirtualCssPath!({
               fileName: "pending.css.ts",
               fileScope: { filePath: "pending.css.ts" },
@@ -11109,11 +11109,11 @@ if (import.meta.vitest) {
       );
       vi.spyOn(
         integrationModule,
-        "processDefineRulesPresetRegistryFile"
+        "internalProcessManagedRegistryFile"
       ).mockImplementation(
         async ({
           serializeVirtualCssPath
-        }: Parameters<typeof processDefineRulesPresetRegistryFile>[0]) =>
+        }: Parameters<typeof internalProcessManagedRegistryFile>[0]) =>
           createRegistryResult(
             await serializeVirtualCssPath!({
               fileName: "logical.css.ts",
@@ -11227,11 +11227,11 @@ if (import.meta.vitest) {
         );
         vi.spyOn(
           integrationModule,
-          "processDefineRulesPresetRegistryFile"
+          "internalProcessManagedRegistryFile"
         ).mockImplementation(
           async ({
             serializeVirtualCssPath
-          }: Parameters<typeof processDefineRulesPresetRegistryFile>[0]) =>
+          }: Parameters<typeof internalProcessManagedRegistryFile>[0]) =>
             createRegistryResult(
               await serializeVirtualCssPath!({
                 fileName: "logical.css.ts",
@@ -11291,11 +11291,11 @@ if (import.meta.vitest) {
         }));
 
         const registrySpy = vi
-          .spyOn(integrationModule, "processDefineRulesPresetRegistryFile")
+          .spyOn(integrationModule, "internalProcessManagedRegistryFile")
           .mockImplementation(
             async ({
               serializeVirtualCssPath
-            }: Parameters<typeof processDefineRulesPresetRegistryFile>[0]) => {
+            }: Parameters<typeof internalProcessManagedRegistryFile>[0]) => {
               return createRegistryResult(
                 (await serializeVirtualCssPath?.({
                   fileName: "src/extracted_rules.css.ts",
@@ -11395,11 +11395,11 @@ if (import.meta.vitest) {
       );
       vi.spyOn(
         integrationModule,
-        "processDefineRulesPresetRegistryFile"
+        "internalProcessManagedRegistryFile"
       ).mockImplementation(
         async ({
           serializeVirtualCssPath
-        }: Parameters<typeof processDefineRulesPresetRegistryFile>[0]) =>
+        }: Parameters<typeof internalProcessManagedRegistryFile>[0]) =>
           createRegistryResult(
             (
               await Promise.all(
@@ -11467,11 +11467,11 @@ if (import.meta.vitest) {
       }));
       vi.spyOn(
         integrationModule,
-        "processDefineRulesPresetRegistryFile"
+        "internalProcessManagedRegistryFile"
       ).mockImplementation(
         async ({
           serializeVirtualCssPath
-        }: Parameters<typeof processDefineRulesPresetRegistryFile>[0]) => {
+        }: Parameters<typeof internalProcessManagedRegistryFile>[0]) => {
           return createRegistryResult(
             (await serializeVirtualCssPath?.({
               fileName: "src/extracted_rules.css.ts",

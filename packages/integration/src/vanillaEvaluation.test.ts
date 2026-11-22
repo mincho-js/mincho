@@ -14,7 +14,7 @@ import {
 } from "@mincho-js/css/defineRules/registry";
 import { CompilationExecution } from "./compilationExecution.js";
 import { CompilationCache } from "./compilationCache.js";
-import { processDefineRulesPresetRegistryFile } from "./defineRulesPreset.js";
+import { processManagedRegistryFile } from "./defineRulesPreset.js";
 import { CompilationDiagnostics } from "./diagnostics.js";
 import { compile } from "./compile.js";
 import { proveReusableEvaluation } from "./evaluationProof.js";
@@ -1934,7 +1934,7 @@ it("keeps independent adapter CSS text while refusing owned artifacts and replay
       text.mockClear();
       await diagnostics.run(issuer, "test", () =>
         execution.run(() =>
-          processDefineRulesPresetRegistryFile({
+          processManagedRegistryFile({
             ...request,
             serializeVirtualCssPath: text
           })

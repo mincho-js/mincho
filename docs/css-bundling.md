@@ -316,8 +316,8 @@ matching `setFileScope` call may instead receive the generated scope. Relative
 assets such as `url("./image.svg")` resolve from the recorded physical producer
 directory in either case.
 
-Keep `cssScopeOrigins` with the source returned by `compile`, and pass both to
-`processDefineRulesPresetRegistryFile`:
+For an artifact serializer, keep `cssScopeOrigins` with the source returned by
+`compile` and pass both to `processDefineRulesPresetRegistryFile`.
 
 ```ts
 import {
@@ -397,7 +397,7 @@ reference. Vite passes the same resolver input for `./icon.svg` and
 `./icon.svg?no-inline#shape` for the external reference so the two inputs remain
 distinct. Mincho reports the ambiguity rather than selecting the wrong asset.
 
-If low-level code mixes compiler-attributed and unattributed emissions in the
+If managed evaluation mixes compiler-attributed and unattributed emissions in the
 same logical file scope, CSS-text output retains their original cascade order
 but has no shared physical origin. Native mode therefore accepts only the
 resource-independent subset above for that combined scope. A relative asset
@@ -425,5 +425,11 @@ and matching owner-relative paths cannot distinguish two physical instances of
 the same package. Missing metadata produces `Missing CSS scope provenance` and
 asks the caller to forward `compile().cssScopeOrigins`; no filesystem path is
 guessed. Modules that emit no CSS artifacts do not require an origin entry.
-CSS-text evaluation without `serializeCssArtifact` retains its existing behavior; custom
-CSS-text serializers remain responsible for distinct scope IDs.
+
+Public calls to `processDefineRulesPresetRegistryFile` that use default CSS
+serialization or `serializeVirtualCssPath` run through Vanilla Extract’s ordinary
+module loader on each call, including when spreading the result of `compile`
+into the options. The text callback receives `fileName`, `fileScope` and `source`.
+Custom text serializers are responsible for distinct scope IDs. Vite and
+esbuild use a separate internal evaluator that retains producer origins for
+their CSS output and supports managed evaluation replay.

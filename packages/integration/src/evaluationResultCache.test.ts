@@ -1,3 +1,4 @@
+import { processVanillaFile } from "@vanilla-extract/integration";
 import { issueCssScopeRuntimeOrigins } from "./fileScopeRuntime.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -13,6 +14,7 @@ import { getActiveDefineRulesRegistrySession } from "@mincho-js/css/defineRules/
 import { generateVanillaCss, type VanillaCssArtifact } from "./vanillaCssIr.js";
 import {
   processDefineRulesPresetRegistryFile,
+  processManagedRegistryFile,
   runDefineRulesPresetRegistryStep
 } from "./defineRulesPreset.js";
 
@@ -57,6 +59,115 @@ function runtime(evaluation: "auto" | "fresh" = "auto", enabled = true) {
   return execution;
 }
 
+it.each(["default", "callback"] as const)(
+  "preserves public CommonJS fileScope identity with %s CSS serialization",
+  async (serializer) => {
+    const result = await compiled(`
+      const first = require("@vanilla-extract/css/fileScope");
+      const second = require(["@vanilla-extract/css", "fileScope"].join("/"));
+      const color = new Map([[first, "green"]]).get(second) ?? "red";
+      first.setFileScope("colors.css.ts", "colors");
+      try {
+        require("@vanilla-extract/css").globalStyle(".scope-identity", {color});
+        module.exports.color = color;
+      } finally { first.endFileScope(); }
+    `);
+    const serialize = vi.fn(({ source }: { source: string }) =>
+      JSON.stringify(source)
+    );
+    const options = {
+      ...result,
+      filePath,
+      ...(serializer === "callback"
+        ? { serializeVirtualCssPath: serialize }
+        : {})
+    };
+    const original = await processVanillaFile(options);
+    serialize.mockClear();
+    const output = await processDefineRulesPresetRegistryFile(options);
+    expect(output.source).toBe(original);
+    expect(output.source).toContain("export var color = 'green';");
+    if (serializer === "callback") {
+      expect(serialize).toHaveBeenCalledTimes(1);
+      const [css] = serialize.mock.calls[0]!;
+      expect(css.source).toContain("color: green");
+      expect(css).not.toHaveProperty("origin");
+    }
+  }
+);
+
+it.each([
+  [false, true],
+  [true, true],
+  [true, false]
+] as const)(
+  "isolates public text from managed evaluation reuse (serializer: %s, result cache: %s)",
+  async (callback, resultCache) => {
+    const result = await compiled(
+      'import {style} from "@vanilla-extract/css"; export const box=style({color:"red"});'
+    );
+    const execution = runtime("auto", resultCache);
+    const run = async (evaluate: typeof processManagedRegistryFile) => {
+      const diagnostics = new CompilationDiagnostics({ console: true });
+      const serialize = vi.fn(
+        ({ source }: { source: string; origin?: string }) => {
+          getActiveDefineRulesRegistrySession()!.nextRegistrationIndex +=
+            evaluate === processManagedRegistryFile ? 1 : 2;
+          return JSON.stringify(source);
+        }
+      );
+      const output = await diagnostics.run(filePath, "evaluation", () =>
+        execution.run(() =>
+          runDefineRulesPresetRegistryStep(() =>
+            evaluate({
+              ...result,
+              filePath,
+              ...(callback ? { serializeVirtualCssPath: serialize } : {})
+            })
+          )
+        )
+      );
+      const phases = diagnostics
+        .snapshot()
+        .builds.flatMap((build) => build.events.map((event) => event.phase));
+      return { output, phases, css: serialize.mock.calls[0]?.[0] };
+    };
+    const publicCold = await run(processDefineRulesPresetRegistryFile);
+    const managedCold = await run(processManagedRegistryFile);
+    const publicWarm = await run(processDefineRulesPresetRegistryFile);
+    const managedWarm = await run(processManagedRegistryFile);
+    expect(managedCold.phases).toContain("vm-evaluate");
+    expect(managedCold.phases).not.toContain("evaluation-result-hit");
+    expect(managedWarm.phases).toContain(
+      resultCache ? "evaluation-result-hit" : "vm-script-hit"
+    );
+    for (const current of [publicCold, publicWarm]) {
+      expect(
+        current.phases.filter(
+          (phase) =>
+            phase.startsWith("vm-") || phase.startsWith("evaluation-result-")
+        )
+      ).toEqual([]);
+      expect(current.output.source).toBe(managedCold.output.source);
+    }
+    expect(publicCold.output.registrySession).not.toBe(
+      publicWarm.output.registrySession
+    );
+    expect(managedCold.output.source).toBe(managedWarm.output.source);
+    if (callback) {
+      expect(
+        [publicCold, managedCold, publicWarm, managedWarm].map(
+          (run) => run.output.registrySession.nextRegistrationIndex
+        )
+      ).toEqual([2, 1, 2, 1]);
+      expect(publicCold.css).not.toHaveProperty("origin");
+      expect(publicWarm.css).not.toHaveProperty("origin");
+      expect(managedCold.css).toMatchObject({ origin: filePath });
+      expect(managedWarm.css).toEqual(managedCold.css);
+    }
+  }
+);
+
 describe("serialized evaluation results", () => {
   it("replays inherited recipe CSS dependencies and their package ordering", async () => {
     // Exercise snapshot replay independently of the intentionally conservative
@@ -80,7 +191,7 @@ describe("serialized evaluation results", () => {
       runDefineRulesPresetRegistryStep(() =>
         diagnostics.run(filePath, "test", () =>
           execution.run(() =>
-            processDefineRulesPresetRegistryFile({
+            processManagedRegistryFile({
               source,
               filePath,
               cssScopeOrigins,
@@ -125,7 +236,7 @@ describe("serialized evaluation results", () => {
       runDefineRulesPresetRegistryStep(() =>
         diagnostics.run(filePath, "test", () =>
           execution.run(() =>
-            processDefineRulesPresetRegistryFile({
+            processManagedRegistryFile({
               source,
               filePath,
               cssScopeOrigins: origins,
@@ -192,7 +303,7 @@ describe("serialized evaluation results", () => {
         runDefineRulesPresetRegistryStep(() =>
           diagnostics.run(filePath, "test", () =>
             execution.run(() =>
-              processDefineRulesPresetRegistryFile({
+              processManagedRegistryFile({
                 source,
                 filePath,
                 cssScopeOrigins,
@@ -248,7 +359,7 @@ describe("serialized evaluation results", () => {
         runDefineRulesPresetRegistryStep(() =>
           diagnostics.run(filePath, "test", () =>
             owner.run(() =>
-              processDefineRulesPresetRegistryFile({
+              processManagedRegistryFile({
                 source,
                 filePath,
                 cssScopeOrigins,
@@ -340,7 +451,7 @@ describe("serialized evaluation results", () => {
         runDefineRulesPresetRegistryStep(() =>
           diagnostics.run(filePath, "test", () =>
             execution.run(() =>
-              processDefineRulesPresetRegistryFile({
+              processManagedRegistryFile({
                 source,
                 filePath,
                 cssScopeOrigins
@@ -385,7 +496,7 @@ describe("serialized evaluation results", () => {
       const result = await runDefineRulesPresetRegistryStep(() =>
         diagnostics.run(filePath, "test", () =>
           execution.run(() =>
-            processDefineRulesPresetRegistryFile({
+            processManagedRegistryFile({
               source,
               filePath,
               cssScopeOrigins
@@ -435,7 +546,7 @@ describe("serialized evaluation results", () => {
       runDefineRulesPresetRegistryStep(() =>
         diagnostics.run(filePath, "test", () =>
           execution.run(() =>
-            processDefineRulesPresetRegistryFile({
+            processManagedRegistryFile({
               source,
               filePath,
               cssScopeOrigins,
@@ -482,7 +593,7 @@ describe("serialized evaluation results", () => {
       runDefineRulesPresetRegistryStep(() =>
         diagnostics.run(filePath, "test", () =>
           execution.run(() =>
-            processDefineRulesPresetRegistryFile({
+            processManagedRegistryFile({
               source,
               filePath,
               cssScopeOrigins
@@ -536,7 +647,7 @@ it("keys, evaluates and replays one immutable origin snapshot despite serializer
     await runDefineRulesPresetRegistryStep(() =>
       diagnostics.run(options.filePath, "snapshot", () =>
         execution.run(() =>
-          processDefineRulesPresetRegistryFile({
+          processManagedRegistryFile({
             source,
             filePath: options.filePath,
             cssScopeOrigins: origins,

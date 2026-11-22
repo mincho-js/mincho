@@ -190,7 +190,7 @@ describe("mincho with the Vite runtime", () => {
       let request: string | undefined;
       let stylesheet = ".probe { color: red; }";
       const registry = vi
-        .spyOn(integration, "processDefineRulesPresetRegistryFile")
+        .spyOn(integration, "internalProcessManagedRegistryFile")
         .mockImplementation(async ({ serializeVirtualCssPath }) => {
           const cssImport = await serializeVirtualCssPath!({
             fileName: "logical.css.ts",
@@ -341,7 +341,7 @@ describe("mincho with the Vite runtime", () => {
         releasePausedRequest = resolve;
       });
       const registry = vi
-        .spyOn(integration, "processDefineRulesPresetRegistryFile")
+        .spyOn(integration, "internalProcessManagedRegistryFile")
         .mockImplementation(async ({ serializeVirtualCssPath }) => {
           const cssImport = await serializeVirtualCssPath!({
             fileName: "logical.css.ts",
@@ -627,7 +627,7 @@ describe("mincho with the Vite runtime", () => {
       let request: string | undefined;
       let stylesheet = ".probe { color: red; }";
       const registrySpy = vi
-        .spyOn(integration, "processDefineRulesPresetRegistryFile")
+        .spyOn(integration, "internalProcessManagedRegistryFile")
         .mockImplementation(async ({ serializeVirtualCssPath }) => {
           const cssImport = await serializeVirtualCssPath!({
             fileName: "logical.css.ts",
@@ -1549,7 +1549,7 @@ describe("mincho with the Vite runtime", () => {
       } as Awaited<ReturnType<typeof integration.compile>>);
       let request: string | undefined;
       const registry = vi
-        .spyOn(integration, "processDefineRulesPresetRegistryFile")
+        .spyOn(integration, "internalProcessManagedRegistryFile")
         .mockImplementation(async ({ serializeVirtualCssPath }) => {
           const cssImport = await serializeVirtualCssPath!({
             fileName: "logical.css.ts",
