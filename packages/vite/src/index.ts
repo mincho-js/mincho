@@ -385,6 +385,11 @@ function viteNativeCssUrlChild(
   return `${cssId}?transform-only${remaining ? `&${remaining.slice(1)}` : ""}`;
 }
 
+function viteDevAssetBase(origin: string | undefined, base: string): string {
+  // Vite joins its decoded pathname base before encoding the emitted asset URL.
+  return (origin ?? "") + encodeURI(decodeURI(base));
+}
+
 function viteStringModuleValue(code: string): string | undefined {
   try {
     const body = parseSync(code, {
@@ -1680,7 +1685,7 @@ function createMinchoViteEnvironmentPlugin(
           "[mincho] Vite cannot distinguish inline and fragment SVG uses of this CSS asset in a percent directory. Use ?no-inline on the fragment reference."
         );
     }
-    const nativeBase = (config.server.origin ?? "") + config.base;
+    const nativeBase = viteDevAssetBase(config.server.origin, config.base);
     if (!url?.startsWith(nativeBase))
       throw new Error(
         "[mincho] Vite did not supply a local URL for a generated CSS asset."
@@ -5214,6 +5219,39 @@ if (import.meta.vitest) {
 
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  it("compares a Vite development asset using the canonical encoded base", () => {
+    const origin = "https://asset.example.test";
+    const base = viteDevAssetBase(origin, "/caf%c3%a9/");
+    expect(base).toBe(origin + "/caf%C3%A9/");
+    expect(viteDevAssetBase(undefined, "/")).toBe("/");
+    expect(viteDevAssetBase(origin, "/app/")).toBe(origin + "/app/");
+    expect(viteDevAssetBase(undefined, "/café/")).toBe("/caf%C3%A9/");
+    // Vite uses decodeURI rather than decodeURIComponent, so reserved escapes
+    // remain escaped before Vite encodes the URI path.
+    expect(viteDevAssetBase(undefined, "/kept%2f%23/")).toBe(
+      "/kept%252f%2523/"
+    );
+    expect(() => viteDevAssetBase(undefined, "/bad%/")).toThrow(URIError);
+
+    const physicalPath = "/src/percent%/icon.svg";
+    const expected = base.slice(0, -1) + encodeURI(physicalPath);
+    expect(expected).toBe(origin + "/caf%C3%A9/src/percent%25/icon.svg");
+    expect(expected).not.toBe(origin + "/caf%c3%a9/src/percent%25/icon.svg");
+    expect(expected).not.toBe(origin + "/caf%C3%A9/src/other/icon.svg");
+    expect(expected).not.toBe(
+      "https://other.example.test/caf%C3%A9/src/percent%25/icon.svg"
+    );
+  });
+
+  it("uses the base already resolved by Vite for relative serve shortcuts", async () => {
+    const { resolveConfig } = await import("vite");
+    for (const base of ["", "./"]) {
+      const config = await resolveConfig({ base, configFile: false }, "serve");
+      expect(config.base).toBe("/");
+      expect(viteDevAssetBase(config.server.origin, config.base)).toBe("/");
+    }
   });
 
   describe("minchoVitePlugin", () => {
