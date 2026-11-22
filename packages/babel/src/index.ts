@@ -154,7 +154,10 @@ export type {
   ImportedStaticCssEvalModuleRecord as InternalImportedStaticCssEvalModuleRecord
 } from "./staticCssEval/importedModules.js";
 export { STATIC_CSS_EVAL_LIMITS as internalStaticCssEvalLimits } from "./staticCssEval/types.js";
-export { hasStaticCssEvalSyntaxFilename as internalHasStaticCssEvalSyntaxFilename } from "./staticCssEval/syntaxFilename.js";
+export {
+  hasConcreteLogicalSyntaxFilename as internalHasConcreteLogicalSyntaxFilename,
+  hasStaticCssEvalSyntaxFilename as internalHasStaticCssEvalSyntaxFilename
+} from "./staticCssEval/syntaxFilename.js";
 export { styledComponentPlugin as minchoStyledComponentPlugin } from "./styled.js";
 export {
   canBypassJsxRuntimeGuards as internalCanBypassJsxRuntimeGuards,

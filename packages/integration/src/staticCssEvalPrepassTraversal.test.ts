@@ -61,11 +61,14 @@ it("preserves provider syntax selection without discarding resolver metadata", (
   const physicalPath = "/src/loader#.ts";
   const physical = createLoadedModule(
     id,
-    { source, realpath: physicalPath },
+    { source, realpath: physicalPath, sourceKind: "project-source" },
     { resolution }
   );
   expect(physical.realpath).toBe(physicalPath);
   expect(physical).not.toHaveProperty("syntaxSourceId");
+  expect(
+    createLoadedModule(id, { source, realpath: physicalPath }, { resolution })
+  ).toMatchObject({ realpath: physicalPath, syntaxSourceId: id });
 });
 
 it.each([
@@ -200,6 +203,22 @@ it.each([
     }
   ],
   [
+    "declared virtual TSX with JavaScript backing",
+    "virtual:tokens.tsx",
+    "/cache/tokens.js",
+    {
+      resolvedFile: "virtual:tokens.tsx",
+      realpath: "/cache/tokens.js",
+      sourceKind: "provider-virtual"
+    }
+  ],
+  [
+    "declared virtual TSX query with JavaScript backing",
+    "virtual:tokens.tsx?scope=/dark.js#preview.tsx",
+    "/cache/tokens.js",
+    { sourceKind: "provider-virtual" }
+  ],
+  [
     "graph ID echo with actual loader physical path",
     "/src/token.js",
     "/src/resolver.js",
@@ -208,6 +227,12 @@ it.each([
       realpath: "/src/actual.tsx",
       sourceKind: "project-source"
     }
+  ],
+  [
+    "opaque virtual ID with TSX physical fallback",
+    "virtual:tokens",
+    "/cache/tokens.tsx",
+    { sourceKind: "provider-virtual" }
   ],
   [
     "loader physical path",

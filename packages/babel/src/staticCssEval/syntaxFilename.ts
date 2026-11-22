@@ -69,6 +69,11 @@ export function inferMetadataFreeSyntaxFilename(id: string): string {
   return inferSyntaxFilename(id);
 }
 
+/** Concrete parser syntax for a declared virtual source, not a prefix guess. */
+export function hasConcreteLogicalSyntaxFilename(id: string): boolean {
+  return sourceExtension.test(inferLogicalSyntaxFilename(id));
+}
+
 /** Syntax recognition for provider metadata, without changing its graph identity. */
 export function hasStaticCssEvalSyntaxFilename(
   id: string,

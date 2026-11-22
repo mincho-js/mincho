@@ -992,10 +992,21 @@ async function compileUncached(options: CompileOptions) {
   const preservesNativeScopeImport = (args: OnResolveArgs) =>
     childBuildOptions?.format === "esm" &&
     (args.kind === "import-statement" || args.kind === "dynamic-import");
+  const hasNativeFileScopeAlias = () => {
+    const aliases = childBuildOptions?.alias;
+    if (!aliases) return false;
+    const moduleId = "@vanilla-extract/css/fileScope";
+    const packageId = "@vanilla-extract/css";
+    // esbuild prefers the exact fileScope alias to its package prefix.
+    // A no-op alias still names the official API and needs its normal receipt.
+    return Object.hasOwn(aliases, moduleId)
+      ? aliases[moduleId] !== moduleId
+      : Object.hasOwn(aliases, packageId) && aliases[packageId] !== packageId;
+  };
   const resolveRuntimeApi = (args: OnResolveArgs) => {
     // The registered evaluator executes CommonJS scripts. Leave native ESM
     // imports of the public API external instead of lowering them to require.
-    if (preservesNativeScopeImport(args)) return;
+    if (preservesNativeScopeImport(args) || hasNativeFileScopeAlias()) return;
     // A resolution-only query uses the native external edge. Let the normal
     // resolution observer record it without creating an executable facade.
     if (args.kind === "require-resolve") return;

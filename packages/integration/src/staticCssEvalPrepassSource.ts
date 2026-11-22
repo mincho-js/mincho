@@ -1,4 +1,5 @@
 import {
+  internalHasConcreteLogicalSyntaxFilename,
   internalHasStaticCssEvalSyntaxFilename,
   internalStaticCssEvalLimits,
   type InternalImportedStaticCssEvalImportResolution as BabelImportedStaticCssEvalImportResolution,
@@ -123,9 +124,9 @@ export function createLoadedModule(
   const virtualId =
     (loadedSource.sourceKind ?? options.resolution?.sourceKind) ===
     "provider-virtual";
-  // A repeated graph ID carries no additional syntax evidence. A distinct,
-  // recognized loader filename describes the returned text; the physical
-  // backing path remains independent and is the next syntax fallback.
+  // Syntax describes the bytes returned by the loader. Prefer an explicit
+  // distinct name, then the concrete grammar of a declared virtual source;
+  // its backing file retains physical identity but may hold different text.
   const syntaxSource =
     loaderFilename !== undefined &&
     loaderFilename !== id &&
@@ -134,17 +135,19 @@ export function createLoadedModule(
           syntaxSourceId: loaderFilename,
           syntaxSourceIdKind: "loader-filename" as const
         }
-      : realpath !== undefined &&
-          internalHasStaticCssEvalSyntaxFilename(realpath, true)
-        ? undefined
-        : internalHasStaticCssEvalSyntaxFilename(id)
-          ? {
-              syntaxSourceId: id,
-              ...(virtualId
-                ? {}
-                : { syntaxSourceIdKind: "metadata-free" as const })
-            }
-          : undefined;
+      : virtualId && internalHasConcreteLogicalSyntaxFilename(id)
+        ? { syntaxSourceId: id }
+        : realpath !== undefined &&
+            internalHasStaticCssEvalSyntaxFilename(realpath, true)
+          ? undefined
+          : internalHasStaticCssEvalSyntaxFilename(id)
+            ? {
+                syntaxSourceId: id,
+                ...(virtualId
+                  ? {}
+                  : { syntaxSourceIdKind: "metadata-free" as const })
+              }
+            : undefined;
 
   return {
     id,

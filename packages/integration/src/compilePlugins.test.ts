@@ -282,6 +282,73 @@ describe("caller loaders in child compilation", () => {
     expect(module.exports.answer).toBe(42);
   });
 
+  it.each([
+    ["no alias", undefined, undefined],
+    ["exact", { "@vanilla-extract/css/fileScope": "scope-shim" }, "scope-shim"],
+    [
+      "package prefix",
+      { "@vanilla-extract/css": "scope-shim" },
+      "scope-shim/fileScope"
+    ],
+    [
+      "identity exact before package",
+      {
+        "@vanilla-extract/css": "scope-shim",
+        "@vanilla-extract/css/fileScope": "@vanilla-extract/css/fileScope"
+      },
+      undefined
+    ],
+    [
+      "exact before another package target",
+      {
+        "@vanilla-extract/css": "other-scope",
+        "@vanilla-extract/css/fileScope": "scope-shim"
+      },
+      "scope-shim"
+    ]
+  ] as const)(
+    "preserves esbuild's native fileScope alias choice (%s)",
+    async (_mode, alias, target) => {
+      const { root } = await fixture();
+      const filePath = join(root, "entry.js");
+      const result = await compile({
+        cwd: root,
+        filePath,
+        originalPath: filePath,
+        resolverCache: new Map(),
+        contents: `
+          const scope = require("@vanilla-extract/css/fileScope");
+          export const flavor = scope.readVariant?.() ?? "native";
+        `,
+        externals: ["scope-shim", "other-scope"],
+        esbuild: {
+          ...esbuild,
+          build: (options) => esbuild.build({ ...options, alias })
+        }
+      });
+      const module = { exports: {} as { flavor?: string } };
+      const load = vi.fn((id: string) =>
+        target && id === target
+          ? { ...vanillaFileScope, readVariant: () => "mapped" }
+          : vanillaFileScope
+      );
+      runInNewContext(result.source, {
+        module,
+        exports: module.exports,
+        require: load
+      });
+      expect(module.exports.flavor).toBe(target ? "mapped" : "native");
+      expect(load).toHaveBeenCalledExactlyOnceWith(
+        target ?? "@vanilla-extract/css/fileScope"
+      );
+      if (target) {
+        expect(result.source).not.toContain("mincho:css-scope-runtime:");
+      } else {
+        expect(result.source).toContain("mincho:css-scope-runtime:");
+      }
+    }
+  );
+
   it("preserves caller fileScope resolver selection in direct execution", async () => {
     const { root } = await fixture();
     const selected = vi.fn();

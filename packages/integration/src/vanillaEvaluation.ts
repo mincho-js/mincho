@@ -1016,6 +1016,22 @@ async function evaluateVanilla(
     scopeDepth = 0;
     return Boolean(baselineScope && !scopeProtocol.hasFileScope());
   };
+  const readRegisteredExports = <T>(read: () => T): T => {
+    // Synchronous export reads may use the public scope protocol, without
+    // recording producer evidence or reinstating the adapter or capture.
+    readingRegisteredExports = true;
+    let result: T;
+    let removedEnclosingScope = false;
+    try {
+      result = read();
+    } finally {
+      readingRegisteredExports = false;
+      removedEnclosingScope = restoreRegisteredScope();
+    }
+    if (removedEnclosingScope)
+      throw new Error("CSS scope runtime removed its enclosing scope");
+    return result;
+  };
   const makeScopeFacade = (id?: string) => ({
     ...evaluationScope,
     setFileScope(...args: Parameters<typeof fileScopeApi.setFileScope>) {
@@ -1258,21 +1274,11 @@ async function evaluateVanilla(
             throw new Error("CSS scope runtime removed its enclosing scope");
           // Like upstream eval, read the resulting realm module once after
           // adapter teardown, while the evaluation NODE_ENV is still active.
-          if (registeredRealm) {
-            // A synchronous getter can use the public scope protocol, including
-            // through a lowered literal import, with no producer recording and
-            // without reinstating the adapter or resource capture.
-            readingRegisteredExports = true;
-            try {
-              registeredExports = (registeredRealm.module as typeof module)
-                .exports;
-            } finally {
-              readingRegisteredExports = false;
-              removedEnclosingScope = restoreRegisteredScope();
-            }
-            if (removedEnclosingScope)
-              throw new Error("CSS scope runtime removed its enclosing scope");
-          }
+          const realm = registeredRealm;
+          if (realm)
+            registeredExports = readRegisteredExports(
+              () => (realm.module as typeof module).exports
+            );
         } finally {
           if (nodeEnv === undefined) delete process.env.NODE_ENV;
           else process.env.NODE_ENV = nodeEnv;
@@ -1360,11 +1366,13 @@ async function evaluateVanilla(
       .filter(({ identifier }) => !used.has(identifier))
       .map(({ identifier }) => identifier);
 
-    return serializeVanillaModule(
-      [],
-      runtimeRegistration ? registeredExports : module.exports,
-      unused.length ? new RegExp(`(${unused.join("|")})\\s`, "g") : null
-    );
+    const serialize = () =>
+      serializeVanillaModule(
+        [],
+        runtimeRegistration ? registeredExports : module.exports,
+        unused.length ? new RegExp(`(${unused.join("|")})\\s`, "g") : null
+      );
+    return runtimeRegistration ? readRegisteredExports(serialize) : serialize();
   };
 
   let exportsSource = artifacts ? serializeExports() : undefined;

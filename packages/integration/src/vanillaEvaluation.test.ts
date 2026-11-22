@@ -1326,6 +1326,60 @@ it("restores the enclosing scope after a registered exports getter throws", asyn
   }
 });
 
+it("serializes enumerable export getters with synchronous public scope bookkeeping", async () => {
+  const compiledInput = await compiled(`
+    const scope = require(['@vanilla-extract/css','fileScope'].join('/'));
+    require('@vanilla-extract/css').globalStyle('.ordinary-export',{color:'green'});
+    Object.defineProperty(module.exports, 'label', {enumerable:true,get(){
+      scope.setFileScope('getter','ordinary');
+      try {
+        return scope.getFileScope().filePath;
+      } finally {
+        scope.endFileScope();
+      }
+    }});
+  `);
+  expect(
+    validateCssScopeRuntimeOrigins(
+      compiledInput.source,
+      compiledInput.cssScopeOrigins
+    )
+  ).toBeDefined();
+  const input = {
+    ...compiledInput,
+    filePath,
+    serializeVirtualCssPath: ({ source }: { source: string }) =>
+      JSON.stringify(source)
+  };
+  const upstream = await processVanillaFile(input);
+  expect(upstream).toContain("color: green");
+  expect(upstream).toContain("export var label = 'getter';");
+  expect(await processVanillaWithExecution(input)).toBe(upstream);
+});
+
+it("restores the enclosing scope when an enumerable export getter throws", async () => {
+  const compiledInput = await compiled(`
+    const scope = require(['@vanilla-extract/css','fileScope'].join('/'));
+    Object.defineProperty(module.exports,'label',{enumerable:true,get(){
+      scope.setFileScope('getter','ordinary');
+      throw new Error('ordinary export property failed');
+    }});
+  `);
+  const scope = createRequire(filePath)(
+    "@vanilla-extract/css/fileScope"
+  ) as typeof import("@vanilla-extract/css/fileScope");
+  scope.setFileScope("enclosing", "ordinary");
+  const enclosing = scope.getFileScope();
+  try {
+    await expect(
+      processVanillaWithExecution({ ...compiledInput, filePath })
+    ).rejects.toThrow("ordinary export property failed");
+    expect(scope.getFileScope()).toBe(enclosing);
+  } finally {
+    scope.endFileScope();
+  }
+});
+
 it("keeps upstream CSS-text fallback for unsupported adapter versions without granting artifact authority", async () => {
   vi.resetModules();
   vi.doMock("node:fs", async () => {
