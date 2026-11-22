@@ -1,9 +1,32 @@
 import { expect, it, vi } from "vitest";
 import {
   ViteCssState,
+  type PublishedStylesheet,
   customNormalize,
   extractedSidecarModuleId
 } from "./cssState.js";
+
+function stylesheet(
+  id: string,
+  source: string,
+  metadata: Partial<
+    Pick<PublishedStylesheet, "environment" | "hostId" | "origin">
+  > = {}
+) {
+  return new Map([
+    [
+      id,
+      {
+        id,
+        environment: "client",
+        hostId: id,
+        source,
+        origin: null,
+        ...metadata
+      }
+    ]
+  ]);
+}
 
 it("bounds retired HMR responses while retaining active styles", () => {
   const state = new ViteCssState({
@@ -14,14 +37,22 @@ it("bounds retired HMR responses while retaining active styles", () => {
     const owner = `/owner-${index}.tsx`;
     const sidecar = `/extracted-${index}.css.ts`;
     state.registerSidecar(owner, sidecar, "");
-    state.setVirtualCssForSidecar(sidecar, `virtual:${index}`, ".live{}");
+    state.commitVirtualCssForSidecar(
+      owner,
+      sidecar,
+      stylesheet(`virtual:${index}`, ".live{}")
+    );
     state.clearGeneratedCssForOwner(owner);
   }
   expect(state.getCss("virtual:0")).toBeUndefined();
   expect(state.hasCss("virtual:0")).toBe(false);
   expect(state.getCss("virtual:999")).toBe("");
   state.registerSidecar("/new.tsx", "/new.css.ts", "");
-  state.setVirtualCssForSidecar("/new.css.ts", "virtual:999", ".new{}");
+  state.commitVirtualCssForSidecar(
+    "/new.tsx",
+    "/new.css.ts",
+    stylesheet("virtual:999", ".new{}")
+  );
   expect(state.getCss("virtual:999")).toBe(".new{}");
 });
 
@@ -33,8 +64,9 @@ it("keeps identical CSS through sidecar renames and publishes only changed or re
   state.commitVirtualCssForSidecar(
     owner,
     "/extracted_old.css.ts",
-    new Map([["virtual:css", ".red{}"]])
+    stylesheet("virtual:css", ".red{}")
   );
+  const first = state.publication("virtual:css");
   invalidateModule.mockClear();
   state.registerSidecar(owner, "/extracted_new.css.ts", "new");
 
@@ -43,16 +75,17 @@ it("keeps identical CSS through sidecar renames and publishes only changed or re
     state.commitVirtualCssForSidecar(
       owner,
       "/extracted_new.css.ts",
-      new Map([["virtual:css", ".red{}"]])
+      stylesheet("virtual:css", ".red{}")
     )
   ).toEqual({ changed: 0, unchanged: 1, removed: 0 });
+  expect(state.publication("virtual:css")).toBe(first);
   expect(invalidateModule).not.toHaveBeenCalledWith("virtual:css");
   expect(state.hasSidecar("/extracted_old.css.ts")).toBe(false);
 
   state.commitVirtualCssForSidecar(
     owner,
     "/extracted_new.css.ts",
-    new Map([["virtual:css", ".blue{}"]])
+    stylesheet("virtual:css", ".blue{}")
   );
 
   expect(invalidateModule).toHaveBeenCalledWith("virtual:css");
@@ -65,6 +98,65 @@ it("keeps identical CSS through sidecar renames and publishes only changed or re
   expect(invalidateModule).toHaveBeenCalledTimes(1);
 });
 
+it.each([
+  { environment: "ssr" },
+  { hostId: "/other.vanilla.css" },
+  { origin: "/other.ts" }
+])("replaces a publication when its host metadata changes: %o", (metadata) => {
+  const invalidateModule = vi.fn();
+  const state = new ViteCssState({ invalidateModule, deleteContract() {} });
+  const publish = (entries: ReadonlyMap<string, PublishedStylesheet>) =>
+    state.commitVirtualCssForSidecar("/App", "/App.css", entries);
+  publish(stylesheet("virtual:css", ".red{}"));
+  const first = state.publication("virtual:css");
+  invalidateModule.mockClear();
+  expect(publish(stylesheet("virtual:css", ".red{}", metadata))).toEqual({
+    changed: 1,
+    unchanged: 0,
+    removed: 0
+  });
+  expect(invalidateModule).toHaveBeenCalledWith("virtual:css");
+  expect(state.publication("virtual:css")).not.toBe(first);
+});
+
+it("invalidates outstanding views across shared publishers and retirement", () => {
+  const invalidateModule = vi.fn();
+  const state = new ViteCssState({ invalidateModule, deleteContract() {} });
+  const id = "virtual:css";
+  const publish = (owner: string, source: string) => {
+    state.registerSidecar(owner, owner + ".css", source);
+    state.commitVirtualCssForSidecar(
+      owner,
+      owner + ".css",
+      stylesheet(id, source)
+    );
+    return state.publication(id);
+  };
+  const first = publish("/First", ".red{}");
+  const second = publish("/Second", ".red{}");
+  expect(second).not.toBe(first);
+  expect(publish("/Second", ".red{}")).toBe(second);
+
+  const changed = publish("/Second", ".blue{}");
+  expect(changed).not.toBe(second);
+  invalidateModule.mockClear();
+  state.clearGeneratedCssForOwner("/Second");
+  const restored = state.publication(id);
+  expect(restored?.source).toBe(".red{}");
+  expect(restored).not.toBe(first);
+  expect(invalidateModule).toHaveBeenCalledWith(id);
+  expect(publish("/First", ".red{}")).toBe(restored);
+
+  state.clearGeneratedCssForOwner("/First");
+  expect(state.publication(id)).toBeUndefined();
+  expect(publish("/First", ".red{}")).not.toBe(restored);
+  const active = publish("/Third", ".green{}");
+  invalidateModule.mockClear();
+  state.clearGeneratedCssForOwner("/First");
+  expect(state.publication(id)).toBe(active);
+  expect(invalidateModule).not.toHaveBeenCalledWith(id);
+});
+
 it("clears an owner's sidecars, authorization and contracts together", () => {
   const invalidateModule = vi.fn();
   const deleteContract = vi.fn();
@@ -74,12 +166,16 @@ it("clears an owner's sidecars, authorization and contracts together", () => {
   const id = extractedSidecarModuleId(sidecar);
   const css = "\0mincho-virtual-css:/project/extracted_1.vanilla.css";
   state.registerSidecar(owner, sidecar, "export const style = 1;");
+  state.commitVirtualCssForSidecar(
+    owner,
+    sidecar,
+    stylesheet(css, ".style { color: red; }")
+  );
   state.registerSidecar(
     "/project/Other.tsx",
     "/project/extracted_2.css.ts",
     "other"
   );
-  state.setVirtualCssForSidecar(sidecar, css, ".style { color: red; }");
 
   expect(state.loadSidecar(id, sidecar)).toContain("export const style");
 

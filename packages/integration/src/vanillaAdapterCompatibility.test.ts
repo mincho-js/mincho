@@ -70,6 +70,15 @@ describe("vanilla-extract adapter compatibility", () => {
       await processVanillaWithExecution({
         source,
         filePath,
+        cssScopeOrigins: [
+          {
+            fileScope: {
+              filePath: "adapter-versions.css.ts",
+              packageName: "adapter-version-test"
+            },
+            origin: filePath
+          }
+        ],
         serializeCssArtifact
       });
 

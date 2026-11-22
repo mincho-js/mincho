@@ -16,7 +16,10 @@ import {
   type DefineRulesRegistrySession
 } from "@mincho-js/css/defineRules/registry";
 import { defineRules } from "@mincho-js/css";
-import type { VanillaOptions } from "./vanillaEvaluation.js";
+import {
+  processVanillaCssText,
+  type VanillaOptions
+} from "./vanillaEvaluation.js";
 import { processVanillaFile } from "@vanilla-extract/integration";
 import { processCachedEvaluation } from "./evaluationResultCache.js";
 import {
@@ -63,8 +66,26 @@ export function getDefineRulesAncestorStyleSpecifiers(registrySession: {
   );
 }
 
+/** Public CSS text uses Vanilla Extract's loader even when given a full compile result. */
 export async function processDefineRulesPresetRegistryFile(
   options: DefineRulesPresetRegistryFileOptions
+): Promise<DefineRulesPresetRegistryResult> {
+  if (options.serializeCssArtifact) return processManagedRegistryFile(options);
+  return processRegistryFile(options, (input, _session, consume) =>
+    processVanillaCssText(input).then(consume)
+  );
+}
+
+/** @internal Host evaluation retains compiler provenance even without a serializer. */
+export function processManagedRegistryFile(
+  options: DefineRulesPresetRegistryFileOptions
+): Promise<DefineRulesPresetRegistryResult> {
+  return processRegistryFile(options, processCachedEvaluation);
+}
+
+async function processRegistryFile(
+  options: DefineRulesPresetRegistryFileOptions,
+  evaluate: typeof processCachedEvaluation
 ): Promise<DefineRulesPresetRegistryResult> {
   const registrySession = beginDefineRulesRegistrySession();
   const tokens =
@@ -84,7 +105,7 @@ export async function processDefineRulesPresetRegistryFile(
     }
 
     return await measureCompilationPhase("vanilla-extract", () =>
-      processCachedEvaluation(options, registrySession, (source) => {
+      evaluate(options, registrySession, (source) => {
         const presetArtifacts =
           validateDefineRulesRegistrySessionArtifacts(registrySession);
 

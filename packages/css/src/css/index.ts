@@ -123,7 +123,7 @@ function isAtRuleObject(value: unknown): value is Record<string, CSSRule> {
 }
 
 // == CSS ======================================================================
-export const css = Object.assign(cssImpl, {
+export const css = /* @__PURE__ */ Object.assign(cssImpl, {
   raw: cssRaw,
   multiple: cssMultiple,
   with: cssWith

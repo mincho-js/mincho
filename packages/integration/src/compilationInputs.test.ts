@@ -11,10 +11,72 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { CompilationCache } from "./compilationCache.js";
-import { fingerprintFiles } from "./compilationInputs.js";
+import { CompilationInputs, fingerprintFiles } from "./compilationInputs.js";
 import { CompilationIoPool } from "./ioPool.js";
 
 describe("compilation input sessions", () => {
+  it("preserves directory read errors while retaining configuration fingerprints", async () => {
+    const root = await mkdtemp(join(tmpdir(), "mincho-input-directory-"));
+    const file = join(root, "package.json");
+    const inputs = new CompilationInputs();
+    try {
+      await mkdir(file);
+      const originalError = await inputs
+        .readOptionalFile(file)
+        .catch((error) => error);
+      expect(originalError).toMatchObject({ code: "EISDIR" });
+      expect((await inputs.fingerprint([file])).get(file)).toMatch(
+        /^directory:/
+      );
+      await rm(file, { recursive: true });
+      await writeFile(file, '{"name":"new"}');
+      await expect(inputs.readOptionalFile(file)).rejects.toBe(originalError);
+      expect(await inputs.validate()).toEqual({
+        files: [file],
+        directories: []
+      });
+      const fresh = new CompilationInputs();
+      expect(
+        Buffer.from((await fresh.readOptionalFile(file))!).toString()
+      ).toContain("new");
+      expect(
+        await fresh.readOptionalFile(join(root, "missing"))
+      ).toBeUndefined();
+      expect(await fresh.readOptionalFile(join(file, "child"))).toBeUndefined();
+      fresh.close();
+    } finally {
+      inputs.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it.each(["file", "missing"])(
+    "rejects a directory changing to %s between read and fingerprint",
+    async (next) => {
+      const root = await mkdtemp(join(tmpdir(), "mincho-input-type-change-"));
+      const file = join(root, "package.json");
+      const inputs = new CompilationInputs(async (path) => {
+        try {
+          return await readFile(path);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "EISDIR") throw error;
+          await rm(path, { recursive: true });
+          if (next === "file") await writeFile(path, '{"name":"new"}');
+          throw error;
+        }
+      });
+      try {
+        await mkdir(file);
+        await expect(inputs.readOptionalFile(file)).rejects.toThrow(
+          "Mincho inputs changed during compilation"
+        );
+      } finally {
+        inputs.close();
+        await rm(root, { recursive: true, force: true });
+      }
+    }
+  );
+
   it.each([
     "fingerprint",
     "unchanged",
@@ -101,6 +163,57 @@ describe("compilation input sessions", () => {
     expect(await second).toBe(2);
     expect(create).toHaveBeenCalledTimes(2);
   });
+
+  it.each([false, true])(
+    "recomputes a standalone pending result after invalidation (value validator: %s)",
+    async (withValidator) => {
+      const root = await mkdtemp(join(tmpdir(), "mincho-review11-generation-"));
+      try {
+        const manifest = join(root, "package.json");
+        await writeFile(manifest, '{"name":"old"}');
+        const cache = new CompilationCache();
+        let entered!: () => void;
+        let release!: () => void;
+        const enteredPromise = new Promise<void>((resolve) => {
+          entered = resolve;
+        });
+        const releasePromise = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        const create = vi.fn(async () => {
+          const buffer = (await cache.readOptionalFile(manifest))!;
+          const value = JSON.parse(Buffer.from(buffer).toString()).name;
+          entered();
+          await releasePromise;
+          return {
+            value,
+            bytes: 1,
+            dependencies: [manifest],
+            valid: async () => true
+          };
+        });
+        const validate = withValidator ? async () => true : undefined;
+        const producer = cache.withInputs(() =>
+          cache.run("keys", create, validate)
+        );
+        const producerResult = producer.catch((error: Error) => error.message);
+        await enteredPromise;
+        const waiter = cache.withInputs(() =>
+          cache.run("keys", create, validate)
+        );
+        await writeFile(manifest, '{"name":"new"}');
+        cache.invalidate(manifest);
+        release();
+        expect(await producerResult).toContain(
+          "Mincho inputs changed during compilation"
+        );
+        expect(await waiter).toBe("new");
+        expect(create).toHaveBeenCalledTimes(2);
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    }
+  );
 
   it("shares concurrent reads and fingerprints, but refreshes every build", async () => {
     const root = await mkdtemp(join(tmpdir(), "mincho-inputs-"));

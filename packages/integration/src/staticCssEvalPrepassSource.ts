@@ -1,4 +1,6 @@
 import {
+  internalHasConcreteLogicalSyntaxFilename,
+  internalHasStaticCssEvalSyntaxFilename,
   internalStaticCssEvalLimits,
   type InternalImportedStaticCssEvalImportResolution as BabelImportedStaticCssEvalImportResolution,
   type InternalImportedStaticCssEvalLoadedModule as BabelImportedStaticCssEvalLoadedModule
@@ -115,10 +117,47 @@ export function createLoadedModule(
     options.resolution
   );
 
+  // A backing filename is syntax evidence only if it describes source code.
+  // Keep the provider's physical path regardless of the parser's choice.
+  const realpath = loadedSource.realpath ?? options.resolution?.realpath;
+  const loaderFilename = loadedSource.resolvedFile;
+  const virtualId =
+    (loadedSource.sourceKind ?? options.resolution?.sourceKind) ===
+    "provider-virtual";
+  // Syntax describes the bytes returned by the loader. Prefer an explicit
+  // distinct name, then the concrete grammar of a declared virtual source.
+  // An echo of the realpath is backing metadata, not a separate loader label:
+  // only the physical fallback may use it, without removing literal delimiters.
+  const syntaxSource =
+    loaderFilename !== undefined &&
+    loaderFilename !== id &&
+    loaderFilename !== realpath &&
+    internalHasStaticCssEvalSyntaxFilename(loaderFilename)
+      ? {
+          syntaxSourceId: loaderFilename,
+          syntaxSourceIdKind: "loader-filename" as const
+        }
+      : virtualId && internalHasConcreteLogicalSyntaxFilename(id)
+        ? { syntaxSourceId: id }
+        : realpath !== undefined &&
+            internalHasStaticCssEvalSyntaxFilename(realpath, true)
+          ? undefined
+          : internalHasStaticCssEvalSyntaxFilename(id)
+            ? {
+                syntaxSourceId: id,
+                ...(virtualId
+                  ? {}
+                  : { syntaxSourceIdKind: "metadata-free" as const })
+              }
+            : undefined;
+
   return {
     id,
+    resolvedFile:
+      loadedSource.resolvedFile ?? options.resolution?.resolvedFile ?? id,
     source: sourceText,
-    realpath: loadedSource.realpath ?? options.resolution?.realpath,
+    realpath,
+    ...syntaxSource,
     sourceHash: sourceIdentity.sourceHash,
     version: sourceIdentity.version,
     ...createLoadedModuleSourceMetadata(loadedSource, options.resolution)

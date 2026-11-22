@@ -73,7 +73,7 @@ describe("babelTransformSource", () => {
         for (const color of ["blue", "green"]) {
           await writeFile(
             config,
-            JSON.stringify({ plugins: [`./${color}.cjs`] })
+            JSON.stringify({ plugins: [join(project, `${color}.cjs`)] })
           );
           expect((await babelTransformSource(options)).result[1]).toContain(
             `"${color}"`

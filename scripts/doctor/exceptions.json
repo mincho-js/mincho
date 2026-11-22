@@ -120,6 +120,16 @@
     "expires": "2026-12-31"
   },
   {
+    "id": "integration-compile-plugins-generated-tokens-loader",
+    "file": "packages/integration/src/compilePlugins.test.ts",
+    "type": "warning",
+    "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
+    "source": "loader: \"ts\",",
+    "count": 1,
+    "reason": "This generated-token fixture supplies TypeScript source through esbuild's built-in ts loader in an onLoad result. It does not reference a Webpack loader package.",
+    "expires": "2026-12-31"
+  },
+  {
     "id": "configs-eslint-config-custom-eslint-config-base-node-modules-01",
     "file": "configs/eslint-config-custom/eslint.config.base.js",
     "type": "warning",
@@ -1447,6 +1457,176 @@
     "source": "setFileScope(\"../node_modules/parent/rules.js\", \"@consumer/app\");",
     "count": 1,
     "reason": "This synthetic producer file scope tests deferred consumer registration. It does not locate a package or access the filesystem.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "integration-colocated-preset-esbuild-loader",
+    "file": "packages/integration/src/coLocatedPreset.test.ts",
+    "type": "warning",
+    "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
+    "source": "loader: \"js\"",
+    "count": 2,
+    "reason": "These two esbuild onLoad fixtures return the built-in JavaScript loader enum, including the escaped-identifier hygiene regression. Neither selects a Webpack loader package.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "babel-extraction-evaluation-operand-use-role",
+    "file": "packages/babel/src/extractionCalls/evaluation.ts",
+    "type": "warning",
+    "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
+    "source": "use: index === 0 ? \"reference\" : \"value\",",
+    "count": 1,
+    "reason": "This evaluation-plan field classifies an assignment operand as a reference or a value. It is not a Webpack use option and names no loader dependency.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "integration-colocated-configured-scope-js-loader",
+    "file": "packages/integration/src/coLocatedPreset.test.ts",
+    "type": "warning",
+    "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
+    "source": "loader: \"js\",",
+    "count": 1,
+    "reason": "The configured Babel scope regression selects the built-in JavaScript script loader; this is not a Webpack loader dependency.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "integration-worker-scope-js-loader",
+    "file": "packages/integration/src/compilationExecution.test.ts",
+    "type": "warning",
+    "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
+    "source": "loader: \"js\" as const,",
+    "count": 1,
+    "reason": "The worker/inline scoped-transform equivalence fixture uses the built-in JavaScript loader enum, not a module specifier.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "integration-runtime-scope-proxy-js-loader",
+    "file": "packages/integration/src/compile.ts",
+    "type": "warning",
+    "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
+    "source": "loader: \"js\",",
+    "count": 1,
+    "reason": "The compiler-owned file-scope proxy returns JavaScript source to esbuild with its built-in JS loader enum; require.resolve would change its meaning.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "vite-published-multiscope-package-layout-01",
+    "file": "packages/vite/src/libraryCssNativeBuild.test.ts",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": "const publishedPackageDirectory = \"node_modules/published\";",
+    "count": 1,
+    "reason": "This isolated published-package regression deliberately creates, imports, replaces, and verifies physical node_modules package files. Real package placement is essential to test package ownership, distinct scope IDs, and relative asset origins; it is not application dependency resolution.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "review7-typescript-emitter-loader",
+    "file": "packages/babel/src/extractionCalls/primitiveInvocation.test.ts",
+    "type": "warning",
+    "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
+    "source": "emitTypeScript(`${source};factory({},1)`, { loader: \"ts\" }).code",
+    "count": 1,
+    "reason": "This runtime argument-index regression invokes the built-in TypeScript esbuild loader. It is not a Webpack loader module.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "review7-virtual-scope-js-loader",
+    "file": "packages/integration/src/compilePlugins.test.ts",
+    "type": "warning",
+    "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
+    "source": "loader: \"js\"",
+    "count": 1,
+    "reason": "The virtual public-scope API fixture returns JavaScript source through esbuild’s built-in JS loader enum; require.resolve would change the loader contract.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "review7-duplicate-installed-preset-01",
+    "file": "packages/integration/src/coLocatedPreset.test.ts",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": "const folder = join(root, parent, \"node_modules/preset\");",
+    "count": 1,
+    "reason": "The fixture intentionally creates two physical installations of the same named package and imports one twice to verify class identity, physical provenance, and deduplication. Resolving a pre-existing dependency would remove the tested installation topology.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "review7-duplicate-installed-preset-02",
+    "file": "packages/integration/src/coLocatedPreset.test.ts",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": "contents: `import {name as a} from './a/node_modules/preset/index.mjs';import {name as again} from './a/node_modules/preset/index.mjs';import {name as b} from './b/node_modules/preset/index.mjs';export const names=[a,again,b];`",
+    "count": 1,
+    "reason": "The fixture intentionally creates two physical installations of the same named package and imports one twice to verify class identity, physical provenance, and deduplication. Resolving a pre-existing dependency would remove the tested installation topology.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "review7-duplicate-installed-preset-03",
+    "file": "packages/integration/src/coLocatedPreset.test.ts",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": "join(root, \"a/node_modules/preset/index.mjs\"),",
+    "count": 1,
+    "reason": "The fixture intentionally creates two physical installations of the same named package and imports one twice to verify class identity, physical provenance, and deduplication. Resolving a pre-existing dependency would remove the tested installation topology.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "review7-duplicate-installed-preset-04",
+    "file": "packages/integration/src/coLocatedPreset.test.ts",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": "join(root, \"b/node_modules/preset/index.mjs\")",
+    "count": 1,
+    "reason": "The fixture intentionally creates two physical installations of the same named package and imports one twice to verify class identity, physical provenance, and deduplication. Resolving a pre-existing dependency would remove the tested installation topology.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "review7-unattributed-native-package-01",
+    "file": "packages/vite/src/libraryCssNativeBuild.test.ts",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": "\"node_modules/dynamic/package.json\":",
+    "count": 1,
+    "reason": "This isolated installed CommonJS producer deliberately acquires the file-scope API dynamically. Its physical package location tests native asset-free output versus resource-bearing rejection without granting provenance.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "review7-unattributed-native-package-02",
+    "file": "packages/vite/src/libraryCssNativeBuild.test.ts",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": "\"node_modules/dynamic/index.cjs\": `",
+    "count": 1,
+    "reason": "This isolated installed CommonJS producer deliberately acquires the file-scope API dynamically. Its physical package location tests native asset-free output versus resource-bearing rejection without granting provenance.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "review7-unattributed-native-package-03",
+    "file": "packages/vite/src/libraryCssNativeBuild.test.ts",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": "\"entry.js\": `import {mincho$} from '@mincho-js/css';import {className} from './node_modules/dynamic/index.cjs';export const value=mincho$(()=>className);`",
+    "count": 1,
+    "reason": "This isolated installed CommonJS producer deliberately acquires the file-scope API dynamically. Its physical package location tests native asset-free output versus resource-bearing rejection without granting provenance.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "review10-foreign-vanilla-adapter-package-fixture",
+    "file": "packages/integration/src/vanillaEvaluation.test.ts",
+    "type": "warning",
+    "message": "Strings should avoid referencing the node_modules directory (prefer require.resolve)",
+    "source": "const foreign = join(root, \"node_modules/@vanilla-extract/css\");",
+    "count": 1,
+    "reason": "The isolated temporary fixture creates a second vanilla-extract installation to verify registered evaluation and replay reject foreign adapters before publishing CSS. Production resolves adapter endpoints using the request issuer.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "integration-compile-resolution-esbuild-loader-options",
+    "file": "packages/integration/src/compileResolution.ts",
+    "type": "warning",
+    "message": "Webpack configs from non-private packages should avoid referencing loaders without require.resolve",
+    "source": "loader: options.loader",
+    "count": 1,
+    "reason": "This shared BuildOptions mapping forwards esbuild extension-to-loader enums identically to compilation and native resolution validation. It is not a Webpack loader package lookup.",
     "expires": "2026-12-31"
   }
 ]

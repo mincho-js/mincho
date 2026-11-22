@@ -51,8 +51,10 @@ vi.mock("./babel.js", async (importOriginal) => {
 });
 
 vi.mock("./compile.js", () => ({
-  transformScopedDependencySource: (input: ScopedDependencyOptions) =>
-    input.contents
+  transformScopedDependency: (input: ScopedDependencyOptions) => ({
+    source: input.contents,
+    cssScopeOrigins: []
+  })
 }));
 
 const source = "/*" + "a".repeat(40 * 1024) + "*/ export const value = 1;";
@@ -107,7 +109,8 @@ describe("worker source transport", () => {
 
       expect(result.ok).toBe(true);
 
-      if (result.ok) expect(result.value).toBe(source);
+      if (result.ok)
+        expect(result.value).toEqual({ source, cssScopeOrigins: [] });
     }
 
     expect(
@@ -228,7 +231,7 @@ describe("worker source transport", () => {
 
     expect(cold).toMatchObject({
       ok: true,
-      value: source,
+      value: { source, cssScopeOrigins: [] },
       transport: {
         payloadMisses: 1,
         payloadHits: 0,
@@ -240,7 +243,7 @@ describe("worker source transport", () => {
 
     expect(warm).toMatchObject({
       ok: true,
-      value: source,
+      value: { source, cssScopeOrigins: [] },
       transport: { payloadHits: 1, payloadMisses: 0, payloadBytes: 0 }
     });
     expect(requests).toBe(1);
@@ -292,7 +295,7 @@ describe("worker source transport", () => {
     });
     expect(await run(source)).toMatchObject({
       ok: true,
-      value: source,
+      value: { source, cssScopeOrigins: [] },
       transport: { payloadMisses: 1 }
     });
   });
@@ -319,10 +322,13 @@ describe("worker source transport", () => {
         }
       );
 
-    expect(await run()).toMatchObject({ ok: true, value: source });
     expect(await run()).toMatchObject({
       ok: true,
-      value: source,
+      value: { source, cssScopeOrigins: [] }
+    });
+    expect(await run()).toMatchObject({
+      ok: true,
+      value: { source, cssScopeOrigins: [] },
       transport: { payloadHits: 1 }
     });
     expect(jobs[0].sourcePayload?.inline).toBe(true);
@@ -331,7 +337,10 @@ describe("worker source transport", () => {
 
     runtime.begin();
 
-    expect(await run()).toMatchObject({ ok: true, value: source });
+    expect(await run()).toMatchObject({
+      ok: true,
+      value: { source, cssScopeOrigins: [] }
+    });
     expect(jobs[2].sourcePayload?.inline).toBe(true);
     expect(jobs[2].sourcePayload?.reference.id).not.toBe(
       jobs[0].sourcePayload?.reference.id
@@ -360,7 +369,7 @@ describe("worker source transport", () => {
             throw new Error("Unexpected inline fallback");
           }
         )
-      ).toMatchObject({ ok: true, value: source });
+      ).toMatchObject({ ok: true, value: { source, cssScopeOrigins: [] } });
 
     expect(
       jobs.every(
@@ -381,7 +390,10 @@ describe("worker source transport", () => {
 
         return {
           ok: true,
-          value: (job.input as ScopedDependencyOptions).contents,
+          value: {
+            source: (job.input as ScopedDependencyOptions).contents,
+            cssScopeOrigins: []
+          },
           duration: 0
         };
       }
@@ -398,7 +410,7 @@ describe("worker source transport", () => {
             throw new Error("Unexpected inline fallback");
           }
         )
-      ).toMatchObject({ ok: true, value: source });
+      ).toMatchObject({ ok: true, value: { source, cssScopeOrigins: [] } });
 
     expect(jobs[0].sourcePayload?.inline).toBe(true);
     expect(jobs[1].sourcePayload).toBeUndefined();
@@ -429,7 +441,11 @@ describe("worker source transport", () => {
         await pending;
         job.port.close();
 
-        return { ok: true, value: source, duration: 0 };
+        return {
+          ok: true,
+          value: { source, cssScopeOrigins: [] },
+          duration: 0
+        };
       }
     } satisfies CompilerPool;
 

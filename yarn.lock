@@ -2277,11 +2277,14 @@ __metadata:
     "@mincho-js/css": "workspace:^"
     "@mincho-js/debug-log": "workspace:^"
     "@mincho-js/transform-runtime": "workspace:^"
+    "@mincho-js/transform-to-vanilla": "workspace:^"
     "@types/babel__core": "catalog:"
     "@types/babel__generator": "catalog:"
     "@types/babel__traverse": "catalog:"
     "@types/node": "catalog:"
     "@vanilla-extract/css": "catalog:"
+    "@vanilla-extract/integration": "catalog:"
+    "@vanilla-extract/recipes": "catalog:"
     esbuild: "catalog:"
     eslint-config-custom: "workspace:^"
     prettier-config-custom: "workspace:^"
@@ -2513,6 +2516,7 @@ __metadata:
     "@mincho-js/transform-to-vanilla": "workspace:^"
     "@rollup/pluginutils": "catalog:"
     "@types/babel__core": "catalog:"
+    "@types/css-tree": "catalog:"
     "@types/node": "catalog:"
     "@vanilla-extract/css": "catalog:"
     "@vanilla-extract/dynamic": "catalog:"
@@ -2520,6 +2524,7 @@ __metadata:
     "@vanilla-extract/recipes": "catalog:"
     "@vanilla-extract/sprinkles": "catalog:"
     "@vanilla-extract/vite-plugin": "catalog:"
+    css-tree: "catalog:"
     eslint-config-custom: "workspace:^"
     magic-string: "catalog:"
     prettier-config-custom: "workspace:^"
@@ -4159,6 +4164,13 @@ __metadata:
   dependencies:
     "@types/deep-eql": "npm:*"
   checksum: 10/de425e7b02cc1233a93923866e019dffbafa892774813940b780ebb1ac9f8a8c57b7438c78686bf4e5db05cd3fc8a970fedf6b83638543995ecca88ef2060668
+  languageName: node
+  linkType: hard
+
+"@types/css-tree@npm:^3.2.0":
+  version: 3.2.0
+  resolution: "@types/css-tree@npm:3.2.0"
+  checksum: 10/bf179b0eef4bebedacaae3a73d488040c52ac10886ab6e6cdc503d6abbf1e13b2e6f8548f42a82cccbcac76e9a07b78bf889e4a16ebc159f3c4cb60f184f4031
   languageName: node
   linkType: hard
 
@@ -6821,6 +6833,16 @@ __metadata:
     shebang-command: "npm:^2.0.0"
     which: "npm:^2.0.1"
   checksum: 10/0d52657d7ae36eb130999dffff1168ec348687b48dd38e2ff59992ed916c88d328cf1d07ff4a4a10bc78de5e1c23f04b306d569e42f7a2293915c081e4dfee86
+  languageName: node
+  linkType: hard
+
+"css-tree@npm:^3.2.1":
+  version: 3.2.1
+  resolution: "css-tree@npm:3.2.1"
+  dependencies:
+    mdn-data: "npm:2.27.1"
+    source-map-js: "npm:^1.2.1"
+  checksum: 10/9945b387bdec756738c34d64b8287f05ca6645f51d1c8abaaa5822ec3e74533604103aaad164b8100afd8495e92120be7c1c6afbe5be89f867acc5b456ddd79c
   languageName: node
   linkType: hard
 
@@ -10326,6 +10348,13 @@ __metadata:
   version: 2.3.0
   resolution: "mdn-data@https://github.com/mdn/data.git#commit=7f0c865a3c4b5d891285c93308ee5c25cb5cfee8"
   checksum: 10/593578702bd2f51b4e52da993c6bf68c4109583eda67041b249cd0b67a6e19877bf1b357249c1be15925cdeabdfe7bf790b477dadab13f833217810b77501b7d
+  languageName: node
+  linkType: hard
+
+"mdn-data@npm:2.27.1":
+  version: 2.27.1
+  resolution: "mdn-data@npm:2.27.1"
+  checksum: 10/5046dc83a961b8ea82a5d6d8331d07df6b15faec61519ce2f83e49766702358e7e6af96413be977ff89080534be6762c1d5963b5dd1180c208a47c0a663226b2
   languageName: node
   linkType: hard
 

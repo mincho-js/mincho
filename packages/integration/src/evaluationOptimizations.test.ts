@@ -60,7 +60,8 @@ async function evaluate(
   source: string,
   filePath: string,
   staticStyles = false,
-  raw = false
+  raw = false,
+  cssScopeOrigins?: Awaited<ReturnType<typeof compile>>["cssScopeOrigins"]
 ) {
   const css: string[] = [];
   const artifacts: VanillaCssArtifact[] = [];
@@ -68,6 +69,7 @@ async function evaluate(
     source,
     filePath,
     staticStyles,
+    cssScopeOrigins,
 
     serializeVirtualCssPath: ({ source }) => {
       css.push(source);
@@ -338,11 +340,14 @@ describe("closed ESM evaluation demand", () => {
       `import {style} from '@vanilla-extract/css'; import {palette} from './tokens'; export const box=style({color:palette.red});`,
       {
         "tokens.ts": `export const palette={red:'red',unused:'EXTERNAL_PLUGIN'};`,
-        ".babelrc.json": JSON.stringify({ plugins: ["./replace.cjs"] }),
         "replace.cjs": `module.exports=()=>({visitor:{StringLiteral(path){if(path.node.value==='red')path.node.value='blue'}}});`
       }
     );
 
+    await writeFile(
+      join(root, ".babelrc.json"),
+      JSON.stringify({ plugins: [join(root, "replace.cjs")] })
+    );
     await rm(join(root, "package.json"));
 
     const baseline = await compile(options);
@@ -568,7 +573,8 @@ describe("intrinsic literal static styles", () => {
               optimized.source,
               options.filePath,
               true,
-              cacheEnabled
+              cacheEnabled,
+              optimized.cssScopeOrigins
             );
           })
         );
@@ -619,7 +625,13 @@ describe("intrinsic literal static styles", () => {
 
             expect(readStaticStyleProgram(optimized.source)).toBeDefined();
 
-            return evaluate(optimized.source, options.filePath, true, true);
+            return evaluate(
+              optimized.source,
+              options.filePath,
+              true,
+              true,
+              optimized.cssScopeOrigins
+            );
           })
         );
 
@@ -647,7 +659,10 @@ describe("intrinsic literal static styles", () => {
       `import {style} from '@vanilla-extract/css'; export const box=style({color:'red'});`
     );
 
-    const source = (await compile({ ...options, staticStyles: true })).source;
+    const { source, cssScopeOrigins } = await compile({
+      ...options,
+      staticStyles: true
+    });
     const execution = new CompilationExecution({ workers: 0 });
     execution.compilationCache = new CompilationCache();
     execution.compilationCache.configure(
@@ -666,6 +681,7 @@ describe("intrinsic literal static styles", () => {
           execution.run(() =>
             processDefineRulesPresetRegistryFile({
               source,
+              cssScopeOrigins,
               filePath: options.filePath,
               staticStyles: true,
 
@@ -853,10 +869,11 @@ describe("evaluation compiler resource provenance", () => {
       export const box=css({color:publicVar,vars:{[privateVar]:'blue',[foreign]:'green',[global]:'black'}});
     `);
 
-    const source = (await compile(options)).source;
+    const { source, cssScopeOrigins } = await compile(options);
     const artifacts: VanillaCssArtifact[] = [];
     const output = await processVanillaWithExecution({
       source,
+      cssScopeOrigins,
       filePath: options.filePath,
 
       serializeCssArtifact: (artifact) => {
@@ -918,7 +935,7 @@ describe("evaluation compiler resource provenance", () => {
 
     const artifacts: VanillaCssArtifact[] = [];
     await processVanillaWithExecution({
-      source: (await compile(good.options)).source,
+      ...(await compile(good.options)),
       filePath: good.options.filePath,
 
       serializeCssArtifact: (artifact) => {
@@ -934,3 +951,35 @@ describe("evaluation compiler resource provenance", () => {
     ).toBeUndefined();
   });
 });
+
+it.each(["icon.css.ts", "icon%.css.ts", "icon#.css.ts"])(
+  "uses the same logical scope in static programs and provenance: %s",
+  async (name) => {
+    const { root, options } = await fixture(
+      "import {style} from '@vanilla-extract/css';export const name=style({color:'red'});"
+    );
+    const filePath = join(root, name);
+    const result = await compile({
+      ...options,
+      filePath,
+      originalPath: filePath,
+      staticStyles: true
+    });
+    const program = readStaticStyleProgram(result.source);
+    expect(program).toBeDefined();
+    expect(program!.scope.filePath).toBe(encodeURIComponent(name));
+    expect(
+      result.cssScopeOrigins.some(
+        (x) => x.fileScope.filePath === program!.scope.filePath
+      )
+    ).toBe(true);
+    const evaluated = await evaluate(
+      result.source,
+      filePath,
+      true,
+      true,
+      result.cssScopeOrigins
+    );
+    expect(evaluated.css.join("")).toContain("red");
+  }
+);

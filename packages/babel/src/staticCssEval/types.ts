@@ -1,3 +1,4 @@
+import type { TransformOptions } from "@babel/core";
 import {
   INERT_STATIC_CSS_API_KINDS,
   STATIC_CSS_API_KINDS,
@@ -436,7 +437,7 @@ export interface StaticCssEvalProjectLocalBoundaryState {
 }
 
 export interface StaticCssEvalParserOptionsKey {
-  plugins: string[];
+  plugins: NonNullable<NonNullable<TransformOptions["parserOpts"]>["plugins"]>;
   sourceType: "module" | "script" | "unambiguous";
   jsx: boolean;
   typescript: boolean;

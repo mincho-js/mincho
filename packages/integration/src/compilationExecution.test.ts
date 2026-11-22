@@ -1,3 +1,4 @@
+import { transformScopedDependency } from "./compile.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -30,6 +31,30 @@ function execution(workers: number) {
 }
 
 describe("compiler workers", () => {
+  it("returns matching final source and scope hints from worker and inline transforms", async () => {
+    const filePath = join(process.cwd(), "src/__fixtures__/scoped-worker.js");
+    const input = {
+      filePath,
+      contents: "export const value=42;",
+      loader: "js" as const,
+      packageName: "worker-fixture",
+      rootPath: process.cwd()
+    };
+    const inline = transformScopedDependency(input);
+    const runtime = execution(1);
+    const dispatch = vi.spyOn(runtime, "dispatch");
+    const fallback = vi.fn(() => inline);
+    const actual = await runtime.run(() =>
+      executeScopedTransform(input, fallback)
+    );
+    expect(dispatch).toHaveBeenCalled();
+    expect(fallback).not.toHaveBeenCalled();
+    expect(actual).toEqual(inline);
+    expect(actual.cssScopeOrigins).toEqual(
+      expect.arrayContaining([expect.objectContaining({ origin: filePath })])
+    );
+  });
+
   it("preserves the options of a disabled execution nested inside an enabled one", async () => {
     const outer = execution(1);
     const inner = new CompilationExecution({ workers: 0 });
@@ -390,7 +415,7 @@ describe("compiler workers", () => {
     const inline = vi.fn(() => {
       runtime.begin();
 
-      return "export const n = 1;";
+      return { source: "export const n = 1;", cssScopeOrigins: [] };
     });
 
     try {

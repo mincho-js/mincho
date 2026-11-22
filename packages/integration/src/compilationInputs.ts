@@ -8,7 +8,7 @@ import {
 } from "./diagnostics.js";
 import { getCompilationIoPool, type CompilationIoPool } from "./ioPool.js";
 
-type Input = { digest: string | null; bytes?: Uint8Array };
+type Input = { digest: string | null; bytes?: Uint8Array; readError?: unknown };
 
 type Reader = (file: string) => Promise<Uint8Array>;
 
@@ -62,8 +62,16 @@ export class CompilationInputs {
     return pending;
   }
 
+  /** Missing files are snapshot values too; never reread an observed absence. */
+  async readOptionalFile(file: string): Promise<Uint8Array | undefined> {
+    const input = await this.input(file);
+    if (input.readError) throw input.readError;
+    return input.bytes;
+  }
+
   async readFile(file: string): Promise<Uint8Array> {
     const input = await this.input(file);
+    if (input.readError) throw input.readError;
     if (input.bytes) return input.bytes;
 
     // Preserve the native error, including the original path and error code.
@@ -156,7 +164,8 @@ export class CompilationInputs {
         const current = await fileDigest(file, this.io);
 
         if (current !== previous.digest)
-          (previous.digest?.startsWith("directory:")
+          (previous.digest?.startsWith("directory:") &&
+          current?.startsWith("directory:")
             ? directories
             : files
           ).push(file);
@@ -191,12 +200,23 @@ async function readInput(file: string, reader: Reader): Promise<Input> {
 
     return { bytes, digest: cacheDigest(bytes) };
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "EISDIR")
+    if ((error as NodeJS.ErrnoException).code === "EISDIR") {
+      let entries: string[];
+      try {
+        entries = await readdir(file);
+      } catch (cause) {
+        const code = (cause as NodeJS.ErrnoException).code;
+        if (code === "ENOTDIR" || code === "ENOENT")
+          throw new Error(`Mincho inputs changed during compilation: ${file}`, {
+            cause
+          });
+        throw cause;
+      }
       return {
-        digest:
-          "directory:" +
-          cacheDigest(JSON.stringify((await readdir(file)).sort()))
+        readError: error,
+        digest: "directory:" + cacheDigest(JSON.stringify(entries.sort()))
       };
+    }
     if (
       (error as NodeJS.ErrnoException).code === "ENOENT" ||
       (error as NodeJS.ErrnoException).code === "ENOTDIR"

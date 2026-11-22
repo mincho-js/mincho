@@ -3,7 +3,10 @@ import type {
   BabelTransformSourceOptions,
   StaticCssEvalSourceProvider
 } from "./babel.js";
-import type { ScopedDependencyOptions } from "./compile.js";
+import type {
+  ScopedDependencyOptions,
+  ScopedDependencyResult
+} from "./compile.js";
 import type { TransformSnapshot } from "./transformSnapshot.js";
 import type {
   CompilerPayloadReference,
@@ -66,7 +69,7 @@ export type CompilerResponse = {
   duration: number;
   transport?: CompilerTransportMetrics;
 } & (
-  | { ok: true; value: string | TransformSnapshot }
+  | { ok: true; value: ScopedDependencyResult | TransformSnapshot }
   | { ok: false; error: WorkerFailure }
 );
 
