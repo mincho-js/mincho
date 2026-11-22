@@ -1057,7 +1057,9 @@ it.each([
 );
 
 it.each([
-  ["color", "color:'red'", "color: red"],
+  ["color", "color:'red'", "color: red", "?url"],
+  ["url then no-inline", "color:'red'", "color: red", "?url&no-inline"],
+  ["no-inline then url", "color:'red'", "color: red", "?no-inline&url"],
   [
     "transform value",
     "transform:'translateX(10px)'",
@@ -1082,10 +1084,9 @@ it.each([
   ["custom property var()", 'vars:{"--brand":"var(--other, red)"}', undefined]
 ] as const)(
   "handles dynamic-scope native CSS without inventing an origin (%s)",
-  async (name, declaration, expected) => {
+  async (name, declaration, expected, plainUrlQuery?: string) => {
     const checkRepresentations =
-      name === "color" || name === "inline flag value";
-    const checkPlainUrl = name === "color";
+      plainUrlQuery !== undefined || name === "inline flag value";
     const lateProcessed: InlineConfig["css"] = {
       postcss: {
         plugins: [
@@ -1174,8 +1175,8 @@ it.each([
               /import\s+["']([^"']+\.vanilla\.css)["']/
             )?.[1];
             if (css) {
-              const plain = checkPlainUrl
-                ? `\nexport {default as stylesheet} from ${JSON.stringify(css + "?url")};`
+              const plain = plainUrlQuery
+                ? `\nexport {default as stylesheet} from ${JSON.stringify(css + plainUrlQuery)};`
                 : "";
               return `${source}\nexport {default as inline} from ${JSON.stringify(css + (name === "inline flag value" ? "?url&inline=1" : "?url&inline"))};\nexport {default as raw} from ${JSON.stringify(css + "?raw")};${plain}`;
             }
@@ -1184,7 +1185,7 @@ it.each([
               /["']([^"']*extracted_[^"']+\.css\.ts)["']/
             )?.[1];
             if (sidecar)
-              return `${source}\nexport {inline,raw${checkPlainUrl ? ",stylesheet" : ""}} from ${JSON.stringify(sidecar)};`;
+              return `${source}\nexport {inline,raw${plainUrlQuery ? ",stylesheet" : ""}} from ${JSON.stringify(sidecar)};`;
           },
           moduleParsed({ id }) {
             if (id.endsWith(".vanilla.css")) ids.add(id);
@@ -1237,7 +1238,7 @@ it.each([
         "color: purple"
       );
       expect(js.code).toContain("color: red");
-      if (checkPlainUrl) {
+      if (plainUrlQuery) {
         const body = parseSync(js.code, {
           babelrc: false,
           configFile: false,

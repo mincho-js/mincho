@@ -369,6 +369,22 @@ function isViteInlineRequest(id: string): boolean {
   return /[?&]inline\b/.test(id);
 }
 
+// Model the pinned Vite CSS loader's injectQuery(removeUrlQuery(id), ...)
+// only for the public, non-inline URL forms we recognize. Keep the other
+// flag in the returned child rather than normalizing its spelling.
+function viteNativeCssUrlChild(
+  cssId: string,
+  parent: string | undefined
+): string | undefined {
+  if (!parent?.startsWith(cssId)) return;
+  const query = parent.slice(cssId.length);
+  if (!/^\?(?:url(?:&no-inline)?|no-inline&url)$/.test(query)) return;
+  const remaining = query
+    .replace(/(\?|&)url(?:&|$)/, "$1")
+    .replace(/[?&]$/, "");
+  return `${cssId}?transform-only${remaining ? `&${remaining.slice(1)}` : ""}`;
+}
+
 function viteStringModuleValue(code: string): string | undefined {
   try {
     const body = parseSync(code, {
@@ -2173,22 +2189,22 @@ function createMinchoViteEnvironmentPlugin(
       }
 
       if (id.startsWith("\0")) {
-        const query = "?transform-only";
         if (
           config.command === "build" &&
-          id.startsWith(virtualCssIdPrefix + unattributedCssPrefix) &&
-          id.endsWith(query)
+          id.startsWith(virtualCssIdPrefix + unattributedCssPrefix)
         ) {
-          // Vite's native ?url module asks for its own transform-only CSS
-          // child. Keep the canonical virtual ID and require live ownership.
-          const cssId = id.slice(0, -query.length);
-          const publication = cssState.publication(cssId);
-          if (
-            publication?.origin === null &&
-            publication.hostId === cssId &&
-            importer === `${cssId}?url`
-          )
-            return id;
+          // Vite's native URL wrapper imports its own transform-only child.
+          // Resolve only that exact child of the live cache-only publisher.
+          const cssId = virtualCssRequest(id)?.cacheId;
+          if (cssId !== undefined) {
+            const publication = cssState.publication(cssId);
+            if (
+              publication?.origin === null &&
+              publication.hostId === cssId &&
+              id === viteNativeCssUrlChild(cssId, importer)
+            )
+              return id;
+          }
         }
         return;
       }
