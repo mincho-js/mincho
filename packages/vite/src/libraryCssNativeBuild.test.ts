@@ -1,3 +1,4 @@
+import { parseSync } from "@babel/core";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join, posix } from "node:path";
 import { runInNewContext } from "node:vm";
@@ -1084,6 +1085,7 @@ it.each([
   async (name, declaration, expected) => {
     const checkRepresentations =
       name === "color" || name === "inline flag value";
+    const checkPlainUrl = name === "color";
     const lateProcessed: InlineConfig["css"] = {
       postcss: {
         plugins: [
@@ -1171,14 +1173,18 @@ it.each([
             const css = source.match(
               /import\s+["']([^"']+\.vanilla\.css)["']/
             )?.[1];
-            if (css)
-              return `${source}\nexport {default as inline} from ${JSON.stringify(css + (name === "inline flag value" ? "?url&inline=1" : "?url&inline"))};\nexport {default as raw} from ${JSON.stringify(css + "?raw")};`;
+            if (css) {
+              const plain = checkPlainUrl
+                ? `\nexport {default as stylesheet} from ${JSON.stringify(css + "?url")};`
+                : "";
+              return `${source}\nexport {default as inline} from ${JSON.stringify(css + (name === "inline flag value" ? "?url&inline=1" : "?url&inline"))};\nexport {default as raw} from ${JSON.stringify(css + "?raw")};${plain}`;
+            }
             if (!id.endsWith("/entry.js")) return;
             const sidecar = source.match(
               /["']([^"']*extracted_[^"']+\.css\.ts)["']/
             )?.[1];
             if (sidecar)
-              return `${source}\nexport {inline,raw} from ${JSON.stringify(sidecar)};`;
+              return `${source}\nexport {inline,raw${checkPlainUrl ? ",stylesheet" : ""}} from ${JSON.stringify(sidecar)};`;
           },
           moduleParsed({ id }) {
             if (id.endsWith(".vanilla.css")) ids.add(id);
@@ -1231,6 +1237,50 @@ it.each([
         "color: purple"
       );
       expect(js.code).toContain("color: red");
+      if (checkPlainUrl) {
+        const body = parseSync(js.code, {
+          babelrc: false,
+          configFile: false,
+          sourceType: "module"
+        })!.program.body;
+        const exportedString = (name: string) => {
+          const exported = body
+            .flatMap((node) =>
+              node.type === "ExportNamedDeclaration" ? node.specifiers : []
+            )
+            .find(
+              (node) =>
+                node.type === "ExportSpecifier" &&
+                node.exported.type === "Identifier" &&
+                node.exported.name === name
+            );
+          if (exported?.type !== "ExportSpecifier") return undefined;
+          const value = body
+            .flatMap((node) =>
+              node.type === "VariableDeclaration" ? node.declarations : []
+            )
+            .find(
+              (decl) =>
+                decl.id.type === "Identifier" &&
+                decl.id.name === exported.local.name
+            )?.init;
+          return value?.type === "StringLiteral" ? value.value : undefined;
+        };
+        const stylesheet = exportedString("stylesheet");
+        expect(stylesheet).toMatch(/^\/assets\/[^/]+\.css$/);
+        expect(exportedString("inline")).toBe(
+          `data:text/css;charset=utf-8;base64,${encoded}`
+        );
+        expect(exportedString("raw")).toContain("color: red");
+        expect(exportedString("raw")).not.toContain("color: purple");
+        const asset = outputs.find(
+          (output): output is Rollup.OutputAsset =>
+            output.type === "asset" && `/${output.fileName}` === stylesheet
+        );
+        expect(asset).toBeDefined();
+        expect(String(asset!.source)).toContain("color: purple");
+        expect(String(asset!.source)).not.toContain("color: red");
+      }
     }
     expect(css).toContain("padding: 4px");
     expect(

@@ -116,6 +116,40 @@ describe("caller loaders in child compilation", () => {
     }
   );
 
+  it.each([
+    'import defer * as theme from "optional-theme";',
+    'import source theme from "optional-theme";'
+  ])(
+    "preserves caller-selected ESM phase syntax in emitted bytes: %s",
+    async (statement) => {
+      const { root } = await fixture();
+      const filePath = join(root, "entry.js");
+      let emittedSource = "";
+      const result = await compile({
+        cwd: root,
+        filePath,
+        originalPath: filePath,
+        resolverCache: new Map(),
+        externals: ["optional-theme"],
+        contents: statement + " export { theme };",
+        esbuild: {
+          ...esbuild,
+          async build(options) {
+            const output = await esbuild.build({
+              ...options,
+              format: "esm",
+              target: "esnext"
+            });
+            emittedSource = output.outputFiles?.[0]?.text ?? "";
+            return output;
+          }
+        }
+      });
+      expect(emittedSource).toContain(statement);
+      expect(result.source).toBe(emittedSource);
+    }
+  );
+
   it("preserves native ESM fileScope imports in an entry and its dependency", async () => {
     const cacheDir = join(process.cwd(), ".cache");
     await fs.mkdir(cacheDir, { recursive: true });

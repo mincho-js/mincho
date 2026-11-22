@@ -125,11 +125,13 @@ export function createLoadedModule(
     (loadedSource.sourceKind ?? options.resolution?.sourceKind) ===
     "provider-virtual";
   // Syntax describes the bytes returned by the loader. Prefer an explicit
-  // distinct name, then the concrete grammar of a declared virtual source;
-  // its backing file retains physical identity but may hold different text.
+  // distinct name, then the concrete grammar of a declared virtual source.
+  // An echo of the realpath is backing metadata, not a separate loader label:
+  // only the physical fallback may use it, without removing literal delimiters.
   const syntaxSource =
     loaderFilename !== undefined &&
     loaderFilename !== id &&
+    loaderFilename !== realpath &&
     internalHasStaticCssEvalSyntaxFilename(loaderFilename)
       ? {
           syntaxSourceId: loaderFilename,

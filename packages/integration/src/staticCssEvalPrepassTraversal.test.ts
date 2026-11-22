@@ -239,6 +239,26 @@ it.each([
     "/plain.js",
     "/src/resolver.js",
     { realpath: "/src/loader.js#variant.tsx" }
+  ],
+  [
+    "physical path echoed by the loader",
+    "virtual:tokens",
+    "/src/resolver.js",
+    {
+      resolvedFile: "/src/loader.js#variant.tsx",
+      realpath: "/src/loader.js#variant.tsx",
+      sourceKind: "project-source"
+    }
+  ],
+  [
+    "declared virtual ID with echoed JavaScript physical backing",
+    "virtual:tokens.tsx?scope=/dark.js#preview.tsx",
+    "/src/backing.js",
+    {
+      resolvedFile: "/src/backing.js",
+      realpath: "/src/backing.js",
+      sourceKind: "provider-virtual"
+    }
   ]
 ] as const)(
   "preserves JSX syntax from %s",

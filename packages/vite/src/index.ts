@@ -2172,7 +2172,26 @@ function createMinchoViteEnvironmentPlugin(
         return physicalPath + request.suffix;
       }
 
-      if (id.startsWith("\0")) return;
+      if (id.startsWith("\0")) {
+        const query = "?transform-only";
+        if (
+          config.command === "build" &&
+          id.startsWith(virtualCssIdPrefix + unattributedCssPrefix) &&
+          id.endsWith(query)
+        ) {
+          // Vite's native ?url module asks for its own transform-only CSS
+          // child. Keep the canonical virtual ID and require live ownership.
+          const cssId = id.slice(0, -query.length);
+          const publication = cssState.publication(cssId);
+          if (
+            publication?.origin === null &&
+            publication.hostId === cssId &&
+            importer === `${cssId}?url`
+          )
+            return id;
+        }
+        return;
+      }
 
       const physicalImporter = ownedExtractedSidecarPath(importer);
 

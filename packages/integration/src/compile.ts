@@ -1175,14 +1175,20 @@ async function compileUncached(options: CompileOptions) {
   const compiledSource = assertSingleChildCompilationOutput(result.outputFiles);
 
   // Only compiler-generated unbound typeof/call sites receive the lexical capability.
-  // Scan legacy ESM assertions when a caller explicitly emits that syntax.
+  // Scan the caller’s emitted ESM assertion and phase syntax without rewriting it.
   const program = parseSync(compiledSource, {
     babelrc: false,
     configFile: false,
     sourceType: "unambiguous",
     parserOpts: {
       allowReturnOutsideFunction: true,
-      plugins: ["jsx", "decorators", "deprecatedImportAssert"]
+      plugins: [
+        "jsx",
+        "decorators",
+        "deprecatedImportAssert",
+        "deferredImportEvaluation",
+        "sourcePhaseImports"
+      ]
     }
   })!;
   const seenIds = new Set<string>();
