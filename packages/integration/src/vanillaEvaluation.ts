@@ -1021,7 +1021,7 @@ async function evaluateVanilla(
     // recording producer evidence or reinstating the adapter or capture.
     readingRegisteredExports = true;
     let result: T;
-    let removedEnclosingScope = false;
+    let removedEnclosingScope: boolean;
     try {
       result = read();
     } finally {
