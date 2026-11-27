@@ -63,6 +63,30 @@ function extract(source: string) {
   };
 }
 
+describe("closed try initializers consumed by finally", () => {
+  it("extracts the actual guaranteed preceding native var value", () => {
+    const code =
+      'import {css} from "@mincho-js/css";export function Box(){try {var rule={color:"red"};} finally {return css(rule);}}';
+    const outcome = extract(code);
+    expect(outcome.values).toEqual([{ color: "red" }]);
+    expect(outcome.source).not.toContain("return css(");
+    expect(outcome.sidecar).toContain('color: "red"');
+  });
+
+  it.each(['observe(); var rule={color:"red"};', "var rule=readRule();"])(
+    "does not presume a possibly abrupt initializer ran before finally: %s",
+    (body) => {
+      expect(() =>
+        extract(
+          'import {css} from "@mincho-js/css";export function Box(){try {' +
+            body +
+            "} finally {return css(rule);}}"
+        )
+      ).toThrow(/captures runtime binding rule/);
+    }
+  );
+});
+
 describe("extracted lexical bindings", () => {
   it("keeps a captured value after its class dependency", () => {
     const result = extract(`

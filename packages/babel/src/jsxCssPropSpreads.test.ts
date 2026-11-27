@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { transformSync as transformJsx } from "esbuild";
+import { cx } from "@mincho-js/css/classname";
 import { supportedJsxCssPropTags } from "./jsxCssPropTags.js";
 import {
   babelTransform,
@@ -11,6 +12,13 @@ import {
   jsxCssPropErrorMessages,
   runJsxCssPropRuntime
 } from "./testUtils/plugin.js";
+
+const transpileRuntimeJsx = (source: string, format?: "cjs") =>
+  transformJsx(source, {
+    loader: "tsx",
+    jsxFactory: "jsx",
+    ...(format ? { format } : {})
+  }).code;
 
 describe("minchoBabelPlugin", () => {
   it("normalizes quoted className and css when merging attributes", () => {
@@ -33,10 +41,7 @@ describe("minchoBabelPlugin", () => {
         `function App() { return <div css=${attribute} />; }`,
         { jsxCssProp: true }
       );
-      const compiled = transformJsx(code, {
-        loader: "tsx",
-        jsxFactory: "jsx"
-      }).code;
+      const compiled = transpileRuntimeJsx(code);
       const props = new Function("jsx", `${compiled}\nreturn App();`)(
         (_tag: unknown, props: unknown) => props
       );
@@ -45,23 +50,57 @@ describe("minchoBabelPlugin", () => {
     }
   );
 
-  it.each(["", "{...{ id: 'spread' }}"])(
-    "normalizes quoted JSX attributes when staging props with %s",
-    (spread) => {
-      const props = runJsxCssPropRuntime(
-        `const styleA = "style-a";
-        function App() {
-          return <div css={styleA} ${spread} className="base" title="first
-  second &amp; third" data-path="a\\b" />;
-        }`,
-        "return App();"
-      ) as Record<string, unknown>;
+  const quotedStagedProps = (spread = "") =>
+    [
+      'const styleA = "style-a";',
+      "function App() {",
+      "  return <div css={styleA} " + spread + ' className="base" title="first',
+      '  second &amp; third" data-path="a\\b" />;',
+      "}"
+    ].join("\n");
 
-      expect(props.className).toBe(spread ? "style-a base" : "base style-a");
-      expect(props.title).toBe("first second & third");
-      expect(props["data-path"]).toBe("a\\b");
-    }
-  );
+  it("leaves quoted explicit props to the actual JSX host when staging", () => {
+    const source = quotedStagedProps();
+    const { code } = babelTransform(source, {
+      jsxCssProp: true,
+      optimize: { runtimeCodegen: false }
+    });
+    const render = (input: string) => {
+      const native = transpileRuntimeJsx(input, "cjs");
+      const trace: string[] = [];
+      const props = new Function("require", "jsx", native + "\nreturn App();")(
+        (name: string) => {
+          expect(name).toBe("@mincho-js/css/classname");
+          return { cx };
+        },
+        (tag: string, props: Record<string, unknown>) => {
+          trace.push(tag);
+          return props;
+        }
+      ) as Record<string, unknown>;
+      return { props, trace };
+    };
+    const authored = render(source);
+    const emitted = render(code);
+    expect(authored.props.title).toBe("first\n  second & third");
+    expect(emitted.props).toEqual({
+      className: "base style-a",
+      title: authored.props.title,
+      "data-path": "a\\b"
+    });
+    expect(emitted.trace).toEqual(authored.trace);
+  });
+
+  it("normalizes quoted props and keeps precedence for an authored spread", () => {
+    const props = runJsxCssPropRuntime(
+      quotedStagedProps("{...{ id: 'spread' }}"),
+      "return App();"
+    ) as Record<string, unknown>;
+    expect(props.className).toBe("style-a base");
+    expect(props.title).toBe("first second & third");
+    expect(props["data-path"]).toBe("a\\b");
+    expect(props.id).toBe("spread");
+  });
 
   it("css before a spread captures explicit css before post-spread className", () => {
     const source = `

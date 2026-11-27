@@ -565,6 +565,49 @@ describe("configured JSX callable values", () => {
     }
   );
 
+  it.each([false, true])(
+    "lets the esbuild JSX host preserve a quoted staged prop (after CSS=%s)",
+    (afterCss) => {
+      const quoted = 'label="A\n  B"';
+      const mark = 'data-row={(trace.push("prop"),"row")}';
+      const cssProp = "css={shared}";
+      const className = 'className={(trace.push("class"),"base")}';
+      const attributes = afterCss
+        ? [cssProp, quoted, mark, className]
+        : [className, quoted, mark, cssProp];
+      const source =
+        "function Widget() {} export function Box(shared, trace) {return <Widget " +
+        attributes.join(" ") +
+        " />; }";
+      const { code } = babelTransform(source, {
+        jsxCssProp: true,
+        optimize: { pureFunctions: false }
+      });
+      const run = (input: string, trace: string[]) => {
+        const { Box } = executeModule(input, {
+          "@mincho-js/css/classname": { cx }
+        }) as {
+          Box(
+            shared: string,
+            trace: string[]
+          ): {
+            props: { label: string; className: string; "data-row": string };
+          };
+        };
+        return Box("selected", trace).props;
+      };
+      const nativeTrace: string[] = [];
+      const emittedTrace: string[] = [];
+      const native = run(source, nativeTrace);
+      const emitted = run(code, emittedTrace);
+      expect(native.label).toBe("A\n  B");
+      expect(emitted.label).toBe(native.label);
+      expect(emitted["data-row"]).toBe("row");
+      expect(emitted.className).toBe("base selected");
+      expect(emittedTrace).toEqual(nativeTrace);
+    }
+  );
+
   it.each([
     ["closure", false],
     ["closure", true],

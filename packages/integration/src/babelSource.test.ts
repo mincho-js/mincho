@@ -37,9 +37,14 @@ function seedArtifacts(engine: MinchoProjectEngine) {
 }
 
 describe("babelTransformSource", () => {
-  it.each([false, true])(
-    "preserves native initialization before a consumed CommonJS operand (used=%s)",
-    async (used) => {
+  it.each([
+    [false, false],
+    [false, true],
+    [true, false],
+    [true, true]
+  ] as const)(
+    "preserves initialization before consumed CommonJS (staged=%s, used=%s)",
+    async (staged, used) => {
       const root = await mkdtemp(join(tmpdir(), "mincho-native-cjs-coercion-"));
       afterTest(() => rm(root, { recursive: true, force: true }));
       const filename = join(root, "entry.cjs");
@@ -81,10 +86,27 @@ describe("babelTransformSource", () => {
         root,
         filename,
         source,
+        commonJsToEsm: staged,
         babel: {
           configFile: false,
           babelrc: false,
-          optimize: { runtimeCodegen: false }
+          optimize: { runtimeCodegen: false },
+          ...(staged
+            ? {
+                staticCssEvalSourceProvider: {
+                  resolve: (_owner, specifier) => {
+                    const id =
+                      specifier === "@mincho-js/css"
+                        ? join(root, "css.cjs")
+                        : specifier === "./operand.cjs"
+                          ? join(root, "operand.cjs")
+                          : null;
+                    return id ? { id, resolvedFile: id } : null;
+                  },
+                  load: async (id) => ({ source: await readFile(id, "utf8") })
+                }
+              }
+            : {})
         }
       });
       expect(result.result[1]).toMatch(/color:\s*["']red["']/);
@@ -96,9 +118,12 @@ describe("babelTransformSource", () => {
         join(root, "sidecar.cjs"),
         `exports.${sidecarExports[0]![1]} = "class-red";`
       );
+      const emitted = result.code.replace(result.result[0], "./sidecar.cjs");
       await writeFile(
         filename,
-        result.code.replace(result.result[0], "./sidecar.cjs")
+        staged
+          ? transformJsx(emitted, { format: "cjs", target: "esnext" }).code
+          : emitted
       );
       const run = (file: string) =>
         JSON.parse(
@@ -106,7 +131,7 @@ describe("babelTransformSource", () => {
             process.execPath,
             [
               "-e",
-              `globalThis.trace = [];const result = require(${JSON.stringify(file)});console.log(JSON.stringify({trace, ...result}));`
+              `globalThis.trace = [];const result = require(${JSON.stringify(file)});console.log(JSON.stringify({trace, className:result.className, observed:result.observed}));`
             ],
             {
               cwd: root,

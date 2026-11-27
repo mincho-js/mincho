@@ -2611,6 +2611,21 @@ describe("css prop alias mutation diagnostics", () => {
       "same nested argument selecting data leaves its getter dormant",
       'const input = rule => ({outer:{get label(){rule.color="blue";return 1;}, data:1}}); const reader = { read({outer:{data}}){} }; reader.read(input(style));',
       "red"
+    ],
+    [
+      "a synchronous inner IIFE runs in the captured rule frame",
+      'const make = rule => () => { (() => {rule.color="blue";})(); }; make(style)();',
+      "blue"
+    ],
+    [
+      "allocating the inner arrow does not activate its capture",
+      'const make = rule => () => { const idle = () => {rule.color="blue";}; }; make(style)();',
+      "red"
+    ],
+    [
+      "the enclosing assignment has not yet committed during its RHS call",
+      'const make = (rule=style) => () => {rule.color="blue";}; const holder = {run(){}}; holder.run = (holder.run(), make());',
+      "red"
     ]
   ] as const)(
     "observes the selected eager input and its frame: %s",
@@ -2627,6 +2642,15 @@ describe("css prop alias mutation diagnostics", () => {
       }
     }
   );
+
+  it("does not discard a preceding completed store while evaluating the next RHS", () => {
+    const authored =
+      'const style={color:"red"}; const make=(rule=style)=>()=>{rule.color="blue";}; const holder={run(){}}; holder.run=make(); holder.run=(holder.run(),make());';
+    expect(new Function(authored + ";return style.color;")()).toBe("blue");
+    const { run, options } = cssTransform(authored, "same-file");
+    expect(run).toThrow(/same-file binding "style"/);
+    expect(options.result[1]).toBe("");
+  });
 
   it.each([
     ["defined primitive", "holder.paint = 1;", false],

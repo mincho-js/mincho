@@ -878,12 +878,18 @@ class ObjectReferences {
     unresolved: (values: ObjectReference[]) => void
   ): void {
     const callee = child(path, "callee");
-    if (!callee.isIdentifier() || isProvablyUnexecuted(path)) return;
-    const fn = this.localCallable(callee, new Set());
+    if (isProvablyUnexecuted(path)) return;
+    const fn = callee.isIdentifier()
+      ? this.localCallable(callee, new Set())
+      : path.isCallExpression() &&
+          (callee.isArrowFunctionExpression() || callee.isFunctionExpression())
+        ? callee
+        : undefined;
     if (
       fn?.findParent((parent) => parent.node === origin.owner?.node) &&
       (!path.isNewExpression() ||
-        (fn.isFunctionDeclaration() &&
+        (callee.isIdentifier() &&
+          fn.isFunctionDeclaration() &&
           callee.scope.getBinding(callee.node.name)?.path === fn)) &&
       !fn.node.async &&
       !fn.node.generator &&
@@ -903,7 +909,7 @@ class ObjectReferences {
     }
     // Only the invoked value's anchored captures can stop extraction. Unknown
     // functions with no link to the selected rule do not contaminate it.
-    unresolved(this.resolve(callee));
+    if (callee.isIdentifier()) unresolved(this.resolve(callee));
   }
 
   private returnedReceiver(path: NodePath<t.ThisExpression>) {
@@ -3273,6 +3279,18 @@ function analyzeAliasedMutationUnchecked(
       for (const { store, member } of group) {
         references.countEffectNode();
         const statement = store.isForOfStatement() ? store : store.parentPath;
+        if (
+          !valueRead &&
+          name !== ownIterator &&
+          store.isAssignmentExpression() &&
+          store.getFunctionParent() === consumption.getFunctionParent() &&
+          (store.node.right === consumption.node ||
+            consumption.findParent(
+              (parent) => parent.node === store.node.right
+            ))
+        )
+          // The assignment's own RHS still sees the pre-store receiver.
+          continue;
         if (
           beforeRight &&
           consumption.parentPath?.parentPath === consumer &&

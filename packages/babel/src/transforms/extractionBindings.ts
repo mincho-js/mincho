@@ -201,14 +201,15 @@ function isInside(path: NodePath<t.Node>, root: NodePath<t.Node>): boolean {
   return path === root || Boolean(path.findParent((parent) => parent === root));
 }
 
-/** One closed const captured exclusively by a later stock CSS call. */
+/** One closed initializer captured exclusively by a later stock CSS call. */
 function isClosedOnlyCssBinding(
   declaration: NodePath<t.Node>,
   use: NodePath<t.Node>,
-  binding: Binding
+  binding: Binding,
+  kind: "const" | "var" = "const"
 ): boolean {
   if (
-    !declaration.isVariableDeclaration({ kind: "const" }) ||
+    !declaration.isVariableDeclaration({ kind }) ||
     declaration.node.declarations.length !== 1 ||
     !binding.constant ||
     !binding.path.isVariableDeclarator() ||
@@ -285,6 +286,30 @@ function isClosedSwitchFallthrough(
   );
 }
 
+function isGuaranteedFinallyInitializer(
+  declaration: NodePath<t.Node>,
+  use: NodePath<t.Node>,
+  attempt: NodePath<t.TryStatement>,
+  binding: Binding
+): boolean {
+  const consumer = use.getStatementParent();
+  const block = attempt.get("block");
+  const finalizer = attempt.get("finalizer");
+  // The try block contains no work before this closed initializer, so
+  // finally cannot observe the hoisted var before it receives its value.
+  return (
+    !attempt.node.handler &&
+    block.node.body.length === 1 &&
+    block.node.body[0] === declaration.node &&
+    finalizer.isBlockStatement() &&
+    finalizer.node.body.length === 1 &&
+    consumer?.isReturnStatement() === true &&
+    consumer.node === finalizer.node.body[0] &&
+    consumer.node.argument === use.node &&
+    isClosedOnlyCssBinding(declaration, use, binding, "var")
+  );
+}
+
 /** A captured declaration must execute in the same enclosing branch as its use. */
 function sharesExecutionContext(
   declaration: NodePath<t.Node>,
@@ -327,6 +352,11 @@ function sharesExecutionContext(
     if (
       parent.isSwitchStatement() &&
       isClosedSwitchFallthrough(declaration, use, parent, child, binding)
+    )
+      continue;
+    if (
+      parent.isTryStatement() &&
+      isGuaranteedFinallyInitializer(declaration, use, parent, binding)
     )
       continue;
     if (

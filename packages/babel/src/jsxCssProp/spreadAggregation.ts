@@ -383,7 +383,12 @@ function createPreCssSpreadAggregatedCssPropLowering(
     declarations: preCssBinding.declarations,
     attributes: [
       ...explicitKeyRefAttributesBeforeCss.beforeSpread,
-      t.jsxSpreadAttribute(t.cloneNode(preCssBinding.restIdentifier)),
+      ...emitAggregateRestAttributes(
+        normalizedElement.attributesBeforeCss,
+        preCssBinding,
+        !normalizedElement.hasSpreadBeforeCss &&
+          !normalizedElement.hasSpreadAfterCss
+      ),
       ...explicitKeyRefAttributesBeforeCss.afterSpread,
       classNameAttribute,
       ...normalizedElement.attributesAfterCss.filter(
@@ -494,14 +499,25 @@ function createPostCssSpreadAggregatedCssPropLowering(
     t.jsxExpressionContainer(nextClassNameExpression)
   );
 
+  const preserveQuotedText =
+    !normalizedElement.hasSpreadBeforeCss &&
+    !normalizedElement.hasSpreadAfterCss;
   const nextAttributes: Array<t.JSXAttribute | t.JSXSpreadAttribute> = [
     ...explicitKeyRefAttributesBeforeCss.beforeSpread,
     ...(preCssBinding
-      ? [t.jsxSpreadAttribute(t.cloneNode(preCssBinding.restIdentifier))]
+      ? emitAggregateRestAttributes(
+          normalizedElement.attributesBeforeCss,
+          preCssBinding,
+          preserveQuotedText
+        )
       : []),
     ...explicitKeyRefAttributesBeforeCss.afterSpread,
     ...explicitKeyRefAttributesAfterCss.beforeSpread,
-    t.jsxSpreadAttribute(t.cloneNode(postCssBinding.restIdentifier)),
+    ...emitAggregateRestAttributes(
+      normalizedElement.attributesAfterCss,
+      postCssBinding,
+      preserveQuotedText
+    ),
     ...explicitKeyRefAttributesAfterCss.afterSpread,
     classNameAttribute
   ];
@@ -961,6 +977,49 @@ export function createAggregatePropsExpression(
 
       return createAggregateObjectProperty(path, attribute);
     })
+  );
+}
+
+function emitAggregateRestAttributes(
+  attributes: readonly (t.JSXAttribute | t.JSXSpreadAttribute)[],
+  binding: AggregatePropsBinding,
+  preserveQuotedText: boolean
+): (t.JSXAttribute | t.JSXSpreadAttribute)[] {
+  const spread = () => [
+    t.jsxSpreadAttribute(t.cloneNode(binding.restIdentifier))
+  ];
+  if (!preserveQuotedText) return spread();
+  const ordinary: (t.JSXAttribute & { name: t.JSXIdentifier })[] = [];
+  for (const attribute of attributes) {
+    if (!t.isJSXAttribute(attribute) || !t.isJSXIdentifier(attribute.name))
+      return spread();
+    if (
+      !isKeyOrRefAttribute(attribute) &&
+      !isNamedJsxAttribute(attribute, classNameAttributeName)
+    )
+      ordinary.push(attribute as t.JSXAttribute & { name: t.JSXIdentifier });
+  }
+  const quoted = (attribute: t.JSXAttribute) =>
+    t.isStringLiteral(attribute.value) && /[\r\n]/.test(attribute.value.value);
+  if (!ordinary.some(quoted)) return spread();
+  const names = ordinary.map((attribute) => attribute.name.name);
+  if (new Set(names).size !== names.length) return spread();
+  // In this explicit segment the inert quoted token can stay in JSX. Let
+  // the actual host apply its whitespace rules; other props read the values
+  // already evaluated by the staging declarations, in the same order.
+  return ordinary.map((attribute) =>
+    quoted(attribute)
+      ? t.cloneNode(attribute)
+      : t.jsxAttribute(
+          t.cloneNode(attribute.name),
+          t.jsxExpressionContainer(
+            t.memberExpression(
+              t.cloneNode(binding.restIdentifier),
+              t.stringLiteral(attribute.name.name),
+              true
+            )
+          )
+        )
   );
 }
 

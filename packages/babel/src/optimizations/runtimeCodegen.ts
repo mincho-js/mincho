@@ -210,10 +210,10 @@ export function removeUnusedExtractedImports(
       liveImportedUse(call.get("callee"), "call", path);
     },
     BinaryExpression(path) {
-      if (optionalSites || path.node.operator !== "+") return;
-      // This is an actual ToPrimitive consumption, not publication of the
-      // result or merely retaining the child value. Reuse the native order
-      // proof without changing staged ESM-managed CommonJS dependencies.
+      if (path.node.operator !== "+") return;
+      // Both output modes run this live ToPrimitive operation. Attribute
+      // only its selected operands to the same earlier authored load/order
+      // evidence used for native CommonJS, not any unrelated child load.
       for (const step of planEvaluation(path).steps)
         if (step.kind === "coerce") liveImportedUse(step.path, "access", path);
     },
