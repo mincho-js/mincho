@@ -3263,6 +3263,26 @@ function analyzeAliasedMutationUnchecked(
           : consumption.getStatementParent()
         : consumption.parentPath;
     const beforeRight = valueRead?.beforeRight;
+    const activation = consumption.getFunctionParent();
+    const isOneShotRead = () => {
+      if (
+        activation &&
+        !holders.every(
+          (holder) =>
+            !holder.uncertainty &&
+            holder.path.getFunctionParent() === activation
+        )
+      )
+        return false;
+      for (
+        let owner = consumption.parentPath;
+        owner && owner !== activation;
+        owner = owner.parentPath
+      )
+        if (owner.isLoop() || owner.isClass()) return false;
+      return true;
+    };
+    let oneShotRead: boolean | undefined;
     const candidates =
       name === null
         ? storedMembers.values()
@@ -3287,9 +3307,11 @@ function analyzeAliasedMutationUnchecked(
           (store.node.right === consumption.node ||
             consumption.findParent(
               (parent) => parent.node === store.node.right
-            ))
+            )) &&
+          (oneShotRead ??= isOneShotRead())
         )
-          // The assignment's own RHS still sees the pre-store receiver.
+          // An assignment's RHS sees the pre-store receiver in a fresh
+          // activation; a repeated one may observe an earlier store.
           continue;
         if (
           !valueRead &&
@@ -3304,7 +3326,8 @@ function analyzeAliasedMutationUnchecked(
               (parent) =>
                 parent.parentPath === consumption &&
                 parent.listKey === "arguments"
-            ))
+            )) &&
+          (oneShotRead ??= isOneShotRead())
         )
           // The callee value is already selected before its arguments run.
           // Their stores remain visible to the next invocation.
@@ -3747,21 +3770,13 @@ function analyzeAliasedMutationUnchecked(
         if (pattern.isArrayPattern()) {
           // The RHS's selected value is consumed even for an unread binding.
           consume(origins);
-          for (const [index, element] of pattern.get("elements").entries()) {
-            if (element.isObjectPattern()) {
-              if (!element.node.properties.length) continue;
-              const delivered = references.observeArrayPatternSlot(
-                path,
-                origins,
-                index
-              );
-              if (delivered === null) unresolved(origins);
-              else inspectPattern(element, delivered);
-            } else if (element.node && patternObservesDelivery(element.node)) {
-              // Keep relevant uncertainty for an existing unmodeled delivery.
-              unresolved(origins);
-            }
-          }
+          observeArrayPatternReads(
+            path,
+            pattern,
+            origins,
+            inspectPattern,
+            unresolved
+          );
         } else if (pattern.isObjectPattern()) {
           observeObjectPatternReads(
             path,
@@ -4028,6 +4043,30 @@ function analyzeAliasedMutationUnchecked(
     }
   });
 
+  function observeArrayPatternReads(
+    site: NodePath<t.Node>,
+    pattern: NodePath<t.ArrayPattern>,
+    origins: ObjectReference[],
+    inspect: (pattern: NodePath<t.Node>, origins: ObjectReference[]) => void,
+    unresolved: UnresolvedEffect
+  ) {
+    for (const [index, element] of pattern.get("elements").entries()) {
+      if (element.isObjectPattern()) {
+        if (!element.node.properties.length) continue;
+        const delivered = references.observeArrayPatternSlot(
+          site,
+          origins,
+          index
+        );
+        if (delivered === null) unresolved(origins);
+        else inspect(element, delivered);
+      } else if (element.node && patternObservesDelivery(element.node)) {
+        // Do not invent a selected value through unmodeled delivery.
+        unresolved(origins);
+      }
+    }
+  }
+
   function inspectInvocationParameterReads(
     fn: NodePath<t.Function>,
     argumentsInCaller: InvocationArguments,
@@ -4045,6 +4084,14 @@ function analyzeAliasedMutationUnchecked(
           inspectParameter,
           origin,
           false
+        );
+      else if (pattern.isArrayPattern())
+        observeArrayPatternReads(
+          fn,
+          pattern,
+          origins,
+          inspectParameter,
+          (values) => observeUnresolved(fn, values, sourceRuleTargets)
         );
     };
     const parameters = fn.get("params");

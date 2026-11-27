@@ -323,14 +323,13 @@ export function removeUnusedExtractedImports(
     return { ...candidate, required, later };
   });
   const stagedSources = new Set(
-    sourcePlans.flatMap(
-      ({ declaration, reference, initializesSource, originalOrder }) =>
-        optionalSites &&
-        initializesSource &&
-        originalOrder !== undefined &&
-        removed.has(declaration.node)
-          ? [reference.source]
-          : []
+    sourcePlans.flatMap(({ reference, initializesSource, originalOrder }) =>
+      // All already-proven alias candidates belonging to an authored
+      // load enter the same final reader reconciliation, even when the
+      // loader itself has a live reader.
+      optionalSites && initializesSource && originalOrder !== undefined
+        ? [reference.source]
+        : []
     )
   );
   for (const {

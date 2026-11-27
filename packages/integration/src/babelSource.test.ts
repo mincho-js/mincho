@@ -2160,16 +2160,24 @@ describe("babelTransformSource", () => {
     [false, false],
     [false, true],
     [true, false],
-    [true, true]
+    [true, true],
+    [true, false, true],
+    [true, true, true]
   ] as const)(
-    "reconciles generator reads of an otherwise dead CSS binding (live cx=%s, generated read=%s)",
-    async (shared, read) => {
+    "reconciles generator reads of an otherwise dead CSS binding (live cx=%s, generated read=%s, alias=%s)",
+    async (shared, read, alias?: true) => {
       const source =
-        (shared
-          ? 'const {css,cx}=require("@mincho-js/css");'
-          : 'const {css}=require("@mincho-js/css");') +
+        (alias
+          ? 'const api=require("@mincho-js/css"); const css=api.css;'
+          : shared
+            ? 'const {css,cx}=require("@mincho-js/css");'
+            : 'const {css}=require("@mincho-js/css");') +
         'exports.className=css({color:"red"});' +
-        (shared ? 'exports.combo=cx("a","b");' : "");
+        (shared
+          ? alias
+            ? 'exports.combo=api.cx("a","b");'
+            : 'exports.combo=cx("a","b");'
+          : "");
       const target = "/virtual/css.cjs";
       const generatorOverride = vi.fn(
         (
@@ -2183,9 +2191,11 @@ describe("babelTransformSource", () => {
           ) => { code: string }
         ) => {
           const generated = generate(ast, options, input);
-          expect(generated.code).toMatch(
-            /\{\s*css(?:\s*,\s*cx)?\s*\}\s*=\s*require/
-          );
+          if (alias) expect(generated.code).toContain("const css = api.css;");
+          else
+            expect(generated.code).toMatch(
+              /\{\s*css(?:\s*,\s*cx)?\s*\}\s*=\s*require/
+            );
           return {
             ...generated,
             code: generated.code + (read ? "\nexports.kind=typeof css;" : "")
@@ -2244,6 +2254,8 @@ describe("babelTransformSource", () => {
         ...(read ? { kind: "function" } : {})
       });
       if (!read) expect(output.code).not.toMatch(/\bcss\s*\}/);
+      if (alias && !read)
+        expect(output.code).not.toContain("const css = api.css;");
       if (!shared && !read) expect(output.code).not.toContain(target);
     }
   );

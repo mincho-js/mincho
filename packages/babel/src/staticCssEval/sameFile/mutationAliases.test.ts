@@ -2674,18 +2674,48 @@ describe("css prop alias mutation diagnostics", () => {
     }
   );
 
-  it.each([false, true])(
-    "selects the callee before writing its replacement in an argument (called again=%s)",
-    (again) => {
+  it.each(["single", "next", "loop"] as const)(
+    "selects the callee before writing its replacement in an argument (execution=%s)",
+    (execution) => {
+      const again = execution !== "single";
       const source = `const style={color:"red"};
         const make=(rule=style)=>()=>{rule.color="blue";};
         const holder={run(){}};
-        holder.run((holder.run=make(),0)); ${again ? "holder.run();" : ""}`;
+        ${
+          execution === "loop"
+            ? "for (let i=0; i<2; i++) { holder.run((holder.run=make(),0)); }"
+            : "holder.run((holder.run=make(),0));"
+        }
+        ${execution === "next" ? "holder.run();" : ""}`;
       expect(runInNewContext(source + ";style.color")).toBe(
         again ? "blue" : "red"
       );
       const { run, options } = cssTransform(source, "same-file");
       if (again) {
+        expect(run).toThrow(/same-file binding "style"/);
+        expect(options.result[1]).toBe("");
+      } else {
+        expect(run()?.code).toContain("className");
+        expect(options.result[1]).toMatch(/color:\s*["']red["']/);
+      }
+    }
+  );
+
+  it.each(["getter", "data", "dormant"] as const)(
+    "inspects only the delivered array-parameter getter (%s)",
+    (kind) => {
+      const source = `const style={color:"red"};
+        const trace=[];
+        const input=rule=>[{get label(){trace.push("getter");rule.color="blue";return 1;},data:2}];
+        const make=()=> ([{${kind === "data" ? "data" : "label"}}])=>{};
+        const read=make();
+        ${kind === "dormant" ? "void read;" : "read(input(style));"}`;
+      const active = kind === "getter";
+      expect(runInNewContext(source + ";[style.color,trace]")).toEqual(
+        active ? ["blue", ["getter"]] : ["red", []]
+      );
+      const { run, options } = cssTransform(source, "same-file");
+      if (active) {
         expect(run).toThrow(/same-file binding "style"/);
         expect(options.result[1]).toBe("");
       } else {
