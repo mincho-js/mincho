@@ -274,9 +274,30 @@ export function createSpreadAggregatedCssPropLowering(
     ? createPreCssSpreadAggregatedCssPropLowering(path, normalizedElement)
     : createPostCssSpreadAggregatedCssPropLowering(path, normalizedElement);
 
-  return type
-    ? { ...lowering, declarations: [type, ...lowering.declarations] }
-    : lowering;
+  const authoredSpread =
+    normalizedElement.hasSpreadBeforeCss || normalizedElement.hasSpreadAfterCss;
+  const keys = authoredSpread
+    ? []
+    : lowering.attributes.filter((attribute) =>
+        isNamedJsxAttribute(attribute, keyAttributeName)
+      );
+  // These key values were already evaluated in their authored positions by
+  // the staged props bindings. The automatic JSX transform must not see an
+  // implementation-created spread before a key when the author used none.
+  const attributes = keys.length
+    ? [
+        ...keys,
+        ...lowering.attributes.filter(
+          (attribute) => !isNamedJsxAttribute(attribute, keyAttributeName)
+        )
+      ]
+    : lowering.attributes;
+  return {
+    attributes,
+    declarations: type
+      ? [type, ...lowering.declarations]
+      : lowering.declarations
+  };
 }
 
 // JSX evaluates its type before any attributes. Staging props must not defer

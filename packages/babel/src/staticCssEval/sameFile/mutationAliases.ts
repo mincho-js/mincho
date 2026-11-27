@@ -1888,6 +1888,28 @@ class ObjectReferences {
     return this.assignmentIterationIsIntact;
   }
 
+  observeArrayPatternSlot(
+    site: NodePath<t.Node>,
+    values: ObjectReference[],
+    index: number
+  ): ObjectReference[] | null {
+    if (
+      !this.hasNativeDelivery(site) ||
+      !values.every(
+        (origin) =>
+          !origin.uncertainty &&
+          (origin.arrayElements !== undefined ||
+            (origin.path.isArrayExpression() &&
+              origin.path
+                .get("elements")
+                .slice(0, index + 1)
+                .every((element) => !element.isSpreadElement())))
+      )
+    )
+      return null;
+    return this.select(values, String(index));
+  }
+
   observeLoopArguments(value: NodePath<t.Node>): InvocationArguments[] | null {
     if (!value.isArrayExpression() || !this.hasNativeDelivery(value))
       return null;
@@ -3157,7 +3179,13 @@ function analyzeAliasedMutationUnchecked(
   ): Generator<ObjectReference[]> {
     if (
       sourceRuleTargets.size === 0 ||
-      !holders.some((holder) => holder.path.isObjectExpression())
+      !holders.some(
+        (holder) =>
+          holder.path.isObjectExpression() ||
+          (holder.path.isArrayExpression() &&
+            (name === null ||
+              (typeof name === "string" && /^(?:0|[1-9]\d*)$/.test(name))))
+      )
     )
       return;
     if (!storedMembers) {
@@ -3295,11 +3323,34 @@ function analyzeAliasedMutationUnchecked(
               );
           }
         } else if (store.isAssignmentExpression()) {
-          yield references.storedValues(
+          const values = references.storedValues(
             store.get("left"),
             store.get("right"),
             member.node
           );
+          const receiver = holders[0]!;
+          const index = typeof name === "string" ? Number(name) : -1;
+          if (
+            inspectDelivery &&
+            store.node.operator === "=" &&
+            selectedMemberName(member) === name &&
+            holders.length === 1 &&
+            !receiver.uncertainty &&
+            receiver.path.isArrayExpression() &&
+            Number.isInteger(index) &&
+            index >= 0 &&
+            String(index) === name
+          ) {
+            const elements = receiver.path.get("elements");
+            if (
+              elements[index]?.isExpression() &&
+              elements.slice(0, index).every((slot) => !slot.isSpreadElement())
+            ) {
+              inspectDelivery(receiver, values);
+              continue;
+            }
+          }
+          yield values;
         }
       }
   }
@@ -3635,14 +3686,20 @@ function analyzeAliasedMutationUnchecked(
         if (pattern.isArrayPattern()) {
           // The RHS's selected value is consumed even for an unread binding.
           consume(origins);
-          if (
-            pattern.node.elements.some((element) =>
-              element ? patternObservesDelivery(element) : false
-            )
-          ) {
-            // Element delivery comes from the runtime iterator, not necessarily
-            // an array index. No certified delivery means relevant captures only.
-            unresolved(origins);
+          for (const [index, element] of pattern.get("elements").entries()) {
+            if (element.isObjectPattern()) {
+              if (!element.node.properties.length) continue;
+              const delivered = references.observeArrayPatternSlot(
+                path,
+                origins,
+                index
+              );
+              if (delivered === null) unresolved(origins);
+              else inspectPattern(element, delivered);
+            } else if (element.node && patternObservesDelivery(element.node)) {
+              // Keep relevant uncertainty for an existing unmodeled delivery.
+              unresolved(origins);
+            }
           }
         } else if (pattern.isObjectPattern()) {
           observeObjectPatternReads(
@@ -3916,12 +3973,14 @@ function analyzeAliasedMutationUnchecked(
     skippedDefaults?: ReadonlySet<t.Node>,
     argumentsInCaller?: InvocationArguments
   ) {
-    // Selected methods, setters, and plain returned arrows consume their
+    // Selected methods, setters, and plain returned functions consume their
     // actual incoming object before entering the same returned-effect body.
     if (
       (fn.isObjectMethod({ kind: "method" }) ||
         fn.isObjectMethod({ kind: "set" }) ||
-        (fn.isArrowFunctionExpression() && !fn.node.async)) &&
+        ((fn.isArrowFunctionExpression() || fn.isFunctionExpression()) &&
+          !fn.node.async &&
+          !("generator" in fn.node && fn.node.generator))) &&
       argumentsInCaller
     ) {
       const parameters = fn.get("params");

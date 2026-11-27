@@ -10,7 +10,10 @@ import type { MinchoBabelFileMetadata, ProgramScope } from "../types.js";
 import { hasDynamicScope } from "./dynamicScope.js";
 import { closedRuntimeString } from "./runtimeSourceReference.js";
 import { builtInExtractionCalls } from "../extractionCalls/builtins.js";
-import { isProvablyUnexecuted } from "../extractionCalls/evaluation.js";
+import {
+  isProvablyUnexecuted,
+  planEvaluation
+} from "../extractionCalls/evaluation.js";
 import { getStaticCssEvalLiteralRequireImportPath } from "../staticCssEval/cjsBindings.js";
 import { getCjsAssignmentTarget } from "../staticCssEval/cjsExportTargets.js";
 
@@ -205,6 +208,14 @@ export function removeUnusedExtractedImports(
         t.CallExpression | t.OptionalCallExpression | t.NewExpression
       > = path;
       liveImportedUse(call.get("callee"), "call", path);
+    },
+    BinaryExpression(path) {
+      if (optionalSites || path.node.operator !== "+") return;
+      // This is an actual ToPrimitive consumption, not publication of the
+      // result or merely retaining the child value. Reuse the native order
+      // proof without changing staged ESM-managed CommonJS dependencies.
+      for (const step of planEvaluation(path).steps)
+        if (step.kind === "coerce") liveImportedUse(step.path, "access", path);
     },
     "MemberExpression|OptionalMemberExpression"(path) {
       // Observable child accessors require native CommonJS order. The staged

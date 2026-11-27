@@ -30,11 +30,17 @@ function executeSidecar(source: string, modules: Record<string, unknown>) {
   return Object.values(executeModule(source, modules));
 }
 
-function executeModule(source: string, modules: Record<string, unknown>) {
+function executeModule(
+  source: string,
+  modules: Record<string, unknown>,
+  automatic = false
+) {
   const output = transformSync(source, {
     loader: "tsx",
     format: "cjs",
-    jsxFactory: "jsx"
+    ...(automatic
+      ? { jsx: "automatic", jsxImportSource: "@mincho-js/react" }
+      : { jsxFactory: "jsx" })
   }).code;
   const module = { exports: {} as Record<string, unknown> };
   const requireModule = (name: string) => {
@@ -502,6 +508,90 @@ describe("configured JSX callable values", () => {
           ...(hasTrailing ? ["trailing", "trailing class"] : [])
         ]);
       }
+    }
+  );
+
+  it.each(["staged-key", "authored-spread"] as const)(
+    "keeps automatic JSX for %s while preserving attribute effects",
+    (mode) => {
+      const hasSpread = mode === "authored-spread";
+      const lead = hasSpread
+        ? 'key={mark("key", "one")} data-id={mark("data", "row")} css={input} {...mark("spread", {title: "row"})}'
+        : 'data-id={mark("data", "row")} css={input} key={mark("key", "one")}';
+      const { code, result } = babelTransform(
+        "export function Box(input, trace) { const mark = (label, value) => (trace.push(label), value); return <div " +
+          lead +
+          ' className={mark("class", "base")} />; }',
+        { jsxCssProp: true, optimize: { pureFunctions: false } }
+      );
+      expect(result[1]).toBe("");
+      const trace: string[] = [];
+      const runtime = executeModule(
+        code,
+        {
+          "@mincho-js/css/classname": { cx },
+          "@mincho-js/react/jsx-runtime": {
+            jsx: (type: string, props: unknown, key: string) => ({
+              type,
+              props,
+              key
+            })
+          }
+        },
+        true
+      ) as {
+        Box(
+          input: string,
+          trace: string[]
+        ): {
+          key: string;
+          props: { className: string; title?: string; "data-id": string };
+        };
+      };
+      expect(runtime.Box("selected", trace)).toEqual({
+        type: "div",
+        key: "one",
+        props: {
+          "data-id": "row",
+          className: hasSpread ? "selected base" : "base selected",
+          ...(hasSpread ? { title: "row" } : {})
+        }
+      });
+      expect(trace).toEqual(
+        hasSpread
+          ? ["key", "data", "spread", "class"]
+          : ["data", "key", "class"]
+      );
+    }
+  );
+
+  it.each([false, true])(
+    "preserves the authored late const observation before using a class: initialized=%s",
+    (initialized) => {
+      const declaration = "const selected = getStyles({padding:12});";
+      const use = "export const element = read();";
+      const { code, result } = babelTransform(
+        'import {getStyles} from "./theme.css.js"; const read = () => <div css={selected} />;' +
+          (initialized ? declaration + use : use + declaration),
+        { jsxCssProp, optimize: { pureFunctions: false } }
+      );
+      const definition = defineRules({ properties: { padding: [12] } });
+      const expected = definition.css({ padding: 12 });
+      const modules = {
+        "custom-preset": { css: definition.css, cx },
+        "@mincho-js/css": { mincho$ },
+        "@mincho-js/css/classname": { cx },
+        "./theme.css.js": { getStyles: (value: unknown) => value }
+      };
+      const sidecar = executeModule(result[1], modules);
+      const run = () =>
+        executeModule(code, { ...modules, [result[0]]: sidecar });
+      if (initialized)
+        expect(run().element).toEqual({
+          type: "div",
+          props: { className: expected }
+        });
+      else expect(run).toThrow(ReferenceError);
     }
   );
 
@@ -5331,6 +5421,48 @@ describe("configured JSX callable values", () => {
       expect(trace).toEqual([]);
       expect(fallback).toHaveBeenCalledTimes(usesFallback ? 2 : 0);
       expect(configuredCss).toHaveBeenCalledTimes(usesFallback ? 0 : 1);
+    }
+  );
+
+  it.each([false, true])(
+    "selects a single static factory for a bare runtime cx nullish default: primary=%s",
+    (hasPrimary) => {
+      const { code, result } = babelTransform(
+        'import {cx} from "custom-preset"; import {getPrimary, getDefault} from "./theme.css.js"; export function Box(base) { return <div css={cx(base, getPrimary() ?? getDefault())} />; }',
+        { jsxCssProp }
+      );
+      const trace: string[] = [];
+      const definition = defineRules({ properties: { padding: [12] } });
+      const expected = definition.css({ padding: 12 });
+      const modules = {
+        "custom-preset": { css: definition.css, cx },
+        "@mincho-js/css": { mincho$ },
+        "@mincho-js/css/classname": { cx },
+        "./theme.css.js": {
+          getPrimary: () => {
+            trace.push("primary");
+            return hasPrimary ? { padding: 12 } : null;
+          },
+          getDefault: () => {
+            trace.push("default");
+            if (hasPrimary) throw new Error("unselected default");
+            return { padding: 12 };
+          }
+        }
+      };
+      const sidecar = executeModule(result[1], modules);
+      expect(trace.splice(0)).toEqual(
+        hasPrimary ? ["primary"] : ["primary", "default"]
+      );
+      const { Box } = executeModule(code, {
+        ...modules,
+        [result[0]]: sidecar
+      }) as {
+        Box(base: string): { props: { className: string } };
+      };
+      for (const base of ["first", "second"])
+        expect(Box(base).props.className).toBe(cx(base, expected));
+      expect(trace).toEqual([]);
     }
   );
 

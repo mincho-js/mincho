@@ -2556,6 +2556,46 @@ describe("css prop alias mutation diagnostics", () => {
       "the selected returned-arrow getter can belong to an unrelated rule",
       'const make = () => ({label}) => {}; const run = make(); const input = rule => ({get label(){rule.color="blue";return 1;}, data:1}); run(input({}));',
       "red"
+    ],
+    [
+      "select an earlier store on the same array slot",
+      'const make = rule => () => {rule.color="blue";}; const actions = [() => {}]; actions[0] = make(style); actions[0]();',
+      "blue"
+    ],
+    [
+      "array invocation before the store uses the original callback",
+      'const make = rule => () => {rule.color="blue";}; const actions = [() => {}]; actions[0](); actions[0] = make(style);',
+      "red"
+    ],
+    [
+      "an unrelated rule is not changed by the stored array callback",
+      'const make = rule => () => {rule.color="blue";}; const actions = [() => {}]; actions[0] = make({}); actions[0]();',
+      "red"
+    ],
+    [
+      "the selected ordinary returned-function parameter getter precedes its body",
+      'const make = () => function ({label}) {}; const input = rule => ({get label(){rule.color="blue";return 1;}, data:1}); make()(input(style));',
+      "blue"
+    ],
+    [
+      "the unselected returned-function parameter getter stays dormant",
+      'const make = () => function ({data}) {}; const input = rule => ({get label(){rule.color="blue";return 1;}, data:1}); make()(input(style));',
+      "red"
+    ],
+    [
+      "a named object property consumes the delivered array element",
+      'const input = rule => [{get label(){rule.color="blue";return 1;}, data:1}]; const [{label}] = input(style);',
+      "blue"
+    ],
+    [
+      "object rest consumes the delivered array element",
+      'const input = rule => [{get label(){rule.color="blue";return 1;}, data:1}]; const [{...all}] = input(style);',
+      "blue"
+    ],
+    [
+      "a different object property leaves the delivered getter dormant",
+      'const input = rule => [{get label(){rule.color="blue";return 1;}, data:1}]; const [{data}] = input(style);',
+      "red"
     ]
   ] as const)(
     "observes the selected eager input and its frame: %s",

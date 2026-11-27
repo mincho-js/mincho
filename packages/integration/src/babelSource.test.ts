@@ -1,6 +1,7 @@
 import { describe, expect, it, onTestFinished as afterTest, vi } from "vitest";
 import { parseSync, types as t, type PluginObj } from "@babel/core";
 import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import { SourceMap } from "node:module";
 import { type Loader, transformSync as transformJsx } from "esbuild";
 import { mkdir, mkdtemp, readFile, writeFile, rm } from "node:fs/promises";
@@ -36,6 +37,100 @@ function seedArtifacts(engine: MinchoProjectEngine) {
 }
 
 describe("babelTransformSource", () => {
+  it.each([false, true])(
+    "preserves native initialization before a consumed CommonJS operand (used=%s)",
+    async (used) => {
+      const root = await mkdtemp(join(tmpdir(), "mincho-native-cjs-coercion-"));
+      afterTest(() => rm(root, { recursive: true, force: true }));
+      const filename = join(root, "entry.cjs");
+      const source = `
+        const operand = require("./operand.cjs");
+        const {css} = require("@mincho-js/css");
+        exports.className = css({color: "red"});
+        exports.observed = ${used ? '"" + operand' : '"untouched"'};
+      `;
+      await Promise.all([
+        writeFile(
+          join(root, "package.json"),
+          JSON.stringify({
+            name: "@mincho-js/css",
+            type: "commonjs",
+            exports: "./css.cjs"
+          })
+        ),
+        writeFile(
+          join(root, "css.cjs"),
+          'globalThis.trace.push("css-package"); exports.css = style => "class-" + style.color;'
+        ),
+        writeFile(
+          join(root, "operand.cjs"),
+          `
+          globalThis.trace.push("load");
+          module.exports = { [Symbol.toPrimitive]() {
+            globalThis.trace.push("coerce");
+            const initialized = globalThis.trace.includes("css-package");
+            require("@mincho-js/css");
+            return initialized;
+          } };
+        `
+        ),
+        writeFile(join(root, "native.cjs"), source),
+        writeFile(filename, source)
+      ]);
+      const result = await babelTransformSource({
+        root,
+        filename,
+        source,
+        babel: {
+          configFile: false,
+          babelrc: false,
+          optimize: { runtimeCodegen: false }
+        }
+      });
+      expect(result.result[1]).toMatch(/color:\s*["']red["']/);
+      const sidecarExports = [
+        ...result.result[1].matchAll(/export\s+var\s+([\w$]+)/g)
+      ];
+      expect(sidecarExports).toHaveLength(1);
+      await writeFile(
+        join(root, "sidecar.cjs"),
+        `exports.${sidecarExports[0]![1]} = "class-red";`
+      );
+      await writeFile(
+        filename,
+        result.code.replace(result.result[0], "./sidecar.cjs")
+      );
+      const run = (file: string) =>
+        JSON.parse(
+          execFileSync(
+            process.execPath,
+            [
+              "-e",
+              `globalThis.trace = [];const result = require(${JSON.stringify(file)});console.log(JSON.stringify({trace, ...result}));`
+            ],
+            {
+              cwd: root,
+              encoding: "utf8",
+              env: { ...process.env, NODE_OPTIONS: "" }
+            }
+          )
+        ) as { trace: string[]; className: string; observed: string };
+      const actual = run("./entry.cjs");
+      const original = run("./native.cjs");
+      expect(actual).toEqual(
+        used
+          ? {
+              trace: ["load", "css-package", "coerce"],
+              className: "class-red",
+              observed: "true"
+            }
+          : { trace: ["load"], className: "class-red", observed: "untouched" }
+      );
+      if (used) expect(actual).toEqual(original);
+      else expect(original.trace).toEqual(["load", "css-package"]);
+    }
+  );
+
   it.each(["cts", "cjs"] as const)(
     "keeps the owner Flow parser separate from an ordinary %s dependency",
     async (extension) => {

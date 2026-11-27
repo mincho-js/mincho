@@ -320,18 +320,41 @@ function visitClassValue(
       return true;
     }
 
-    return (
-      init.isExpression() &&
-      visitClassValue(
-        init,
-        next,
-        prepare,
-        sharedKind === "alias" && containsStaticFactory(init, next)
-          ? init
-          : consumer,
-        allowStyleBranches
-      )
+    if (!init.isExpression()) return false;
+    const originalConsumer = consumer.node;
+    const readBeforeDeclaration =
+      prepare &&
+      binding.kind === "const" &&
+      path.node.start != null &&
+      binding.path.node.start != null &&
+      path.node.start < binding.path.node.start &&
+      path.getFunctionParent() !== binding.path.getFunctionParent() &&
+      consumer.scope.getBinding(path.node.name) === binding
+        ? t.cloneNode(path.node)
+        : undefined;
+    const lowered = visitClassValue(
+      init,
+      next,
+      prepare,
+      sharedKind === "alias" && containsStaticFactory(init, next)
+        ? init
+        : consumer,
+      allowStyleBranches
     );
+    if (
+      readBeforeDeclaration &&
+      lowered &&
+      consumer.isExpression() &&
+      consumer.node !== originalConsumer
+    ) {
+      // The sidecar may already have a class, but it cannot prove when this
+      // earlier closure runs. Preserve the author's lexical GetValue in place.
+      consumer.replaceWith(
+        t.sequenceExpression([readBeforeDeclaration, consumer.node])
+      );
+      preparedClassValues.add(consumer.node);
+    }
+    return lowered;
   }
 
   if (path.isCallExpression()) {
@@ -1010,16 +1033,7 @@ function prepareCxArgument(
       if (left.isLogicalExpression({ operator: "??" })) {
         const supplied = unwrapCxArgument(left.get("left"));
         const otherwise = unwrapCxArgument(left.get("right"));
-        if (
-          supplied.isCallExpression() &&
-          otherwise.isCallExpression() &&
-          [supplied, otherwise].every(
-            (factory) =>
-              !isProvablyUnexecuted(factory) &&
-              isStaticCall(factory) &&
-              visitClassValue(factory, next, false)
-          )
-        ) {
+        if (isStaticNullishFactorySelection(supplied, otherwise, next)) {
           // Both branches are statically compilable, but only the selected
           // factory may run. Capture the entire authored nullish selection
           // once before applying the ordinary scalar class/truthiness receipt.
@@ -1123,6 +1137,19 @@ function prepareCxArgument(
       if (prepared) selectTruthyScalarClass(path, guarded ? "||" : "??");
       return;
     }
+    if (
+      !spreadOperand &&
+      path.node.operator === "??" &&
+      isStaticNullishFactorySelection(
+        unwrapCxArgument(path.get("left")),
+        unwrapCxArgument(path.get("right")),
+        next
+      )
+    ) {
+      lowerStaticFactory(path);
+      preparedClassValues.add(path.node);
+      return;
+    }
     if (path.node.operator !== "&&")
       prepareCxArgument(path.get("left"), next, spreadOperand);
     prepareCxArgument(path.get("right"), next, spreadOperand);
@@ -1149,6 +1176,20 @@ function prepareCxArgument(
   } else if (!spreadOperand && path.isExpression()) {
     visitClassValue(path, seen, true);
   }
+}
+
+function isStaticNullishFactorySelection(
+  supplied: NodePath<t.Node>,
+  otherwise: NodePath<t.Node>,
+  seen: Set<t.Node>
+) {
+  return [supplied, otherwise].every(
+    (factory) =>
+      factory.isCallExpression() &&
+      !isProvablyUnexecuted(factory) &&
+      isStaticCall(factory) &&
+      visitClassValue(factory, seen, false)
+  );
 }
 
 function isStaticCall(path: NodePath<t.CallExpression>) {
