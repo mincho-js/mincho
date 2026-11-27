@@ -964,6 +964,16 @@ class ObjectReferences {
       this.inspectObservedCallable(value, receiver, inspect, args, unresolved);
   }
 
+  inspectStoredKeyConversion(
+    values: readonly ObjectReference[],
+    receiver: ObjectReference,
+    inspect: ReturnedEffectInspector,
+    unresolved: UnresolvedEffect
+  ): void {
+    for (const value of values)
+      this.inspectObservedCallable(value, receiver, inspect, [], unresolved);
+  }
+
   private inspectObservedCallable(
     value: ObjectReference,
     receiver: ObjectReference,
@@ -3443,6 +3453,19 @@ function analyzeAliasedMutationUnchecked(
       checkReturnedEffectBody,
       unresolved
     );
+    // A selected property-key read can dispatch to an earlier same-object
+    // store. Use the existing recorded write frame and the real key receiver.
+    // The string-first ordinary operation is still behind the Symbol hook.
+    for (const receiver of values) {
+      if (!receiver.path.isObjectExpression()) continue;
+      for (const stored of storedMemberValues(site, [receiver], "toString", {}))
+        references.inspectStoredKeyConversion(
+          stored,
+          receiver,
+          checkReturnedEffectBody,
+          unresolved
+        );
+    }
     references.inspectPropertyKeyHooks(
       values,
       key,
@@ -3893,14 +3916,19 @@ function analyzeAliasedMutationUnchecked(
     skippedDefaults?: ReadonlySet<t.Node>,
     argumentsInCaller?: InvocationArguments
   ) {
-    // Ordinary selected methods and setters bind their actual incoming
-    // object before entering the same returned-effect body.
+    // Selected methods, setters, and plain returned arrows consume their
+    // actual incoming object before entering the same returned-effect body.
     if (
       (fn.isObjectMethod({ kind: "method" }) ||
-        fn.isObjectMethod({ kind: "set" })) &&
+        fn.isObjectMethod({ kind: "set" }) ||
+        (fn.isArrowFunctionExpression() && !fn.node.async)) &&
       argumentsInCaller
     ) {
-      for (const [index, parameter] of fn.get("params").entries()) {
+      const parameters = fn.get("params");
+      for (const [index, parameter] of (Array.isArray(parameters)
+        ? parameters
+        : []
+      ).entries()) {
         const incoming = argumentsInCaller[index];
         if (!incoming?.origins.length) continue;
         const pattern =

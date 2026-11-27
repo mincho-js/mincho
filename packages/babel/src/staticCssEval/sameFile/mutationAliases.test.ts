@@ -2527,6 +2527,53 @@ describe("css prop alias mutation diagnostics", () => {
   );
 
   it.each([
+    [
+      "live earlier property-key conversion invokes the stored callable",
+      'const make = rule => () => {rule.color = "blue"; return "slot";}; const key = {toString(){return "slot";}}; const holder = {slot:true}; key.toString = make(style); const read = holder[key];',
+      "blue"
+    ],
+    [
+      "reading a different slot does not convert the stored key",
+      'const make = rule => () => {rule.color = "blue"; return "slot";}; const key = {toString(){return "slot";}}; const holder = {slot:true}; key.toString = make(style); const read = holder.slot;',
+      "red"
+    ],
+    [
+      "key conversion before the store keeps the original method",
+      'const make = rule => () => {rule.color = "blue"; return "slot";}; const key = {toString(){return "slot";}}; const holder = {slot:true}; const read = holder[key]; key.toString = make(style);',
+      "red"
+    ],
+    [
+      "the selected returned-arrow parameter getter runs before its body",
+      'const make = () => ({label}) => {}; const run = make(); const input = rule => ({get label(){rule.color="blue";return 1;}, data:1}); run(input(style));',
+      "blue"
+    ],
+    [
+      "a returned arrow selecting only data does not read the getter",
+      'const make = () => ({data}) => {}; const run = make(); const input = rule => ({get label(){rule.color="blue";return 1;}, data:1}); run(input(style));',
+      "red"
+    ],
+    [
+      "the selected returned-arrow getter can belong to an unrelated rule",
+      'const make = () => ({label}) => {}; const run = make(); const input = rule => ({get label(){rule.color="blue";return 1;}, data:1}); run(input({}));',
+      "red"
+    ]
+  ] as const)(
+    "observes the selected eager input and its frame: %s",
+    (_case, operation, color) => {
+      const authored = `const style = {color: "red"}; ${operation}`;
+      expect(new Function(`${authored}; return style.color;`)()).toBe(color);
+      const { run, options } = cssTransform(authored, "same-file");
+      if (color === "blue") {
+        expect(run).toThrow(/same-file binding "style".*mutated/);
+        expect(options.result[1]).toBe("");
+      } else {
+        expect(run()?.code).toContain("className");
+        expect(options.result[1]).toMatch(/"?color"?:\s*["']red["']/);
+      }
+    }
+  );
+
+  it.each([
     ["defined primitive", "holder.paint = 1;", false],
     ["defined allocation", "holder.paint = {};", false],
     ["undefined", "holder.paint = undefined;", true],

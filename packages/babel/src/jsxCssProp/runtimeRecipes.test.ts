@@ -2311,6 +2311,63 @@ describe("configured JSX callable values", () => {
       }
     );
 
+    it.each([
+      ["literal primitive", "4", "export const spacing = 4;", true],
+      [
+        "resolved imported primitive",
+        "spacing",
+        "export const spacing = 4;",
+        true
+      ],
+      ["unproved imported value", "spacing", "export let spacing = {};", false]
+    ] as const)(
+      "uses the resolved primitive proof at the local argument: %s",
+      (_case, value, tokenModule, staticCall) => {
+        const source = `
+        import {getStyles} from "./theme.css.js";
+        ${value === "spacing" ? 'import {spacing} from "./tokens.js";' : ""}
+        const identity = value => value;
+        export const Box = () => <div css={getStyles(identity(${value}))} />;
+      `;
+        const preparedExtractCalls = prepareModuleSourceFixture(
+          source,
+          { "./tokens.js": tokenModule },
+          { "custom-preset": ["css"] },
+          true
+        );
+        const { code, result } = babelTransform(source, {
+          jsxCssProp,
+          optimize: { pureFunctions: false },
+          preparedExtractCalls
+        });
+        const definition = defineRules({ properties: { padding: [4] } });
+        const getStyles = vi.fn((padding: number) => ({ padding }));
+        const modules = {
+          "@mincho-js/css": { mincho$ },
+          "@mincho-js/css/classname": { cx },
+          "custom-preset": { css: definition.css },
+          "./theme.css.js": { getStyles },
+          "./tokens.js": { spacing: staticCall ? 4 : {} }
+        };
+        if (!staticCall) {
+          expect(() => executeModule(result[1], modules)).toThrow(
+            /runtime calls only to compiled/
+          );
+          expect(getStyles).not.toHaveBeenCalled();
+          return;
+        }
+        const sidecar = executeModule(result[1], modules);
+        const { Box } = executeModule(code, {
+          ...modules,
+          [result[0]]: sidecar
+        }) as {
+          Box(): { props: { className: string } };
+        };
+        expect(Box().props.className).toBe(definition.css({ padding: 4 }));
+        expect(getStyles).toHaveBeenCalledExactlyOnceWith(4);
+      }
+    );
+
     it.each(["Math.max(size, 4)", '"x".repeat(size).length'])(
       "preserves imported primitive coercion at runtime: %s",
       (argument) => {
@@ -5929,6 +5986,77 @@ describe("configured JSX callable values", () => {
     expect(getAlternateStyles).toHaveBeenCalledOnce();
     expect(choose).toHaveBeenCalledTimes(2);
   });
+
+  it.each([false, true])(
+    "publishes each shared class only after its retained value: caught throw=%s",
+    (throws) => {
+      const source = `
+      import {getStyles, getAlternateStyles} from "./theme.css.js";
+      export const Box = (flags, select) => {
+        const rows = [];
+        for (const active of flags) {
+          try { var selected = select(active) ? getStyles() : getAlternateStyles(); }
+          catch (error) { rows.push(error.message); }
+          rows.push({value:selected, element:<div css={selected} style={selected} />});
+        }
+        return rows;
+      };
+    `;
+      const { code, result } = babelTransform(source, { jsxCssProp });
+      const firstStyle = { padding: 12 } as const;
+      const secondStyle = { padding: 4 } as const;
+      let runtime = false;
+      const trace: string[] = [];
+      const getStyles = () => {
+        trace.push("primary");
+        return firstStyle;
+      };
+      const getAlternateStyles = () => {
+        trace.push("alternate");
+        if (runtime && throws) throw new Error("alternate failed");
+        return secondStyle;
+      };
+      const definition = defineRules({ properties: { padding: [4, 12] } });
+      const modules = {
+        "@mincho-js/css": { mincho$ },
+        "@mincho-js/css/classname": { cx },
+        "custom-preset": { css: definition.css },
+        "./theme.css.js": { getStyles, getAlternateStyles }
+      };
+      const sidecar = executeModule(result[1], modules);
+      expect(trace.splice(0)).toEqual(["primary", "alternate"]);
+      runtime = true;
+      const { Box } = executeModule(code, {
+        ...modules,
+        [result[0]]: sidecar
+      }) as {
+        Box(
+          flags: boolean[],
+          select: (active: boolean) => boolean
+        ): (
+          | string
+          | {
+              value: object;
+              element: { props: { style: object; className: string } };
+            }
+        )[];
+      };
+      const rows = Box([true, false], (active) => active);
+      const expected = (style: { padding: 4 | 12 }) => ({
+        value: style,
+        element: {
+          type: "div",
+          props: { style, className: definition.css(style) }
+        }
+      });
+      expect(rows).toEqual(
+        throws
+          ? [expected(firstStyle), "alternate failed", expected(firstStyle)]
+          : [expected(firstStyle), expected(secondStyle)]
+      );
+      expect(trace).toEqual(["primary", "alternate"]);
+    }
+  );
 
   it.each(["const", "let"])(
     "diagnoses shared %s factory aliases in for initializers before changing closure scope",

@@ -16,6 +16,7 @@ import type { Binding } from "@babel/traverse";
 import {
   getModuleReference,
   isProvenModuleDataRead,
+  isProvenPrimitiveImport,
   staticMemberName
 } from "../commonjs/bindings.js";
 import {
@@ -855,11 +856,10 @@ function prepareSharedFactoryClass(
   }
 
   const sharedClass = bindingScope.generateUidIdentifier("cssClass");
-  bindingScope.push({
-    id: t.cloneNode(sharedClass),
-    kind: "let",
-    unique: true
-  });
+  const nextClass = bindingScope.generateUidIdentifier("nextCssClass");
+  const authoredValue = bindingScope.generateUidIdentifier("cssValue");
+  for (const slot of [sharedClass, nextClass, authoredValue])
+    bindingScope.push({ id: t.cloneNode(slot), kind: "let", unique: true });
   sharedFactoryClasses.set(declaration.node, sharedClass);
 
   const prepareBranch = (branch: NodePath<t.Node>): void => {
@@ -889,7 +889,7 @@ function prepareSharedFactoryClass(
 
       branch.replaceWith(
         t.sequenceExpression([
-          t.assignmentExpression("=", t.cloneNode(sharedClass), branch.node),
+          t.assignmentExpression("=", t.cloneNode(nextClass), branch.node),
           original
         ])
       );
@@ -898,17 +898,24 @@ function prepareSharedFactoryClass(
     }
   };
 
-  // Record the selected compiled branch without replacing its original value.
-  // Reset on each initializer evaluation, including short-circuited loop runs.
+  // Stage the next class while evaluating the complete authored initializer.
+  // Publish it only if the initializer succeeds, so a caught throw leaves
+  // the previous value and its class paired, including in a loop.
   prepareBranch(init);
   init.replaceWith(
     t.sequenceExpression([
       t.assignmentExpression(
         "=",
-        t.cloneNode(sharedClass),
+        t.cloneNode(nextClass),
         t.unaryExpression("void", t.numericLiteral(0))
       ),
-      init.node
+      t.assignmentExpression("=", t.cloneNode(authoredValue), init.node),
+      t.assignmentExpression(
+        "=",
+        t.cloneNode(sharedClass),
+        t.cloneNode(nextClass)
+      ),
+      t.cloneNode(authoredValue)
     ])
   );
   return sharedClass;
@@ -1605,9 +1612,10 @@ function hasRuntimeCalls(
       return intrinsicRead.dependencies.some((dependency) =>
         containsRuntimeCall(dependency)
       );
-    if (use === "argument-value" && getModuleReference(reference)) return true;
-
     const binding = reference.scope.getBinding(reference.node.name);
+    if (use === "argument-value" && getModuleReference(reference))
+      return !binding || !isProvenPrimitiveImport(binding);
+
     const inspected =
       use === "argument-value" ? inspectedArgumentValues : inspectedHelpers;
     if (!binding?.constant || inspected.has(binding)) return false;

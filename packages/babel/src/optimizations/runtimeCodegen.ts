@@ -530,6 +530,19 @@ export function removeUnusedExtractedImports(
     const immutableRequestName = (source: NodePath<t.Node> | undefined) => {
       if (!source?.isIdentifier())
         return source ? closedRuntimeString(source) : undefined;
+      const owner = source.getFunctionParent();
+      const closure = owner?.parentPath;
+      const declarationStatement = closure?.parentPath;
+      // Only a module-local binding whose initializer creates a callable is
+      // deferred here; an immediately evaluated function expression is not.
+      const deferredLocalClosure =
+        (owner?.isArrowFunctionExpression() || owner?.isFunctionExpression()) &&
+        closure?.isVariableDeclarator() &&
+        closure.node.init === owner.node &&
+        declarationStatement?.isVariableDeclaration() &&
+        (declarationStatement.parentPath === program ||
+          (declarationStatement.parentPath.isExportNamedDeclaration() &&
+            declarationStatement.parentPath.parentPath === program));
       const binding = source.scope.getBinding(source.node.name);
       const declaration = binding?.path;
       if (
@@ -541,7 +554,7 @@ export function removeUnusedExtractedImports(
         declaration.parentPath.parentPath !== program ||
         declaration.node.end == null ||
         source.node.start == null ||
-        declaration.node.end > source.node.start
+        (declaration.node.end > source.node.start && !deferredLocalClosure)
       )
         return;
       // A deferred use can run before initialization in a cycle. That is not

@@ -168,6 +168,19 @@ describe("runtime code generation", () => {
       true
     ],
     [
+      "deferred dynamic import with a later immutable module string",
+      'export const load = () => import(request); const request = "@mincho-js/css";',
+      true
+    ],
+    [
+      "deferred request preserves the authored early-read TDZ",
+      `export const load = () => import(request);
+        try { await load(); throw new Error("expected request TDZ"); }
+        catch (error) { if (!(error instanceof ReferenceError)) throw error; }
+        const request = "@mincho-js/css";`,
+      true
+    ],
+    [
       "dead deferred dynamic import with a closed string expression",
       'export const load = () => false && import("@mincho-js/" + "css");',
       false
