@@ -1384,7 +1384,11 @@ class ObjectReferences {
       | t.AssignmentExpression
       | t.ForOfStatement
     >,
-    knownArguments?: InvocationArguments | null
+    knownArguments?: InvocationArguments | null,
+    inspectUnframedArgument?: (
+      fn: NodePath<t.Function>,
+      incoming: InvocationArguments
+    ) => void
   ): void {
     const readsMember = operation !== "set";
     let observed: InvocationArguments | null | undefined = knownArguments;
@@ -1427,8 +1431,8 @@ class ObjectReferences {
         // The selected callable can carry a different lexical frame from
         // its holder, whether copied via spread or stored as a data value.
         if (!liveCall()) return;
-        for (const value of this.select([origin], name, new Set(), true))
-          if (value.parameterFrame)
+        for (const value of this.select([origin], name, new Set(), true)) {
+          if (value.parameterFrame) {
             this.inspectObservedCallable(
               value,
               origin,
@@ -1436,6 +1440,22 @@ class ObjectReferences {
               argumentsInCaller(),
               unresolved
             );
+          } else if (
+            inspectUnframedArgument &&
+            value.path.isObjectMethod({ kind: "method" }) &&
+            value.path.parentPath.node === origin.path.node &&
+            !value.path.node.async &&
+            !value.path.node.generator &&
+            value.path
+              .get("params")
+              .some((parameter) => parameter.isObjectPattern())
+          ) {
+            // The receiver can be an ordinary local literal with no saved
+            // frame, while the selected incoming argument carries one.
+            const incoming = argumentsInCaller();
+            if (incoming) inspectUnframedArgument(value.path, incoming);
+          }
+        }
       }
       if (!origin.parameterFrame) continue;
       // A later operation can replace a key without proving it absent at
@@ -3400,7 +3420,9 @@ function analyzeAliasedMutationUnchecked(
         constructing ? "construct" : "method",
         checkReturnedEffectBody,
         unresolved,
-        path
+        path,
+        undefined,
+        sourceRuleTargets.size > 0 ? inspectInvocationParameterReads : undefined
       );
       if (live) {
         if (!constructing) {
@@ -3556,11 +3578,12 @@ function analyzeAliasedMutationUnchecked(
     site: NodePath<t.Node>,
     pattern: NodePath<t.ObjectPattern>,
     origins: ObjectReference[],
-    inspectNested?: (
+    inspectNested: (
       pattern: NodePath<t.Node>,
       origins: ObjectReference[]
     ) => void,
-    activeOrigin?: ObjectReference
+    activeOrigin?: ObjectReference,
+    observeKeys = true
   ) => {
     const unresolved = (values: ObjectReference[]) =>
       observeUnresolved(site, values, sourceRuleTargets);
@@ -3568,7 +3591,6 @@ function analyzeAliasedMutationUnchecked(
     for (const property of pattern.get("properties")) {
       references.countEffectNode();
       if (property.isRestElement()) {
-        if (!inspectNested) continue;
         references.inspectOwnGetters(
           origins,
           checkReturnedEffectBody,
@@ -3581,13 +3603,12 @@ function analyzeAliasedMutationUnchecked(
         continue;
       }
       if (!property.isObjectProperty()) continue;
-      // Pattern keys are observed only after delivery. Invocation binding
-      // uses this same selected read for named properties; the caller owns any
-      // separate computed-key or iterator decision.
-      if (property.node.computed && inspectNested)
+      // Invocation binding shares these own reads after actual delivery.
+      // Computed-key activation remains with the caller's ordered plan.
+      if (property.node.computed && observeKeys)
         observeComputedKey(site, property.get("key"), false, activeOrigin);
       const name = propertyName(property.node);
-      if (name === null && !inspectNested) continue;
+      if (name === null && !observeKeys) continue;
       references.inspectOwnGetters(
         origins,
         checkReturnedEffectBody,
@@ -3597,8 +3618,7 @@ function analyzeAliasedMutationUnchecked(
       if (name !== null) excludedNames.add(name);
 
       const childPattern = property.get("value");
-      if (!inspectNested || !bindingPatternReadsSource(childPattern.node))
-        continue;
+      if (!bindingPatternReadsSource(childPattern.node)) continue;
       if (name === null) unresolved(origins);
       else inspectNested(childPattern, references.select(origins, name));
     }
@@ -3967,6 +3987,40 @@ function analyzeAliasedMutationUnchecked(
     }
   });
 
+  function inspectInvocationParameterReads(
+    fn: NodePath<t.Function>,
+    argumentsInCaller: InvocationArguments,
+    origin?: ObjectReference
+  ) {
+    const inspectParameter = (
+      pattern: NodePath<t.Node>,
+      origins: ObjectReference[]
+    ) => {
+      if (pattern.isObjectPattern())
+        observeObjectPatternReads(
+          fn,
+          pattern,
+          origins,
+          inspectParameter,
+          origin,
+          false
+        );
+    };
+    const parameters = fn.get("params");
+    for (const [index, parameter] of (Array.isArray(parameters)
+      ? parameters
+      : []
+    ).entries()) {
+      const incoming = argumentsInCaller[index];
+      if (!incoming?.origins.length) continue;
+      const pattern =
+        parameter.isAssignmentPattern() && incoming.definitelyDefined
+          ? parameter.get("left")
+          : parameter;
+      inspectParameter(pattern, incoming.origins);
+    }
+  }
+
   function checkReturnedEffectBody(
     fn: NodePath<t.Function>,
     origin: ObjectReference,
@@ -3982,22 +4036,8 @@ function analyzeAliasedMutationUnchecked(
           !fn.node.async &&
           !("generator" in fn.node && fn.node.generator))) &&
       argumentsInCaller
-    ) {
-      const parameters = fn.get("params");
-      for (const [index, parameter] of (Array.isArray(parameters)
-        ? parameters
-        : []
-      ).entries()) {
-        const incoming = argumentsInCaller[index];
-        if (!incoming?.origins.length) continue;
-        const pattern =
-          parameter.isAssignmentPattern() && incoming.definitelyDefined
-            ? parameter.get("left")
-            : parameter;
-        if (pattern.isObjectPattern())
-          observeObjectPatternReads(fn, pattern, incoming.origins);
-      }
-    }
+    )
+      inspectInvocationParameterReads(fn, argumentsInCaller, origin);
     // This is an additional mutation veto, never a proof that the invocation
     // can be replayed. A returned-but-uninvoked callback or setter does not
     // enter here.

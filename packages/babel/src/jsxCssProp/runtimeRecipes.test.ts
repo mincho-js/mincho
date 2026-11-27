@@ -565,16 +565,29 @@ describe("configured JSX callable values", () => {
     }
   );
 
-  it.each([false, true])(
-    "preserves the authored late const observation before using a class: initialized=%s",
-    (initialized) => {
+  it.each([
+    ["closure", false],
+    ["closure", true],
+    ["local", false],
+    ["local", true]
+  ] as const)(
+    "preserves a %s lexical read before using a class: initialized=%s",
+    (placement, initialized) => {
       const declaration = "const selected = getStyles({padding:12});";
-      const use = "export const element = read();";
-      const { code, result } = babelTransform(
-        'import {getStyles} from "./theme.css.js"; const read = () => <div css={selected} />;' +
-          (initialized ? declaration + use : use + declaration),
-        { jsxCssProp, optimize: { pureFunctions: false } }
-      );
+      const use =
+        placement === "local"
+          ? "const view = <div css={selected} />;"
+          : "export const element = read();";
+      const ordered = initialized ? declaration + use : use + declaration;
+      const source =
+        'import {getStyles} from "./theme.css.js";' +
+        (placement === "local"
+          ? "export function Box() {" + ordered + "return view;}"
+          : "const read = () => <div css={selected} />;" + ordered);
+      const { code, result } = babelTransform(source, {
+        jsxCssProp,
+        optimize: { pureFunctions: false }
+      });
       const definition = defineRules({ properties: { padding: [12] } });
       const expected = definition.css({ padding: 12 });
       const modules = {
@@ -584,10 +597,14 @@ describe("configured JSX callable values", () => {
         "./theme.css.js": { getStyles: (value: unknown) => value }
       };
       const sidecar = executeModule(result[1], modules);
-      const run = () =>
-        executeModule(code, { ...modules, [result[0]]: sidecar });
+      const run = () => {
+        const app = executeModule(code, { ...modules, [result[0]]: sidecar });
+        return placement === "local"
+          ? (app.Box as () => unknown)()
+          : app.element;
+      };
       if (initialized)
-        expect(run().element).toEqual({
+        expect(run()).toEqual({
           type: "div",
           props: { className: expected }
         });
@@ -5421,6 +5438,45 @@ describe("configured JSX callable values", () => {
       expect(trace).toEqual([]);
       expect(fallback).toHaveBeenCalledTimes(usesFallback ? 2 : 0);
       expect(configuredCss).toHaveBeenCalledTimes(usesFallback ? 0 : 1);
+    }
+  );
+
+  it.each(["fixed", "runtime-falsy"] as const)(
+    "only prepares a runtime cx OR factory when reachable: %s",
+    (form) => {
+      const left = form === "fixed" ? '"fixed"' : "base";
+      const { code, result } = babelTransform(
+        'import {cx} from "custom-preset"; import {getStyles} from "./theme.css.js"; export function Box(base) { return <div css={cx(base, ' +
+          left +
+          " || getStyles())} />; }",
+        { jsxCssProp, optimize: { pureFunctions: false } }
+      );
+      const definition = defineRules({ properties: { padding: [12] } });
+      const compiled = definition.css({ padding: 12 });
+      const getStyles = vi.fn(() => {
+        if (form === "fixed") throw Error("unselected stylesheet fallback");
+        return { padding: 12 };
+      });
+      const modules = {
+        "custom-preset": { css: definition.css, cx },
+        "@mincho-js/css": { mincho$ },
+        "@mincho-js/css/classname": { cx },
+        "./theme.css.js": { getStyles }
+      };
+      const sidecar = executeModule(result[1], modules);
+      const { Box } = executeModule(code, {
+        ...modules,
+        [result[0]]: sidecar
+      }) as {
+        Box(base: string): { props: { className: string } };
+      };
+      if (form === "fixed") {
+        expect(Box("base").props.className).toBe("base fixed");
+        expect(getStyles).not.toHaveBeenCalled();
+      } else {
+        expect(Box("").props.className).toBe(compiled);
+        expect(getStyles).toHaveBeenCalledOnce();
+      }
     }
   );
 

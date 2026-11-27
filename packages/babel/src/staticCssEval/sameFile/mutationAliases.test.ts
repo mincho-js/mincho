@@ -2596,6 +2596,21 @@ describe("css prop alias mutation diagnostics", () => {
       "a different object property leaves the delivered getter dormant",
       'const input = rule => [{get label(){rule.color="blue";return 1;}, data:1}]; const [{data}] = input(style);',
       "red"
+    ],
+    [
+      "selected nested parameter reads its actual inner getter once",
+      'let reads = 0; const input = rule => ({outer:{get label(){rule.color="blue"; if (++reads !== 1) throw Error("repeated getter");return 1;}, data:1}}); const reader = { read({outer:{label}}){} }; reader.read(input(style));',
+      "blue"
+    ],
+    [
+      "selected object rest copies its actual enumerable getter once",
+      'let reads = 0; const input = rule => ({get label(){rule.color="blue"; if (++reads !== 1) throw Error("repeated getter");return 1;}, data:1}); const reader = { read({...rest}){} }; reader.read(input(style));',
+      "blue"
+    ],
+    [
+      "same nested argument selecting data leaves its getter dormant",
+      'const input = rule => ({outer:{get label(){rule.color="blue";return 1;}, data:1}}); const reader = { read({outer:{data}}){} }; reader.read(input(style));',
+      "red"
     ]
   ] as const)(
     "observes the selected eager input and its frame: %s",

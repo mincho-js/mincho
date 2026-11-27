@@ -105,6 +105,7 @@ describe("publication for a compound authored initializer", () => {
     "copy current output",
     "later consumer of output copy",
     "inert object destructuring",
+    "alias of a prior inert object destructuring",
     "earlier closed module constant"
   ] as const)(
     "publishes the %s built-in CSS output before sidecar reads",
@@ -126,6 +127,8 @@ describe("publication for a compound authored initializer", () => {
           'const rule = { color: "red" }, cls = css(rule), copy = cls; export const animation = css({ animationName: copy });',
         "inert object destructuring":
           'const rule = { color: "red" }, {x} = {x: 1}; export const cls = css(rule); export {x};',
+        "alias of a prior inert object destructuring":
+          'const rule = {color:"red"}, {shade} = {shade:"blue"}, copy = shade; export const cls = css(rule); export {copy};',
         "earlier closed module constant":
           'const shade = "blue"; const rule = { color: "red" }, copy = shade; export const cls = css(rule); export { copy };'
       };

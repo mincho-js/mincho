@@ -328,7 +328,6 @@ function visitClassValue(
       path.node.start != null &&
       binding.path.node.start != null &&
       path.node.start < binding.path.node.start &&
-      path.getFunctionParent() !== binding.path.getFunctionParent() &&
       consumer.scope.getBinding(path.node.name) === binding
         ? t.cloneNode(path.node)
         : undefined;
@@ -347,8 +346,8 @@ function visitClassValue(
       consumer.isExpression() &&
       consumer.node !== originalConsumer
     ) {
-      // The sidecar may already have a class, but it cannot prove when this
-      // earlier closure runs. Preserve the author's lexical GetValue in place.
+      // The sidecar may already have a class. The authored lexical read
+      // still happens at this point, even in the initializer's own function.
       consumer.replaceWith(
         t.sequenceExpression([readBeforeDeclaration, consumer.node])
       );
@@ -1007,6 +1006,13 @@ function prepareCxArgument(
     prepareCxArgument(path.get("alternate"), next, spreadOperand);
   } else if (path.isLogicalExpression()) {
     if (path.node.operator === "||" && !spreadOperand) {
+      const right = path.get("right");
+      if (isProvablyUnexecuted(right)) {
+        // Do not give a statically excluded runtime fallback its own build
+        // owner. Leave the authored test and its selected value in place.
+        prepareCxArgument(path.get("left"), next);
+        return;
+      }
       const left = unwrapCxArgument(path.get("left"));
       if (
         left === path.get("left") &&

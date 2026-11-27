@@ -584,21 +584,31 @@ export function planExtractionBindings(
       if (!id.isIdentifier()) {
         // A fresh literal's inert own reads are already certified by the
         // shared pattern replay checker; defaults/unknown operations aren't.
+        if (required) continue;
         if (
-          !required &&
-          !(
-            id.isObjectPattern() &&
-            initializer.isObjectExpression() &&
-            prove(initializer) &&
-            analysis.everyPattern(
-              id,
-              (path) => !path.node || (path.isExpression() && prove(path)),
-              initializer.node
-            ) &&
-            !predecessor
-          )
-        )
-          runtimeBinding ??= binding;
+          id.isObjectPattern() &&
+          initializer.isObjectExpression() &&
+          prove(initializer) &&
+          analysis.everyPattern(
+            id,
+            (path) => !path.node || (path.isExpression() && prove(path)),
+            initializer.node
+          ) &&
+          !predecessor
+        ) {
+          // The same ordered emission unit just initialized these exact
+          // binding objects. A later sibling may read them without replay.
+          for (const identifier of Object.values(
+            t.getBindingIdentifiers(id.node)
+          )) {
+            const local = id.scope.getBinding(identifier.name);
+            if (
+              local?.path.node === sibling.node &&
+              local.identifier === identifier
+            )
+              initialized.set(local, undefined);
+          }
+        } else runtimeBinding ??= binding;
         continue;
       }
       const local = id.scope.getBinding(id.node.name);
