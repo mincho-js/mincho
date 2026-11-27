@@ -1,6 +1,14 @@
+import {
+  completeExtractionPublication,
+  requiresExtractionPublication,
+  isIgnoredExtractionCall
+} from "./extractionPublication.js";
 import { NodePath, types as t } from "@babel/core";
 import type { ProgramScope } from "../types.js";
-import { collectExtractionBindings } from "./extractionBindings.js";
+import {
+  collectExtractionBindings,
+  recordExtractionInitializer
+} from "./extractionBindings.js";
 import { getNearestIdentifier, registerImportMethod } from "../utils.js";
 import {
   isExtractionCall,
@@ -19,15 +27,29 @@ export function transformCallExpression(path: NodePath<t.CallExpression>) {
   const programParent = path.scope.getProgramParent() as ProgramScope;
 
   // Checks for special comments that say "mincho-js-ignore"
-  const ignored = Boolean(
-    path.node.leadingComments?.some(
-      (comment) => comment.value.trim() === "mincho-js-ignore"
-    ) ||
-    path.parent.leadingComments?.some(
-      (comment) => comment.value.trim() === "mincho-js-ignore"
-    )
+  const ignored = isIgnoredExtractionCall(path);
+
+  const publicationRequired = requiresExtractionPublication(
+    programParent,
+    path.node
   );
-  if (!isExtractionCall(callee, !ignored)) return;
+  if (publicationRequired && ignored)
+    throw path.buildCodeFrameError(
+      "Cannot ignore a compiler-required output publication."
+    );
+  if (!isExtractionCall(callee, !ignored)) {
+    // Compiler-selected complete owners and promised publications must not
+    // silently fall back to a runtime invocation after their proof is lost.
+    if (
+      !ignored &&
+      (publicationRequired ||
+        path.node.extra?.minchoEvaluationOwner === "build")
+    )
+      throw path.buildCodeFrameError(
+        `Cannot safely extract compiler-owned build-time call ${callee.toString()}: its invocation, dependencies, or evaluation order could not be proven. Simplify the authoring expression or move it to a supported CSS module.`
+      );
+    return;
+  }
 
   if (ignored) {
     // Even if ignored, still collect bindings
@@ -66,10 +88,12 @@ export function transformCallExpression(path: NodePath<t.CallExpression>) {
 
   // Creates an alias for the imported identifier
   // because other transforms use the imported ident as reference
-  programParent.minchoData.nodes.push(
-    t.variableDeclaration("var", [
-      t.variableDeclarator(importedIdentifier, identifier)
-    ])
-  );
+  const alias = t.variableDeclaration("var", [
+    t.variableDeclarator(importedIdentifier, identifier)
+  ]);
+  programParent.minchoData.nodes.push(alias);
+  recordExtractionInitializer(path, alias);
+  const publishedCall = path.node;
   path.replaceWith(importedIdentifier);
+  completeExtractionPublication(programParent, publishedCall);
 }

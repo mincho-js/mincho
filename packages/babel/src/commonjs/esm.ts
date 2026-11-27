@@ -36,21 +36,28 @@ export interface CommonJsDescription {
 export function inspectCommonJs(
   source: string,
   filename: string,
-  parserPlugins: NonNullable<TransformOptions["parserOpts"]>["plugins"] = []
+  parserPlugins: NonNullable<TransformOptions["parserOpts"]>["plugins"] = [],
+  existingAst?: t.File
 ): CommonJsDescription {
-  const ast = parseSync(source, {
-    filename,
-    configFile: false,
-    babelrc: false,
-    parserOpts: {
-      sourceType: "unambiguous",
-      plugins: [
-        ...parserPlugins,
-        "typescript",
-        ...(/\.[cm]?[jt]s$/.test(filename) ? [] : ["jsx" as const])
-      ]
-    }
+  const hasDialect = parserPlugins?.some((plugin) => {
+    const name = typeof plugin === "string" ? plugin : plugin[0];
+    return name === "flow" || name === "typescript";
   });
+  const ast =
+    existingAst ??
+    parseSync(source, {
+      filename,
+      configFile: false,
+      babelrc: false,
+      parserOpts: {
+        sourceType: "unambiguous",
+        plugins: [
+          ...parserPlugins,
+          ...(hasDialect ? [] : ["typescript" as const]),
+          ...(/\.[cm]?[jt]s$/.test(filename) ? [] : ["jsx" as const])
+        ]
+      }
+    });
 
   let program!: NodePath<t.Program>;
 

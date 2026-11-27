@@ -8,7 +8,8 @@ import type {
   BuildOptions,
   OnLoadArgs,
   OnLoadResult,
-  OnResolveResult
+  OnResolveResult,
+  PluginBuild
 } from "esbuild";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
@@ -151,6 +152,20 @@ export interface BuildTransaction {
   graphs: Map<string, DefineRulesPackageGraph>;
   styles: Map<string, Set<string>>;
   graphParts?: Map<string, Map<string, DefineRulesPackageGraph>>;
+
+  /** The transaction observer records the actual loader order and host wrapper. */
+  loaders?: Map<
+    Parameters<PluginBuild["onLoad"]>[1],
+    {
+      preceding: readonly {
+        namespace?: string;
+        callback: Parameters<PluginBuild["onLoad"]>[1];
+      }[];
+      load: Parameters<PluginBuild["onLoad"]>[1];
+      /** Followed only by owned native CSS handlers and the snapshot file loader. */
+      nativeFileFallback?: true;
+    }
+  >;
 
   /** Inputs already evaluated by the two native passes, never fresh plugin calls. */
   cssReplay?: {

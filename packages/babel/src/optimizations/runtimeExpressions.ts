@@ -1,11 +1,15 @@
 import { flattenJsxElement } from "./intrinsicElements.js";
-import { recipeFactoryKind, decodeRecipePayload } from "./recipeFactories.js";
+import {
+  recipeFactoryKind,
+  decodeRecipePayload,
+  readRecipeData as staticData,
+  type RecipeData
+} from "./recipeFactories.js";
 import { compactRecipes } from "./compactRecipes.js";
 import {
   types as t,
   parseSync,
   traverse,
-  transformSync,
   transformFromAstSync,
   type NodePath,
   type TransformOptions
@@ -65,14 +69,7 @@ import {
   preserveModuleEffects
 } from "./pureFunctions.js";
 
-export type StaticData =
-  | undefined
-  | null
-  | string
-  | number
-  | boolean
-  | StaticData[]
-  | { [key: string]: StaticData };
+export type StaticData = RecipeData;
 
 export interface StaticRecipeCall {
   readonly key: string;
@@ -209,6 +206,7 @@ export function* analyzeRuntimeExpressions(options: {
   filename: string;
   source: string;
   parserCache?: SourceAstCache;
+  parserPlugins?: NonNullable<TransformOptions["parserOpts"]>["plugins"];
   pureFunctions?: boolean;
   staticRecipes?: boolean;
   styledComponents?: boolean;
@@ -249,7 +247,13 @@ export function* analyzeRuntimeExpressions(options: {
       (/\.css\.[cm]?[jt]s$/.test(id) && !/extracted_[^/]+\.css\.ts$/.test(id)),
 
     parse: (id, source, jsx) =>
-      parseModuleProgram(id, source, jsx, options.parserCache)
+      parseModuleProgram(
+        id,
+        source,
+        jsx,
+        options.parserCache,
+        options.parserPlugins
+      )
   });
 
   const owner = {
@@ -258,7 +262,8 @@ export function* analyzeRuntimeExpressions(options: {
       options.filename,
       options.source,
       true,
-      options.parserCache
+      options.parserCache,
+      options.parserPlugins
     )
   };
 
@@ -779,7 +784,8 @@ export function* analyzeRuntimeExpressions(options: {
         options.filename,
         options.source,
         true,
-        options.parserCache
+        options.parserCache,
+        options.parserPlugins
       ).parent as t.File
     );
 
@@ -1425,6 +1431,7 @@ export function applyRuntimeExpressions(options: {
   bundleSize?: import("../bundleSize.js").BundleSizeOptions;
   filename: string;
   source: string;
+  parserPlugins?: NonNullable<TransformOptions["parserOpts"]>["plugins"];
   replacements: ReadonlyArray<{ key: string; value: string }>;
   expressions?: ReadonlyArray<{ key: string; expression: t.Expression }>;
   finiteCalls?: ReadonlyArray<{
@@ -1450,7 +1457,6 @@ export function applyRuntimeExpressions(options: {
     configFile: false,
     babelrc: false,
     sourceType: "unambiguous",
-    parserOpts: { plugins: ["jsx", "typescript"] },
     sourceMaps: options.sourceMaps,
     inputSourceMap: options.inputSourceMap,
     plugins: [
@@ -1524,53 +1530,17 @@ export function applyRuntimeExpressions(options: {
     ]
   };
 
-  return options.ast
-    ? transformFromAstSync(options.ast, options.source, transformOptions)
-    : transformSync(options.source, transformOptions);
-}
+  const ast =
+    options.ast ??
+    (parseModuleProgram(
+      options.filename,
+      options.source,
+      true,
+      undefined,
+      options.parserPlugins
+    ).parent as t.File);
 
-function staticData(node: t.Expression): StaticData {
-  if (t.isUnaryExpression(node, { operator: "void" })) return undefined;
-  if (
-    t.isStringLiteral(node) ||
-    t.isBooleanLiteral(node) ||
-    t.isNumericLiteral(node)
-  )
-    return node.value;
-  if (t.isNullLiteral(node)) return null;
-  if (t.isArrayExpression(node))
-    return node.elements.map((item) => {
-      if (!item || !t.isExpression(item)) throw new Error("Non-static array");
-
-      return staticData(item);
-    });
-
-  if (t.isObjectExpression(node)) {
-    const result: Record<string, StaticData> = Object.create(null);
-
-    for (const property of node.properties) {
-      if (
-        !t.isObjectProperty(property) ||
-        (property.computed && t.isIdentifier(property.key)) ||
-        !t.isExpression(property.value)
-      )
-        throw new Error("Non-static object");
-
-      const key = t.isIdentifier(property.key)
-        ? property.key.name
-        : t.isStringLiteral(property.key) || t.isNumericLiteral(property.key)
-          ? String(property.key.value)
-          : null;
-      if (key === null || key === "prototype" || key in Object.prototype)
-        throw new Error("Unsupported key");
-
-      result[key] = staticData(property.value);
-    }
-
-    return result;
-  }
-
-  throw new Error("Non-static value");
+  return transformFromAstSync(ast, options.source, transformOptions);
 }
 
 /** Generated call-only helpers cannot expose selector or extension metadata. */

@@ -1,3 +1,7 @@
+import type { BabelTransformResult } from "@mincho-js/integration";
+
+type SidecarParserPlugins = BabelTransformResult["parserPlugins"];
+
 export const extractedSidecarIdPrefix = "\0mincho-extracted-css:";
 
 export function extractedSidecarModuleId(filePath: string): string {
@@ -17,6 +21,7 @@ type CssModuleData =
       path: string;
       filePath: string;
       originalPath: string;
+      parserPlugins?: SidecarParserPlugins;
     };
 
 /** The serializer supplies the real emitter, even when the generated name is opaque. */
@@ -38,7 +43,10 @@ export class ViteCssState {
   // Empty responses clear CSS already imported by an in-flight HMR update. Keep
   // only recent retired IDs; they must not grow with the lifetime of the server.
   private readonly retiredCss = new Set<string>();
-  private readonly sidecars = new Map<string, string>();
+  private readonly sidecars = new Map<
+    string,
+    { source: string; parserPlugins?: SidecarParserPlugins }
+  >();
   private readonly currentSidecars = new Map<string, string>();
   private readonly moduleData = new Map<string, CssModuleData>();
   private readonly ownerToCssPaths = new Map<string, Set<string>>();
@@ -83,7 +91,11 @@ export class ViteCssState {
   }
 
   getSidecar(path: string): string | undefined {
-    return this.sidecars.get(path);
+    return this.sidecars.get(path)?.source;
+  }
+
+  getSidecarParserPlugins(path: string): SidecarParserPlugins {
+    return this.sidecars.get(path)?.parserPlugins;
   }
 
   isCurrentSidecar(ownerId: string, path: string): boolean {
@@ -106,14 +118,19 @@ export class ViteCssState {
     return this.ownerToCssPaths.get(ownerId)?.size ?? 0;
   }
 
-  registerSidecar(ownerId: string, cssPath: string, source: string): void {
+  registerSidecar(
+    ownerId: string,
+    cssPath: string,
+    source: string,
+    parserPlugins?: SidecarParserPlugins
+  ): void {
     this.currentSidecars.set(ownerId, cssPath);
 
     const cssPaths = this.ownerToCssPaths.get(ownerId) ?? new Set<string>();
     cssPaths.add(cssPath);
     this.ownerToCssPaths.set(ownerId, cssPaths);
 
-    this.sidecars.set(cssPath, source);
+    this.sidecars.set(cssPath, { source, parserPlugins });
     this.resolverCache.delete(ownerId);
 
     this.moduleData.set(ownerId, { kind: "owner", mainFilePath: ownerId });
@@ -128,18 +145,19 @@ export class ViteCssState {
     const data = this.moduleData.get(customNormalize(cssPath));
     if (!data || data.kind === "owner") return null;
 
-    const contents = this.sidecars.get(data.path);
-    if (!contents) return null;
+    const sidecar = this.sidecars.get(data.path);
+    if (!sidecar?.source) return null;
 
     this.moduleData.set(id, {
       kind: "loaded-sidecar",
       mainFilePath: data.mainFilePath,
       path: data.path,
       filePath: data.path,
-      originalPath: data.mainFilePath
+      originalPath: data.mainFilePath,
+      ...(sidecar.parserPlugins ? { parserPlugins: sidecar.parserPlugins } : {})
     });
 
-    return contents;
+    return sidecar.source;
   }
 
   /** Publish validated output without invalidating CSS merely because a sidecar was renamed. */

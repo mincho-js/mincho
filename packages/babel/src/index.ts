@@ -1,9 +1,13 @@
+import {
+  assertExtractionPublications,
+  finishCapturedAuthoringOwners
+} from "./transforms/extractionPublication.js";
 import { compactRecipes } from "./optimizations/compactRecipes.js";
 import {
   analyzePureFunctions,
   applyPureFunctions
 } from "./optimizations/pureFunctions.js";
-import { type PluginObj } from "@babel/core";
+import { type PluginObj, types as t } from "@babel/core";
 import {
   analyzeDefineRulesCxConditionsCallExpression,
   defineRulesCxConditionsOptimizationMetadataKey,
@@ -21,9 +25,11 @@ import { prepareExtractCalls } from "./extractionCalls/index.js";
 
 import { normalizeTypeScriptCommonJs } from "./commonjs/modules.js";
 import {
+  hasConfiguredGeneratorOverride,
   optimizeRuntimeCodegen,
   removeUnusedExtractedImports,
-  removeUnusedGeneratedImports
+  removeUnusedGeneratedImports,
+  type OriginalModuleRequests
 } from "./optimizations/runtimeCodegen.js";
 import { pruneRecipeMetadata } from "./optimizations/recipeMetadata.js";
 import { lowerLayoutJsx } from "./optimizations/layoutJsx.js";
@@ -35,6 +41,10 @@ import {
 
 export function minchoBabelPlugin(): PluginObj<PluginState> {
   const started = new WeakMap<PluginState, number>();
+  const originalModuleRequests = new WeakMap<
+    PluginState,
+    OriginalModuleRequests
+  >();
 
   return {
     name: "mincho-babel-plugin",
@@ -42,8 +52,24 @@ export function minchoBabelPlugin(): PluginObj<PluginState> {
       Program: {
         enter(path, state) {
           if (state.opts.diagnostics) started.set(state, performance.now());
-
           normalizeTypeScriptCommonJs(path, state.file);
+
+          // After configured pre hooks and input normalization, but before
+          // Mincho introduces CSS-sidecar requests, record exact input nodes.
+          const requires = new Map<t.CallExpression, number>();
+          t.traverseFast(path.node, (node) => {
+            if (
+              t.isCallExpression(node) &&
+              t.isIdentifier(node.callee, { name: "require" })
+            )
+              requires.set(node, requires.size);
+          });
+          const statements =
+            state.opts.optimize?.runtimeCodegen !== true
+              ? new Set(path.node.body)
+              : undefined;
+          if (statements || requires.size)
+            originalModuleRequests.set(state, { statements, requires });
 
           if (isDefineRulesCxConditionsEnabled(state)) {
             state.file.metadata[
@@ -55,11 +81,13 @@ export function minchoBabelPlugin(): PluginObj<PluginState> {
             let prepared = state.opts.preparedPureFunctions;
 
             if (!prepared) {
+              const realm = state.opts.preparedExtractCalls?.arrayMapIntrinsics;
               const flow = analyzePureFunctions({
+                nativeArrayIteration: realm?.iterationIntact ?? realm?.intact,
                 filename: state.file.opts.filename ?? "/__mincho__.tsx",
                 source: state.file.code,
                 program: path,
-                jsxCssProp: state.opts.jsxCssProp
+                jsxCssProp: Boolean(state.opts.jsxCssProp)
               });
 
               let step = flow.next();
@@ -81,7 +109,9 @@ export function minchoBabelPlugin(): PluginObj<PluginState> {
         },
 
         exit(path, state) {
+          assertExtractionPublications(path);
           postprocess(path, state);
+          finishCapturedAuthoringOwners(path);
           finishCompilerClassStrategies(path, state);
 
           if (state.opts.optimize?.staticScopedCx)
@@ -93,15 +123,42 @@ export function minchoBabelPlugin(): PluginObj<PluginState> {
           if (state.opts.optimize?.runtimeCodegen === true) {
             optimizeRuntimeCodegen(path);
             pruneRecipeMetadata(path);
-            removeUnusedExtractedImports(path);
           }
 
+          const optionalSites = state.opts.stageCommonJsRuntimeRequests
+            ? (state.file.metadata.minchoOptionalCommonJsSites = [])
+            : undefined;
+          removeUnusedExtractedImports(
+            path,
+            originalModuleRequests.get(state),
+            optionalSites,
+            hasConfiguredGeneratorOverride(state.file.opts)
+              ? {
+                  cleanup: state.opts.stageEsmGeneratorImports
+                    ? (state.file.metadata.minchoOptionalEsmImports = {
+                        sites: [],
+                        requests: []
+                      })
+                    : undefined
+                }
+              : undefined
+          );
           removeUnusedJsxCssPropCssModuleImports(path);
           removeUnusedGeneratedImports(path);
           compactRecipes(path, {
             ...state.opts.optimize,
             bundleSize: state.opts.bundleSize
           });
+
+          const stagedEsm = state.file.metadata.minchoOptionalEsmImports;
+          if (stagedEsm?.sites.length)
+            for (const node of path.node.body)
+              if (
+                node.type === "ImportDeclaration" ||
+                node.type === "ExportNamedDeclaration" ||
+                node.type === "ExportAllDeclaration"
+              )
+                stagedEsm.requests.push(t.cloneNode(node));
 
           const start = started.get(state);
 
@@ -172,6 +229,7 @@ export type {
   PluginOptions
 } from "./types.js";
 export { analyzeExtractCalls as internalAnalyzeExtractCalls } from "./extractionCalls/analysis.js";
+export { jsxCssPropExtractCalls as internalJsxCssPropExtractCalls } from "./jsxCssProp/options.js";
 export {
   canonicalExtractCallsFile as internalCanonicalExtractCallsFile,
   resolveExtractCallsFile as internalResolveExtractCallsFile
@@ -182,6 +240,9 @@ export {
   inspectCommonJs as internalInspectCommonJs,
   commonJsToEsmPlugin as internalCommonJsToEsmPlugin
 } from "./commonjs/esm.js";
+export { getModuleReference as internalGetModuleReference } from "./commonjs/bindings.js";
+export { hasConfiguredGeneratorOverride as internalHasConfiguredGeneratorOverride } from "./optimizations/runtimeCodegen.js";
+export { normalizeTypeScriptCommonJs as internalNormalizeTypeScriptCommonJs } from "./commonjs/modules.js";
 
 export {
   createModuleGraph as internalCreateModuleGraph,
@@ -193,6 +254,7 @@ export {
 } from "./moduleGraph.js";
 
 export { SourceAstCache as InternalSourceAstCache } from "./staticCssEval/moduleParser.js";
+export { getStaticCssEvalLiteralRequireImportPath as internalGetStaticCssEvalLiteralRequireImportPath } from "./staticCssEval/cjsBindings.js";
 export { analyzeSource as internalAnalyzeSource } from "./sourceAnalysis.js";
 export {
   semanticExports as internalSemanticExports,

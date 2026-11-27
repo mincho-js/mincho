@@ -1,7 +1,3 @@
-import {
-  compilationResolutionOptions,
-  createCompileResolutionObserver
-} from "./compileResolution.js";
 import { CompilationInputs } from "./compilationInputs.js";
 import { getVerifiedFileScopeRequire } from "./fileScopeNamespace.js";
 import {
@@ -32,11 +28,18 @@ import {
   type CompileCacheBridge
 } from "./compileCache.js";
 import {
+  compilationResolutionOptions,
+  createCompileResolutionObserver,
+  resolvedImportPlugin
+} from "./compileResolution.js";
+import {
+  loadPartialConfig,
   parseSync,
   traverse,
   types as t,
   transformSync,
   type NodePath,
+  type PluginObj,
   type TransformOptions
 } from "@babel/core";
 import {
@@ -70,7 +73,11 @@ export interface CompileOptions {
   cwd?: string;
   externals?: Array<string>;
   loader?: BuildOptions["loader"];
+  alias?: BuildOptions["alias"];
+  /** Host-resolved exact entry imports; dependencies keep local resolution. */
+  resolvedImports?: Readonly<Record<string, string>>;
   plugins?: BuildOptions["plugins"];
+  parserPlugins?: NonNullable<TransformOptions["parserOpts"]>["plugins"];
 
   /** Transaction-owned input reader used by multi-pass build integrations. */
   readFile?: (path: string) => Promise<string>;
@@ -182,6 +189,7 @@ export interface ScopedDependencyOptions {
   loader: "js" | "jsx" | "ts" | "tsx";
   packageName: string;
   rootPath: string;
+  parserPlugins?: CompileOptions["parserPlugins"];
 }
 
 export interface ScopedDependencyResult {
@@ -201,7 +209,8 @@ export function transformScopedDependency({
   physicalFilePath,
   loader,
   packageName,
-  rootPath
+  rootPath,
+  parserPlugins
 }: ScopedDependencyOptions) {
   const source = addScopedSource({
     source: contents,
@@ -210,7 +219,40 @@ export function transformScopedDependency({
     packageName
   });
 
-  const transformed = transformSync(source, {
+  const pluginName = (
+    plugin: NonNullable<CompileOptions["parserPlugins"]>[number]
+  ) => (typeof plugin === "string" ? plugin : plugin[0]);
+  const sharedSyntax = parserPlugins?.filter((plugin) => {
+    const name = pluginName(plugin);
+    // The plain TypeScript preset deliberately removes JSX (angle brackets
+    // are type assertions here). A late fallback must not restore it from
+    // the TSX owner. Other loaders and child Babel options stay unchanged.
+    return (
+      name !== "flow" &&
+      name !== "typescript" &&
+      (loader !== "ts" || name !== "jsx")
+    );
+  });
+  const dependencySyntax = (): PluginObj => ({
+    visitor: {},
+    manipulateOptions(_options, parser) {
+      // The inherited list describes the owner. A child selects its language
+      // via its own loader and Babel config. Share only missing syntax flags,
+      // without replacing the child's parserOpts or re-running its hooks.
+      const local = (parser.plugins ??= []);
+      const syntaxFamily = (name: string) =>
+        name === "decorators-legacy" ? "decorators" : name;
+      const names = new Set(local.map(pluginName).map(syntaxFamily));
+      for (const syntax of sharedSyntax ?? []) {
+        const name = syntaxFamily(pluginName(syntax));
+        if (!names.has(name)) {
+          local.push(syntax);
+          names.add(name);
+        }
+      }
+    }
+  });
+  const options: TransformOptions = {
     filename: filePath,
     plugins: [
       ...(loader === "jsx" || loader === "tsx" ? [jsxSyntaxPluginPath] : []),
@@ -227,7 +269,25 @@ export function transformScopedDependency({
         : [],
     sourceMaps: false,
     ast: true
-  })!;
+  };
+  const configured = sharedSyntax?.length
+    ? loadPartialConfig(options)
+    : undefined;
+  // An appended raw preset gets a final independent pass. The resolved child
+  // ConfigItems keep their original passes and hooks; their parser choices
+  // have run before the fallback contributes any missing shared syntax.
+  const finalOptions: TransformOptions & { passPerPreset?: boolean } =
+    configured
+      ? {
+          ...configured.options,
+          passPerPreset: true,
+          presets: [
+            ...(configured.options.presets ?? []),
+            () => ({ plugins: [dependencySyntax] })
+          ]
+        }
+      : options;
+  const transformed = transformSync(source, finalOptions)!;
   const cssScopeOrigins: CssScopeOrigin[] = [];
   try {
     recordTransformedCssScopes(
@@ -385,7 +445,7 @@ function recordDeclaredCssScopes(
   rootPath: string,
   packageName: string,
   origin: string,
-  parserPlugins?: NonNullable<TransformOptions["parserOpts"]>["plugins"],
+  parserPlugins?: CompileOptions["parserPlugins"],
   loader: ScopedDependencyOptions["loader"] = "tsx"
 ) {
   const api = "@vanilla-extract/css/fileScope";
@@ -575,6 +635,7 @@ async function scopedDependencyOptions(
   entryPackage: { dirname: string; name: string },
   packageWatchFiles: Set<string>,
   cssScopeOrigins: CssScopeOrigin[],
+  parserPlugins?: CompileOptions["parserPlugins"],
   readPackageFile?: CompileOptions["readPackageFile"]
 ): Promise<ScopedDependencyOptions> {
   const directory = dirname(physicalFilePath);
@@ -627,7 +688,8 @@ async function scopedDependencyOptions(
     physicalFilePath,
     loader,
     rootPath,
-    packageName: packageInfo.name
+    packageName: packageInfo.name,
+    parserPlugins
   };
 }
 
@@ -639,6 +701,7 @@ function createScopedOnLoadPlugin(
   graph?: () => EvaluationDependencyGraph | undefined,
   packageWatchFiles = new Set<string>(),
   cssScopeOrigins: CssScopeOrigin[] = [],
+  parserPlugins?: CompileOptions["parserPlugins"],
   readPackageFile?: CompileOptions["readPackageFile"],
   observeAuthorSource: (source: string) => void = () => {}
 ) {
@@ -691,6 +754,7 @@ function createScopedOnLoadPlugin(
             entryPackage,
             packageWatchFiles,
             cssScopeOrigins,
+            parserPlugins,
             readPackageFile
           );
 
@@ -716,6 +780,7 @@ function scopeLoadedDependencies(
   sources: ReturnType<typeof createCompileSourceSelection>,
   packageWatchFiles: Set<string>,
   cssScopeOrigins: CssScopeOrigin[],
+  parserPlugins?: CompileOptions["parserPlugins"],
   readPackageFile?: CompileOptions["readPackageFile"],
   observeAuthorSource: (source: string) => void = () => {},
   onResolveRegistered: () => void = () => {},
@@ -778,6 +843,7 @@ function scopeLoadedDependencies(
                 entryPackage,
                 packageWatchFiles,
                 cssScopeOrigins,
+                parserPlugins,
                 readPackageFile
               );
 
@@ -885,7 +951,10 @@ async function compileUncached(options: CompileOptions) {
     contents,
     cwd = process.cwd(),
     loader,
+    alias,
+    resolvedImports,
     plugins = [],
+    parserPlugins,
     cache,
     cacheBridge,
     dependencyGraph = false,
@@ -920,7 +989,8 @@ async function compileUncached(options: CompileOptions) {
       originalPath,
       sourcePackageInfo.dirname,
       sourcePackageInfo.name,
-      entryOrigin
+      entryOrigin,
+      parserPlugins
     );
   } catch {
     /* Exact runtime producer receipts replace unsupported static hints. */
@@ -931,6 +1001,8 @@ async function compileUncached(options: CompileOptions) {
 
   if (
     staticStyles &&
+    !alias &&
+    !resolvedImports &&
     currentCompilationExecution()?.evaluation !== "fresh" &&
     trustedPlugins
   ) {
@@ -1063,10 +1135,9 @@ async function compileUncached(options: CompileOptions) {
     }
   };
   let graph: EvaluationDependencyGraph | undefined;
-  const resolution =
-    cache && trustedPlugins
-      ? createCompileResolutionObserver(options)
-      : undefined;
+  const resolution = cache
+    ? createCompileResolutionObserver(options)
+    : undefined;
   const source = getScopedSourceWithCache({
     contents,
     originalPath,
@@ -1086,10 +1157,13 @@ async function compileUncached(options: CompileOptions) {
       },
       metafile: true,
       bundle: true,
+      // Decorators accepted by Babel must be lowered before VM evaluation.
+      supported: { decorators: false },
       write: false,
       plugins: [
         runtimePlugin,
         ...(resolution ? [resolution.plugin] : []),
+        ...resolvedImportPlugin(options),
         ...plugins.map((plugin) => {
           const scoped = scopeLoadedDependencies(
             plugin,
@@ -1097,6 +1171,7 @@ async function compileUncached(options: CompileOptions) {
             sources,
             packageWatchFiles,
             cssScopeOrigins,
+            parserPlugins,
             readPackageFile,
             observeAuthorSource,
             () => {
@@ -1165,6 +1240,7 @@ async function compileUncached(options: CompileOptions) {
           () => graph,
           packageWatchFiles,
           cssScopeOrigins,
+          parserPlugins,
           readPackageFile,
           observeAuthorSource
         )
@@ -1216,7 +1292,9 @@ async function compileUncached(options: CompileOptions) {
       throw new Error("Invalid compiler CSS scope capability site");
     }
   });
-  // Every newly compiled producer is runtime-only, including dynamic acquisitions.
+  // Every newly compiled producer is runtime-only, even if its official API
+  // acquisition was dynamic or tree-shaken. Missing calls cannot fall back to
+  // old static scope hints to authorize artifacts.
   for (const entry of cssScopeOrigins)
     runtimeOrigins.set(
       CSS_SCOPE_RUNTIME_PREFIX + cacheDigest(entry.origin),

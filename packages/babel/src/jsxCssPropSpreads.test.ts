@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { transformSync as transformJsx } from "esbuild";
+import { cx } from "@mincho-js/css/classname";
 import { supportedJsxCssPropTags } from "./jsxCssPropTags.js";
 import {
   babelTransform,
@@ -11,8 +13,165 @@ import {
   runJsxCssPropRuntime
 } from "./testUtils/plugin.js";
 
+const transpileRuntimeJsx = (
+  source: string,
+  format?: "cjs",
+  automatic = false
+) =>
+  transformJsx(source, {
+    loader: "tsx",
+    ...(automatic ? { jsx: "automatic" } : { jsxFactory: "jsx" }),
+    ...(format ? { format } : {})
+  }).code;
+
 describe("minchoBabelPlugin", () => {
-  it("css before a spread lowers explicit css before post-spread className", () => {
+  it("normalizes quoted className and css when merging attributes", () => {
+    const props = runJsxCssPropRuntime(
+      `function App() {
+        return <div className="base
+  active" css="style-a
+  other" />;
+      }`,
+      "return App();"
+    ) as Record<string, unknown>;
+
+    expect(props.className).toBe("base active style-a other");
+  });
+
+  it.each(['"a\\b"', '{"a\\\\b"}'])(
+    "preserves escaping of a standalone css string: %s",
+    (attribute) => {
+      const { code } = babelTransform(
+        `function App() { return <div css=${attribute} />; }`,
+        { jsxCssProp: true }
+      );
+      const compiled = transpileRuntimeJsx(code);
+      const props = new Function("jsx", `${compiled}\nreturn App();`)(
+        (_tag: unknown, props: unknown) => props
+      );
+
+      expect(props.className).toBe("a\\b");
+    }
+  );
+
+  const quotedStagedProps = (spread = "") =>
+    [
+      'const styleA = "style-a";',
+      "function App() {",
+      "  return <div css={styleA} " + spread + ' className="base" title="first',
+      '  second &amp; third" data-path="a\\b" />;',
+      "}"
+    ].join("\n");
+
+  it.each([false, true])(
+    "leaves the winning quoted prop to the JSX host (duplicate=%s)",
+    (duplicate) => {
+      const source = quotedStagedProps().replace(
+        ' title="first',
+        duplicate ? ' title="overwritten" title="first' : ' title="first'
+      );
+      const { code } = babelTransform(source, {
+        jsxCssProp: true,
+        optimize: { runtimeCodegen: false }
+      });
+      const render = (input: string) => {
+        const native = transpileRuntimeJsx(input, "cjs");
+        const trace: string[] = [];
+        const props = new Function(
+          "require",
+          "jsx",
+          native + "\nreturn App();"
+        )(
+          (name: string) => {
+            expect(name).toBe("@mincho-js/css/classname");
+            return { cx };
+          },
+          (tag: string, props: Record<string, unknown>) => {
+            trace.push(tag);
+            return props;
+          }
+        ) as Record<string, unknown>;
+        return { props, trace };
+      };
+      const authored = render(source);
+      const emitted = render(code);
+      expect(authored.props.title).toBe("first\n  second & third");
+      expect(emitted.props).toEqual({
+        className: "base style-a",
+        title: authored.props.title,
+        "data-path": "a\\b"
+      });
+      expect(emitted.trace).toEqual(authored.trace);
+    }
+  );
+
+  it.each([false, true])(
+    "keeps the winning quoted key in the automatic host (duplicate=%s)",
+    (duplicate) => {
+      const source = [
+        'const styleA = "style-a";',
+        "export function App() {",
+        '  return <div css={styleA} className="base" data-tail={mark("tail")} ' +
+          (duplicate ? 'key="old" ' : "") +
+          'key="A',
+        '  B &amp; C" />;',
+        "}"
+      ].join("\n");
+      const { code } = babelTransform(source, {
+        jsxCssProp: true,
+        optimize: { runtimeCodegen: false }
+      });
+      const run = (input: string) => {
+        const transpiled = transpileRuntimeJsx(input, "cjs", true);
+        expect(transpiled).toContain("react/jsx-runtime");
+        const module = {
+          exports: {} as {
+            App(): { key: string; props: Record<string, unknown> };
+          }
+        };
+        const trace: string[] = [];
+        new Function("module", "exports", "require", "mark", transpiled)(
+          module,
+          module.exports,
+          (specifier: string) => {
+            if (specifier === "@mincho-js/css/classname") return { cx };
+            expect(specifier).toBe("react/jsx-runtime");
+            return {
+              jsx(_tag: string, props: Record<string, unknown>, key: string) {
+                return { props, key };
+              }
+            };
+          },
+          (marker: string) => {
+            trace.push(marker);
+            return marker;
+          }
+        );
+        return { ...module.exports.App(), trace };
+      };
+      const native = run(source);
+      expect(native.key).toBe("A\n  B & C");
+      expect(run(code)).toEqual({
+        key: native.key,
+        props: { className: "base style-a", "data-tail": "tail" },
+        trace: native.trace
+      });
+      expect(native.trace).toEqual(["tail"]);
+    }
+  );
+
+  it("normalizes quoted props and keeps precedence for an authored spread", () => {
+    const props = runJsxCssPropRuntime(
+      quotedStagedProps("{...{ id: 'spread' }}"),
+      "return App();"
+    ) as Record<string, unknown>;
+    expect(props.className).toBe("style-a base");
+    expect(props.title).toBe("first second & third");
+    expect(props["data-path"]).toBe("a\\b");
+    expect(props.id).toBe("spread");
+  });
+
+  it("css before a spread captures explicit css before post-spread className", () => {
     const source = `
         const styleA = "style-a";
         const props = {
@@ -39,7 +198,12 @@ describe("minchoBabelPlugin", () => {
     expect(code).not.toContain("(() =>");
     expect(code).toContain("className: _minchoClassName");
     expect(code).toContain("..._minchoRest");
-    expect(code).toContain("className={_cx(styleA, _minchoClassName)}");
+    expect(code).toMatch(
+      /const _minchoCssClassName = styleA;\s+const _minchoProps = \{/
+    );
+    expect(code).toContain(
+      "className={_cx(_minchoCssClassName, _minchoClassName)}"
+    );
     expect(output).not.toContain("className={_cx(_minchoClassName, styleA)}");
     expect(observed).toMatchObject({
       className: "style-a base",
@@ -324,6 +488,21 @@ describe("minchoBabelPlugin", () => {
       id: "root"
     });
     expect("css" in observed.props).toBe(false);
+  });
+
+  it("reads a CSS identifier before a later spread can observe its TDZ", () => {
+    const observed = runJsxCssPropRuntime(
+      `
+      const events = [];
+      const props = { get title() { events.push("spread"); return "title"; } };
+      try { App(); } catch (error) { events.push(error.name); }
+      const styleA = "style-a";
+      function App() { return <div css={styleA} {...props} />; }
+    `,
+      "return events;"
+    );
+
+    expect(observed).toEqual(["ReferenceError"]);
   });
 
   it("reads post-spread className getter once through aggregate props", () => {
@@ -845,6 +1024,26 @@ describe("minchoBabelPlugin", () => {
     });
   }
 
+  it.each([
+    "function App(active) { return active && <div css={style()} {...post()} />; }",
+    "const App = false ? () => <div css={style()} {...post()} /> : () => null;"
+  ])(
+    "does not transfer unreachable-branch evidence across unknown conditions or functions: %s",
+    (body) => {
+      expect(() =>
+        babelTransform(
+          `
+      const events = [];
+      const style = () => { events.push("style"); return "style-a"; };
+      const post = () => ({className: "post"});
+      ${body}
+    `,
+          { jsxCssProp: true }
+        )
+      ).toThrow(/Cannot statically evaluate css prop value/);
+    }
+  );
+
   it("preserves lexical this and arguments in nested moved expressions", () => {
     const source = `
         function App() {
@@ -1015,7 +1214,12 @@ describe("minchoBabelPlugin", () => {
     expect(code).not.toContain(" css=");
     expect(code).toContain("css: _minchoCssProp");
     expect(code).toContain("..._minchoRest");
-    expect(code).toContain("className={_cx(styleA, _minchoClassName)}");
+    expect(code).toMatch(
+      /const _minchoCssClassName = styleA;\s+const _minchoProps = \{/
+    );
+    expect(code).toContain(
+      "className={_cx(_minchoCssClassName, _minchoClassName)}"
+    );
     expect(code).not.toContain("(() =>");
   });
 

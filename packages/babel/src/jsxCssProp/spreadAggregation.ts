@@ -10,11 +10,14 @@ import {
   classNameAttributeName,
   classNameValueErrorMessage,
   cssAttributeName,
+  cssModuleName,
   nestedAsyncGeneratorErrorMessage,
   spreadAggregationContextErrorMessage,
   styleAttributeName
 } from "./constants.js";
 import { getStyleExpression } from "./styleExpression.js";
+import { cssPropImportSource } from "./options.js";
+import { createJsxAttributeString } from "./attributeValue.js";
 import type {
   AggregatePropsBinding,
   NormalizedJsxCssPropElement,
@@ -24,11 +27,53 @@ import type {
 const keyAttributeName = "key";
 const refAttributeName = "ref";
 
+// Merging className must not move a runtime CSS value across other attributes.
+export function requiresClassValueStaging(
+  path: NodePath<t.JSXOpeningElement>,
+  element: NormalizedJsxCssPropElement
+): boolean {
+  const runtimeStyleSelection =
+    element.cssValueClassification === "branch-css-rule" &&
+    t.isConditionalExpression(element.cssExpression) &&
+    cssPropImportSource(path.scope) !== cssModuleName;
+  return (
+    (element.cssValueClassification === "class-value" ||
+      runtimeStyleSelection) &&
+    element.classNameAttribute !== null &&
+    element.attributesBeforeCss.at(-1) !== element.classNameAttribute &&
+    !t.isStringLiteral(element.cssExpression)
+  );
+}
+
 export function transformSpreadAggregatedCssProp(
   path: NodePath<t.JSXOpeningElement>,
   normalizedElement: NormalizedJsxCssPropElement
 ): void {
-  const statementPath = getDirectSpreadAggregationStatementPath(path);
+  if (
+    !normalizedElement.hasSpreadBeforeCss &&
+    !normalizedElement.hasSpreadAfterCss &&
+    requiresClassValueStaging(path, normalizedElement)
+  ) {
+    const initializer = getCompoundConstInitializer(path);
+
+    if (initializer) {
+      const lowering = createSpreadAggregatedCssPropLowering(
+        path,
+        normalizedElement
+      );
+      stageAtConstInitializer(initializer, lowering.declarations);
+      path.node.attributes = lowering.attributes;
+
+      return;
+    }
+  }
+
+  const statementPath = getDirectSpreadAggregationStatementPath(
+    path,
+    !normalizedElement.hasSpreadBeforeCss &&
+      !normalizedElement.hasSpreadAfterCss &&
+      requiresClassValueStaging(path, normalizedElement)
+  );
 
   if (!statementPath) {
     transformNestedSpreadAggregatedCssProp(path, normalizedElement);
@@ -55,7 +100,22 @@ export function transformNestedSpreadAggregatedCssProp(
     throw path.buildCodeFrameError(spreadAggregationContextErrorMessage);
   }
 
-  assertNestedSpreadAggregationIifeCompatible(jsxElementPath, path);
+  const suspends = containsAwaitOrYieldExpression(jsxElementPath);
+  const canStageClassValue =
+    !normalizedElement.hasSpreadBeforeCss &&
+    !normalizedElement.hasSpreadAfterCss &&
+    requiresClassValueStaging(path, normalizedElement);
+  const scope = canStageClassValue
+    ? suspends
+      ? (path.scope.getFunctionParent() ??
+        getModuleSuspendingScope(jsxElementPath))
+      : hasDynamicScopeAccess(jsxElementPath)
+        ? getAuthoredFunctionBodyScope(jsxElementPath)
+        : null
+    : null;
+
+  if (suspends && (!scope || hasDynamicScopeAccess(scope.path)))
+    throw path.buildCodeFrameError(nestedAsyncGeneratorErrorMessage);
 
   const lowering = createSpreadAggregatedCssPropLowering(
     path,
@@ -65,31 +125,100 @@ export function transformNestedSpreadAggregatedCssProp(
   const nextElement = t.cloneNode(jsxElementPath.node);
   nextElement.openingElement.attributes = lowering.attributes;
 
-  const iifeExpression = t.callExpression(
-    t.arrowFunctionExpression(
-      [],
-      t.blockStatement([
-        ...lowering.declarations,
-        t.returnStatement(nextElement)
-      ])
-    ),
-    []
-  );
+  const staged = scope
+    ? stageClassValueInActivation(scope, lowering.declarations, nextElement)
+    : t.callExpression(
+        t.arrowFunctionExpression(
+          [],
+          t.blockStatement([
+            ...lowering.declarations,
+            t.returnStatement(nextElement)
+          ])
+        ),
+        []
+      );
 
-  const replacement = isJsxChildReplacementContext(jsxElementPath)
-    ? t.jsxExpressionContainer(iifeExpression)
-    : iifeExpression;
+  const replacement = requiresJsxExpressionContainer(jsxElementPath)
+    ? t.jsxExpressionContainer(staged)
+    : staged;
 
   jsxElementPath.replaceWith(replacement);
 }
 
-function assertNestedSpreadAggregationIifeCompatible(
-  jsxElementPath: NodePath<t.JSXElement>,
-  diagnosticPath: NodePath<t.JSXOpeningElement>
-): void {
-  if (containsAwaitOrYieldExpression(jsxElementPath)) {
-    throw diagnosticPath.buildCodeFrameError(nestedAsyncGeneratorErrorMessage);
+function getAuthoredFunctionBodyScope(path: NodePath<t.JSXElement>) {
+  const functionScope = path.scope.getFunctionParent();
+  if (!functionScope) return null;
+  let child: NodePath<t.Node> = path;
+  while (child.parentPath && child.parentPath !== functionScope.path)
+    child = child.parentPath;
+  // A default parameter has its own evaluation environment and cannot see
+  // staged names declared in the function body.
+  return child.parentPath === functionScope.path && child.key === "body"
+    ? functionScope
+    : null;
+}
+
+function getModuleSuspendingScope(path: NodePath<t.JSXElement>) {
+  const program = path.scope.getProgramParent();
+  if (!program.path.isProgram({ sourceType: "module" })) return null;
+  let scope = path.scope.getBlockParent();
+  while (scope.path.isLoop() || scope.path.isCatchClause()) {
+    let child: NodePath<t.Node> = path;
+    while (child.parentPath && child.parentPath !== scope.path)
+      child = child.parentPath;
+    if (child.key === "body") break;
+    // Babel puts loop and catch bindings inside their bodies, which
+    // are not visible to a header or parameter-default expression.
+    scope = scope.parent?.getBlockParent() ?? program;
   }
+  return scope;
+}
+
+function hasDynamicScopeAccess(path: NodePath<t.Node>): boolean {
+  let found = false;
+  path.traverse({
+    WithStatement(statement) {
+      found = true;
+      statement.stop();
+    },
+    ReferencedIdentifier(identifier) {
+      // Including other uses of unbound eval is intentionally conservative for
+      // syntax wrappers that Babel may erase before the generated code runs.
+      if (
+        identifier.node.name !== "eval" ||
+        identifier.scope.getBinding("eval")
+      )
+        return;
+      found = true;
+      identifier.stop();
+    }
+  });
+  return found;
+}
+
+function stageClassValueInActivation(
+  scope: NodePath<t.Node>["scope"],
+  declarations: readonly t.VariableDeclaration[],
+  element: t.JSXElement
+): t.SequenceExpression {
+  const steps = declarations.flatMap((declaration) => declaration.declarations);
+  // Declare only compiler-owned storage in the enclosing activation. All
+  // reads and writes remain in the selected branch, in their authored order.
+  // A wrapper call would move authored eval bindings or a child's suspension.
+  for (const { id } of steps) {
+    for (const binding of Object.values(t.getBindingIdentifiers(id)))
+      scope.push({ id: t.cloneNode(binding), kind: "let", unique: true });
+  }
+  return t.sequenceExpression([
+    ...steps.map(({ id, init }) => {
+      invariant(
+        init != null && (t.isIdentifier(id) || t.isObjectPattern(id)),
+        "Expected a staged JSX identifier or destructuring initializer"
+      );
+      return t.assignmentExpression("=", id, init);
+    }),
+    element
+  ]);
 }
 
 function containsAwaitOrYieldExpression(path: NodePath<t.Node>): boolean {
@@ -107,6 +236,24 @@ function containsAwaitOrYieldExpression(path: NodePath<t.Node>): boolean {
     },
 
     Function(functionPath) {
+      // A method's computed key runs while constructing the object or class,
+      // in the surrounding scope; its body and parameters do not.
+      if (
+        (functionPath.isObjectMethod() || functionPath.isClassMethod()) &&
+        functionPath.node.computed
+      ) {
+        const method: NodePath<t.ObjectMethod | t.ClassMethod> = functionPath;
+        const key = method.get("key");
+        if (
+          key.isAwaitExpression() ||
+          key.isYieldExpression() ||
+          containsAwaitOrYieldExpression(key)
+        ) {
+          hasControlFlowExpression = true;
+          functionPath.stop();
+          return;
+        }
+      }
       functionPath.skip();
     }
   });
@@ -119,13 +266,54 @@ export function createSpreadAggregatedCssPropLowering(
   normalizedElement: NormalizedJsxCssPropElement
 ): SpreadAggregatedCssPropLowering {
   const type = captureJsxElementType(path);
-  const lowering = !normalizedElement.hasSpreadAfterCss
+  const stageAfterCss =
+    normalizedElement.hasSpreadAfterCss ||
+    (requiresClassValueStaging(path, normalizedElement) &&
+      normalizedElement.attributesAfterCss.length > 0);
+  const lowering = !stageAfterCss
     ? createPreCssSpreadAggregatedCssPropLowering(path, normalizedElement)
     : createPostCssSpreadAggregatedCssPropLowering(path, normalizedElement);
 
-  return type
-    ? { ...lowering, declarations: [type, ...lowering.declarations] }
-    : lowering;
+  const authoredSpread =
+    normalizedElement.hasSpreadBeforeCss || normalizedElement.hasSpreadAfterCss;
+  const keys = authoredSpread
+    ? []
+    : lowering.attributes.filter((attribute) =>
+        isNamedJsxAttribute(attribute, keyAttributeName)
+      );
+  // Keys were already evaluated in source order by the staging bindings.
+  // Keep the winning inert quoted token in JSX so each automatic host still
+  // applies its own whitespace rules. Expressions keep their staged reads.
+  const winningKey = keys.length
+    ? (normalizedElement.attributesAfterCss.findLast((attribute) =>
+        isNamedJsxAttribute(attribute, keyAttributeName)
+      ) ??
+      normalizedElement.attributesBeforeCss.findLast((attribute) =>
+        isNamedJsxAttribute(attribute, keyAttributeName)
+      ))
+    : undefined;
+  if (
+    keys.length &&
+    t.isJSXAttribute(winningKey) &&
+    t.isStringLiteral(winningKey.value)
+  )
+    keys[keys.length - 1] = t.cloneNode(winningKey);
+  // The automatic transform must not see a synthetic spread before a key
+  // when none of the earlier spreads were authored.
+  const attributes = keys.length
+    ? [
+        ...keys,
+        ...lowering.attributes.filter(
+          (attribute) => !isNamedJsxAttribute(attribute, keyAttributeName)
+        )
+      ]
+    : lowering.attributes;
+  return {
+    attributes,
+    declarations: type
+      ? [type, ...lowering.declarations]
+      : lowering.declarations
+  };
 }
 
 // JSX evaluates its type before any attributes. Staging props must not defer
@@ -211,7 +399,12 @@ function createPreCssSpreadAggregatedCssPropLowering(
     declarations: preCssBinding.declarations,
     attributes: [
       ...explicitKeyRefAttributesBeforeCss.beforeSpread,
-      t.jsxSpreadAttribute(t.cloneNode(preCssBinding.restIdentifier)),
+      ...emitAggregateRestAttributes(
+        normalizedElement.attributesBeforeCss,
+        preCssBinding,
+        !normalizedElement.hasSpreadBeforeCss &&
+          !normalizedElement.hasSpreadAfterCss
+      ),
       ...explicitKeyRefAttributesBeforeCss.afterSpread,
       classNameAttribute,
       ...normalizedElement.attributesAfterCss.filter(
@@ -257,9 +450,9 @@ function createPostCssSpreadAggregatedCssPropLowering(
     postCssBinding
   );
 
-  const canInlineExplicitCssClassName =
-    t.isIdentifier(normalizedElement.cssExpression) ||
-    t.isStringLiteral(normalizedElement.cssExpression);
+  const canInlineExplicitCssClassName = t.isStringLiteral(
+    normalizedElement.cssExpression
+  );
 
   const explicitCssClassNameIdentifier = canInlineExplicitCssClassName
     ? null
@@ -273,7 +466,13 @@ function createPostCssSpreadAggregatedCssPropLowering(
             createClassNameExpression(path, {
               cssExpression: normalizedElement.cssExpression,
               cssValueClassification: normalizedElement.cssValueClassification,
-              classNameAttribute: null
+              classNameAttribute: null,
+              // Capture an authored flat class before later attributes, then
+              // normalize that same value at the merge regardless of spreads.
+              stageRawClassValue:
+                t.isIdentifier(normalizedElement.cssExpression) ||
+                (!normalizedElement.hasSpreadBeforeCss &&
+                  !normalizedElement.hasSpreadAfterCss)
             })
           )
         ])
@@ -287,7 +486,14 @@ function createPostCssSpreadAggregatedCssPropLowering(
     cssValueClassification: explicitCssClassNameIdentifier
       ? "class-value"
       : normalizedElement.cssValueClassification,
-    classNameAttribute: null,
+    classNameAttribute: normalizedElement.hasSpreadAfterCss
+      ? null
+      : t.jsxAttribute(
+          t.jsxIdentifier(classNameAttributeName),
+          t.jsxExpressionContainer(
+            t.cloneNode(postCssBinding.classNameIdentifier)
+          )
+        ),
     ...(preCssBinding
       ? {
           preAggregateClassNameExpression: t.cloneNode(
@@ -295,9 +501,13 @@ function createPostCssSpreadAggregatedCssPropLowering(
           )
         }
       : {}),
-    postAggregateClassNameExpression: t.cloneNode(
-      postCssBinding.classNameIdentifier
-    )
+    ...(normalizedElement.hasSpreadAfterCss
+      ? {
+          postAggregateClassNameExpression: t.cloneNode(
+            postCssBinding.classNameIdentifier
+          )
+        }
+      : {})
   });
 
   const classNameAttribute = t.jsxAttribute(
@@ -305,14 +515,25 @@ function createPostCssSpreadAggregatedCssPropLowering(
     t.jsxExpressionContainer(nextClassNameExpression)
   );
 
+  const preserveQuotedText =
+    !normalizedElement.hasSpreadBeforeCss &&
+    !normalizedElement.hasSpreadAfterCss;
   const nextAttributes: Array<t.JSXAttribute | t.JSXSpreadAttribute> = [
     ...explicitKeyRefAttributesBeforeCss.beforeSpread,
     ...(preCssBinding
-      ? [t.jsxSpreadAttribute(t.cloneNode(preCssBinding.restIdentifier))]
+      ? emitAggregateRestAttributes(
+          normalizedElement.attributesBeforeCss,
+          preCssBinding,
+          preserveQuotedText
+        )
       : []),
     ...explicitKeyRefAttributesBeforeCss.afterSpread,
     ...explicitKeyRefAttributesAfterCss.beforeSpread,
-    t.jsxSpreadAttribute(t.cloneNode(postCssBinding.restIdentifier)),
+    ...emitAggregateRestAttributes(
+      normalizedElement.attributesAfterCss,
+      postCssBinding,
+      preserveQuotedText
+    ),
     ...explicitKeyRefAttributesAfterCss.afterSpread,
     classNameAttribute
   ];
@@ -610,9 +831,72 @@ export function assertSupportedSpreadAggregationContext(
   throw path.buildCodeFrameError(spreadAggregationContextErrorMessage);
 }
 
-function getDirectSpreadAggregationStatementPath(
+// A prelude for an awaited/yielded JSX initializer must run after preceding
+// initializers, in the same lexical environment and before JSX children.
+function getCompoundConstInitializer(
   path: NodePath<t.JSXOpeningElement>
-): NodePath<t.ReturnStatement | t.ExpressionStatement> | null {
+): NodePath<t.VariableDeclarator> | null {
+  const element = getSpreadAggregationJsxElementPath(path);
+
+  if (!element || !containsAwaitOrYieldExpression(element)) return null;
+
+  const initializer = element.parentPath;
+
+  if (
+    !initializer.isVariableDeclarator() ||
+    initializer.node.init !== element.node
+  )
+    return null;
+
+  const declaration = initializer.parentPath;
+
+  if (
+    !declaration.isVariableDeclaration({ kind: "const" }) ||
+    declaration.node.declarations.length < 2
+  )
+    return null;
+
+  const parent = declaration.parentPath;
+
+  return hasStatementListParent(declaration) ||
+    (parent.isExportNamedDeclaration() && hasStatementListParent(parent))
+    ? initializer
+    : null;
+}
+
+function stageAtConstInitializer(
+  initializer: NodePath<t.VariableDeclarator>,
+  declarations: readonly t.VariableDeclaration[]
+): void {
+  const declaration = initializer.parentPath;
+
+  if (!declaration.isVariableDeclaration()) return;
+
+  const exported = declaration.parentPath;
+
+  if (!exported.isExportNamedDeclaration()) {
+    initializer.insertBefore(declarations.flatMap((item) => item.declarations));
+
+    return;
+  }
+
+  // Keep generated bindings private, without moving any authored initializer.
+  const index = declaration.node.declarations.indexOf(initializer.node);
+  const earlier = declaration.node.declarations.splice(0, index);
+  exported.insertBefore([
+    ...(earlier.length > 0
+      ? [t.exportNamedDeclaration(t.variableDeclaration("const", earlier))]
+      : []),
+    ...declarations
+  ]);
+}
+
+function getDirectSpreadAggregationStatementPath(
+  path: NodePath<t.JSXOpeningElement>,
+  preserveSynchronousEvalScope = false
+): NodePath<
+  t.ReturnStatement | t.ExpressionStatement | t.VariableDeclaration
+> | null {
   const jsxElementPath = getSpreadAggregationJsxElementPath(path);
 
   if (!jsxElementPath) {
@@ -620,6 +904,21 @@ function getDirectSpreadAggregationStatementPath(
   }
 
   const expressionParentPath = jsxElementPath.parentPath;
+
+  // A single direct initializer evaluates before its binding pattern. Hoist
+  // only here: multiple declarators or nested expressions have earlier work
+  // whose evaluation must not be reordered. Keeping the element in place also
+  // preserves await/yield and direct eval in their enclosing activation.
+  if (
+    expressionParentPath.isVariableDeclarator() &&
+    expressionParentPath.node.init === jsxElementPath.node &&
+    expressionParentPath.parentPath.isVariableDeclaration() &&
+    expressionParentPath.parentPath.node.declarations.length === 1 &&
+    hasStatementListParent(expressionParentPath.parentPath) &&
+    (containsAwaitOrYieldExpression(jsxElementPath) ||
+      (preserveSynchronousEvalScope && hasDynamicScopeAccess(jsxElementPath)))
+  )
+    return expressionParentPath.parentPath;
 
   if (
     expressionParentPath.isReturnStatement() &&
@@ -658,13 +957,16 @@ function getSpreadAggregationJsxElementPath(
   return jsxElementPath;
 }
 
-function isJsxChildReplacementContext(
+function requiresJsxExpressionContainer(
   jsxElementPath: NodePath<t.JSXElement>
 ): boolean {
   const expressionParentPath = jsxElementPath.parentPath;
 
   return (
-    expressionParentPath.isJSXElement() || expressionParentPath.isJSXFragment()
+    expressionParentPath.isJSXElement() ||
+    expressionParentPath.isJSXFragment() ||
+    (expressionParentPath.isJSXAttribute() &&
+      expressionParentPath.node.value === jsxElementPath.node)
   );
 }
 
@@ -691,6 +993,52 @@ export function createAggregatePropsExpression(
 
       return createAggregateObjectProperty(path, attribute);
     })
+  );
+}
+
+function emitAggregateRestAttributes(
+  attributes: readonly (t.JSXAttribute | t.JSXSpreadAttribute)[],
+  binding: AggregatePropsBinding,
+  preserveQuotedText: boolean
+): (t.JSXAttribute | t.JSXSpreadAttribute)[] {
+  const spread = () => [
+    t.jsxSpreadAttribute(t.cloneNode(binding.restIdentifier))
+  ];
+  if (!preserveQuotedText) return spread();
+  const ordinary: (t.JSXAttribute & { name: t.JSXIdentifier })[] = [];
+  for (const attribute of attributes) {
+    if (!t.isJSXAttribute(attribute) || !t.isJSXIdentifier(attribute.name))
+      return spread();
+    if (
+      !isKeyOrRefAttribute(attribute) &&
+      !isNamedJsxAttribute(attribute, classNameAttributeName)
+    )
+      ordinary.push(attribute as t.JSXAttribute & { name: t.JSXIdentifier });
+  }
+  const quoted = (attribute: t.JSXAttribute) =>
+    t.isStringLiteral(attribute.value) && /[\r\n]/.test(attribute.value.value);
+  // Only the last authored value wins; earlier expressions were already
+  // evaluated by the staging declarations in source order.
+  const winners = new Map(
+    ordinary.map((attribute) => [attribute.name.name, attribute])
+  );
+  if (![...winners.values()].some(quoted)) return spread();
+  // In this explicit segment the inert quoted token can stay in JSX. Let
+  // the actual host apply its whitespace rules; other props read the values
+  // already evaluated by the staging declarations, in the same order.
+  return [...winners.values()].map((attribute) =>
+    quoted(attribute)
+      ? t.cloneNode(attribute)
+      : t.jsxAttribute(
+          t.cloneNode(attribute.name),
+          t.jsxExpressionContainer(
+            t.memberExpression(
+              t.cloneNode(binding.restIdentifier),
+              t.stringLiteral(attribute.name.name),
+              true
+            )
+          )
+        )
   );
 }
 
@@ -875,7 +1223,7 @@ function getAggregateAttributeValue(
   }
 
   if (t.isStringLiteral(attribute.value)) {
-    return t.cloneNode(attribute.value);
+    return createJsxAttributeString(attribute.value);
   }
 
   if (t.isJSXExpressionContainer(attribute.value)) {

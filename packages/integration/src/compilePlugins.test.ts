@@ -5,6 +5,7 @@ import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, sep } from "node:path";
 import { runInNewContext } from "node:vm";
+import type { TransformOptions } from "@babel/core";
 import * as vanillaCss from "@vanilla-extract/css";
 import * as vanillaFileScope from "@vanilla-extract/css/fileScope";
 import { addFileScope } from "@vanilla-extract/integration";
@@ -315,6 +316,57 @@ describe("caller loaders in child compilation", () => {
     });
     expect(module.exports.answer).toBe(42);
   });
+
+  it.each([false, true])(
+    "keeps host-resolved entry imports out of dependency-local resolution (dependencyGraph: %s)",
+    async (dependencyGraph) => {
+      const { root } = await fixture();
+      const dependency = join(root, "dependency");
+      const nestedPackage = join(dependency, "node_modules", "shared");
+      const appModule = join(root, "app-shared.ts");
+
+      await fs.mkdir(nestedPackage, { recursive: true });
+      await fs.writeFile(appModule, 'export const value = "app";');
+      await fs.writeFile(
+        join(nestedPackage, "package.json"),
+        '{"name":"shared","main":"index.js"}'
+      );
+      await fs.writeFile(
+        join(nestedPackage, "index.js"),
+        'exports.value = "dependency";'
+      );
+      await fs.writeFile(
+        join(dependency, "index.ts"),
+        'export { value } from "shared";'
+      );
+
+      const compiled = await compile({
+        cwd: root,
+        filePath: join(root, "entry.ts"),
+        originalPath: join(root, "entry.ts"),
+        resolverCache: new Map(),
+        contents: `import { value as app } from "shared";
+        import { value as dependency } from "./dependency/index.ts";
+        export const values = [app, dependency];`,
+        resolvedImports: { shared: appModule },
+        dependencyGraph
+      });
+      const module = { exports: {} as { values: string[] } };
+
+      runInNewContext(compiled.source, {
+        module,
+        exports: module.exports,
+        require(id: string) {
+          if (id === "@vanilla-extract/css/fileScope") return vanillaFileScope;
+          throw new Error(`Unexpected dependency: ${id}`);
+        }
+      });
+
+      expect(module.exports.values).toEqual(["app", "dependency"]);
+      expect(compiled.watchFiles).toContain(appModule);
+      expect(compiled.watchFiles).toContain(join(nestedPackage, "index.js"));
+    }
+  );
 
   it.each([
     ["no alias", undefined, undefined],
@@ -803,6 +855,227 @@ describe("CommonJS dependencies in child compilation", () => {
     expect(result.exports.value).toBe("Example");
     expect(result.events).toEqual(["lazy", "0"]);
   });
+
+  it.each([
+    { kind: "file", dependencyGraph: false },
+    { kind: "file", dependencyGraph: true },
+    { kind: "caller-loader", dependencyGraph: false },
+    { kind: "caller-loader", dependencyGraph: true }
+  ])(
+    "forwards configured decorator syntax through $kind dependencies (dependencyGraph=$dependencyGraph)",
+    async ({ kind, dependencyGraph }) => {
+      const { root } = await fixture();
+      const dependency = join(
+        root,
+        kind === "file" ? "decorated.ts" : "decorated.custom"
+      );
+      const contents = `
+        const events: string[] = [];
+        function sealed(value: typeof Factory) {
+          events.push("decorated");
+          return value;
+        }
+        export @sealed class Factory {
+          static marker: string = "original";
+        }
+        export const value = events.join(",");
+      `;
+      await fs.writeFile(dependency, contents);
+      const options = {
+        filePath: join(root, "entry.ts"),
+        originalPath: join(root, "entry.ts"),
+        contents: `export { value } from ${JSON.stringify(dependency)};`,
+        cwd: root,
+        resolverCache: new Map<string, string>(),
+        dependencyGraph,
+        parserPlugins: [
+          ["decorators", { decoratorsBeforeExport: false }]
+        ] as NonNullable<TransformOptions["parserOpts"]>["plugins"]
+      };
+      const compiled = await compile({
+        ...options,
+        plugins:
+          kind === "caller-loader"
+            ? [
+                {
+                  name: "decorated-typescript",
+                  setup(build) {
+                    build.onLoad({ filter: /decorated\.custom$/ }, () => ({
+                      contents,
+                      loader: "ts"
+                    }));
+                  }
+                }
+              ]
+            : []
+      });
+
+      expect(evaluate(compiled.source).exports.value).toBe("decorated");
+      expect(compiled.watchFiles).toContain(dependency);
+    }
+  );
+
+  it.each(["flow", "typescript"] as const)(
+    "uses the child Babel config for %s instead of the owner's dialect",
+    async (dialect) => {
+      const { root } = await fixture();
+      const cwd = vi.spyOn(process, "cwd").mockReturnValue(root);
+      try {
+        const isFlow = dialect === "flow";
+        const dependency = join(root, "palette.js");
+        await fs.writeFile(
+          dependency,
+          isFlow
+            ? 'type Palette = {|color:string|}; export const palette: Palette = {color:"blue"};'
+            : 'type Palette = {color:string}; export const palette: Palette = {color:"blue"};'
+        );
+        await fs.writeFile(
+          join(root, "babel.config.cjs"),
+          `module.exports = { overrides: [{
+            test: filename => filename?.endsWith("palette.js"),
+            ${isFlow ? "" : 'parserOpts: { plugins: ["typescript"] },'}
+            plugins: [() => ({
+              ${
+                isFlow
+                  ? `manipulateOptions(_options, {plugins}) {
+                if (!plugins.some(p => (Array.isArray(p) ? p[0] : p) === "typescript"))
+                  plugins.push("flow");
+              },`
+                  : ""
+              }
+              visitor: {
+                ${isFlow ? "TypeAlias" : "TSTypeAliasDeclaration"}(path) { path.remove(); },
+                Identifier(path) { path.node.typeAnnotation = null; }
+              }
+            })]
+          }] };`
+        );
+        const filePath = join(root, "owner.tsx");
+        const compiled = await compile({
+          cwd: root,
+          filePath,
+          originalPath: filePath,
+          resolverCache: new Map(),
+          contents:
+            'import { palette } from "./palette.js"; export const value = palette.color;',
+          parserPlugins: ["jsx", isFlow ? "typescript" : "flow"]
+        });
+        expect(evaluate(compiled.source).exports.value).toBe("blue");
+        expect(compiled.watchFiles).toContain(dependency);
+      } finally {
+        cwd.mockRestore();
+      }
+    }
+  );
+
+  it.each([
+    [false, false, false],
+    [false, true, false],
+    [true, true, false],
+    [true, false, true],
+    [true, true, true]
+  ] as const)(
+    "uses child preset options before inherited decorators (own pass=%s, inherited=%s, legacy=%s)",
+    async (ownPass, inherited, legacy) => {
+      const { root } = await fixture();
+      const cwd = vi.spyOn(process, "cwd").mockReturnValue(root);
+      try {
+        const dependency = join(root, "palette.ts");
+        await fs.writeFile(
+          dependency,
+          `const seal = (value: unknown) => value;
+           ${legacy ? "@seal export" : "export @seal"} class Palette { static color = "blue"; }
+           export const value = Palette.color;`
+        );
+        await fs.writeFile(
+          join(root, "babel.config.cjs"),
+          `let invocations = 0;
+           module.exports = { overrides: [{
+            test: filename => filename?.endsWith("palette.ts"),
+            passPerPreset: ${ownPass},
+            presets: [() => ({ plugins: [() => ({
+              manipulateOptions(_options, parser) {
+                invocations++;
+                parser.plugins.push(${legacy ? '"decorators-legacy"' : '["decorators", { decoratorsBeforeExport: false }]'});
+              },
+              visitor: { ClassDeclaration(path) {
+                if (invocations !== 1) throw new Error("child parser hook must run once");
+                path.node.decorators = null;
+              } }
+            })] })]
+           }] };`
+        );
+        const filePath = join(root, "owner.tsx");
+        const compiled = await compile({
+          cwd: root,
+          filePath,
+          originalPath: filePath,
+          resolverCache: new Map(),
+          contents: 'export { value } from "./palette.ts";',
+          ...(inherited
+            ? {
+                parserPlugins: [
+                  ["decorators", { decoratorsBeforeExport: true }]
+                ]
+              }
+            : {})
+        });
+        expect(evaluate(compiled.source).exports.value).toBe("blue");
+        expect(compiled.watchFiles).toContain(dependency);
+      } finally {
+        cwd.mockRestore();
+      }
+    }
+  );
+
+  it.each(["ts", "tsx", "jsx", "js"] as const)(
+    "keeps the dependency's %s JSX mode with inherited decorator syntax",
+    async (extension) => {
+      const { root } = await fixture();
+      const cwd = vi.spyOn(process, "cwd").mockReturnValue(root);
+      try {
+        const suffix = `palette.${extension}`;
+        const dependency = join(root, suffix);
+        if (extension === "js") {
+          await fs.writeFile(
+            join(root, "babel.config.cjs"),
+            `module.exports = { overrides: [{
+              test: filename => filename?.endsWith("palette.js"),
+              parserOpts: { plugins: ["jsx"] },
+              plugins: [({ types }) => ({ visitor: {
+                JSXElement(path) { path.replaceWith(types.stringLiteral(path.node.openingElement.name.name)); }
+              } })]
+            }] };`
+          );
+        }
+        const expression =
+          extension === "ts" ? '(<const>{ color: "blue" }).color' : "<blue />";
+        await fs.writeFile(
+          dependency,
+          `const seal = value => value;
+            const React = {createElement: tag => tag};
+            export @seal class Palette { static color = ${expression}; }
+            export const value = Palette.color;`
+        );
+        const filePath = join(root, "owner.tsx");
+        const compiled = await compile({
+          cwd: root,
+          filePath,
+          originalPath: filePath,
+          resolverCache: new Map(),
+          contents: `export { value } from "./${suffix}";`,
+          parserPlugins: [
+            ...(extension === "js" ? [] : ["jsx" as const]),
+            ["decorators", { decoratorsBeforeExport: false }]
+          ]
+        });
+        expect(evaluate(compiled.source).exports.value).toBe("blue");
+        expect(compiled.watchFiles).toContain(dependency);
+      } finally {
+        cwd.mockRestore();
+      }
+    }
+  );
 
   it("reports invalid entry syntax through esbuild", async () => {
     const { root } = await fixture();

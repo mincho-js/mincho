@@ -1,7 +1,3 @@
-import {
-  validateCompileResolutions,
-  type CompileResolutionManifest
-} from "./compileResolution.js";
 import type { CssScopeOrigin } from "./fileScopeRuntime.js";
 import { basename, join, resolve } from "node:path";
 import type { Plugin } from "esbuild";
@@ -9,6 +5,10 @@ import type { CompileOptions } from "./compile.js";
 import { currentCompilationExecution } from "./compilationExecution.js";
 import { cacheDigest } from "./compilationCache.js";
 import { recordCompilationDiagnostic } from "./diagnostics.js";
+import {
+  validateCompileResolutions,
+  type CompileResolutionManifest
+} from "./compileResolution.js";
 
 export interface CompileCacheBridge {
   readonly plugin: Plugin;
@@ -110,14 +110,20 @@ async function compileWithInputs(
   }
 
   const cwd = options.cwd ?? process.cwd();
+  // Keep the sidecar cache namespace, but invalidate artifacts parsed before
+  // child files selected their own Babel language.
   const key = `compile-v11-css-origins:${cacheDigest(
     JSON.stringify([
+      "child-syntax-v3",
       options.originalPath,
       options.filePath,
       options.contents,
       cwd,
       options.externals,
       options.loader,
+      options.parserPlugins,
+      options.alias,
+      options.resolvedImports,
       options.dependencyGraph,
       options.staticStyles,
       currentCompilationExecution()?.evaluation,
@@ -227,7 +233,6 @@ async function compileWithInputs(
       } catch {
         cacheable = false;
       }
-
       if (!compiled.resolutions)
         recordCompilationDiagnostic("cache-bypass", {
           reason: "unverifiable-resolution"

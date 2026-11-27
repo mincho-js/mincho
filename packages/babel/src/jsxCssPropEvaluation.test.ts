@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { transformSync as transformJsx } from "esbuild";
 import { babelTransform, runJsxCssPropRuntime } from "./testUtils/plugin.js";
 
 describe.each([false, true])(
@@ -24,6 +25,67 @@ describe.each([false, true])(
         expect(code).not.toContain("_minchoCssValue");
       }
     );
+
+    const runWithChildren = (source: string, result: string) => {
+      const { code } = babelTransform(source, {
+        jsxCssProp: true,
+        optimize: { runtimeCodegen }
+      });
+      const runtime = transformJsx(code, {
+        loader: "tsx",
+        jsxFactory: "jsx",
+        format: "cjs"
+      }).code;
+      return new Function("require", "jsx", runtime + "\n" + result)(
+        (name: string) => {
+          expect(name).toBe("@mincho-js/css/classname");
+          return {
+            cx: (...values: unknown[]) => values.filter(Boolean).join(" ")
+          };
+        },
+        (
+          _tag: unknown,
+          props: Record<string, unknown>,
+          ...children: unknown[]
+        ) => ({ ...props, children })
+      );
+    };
+
+    it("keeps awaited children in staged JSX variable initializers", async () => {
+      const source = `const events = [];
+        const styleA = "style-a";
+        async function loadChild() { events.push('child'); return 'child'; }
+        function after() { events.push('after'); return true; }
+        async function App() {
+          const view = <div css={styleA} className="base" hidden={after()}>{await loadChild()}</div>;
+          events.push('done'); return view;
+        }`;
+      expect(
+        await runWithChildren(
+          source,
+          "return App().then(view => ({events, className:view.className}));"
+        )
+      ).toEqual({
+        events: ["after", "child", "done"],
+        className: "base style-a"
+      });
+    });
+
+    it("keeps yielded children in staged JSX variable initializers", () => {
+      const source = `const styleA = "style-a";
+        function* App() { const view = <div css={styleA} className="base">{yield 'child'}</div>; return view; }`;
+      expect(
+        runWithChildren(
+          source,
+          `const iterator = App(); const first = iterator.next(); const last = iterator.next('value');
+        return {first, className:last.value.className, done:last.done};`
+        )
+      ).toEqual({
+        first: { value: "child", done: false },
+        className: "base style-a",
+        done: true
+      });
+    });
 
     it("keeps await before direct CSS in its async context", async () => {
       const source = `const events = [];

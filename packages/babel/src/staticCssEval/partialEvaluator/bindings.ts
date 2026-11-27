@@ -1,6 +1,6 @@
 import { types as t } from "@babel/core";
 import type { Binding } from "@babel/traverse";
-import { hasStaticCssEvalBindingMutation } from "../sameFile/mutation.js";
+import { analyzeStaticCssEvalBindingMutation } from "../sameFile/mutation.js";
 import { getStaticCssEvalBindingDeclarationKind } from "../sameFile/shapes.js";
 import type { PartialEvalBindingFrame } from "./context.js";
 import {
@@ -48,7 +48,11 @@ export function reduceIdentifierExpression(
     });
   }
 
-  const source = getPartialEvalBindingSource(binding, options.node.name);
+  const source = getPartialEvalBindingSource(
+    binding,
+    options.node.name,
+    options.runtime.context.nativeArrayIteration
+  );
 
   if (!source) {
     return createBindingShapeDeopt(options, bindingDeoptPath);
@@ -108,15 +112,6 @@ export function reduceIdentifierExpression(
     });
   }
 
-  if (
-    hasStaticCssEvalBindingMutation(
-      options.reductionContext.programPath,
-      binding
-    )
-  ) {
-    return createMutatedBindingDeopt(options, bindingDeoptPath);
-  }
-
   const sourceResult = options.runtime.reduceExpression({
     expression: source.init,
     depth: options.depth + 1,
@@ -126,6 +121,30 @@ export function reduceIdentifierExpression(
       scope: binding.scope
     }
   });
+
+  // Structural mutation proofs fail closed for unresolved aliases too. Reduce
+  // the initializer under the existing recursion/node budgets first so that
+  // this uncertainty cannot hide a proven cycle or an exhausted budget. No
+  // reduced value may escape without the same mutation check as before.
+  const hardDeopt =
+    sourceResult.kind === "deopt" &&
+    (sourceResult.reason === "cycle-detected" ||
+      sourceResult.reason === "depth-limit" ||
+      sourceResult.reason === "node-count-limit");
+  const mutation = analyzeStaticCssEvalBindingMutation(
+    options.reductionContext.programPath,
+    binding
+  );
+  if (
+    !hardDeopt &&
+    (mutation.kind === "may-mutate" ||
+      (mutation.kind === "unknown" && sourceResult.kind === "confident"))
+  ) {
+    return createMutatedBindingDeopt(options, bindingDeoptPath);
+  }
+  // Unknown provenance cannot certify a value, but it also is not evidence of
+  // mutation. Preserve a child's existing unsupported-shape diagnostic rather
+  // than replacing it with a mutation diagnostic that hides its unsafe syntax.
 
   if (sourceResult.kind === "deopt") {
     return options.runtime.createDeoptFromChild({
@@ -140,7 +159,8 @@ export function reduceIdentifierExpression(
 
   const resolvedExpression = resolveStaticMemberPath(
     sourceResult.expression,
-    source.memberPath
+    source.memberPath,
+    source.arrayIterationOffsets
   );
 
   return resolvedExpression
@@ -153,7 +173,8 @@ export function reduceIdentifierExpression(
 
 function getPartialEvalBindingSource(
   binding: Binding,
-  bindingName: string
+  bindingName: string,
+  nativeArrayIteration?: boolean
 ): PartialEvalBindingSource | null {
   const declarationKind = getStaticCssEvalBindingDeclarationKind(binding);
 
@@ -171,7 +192,10 @@ function getPartialEvalBindingSource(
       : null;
   }
 
-  return getDestructuredBindingSource(binding, bindingName);
+  return getDestructuredBindingSource(binding, bindingName, {
+    nativeArrayIteration,
+    deferArrayReceiverCheck: true
+  });
 }
 
 function createBindingShapeDeopt(

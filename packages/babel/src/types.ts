@@ -23,6 +23,10 @@ export interface MinchoCompilationMetadata {
 
 export interface PluginOptions {
   diagnostics?: boolean;
+  /** @internal Hand optional authored runtime requests to the host normalizer. */
+  stageCommonJsRuntimeRequests?: boolean;
+  /** @internal Integration can reconcile stable dead imports after generation. */
+  stageEsmGeneratorImports?: boolean;
   result: [string, string];
 
   /** Additional build-time calls; local files are relative to the Babel root. */
@@ -33,7 +37,7 @@ export interface PluginOptions {
 
   /** @internal Prepared pure helper results; values are fresh literal ASTs. */
   preparedPureFunctions?: import("./optimizations/pureFunctions.js").PreparedPureFunctions;
-  jsxCssProp?: boolean;
+  jsxCssProp?: import("./jsxCssProp/options.js").JsxCssPropOptions;
   jsxCssPropTransformed?: boolean;
   bundleSize?: import("./bundleSize.js").BundleSizeOptions;
   optimize?: {
@@ -81,6 +85,23 @@ export interface MinchoStaticCssEvalMetadata {
 }
 
 export interface MinchoBabelFileMetadata {
+  /** Worker-local exact AST nodes; never serialized as host proof. */
+  minchoOptionalCommonJsSites?: {
+    declaration: t.VariableDeclarator;
+    stagedShape: t.VariableDeclarator;
+    /** When present only this local binding can be pruned. */
+    property?: t.ObjectProperty;
+    members: readonly (string | null)[];
+    requests: t.CallExpression[];
+    source: string;
+    later: { node: t.CallExpression; source: string }[];
+  }[];
+  minchoOptionalEsmImports?: {
+    sites: t.ImportDeclaration[];
+    requests: (
+      t.ImportDeclaration | t.ExportNamedDeclaration | t.ExportAllDeclaration
+    )[];
+  };
   minchoCompilation?: MinchoCompilationMetadata;
   minchoStaticCssEval?: MinchoStaticCssEvalMetadata;
   minchoDefineRulesCxConditions?: DefineRulesCxConditionsMetadata;
@@ -102,6 +123,7 @@ export interface ProgramScope extends Scope {
     nodes: Array<t.Node>;
     cssFile: string;
     extractCalls?: PreparedExtractCalls;
+    jsxCssPropImportSource?: string;
   };
 }
 

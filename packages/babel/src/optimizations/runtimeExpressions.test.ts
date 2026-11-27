@@ -1,5 +1,75 @@
 import { describe, expect, it } from "vitest";
-import { annotateRecipeFactories } from "./runtimeExpressions.js";
+import { parseSync, types as t, type TransformOptions } from "@babel/core";
+import { isClosedCompiledRecipeInvocationArguments } from "./recipeFactories.js";
+import { SourceAstCache } from "../staticCssEval/moduleParser.js";
+import {
+  analyzeRuntimeExpressions,
+  annotateRecipeFactories,
+  applyRuntimeExpressions
+} from "./runtimeExpressions.js";
+
+describe("runtime optimizer parser configuration", () => {
+  it.each([
+    ["owner", false],
+    ["owner", true],
+    ["dependency", false],
+    ["dependency", true]
+  ] as const)(
+    "preserves configured parser plugins in the %s with cached parsing=%s",
+    (location, cached) => {
+      const decorated =
+        "export @sealed class View { render(): unknown { return <div />; } }";
+      const recipe = `
+        import { createRuntimeFn } from "@mincho-js/css/rules/createRuntimeFn";
+        export const button = createRuntimeFn({
+          defaultClassName: "base",
+          variantClassNames: {},
+          defaultVariants: {},
+          compoundVariants: []
+        });
+      `;
+      const source = `${location === "owner" ? decorated : ""}
+        import { button } from "/recipe.tsx";
+        export const cls = button();
+      `;
+      const options = {
+        filename: "/app.tsx",
+        source,
+        parserCache: cached ? new SourceAstCache() : undefined,
+        parserPlugins: [
+          ["decorators", { decoratorsBeforeExport: false }]
+        ] satisfies NonNullable<TransformOptions["parserOpts"]>["plugins"]
+      };
+      const flow = analyzeRuntimeExpressions(options);
+      let step = flow.next();
+
+      while (!step.done) {
+        const request = step.value;
+        step = flow.next(
+          request.kind === "load" && request.id === "/recipe.tsx"
+            ? `${location === "dependency" ? decorated : ""} ${recipe}`
+            : request.kind === "resolve" && request.source === "/recipe.tsx"
+              ? request.source
+              : null
+        );
+      }
+
+      expect(step.value.calls).toHaveLength(1);
+
+      const output = applyRuntimeExpressions({
+        ...options,
+        ...(cached ? { ast: step.value.ast } : {}),
+        replacements: [{ key: step.value.calls[0]!.key, value: "base" }]
+      });
+
+      expect(output?.code).toContain('export const cls = "base";');
+      if (location === "owner") {
+        expect(output?.code).toContain("@sealed");
+        expect(output?.code).toContain("<div />");
+      }
+    }
+  );
+});
 
 describe("serialized recipe purity", () => {
   it("preserves serialized bytes and respects lexical shadowing", () => {
@@ -37,5 +107,38 @@ describe("serialized recipe purity", () => {
       'import { createRuntimeFn } from "@vanilla-extract/recipes/createRuntimeFn"; export const recipe = createRuntimeFn({});';
 
     expect(annotateRecipeFactories(source, "/sidecar.js")).toBe(source);
+  });
+});
+
+function call(source: string): t.CallExpression {
+  const node = parseSync(source, { configFile: false, babelrc: false })?.program
+    .body[0];
+  if (!t.isExpressionStatement(node) || !t.isCallExpression(node.expression))
+    throw new Error("Expected call");
+  return node.expression;
+}
+
+describe("compiled recipe invocation argument obligations", () => {
+  it.each([
+    "recipe()",
+    "recipe(void 0)",
+    "recipe(null)",
+    "recipe({tone:'solid', size:2, active:true})",
+    "recipe(['active', {tone:'solid'}])"
+  ])("accepts closed primitive selections: %s", (source) => {
+    expect(isClosedCompiledRecipeInvocationArguments(call(source))).toBe(true);
+  });
+  it.each([
+    "recipe({tone})",
+    "recipe({get tone(){return 'solid'}})",
+    "recipe({tone:{toString(){return 'solid'}}})",
+    "recipe({...options})",
+    "recipe({tone:read()})",
+    "recipe(...options)",
+    "recipe({}, observe())",
+    "recipe({[key]:'solid'})",
+    "recipe({__proto__: {tone:'solid'}})"
+  ])("retains unknown input effects: %s", (source) => {
+    expect(isClosedCompiledRecipeInvocationArguments(call(source))).toBe(false);
   });
 });

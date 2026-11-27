@@ -5,6 +5,10 @@ import type {
   PendingPartialEvalDeopt
 } from "./reduction.js";
 import { getStaticStringOrNumberMemberName } from "./literals.js";
+import {
+  isObjectPrototypeSetter,
+  selectObjectLiteralMember
+} from "../propertySelection.js";
 
 export function reduceObjectExpression(
   options: PartialEvalReducerNodeOptions<t.ObjectExpression>
@@ -103,7 +107,12 @@ export function reduceObjectExpression(
 
     const nextProperty = t.cloneNode(property);
     nextProperty.key = createStaticObjectPropertyKey(keyResult.name);
-    nextProperty.computed = false;
+    // A computed/shorthand __proto__ defines an own property. Canonicalizing
+    // it to a colon-form key would instead change the object's prototype.
+    nextProperty.computed =
+      keyResult.name === "__proto__" && !isObjectPrototypeSetter(property);
+    if (nextProperty.computed)
+      nextProperty.key = t.stringLiteral(keyResult.name);
     nextProperty.shorthand = false;
 
     if (valueResult.kind === "deopt") {
@@ -145,21 +154,16 @@ export function getStaticObjectMemberValue(
   expression: t.ObjectExpression,
   memberName: string
 ): t.Expression | null {
-  for (let index = expression.properties.length - 1; index >= 0; index -= 1) {
-    const property = expression.properties[index];
-
-    if (!t.isObjectProperty(property) || property.computed) {
-      return null;
-    }
-
-    if (getStaticObjectPropertyName(property.key) !== memberName) {
-      continue;
-    }
-
-    return t.isExpression(property.value) ? property.value : null;
-  }
-
-  return null;
+  const selected = selectObjectLiteralMember(expression, memberName);
+  if (selected.kind === "prototype")
+    return t.isObjectExpression(selected.value)
+      ? getStaticObjectMemberValue(selected.value, memberName)
+      : null;
+  return selected.kind === "property" &&
+    t.isObjectProperty(selected.property) &&
+    t.isExpression(selected.property.value)
+    ? selected.property.value
+    : null;
 }
 
 export function getStaticObjectPropertyName(
@@ -260,6 +264,7 @@ function pushObjectSpreadProperties(
   options: PushObjectSpreadPropertiesOptions
 ): boolean {
   for (const spreadProperty of options.spreadExpression.properties) {
+    if (isObjectPrototypeSetter(spreadProperty)) continue;
     if (t.isSpreadElement(spreadProperty)) {
       pushObjectPropertyWithOverride({
         properties: options.properties,
@@ -286,7 +291,8 @@ function pushObjectPropertyWithOverride(options: {
   readonly propertyKeyIndexes: Map<string, number>;
 }): void {
   const keyName =
-    t.isObjectProperty(options.property) || t.isObjectMethod(options.property)
+    !isObjectPrototypeSetter(options.property) &&
+    (t.isObjectProperty(options.property) || t.isObjectMethod(options.property))
       ? getStaticObjectPropertyName(options.property.key)
       : null;
 

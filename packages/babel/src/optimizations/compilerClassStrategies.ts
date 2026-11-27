@@ -4,7 +4,7 @@ import {
   getModuleReference,
   referencesModuleExport
 } from "../commonjs/bindings.js";
-import { isExtractionCall } from "../extractionCalls/index.js";
+import { isRegisteredExtractionReference } from "../extractionCalls/index.js";
 import type { PluginState, ProgramScope } from "../types.js";
 import { registerImportMethod } from "../utils.js";
 import { hasDynamicScope } from "./dynamicScope.js";
@@ -159,7 +159,7 @@ export function prepareCompilerClassStrategies(
       const reference = getModuleReference(callee);
 
       if (
-        isExtractionCall(callee, false) ||
+        isRegisteredExtractionReference(callee) ||
         reference?.source.startsWith("@mincho-js/") ||
         reference?.source.startsWith("@vanilla-extract/")
       )

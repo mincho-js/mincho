@@ -25,7 +25,7 @@ import type {
   SameFileBindingResolutionResult,
   SameFileBindingStackFrame
 } from "./types.js";
-import { hasStaticCssEvalBindingMutation } from "./mutation.js";
+import { analyzeStaticCssEvalBindingMutation } from "./mutation.js";
 import {
   getStaticCssEvalBindingDeclarationKind,
   getStaticCssEvalVariableBindingInitExpression,
@@ -110,7 +110,11 @@ export function resolveSameFileBindingExpression(
     };
   }
 
-  if (hasStaticCssEvalBindingMutation(options.programPath, options.binding)) {
+  const mutationProof = analyzeStaticCssEvalBindingMutation(
+    options.programPath,
+    options.binding
+  );
+  if (mutationProof.kind === "may-mutate") {
     return {
       kind: "error",
       diagnostic: createSameFileStaticCssEvalDiagnostic(
@@ -126,6 +130,59 @@ export function resolveSameFileBindingExpression(
 
   const unwrappedInit = unwrapTransparentCssRuleExpression(init);
   const initReference = getStaticCssEvalMemberReference(unwrappedInit);
+
+  // Non-rule producers (including compiler css calls) belong to the caller's
+  // evaluation/fallback path; declining them does not prove their origin safe.
+  if (
+    mutationProof.kind === "unknown" &&
+    !isPotentialStaticCssEvalBindingInit(init, options.memberPath)
+  ) {
+    return { kind: "not-candidate" };
+  }
+
+  // A bare value alias has no new rule authority. If the existing terminal
+  // binding analysis declines the producer, leave the alias to the same
+  // runtime class path as a direct reference.
+  if (
+    mutationProof.kind === "unknown" &&
+    mutationProof.reason === "unsupported-origin" &&
+    options.memberPath.length === 0 &&
+    t.isIdentifier(unwrappedInit) &&
+    initReference?.kind === "supported"
+  ) {
+    const binding = options.binding.scope.getBinding(initReference.bindingName);
+    if (
+      binding &&
+      getStaticCssEvalBindingDeclarationKind(binding) === "const"
+    ) {
+      const terminal = resolveSameFileBindingExpression({
+        ...options,
+        binding,
+        bindingName: initReference.bindingName,
+        stack: nextStack
+      });
+      if (terminal.kind === "not-candidate") return terminal;
+    }
+  }
+
+  // Let the existing alias stack produce its precise cycle and import chain.
+  // Unknown is not evidence of a write, nor permission to statically resolve.
+  if (
+    mutationProof.kind === "unknown" &&
+    !(mutationProof.reason === "recursive-origin" && initReference)
+  ) {
+    return {
+      kind: "error",
+      diagnostic: createSameFileStaticCssEvalDiagnostic(
+        context,
+        "unsupported-source",
+        "runtime-dynamic-value",
+        `same-file binding "${options.bindingName}" has an unproven object origin (${mutationProof.reason})`,
+        "STATIC_CSS_EVAL_DYNAMIC_EXPRESSION_UNSUPPORTED"
+      ),
+      metadata
+    };
+  }
 
   if (initReference?.kind === "supported") {
     const referencedBinding = options.binding.scope.getBinding(
