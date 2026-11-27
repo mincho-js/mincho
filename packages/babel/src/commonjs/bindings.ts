@@ -11,6 +11,28 @@ export interface ModuleReference {
   interop?: boolean | "node";
 }
 
+/** A local alias may be write-free even though its ESM export is live.
+ * This does not say anything about the stability of the imported value. */
+export function isWriteFreeImportAlias(binding: Binding): boolean {
+  const path = binding.path;
+  if (
+    binding.kind !== "module" ||
+    (!path.isImportSpecifier() && !path.isImportDefaultSpecifier()) ||
+    !path.parentPath.isImportDeclaration() ||
+    path.parentPath.node.phase != null ||
+    binding.constantViolations.length !== 0
+  )
+    return false;
+  const kind = path.parentPath.node.importKind;
+  const specifierKind = path.isImportSpecifier() ? path.node.importKind : null;
+  return (
+    kind !== "type" &&
+    kind !== "typeof" &&
+    specifierKind !== "type" &&
+    specifierKind !== "typeof"
+  );
+}
+
 export function staticMemberName(
   node: t.MemberExpression | t.ObjectProperty
 ): string | null {

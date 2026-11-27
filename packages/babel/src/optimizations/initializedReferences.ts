@@ -1,4 +1,5 @@
 import type { NodePath, types as t } from "@babel/core";
+import { isWriteFreeImportAlias } from "../commonjs/bindings.js";
 
 /** A completed declaration must dominate the read in the same execution scope. */
 export function initializedBefore(
@@ -40,7 +41,10 @@ export function initializedBefore(
  * Guard only the opt-in literal substitutions. Alias initializers must satisfy
  * the same proof; immutable bindings alone do not establish evaluation order.
  */
-export function hasInitializedReferences(path: NodePath<t.Node>): boolean {
+export function hasInitializedReferences(
+  path: NodePath<t.Node>,
+  observeImport?: (read: NodePath<t.Node>) => boolean
+): boolean {
   const active = new Set<t.Node>();
   let remaining = 10000;
 
@@ -52,7 +56,10 @@ export function hasInitializedReferences(path: NodePath<t.Node>): boolean {
 
       const binding = read.scope.getBinding(read.node.name);
       if (!binding) return true;
-      if (!binding.constant) return false;
+      if (!binding.constant)
+        return (
+          isWriteFreeImportAlias(binding) && observeImport?.(read) === true
+        );
 
       const declaration = binding.path;
       if (

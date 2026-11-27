@@ -170,6 +170,35 @@ describe("shared module graph", () => {
     }
   });
 
+  it.each([false, true])(
+    "follows a write-free local import alias but still checks its actual exporter (writable=%s)",
+    (writable) => {
+      const { graph, run } = fixture({
+        "/project/barrel.ts":
+          'import { gap as selected } from "./helper.ts"; export { selected };',
+        "/project/helper.ts": writable
+          ? "export let gap = n => n; gap = n => n + 1;"
+          : "export const gap = n => n;"
+      });
+      const owner = run(graph.load("/project/barrel.ts"));
+      const resolve = () =>
+        run(graph.resolveExport(owner, "selected", new Set()));
+      if (writable) {
+        expect(resolve).toThrow("Mutable binding gap in /project/helper.ts");
+      } else {
+        const result = resolve();
+        expect(result && !("external" in result) && result.module.id).toBe(
+          "/project/helper.ts"
+        );
+        expect(
+          result &&
+            !("external" in result) &&
+            result.path.isArrowFunctionExpression()
+        ).toBe(true);
+      }
+    }
+  );
+
   it("rejects reassigned exported helpers", () => {
     const { graph, run } = fixture({
       "/project/helper.ts": "export let gap = n => n; gap = other;"

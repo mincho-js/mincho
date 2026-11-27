@@ -1,5 +1,8 @@
 import { types as t, type NodePath } from "@babel/core";
-import { getModuleReference } from "../commonjs/bindings.js";
+import {
+  getModuleReference,
+  isWriteFreeImportAlias
+} from "../commonjs/bindings.js";
 import type { ProgramScope } from "../types.js";
 import { hasDynamicScope } from "./dynamicScope.js";
 import { builtInExtractionCalls } from "../extractionCalls/builtins.js";
@@ -31,7 +34,12 @@ export function removeUnusedExtractedImports(
       const name = t.isIdentifier(imported) ? imported.name : imported.value;
       const binding = program.scope.getBinding(specifier.node.local.name);
 
-      if (names.includes(name) && binding?.constant && !binding.referenced)
+      if (
+        names.includes(name) &&
+        binding?.path.node === specifier.node &&
+        !binding.referenced &&
+        isWriteFreeImportAlias(binding)
+      )
         specifier.remove();
     }
 
