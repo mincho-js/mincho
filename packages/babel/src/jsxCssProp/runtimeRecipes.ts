@@ -387,6 +387,7 @@ function visitClassValue(
     if (!importedOrExtracted) return false;
     if (!prepare) return true;
 
+    normalizeClosedOptionalFactoryArguments(path);
     if (isStaticCall(path)) {
       lowerStaticFactory(consumer, captureTruthyFactoryResult);
       preparedClassValues.add(consumer.node);
@@ -1196,6 +1197,25 @@ function isStaticNullishFactorySelection(
       isStaticCall(factory) &&
       visitClassValue(factory, seen, false)
   );
+}
+
+/** A closed nullish callee has no executed argument or captured reader. */
+function normalizeClosedOptionalFactoryArguments(
+  path: NodePath<t.CallExpression>
+) {
+  const analysis = createReplayAnalysis(path.scope);
+  for (const argument of path.get("arguments")) {
+    if (!argument.isOptionalCallExpression({ optional: true })) continue;
+    const callee = argument.get("callee");
+    if (
+      callee.isExpression() &&
+      analysis.branches.hasClosedCondition(callee) &&
+      analysis.branches.valueNullish(callee) === true
+    )
+      // Keep the argument slot but remove its unreachable references before
+      // runtime classification and sidecar capture see the same expression.
+      argument.replaceWith(t.unaryExpression("void", t.numericLiteral(0)));
+  }
 }
 
 function isStaticCall(path: NodePath<t.CallExpression>) {

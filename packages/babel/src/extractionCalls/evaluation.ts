@@ -1466,6 +1466,9 @@ export function branchEvaluationFacts(
     valueNullish(path: NodePath<t.Expression>) {
       return normalBranchOutcome(path, context)?.nullish;
     },
+    hasClosedCondition(path: NodePath<t.Expression>) {
+      return primitiveCondition(path, context) !== undefined;
+    },
     logicalAssignmentWrite(
       operator: t.LogicalExpression["operator"],
       readValue: NodePath<t.Expression>

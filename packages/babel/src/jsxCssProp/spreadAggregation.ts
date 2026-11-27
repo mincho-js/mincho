@@ -1001,13 +1001,16 @@ function emitAggregateRestAttributes(
   }
   const quoted = (attribute: t.JSXAttribute) =>
     t.isStringLiteral(attribute.value) && /[\r\n]/.test(attribute.value.value);
-  if (!ordinary.some(quoted)) return spread();
-  const names = ordinary.map((attribute) => attribute.name.name);
-  if (new Set(names).size !== names.length) return spread();
+  // Only the last authored value wins; earlier expressions were already
+  // evaluated by the staging declarations in source order.
+  const winners = new Map(
+    ordinary.map((attribute) => [attribute.name.name, attribute])
+  );
+  if (![...winners.values()].some(quoted)) return spread();
   // In this explicit segment the inert quoted token can stay in JSX. Let
   // the actual host apply its whitespace rules; other props read the values
   // already evaluated by the staging declarations, in the same order.
-  return ordinary.map((attribute) =>
+  return [...winners.values()].map((attribute) =>
     quoted(attribute)
       ? t.cloneNode(attribute)
       : t.jsxAttribute(

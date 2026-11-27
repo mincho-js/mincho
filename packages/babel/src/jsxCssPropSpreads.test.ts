@@ -59,37 +59,47 @@ describe("minchoBabelPlugin", () => {
       "}"
     ].join("\n");
 
-  it("leaves quoted explicit props to the actual JSX host when staging", () => {
-    const source = quotedStagedProps();
-    const { code } = babelTransform(source, {
-      jsxCssProp: true,
-      optimize: { runtimeCodegen: false }
-    });
-    const render = (input: string) => {
-      const native = transpileRuntimeJsx(input, "cjs");
-      const trace: string[] = [];
-      const props = new Function("require", "jsx", native + "\nreturn App();")(
-        (name: string) => {
-          expect(name).toBe("@mincho-js/css/classname");
-          return { cx };
-        },
-        (tag: string, props: Record<string, unknown>) => {
-          trace.push(tag);
-          return props;
-        }
-      ) as Record<string, unknown>;
-      return { props, trace };
-    };
-    const authored = render(source);
-    const emitted = render(code);
-    expect(authored.props.title).toBe("first\n  second & third");
-    expect(emitted.props).toEqual({
-      className: "base style-a",
-      title: authored.props.title,
-      "data-path": "a\\b"
-    });
-    expect(emitted.trace).toEqual(authored.trace);
-  });
+  it.each([false, true])(
+    "leaves the winning quoted prop to the JSX host (duplicate=%s)",
+    (duplicate) => {
+      const source = quotedStagedProps().replace(
+        ' title="first',
+        duplicate ? ' title="overwritten" title="first' : ' title="first'
+      );
+      const { code } = babelTransform(source, {
+        jsxCssProp: true,
+        optimize: { runtimeCodegen: false }
+      });
+      const render = (input: string) => {
+        const native = transpileRuntimeJsx(input, "cjs");
+        const trace: string[] = [];
+        const props = new Function(
+          "require",
+          "jsx",
+          native + "\nreturn App();"
+        )(
+          (name: string) => {
+            expect(name).toBe("@mincho-js/css/classname");
+            return { cx };
+          },
+          (tag: string, props: Record<string, unknown>) => {
+            trace.push(tag);
+            return props;
+          }
+        ) as Record<string, unknown>;
+        return { props, trace };
+      };
+      const authored = render(source);
+      const emitted = render(code);
+      expect(authored.props.title).toBe("first\n  second & third");
+      expect(emitted.props).toEqual({
+        className: "base style-a",
+        title: authored.props.title,
+        "data-path": "a\\b"
+      });
+      expect(emitted.trace).toEqual(authored.trace);
+    }
+  );
 
   it("normalizes quoted props and keeps precedence for an authored spread", () => {
     const props = runJsxCssPropRuntime(

@@ -201,11 +201,7 @@ export function removeUnusedExtractedImports(
     "CallExpression|OptionalCallExpression|NewExpression|TaggedTemplateExpression"(
       path
     ) {
-      if (
-        optionalSites &&
-        (path.isNewExpression() || path.isTaggedTemplateExpression())
-      )
-        return;
+      if (optionalSites && path.isNewExpression()) return;
       const target = invocationStep(path)?.invocation?.callee;
       if (target)
         // A tag can be a callable CommonJS namespace. This demand only
@@ -217,13 +213,9 @@ export function removeUnusedExtractedImports(
         );
     },
     "BinaryExpression|ForOfStatement"(path) {
-      // Staged CommonJS has its own host-demand policy. Keep the existing
-      // coercion case there; native CommonJS also observes an iterator
-      // delivery at the consuming statement, not at the earlier load.
-      if (
-        path.isBinaryExpression() ? path.node.operator !== "+" : optionalSites
-      )
-        return;
+      // Both output modes can observe the earlier authored load through
+      // selected coercion or iteration at the actual consuming statement.
+      if (path.isBinaryExpression() && path.node.operator !== "+") return;
       for (const step of planEvaluation(path).steps) {
         if (step.kind === "coerce") liveImportedUse(step.path, "access", path);
         else if (
@@ -332,18 +324,10 @@ export function removeUnusedExtractedImports(
   });
   const stagedSources = new Set(
     sourcePlans.flatMap(
-      ({
-        declaration,
-        reference,
-        initializesSource,
-        originalOrder,
-        required,
-        later
-      }) =>
+      ({ declaration, reference, initializesSource, originalOrder }) =>
         optionalSites &&
         initializesSource &&
         originalOrder !== undefined &&
-        (required || later) &&
         removed.has(declaration.node)
           ? [reference.source]
           : []
@@ -361,20 +345,11 @@ export function removeUnusedExtractedImports(
     const retainInitialization = initializesSource && (required || later);
     const stageAlias =
       !initializesSource && stagedSources.has(reference.source);
-    if (
-      optionalSites &&
-      removed.has(declaration.node) &&
-      (stageAlias ||
-        (initializesSource &&
-          originalOrder !== undefined &&
-          !required &&
-          later))
-    ) {
-      // Defer a proved dead alias whose original load remains visible during
-      // generation. The one configured generator may add a reader of a name.
-      optionalSites.push({
+    const stage = (property?: t.ObjectProperty) => {
+      optionalSites?.push({
         declaration: declaration.node,
         stagedShape: t.cloneNode(declaration.node),
+        ...(property ? { property } : {}),
         requests,
         source: reference.source,
         later:
@@ -384,6 +359,16 @@ export function removeUnusedExtractedImports(
                 (entry) => !entry.deferred && entry.order > originalOrder
               )
       });
+    };
+    if (
+      optionalSites &&
+      removed.has(declaration.node) &&
+      (stageAlias ||
+        (initializesSource && originalOrder !== undefined && !required))
+    ) {
+      // Even without a later require, the one configured generator may
+      // add a reader of this otherwise dead authored binding.
+      stage();
       continue;
     }
     if (removed.has(declaration.node) && !retainInitialization) {
@@ -392,8 +377,16 @@ export function removeUnusedExtractedImports(
     }
     const pattern = declaration.get("id");
     if (pattern.isObjectPattern())
-      for (const property of pattern.get("properties"))
-        if (removed.has(property.node)) property.remove();
+      for (const property of pattern.get("properties")) {
+        if (!removed.has(property.node)) continue;
+        if (
+          optionalSites &&
+          (originalOrder !== undefined || stageAlias) &&
+          property.isObjectProperty()
+        )
+          stage(property.node);
+        else property.remove();
+      }
   }
 
   // Removing a destructured authoring binding can make its namespace import

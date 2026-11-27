@@ -2674,6 +2674,27 @@ describe("css prop alias mutation diagnostics", () => {
     }
   );
 
+  it.each([false, true])(
+    "selects the callee before writing its replacement in an argument (called again=%s)",
+    (again) => {
+      const source = `const style={color:"red"};
+        const make=(rule=style)=>()=>{rule.color="blue";};
+        const holder={run(){}};
+        holder.run((holder.run=make(),0)); ${again ? "holder.run();" : ""}`;
+      expect(runInNewContext(source + ";style.color")).toBe(
+        again ? "blue" : "red"
+      );
+      const { run, options } = cssTransform(source, "same-file");
+      if (again) {
+        expect(run).toThrow(/same-file binding "style"/);
+        expect(options.result[1]).toBe("");
+      } else {
+        expect(run()?.code).toContain("className");
+        expect(options.result[1]).toMatch(/color:\s*["']red["']/);
+      }
+    }
+  );
+
   it("does not discard a preceding completed store while evaluating the next RHS", () => {
     const authored =
       'const style={color:"red"}; const make=(rule=style)=>()=>{rule.color="blue";}; const holder={run(){}}; holder.run=make(); holder.run=(holder.run(),make());';

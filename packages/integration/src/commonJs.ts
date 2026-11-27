@@ -74,9 +74,14 @@ function unchangedOptionalCommonJsSites(
   ast: t.File,
   sites: readonly OptionalSite[]
 ): OptionalSite[] {
-  const candidates = new Map(sites.map((site) => [site.declaration, site]));
+  const candidates = new Map<t.VariableDeclarator, OptionalSite[]>();
+  for (const site of sites) {
+    const list = candidates.get(site.declaration) ?? [];
+    list.push(site);
+    candidates.set(site.declaration, list);
+  }
   const eligible = new Map<
-    t.VariableDeclarator,
+    t.VariableDeclarator | t.ObjectProperty,
     { site: OptionalSite; references: NodePath[] }
   >();
   traverse(ast, {
@@ -87,43 +92,50 @@ function unchangedOptionalCommonJsSites(
       for (const statement of program.get("body")) {
         if (!statement.isVariableDeclaration()) continue;
         for (const declaration of statement.get("declarations")) {
-          const site = candidates.get(declaration.node);
-          if (!site || !t.isNodesEquivalent(declaration.node, site.stagedShape))
-            continue;
-          const bindings = Object.keys(
-            t.getBindingIdentifiers(declaration.node.id)
-          ).map((name) => declaration.scope.getBinding(name));
-          if (
-            bindings.some(
-              (binding) =>
-                binding?.path.node !== declaration.node || !binding.constant
+          for (const site of candidates.get(declaration.node) ?? []) {
+            if (!t.isNodesEquivalent(declaration.node, site.stagedShape))
+              continue;
+            const id = declaration.node.id;
+            if (
+              site.property &&
+              (!t.isObjectPattern(id) || !id.properties.includes(site.property))
             )
-          )
-            continue;
+              continue;
+            const bindings = Object.keys(
+              t.getBindingIdentifiers(site.property?.value ?? id)
+            ).map((name) => declaration.scope.getBinding(name));
+            if (
+              bindings.some(
+                (binding) =>
+                  binding?.path.node !== declaration.node || !binding.constant
+              )
+            )
+              continue;
 
-          const requests = new Set(site.requests);
-          if (requests.size > 0) {
-            const observe = (call: NodePath<t.CallExpression>) => {
-              if (
-                requests.has(call.node) &&
-                internalGetStaticCssEvalLiteralRequireImportPath(
-                  call.node,
-                  call.scope
-                ) === site.source
-              )
-                requests.delete(call.node);
-            };
-            const init = declaration.get("init");
-            if (init.isCallExpression()) observe(init);
-            init.traverse({ CallExpression: observe });
+            const requests = new Set(site.requests);
+            if (requests.size > 0) {
+              const observe = (call: NodePath<t.CallExpression>) => {
+                if (
+                  requests.has(call.node) &&
+                  internalGetStaticCssEvalLiteralRequireImportPath(
+                    call.node,
+                    call.scope
+                  ) === site.source
+                )
+                  requests.delete(call.node);
+              };
+              const init = declaration.get("init");
+              if (init.isCallExpression()) observe(init);
+              init.traverse({ CallExpression: observe });
+            }
+            if (requests.size === 0)
+              eligible.set(site.property ?? declaration.node, {
+                site,
+                references: bindings.flatMap(
+                  (binding) => binding?.referencePaths ?? []
+                )
+              });
           }
-          if (requests.size === 0)
-            eligible.set(declaration.node, {
-              site,
-              references: bindings.flatMap(
-                (binding) => binding?.referencePaths ?? []
-              )
-            });
         }
       }
       program.stop();
@@ -145,8 +157,8 @@ function unchangedOptionalCommonJsSites(
         dead.add(node);
     changed = dead.size !== before;
   } while (changed);
-  const result = [...eligible.values()].flatMap(({ site }) =>
-    dead.has(site.declaration) ? [site] : []
+  const result = [...eligible].flatMap(([node, { site }]) =>
+    dead.has(node) ? [site] : []
   );
   return result;
 }
@@ -230,9 +242,19 @@ function reconcileEmittedCommonJsSites(
       requests.some((call) => !call)
     )
       continue;
+    const propertyIndex =
+      site.property && t.isObjectPattern(site.declaration.id)
+        ? site.declaration.id.properties.indexOf(site.property)
+        : -1;
+    const property =
+      propertyIndex >= 0 && t.isObjectPattern(declaration.id)
+        ? declaration.id.properties[propertyIndex]
+        : undefined;
+    if (site.property && !t.isObjectProperty(property)) continue;
     candidates.push({
       ...site,
       declaration,
+      ...(t.isObjectProperty(property) ? { property } : {}),
       requests: requests.filter((call): call is t.CallExpression => !!call),
       later: site.later.flatMap((entry) => {
         const node = emittedRequests.get(entry.node);
@@ -518,7 +540,7 @@ export async function transformCommonJsToEsm(options: {
         Awaited<ReturnType<typeof runtimeSource>>
       >();
       for (const site of unchanged) {
-        if (!live.has(site.declaration)) continue;
+        if (site.property || !live.has(site.declaration)) continue;
         const seen = new Set<string>();
         for (const later of site.later) {
           if (!live.has(later.node) || !eager.has(later.source)) continue;
@@ -562,9 +584,14 @@ export async function transformCommonJsToEsm(options: {
       if (t.isObjectPattern(declaration.id)) declaration.id.properties = [];
     const removed = new Set(
       unchanged
+        .filter((site) => !site.property && !kept.has(site.declaration))
         .map((site) => site.declaration)
-        .filter((node) => !kept.has(node))
     );
+    for (const site of unchanged)
+      if (site.property && t.isObjectPattern(site.declaration.id))
+        site.declaration.id.properties = site.declaration.id.properties.filter(
+          (property) => property !== site.property
+        );
     staged.ast.program.body = staged.ast.program.body.filter((statement) => {
       if (!t.isVariableDeclaration(statement)) return true;
       statement.declarations = statement.declarations.filter(

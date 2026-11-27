@@ -87,6 +87,8 @@ export interface MinchoBabelFileMetadata {
   minchoOptionalCommonJsSites?: {
     declaration: t.VariableDeclarator;
     stagedShape: t.VariableDeclarator;
+    /** When present only this local binding can be pruned. */
+    property?: t.ObjectProperty;
     requests: t.CallExpression[];
     source: string;
     later: { node: t.CallExpression; source: string }[];

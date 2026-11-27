@@ -45,7 +45,11 @@ describe("babelTransformSource", () => {
     [false, "tag", false],
     [false, "tag", true],
     [false, "iteration", false],
-    [false, "iteration", true]
+    [false, "iteration", true],
+    [true, "tag", false],
+    [true, "tag", true],
+    [true, "iteration", false],
+    [true, "iteration", true]
   ] as const)(
     "preserves initialization before consumed CommonJS (staged=%s, operation=%s, used=%s)",
     async (staged, operation, used) => {
@@ -57,7 +61,7 @@ describe("babelTransformSource", () => {
           ? 'exports.observed = "" + operand;'
           : operation === "tag"
             ? "exports.observed = operand`check`;"
-            : "for (const value of operand) exports.observed = value;";
+            : "let item; for (const value of operand) item = value; exports.observed = item;";
       const source = `
         const operand = require("./operand.cjs");
         const {css} = require("@mincho-js/css");
@@ -2149,6 +2153,98 @@ describe("babelTransformSource", () => {
         originalLine: 8,
         originalColumn: 0
       });
+    }
+  );
+
+  it.each([
+    [false, false],
+    [false, true],
+    [true, false],
+    [true, true]
+  ] as const)(
+    "reconciles generator reads of an otherwise dead CSS binding (live cx=%s, generated read=%s)",
+    async (shared, read) => {
+      const source =
+        (shared
+          ? 'const {css,cx}=require("@mincho-js/css");'
+          : 'const {css}=require("@mincho-js/css");') +
+        'exports.className=css({color:"red"});' +
+        (shared ? 'exports.combo=cx("a","b");' : "");
+      const target = "/virtual/css.cjs";
+      const generatorOverride = vi.fn(
+        (
+          ast: t.File,
+          options: unknown,
+          input: string,
+          generate: (
+            ast: t.File,
+            options: unknown,
+            input: string
+          ) => { code: string }
+        ) => {
+          const generated = generate(ast, options, input);
+          expect(generated.code).toMatch(
+            /\{\s*css(?:\s*,\s*cx)?\s*\}\s*=\s*require/
+          );
+          return {
+            ...generated,
+            code: generated.code + (read ? "\nexports.kind=typeof css;" : "")
+          };
+        }
+      );
+      const output = await babelTransformSource({
+        filename: "/virtual/entry.cjs",
+        root: "/virtual",
+        commonJsToEsm: true,
+        source,
+        babel: {
+          configFile: false,
+          babelrc: false,
+          plugins: [() => ({ generatorOverride, visitor: {} })],
+          optimize: { runtimeCodegen: false },
+          staticCssEvalSourceProvider: {
+            resolve(_owner, specifier) {
+              return specifier === "@mincho-js/css"
+                ? { id: target, resolvedFile: target }
+                : null;
+            },
+            load() {
+              return {
+                source:
+                  'exports.css=rule=>"class-"+rule.color; exports.cx=(...x)=>x.join(" ");'
+              };
+            }
+          }
+        }
+      });
+      expect(generatorOverride).toHaveBeenCalledOnce();
+      const css = {
+        css: (rule: { color: string }) => "class-" + rule.color,
+        cx: (...parts: string[]) => parts.join(" ")
+      };
+      const execute = (code: string, load: (id: string) => unknown) => {
+        const module = { exports: {} };
+        new Function(
+          "require",
+          "module",
+          "exports",
+          transformJsx(code, { format: "cjs" }).code
+        )(load, module, module.exports);
+        return module.exports;
+      };
+      const sidecar = execute(output.result[1], () => css);
+      const actual = execute(output.code, (id) => {
+        if (id === output.result[0]) return sidecar;
+        if (id === target || id === "@mincho-js/css") return css;
+        throw new Error("unexpected dependency " + id);
+      });
+      expect(actual).toMatchObject({
+        className: "class-red",
+        ...(shared ? { combo: "a b" } : {}),
+        ...(read ? { kind: "function" } : {})
+      });
+      if (!read) expect(output.code).not.toMatch(/\bcss\s*\}/);
+      if (!shared && !read) expect(output.code).not.toContain(target);
     }
   );
 

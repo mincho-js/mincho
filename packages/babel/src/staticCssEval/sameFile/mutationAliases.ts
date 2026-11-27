@@ -3292,6 +3292,24 @@ function analyzeAliasedMutationUnchecked(
           // The assignment's own RHS still sees the pre-store receiver.
           continue;
         if (
+          !valueRead &&
+          name !== ownIterator &&
+          store.getFunctionParent() === consumption.getFunctionParent() &&
+          (consumption.isCallExpression() ||
+            consumption.isOptionalCallExpression() ||
+            consumption.isNewExpression()) &&
+          ((store.parentPath === consumption &&
+            store.listKey === "arguments") ||
+            store.findParent(
+              (parent) =>
+                parent.parentPath === consumption &&
+                parent.listKey === "arguments"
+            ))
+        )
+          // The callee value is already selected before its arguments run.
+          // Their stores remain visible to the next invocation.
+          continue;
+        if (
           beforeRight &&
           consumption.parentPath?.parentPath === consumer &&
           consumer?.isExpressionStatement() &&

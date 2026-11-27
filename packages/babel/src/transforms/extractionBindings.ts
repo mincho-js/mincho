@@ -5,6 +5,7 @@ import {
   requiresExtractionPublication
 } from "./extractionPublication.js";
 import { getModuleReference } from "../commonjs/bindings.js";
+import { selectObjectLiteralMember } from "../staticCssEval/propertySelection.js";
 import { proveEvaluationOrder } from "../extractionCalls/evaluation.js";
 import {
   builtInExtractionCalls,
@@ -322,7 +323,7 @@ function sharesExecutionContext(
     parent;
     child = parent, parent = parent.parentPath
   ) {
-    // A sole module-scoped var in a definitely selected literal branch
+    // A sole module-scoped var in a closed, definitely selected branch
     // already has the surrounding Program's binding. No other statements
     // or predicate effects can be lost by selecting just that declaration.
     if (
@@ -334,7 +335,7 @@ function sharesExecutionContext(
         (child.isBlockStatement() &&
           child.node.body.length === 1 &&
           child.node.body[0] === declaration.node)) &&
-      isSupportedStaticCssPrimitiveLiteral(parent.node.test) &&
+      analysis.branches.hasClosedCondition(parent.get("test")) &&
       analysis.branches
         .plan(parent)
         .operands.some(
@@ -605,6 +606,36 @@ export function planExtractionBindings(
               }
               return isPublishedSidecarValue(program, reference) ||
                 (local && earlierClosed(reference, local))
+                ? "proven"
+                : "unknown";
+            },
+            observe(read) {
+              if (!read.isMemberExpression({ computed: false }))
+                return "unknown";
+              const receiver = read.get("object");
+              const property = read.get("property");
+              if (!receiver.isIdentifier() || !property.isIdentifier())
+                return "unknown";
+              const owner = receiver.scope.getBinding(receiver.node.name);
+              if (
+                !owner?.constant ||
+                owner.kind !== "const" ||
+                !initialized.has(owner) ||
+                !owner.path.isVariableDeclarator() ||
+                owner.path.parentPath !== root
+              )
+                return "unknown";
+              const object = owner.path.get("init");
+              if (!object.isObjectExpression()) return "unknown";
+              const slot = selectObjectLiteralMember(
+                object.node,
+                property.node.name,
+                true
+              );
+              return slot.kind === "property" &&
+                t.isObjectProperty(slot.property) &&
+                t.isExpression(slot.property.value) &&
+                isSupportedStaticCssPrimitiveLiteral(slot.property.value)
                 ? "proven"
                 : "unknown";
             }

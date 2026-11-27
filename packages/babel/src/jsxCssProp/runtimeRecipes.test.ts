@@ -1174,6 +1174,33 @@ describe("configured JSX callable values", () => {
     }
   );
 
+  it("leaves arguments of a closed nullish optional call unexecuted", () => {
+    const { code, result } = babelTransform(
+      `import {getStyles} from "./theme.css.js";
+        import {readValue} from "./runtime.js";
+        export const Box=()=> <div css={getStyles(null?.(readValue()))} />;`,
+      { jsxCssProp, optimize: { pureFunctions: false } }
+    );
+    const getStyles = vi.fn((size?: number) => ({ padding: size ?? 4 }));
+    const readValue = vi.fn(() => 12);
+    const modules = {
+      "./theme.css.js": { getStyles },
+      "./runtime.js": { readValue },
+      "custom-preset": {
+        css: (rule: { padding: number }) => `p${rule.padding}`
+      },
+      "@mincho-js/css": { mincho$ },
+      "@mincho-js/css/classname": { cx }
+    };
+    const sidecar = executeModule(result[1], modules);
+    const Box = executeModule(code, { ...modules, [result[0]]: sidecar })
+      .Box as () => { props: { className: string } };
+    expect(Box().props.className).toBe("p4");
+    expect(getStyles.mock.calls).toEqual([[undefined]]);
+    expect(readValue).not.toHaveBeenCalled();
+    expect(result[1]).not.toContain("./runtime.js");
+  });
+
   it.each(["true", "false"] as const)(
     "does not evaluate a dead ordinary stylesheet factory in a direct JSX ternary (%s)",
     (condition) => {

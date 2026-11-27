@@ -294,6 +294,52 @@ describe("publication for a compound authored initializer", () => {
     }
   );
 
+  it.each([
+    ['if (1 === 1) { var rule = { color: "red" }; }', false],
+    ['const rule = { color: "red" }, copy = rule.color; export {copy};', true]
+  ] as const)(
+    "preserves a closed initializer and real output: %s",
+    (setup, hasCopy) => {
+      const source = `import {css} from "@mincho-js/css";
+        ${setup} export const cls=css(rule);`;
+      const built = transform(source);
+      const imports: Record<string, unknown> = {
+        "@mincho-js/css": {
+          css: (rule: { color: string }) => `class-${rule.color}`
+        }
+      };
+      const execute = (code: string) => {
+        const module = { exports: {} };
+        runInNewContext(
+          compileModule(code, { format: "cjs", target: "esnext" }).code,
+          {
+            module,
+            exports: module.exports,
+            require: (id: string) => imports[id]
+          }
+        );
+        return module.exports;
+      };
+      const expected = {
+        cls: "class-red",
+        ...(hasCopy ? { copy: "red" } : {})
+      };
+      expect(execute(source)).toEqual(expected);
+      imports[built.sidecarId] = execute(built.sidecar);
+      expect(execute(built.code)).toEqual(expected);
+    }
+  );
+
+  it.each([
+    'if (report()) { var rule = { color: "red" }; }',
+    'const rule = { color: "red", get other() { return report(); } }, copy = rule.other; export {copy};'
+  ])("does not defer an unproved initializer effect: %s", (setup) => {
+    expect(() =>
+      transform(`import {css} from "@mincho-js/css";
+      ${setup} export const cls=css(rule);`)
+    ).toThrow(/captures runtime binding rule/);
+  });
+
   it("does not treat an unrelated sibling call as the selected output", () => {
     expect(() =>
       transform(`import { css } from "@mincho-js/css";
