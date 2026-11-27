@@ -281,9 +281,25 @@ export function createSpreadAggregatedCssPropLowering(
     : lowering.attributes.filter((attribute) =>
         isNamedJsxAttribute(attribute, keyAttributeName)
       );
-  // These key values were already evaluated in their authored positions by
-  // the staged props bindings. The automatic JSX transform must not see an
-  // implementation-created spread before a key when the author used none.
+  // Keys were already evaluated in source order by the staging bindings.
+  // Keep the winning inert quoted token in JSX so each automatic host still
+  // applies its own whitespace rules. Expressions keep their staged reads.
+  const winningKey = keys.length
+    ? (normalizedElement.attributesAfterCss.findLast((attribute) =>
+        isNamedJsxAttribute(attribute, keyAttributeName)
+      ) ??
+      normalizedElement.attributesBeforeCss.findLast((attribute) =>
+        isNamedJsxAttribute(attribute, keyAttributeName)
+      ))
+    : undefined;
+  if (
+    keys.length &&
+    t.isJSXAttribute(winningKey) &&
+    t.isStringLiteral(winningKey.value)
+  )
+    keys[keys.length - 1] = t.cloneNode(winningKey);
+  // The automatic transform must not see a synthetic spread before a key
+  // when none of the earlier spreads were authored.
   const attributes = keys.length
     ? [
         ...keys,

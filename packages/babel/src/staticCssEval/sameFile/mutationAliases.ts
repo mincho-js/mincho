@@ -1454,7 +1454,7 @@ class ObjectReferences {
             !value.path.node.generator &&
             value.path
               .get("params")
-              .some((parameter) => parameter.isObjectPattern())
+              .some((parameter) => bindingPatternReadsSource(parameter.node))
           ) {
             // The receiver can be an ordinary local literal with no saved
             // frame, while the selected incoming argument carries one.

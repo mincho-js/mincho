@@ -2634,6 +2634,21 @@ describe("css prop alias mutation diagnostics", () => {
       "blue"
     ],
     [
+      "an unframed method observes its selected array-then-object parameter",
+      'let reads = 0; const input = rule => [{get label(){rule.color="blue"; if (++reads !== 1) throw Error("repeated getter");return 1;}, data:1}]; const reader = { read([{label}]){} }; reader.read(input(style));',
+      "blue"
+    ],
+    [
+      "an unframed method leaves an unselected array-then-object getter dormant",
+      'const input = rule => [{get label(){rule.color="blue";return 1;}, data:1}]; const reader = { read([{data}]){} }; reader.read(input(style));',
+      "red"
+    ],
+    [
+      "allocating the same unframed array-parameter method is not an invocation",
+      'const input = rule => [{get label(){rule.color="blue";return 1;}, data:1}]; const reader = { read([{label}]){} }; const dormant = reader.read;',
+      "red"
+    ],
+    [
       "selected object rest copies its actual enumerable getter once",
       'let reads = 0; const input = rule => ({get label(){rule.color="blue"; if (++reads !== 1) throw Error("repeated getter");return 1;}, data:1}); const reader = { read({...rest}){} }; reader.read(input(style));',
       "blue"

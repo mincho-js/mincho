@@ -189,7 +189,7 @@ export function removeUnusedExtractedImports(
       /^\.{1,2}\//.test(reference.source) &&
       !isProvablyUnexecuted(site)
     ) {
-      const position = statementPosition(site);
+      const position = eagerProgramStatementPosition(site);
       if (position !== undefined)
         selectedEsmUses.push({ source: reference.source, position });
     }
@@ -217,6 +217,19 @@ export function removeUnusedExtractedImports(
     const statement = path.getStatementParent();
     if (statement?.parentPath === program && typeof statement.key === "number")
       return statement.key;
+  };
+  const eagerProgramStatementPosition = (
+    site: NodePath
+  ): number | undefined => {
+    // An admitted eager demand belongs to its Program statement, not the
+    // nearest nested statement. Do not infer demand from a deferred body.
+    let item = site;
+    while (item.parentPath) {
+      if (item.isFunction() || item.isClass()) return;
+      if (item.parentPath === program)
+        return typeof item.key === "number" ? item.key : undefined;
+      item = item.parentPath;
+    }
   };
   let unknownRuntimeRequire = false;
   const liveOriginal: {

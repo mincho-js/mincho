@@ -165,6 +165,60 @@ describe("publication for a compound authored initializer", () => {
       expect(values[0]).toEqual({ color: "red" });
     }
   );
+  it.each(["direct", "immutable handoff"] as const)(
+    "returns the emitted class from a closed finalizer (%s)",
+    (mode) => {
+      const source =
+        'import {css} from "@mincho-js/css"; const trace=[];' +
+        'function render(){ trace.push("before"); try { var rule={color:"red"}; } finally {' +
+        (mode === "direct"
+          ? "return css(rule);"
+          : "const result=css(rule); return result;") +
+        "} } export const cls=render(); trace.push(cls); export {trace};";
+      const called: string[] = [];
+      const imports: Record<string, unknown> = {
+        "@mincho-js/css": {
+          css(rule: { color: string }) {
+            called.push(rule.color);
+            return "class-" + rule.color;
+          }
+        }
+      };
+      const execute = (input: string) => {
+        const module = { exports: {} };
+        runInNewContext(
+          compileModule(input, { format: "cjs", target: "esnext" }).code,
+          {
+            module,
+            exports: module.exports,
+            require: (id: string) => imports[id]
+          }
+        );
+        return module.exports;
+      };
+      const native = execute(source);
+      expect(native).toEqual({
+        cls: "class-red",
+        trace: ["before", "class-red"]
+      });
+      expect(called.splice(0)).toEqual(["red"]);
+      const emitted = transform(source);
+      imports[emitted.sidecarId] = execute(emitted.sidecar);
+      expect(called).toEqual(["red"]);
+      expect(execute(emitted.code)).toEqual(native);
+      expect(called).toEqual(["red"]);
+    }
+  );
+
+  it("still rejects a finalizer that performs other observable work", () => {
+    expect(() =>
+      transform(
+        'import {css} from "@mincho-js/css"; export function render(report) {' +
+          'try { var rule={color:"red"}; } finally { const result=css(rule); report(result); return result; } }'
+      )
+    ).toThrow(/captures runtime binding rule/);
+  });
+
   it.each([
     'const rule={color:"red"}, read=()=>shade;',
     'const read=()=>shade, rule={color:"red"};'

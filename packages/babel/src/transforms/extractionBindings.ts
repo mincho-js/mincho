@@ -298,16 +298,46 @@ function isGuaranteedFinallyInitializer(
   const finalizer = attempt.get("finalizer");
   // The try block contains no work before this closed initializer, so
   // finally cannot observe the hoisted var before it receives its value.
+  if (
+    attempt.node.handler ||
+    block.node.body.length !== 1 ||
+    block.node.body[0] !== declaration.node ||
+    !finalizer.isBlockStatement() ||
+    !consumer ||
+    consumer.node !== finalizer.node.body[0] ||
+    !isClosedOnlyCssBinding(declaration, use, binding, "var")
+  )
+    return false;
+  if (consumer.isReturnStatement())
+    return (
+      finalizer.node.body.length === 1 && consumer.node.argument === use.node
+    );
+
+  // Also allow exactly one immutable handoff of the CSS value to the
+  // immediately following return, not another observable finalizer action.
+  if (
+    !consumer.isVariableDeclaration({ kind: "const" }) ||
+    consumer.node.declarations.length !== 1 ||
+    finalizer.node.body.length !== 2
+  )
+    return false;
+  const result = consumer.get("declarations")[0];
+  const id = result?.get("id");
+  const returned = finalizer.get("body")[1];
+  if (
+    !result ||
+    !id?.isIdentifier() ||
+    result.node.init !== use.node ||
+    !returned?.isReturnStatement() ||
+    !t.isIdentifier(returned.node.argument, { name: id.node.name })
+  )
+    return false;
+  const carried = returned.scope.getBinding(id.node.name);
   return (
-    !attempt.node.handler &&
-    block.node.body.length === 1 &&
-    block.node.body[0] === declaration.node &&
-    finalizer.isBlockStatement() &&
-    finalizer.node.body.length === 1 &&
-    consumer?.isReturnStatement() === true &&
-    consumer.node === finalizer.node.body[0] &&
-    consumer.node.argument === use.node &&
-    isClosedOnlyCssBinding(declaration, use, binding, "var")
+    carried?.path === result &&
+    carried.constant &&
+    carried.referencePaths.length === 1 &&
+    carried.referencePaths[0]?.node === returned.node.argument
   );
 }
 

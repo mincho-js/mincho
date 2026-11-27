@@ -13,10 +13,14 @@ import {
   runJsxCssPropRuntime
 } from "./testUtils/plugin.js";
 
-const transpileRuntimeJsx = (source: string, format?: "cjs") =>
+const transpileRuntimeJsx = (
+  source: string,
+  format?: "cjs",
+  automatic = false
+) =>
   transformJsx(source, {
     loader: "tsx",
-    jsxFactory: "jsx",
+    ...(automatic ? { jsx: "automatic" } : { jsxFactory: "jsx" }),
     ...(format ? { format } : {})
   }).code;
 
@@ -98,6 +102,61 @@ describe("minchoBabelPlugin", () => {
         "data-path": "a\\b"
       });
       expect(emitted.trace).toEqual(authored.trace);
+    }
+  );
+
+  it.each([false, true])(
+    "keeps the winning quoted key in the automatic host (duplicate=%s)",
+    (duplicate) => {
+      const source = [
+        'const styleA = "style-a";',
+        "export function App() {",
+        '  return <div css={styleA} className="base" data-tail={mark("tail")} ' +
+          (duplicate ? 'key="old" ' : "") +
+          'key="A',
+        '  B &amp; C" />;',
+        "}"
+      ].join("\n");
+      const { code } = babelTransform(source, {
+        jsxCssProp: true,
+        optimize: { runtimeCodegen: false }
+      });
+      const run = (input: string) => {
+        const transpiled = transpileRuntimeJsx(input, "cjs", true);
+        expect(transpiled).toContain("react/jsx-runtime");
+        const module = {
+          exports: {} as {
+            App(): { key: string; props: Record<string, unknown> };
+          }
+        };
+        const trace: string[] = [];
+        new Function("module", "exports", "require", "mark", transpiled)(
+          module,
+          module.exports,
+          (specifier: string) => {
+            if (specifier === "@mincho-js/css/classname") return { cx };
+            expect(specifier).toBe("react/jsx-runtime");
+            return {
+              jsx(_tag: string, props: Record<string, unknown>, key: string) {
+                return { props, key };
+              }
+            };
+          },
+          (marker: string) => {
+            trace.push(marker);
+            return marker;
+          }
+        );
+        return { ...module.exports.App(), trace };
+      };
+      const native = run(source);
+      expect(native.key).toBe("A\n  B & C");
+      expect(run(code)).toEqual({
+        key: native.key,
+        props: { className: "base style-a", "data-tail": "tail" },
+        trace: native.trace
+      });
+      expect(native.trace).toEqual(["tail"]);
     }
   );
 
