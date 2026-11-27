@@ -134,8 +134,11 @@ export function minchoBabelPlugin(): PluginObj<PluginState> {
             optionalSites,
             hasConfiguredGeneratorOverride(state.file.opts)
               ? {
-                  sites: state.opts.stageEsmGeneratorImports
-                    ? (state.file.metadata.minchoOptionalEsmImports = [])
+                  cleanup: state.opts.stageEsmGeneratorImports
+                    ? (state.file.metadata.minchoOptionalEsmImports = {
+                        sites: [],
+                        requests: []
+                      })
                     : undefined
                 }
               : undefined
@@ -146,6 +149,16 @@ export function minchoBabelPlugin(): PluginObj<PluginState> {
             ...state.opts.optimize,
             bundleSize: state.opts.bundleSize
           });
+
+          const stagedEsm = state.file.metadata.minchoOptionalEsmImports;
+          if (stagedEsm?.sites.length)
+            for (const node of path.node.body)
+              if (
+                node.type === "ImportDeclaration" ||
+                node.type === "ExportNamedDeclaration" ||
+                node.type === "ExportAllDeclaration"
+              )
+                stagedEsm.requests.push(t.cloneNode(node));
 
           const start = started.get(state);
 

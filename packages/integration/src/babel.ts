@@ -298,7 +298,7 @@ async function reconcileEmittedEsmImports(
   code: string,
   filename: string,
   parserPlugins: NonNullable<TransformOptions["parserOpts"]>["plugins"],
-  sites: readonly t.ImportDeclaration[]
+  cleanup: NonNullable<MinchoBabelFileMetadata["minchoOptionalEsmImports"]>
 ): Promise<string> {
   let ast: t.File | null;
   try {
@@ -313,6 +313,59 @@ async function reconcileEmittedEsmImports(
     return code;
   }
   if (!ast) return code;
+  const requestKey = (node: t.Statement) => {
+    const importing = t.isImportDeclaration(node);
+    if (
+      !importing &&
+      !t.isExportNamedDeclaration(node) &&
+      !t.isExportAllDeclaration(node)
+    )
+      return;
+    if (
+      !node.source ||
+      (importing
+        ? node.importKind === "type" ||
+          node.importKind === "typeof" ||
+          (node.specifiers.length > 0 &&
+            node.specifiers.every(
+              (item) =>
+                t.isImportSpecifier(item) &&
+                (item.importKind === "type" || item.importKind === "typeof")
+            ))
+        : node.exportKind === "type" ||
+          (t.isExportNamedDeclaration(node) &&
+            node.specifiers.length > 0 &&
+            node.specifiers.every(
+              (item) => t.isExportSpecifier(item) && item.exportKind === "type"
+            )))
+    )
+      return;
+    return JSON.stringify([
+      node.source.value,
+      importing ? (node.phase ?? null) : null,
+      (node.attributes ?? node.assertions ?? [])
+        .map(({ key, value }) =>
+          JSON.stringify([
+            t.isIdentifier(key) ? key.name : key.value,
+            value.value
+          ])
+        )
+        .sort()
+    ]);
+  };
+  const orderedRequests = (body: readonly t.Statement[]) =>
+    body.map(requestKey).filter((key) => key !== undefined);
+  // The generator may add or move an actual static dependency which can
+  // reach this package. If startup order changed, preserve the first request
+  // rather than inferring the changed dependency's behavior from its name.
+  const staged = orderedRequests(cleanup.requests);
+  const emitted = orderedRequests(ast.program.body);
+  if (
+    staged.length !== emitted.length ||
+    staged.some((request, index) => request !== emitted[index])
+  )
+    return code;
+
   const comments = ast.comments ?? [];
   const ranges: { start: number; end: number }[] = [];
   traverse(ast, {
@@ -320,7 +373,7 @@ async function reconcileEmittedEsmImports(
       const imports = program
         .get("body")
         .filter((path) => path.isImportDeclaration());
-      for (const site of sites) {
+      for (const site of cleanup.sites) {
         const matches = imports.filter((path) =>
           t.isNodesEquivalent(path.node, site)
         );
@@ -355,7 +408,10 @@ async function reconcileEmittedEsmImports(
   for (const { start, end } of ranges.sort((a, b) => b.start - a.start))
     code =
       code.slice(0, start) +
-      code.slice(start, end).replace(/[^\r\n\u2028\u2029]/g, " ") +
+      // Keep the statement boundary as well as the generator's UTF-16 offsets:
+      // blanking alone could join an ASI-sensitive preceding expression.
+      ";" +
+      code.slice(start + 1, end).replace(/[^\r\n\u2028\u2029]/g, " ") +
       code.slice(end);
   return code;
 }
@@ -1481,7 +1537,7 @@ export async function transformSourceUncached(
     const esmSites = (
       transformed.metadata as MinchoBabelFileMetadata | undefined
     )?.minchoOptionalEsmImports;
-    if (!commonJsTransformed && esmSites?.length) {
+    if (!commonJsTransformed && esmSites?.sites.length) {
       const cleaned = await reconcileEmittedEsmImports(
         transformed.code,
         path,

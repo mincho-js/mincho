@@ -2395,6 +2395,131 @@ describe("babelTransformSource", () => {
     }
   );
 
+  it.each(["request", "unused", "asi", "terminated"] as const)(
+    "reconciles one configured generator's final static startup and statement boundary (%s)",
+    async (mode) => {
+      const root = await mkdtemp(join(tmpdir(), "mincho-esm-generator-final-"));
+      afterTest(() => rm(root, { recursive: true, force: true }));
+      const filename = join(root, "entry.mjs");
+      const importLine = 'import {css} from "@mincho-js/css";';
+      const exported = 'export const cls=css({color:"red"});';
+      const source = importLine + exported;
+      const addedRequest =
+        mode === "request" ? '\nimport "./observer.mjs";' : "";
+      const prefix =
+        mode === "asi"
+          ? "export const n = 1\n"
+          : mode === "terminated"
+            ? "export const n = 1;\n"
+            : "";
+      const after = prefix ? "\n[2].forEach(value => trace.push(value));" : "";
+      const native = prefix + importLine + after + exported + addedRequest;
+      await Promise.all([
+        writeFile(filename, source),
+        writeFile(join(root, "native.mjs"), native),
+        writeFile(
+          join(root, "package.json"),
+          JSON.stringify({
+            name: "@mincho-js/css",
+            type: "module",
+            exports: "./css.mjs"
+          })
+        ),
+        writeFile(
+          join(root, "css.mjs"),
+          'trace.push("css-package");export const css=rule=>"class-"+rule.color;'
+        ),
+        writeFile(
+          join(root, "reader.mjs"),
+          'trace.push("reader:"+trace.includes("css-package"));'
+        ),
+        writeFile(
+          join(root, "observer.mjs"),
+          'import "./reader.mjs"; import "@mincho-js/css"; trace.push("observer");'
+        )
+      ]);
+      let generated: string | undefined;
+      const override = (
+        ast: t.File,
+        options: unknown,
+        input: string,
+        generate: (
+          ast: t.File,
+          options: unknown,
+          input: string
+        ) => { code: string }
+      ) => {
+        const output = generate(ast, options, input);
+        const site =
+          /(^import\s*\{\s*css\s*\}\s*from\s*["']@mincho-js\/css["'];?$)/m;
+        expect(output.code).toMatch(site);
+        generated =
+          output.code.replace(site, (match) => prefix + match + after) +
+          addedRequest;
+        return { ...output, code: generated };
+      };
+      const generator = vi.fn(override);
+      const result = await babelTransformSource({
+        root,
+        filename,
+        source,
+        sourceMaps: true,
+        babel: {
+          configFile: false,
+          babelrc: false,
+          optimize: { runtimeCodegen: false },
+          plugins: [() => ({ generatorOverride: generator, visitor: {} })]
+        }
+      });
+      expect(generator).toHaveBeenCalledOnce();
+      expect(result.map?.sourcesContent).toEqual([source]);
+      expect(result.code.length).toBe(generated?.length);
+      expect(result.result[1]).toContain('color: "red"');
+      const emitted = [
+        ...result.result[1].matchAll(/export\s+var\s+([\w$]+)/g)
+      ];
+      expect(emitted).toHaveLength(1);
+      await writeFile(
+        join(root, "sidecar.mjs"),
+        `export const ${emitted[0]![1]}="class-red";`
+      );
+      await writeFile(
+        filename,
+        result.code.replace(result.result[0], "./sidecar.mjs")
+      );
+      const run = (file: string) =>
+        JSON.parse(
+          execFileSync(
+            process.execPath,
+            [
+              "--input-type=module",
+              "-e",
+              `globalThis.trace=[];const m=await import("./${file}");console.log(JSON.stringify({trace,cls:m.cls,n:m.n}));`
+            ],
+            {
+              cwd: root,
+              env: { ...process.env, NODE_OPTIONS: "" },
+              encoding: "utf8"
+            }
+          )
+        );
+      const original = run("native.mjs");
+      if (mode === "request") {
+        expect(run("entry.mjs")).toEqual(original);
+        expect(original).toEqual({
+          cls: "class-red",
+          trace: ["css-package", "reader:true", "observer"]
+        });
+      } else {
+        expect(result.code).not.toContain('from "@mincho-js/css"');
+        expect(run("entry.mjs")).toEqual({
+          ...original,
+          trace: original.trace.filter((item: string) => item !== "css-package")
+        });
+      }
+    }
+  );
+
   it.each(["unused", "direct", "early", "block", "dead", "deferred"] as const)(
     "keeps initialization before a selected earlier ESM loader (%s)",
     async (mode) => {

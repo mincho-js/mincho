@@ -47,7 +47,7 @@ export function removeUnusedExtractedImports(
   program: NodePath<t.Program>,
   originalModuleRequests?: OriginalModuleRequests,
   optionalSites?: MinchoBabelFileMetadata["minchoOptionalCommonJsSites"],
-  generator?: { sites?: MinchoBabelFileMetadata["minchoOptionalEsmImports"] }
+  generator?: { cleanup?: MinchoBabelFileMetadata["minchoOptionalEsmImports"] }
 ): void {
   const data = (program.scope as ProgramScope).minchoData;
   if (!data || hasDynamicScope(program)) return;
@@ -695,7 +695,7 @@ export function removeUnusedExtractedImports(
     ) {
       if (!generator) path.remove();
       else if (node.specifiers.length > 0)
-        generator.sites?.push(t.cloneNode(node));
+        generator.cleanup?.sites.push(t.cloneNode(node));
       return;
     }
     if (emptied.has(node) ? isValue : carriesRuntimeRequest(node))

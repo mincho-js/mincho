@@ -96,7 +96,12 @@ export interface MinchoBabelFileMetadata {
     source: string;
     later: { node: t.CallExpression; source: string }[];
   }[];
-  minchoOptionalEsmImports?: t.ImportDeclaration[];
+  minchoOptionalEsmImports?: {
+    sites: t.ImportDeclaration[];
+    requests: (
+      t.ImportDeclaration | t.ExportNamedDeclaration | t.ExportAllDeclaration
+    )[];
+  };
   minchoCompilation?: MinchoCompilationMetadata;
   minchoStaticCssEval?: MinchoStaticCssEvalMetadata;
   minchoDefineRulesCxConditions?: DefineRulesCxConditionsMetadata;

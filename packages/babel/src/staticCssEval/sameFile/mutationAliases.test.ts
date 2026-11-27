@@ -2921,6 +2921,70 @@ describe("css prop alias mutation diagnostics", () => {
     }
   );
 
+  it.each([
+    [
+      "constructor getter",
+      "function Box({chosen}) {} new Box(prepare(style));",
+      true
+    ],
+    [
+      "constructor data",
+      "function Box({data}) {} new Box(prepare(style));",
+      false
+    ],
+    [
+      "constructor dormant",
+      "function Box({chosen}) {} const input=prepare(style);",
+      false
+    ],
+    [
+      "returned default",
+      "const maker=()=>({chosen}=prepare(style))=>{}; maker()();",
+      true
+    ],
+    [
+      "returned undefined default",
+      "const maker=()=>({chosen}=prepare(style))=>{}; maker()(undefined);",
+      true
+    ],
+    [
+      "returned defined input",
+      "const maker=()=>({chosen}=prepare(style))=>{}; maker()({chosen:2});",
+      false
+    ],
+    [
+      "live stored conversion",
+      "const box={valueOf(){return 0;}}; box*(box.valueOf=convert(style),2);",
+      true
+    ],
+    [
+      "late stored conversion",
+      "const box={valueOf(){return 0;}}; box*2; box.valueOf=convert(style);",
+      false
+    ]
+  ] as const)(
+    "observes the reached ordered argument or conversion delivery: %s",
+    (_name, operation, changed) => {
+      const source = `
+        const style={color:"red"};
+        const prepare=rule=>({get chosen(){rule.color="blue";return 1;},data:2});
+        const convert=rule=>()=>{rule.color="blue";return 1;};
+        ${operation}
+      `;
+      expect(runInNewContext(source + ";style.color")).toBe(
+        changed ? "blue" : "red"
+      );
+      const { run, options } = cssTransform(source, "same-file");
+      if (changed) {
+        expect(run).toThrow(/binding "style".*mutated/);
+        expect(options.result[1]).toBe("");
+      } else {
+        expect(run()?.code).toContain("className");
+        expect(options.result[1]).toMatch(/"?color"?:\s*["']red["']/);
+      }
+    }
+  );
+
   it("does not compile untrusted shared factory results as static rules", () => {
     const { run, options } = cssTransform(
       "const style = factory(); const alias = factory(); alias.color = 'blue';",

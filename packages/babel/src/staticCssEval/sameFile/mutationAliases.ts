@@ -141,6 +141,7 @@ interface ObjectReference {
 type InvocationArgument = {
   origins: ObjectReference[];
   definitelyDefined: boolean;
+  definitelyUndefined?: boolean;
   source?: NodePath<t.Node>;
 };
 type InvocationArguments = readonly InvocationArgument[];
@@ -585,6 +586,7 @@ class ObjectReferences {
       return {
         origins: this.resolve(argument, seen),
         source: argument,
+        definitelyUndefined: scalar !== undefined && scalar.value === undefined,
         definitelyDefined: scalar
           ? scalar.value !== undefined
           : argument.isObjectExpression() ||
@@ -631,6 +633,23 @@ class ObjectReferences {
       }
     }
     return skippedDefaults;
+  }
+
+  selectedParameterDelivery(
+    parameter: NodePath<t.Node>,
+    incoming: InvocationArgument | undefined
+  ): { pattern: NodePath<t.Node>; origins: ObjectReference[] } {
+    if (!parameter.isAssignmentPattern())
+      return { pattern: parameter, origins: incoming?.origins ?? [] };
+    return {
+      pattern: parameter.get("left"),
+      // The caller's argument has already been evaluated. An omitted or
+      // proved undefined value selects the default in the active callee frame.
+      origins:
+        !incoming || incoming.definitelyUndefined
+          ? this.resolve(parameter.get("right"))
+          : incoming.origins
+    };
   }
 
   private observedInvocation(
@@ -890,7 +909,26 @@ class ObjectReferences {
     )
       return;
     const args = this.observedInvocation(call);
-    if (args) inspect(fn, args);
+    if (!args) return;
+    const evaluatesDefault = fn.get("params").some((parameter, index) => {
+      const incoming = args[index];
+      return (
+        parameter.isAssignmentPattern() &&
+        bindingPatternReadsSource(parameter.node) &&
+        (!incoming || incoming.definitelyUndefined)
+      );
+    });
+    if (!evaluatesDefault) {
+      inspect(fn, args);
+      return;
+    }
+    const previous = this.parameterOrigins;
+    try {
+      this.bindInvocationParameters(fn, args);
+      inspect(fn, args);
+    } finally {
+      this.parameterOrigins = previous;
+    }
   }
 
   inspectCapturedCall(
@@ -3589,7 +3627,7 @@ function analyzeAliasedMutationUnchecked(
       } else if (
         live &&
         sourceRuleTargets.size > 0 &&
-        path.isCallExpression()
+        (path.isCallExpression() || path.isNewExpression())
       ) {
         references.observeDirectParameterDelivery(
           callee,
@@ -3772,7 +3810,9 @@ function analyzeAliasedMutationUnchecked(
     const conversionAfter = selectedConversion?.valueConversion?.after;
     if (
       conversionAfter &&
-      (operand.isMemberExpression() || !path.isBinaryExpression()) &&
+      (operand.isMemberExpression() ||
+        operand.isIdentifier() ||
+        !path.isBinaryExpression()) &&
       !isProvablyUnexecuted(path)
     ) {
       // Save the selected GetValue at operand time; the same object may
@@ -4219,13 +4259,12 @@ function analyzeAliasedMutationUnchecked(
       ? parameters
       : []
     ).entries()) {
-      const incoming = argumentsInCaller[index];
-      if (!incoming?.origins.length) continue;
-      const pattern =
-        parameter.isAssignmentPattern() && incoming.definitelyDefined
-          ? parameter.get("left")
-          : parameter;
-      inspectParameter(pattern, incoming.origins);
+      if (!bindingPatternReadsSource(parameter.node)) continue;
+      const { pattern, origins } = references.selectedParameterDelivery(
+        parameter,
+        argumentsInCaller[index]
+      );
+      if (origins.length) inspectParameter(pattern, origins);
     }
   }
 
