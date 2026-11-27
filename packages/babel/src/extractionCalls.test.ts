@@ -2736,6 +2736,40 @@ describe("local extractCalls implementations", () => {
     ).toThrow(/Cannot statically identify a function implementation/);
   });
 
+  it("parses a plain TypeScript child under a restricted .mts owner", () => {
+    const child = 'export const make = () => <string>"class";';
+    const source =
+      'import { make } from "./factory.ts"; export const label = make();';
+    const { root } = fixture({ "app.mts": source, "factory.ts": child });
+    const options: PluginOptions = {
+      result: ["", ""],
+      extractCalls: { "./factory.ts": ["make"] },
+      optimize: { pureFunctions: false }
+    };
+    const transform = (input: string) =>
+      transformSync(input, {
+        filename: join(root, "app.mts"),
+        root,
+        babelrc: false,
+        configFile: false,
+        parserOpts: {
+          plugins: [["typescript", { disallowAmbiguousJSXLike: true }]]
+        },
+        plugins: [[minchoBabelPlugin(), options], [styledComponentPlugin()]]
+      });
+    expect(() => transform(child)).toThrow("reserved in files with the .mts");
+    const transformed = transform(source);
+    const modules = { "./factory.ts": { make: () => "class" } };
+    expect(transformed?.code).not.toContain("make()");
+    expect(options.result[1]).toContain("make()");
+    expect(
+      executeModule(transformed!.code!, {
+        ...modules,
+        [options.result[0]]: executeModule(options.result[1], modules)
+      }).label
+    ).toBe("class");
+  });
+
   it("forwards configured parser plugins to registered dependencies", () => {
     const source =
       'import { make } from "./factory.ts"; export const value = make({ color: "red" });';

@@ -38,22 +38,44 @@ function seedArtifacts(engine: MinchoProjectEngine) {
 
 describe("babelTransformSource", () => {
   it.each([
-    [false, false],
-    [false, true],
-    [true, false],
-    [true, true]
+    [false, "coercion", false],
+    [false, "coercion", true],
+    [true, "coercion", false],
+    [true, "coercion", true],
+    [false, "tag", false],
+    [false, "tag", true],
+    [false, "iteration", false],
+    [false, "iteration", true]
   ] as const)(
-    "preserves initialization before consumed CommonJS (staged=%s, used=%s)",
-    async (staged, used) => {
+    "preserves initialization before consumed CommonJS (staged=%s, operation=%s, used=%s)",
+    async (staged, operation, used) => {
       const root = await mkdtemp(join(tmpdir(), "mincho-native-cjs-coercion-"));
       afterTest(() => rm(root, { recursive: true, force: true }));
       const filename = join(root, "entry.cjs");
+      const consumption =
+        operation === "coercion"
+          ? 'exports.observed = "" + operand;'
+          : operation === "tag"
+            ? "exports.observed = operand`check`;"
+            : "for (const value of operand) exports.observed = value;";
       const source = `
         const operand = require("./operand.cjs");
         const {css} = require("@mincho-js/css");
         exports.className = css({color: "red"});
-        exports.observed = ${used ? '"" + operand' : '"untouched"'};
+        ${used ? consumption : 'exports.observed = "untouched";'}
       `;
+      const read = `
+        globalThis.trace.push(${JSON.stringify(operation === "coercion" ? "coerce" : operation)});
+        const initialized = globalThis.trace.includes("css-package");
+        require("@mincho-js/css");
+        return initialized;
+      `;
+      const operand =
+        operation === "coercion"
+          ? `{ [Symbol.toPrimitive]() { ${read} } }`
+          : operation === "tag"
+            ? `function () { ${read} }`
+            : `{ *[Symbol.iterator]() { yield (() => { ${read} })(); } }`;
       await Promise.all([
         writeFile(
           join(root, "package.json"),
@@ -69,15 +91,7 @@ describe("babelTransformSource", () => {
         ),
         writeFile(
           join(root, "operand.cjs"),
-          `
-          globalThis.trace.push("load");
-          module.exports = { [Symbol.toPrimitive]() {
-            globalThis.trace.push("coerce");
-            const initialized = globalThis.trace.includes("css-package");
-            require("@mincho-js/css");
-            return initialized;
-          } };
-        `
+          `globalThis.trace.push("load"); module.exports = ${operand};`
         ),
         writeFile(join(root, "native.cjs"), source),
         writeFile(filename, source)
@@ -139,15 +153,19 @@ describe("babelTransformSource", () => {
               env: { ...process.env, NODE_OPTIONS: "" }
             }
           )
-        ) as { trace: string[]; className: string; observed: string };
+        ) as { trace: string[]; className: string; observed: string | boolean };
       const actual = run("./entry.cjs");
       const original = run("./native.cjs");
       expect(actual).toEqual(
         used
           ? {
-              trace: ["load", "css-package", "coerce"],
+              trace: [
+                "load",
+                "css-package",
+                operation === "coercion" ? "coerce" : operation
+              ],
               className: "class-red",
-              observed: "true"
+              observed: operation === "coercion" ? "true" : true
             }
           : { trace: ["load"], className: "class-red", observed: "untouched" }
       );

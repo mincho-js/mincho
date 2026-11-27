@@ -130,6 +130,7 @@ export type EvaluationStep =
   | {
       kind: "observe";
       path: NodePath<t.Node>;
+      invocation?: { callee: NodePath<t.Node> };
       sourceDelivery?: {
         after: NodePath<t.Expression>;
         kind: "sync-iterator" | "async-iterator" | "binding-pattern";
@@ -316,6 +317,21 @@ export function storedValueConversionSteps(
     path: value,
     valueConversion: { after: right, hint }
   }));
+}
+
+/** The selected callable is evaluated before its arguments or substitutions. */
+export function invocationStep(
+  path: NodePath<t.Node>
+): Extract<EvaluationStep, { kind: "observe" }> | undefined {
+  const callee = path.isTaggedTemplateExpression()
+    ? path.get("tag")
+    : path.isCallExpression() ||
+        path.isOptionalCallExpression() ||
+        path.isNewExpression()
+      ? path.get("callee")
+      : undefined;
+  if (callee && !Array.isArray(callee) && callee.node)
+    return { kind: "observe", path, invocation: { callee } };
 }
 
 export function patternObservesDelivery(pattern: t.Node): boolean {
@@ -849,7 +865,10 @@ export function planEvaluation(
   plan.steps = steps ?? plan.operands.map(evaluate);
   if (!steps && (plan.operation === "observation" || plan.operation === "call"))
     plan.steps.push(
-      sourceDeliveryStep(path) ?? objectSpreadStep(path) ?? observe()
+      sourceDeliveryStep(path) ??
+        objectSpreadStep(path) ??
+        invocationStep(path) ??
+        observe()
     );
   context.plans.set(path, plan);
   return plan;

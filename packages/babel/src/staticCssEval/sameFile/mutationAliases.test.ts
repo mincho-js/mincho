@@ -1224,6 +1224,37 @@ describe("css prop alias mutation diagnostics", () => {
     });
   });
 
+  it.each([
+    ["selected", "h.paint()", "style", "blue", ["paint"]],
+    ["dormant", "void h", "style", "red", []],
+    ["unrelated", "h.paint()", "{}", "red", ["paint"]]
+  ] as const)(
+    "uses the active frame for a %s function-local own method",
+    (_kind, call, input, color, trace) => {
+      const source = `
+        const style = { color: "red" };
+        const trace = [];
+        const make = rule => () => {
+          const h = { paint() { trace.push("paint"); rule.color = "blue"; } };
+          ${call};
+        };
+        make(${input})();
+      `;
+      expect(runInNewContext(`${source} [style.color, trace];`)).toEqual([
+        color,
+        [...trace]
+      ]);
+      const { run, options } = cssTransform(source, "same-file");
+      if (color === "blue") {
+        expect(run).toThrow(/same-file binding "style".*mutated/);
+        expect(options.result[1]).toBe("");
+      } else {
+        expect(run()?.code).toContain("className");
+        expect(options.result[1]).toMatch(/"?color"?:\s*["']red["']/);
+      }
+    }
+  );
+
   describe("ordered consumption of captured style values", () => {
     const callback =
       'const make = rule => () => { trace.push("call"); rule.color = "blue"; };';

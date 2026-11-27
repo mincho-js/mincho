@@ -11,6 +11,7 @@ import { hasDynamicScope } from "./dynamicScope.js";
 import { closedRuntimeString } from "./runtimeSourceReference.js";
 import { builtInExtractionCalls } from "../extractionCalls/builtins.js";
 import {
+  invocationStep,
   isProvablyUnexecuted,
   planEvaluation
 } from "../extractionCalls/evaluation.js";
@@ -197,25 +198,40 @@ export function removeUnusedExtractedImports(
     enter(path) {
       if (removed.has(path.node)) path.skip();
     },
-    "CallExpression|OptionalCallExpression|NewExpression"(path) {
+    "CallExpression|OptionalCallExpression|NewExpression|TaggedTemplateExpression"(
+      path
+    ) {
       if (
-        !path.isCallExpression() &&
-        !path.isOptionalCallExpression() &&
-        (optionalSites || !path.isNewExpression())
+        optionalSites &&
+        (path.isNewExpression() || path.isTaggedTemplateExpression())
       )
         return;
-      const call: NodePath<
-        t.CallExpression | t.OptionalCallExpression | t.NewExpression
-      > = path;
-      liveImportedUse(call.get("callee"), "call", path);
+      const target = invocationStep(path)?.invocation?.callee;
+      if (target)
+        // A tag can be a callable CommonJS namespace. This demand only
+        // preserves an authored load; extraction need not trust its shape.
+        liveImportedUse(
+          target,
+          path.isTaggedTemplateExpression() ? "access" : "call",
+          path
+        );
     },
-    BinaryExpression(path) {
-      if (path.node.operator !== "+") return;
-      // Both output modes run this live ToPrimitive operation. Attribute
-      // only its selected operands to the same earlier authored load/order
-      // evidence used for native CommonJS, not any unrelated child load.
-      for (const step of planEvaluation(path).steps)
+    "BinaryExpression|ForOfStatement"(path) {
+      // Staged CommonJS has its own host-demand policy. Keep the existing
+      // coercion case there; native CommonJS also observes an iterator
+      // delivery at the consuming statement, not at the earlier load.
+      if (
+        path.isBinaryExpression() ? path.node.operator !== "+" : optionalSites
+      )
+        return;
+      for (const step of planEvaluation(path).steps) {
         if (step.kind === "coerce") liveImportedUse(step.path, "access", path);
+        else if (
+          step.kind === "observe" &&
+          step.sourceDelivery?.kind === "sync-iterator"
+        )
+          liveImportedUse(step.sourceDelivery.after, "access", path);
+      }
     },
     "MemberExpression|OptionalMemberExpression"(path) {
       // Observable child accessors require native CommonJS order. The staged

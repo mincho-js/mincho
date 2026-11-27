@@ -3429,7 +3429,12 @@ function analyzeAliasedMutationUnchecked(
       (readOnly ??= options.isReadOnlyCall?.(path) ?? false);
     let receiver = false;
     if (callee.isMemberExpression() || callee.isOptionalMemberExpression()) {
-      const origins = references.resolve(child(callee, "object"));
+      // Dispatch the selected own method in the frame of the receiver's
+      // allocation, not in an unframed replay of the callee expression.
+      const origins = observedOperandOrigins(
+        child(callee, "object"),
+        activeOrigin
+      );
       const name = selectedMemberName(callee);
       const constructing = path.isNewExpression();
       references.inspectReturnedMember(

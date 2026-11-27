@@ -1009,6 +1009,29 @@ export function* analyzeExtractCalls(
   options: ExtractCallsAnalysisOptions
 ): ExtractCallsAnalysis {
   const root = canonicalExtractCallsFile(options.root);
+  const parseDependencyProgram = (
+    id: string,
+    source: string,
+    jsx?: boolean
+  ) => {
+    // The owner can have a file-specific .mts/.cts ambiguity restriction.
+    // A plain TypeScript dependency keeps its own dialect while retaining
+    // shared parser options (for example, decorators).
+    const parserPlugins =
+      /\.[cm]ts$/i.test(options.filename) && /\.tsx?$/i.test(id)
+        ? options.parserPlugins?.map((entry) =>
+            Array.isArray(entry) &&
+            entry[0] === "typescript" &&
+            entry[1]?.disallowAmbiguousJSXLike
+              ? ([
+                  entry[0],
+                  { ...entry[1], disallowAmbiguousJSXLike: false }
+                ] as typeof entry)
+              : entry
+          )
+        : options.parserPlugins;
+    return parseProgram(id, source, jsx, options.parserCache, parserPlugins);
+  };
   const {
     dependencies,
     combinedIntrinsicSnapshot,
@@ -1023,8 +1046,7 @@ export function* analyzeExtractCalls(
       if (module.id === options.filename)
         registrationBindings?.add(binding.identifier.name);
     },
-    parse: (id, source, jsx) =>
-      parseProgram(id, source, jsx, options.parserCache, options.parserPlugins)
+    parse: parseDependencyProgram
   });
   // Consumer origins describe the values that run after host transforms.
   // Registered implementations and sidecar dependencies retain the authoring
@@ -1033,13 +1055,7 @@ export function* analyzeExtractCalls(
     loadPurpose: "consumer-runtime",
     isExternal: (id) => isExternal(id.split(/[?#]/, 1)[0]!),
     parse: (id, source, jsx) =>
-      parseProgram(
-        id.split(/[?#]/, 1)[0]!,
-        source,
-        jsx,
-        options.parserCache,
-        options.parserPlugins
-      )
+      parseDependencyProgram(id.split(/[?#]/, 1)[0]!, source, jsx)
   });
 
   const protectedFunctions = new Map<
