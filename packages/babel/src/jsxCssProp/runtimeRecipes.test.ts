@@ -6612,6 +6612,46 @@ describe("configured JSX callable values", () => {
     }
   );
 
+  it.each(["Error", "Local"])(
+    "keeps the authored function's observable name with a valid compiled recipe (%s)",
+    (name) => {
+      const button = rules({ variants: { tone: { loud: { padding: 12 } } } });
+      const source =
+        'import {button} from "./styles.css.js";' +
+        "export const Box = ({tone}) => { function " +
+        name +
+        "() {}" +
+        "return <button css={button({tone})} data-name={" +
+        name +
+        ".name} />; };";
+      const { code, result } = babelTransform(source, {
+        jsxCssProp,
+        optimize: { pureFunctions: false }
+      });
+      const modules = {
+        "@mincho-js/css": { mincho$ },
+        "@mincho-js/css/classname": { cx },
+        "./styles.css.js": { button }
+      };
+      const typeofBox = (entry: Record<string, unknown>) =>
+        entry.Box as (p: { tone: string }) => {
+          props: Record<string, unknown>;
+        };
+      const native = typeofBox(executeModule(source, modules))({
+        tone: "loud"
+      }).props;
+      const sidecar = executeModule(result[1], modules);
+      const compiled = typeofBox(
+        executeModule(code, { ...modules, [result[0]]: sidecar })
+      )({ tone: "loud" }).props;
+      expect(native["data-name"]).toContain(name);
+      expect(compiled).toMatchObject({
+        "data-name": native["data-name"],
+        className: button({ tone: "loud" })
+      });
+    }
+  );
+
   it("does not rename a shadowed guard intrinsic across dynamic scope", () => {
     expect(() =>
       babelTransform(

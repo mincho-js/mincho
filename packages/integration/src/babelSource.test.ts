@@ -2395,16 +2395,19 @@ describe("babelTransformSource", () => {
     }
   );
 
-  it.each(["unused", "direct", "block", "dead", "deferred"] as const)(
+  it.each(["unused", "direct", "early", "block", "dead", "deferred"] as const)(
     "keeps initialization before a selected earlier ESM loader (%s)",
     async (mode) => {
       const root = await mkdtemp(join(tmpdir(), "mincho-esm-startup-"));
       afterTest(() => rm(root, { recursive: true, force: true }));
       const source =
-        'import {observe} from "./observer.mjs"; import {css} from "@mincho-js/css"; export const cls=css({color:"red"});' +
+        'import {observe} from "./observer.mjs";' +
+        (mode === "early" ? "export const pending = observe();" : "") +
+        'import {css} from "@mincho-js/css"; export const cls=css({color:"red"});' +
         {
           unused: "",
           direct: "export const pending = observe();",
+          early: "",
           block: "export let pending; if (true) { pending = observe(); }",
           dead: "export let pending; if (false) { pending = observe(); }",
           deferred: "export function runLater() { return observe(); }"
@@ -2470,7 +2473,7 @@ describe("babelTransformSource", () => {
           )
         );
       const actual = run("entry.mjs");
-      if (mode === "direct" || mode === "block") {
+      if (mode === "direct" || mode === "early" || mode === "block") {
         expect(actual).toEqual(run("native.mjs"));
         expect(actual).toEqual({
           trace: ["load", "css-package", "observe"],

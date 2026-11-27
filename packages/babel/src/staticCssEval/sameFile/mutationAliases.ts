@@ -14,7 +14,7 @@ import {
   objectSpreadStep,
   patternObservesDelivery,
   bindingPatternReadsSource,
-  storedValueConversionSteps,
+  orderedValueConversionSteps,
   propertyKeyStep,
   planEvaluation
 } from "../../extractionCalls/evaluation.js";
@@ -869,6 +869,30 @@ class ObjectReferences {
     return inspected;
   }
 
+  observeDirectParameterDelivery(
+    callee: NodePath<t.Node>,
+    call: NodePath<
+      t.CallExpression | t.OptionalCallExpression | t.NewExpression
+    >,
+    inspect: (fn: NodePath<t.Function>, args: InvocationArguments) => void
+  ) {
+    if (!callee.isIdentifier() || crossesWithEnvironment(callee)) return;
+    const fn = this.localCallable(callee, new Set());
+    // An ordinary named declaration has a stable, initialized function
+    // value here. Other direct callees use their existing origin proof.
+    if (
+      !fn?.isFunctionDeclaration() ||
+      fn.node.async ||
+      fn.node.generator ||
+      !fn
+        .get("params")
+        .some((parameter) => bindingPatternReadsSource(parameter.node))
+    )
+      return;
+    const args = this.observedInvocation(call);
+    if (args) inspect(fn, args);
+  }
+
   inspectCapturedCall(
     origin: ObjectReference,
     path: NodePath<
@@ -1173,27 +1197,51 @@ class ObjectReferences {
               unresolved([callable]);
               continue;
             }
-            this.inspectObservedCallable(
-              callable,
-              origin,
-              iterator
-                ? (fn, frame, skippedDefaults) => {
-                    inspect(fn, frame, skippedDefaults);
-                    // The spread also consumes the returned iterator. Its
-                    // protocol body is not proved by a safe factory call.
-                    // Keep only an unresolved effect linked to a captured
-                    // source rule through the actual returned value.
-                    unresolved(
-                      this.returnedValues(fn, new Set([fn.node])).map(
-                        (value) =>
-                          value.parameterFrame ? value : { ...frame, ...value }
-                      )
-                    );
-                  }
-                : inspect,
-              iterator ? [] : [{ origins: [], definitelyDefined: true }],
-              unresolved
-            );
+            const inspectHook: ReturnedEffectInspector = iterator
+              ? (fn, frame, skippedDefaults) => {
+                  inspect(fn, frame, skippedDefaults);
+                  // Delivery also consumes the returned iterator, not just
+                  // its factory. Unproved effects still need a relevant origin.
+                  unresolved(
+                    this.returnedValues(fn, new Set([fn.node])).map((value) =>
+                      value.parameterFrame ? value : { ...frame, ...value }
+                    )
+                  );
+                }
+              : inspect;
+            if (
+              iterator &&
+              !callable.parameterFrame &&
+              callable.path.isFunction()
+            ) {
+              if (
+                hook === "iterator" &&
+                (kind === "method" ||
+                  data?.isArrowFunctionExpression() ||
+                  data?.isFunctionExpression()) &&
+                !callable.path.node.async &&
+                authored === property &&
+                !openOwnSlot &&
+                this.freshOwnHookReceiver(origin, operand, symbol)
+              )
+                this.inspectReturnedEffect(
+                  origin,
+                  callable.path,
+                  inspectHook,
+                  !callable.path.isArrowFunctionExpression(),
+                  [],
+                  unresolved
+                );
+              else unresolved([origin, callable]);
+            } else {
+              this.inspectObservedCallable(
+                callable,
+                origin,
+                inspectHook,
+                iterator ? [] : [{ origins: [], definitelyDefined: true }],
+                unresolved
+              );
+            }
           }
         });
         if (iterator) {
@@ -3334,9 +3382,8 @@ function analyzeAliasedMutationUnchecked(
           continue;
         if (
           beforeRight &&
-          consumption.parentPath?.parentPath === consumer &&
-          consumer?.isExpressionStatement() &&
-          consumer.parentPath === program &&
+          store.getFunctionParent() === activation &&
+          (oneShotRead ??= isOneShotRead()) &&
           (store.node === beforeRight.node ||
             store.findParent((parent) => parent.node === beforeRight.node))
         )
@@ -3458,13 +3505,18 @@ function analyzeAliasedMutationUnchecked(
     >,
     activeOrigin?: ObjectReference
   ) => {
-    if (isKnownReadOnlyCall(path) || references.isEffectFreeLocalCall(path))
+    if (
+      (path.isOptionalCallExpression() &&
+        evaluation.plan(path).unexecutedBranches) ||
+      isKnownReadOnlyCall(path) ||
+      references.isEffectFreeLocalCall(path)
+    )
       return;
 
     const callee = child(path, "callee");
     const unresolved = (values: ObjectReference[]) =>
       observeUnresolved(path, values);
-    const live = !isProvablyUnexecuted(path);
+    const live = !evaluation.isUnexecuted(path);
     let readOnly: boolean | undefined;
     const isReadOnly = () =>
       (readOnly ??= options.isReadOnlyCall?.(path) ?? false);
@@ -3525,15 +3577,26 @@ function analyzeAliasedMutationUnchecked(
         path,
         unresolved,
         evaluation
-      ) &&
-      activeOrigin
+      )
     ) {
-      references.inspectCapturedCall(
-        activeOrigin,
-        path,
-        checkReturnedEffectBody,
-        unresolved
-      );
+      if (activeOrigin) {
+        references.inspectCapturedCall(
+          activeOrigin,
+          path,
+          checkReturnedEffectBody,
+          unresolved
+        );
+      } else if (
+        live &&
+        sourceRuleTargets.size > 0 &&
+        path.isCallExpression()
+      ) {
+        references.observeDirectParameterDelivery(
+          callee,
+          path,
+          inspectInvocationParameterReads
+        );
+      }
     }
     if (mutated) return path.stop();
 
@@ -3616,7 +3679,7 @@ function analyzeAliasedMutationUnchecked(
     key: ReturnType<typeof propertyKeyStep>;
     delivery: Extract<EvaluationStep, { kind: "observe" }>["sourceDelivery"];
     copy: Extract<EvaluationStep, { kind: "observe" }>["copyMembers"];
-    conversions: ReturnType<typeof storedValueConversionSteps>;
+    conversions: ReturnType<typeof orderedValueConversionSteps>;
   };
   const afterValue = new WeakMap<
     NodePath<t.Node>,
@@ -3628,7 +3691,7 @@ function analyzeAliasedMutationUnchecked(
       const key = propertyKeyStep(path);
       const delivery = sourceDeliveryStep(path)?.sourceDelivery;
       const copy = objectSpreadStep(path)?.copyMembers;
-      const conversions = storedValueConversionSteps(path);
+      const conversions = orderedValueConversionSteps(path);
       operations =
         key || delivery || copy || conversions
           ? { key, delivery, copy, conversions }
@@ -3688,7 +3751,10 @@ function analyzeAliasedMutationUnchecked(
     }
   };
 
-  type OperandReceipts = WeakMap<t.Node, ObjectReference[]>;
+  type OperandReceipts = WeakMap<
+    t.Node,
+    { values: ObjectReference[]; hasStoredMember: boolean }
+  >;
   const observeAfterOperand = (
     operand: NodePath<t.Node>,
     receipts: OperandReceipts,
@@ -3700,16 +3766,19 @@ function analyzeAliasedMutationUnchecked(
     const operations = operationsAfterValue(path);
     if (!operations) return;
     const { key: step, delivery: iteration, copy, conversions } = operations;
-    const saved = conversions?.[0];
-    const conversionAfter = saved?.valueConversion?.after;
+    const selectedConversion = conversions?.find(
+      (candidate) => candidate.path.node === operand.node
+    );
+    const conversionAfter = selectedConversion?.valueConversion?.after;
     if (
-      saved?.path.node === operand.node &&
       conversionAfter &&
+      (operand.isMemberExpression() || !path.isBinaryExpression()) &&
       !isProvablyUnexecuted(path)
     ) {
-      // Compound stores and updates consume the selected GetValue result,
-      // not a fresh reference read during conversion. An update has no RHS.
-      const oldValue = observedOperandOrigins(operand, activeOrigin);
+      // Save the selected GetValue at operand time; the same object may
+      // dispatch a different conversion hook after the other operand runs.
+      const selected = observedOperandOrigins(operand, activeOrigin);
+      let hasStoredMember = false;
       if (operand.isMemberExpression())
         for (const values of storedMemberValues(
           operand,
@@ -3721,13 +3790,18 @@ function analyzeAliasedMutationUnchecked(
                 ? undefined
                 : conversionAfter
           }
-        ))
-          oldValue.push(...values);
-      receipts.set(operand.node, oldValue);
+        )) {
+          hasStoredMember ||= values.length > 0;
+          selected.push(...values);
+        }
+      receipts.set(operand.node, { values: selected, hasStoredMember });
     }
     if (conversionAfter?.node === operand.node)
       observeCoercion(path, activeOrigin, conversions, receipts);
-    if (iteration?.after.node === operand.node && !isProvablyUnexecuted(path)) {
+    if (
+      iteration?.after.node === operand.node &&
+      !evaluation.isUnexecuted(path)
+    ) {
       // A function's declaration is neither its execution position nor an
       // activation. Unknown escapes stay possible; exactly unused local
       // owners need no captured-iterator observation.
@@ -3879,9 +3953,9 @@ function analyzeAliasedMutationUnchecked(
         if (counterpart === "does-not-convert") continue;
         counterpartSettled = counterpart === "primitive";
       }
+      const receipt = receipts?.get(step.path.node);
       const values = references.inspectOwnSymbolHook(
-        receipts?.get(step.path.node) ??
-          observedOperandOrigins(step.path, activeOrigin),
+        receipt?.values ?? observedOperandOrigins(step.path, activeOrigin),
         step.path,
         counterpartSettled,
         checkReturnedEffectBody,
@@ -3890,9 +3964,40 @@ function analyzeAliasedMutationUnchecked(
       for (const name of step.valueConversion
         ? ["valueOf", "toString"]
         : ["toString", "valueOf"]) {
+        if (step.valueConversion && receipts?.has(step.path.node))
+          for (const receiver of values) {
+            if (!receiver.path.isObjectExpression()) continue;
+            for (const stored of storedMemberValues(
+              path,
+              [receiver],
+              name,
+              {}
+            )) {
+              const unresolved = (relevant: ObjectReference[]) =>
+                observeUnresolved(path, relevant, sourceRuleTargets);
+              references.inspectStoredKeyConversion(
+                stored,
+                receiver,
+                checkReturnedEffectBody,
+                unresolved
+              );
+              // A stored callable without a proven invocation frame can
+              // still write through this exact receiver. Do not replay it.
+              if (
+                stored.some(
+                  (value) => !value.parameterFrame || value.uncertainty
+                )
+              )
+                unresolved([receiver, ...stored]);
+            }
+          }
         // Ordinary coercion calls the selected method with the operand as
         // receiver. A method may read this.rule without capturing rule itself.
-        if (step.valueConversion && name === "valueOf")
+        if (
+          step.valueConversion &&
+          name === "valueOf" &&
+          (!path.isBinaryExpression() || receipt?.hasStoredMember)
+        )
           references.inspectReturnedMember(
             values,
             name,
@@ -3941,8 +4046,6 @@ function analyzeAliasedMutationUnchecked(
         observeCoercion(path, activeOrigin);
       }
     },
-
-    BinaryExpression: (path) => observeCoercion(path, activeOrigin),
 
     ExportNamedDeclaration(path) {
       if (

@@ -2659,6 +2659,46 @@ describe("css prop alias mutation diagnostics", () => {
       "red"
     ],
     [
+      "binary conversion consumes the object read from an earlier store",
+      'const make = rule => ({valueOf(){rule.color="blue";return 2;}}); const holder={value:0}; holder.value=make(style); holder.value * 3;',
+      "blue"
+    ],
+    [
+      "the binary left value is saved before the right rewrites its source",
+      'const make = rule => ({valueOf(){rule.color="blue";return 2;}}); const holder={value:0}; holder.value=make(style); holder.value * (holder.value=0,3);',
+      "blue"
+    ],
+    [
+      "a later slot store does not change an earlier primitive binary value",
+      'const make = rule => ({valueOf(){rule.color="blue";return 2;}}); const holder={value:0}; holder.value * 3; holder.value=make(style);',
+      "red"
+    ],
+    [
+      "passing an argument spread observes its selected own iterator",
+      'const inert=()=>0; const input={rule:style,[Symbol.iterator](){this.rule.color="blue";return [2][Symbol.iterator]();}}; inert(...input);',
+      "blue"
+    ],
+    [
+      "passing the same argument without spread leaves its iterator dormant",
+      'const inert=()=>0; const input={rule:style,[Symbol.iterator](){this.rule.color="blue";return [2][Symbol.iterator]();}}; inert(input);',
+      "red"
+    ],
+    [
+      "a nullish optional call never reaches spread delivery",
+      'const inert=null; const input={rule:style,[Symbol.iterator](){this.rule.color="blue";return [2][Symbol.iterator]();}}; inert?.(...input);',
+      "red"
+    ],
+    [
+      "the parameter getter of a direct local function runs before its body",
+      'const input=rule=>({get label(){rule.color="blue";return 1;},data:2}); function read({label}){} read(input(style));',
+      "blue"
+    ],
+    [
+      "a direct local function selecting data does not invoke the sibling getter",
+      'const input=rule=>({get label(){rule.color="blue";return 1;},data:2}); function read({data}){} read(input(style));',
+      "red"
+    ],
+    [
       "a synchronous inner IIFE runs in the captured rule frame",
       'const make = rule => () => { (() => {rule.color="blue";})(); }; make(style)();',
       "blue"
@@ -2688,6 +2728,20 @@ describe("css prop alias mutation diagnostics", () => {
       }
     }
   );
+
+  it("does not certify a same-receiver conversion hook installed by the RHS", () => {
+    const source =
+      'const style={color:"red"}; const trace=[];' +
+      "const old={rule:style,valueOf(){return 2;}}; const holder={value:old};" +
+      'holder.value += (trace.push("rhs"),holder.value=0,old.valueOf=function(){' +
+      'trace.push("convert");this.rule.color="blue";return 2;},3);';
+    expect(
+      new Function(source + ";return [style.color,holder.value,trace]")()
+    ).toEqual(["blue", 5, ["rhs", "convert"]]);
+    const { run, options } = cssTransform(source, "same-file");
+    expect(run).toThrow(/same-file binding "style".*unproven object origin/);
+    expect(options.result[1]).toBe("");
+  });
 
   it.each(["single", "next", "loop"] as const)(
     "selects the callee before writing its replacement in an argument (execution=%s)",

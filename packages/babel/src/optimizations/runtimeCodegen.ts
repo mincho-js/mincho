@@ -166,7 +166,7 @@ export function removeUnusedExtractedImports(
 
   const runtimeRequires = new Set<string>();
   const authoredRequireSources = new Map<string, number>();
-  const selectedEsmUses: { source: string; position: number }[] = [];
+  const selectedEsmUses = new Set<string>();
   const liveImportedUses: {
     source: string;
     position?: number;
@@ -189,9 +189,7 @@ export function removeUnusedExtractedImports(
       /^\.{1,2}\//.test(reference.source) &&
       !isProvablyUnexecuted(site)
     ) {
-      const position = eagerProgramStatementPosition(site);
-      if (position !== undefined)
-        selectedEsmUses.push({ source: reference.source, position });
+      if (isEagerProgramUse(site)) selectedEsmUses.add(reference.source);
     }
     if (
       reference?.kind === "require" &&
@@ -218,18 +216,14 @@ export function removeUnusedExtractedImports(
     if (statement?.parentPath === program && typeof statement.key === "number")
       return statement.key;
   };
-  const eagerProgramStatementPosition = (
-    site: NodePath
-  ): number | undefined => {
-    // An admitted eager demand belongs to its Program statement, not the
-    // nearest nested statement. Do not infer demand from a deferred body.
-    let item = site;
-    while (item.parentPath) {
-      if (item.isFunction() || item.isClass()) return;
-      if (item.parentPath === program)
-        return typeof item.key === "number" ? item.key : undefined;
-      item = item.parentPath;
+  const isEagerProgramUse = (site: NodePath): boolean => {
+    // ESM evaluates static dependencies before any reachable Program body,
+    // regardless of where the import happens to appear in source text.
+    for (let item = site; item.parentPath; item = item.parentPath) {
+      if (item.isFunction() || item.isClass()) return false;
+      if (item.parentPath === program) return true;
     }
+    return false;
   };
   let unknownRuntimeRequire = false;
   const liveOriginal: {
@@ -663,15 +657,13 @@ export function removeUnusedExtractedImports(
   }
   // An authored earlier local dependency with actual surviving consumption
   // can observe this initializer. We do not inspect or predict its body.
-  const earlierAuthoredImports = new Map<string, number>();
-  for (const [index, { node }] of body.entries())
-    if (
+  const firstSelectedAuthoredDependency = body.findIndex(
+    ({ node }) =>
       t.isImportDeclaration(node) &&
       originalModuleRequests?.statements?.has(node) &&
-      carriesRuntimeRequest(node) &&
-      !earlierAuthoredImports.has(node.source.value)
-    )
-      earlierAuthoredImports.set(node.source.value, index);
+      selectedEsmUses.has(node.source.value) &&
+      carriesRuntimeRequest(node)
+  );
   const seen = new Set<string>();
   body.forEach((path, index) => {
     const node = path.node;
@@ -690,11 +682,8 @@ export function removeUnusedExtractedImports(
           (laterRequests.get(key) ?? -1) <= index &&
           !(
             originalModuleRequests?.statements?.has(node) &&
-            selectedEsmUses.some(
-              ({ source, position }) =>
-                (earlierAuthoredImports.get(source) ?? Infinity) < index &&
-                position > index
-            )
+            firstSelectedAuthoredDependency !== -1 &&
+            firstSelectedAuthoredDependency < index
           ) &&
           // In the non-codegen profile an unclassified later authored
           // dependency can still initialize this module via an alias or

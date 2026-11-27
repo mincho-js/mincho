@@ -292,7 +292,7 @@ function computedMemberKey(
 // Apply the compound operator to the earlier GetValue and the now evaluated
 // RHS, before forming the eventual write. Logical assignments only select
 // and store a value; they never run this conversion.
-export function storedValueConversionSteps(
+export function orderedValueConversionSteps(
   path: NodePath<t.Node>
 ): Extract<EvaluationStep, { kind: "coerce" }>[] | undefined {
   if (path.isUpdateExpression()) {
@@ -304,6 +304,25 @@ export function storedValueConversionSteps(
         valueConversion: { after: argument, hint: "number" }
       }
     ];
+  }
+  if (path.isBinaryExpression()) {
+    const { operator } = path.node;
+    const left = path.get("left");
+    if (
+      !left.isExpression() ||
+      ["in", "instanceof", "===", "!==", "|>"].includes(operator)
+    )
+      return;
+    const right = path.get("right");
+    const hint =
+      operator === "+" || operator === "==" || operator === "!="
+        ? "default"
+        : "number";
+    return [left, right].map((value) => ({
+      kind: "coerce",
+      path: value,
+      valueConversion: { after: right, hint }
+    }));
   }
   if (
     !path.isAssignmentExpression() ||
@@ -361,7 +380,14 @@ export function bindingPatternReadsSource(pattern: t.Node): boolean {
 export function sourceDeliveryStep(
   path: NodePath<t.Node>
 ): Extract<EvaluationStep, { kind: "observe" }> | undefined {
-  if (path.isSpreadElement() && path.parentPath.isArrayExpression())
+  if (
+    path.isSpreadElement() &&
+    (path.parentPath.isArrayExpression() ||
+      (path.listKey === "arguments" &&
+        (path.parentPath.isCallExpression() ||
+          path.parentPath.isOptionalCallExpression() ||
+          path.parentPath.isNewExpression())))
+  )
     return {
       kind: "observe",
       path,
@@ -720,7 +746,7 @@ export function planEvaluation(
       if (propertyKey) steps.push(propertyKey);
       steps.push(observe());
     } else if (!["===", "!=="].includes(path.node.operator)) {
-      steps.push(...plan.operands.map((value) => coerce(value.path)));
+      steps.push(...(orderedValueConversionSteps(path) ?? []));
       const { operator, left, right } = path.node;
       const dividend = t.isExpression(left)
         ? unwrapTransparentCssRuleExpression(left)
@@ -782,7 +808,7 @@ export function planEvaluation(
           path: left
         });
       }
-      const conversions = storedValueConversionSteps(path);
+      const conversions = orderedValueConversionSteps(path);
       if (conversions) steps.splice(steps.length - 1, 0, ...conversions);
       const keyWrite = propertyKeyStep(path);
       if (keyWrite) steps.splice(steps.length - 1, 0, keyWrite);
@@ -795,7 +821,7 @@ export function planEvaluation(
         0,
         ...(keyRead ? [keyRead] : []),
         { kind: "observe", path: argument },
-        ...(storedValueConversionSteps(path) ?? []),
+        ...(orderedValueConversionSteps(path) ?? []),
         ...(keyWrite ? [keyWrite] : [])
       );
     }
@@ -808,11 +834,23 @@ export function planEvaluation(
     path.isTaggedTemplateExpression()
   ) {
     plan.operation = "call";
-    if (path.isOptionalCallExpression())
-      plan.operands = plan.operands.map((value) => ({
-        ...value,
-        execution: value.path.listKey === "arguments" ? "possible" : "eager"
-      }));
+    if (path.isOptionalCallExpression()) {
+      const callee = path.get("callee");
+      if (
+        path.node.optional &&
+        callee.isExpression() &&
+        normalBranchOutcome(callee, context)?.nullish === true
+      ) {
+        plan.unexecutedBranches = path.get("arguments");
+        plan.operands = [operand(callee)];
+        steps = plan.operands.map(evaluate);
+      } else {
+        plan.operands = plan.operands.map((value) => ({
+          ...value,
+          execution: value.path.listKey === "arguments" ? "possible" : "eager"
+        }));
+      }
+    }
   } else if (path.isVariableDeclarator() && sourceDeliveryStep(path)) {
     plan.operation = "observation";
     const iteration = sourceDeliveryStep(path)!;
@@ -1550,6 +1588,14 @@ export function isProvablyUnexecuted(
   let excluded = false;
   for (let parent = path.parentPath; parent; parent = parent.parentPath) {
     if (parent.isFunction() || parent.isClass()) return excluded;
+    if (
+      parent.isOptionalCallExpression() &&
+      child.listKey === "arguments" &&
+      planEvaluation(parent, context).unexecutedBranches?.some(
+        (branch) => branch.node === child.node
+      )
+    )
+      return true;
     if (
       parent.isIfStatement() ||
       parent.isConditionalExpression() ||

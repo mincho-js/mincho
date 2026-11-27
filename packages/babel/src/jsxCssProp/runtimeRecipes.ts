@@ -2239,15 +2239,27 @@ function serializedRecipeReference(path: NodePath) {
   // Generated metadata validation uses the intrinsic Error, not an authoring
   // binding captured from a component or module scope.
   let errorBinding = path.scope.getBinding("Error");
+  let errorConstructor: t.Identifier | t.MemberExpression =
+    t.identifier("Error");
   if (errorBinding) {
     const program = path.scope.getProgramParent().path;
     if (!program.isProgram() || hasDynamicScope(program))
       throw path.buildCodeFrameError(
         "Cannot safely rename a shadowed Error binding across dynamic scope."
       );
-    while (errorBinding) {
-      errorBinding.scope.rename("Error");
-      errorBinding = path.scope.getBinding("Error");
+    // Keep authored bindings' reflective function/class names. The
+    // generated callback can use the unshadowed ambient Error constructor.
+    if (!path.scope.getBinding("globalThis")) {
+      errorConstructor = t.memberExpression(
+        t.identifier("globalThis"),
+        t.identifier("Error")
+      );
+    } else {
+      // Preserve existing behavior in opaque doubly-shadowed scopes.
+      while (errorBinding) {
+        errorBinding.scope.rename("Error");
+        errorBinding = path.scope.getBinding("Error");
+      }
     }
   }
 
@@ -2311,7 +2323,7 @@ function serializedRecipeReference(path: NodePath) {
               t.logicalExpression("&&", metadata, supportedFactories)
             ),
             t.throwStatement(
-              t.newExpression(t.identifier("Error"), [
+              t.newExpression(errorConstructor, [
                 t.stringLiteral(
                   "Configured JSX css prop accepts runtime calls only to compiled Mincho or Vanilla Extract recipes. Use static token values for style factories."
                 )
