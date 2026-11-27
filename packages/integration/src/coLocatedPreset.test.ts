@@ -691,7 +691,7 @@ describe("co-located preset package scopes", () => {
     ).toThrow("Ambiguous CSS file scope");
   });
 
-  it.each([false, true])(
+  it.each([false, true] as const)(
     "uses snapshot ownership across manifest ABA (initially missing: %s)",
     async (missing) => {
       await mkdir(join(process.cwd(), ".cache"), { recursive: true });

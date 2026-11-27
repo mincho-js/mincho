@@ -163,7 +163,10 @@ async function compile(
     Array.isArray(result) ? result : [result]
   ) as Rollup.RollupOutput[];
 
-  return { output: outputs.flatMap((output) => output.output) };
+  return {
+    output: outputs.flatMap((output) => output.output),
+    outputGroups: outputs
+  };
 }
 
 function chunks(output: NativeBuildOutput) {
@@ -591,23 +594,50 @@ describe("native library CSS in one Vite application build", () => {
     expect(artifact(worker)).toEqual(artifact(inline));
   }, 60_000);
 
-  for (const format of ["es", "cjs"] as const) {
-    it(`${format}: preserves Mincho graph classes alongside vanilla-extract files`, async () => {
-      const preset = diamondArtifacts()[3]!;
-      const root = await fixture({
-        "entry.js": 'export { cls } from "./rules.ts";',
-        "rules.ts": [
-          'import { defineRules, css } from "@mincho-js/css";',
-          `const rules = defineRules({ presets: ${JSON.stringify(preset)}, properties: { display: true } });`,
-          'export const cls = css([rules.css({ display: "grid" })]);'
-        ].join("\n"),
-        "vanilla.css.ts": [
-          'import { style } from "@vanilla-extract/css";',
-          'export const native = style({ padding: "17px" });'
-        ].join("\n")
-      });
+  const mixedFormats = ["es", "cjs"] as const;
+  // Only this fixture is shared: each format still checks its own real output.
+  let mixedGraphs: ReturnType<typeof buildMixedGraphs> | undefined;
 
-      const baseline = await compile(root, { graph: true, format });
+  async function buildMixedGraphs() {
+    const preset = diamondArtifacts()[3]!;
+    const root = await fixture({
+      "entry.js": 'export { cls } from "./rules.ts";',
+      "rules.ts": [
+        'import { defineRules, css } from "@mincho-js/css";',
+        `const rules = defineRules({ presets: ${JSON.stringify(preset)}, properties: { display: true } });`,
+        'export const cls = css([rules.css({ display: "grid" })]);'
+      ].join("\n"),
+      "vanilla.css.ts": [
+        'import { style } from "@vanilla-extract/css";',
+        'export const native = style({ padding: "17px" });'
+      ].join("\n")
+    });
+
+    const baseline = await compile(root, {
+      graph: true,
+      format: [...mixedFormats]
+    });
+    await writeFile(
+      join(root, "entry.js"),
+      'export { cls } from "./rules.ts"; export { native } from "./vanilla.css.ts";'
+    );
+    const combined = await compile(root, {
+      graph: true,
+      vanilla: true,
+      format: [...mixedFormats]
+    });
+
+    expect(baseline.outputGroups).toHaveLength(mixedFormats.length);
+    expect(combined.outputGroups).toHaveLength(mixedFormats.length);
+
+    return { baseline: baseline.outputGroups, combined: combined.outputGroups };
+  }
+
+  for (const [index, format] of mixedFormats.entries()) {
+    it(`${format}: preserves Mincho graph classes alongside vanilla-extract files`, async () => {
+      const graphs = await (mixedGraphs ??= buildMixedGraphs());
+      const baseline = graphs.baseline[index]!;
+      const combined = graphs.combined[index]!;
       const baselineCss = cssAssets(baseline)
         .map((asset) => String(asset.source))
         .join("\n");
@@ -618,27 +648,23 @@ describe("native library CSS in one Vite application build", () => {
 
       expect(gridSelectors.length).toBeGreaterThan(0);
 
-      await writeFile(
-        join(root, "entry.js"),
-        'export { cls } from "./rules.ts"; export { native } from "./vanilla.css.ts";'
-      );
-
-      const combined = await compile(root, {
-        graph: true,
-        vanilla: true,
-        format
-      });
-
       const combinedCss = cssAssets(combined)
         .map((asset) => String(asset.source))
         .join("\n");
 
+      const combinedGridSelectors = [
+        ...combinedCss.matchAll(/([^{}]+)\{[^{}]*display:\s*grid[^{}]*\}/g)
+      ].map(([, selector]) => selector!.trim());
       for (const selector of gridSelectors)
-        expect(combinedCss).toContain(selector);
+        expect(combinedGridSelectors).toContain(selector);
 
       expect(combinedCss).toMatch(/padding:\s*17px/);
 
       const entry = chunks(combined).find((chunk) => chunk.isEntry)!;
+      expect(entry.exports.slice().sort()).toEqual(["cls", "native"]);
+      expect(entry.code).toMatch(
+        format === "es" ? /\bimport ["']/ : /\brequire\(["']/
+      );
 
       expect(
         [
