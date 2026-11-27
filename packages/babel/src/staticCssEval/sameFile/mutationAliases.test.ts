@@ -2725,6 +2725,53 @@ describe("css prop alias mutation diagnostics", () => {
     }
   );
 
+  it.each([false, true])(
+    "orders a callee read in the exact top-level initializer (store first=%s)",
+    (storeFirst) => {
+      const before = "holder.run=make();";
+      const source = `const style={color:"red"};
+        const make=(rule=style)=>()=>{rule.color="blue";};
+        const holder={run(){}};
+        ${storeFirst ? before : ""}
+        const result=holder.run();
+        ${storeFirst ? "" : before}`;
+      expect(runInNewContext(source + ";style.color")).toBe(
+        storeFirst ? "blue" : "red"
+      );
+      const { run, options } = cssTransform(source, "same-file");
+      if (storeFirst) {
+        expect(run).toThrow(/same-file binding "style"/);
+        expect(options.result[1]).toBe("");
+      } else {
+        expect(run()?.code).toContain("className");
+        expect(options.result[1]).toMatch(/color:\s*["']red["']/);
+      }
+    }
+  );
+
+  it.each([false, true])(
+    "consumes the actual incoming iterator before parameter binding (called=%s)",
+    (called) => {
+      const source = `const style={color:"red"};
+        const trace=[];
+        const make=rule=>()=>{trace.push("iterator");rule.color="blue";return [1][Symbol.iterator]();};
+        const iterable={[Symbol.iterator]:make(style)};
+        const read=()=> ([first])=>{};
+        ${called ? "read()(iterable);" : "const dormant=read();"}`;
+      expect(runInNewContext(source + ";[style.color,trace]")).toEqual(
+        called ? ["blue", ["iterator"]] : ["red", []]
+      );
+      const { run, options } = cssTransform(source, "same-file");
+      if (called) {
+        expect(run).toThrow(/same-file binding "style"/);
+        expect(options.result[1]).toBe("");
+      } else {
+        expect(run()?.code).toContain("className");
+        expect(options.result[1]).toMatch(/color:\s*["']red["']/);
+      }
+    }
+  );
+
   it("does not discard a preceding completed store while evaluating the next RHS", () => {
     const authored =
       'const style={color:"red"}; const make=(rule=style)=>()=>{rule.color="blue";}; const holder={run(){}}; holder.run=make(); holder.run=(holder.run(),make());';

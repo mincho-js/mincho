@@ -31,6 +31,7 @@ import {
   type InternalPreparedExtractCalls,
   internalCollectRuntimeCandidates,
   internalGetStaticCssEvalLiteralRequireImportPath,
+  internalHasConfiguredGeneratorOverride,
   internalParseModuleProgram,
   internalNormalizeTypeScriptCommonJs,
   minchoBabelPlugin,
@@ -289,6 +290,74 @@ export class BabelTransformError extends Error {
     this.cause = cause;
     this.staticCssEval = staticCssEval;
   }
+}
+
+/** Only remove an unchanged whole import after the sole configured generator.
+ * Keep source coordinates (and its authoritative source map) unchanged. */
+async function reconcileEmittedEsmImports(
+  code: string,
+  filename: string,
+  parserPlugins: NonNullable<TransformOptions["parserOpts"]>["plugins"],
+  sites: readonly t.ImportDeclaration[]
+): Promise<string> {
+  let ast: t.File | null;
+  try {
+    ast = await parseAsync(code, {
+      filename,
+      babelrc: false,
+      configFile: false,
+      sourceType: "module",
+      parserOpts: { plugins: parserPlugins }
+    });
+  } catch {
+    return code;
+  }
+  if (!ast) return code;
+  const comments = ast.comments ?? [];
+  const ranges: { start: number; end: number }[] = [];
+  traverse(ast, {
+    Program(program) {
+      const imports = program
+        .get("body")
+        .filter((path) => path.isImportDeclaration());
+      for (const site of sites) {
+        const matches = imports.filter((path) =>
+          t.isNodesEquivalent(path.node, site)
+        );
+        if (matches.length !== 1) continue;
+        const { node } = matches[0]!;
+        const { start, end } = node;
+        if (
+          start == null ||
+          end == null ||
+          comments.some(
+            (comment) =>
+              comment.start != null &&
+              comment.end != null &&
+              comment.start < end &&
+              comment.end > start
+          ) ||
+          node.specifiers.some((specifier) => {
+            const binding = program.scope.getBinding(specifier.local.name);
+            return (
+              !binding?.constant ||
+              binding.path.node !== specifier ||
+              binding.referenced
+            );
+          })
+        )
+          continue;
+        ranges.push({ start, end });
+      }
+      program.stop();
+    }
+  });
+  for (const { start, end } of ranges.sort((a, b) => b.start - a.start))
+    code =
+      code.slice(0, start) +
+      code.slice(start, end).replace(/[^\r\n\u2028\u2029]/g, " ") +
+      code.slice(end);
+  return code;
 }
 
 export type BabelOptions = Omit<
@@ -655,6 +724,7 @@ export async function transformSourceUncached(
   const extractCallsDependencies = new Set<string>();
   const options: PluginOptions = {
     ...(commonJsToEsm ? { stageCommonJsRuntimeRequests: true } : {}),
+    stageEsmGeneratorImports: true,
     result: ["", ""],
     diagnostics,
     jsxCssProp,
@@ -671,24 +741,6 @@ export async function transformSourceUncached(
   const optionalCommonJsSites = (metadata: unknown) =>
     (metadata as Pick<MinchoBabelFileMetadata, "minchoOptionalCommonJsSites">)
       ?.minchoOptionalCommonJsSites;
-  const hasGeneratorOverride = (options: unknown) => {
-    const effective = options as
-      | {
-          plugins?: readonly unknown[];
-          presets?: readonly { plugins?: readonly unknown[] }[];
-        }
-      | undefined;
-    return [
-      ...(effective?.plugins ?? []),
-      ...(effective?.presets ?? []).flatMap((preset) => preset.plugins ?? [])
-    ].some(
-      (plugin) =>
-        plugin !== null &&
-        typeof plugin === "object" &&
-        "generatorOverride" in plugin &&
-        typeof plugin.generatorOverride === "function"
-    );
-  };
   let preparedProgram:
     ReturnType<typeof internalParseModuleProgram> | undefined;
   let preparedWithBabel = false;
@@ -1068,7 +1120,8 @@ export async function transformSourceUncached(
       if (!ast) return false;
 
       configuredAst = ast;
-      observedGeneratorOverride = hasGeneratorOverride(configuredOptions);
+      observedGeneratorOverride =
+        internalHasConfiguredGeneratorOverride(configuredOptions);
 
       // Babel has already expanded the first-pass plugin list for this file.
       // Use its real pre hooks, including from auto-discovered configuration,
@@ -1336,7 +1389,8 @@ export async function transformSourceUncached(
                   post(file: { metadata: unknown; opts: TransformOptions }) {
                     const sites = optionalCommonJsSites(file.metadata);
                     stagedWithGenerator =
-                      !!sites?.length && hasGeneratorOverride(file.opts);
+                      !!sites?.length &&
+                      internalHasConfiguredGeneratorOverride(file.opts);
                   },
                   visitor: {}
                 }
@@ -1422,6 +1476,19 @@ export async function transformSourceUncached(
         result = { ...normalized, metadata: transformed.metadata };
         commonJsTransformed = true;
       }
+    }
+
+    const esmSites = (
+      transformed.metadata as MinchoBabelFileMetadata | undefined
+    )?.minchoOptionalEsmImports;
+    if (!commonJsTransformed && esmSites?.length) {
+      const cleaned = await reconcileEmittedEsmImports(
+        transformed.code,
+        path,
+        parserPlugins,
+        esmSites
+      );
+      if (cleaned !== transformed.code) result = { ...result, code: cleaned };
     }
   } catch (error) {
     if (error instanceof InternalExtractCallsError)

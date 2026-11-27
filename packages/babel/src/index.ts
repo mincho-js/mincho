@@ -25,6 +25,7 @@ import { prepareExtractCalls } from "./extractionCalls/index.js";
 
 import { normalizeTypeScriptCommonJs } from "./commonjs/modules.js";
 import {
+  hasConfiguredGeneratorOverride,
   optimizeRuntimeCodegen,
   removeUnusedExtractedImports,
   removeUnusedGeneratedImports,
@@ -130,7 +131,14 @@ export function minchoBabelPlugin(): PluginObj<PluginState> {
           removeUnusedExtractedImports(
             path,
             originalModuleRequests.get(state),
-            optionalSites
+            optionalSites,
+            hasConfiguredGeneratorOverride(state.file.opts)
+              ? {
+                  sites: state.opts.stageEsmGeneratorImports
+                    ? (state.file.metadata.minchoOptionalEsmImports = [])
+                    : undefined
+                }
+              : undefined
           );
           removeUnusedJsxCssPropCssModuleImports(path);
           removeUnusedGeneratedImports(path);
@@ -219,6 +227,8 @@ export {
   inspectCommonJs as internalInspectCommonJs,
   commonJsToEsmPlugin as internalCommonJsToEsmPlugin
 } from "./commonjs/esm.js";
+export { getModuleReference as internalGetModuleReference } from "./commonjs/bindings.js";
+export { hasConfiguredGeneratorOverride as internalHasConfiguredGeneratorOverride } from "./optimizations/runtimeCodegen.js";
 export { normalizeTypeScriptCommonJs as internalNormalizeTypeScriptCommonJs } from "./commonjs/modules.js";
 
 export {

@@ -2260,6 +2260,221 @@ describe("babelTransformSource", () => {
     }
   );
 
+  it.each([false, true])(
+    "prunes a dead CJS alias only while its actual producer is unchanged (replace=%s)",
+    async (replace) => {
+      const source =
+        'const api=require("@mincho-js/css");const css=api.css;exports.cls=css({color:"red"});exports.combo=api.cx("a","b");';
+      const target = "/virtual/css.cjs";
+      const post = vi.fn((file: { ast: t.File }) => {
+        if (!replace) return;
+        const replacement = parseSync(
+          '({get css(){trace.push("getter");return rule=>"class-"+rule.color;},cx(...items){return items.join(" ");}})',
+          { configFile: false, babelrc: false }
+        )?.program.body[0];
+        if (!t.isExpressionStatement(replacement))
+          throw new Error("missing fixture object");
+        for (const statement of file.ast.program.body)
+          if (t.isVariableDeclaration(statement))
+            for (const declaration of statement.declarations)
+              if (t.isIdentifier(declaration.id, { name: "api" }))
+                declaration.init = replacement.expression;
+      });
+      const result = await babelTransformSource({
+        root: "/virtual",
+        filename: "/virtual/entry.cjs",
+        source,
+        commonJsToEsm: true,
+        babel: {
+          configFile: false,
+          babelrc: false,
+          optimize: { runtimeCodegen: false },
+          plugins: [() => ({ post, visitor: {} })],
+          staticCssEvalSourceProvider: {
+            resolve(_owner, specifier) {
+              return specifier === "@mincho-js/css"
+                ? { id: target, resolvedFile: target }
+                : null;
+            },
+            load() {
+              return {
+                source:
+                  'exports.css=rule=>"class-"+rule.color;exports.cx=(...items)=>items.join(" ");'
+              };
+            }
+          }
+        }
+      });
+      expect(post).toHaveBeenCalledOnce();
+      const trace: string[] = [];
+      const css = {
+        css: (rule: { color: string }) => "class-" + rule.color,
+        cx: (...items: string[]) => items.join(" ")
+      };
+      const execute = (code: string, load: (id: string) => unknown) => {
+        const module = { exports: {} };
+        new Function(
+          "module",
+          "exports",
+          "require",
+          "trace",
+          transformJsx(code, { format: "cjs" }).code
+        )(module, module.exports, load, trace);
+        return module.exports;
+      };
+      const sidecar = execute(result.result[1], () => css);
+      const runtime = execute(result.code, (id) =>
+        id === result.result[0] ? sidecar : css
+      );
+      expect(runtime).toMatchObject({ cls: "class-red", combo: "a b" });
+      expect(trace).toEqual(replace ? ["getter"] : []);
+      if (!replace) expect(result.code).not.toContain("const css = api.css;");
+    }
+  );
+
+  it.each([false, true])(
+    "reconciles a configured ESM generator's actual import readers (generated reader=%s)",
+    async (read) => {
+      const source =
+        'import {css} from "@mincho-js/css"; export const cls=css({color:"red"}); export const marker="tail";';
+      const generate = vi.fn(
+        (
+          ast: t.File,
+          options: unknown,
+          input: string,
+          run: (
+            ast: t.File,
+            options: unknown,
+            input: string
+          ) => { code: string }
+        ) => {
+          const output = run(ast, options, input);
+          expect(output.code).toMatch(/import\s*\{\s*css\s*\}\s*from/);
+          return {
+            ...output,
+            code: output.code + (read ? "\nexport const kind=typeof css;" : "")
+          };
+        }
+      );
+      const result = await babelTransformSource({
+        root: "/virtual",
+        filename: "/virtual/entry.mjs",
+        source,
+        sourceMaps: true,
+        babel: {
+          configFile: false,
+          babelrc: false,
+          optimize: { runtimeCodegen: false },
+          plugins: [() => ({ generatorOverride: generate, visitor: {} })]
+        }
+      });
+      expect(generate).toHaveBeenCalledOnce();
+      expect(result.map?.sourcesContent).toEqual([source]);
+      expect(result.code.includes('from "@mincho-js/css"')).toBe(read);
+      expect(result.result[1]).toContain('color: "red"');
+      const css = { css: (rule: { color: string }) => `class-${rule.color}` };
+      const execute = (code: string, load: (id: string) => unknown) => {
+        const module = { exports: {} };
+        new Function(
+          "module",
+          "exports",
+          "require",
+          transformJsx(code, { format: "cjs" }).code
+        )(module, module.exports, load);
+        return module.exports;
+      };
+      const sidecar = execute(result.result[1], () => css);
+      const runtime = execute(result.code, (id) =>
+        id === result.result[0] ? sidecar : css
+      );
+      expect(runtime).toMatchObject({
+        cls: "class-red",
+        marker: "tail",
+        ...(read ? { kind: "function" } : {})
+      });
+    }
+  );
+
+  it.each([false, true])(
+    "keeps initialization before a selected earlier ESM loader (called=%s)",
+    async (used) => {
+      const root = await mkdtemp(join(tmpdir(), "mincho-esm-startup-"));
+      afterTest(() => rm(root, { recursive: true, force: true }));
+      const source =
+        'import {observe} from "./observer.mjs"; import {css} from "@mincho-js/css"; export const cls=css({color:"red"});' +
+        (used ? "export const pending = observe();" : "");
+      const filename = join(root, "entry.mjs");
+      await Promise.all([
+        writeFile(filename, source),
+        writeFile(join(root, "native.mjs"), source),
+        writeFile(
+          join(root, "package.json"),
+          JSON.stringify({
+            name: "@mincho-js/css",
+            type: "module",
+            exports: "./css.mjs"
+          })
+        ),
+        writeFile(
+          join(root, "css.mjs"),
+          'trace.push("css-package");export const css=rule=>"class-"+rule.color;'
+        ),
+        writeFile(
+          join(root, "observer.mjs"),
+          'trace.push("load");export async function observe(){const ready=trace.includes("css-package");trace.push("observe");await import("@mincho-js/css");return ready;}'
+        )
+      ]);
+      const result = await babelTransformSource({
+        root,
+        filename,
+        source,
+        babel: {
+          configFile: false,
+          babelrc: false,
+          optimize: { runtimeCodegen: false }
+        }
+      });
+      expect(result.result[1]).toContain('color: "red"');
+      const emitted = [
+        ...result.result[1].matchAll(/export\s+var\s+([\w$]+)/g)
+      ];
+      expect(emitted).toHaveLength(1);
+      await writeFile(
+        join(root, "sidecar.mjs"),
+        `export const ${emitted[0]![1]}="class-red";`
+      );
+      await writeFile(
+        filename,
+        result.code.replace(result.result[0], "./sidecar.mjs")
+      );
+      const run = (file: string) =>
+        JSON.parse(
+          execFileSync(
+            process.execPath,
+            [
+              "--input-type=module",
+              "-e",
+              `globalThis.trace=[];const m=await import("./${file}");console.log(JSON.stringify({trace,cls:m.cls,ready:await m.pending}));`
+            ],
+            {
+              cwd: root,
+              env: { ...process.env, NODE_OPTIONS: "" },
+              encoding: "utf8"
+            }
+          )
+        );
+      const actual = run("entry.mjs");
+      if (used) {
+        expect(actual).toEqual(run("native.mjs"));
+        expect(actual).toEqual({
+          trace: ["load", "css-package", "observe"],
+          cls: "class-red",
+          ready: true
+        });
+      } else expect(actual).toEqual({ trace: ["load"], cls: "class-red" });
+    }
+  );
+
   it("uses the supplied owner source for both the prepass and transformation", async () => {
     const load = vi.fn(() => {
       throw new Error("The owner must not be reloaded");

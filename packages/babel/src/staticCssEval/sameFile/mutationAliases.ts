@@ -3261,7 +3261,7 @@ function analyzeAliasedMutationUnchecked(
         ? consumption.isForOfStatement()
           ? consumption
           : consumption.getStatementParent()
-        : consumption.parentPath;
+        : consumption.getStatementParent();
     const beforeRight = valueRead?.beforeRight;
     const activation = consumption.getFunctionParent();
     const isOneShotRead = () => {
@@ -3346,9 +3346,9 @@ function analyzeAliasedMutationUnchecked(
         if (
           !consumption.getFunctionParent() &&
           (consumer?.isExpressionStatement() ||
+            consumer?.isVariableDeclaration() ||
             ((name === ownIterator || valueRead) &&
-              (consumer?.isVariableDeclaration() ||
-                consumer?.isForOfStatement()))) &&
+              consumer?.isForOfStatement())) &&
           (statement.isExpressionStatement() || statement.isForOfStatement()) &&
           consumer.parentPath === program &&
           statement.parentPath === program &&
@@ -3734,34 +3734,14 @@ function analyzeAliasedMutationUnchecked(
       if (!activeOrigin && hasDormantLocalIterationOwner(path)) return;
       const unresolved = (values: ObjectReference[]) =>
         observeUnresolved(path, values, sourceRuleTargets);
-      const consume = (origins: ObjectReference[]) => {
-        // Async activation selects a different protocol. The analyzer
-        // can retain only relevant uncertainty, never run the transport.
-        const syncCandidates =
-          iteration.kind === "async-iterator"
-            ? references.inspectOwnSymbolHook(
-                origins,
-                operand,
-                false,
-                checkReturnedEffectBody,
-                unresolved,
-                "asyncIterator"
-              )
-            : origins;
-        observeStoredMembers(path, syncCandidates, ownIterator);
-        const unproved = references.inspectOwnSymbolHook(
-          syncCandidates,
-          operand,
-          false,
-          checkReturnedEffectBody,
-          unresolved,
-          "iterator"
-        );
-        observeReturned(
+      const consume = (origins: ObjectReference[]) =>
+        observeIterationDelivery(
           path,
-          unproved.filter((origin) => origin.uncertainty)
+          operand,
+          origins,
+          unresolved,
+          iteration.kind === "async-iterator"
         );
-      };
       const inspectPattern = (
         pattern: NodePath<t.Node>,
         origins: ObjectReference[]
@@ -4043,6 +4023,39 @@ function analyzeAliasedMutationUnchecked(
     }
   });
 
+  function observeIterationDelivery(
+    site: NodePath<t.Node>,
+    source: NodePath<t.Node>,
+    origins: ObjectReference[],
+    unresolved: UnresolvedEffect,
+    asynchronous = false
+  ) {
+    // Async delivery can select its own hook before the synchronous fallback.
+    const syncCandidates = asynchronous
+      ? references.inspectOwnSymbolHook(
+          origins,
+          source,
+          false,
+          checkReturnedEffectBody,
+          unresolved,
+          "asyncIterator"
+        )
+      : origins;
+    observeStoredMembers(site, syncCandidates, ownIterator);
+    const unproved = references.inspectOwnSymbolHook(
+      syncCandidates,
+      source,
+      false,
+      checkReturnedEffectBody,
+      unresolved,
+      "iterator"
+    );
+    observeReturned(
+      site,
+      unproved.filter((origin) => origin.uncertainty)
+    );
+  }
+
   function observeArrayPatternReads(
     site: NodePath<t.Node>,
     pattern: NodePath<t.ArrayPattern>,
@@ -4085,14 +4098,18 @@ function analyzeAliasedMutationUnchecked(
           origin,
           false
         );
-      else if (pattern.isArrayPattern())
+      else if (pattern.isArrayPattern()) {
+        const unresolved = (values: ObjectReference[]) =>
+          observeUnresolved(fn, values, sourceRuleTargets);
+        observeIterationDelivery(fn, pattern, origins, unresolved);
         observeArrayPatternReads(
           fn,
           pattern,
           origins,
           inspectParameter,
-          (values) => observeUnresolved(fn, values, sourceRuleTargets)
+          unresolved
         );
+      }
     };
     const parameters = fn.get("params");
     for (const [index, parameter] of (Array.isArray(parameters)

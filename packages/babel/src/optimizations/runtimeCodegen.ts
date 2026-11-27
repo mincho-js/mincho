@@ -23,11 +23,31 @@ export interface OriginalModuleRequests {
   requires: ReadonlyMap<t.CallExpression, number>;
 }
 
+export function hasConfiguredGeneratorOverride(options: unknown): boolean {
+  const effective = options as
+    | {
+        plugins?: readonly unknown[];
+        presets?: readonly { plugins?: readonly unknown[] }[];
+      }
+    | undefined;
+  return [
+    ...(effective?.plugins ?? []),
+    ...(effective?.presets ?? []).flatMap((preset) => preset.plugins ?? [])
+  ].some(
+    (plugin) =>
+      plugin !== null &&
+      typeof plugin === "object" &&
+      "generatorOverride" in plugin &&
+      typeof plugin.generatorOverride === "function"
+  );
+}
+
 /** Authoring imports already evaluated in the sidecar need no client runtime. */
 export function removeUnusedExtractedImports(
   program: NodePath<t.Program>,
   originalModuleRequests?: OriginalModuleRequests,
-  optionalSites?: MinchoBabelFileMetadata["minchoOptionalCommonJsSites"]
+  optionalSites?: MinchoBabelFileMetadata["minchoOptionalCommonJsSites"],
+  generator?: { sites?: MinchoBabelFileMetadata["minchoOptionalEsmImports"] }
 ): void {
   const data = (program.scope as ProgramScope).minchoData;
   if (!data || hasDynamicScope(program)) return;
@@ -146,6 +166,7 @@ export function removeUnusedExtractedImports(
 
   const runtimeRequires = new Set<string>();
   const authoredRequireSources = new Map<string, number>();
+  const selectedEsmUses: { source: string; position: number }[] = [];
   const liveImportedUses: {
     source: string;
     position?: number;
@@ -154,12 +175,24 @@ export function removeUnusedExtractedImports(
   const liveImportedUse = (
     use: NodePath,
     kind: "call" | "publication" | "access",
-    site: NodePath
+    site: NodePath,
+    selectedConsumption = false
   ) => {
     const reference =
       kind === "access"
         ? getModuleRuntimeDemandOrigin(use)
         : getModuleReference(use);
+    if (
+      selectedConsumption &&
+      reference?.kind === "import" &&
+      !reference.unsafe &&
+      /^\.{1,2}\//.test(reference.source) &&
+      !isProvablyUnexecuted(site)
+    ) {
+      const position = statementPosition(site);
+      if (position !== undefined)
+        selectedEsmUses.push({ source: reference.source, position });
+    }
     if (
       reference?.kind === "require" &&
       !reference.unsafe &&
@@ -209,7 +242,8 @@ export function removeUnusedExtractedImports(
         liveImportedUse(
           target,
           path.isTaggedTemplateExpression() ? "access" : "call",
-          path
+          path,
+          true
         );
     },
     "BinaryExpression|ForOfStatement"(path) {
@@ -222,7 +256,7 @@ export function removeUnusedExtractedImports(
           step.kind === "observe" &&
           step.sourceDelivery?.kind === "sync-iterator"
         )
-          liveImportedUse(step.sourceDelivery.after, "access", path);
+          liveImportedUse(step.sourceDelivery.after, "access", path, true);
       }
     },
     "MemberExpression|OptionalMemberExpression"(path) {
@@ -349,6 +383,7 @@ export function removeUnusedExtractedImports(
         declaration: declaration.node,
         stagedShape: t.cloneNode(declaration.node),
         ...(property ? { property } : {}),
+        members: reference.members,
         requests,
         source: reference.source,
         later:
@@ -401,10 +436,15 @@ export function removeUnusedExtractedImports(
       : undefined;
     if (!names) continue;
 
+    const dead = new Set<t.Node>();
+    const prune = (specifier: NodePath<t.Node>) => {
+      dead.add(specifier.node);
+      if (!generator) specifier.remove();
+    };
     for (const specifier of path.get("specifiers")) {
       const binding = program.scope.getBinding(specifier.node.local.name);
       if (specifier.isImportNamespaceSpecifier()) {
-        if (binding?.constant && !binding.referenced) specifier.remove();
+        if (binding?.constant && !binding.referenced) prune(specifier);
         continue;
       }
       if (!specifier.isImportSpecifier()) continue;
@@ -413,11 +453,11 @@ export function removeUnusedExtractedImports(
       const name = t.isIdentifier(imported) ? imported.name : imported.value;
 
       if (names.includes(name) && binding?.constant && !binding.referenced)
-        specifier.remove();
+        prune(specifier);
     }
 
     if (
-      !path.node.specifiers.length &&
+      path.node.specifiers.every((specifier) => dead.has(specifier)) &&
       !data.effectImports?.has(path.node.source.value)
     )
       emptied.add(path.node);
@@ -608,6 +648,17 @@ export function removeUnusedExtractedImports(
       }
     });
   }
+  // An authored earlier local dependency with actual surviving consumption
+  // can observe this initializer. We do not inspect or predict its body.
+  const earlierAuthoredImports = new Map<string, number>();
+  for (const [index, { node }] of body.entries())
+    if (
+      t.isImportDeclaration(node) &&
+      originalModuleRequests?.statements?.has(node) &&
+      carriesRuntimeRequest(node) &&
+      !earlierAuthoredImports.has(node.source.value)
+    )
+      earlierAuthoredImports.set(node.source.value, index);
   const seen = new Set<string>();
   body.forEach((path, index) => {
     const node = path.node;
@@ -624,6 +675,14 @@ export function removeUnusedExtractedImports(
         seen.has(key) ||
         (!dynamicRequests.has(key) &&
           (laterRequests.get(key) ?? -1) <= index &&
+          !(
+            originalModuleRequests?.statements?.has(node) &&
+            selectedEsmUses.some(
+              ({ source, position }) =>
+                (earlierAuthoredImports.get(source) ?? Infinity) < index &&
+                position > index
+            )
+          ) &&
           // In the non-codegen profile an unclassified later authored
           // dependency can still initialize this module via an alias or
           // through its own dependencies. Keep the original first request.
@@ -632,7 +691,9 @@ export function removeUnusedExtractedImports(
             lastAuthoredStaticRequest > index
           )))
     ) {
-      path.remove();
+      if (!generator) path.remove();
+      else if (node.specifiers.length > 0)
+        generator.sites?.push(t.cloneNode(node));
       return;
     }
     if (emptied.has(node) ? isValue : carriesRuntimeRequest(node))

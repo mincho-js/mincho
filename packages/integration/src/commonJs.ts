@@ -11,6 +11,7 @@ import {
 import {
   internalInspectCommonJs,
   internalGetStaticCssEvalLiteralRequireImportPath,
+  internalGetModuleReference,
   internalCommonJsToEsmPlugin,
   internalResolveExtractCallsFile,
   type MinchoBabelFileMetadata
@@ -112,6 +113,22 @@ function unchangedOptionalCommonJsSites(
             )
               continue;
 
+            if (site.requests.length === 0) {
+              const initializer = declaration.get("init");
+              const producer = initializer.isExpression()
+                ? internalGetModuleReference(initializer)
+                : null;
+              if (
+                producer?.kind !== "require" ||
+                producer.unsafe ||
+                producer.source !== site.source ||
+                producer.members.length !== site.members.length ||
+                producer.members.some(
+                  (member, index) => member !== site.members[index]
+                )
+              )
+                continue;
+            }
             const requests = new Set(site.requests);
             if (requests.size > 0) {
               const observe = (call: NodePath<t.CallExpression>) => {

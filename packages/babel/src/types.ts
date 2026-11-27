@@ -25,6 +25,8 @@ export interface PluginOptions {
   diagnostics?: boolean;
   /** @internal Hand optional authored runtime requests to the host normalizer. */
   stageCommonJsRuntimeRequests?: boolean;
+  /** @internal Integration can reconcile stable dead imports after generation. */
+  stageEsmGeneratorImports?: boolean;
   result: [string, string];
 
   /** Additional build-time calls; local files are relative to the Babel root. */
@@ -89,10 +91,12 @@ export interface MinchoBabelFileMetadata {
     stagedShape: t.VariableDeclarator;
     /** When present only this local binding can be pruned. */
     property?: t.ObjectProperty;
+    members: readonly (string | null)[];
     requests: t.CallExpression[];
     source: string;
     later: { node: t.CallExpression; source: string }[];
   }[];
+  minchoOptionalEsmImports?: t.ImportDeclaration[];
   minchoCompilation?: MinchoCompilationMetadata;
   minchoStaticCssEval?: MinchoStaticCssEvalMetadata;
   minchoDefineRulesCxConditions?: DefineRulesCxConditionsMetadata;
