@@ -251,10 +251,48 @@ export function* analyzeScopedCx(
 
       count("candidate");
 
+      const targetCallee = target.path.node.callee;
+      const selectedReads: NodePath<t.Node>[] = [];
       if (
-        !hasInitializedReferences(path) ||
-        !hasInitializedReferences(target.path)
+        !hasInitializedReferences(path, (read) => {
+          selectedReads.push(read);
+          return true;
+        }) ||
+        !hasInitializedReferences(
+          target.path,
+          (read) => read.node === targetCallee
+        )
       ) {
+        count("initialization-order");
+        continue;
+      }
+
+      // Order for local declarations is still checked above. A write-free
+      // import read needs the exact resolved factory or a literal sidecar value.
+      let provedImports = true;
+      for (const read of selectedReads) {
+        const selected = yield* graph.valueTarget(owner, read, new Set());
+        const origin = getModuleReference(read);
+        if (
+          selected &&
+          !("external" in selected) &&
+          selected.module === target.module &&
+          selected.path.node === target.path.node &&
+          origin?.kind === "import" &&
+          !origin.unsafe &&
+          (yield* graph.resolveImport(owner.id, origin.source, origin.kind)) ===
+            target.module.id
+        )
+          continue;
+
+        try {
+          yield* readSidecarString(graph, owner, read);
+        } catch {
+          provedImports = false;
+          break;
+        }
+      }
+      if (!provedImports) {
         count("initialization-order");
         continue;
       }
@@ -314,7 +352,10 @@ export function pruneScopedCxFactories(program: NodePath<t.Program>): void {
         binding.referenced ||
         !init.isCallExpression() ||
         !isCompiledScopedCx(init) ||
-        !hasInitializedReferences(init) ||
+        !hasInitializedReferences(
+          init,
+          (read) => read.node === init.node.callee
+        ) ||
         init.node.arguments.length !== 1
       )
         return;

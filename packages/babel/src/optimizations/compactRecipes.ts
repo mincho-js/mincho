@@ -1,6 +1,9 @@
 import { transformFromAstSync, types as t, type NodePath } from "@babel/core";
 import { addNamed } from "@babel/helper-module-imports";
-import { getModuleReference } from "../commonjs/bindings.js";
+import {
+  getModuleReference,
+  isWriteFreeImportAlias
+} from "../commonjs/bindings.js";
 import { hasDynamicScope } from "./dynamicScope.js";
 import { hasObservablePrototypeMutation } from "./recipeMetadata.js";
 import {
@@ -254,7 +257,14 @@ export function compactRecipes(
       continue;
     for (const specifier of path.get("specifiers")) {
       const binding = program.scope.getBinding(specifier.node.local.name);
-      if (binding?.constant && !binding.referenced) specifier.remove();
+      if (
+        binding &&
+        binding.path.node === specifier.node &&
+        !binding.referenced &&
+        (binding.constant ||
+          (specifier.isImportSpecifier() && isWriteFreeImportAlias(binding)))
+      )
+        specifier.remove();
     }
     if (!path.node.specifiers.length) path.remove();
   }

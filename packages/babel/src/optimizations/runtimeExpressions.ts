@@ -11,7 +11,10 @@ import {
   type TransformOptions
 } from "@babel/core";
 import { addNamed } from "@babel/helper-module-imports";
-import { getModuleReference } from "../commonjs/bindings.js";
+import {
+  getModuleReference,
+  isWriteFreeImportAlias
+} from "../commonjs/bindings.js";
 import {
   hasObservablePrototypeMutation,
   pruneRecipeMetadata
@@ -854,6 +857,16 @@ function* analyzePrivateRecipeImports(
           new Set()
         );
 
+        // Both consumers below require an exact resolved sidecar artifact.
+        // Only its own lexical alias can provide the import-read receipt.
+        const resolvedImport = isWriteFreeImportAlias(binding);
+        const observesSidecarImport = (read: NodePath<t.Node>): boolean =>
+          resolvedImport &&
+          read.isIdentifier() &&
+          read.scope.getBinding(read.node.name) === binding;
+        const stableBinding = (current: Binding): boolean =>
+          current.constant || (resolvedImport && current === binding);
+
         if (
           target &&
           !("external" in target) &&
@@ -861,13 +874,17 @@ function* analyzePrivateRecipeImports(
         ) {
           const active = new Set<Binding>();
 
-          const unused = (binding: Binding): boolean => {
-            if (active.size > 100 || active.has(binding) || !binding.constant)
+          const unused = (current: Binding): boolean => {
+            if (
+              active.size > 100 ||
+              active.has(current) ||
+              !stableBinding(current)
+            )
               return false;
 
-            active.add(binding);
+            active.add(current);
 
-            for (const ref of binding.referencePaths) {
+            for (const ref of current.referencePaths) {
               const declaration = ref.parentPath;
               if (
                 !declaration?.isVariableDeclarator() ||
@@ -877,7 +894,7 @@ function* analyzePrivateRecipeImports(
                   kind: "const"
                 }) ||
                 declaration.parentPath.parentPath?.isExportNamedDeclaration() ||
-                !hasInitializedReferences(ref)
+                !hasInitializedReferences(ref, observesSidecarImport)
               )
                 return false;
 
@@ -887,7 +904,7 @@ function* analyzePrivateRecipeImports(
               if (!alias || !unused(alias)) return false;
             }
 
-            active.delete(binding);
+            active.delete(current);
 
             return true;
           };
@@ -955,7 +972,7 @@ function* analyzePrivateRecipeImports(
         };
 
         const inspect = (current: Binding): boolean => {
-          if (--budget < 0 || !current.constant || active.has(current))
+          if (--budget < 0 || !stableBinding(current) || active.has(current))
             return false;
 
           active.add(current);
@@ -970,7 +987,7 @@ function* analyzePrivateRecipeImports(
             ) {
               if (
                 !use.parentPath.isVariableDeclaration({ kind: "const" }) ||
-                !hasInitializedReferences(ref) ||
+                !hasInitializedReferences(ref, observesSidecarImport) ||
                 use.parentPath.parentPath?.isExportNamedDeclaration()
               )
                 return false;
@@ -991,7 +1008,10 @@ function* analyzePrivateRecipeImports(
 
             // Direct early reads remain opaque. Deferred calls do not execute here;
             // all their literal branches are retained and the original TDZ remains.
-            if (!ref.getFunctionParent() && !hasInitializedReferences(ref))
+            if (
+              !ref.getFunctionParent() &&
+              !hasInitializedReferences(ref, observesSidecarImport)
+            )
               return false;
 
             const argument = use.get("arguments")[0];

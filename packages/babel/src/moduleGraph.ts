@@ -4,6 +4,7 @@ import type { Binding } from "@babel/traverse";
 import { isAbsolute } from "node:path";
 import {
   getModuleReference,
+  isWriteFreeImportAlias,
   type ModuleReference
 } from "./commonjs/bindings.js";
 import {
@@ -211,14 +212,16 @@ export function createModuleGraph(
     binding: Binding,
     seen: Set<string>
   ): Flow<Target | null> {
-    if (!binding.constant)
+    const path = binding.path;
+    // Babel treats ESM imports as live bindings even without any local
+    // assignment. Following a write-free alias does not prove its value
+    // immutable; resolving the exporter still requires its own proof.
+    if (!binding.constant && !isWriteFreeImportAlias(binding))
       throw new Error(
         `Mutable binding ${binding.identifier.name} in ${module.id}`
       );
 
     options.onResolveBinding?.(module, binding);
-
-    const path = binding.path;
 
     if (path.isImportSpecifier() || path.isImportDefaultSpecifier()) {
       const declaration = path.parentPath;
